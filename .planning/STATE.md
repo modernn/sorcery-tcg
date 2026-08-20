@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-08-20)
 Phase: 1 (Rules and Data Authority) — EXECUTING
 Plan: 7 of 8
 Status: Ready to execute
-Last activity: 2026-08-20
+Last activity: 2026-08-20 - Completed quick task 260820-hhu: user-run private authority collector
 
 Progress: [████████░░] 75%
 
@@ -81,7 +81,7 @@ Recent decisions affecting current work:
 - [Phase 01]: Enforce cross-card identity and printing-slug uniqueness in shared snapshot schemas. — One trust boundary preserves exact diagnostics and prevents duplicated validation logic.
 - [Phase 01]: Treat stored-byte rehashing and manifest-only reference verification as distinct successful evidence states. — Stored bytes can be independently rehashed; manifest-only evidence can prove binding but must not claim absent bytes were reverified.
 - [Phase 01]: Resolve normative authority from official records only; equal-rank or unclear official outcomes remain unsupported. — Community provenance remains reviewable without becoming normative, and ambiguity must fail closed.
-- [Phase 01]: Require explicit approved license metadata before any stored source bytes may be accepted. — Permission is a trust-boundary prerequisite and must be checked before opening stored media or corpus files.
+- [Phase 01]: Require explicit license-status metadata for every stored-source record; the D-08 private user-run one-shot seven-source set is the sole risk-accepted exception without approved permission. — Written publisher permission and approved license metadata remain trust-boundary prerequisites before any broader stored-source, recurring acquisition, redistribution, hosting, upload, artwork, or commercial use.
 - [Phase 01]: The durable input lock covers the command's fixed local inputs, and its independently supplied root is verified before content parsing. — This makes substitution or stale-lock failures occur before untrusted content reaches normalization.
 - [Phase 01]: Stored source paths resolve from the selected revision and only approved raw card bytes may occupy the fixed raw/cards.raw.json path. — Revision-relative confinement matches bundle semantics while the fixed path keeps publication storage narrowly reviewable.
 - [Phase 01]: Validation success explicitly reports stored-bytes-rehashed separately from manifest-binding-verified. — Manifest-only records bind provenance without falsely claiming absent raw bytes were independently rehashed.
@@ -98,6 +98,12 @@ Recent decisions affecting current work:
 
 - Phase 1 still lacks publisher permission for broader use. Only the narrow user-run one-shot seven-source collector plus independent private backup is accepted without a legal conclusion; recurring/agent-run acquisition, retry/evasion, artwork collection, redistribution, hosting, third-party upload, public API, and commercialization remain blocked pending written permission and a separate plan.
 - Ranked results remain unavailable until the first owned and benchmark card pool passes transitive verified-coverage gates in Phase 6.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Status | Directory |
+|---|-------------|------|--------|--------|-----------|
+| 260820-hhu | Build and validate a user-run PowerShell collector for the seven private Sorcery authority sources and independent backup | 2026-08-20 | 302a685 | Verified | [260820-hhu-build-and-validate-a-user-run-powershell](./quick/260820-hhu-build-and-validate-a-user-run-powershell/) |
 
 ## Deferred Items
 

@@ -14,12 +14,12 @@ autonomous: true
 requirements: [DATA-01, DATA-02, DATA-03]
 must_haves:
   truths:
-    - "The user can explicitly run one PowerShell 7 command, acknowledge the private-use risk, and collect exactly the seven fixed official authority sources plus an independent byte-identical backup; no artwork endpoint or arbitrary production URL is available."
+    - "The supported direct CLI exposes only `-BackupRoot` and `-AcknowledgePrivateUseRisk`; it collects exactly the seven fixed official authority sources and exposes no supported production URL, manifest, or artwork override."
     - "The collector stops without retry, fallback, evasion, or a final receipt on 401, 403, 429, CAPTCHA/block evidence, disallowed redirects, response-size violations, malformed content, or any filesystem/verifier failure."
     - "Existing primary, backup, or lock destinations are never overwritten, downloads are bounded and staged, exact response bytes are preserved, and the private lock is published last only after verifyPrivateSourceSet accepts both final trees."
     - "The ignored lock records the fixed `acquisitionMethod: user-run-one-shot-powershell`, and Plan 01-07 rejects any other or missing method before accepting the source set."
     - "A fully synthetic loopback test suite proves the happy path, fixed provenance, standard-not-annotated rulebook selection, strict content checks, redirect controls, stop conditions, bounds, backup independence, and no-overwrite behavior without contacting the internet or storing publisher bytes."
-    - "Only the dot-sourced loopback-test path can replace repository, primary, lock, transport, timeout, or byte-limit inputs; the direct production wrapper always uses fixed repository-local destinations and validates an outside-repository backup before its first request."
+    - "Among the three exported commands, only `Invoke-PrivateAuthorityCollectionForLoopbackTest` accepts replacement repository, primary, lock, descriptor, timeout, or byte-limit inputs, and it rejects non-loopback request and redirect hosts before filesystem mutation. Deliberate private-module invocation or modification/copying of the readable script by the machine owner is outside this interface boundary."
     - "Policy and Plan 01-07 truthfully describe the user-run one-shot collector, preserve private/noncommercial/no-redistribution and no-legal-conclusion limits, keep recurring acquisition permission-gated, and permit only user-supplied private local images in a separately approved GUI task."
   artifacts:
     - path: "scripts/collect-private-authority.ps1"
@@ -247,6 +247,7 @@ Revise `.planning/phases/01-rules-and-data-authority/01-07-PLAN.md` so its user 
 | staging -> final primary/backup roots | Partial writes, path aliases, pre-existing evidence, or overwrite could corrupt or misrepresent an immutable revision. |
 | PowerShell receipt -> TypeScript verifier | Transport metadata and byte hashes are untrusted until the existing canonical verifier accepts both final trees. |
 | private roots/lock -> Git, packages, GUI | Official corpus bytes, private locators, and artwork must not escape private storage. |
+| same-owner PowerShell/source control -> out of scope | Module-private functions are implementation encapsulation, not a sandbox against code already executing as the machine owner in the same runspace. |
 
 ## STRIDE Threat Register
 
