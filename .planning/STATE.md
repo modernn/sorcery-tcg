@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-03-PLAN.md
-last_updated: "2026-08-20T16:15:32.424Z"
+stopped_at: Completed 01-04-PLAN.md
+last_updated: "2026-08-20T16:59:16.782Z"
 last_activity: 2026-08-20
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 8
-  completed_plans: 3
-  percent: 38
+  completed_plans: 4
+  percent: 0
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-20)
 ## Current Position
 
 Phase: 1 (Rules and Data Authority) — EXECUTING
-Plan: 4 of 8
+Plan: 5 of 8
 Status: Ready to execute
 Last activity: 2026-08-20
 
-Progress: [████░░░░░░] 38%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -55,6 +55,7 @@ Progress: [████░░░░░░] 38%
 | Phase 01 P01 | 15min | 2 tasks | 11 files |
 | Phase 01 P02 | 28min | 2 tasks | 5 files |
 | Phase 01 P03 | 21min | 2 tasks | 6 files |
+| Phase 01 P04 | 34 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -76,6 +77,9 @@ Recent decisions affecting current work:
 - [Phase 01]: Mint card stable IDs from source ID plus source card ID, independent of display fields, array order, and filesystem names. — Stable logical identity must not change with presentation or local storage.
 - [Phase 01]: Keep full artifact hashes bound to exact raw-source provenance while normalized payload hashes remain property-order independent. — The D-06 SourceRef binds exact source bytes while semantic normalization remains canonical.
 - [Phase 01]: Enforce cross-card identity and printing-slug uniqueness in shared snapshot schemas. — One trust boundary preserves exact diagnostics and prevents duplicated validation logic.
+- [Phase 01]: Treat stored-byte rehashing and manifest-only reference verification as distinct successful evidence states. — Stored bytes can be independently rehashed; manifest-only evidence can prove binding but must not claim absent bytes were reverified.
+- [Phase 01]: Resolve normative authority from official records only; equal-rank or unclear official outcomes remain unsupported. — Community provenance remains reviewable without becoming normative, and ambiguity must fail closed.
+- [Phase 01]: Require explicit approved license metadata before any stored source bytes may be accepted. — Permission is a trust-boundary prerequisite and must be checked before opening stored media or corpus files.
 
 ### Pending Todos
 
@@ -96,6 +100,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-20T16:15:05.593Z
-Stopped at: Completed 01-03-PLAN.md
+Last session: 2026-08-20T16:57:22.276Z
+Stopped at: Completed 01-04-PLAN.md
 Resume file: None
