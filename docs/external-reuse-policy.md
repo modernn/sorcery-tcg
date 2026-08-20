@@ -1,10 +1,16 @@
 # Private authority data and external reuse policy
 
-This policy implements D-08, D-09, and D-11 for the current private, local, noncommercial Sorcery Simulator. It is an operating boundary, not legal advice or a claim of legal certainty. The authorized v1 path below does not depend on future publisher permission; any broader use does.
+This policy implements D-08, D-09, and D-11 for the current private, local, noncommercial Sorcery Simulator. It is an operating boundary, not legal advice or a claim of legal certainty. The narrow Phase 1 exception below records the user's risk acceptance; it does not establish legal permission. Any broader use requires written publisher permission and a separate approved plan.
 
 ## Sole Phase 1 acquisition path
 
-The user makes a manual browser save of exactly one complete official source set under `.local/authority/inputs/official-2026-08-20/primary/`: the current rulebook PDF, base Constructed page, Codex, FAQ, Codex changelog, official card update notice, and full card API JSON.
+The sole accepted Phase 1 acquisition path is one explicit user-run, one-shot invocation:
+
+```powershell
+pwsh -NoProfile -NonInteractive -File scripts/collect-private-authority.ps1 -BackupRoot <absolute-independent-path> -AcknowledgePrivateUseRisk
+```
+
+`-BackupRoot` must name an absent absolute destination outside the repository. The collector acquires exactly one complete official source set under `.local/authority/inputs/official-2026-08-20/primary/` and creates an independent ordinary byte-identical backup: the current standard rulebook PDF, base Constructed page, Codex, FAQ, Codex changelog, official card update notice, and full card API JSON.
 
 | Relative path | Official source URL | Media type |
 |---|---|---|
@@ -16,21 +22,21 @@ The user makes a manual browser save of exactly one complete official source set
 | `updates/card-updates-2025.html` | `https://sorcerytcg.com/news/sorcery-contested-realm-card-updates-2025` | `text/html` |
 | `cards/cards.raw.json` | `https://api.sorcerytcg.com/api/cards` | `application/json` |
 
-There is no second acquisition branch: project code performs no fetch, no scraping, no polling, no API client, and no automated acquisition or update. It does not expose a public/network HTTP card API. Later code reads the selected validated local revision through a local TypeScript catalog/query module.
+There is no second acquisition branch. The production wrapper exposes no URL, manifest, artwork, scheduling, polling, concurrency, retry, timeout, or update override. It makes one bounded sequential pass over the fixed seven-source manifest, publishes no lock on failure, and stops on HTTP 401, 403, 429, CAPTCHA/block evidence, or publisher objection. It performs no retry and no evasion. It has no recurring mode and exposes no public/network HTTP card API. Later code reads only the selected validated local revision through a local TypeScript catalog/query module.
 
-The official API page describes developer access, intermittent polling, and self-hosting of required data, while the publisher Terms restrict automated access and systematic database construction without written permission. Those statements remain in tension. For v1, only the user-controlled manual browser save above is permitted. Future automation requires written publisher permission and a separate plan.
+The official API page describes developer access, intermittent polling, and self-hosting of required data, while the publisher Terms restrict automated access and systematic database construction without written permission and the API host's `robots.txt` disallows bots. The user accepts the identified private-use risk from this unresolved API/Terms/robots conflict by supplying `-AcknowledgePrivateUseRisk`. The collector does not establish legal permission. Recurring, scheduled, unattended, or agent-run acquisition remains blocked pending written publisher permission and a separate plan.
 
 ## Private source-set lock and backup
 
-Plan 07 must block unless it records the user's exact attestation: **private, noncommercial, no redistribution**. It must create a seven-entry source set lock containing, for every row:
+The collector must block unless the user supplies the explicit risk acknowledgment. It creates a seven-entry source set lock containing `acquisitionMethod: user-run-one-shot-powershell`, exact absolute private roots, and for every row:
 
 - the fixed relative path and official URL above;
 - retrieval date/time and effective date when published;
 - media type, byte length, and `sha-256` byte hash;
-- acquisition/derivation method (`manual-browser-save` for the raw source) and parent hashes for later derivatives; and
-- the reviewed rulebook filename/manual-route evidence required by Plan 07.
+- exact response-completion evidence produced by the fixed collector; and
+- the reviewed standard-rulebook filename and non-normative acquisition-route evidence required by Plan 07.
 
-The lock must also contain the canonical source-set root hash. Hashes prove byte identity, not publisher authenticity or legal permission.
+The lock also contains the canonical source-set root hash and the exact operating acknowledgment: private/local/noncommercial use; no redistribution, release, hosting, third-party upload, or artwork; acceptance of the unresolved API/Terms/robots risk; no legal-permission claim; and stop without retry or evasion on 401/403/429/CAPTCHA/block or publisher objection. Hashes prove byte identity, not publisher authenticity or legal permission.
 
 The user must maintain a durable, independent, byte-identical private backup source root outside the repository. It may not be the same, nested, linked, junctioned, symlinked, or hard-linked storage identity as the primary. Every backup relative path, byte length, and SHA-256 must match the primary; its private absolute locator appears only in the Git-ignored lock. Missing or mismatched primary/backup evidence fails closed.
 
@@ -46,7 +52,7 @@ Git may contain only:
 - independent non-content hashes and receipts without private absolute locators; and
 - generic local-import, validation, and final-gate tests.
 
-The current official rulebook PDF, saved official HTML pages, and full API corpus may exist only in the private primary and backup source roots. They must not enter the built revision, Git, or packages. Card art is excluded entirely. Full corpus bytes, normalized official derivatives, copied community data, and copied external code, tests, assets, or card implementations are also forbidden from Git, packages, and the built revision.
+The current official rulebook PDF, saved official HTML pages, and full API corpus may exist only in the private primary and backup source roots. They must not enter the built revision, Git, or packages. The collector acquires no artwork and exposes no art endpoint. Pending written permission, a later browser GUI may display only user-supplied local images from private storage through a separate permission-reviewed task. Bulk art acquisition, private-CDN access, hotlinking, proxying, hosting, packaging, and redistribution remain prohibited. Full corpus bytes, normalized official derivatives, copied community data, and copied external code, tests, assets, or card implementations are also forbidden from Git, packages, and the built revision.
 
 ## Community and commercial-source audit
 
@@ -75,4 +81,4 @@ Community observations remain provenance/examples only. Official sources alone d
 
 ## Permission gate for broader use
 
-Sharing, release with publisher content, packaging or publication of official/derived content, automated updating, commercialization, a public/network card API, or any changed operating scope requires written publisher permission and a separate approved plan before implementation. Artwork requires its own explicit grant and remains excluded unless that grant is recorded. Written permission is a future expansion trigger, not a blocker to the private manual-import path documented here.
+Sharing, release with publisher content, packaging or publication of official/derived content, recurring or agent-run acquisition, commercialization, a public/network card API, bulk art, private-CDN access, or any changed operating scope requires written publisher permission and a separate approved plan before implementation. Artwork requires its own explicit grant for acquisition or distribution. Until then, the only GUI allowance is separately supplied private local images under the limited boundary above. Written permission is a future expansion trigger, not a claim that the narrow user-run one-shot exception is legally cleared.

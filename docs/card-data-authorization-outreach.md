@@ -1,6 +1,8 @@
 # Card data authorization outreach
 
-This packet is a practical contact checklist, not legal advice. Record written replies before changing the private, manual-import boundary in `external-reuse-policy.md`.
+This packet is a practical contact checklist, not legal advice. The current boundary permits one fixed, user-run, one-shot private collector with explicit risk acceptance; it does not establish publisher permission. Record written replies before expanding that boundary in `external-reuse-policy.md`.
+
+The current exception is limited to exactly seven fixed official sources, an independent private backup, and no artwork. The user accepts the unresolved conflict between the public API guidance, the publisher Terms, and the API host's `robots.txt`. The collector stops on 401, 403, 429, CAPTCHA/block evidence, or publisher objection, with no retry or evasion. Recurring, scheduled, unattended, or agent-run acquisition still requires written permission, as do sharing, publication, hosting, commercial use, bulk art, and private-CDN access.
 
 ## Erik's Curiosa / Sorcery TCG
 
@@ -55,7 +57,7 @@ Thank you,
 
 | Choice | Build now | Cost and boundary | Decision |
 |---|---|---|---|
-| Simulator-local import | Manual private snapshot, validation, normalization, pinned revision | Smallest implementation; no automated acquisition | **Continue now** |
+| Simulator-local import | One fixed user-run private snapshot, validation, normalization, pinned revision | Narrow one-shot risk-accepted exception; no recurring or agent-run acquisition | **Continue now** |
 | Separate catalog updater | Authorized connectors, immutable raw snapshots, source/license registry, semantic diffs, agent validation, human approval, versioned export, scheduled run | Separate product and ongoing operations; cannot create rights to source data | **Start only after written permission, or when a permissive source and a second consumer exist** |
 
 The future updater should publish a signed/versioned local snapshot for the simulator to import. It should not become a public HTTP API unless that scope is explicitly authorized. Default update cadence should be every 14 days; reduce to weekly only when permitted and useful.
@@ -63,8 +65,8 @@ The future updater should publish a signed/versioned local snapshot for the simu
 ## Decision gate
 
 - **Written permission covers automated access and local derivatives:** plan the separate updater in its own project/thread.
-- **Permission covers only manual/private use:** keep the current simulator-local import and do not automate acquisition.
-- **No response or ambiguous response:** treat it as no expanded permission; the private manual path remains available.
+- **Permission covers only private use:** keep the current fixed user-run one-shot path and do not add recurring or agent-run acquisition.
+- **No response or ambiguous response:** treat it as no expanded permission; only the narrow private one-shot exception remains available without a legal conclusion.
 - **Redistribution, artwork, public API, or commercial use becomes desirable:** request a separate explicit grant before implementation.
 
 ## Verified source links
