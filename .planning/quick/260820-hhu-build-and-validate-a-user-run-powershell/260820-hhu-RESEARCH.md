@@ -141,7 +141,7 @@ The following probes were performed on 2026-08-20. Observed lengths and ETags ar
 1. GET only the exact official release URL and require 200, UTF-8 HTML, the expected article title, and the published date. [RECOMMENDED; CITED: https://sorcerytcg.com/news/sorcery-contested-realm-december-2025-rulebook-update]
 2. Extract anchor candidates from the accepted HTML, HTML-decode both `href` and visible text, and require exactly one whose normalized text is `Sorcery: Contested Realm Rulebook (December 2025)`. Explicitly reject text containing `Annotated`. [VERIFIED: official release-page HTML]
 3. Require an HTTPS `drive.google.com` URI with no credentials and a path matching `/file/d/{id}/view`; never accept a user-supplied locator. The current standard viewer is `private-rulebook-locator-redacted`. [VERIFIED: official release-page HTML]
-4. Convert only that validated Drive file ID to the current download form, follow at most five redirects manually, and allow only `drive.google.com` then `drive.usercontent.google.com`. Reject HTTP downgrade, credentials, missing/relative-invalid `Location`, loops, and every other host. [RECOMMENDED; VERIFIED: current Drive probe; CITED: https://learn.microsoft.com/en-us/dotnet/api/system.net.http.httpclienthandler.allowautoredirect]
+4. Convert only that validated Drive file ID to `https://drive.google.com/uc?export=download&id={escaped-id}`. The current route returns 303 to `https://drive.usercontent.google.com/download?...` and then 200. Follow at most five redirects manually, allow only `drive.google.com` then `drive.usercontent.google.com`, and reject HTTP downgrade, credentials, missing/relative-invalid `Location`, loops, and every other host. [RECOMMENDED; VERIFIED: current Drive probe; CITED: https://learn.microsoft.com/en-us/dotnet/api/system.net.http.httpclienthandler.allowautoredirect]
 5. Require final status 200, a bounded streamed body, `Content-Disposition` filename `SorceryRulebook.pdf`, and `%PDF-` magic. Save it only to the locked local name `rulebook-current.pdf`; remote filenames never control a path. [VERIFIED: current Drive probe]
 6. Record the official release page as normative `url`/`sourceUrl`; record the Drive viewer/download evidence only in the ignored `rulebookAcquisitionEvidence` with `privateLocatorIsNormative: false`. [VERIFIED: Plan 01-07; VERIFIED: existing lock contract]
 
@@ -214,6 +214,10 @@ $output = [IO.FileStream]::new(
 ```
 
 Use the existing limits exactly: 10,000,000 bytes for card JSON, 256 MiB for each other file, and 768 MiB total. [VERIFIED: `src/authority/private-source-set.ts`]
+
+Resolve the repository root from the script location, not the caller's current directory. The production primary root is exactly `.local/authority/inputs/official-2026-08-20/primary/`, the receipt is exactly `.local/authority/locks/official-2026-08-20/source-set-lock.json`, and the backup root is a mandatory absolute user parameter outside the repository. [VERIFIED: Plan 01-07; RECOMMENDED]
+
+Set each `retrievedAt` only after its complete body passes transport and content validation, using `[DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [Globalization.CultureInfo]::InvariantCulture)`. This produces the `Z`-terminated UTC form accepted by the existing verifier. [VERIFIED: `src/authority/private-source-set.ts`; RECOMMENDED]
 
 ### Pattern 2: Receipt Is Written Last and Reverified
 
