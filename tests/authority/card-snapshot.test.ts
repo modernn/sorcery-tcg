@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import { canonicalJson } from '../../src/authority/canonical-json.ts';
@@ -10,6 +13,7 @@ import {
   type Diagnostic,
   type SourceMetadata,
 } from '../../src/authority/schemas.ts';
+import { importAuthority } from '../../src/commands/import-authority.ts';
 
 const VALID_BYTES = readFileSync(new URL('./fixtures/cards-valid.json', import.meta.url));
 const MALFORMED_BYTES = readFileSync(new URL('./fixtures/cards-malformed.json', import.meta.url));
@@ -217,7 +221,35 @@ test('DATA-02 valid card count preserves exact cardinality and rejects derived I
   );
 });
 
-test.todo('DATA-02 rejects changed input-lock roots before normalization');
+test('DATA-02 rejects changed input-lock roots before normalization', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sorcery-card-root-'));
+  const inputRoot = join(root, 'input');
+  const outputRoot = join(root, 'authority');
+  try {
+    await cp(new URL('./fixtures/bundle-input/', import.meta.url), inputRoot, { recursive: true });
+    await mkdir(outputRoot);
+    await writeFile(join(inputRoot, 'cards.raw.json'), '{not-json');
+    let diagnostics: readonly Diagnostic[] = [];
+    try {
+      await importAuthority({
+        inputRoot,
+        inputLockPath: 'input-lock.json',
+        expectedInputRootHash: `sha256:${'0'.repeat(64)}`,
+        outputRoot,
+        revisionId: 'card-root-mismatch',
+      });
+      assert.fail('expected AuthorityValidationError');
+    } catch (error: unknown) {
+      assert.ok(error instanceof AuthorityValidationError);
+      diagnostics = error.diagnostics;
+    }
+    assert.deepEqual(pathsAndCodes(diagnostics), [
+      { path: '/expectedInputRootHash', code: 'unexpected_input_root_hash' },
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 test('DATA-02 performs deterministic normalization with network clock and randomness disabled', () => {
   const originalFetch = globalThis.fetch;
   const originalNow = Date.now;

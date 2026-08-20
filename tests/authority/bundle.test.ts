@@ -25,6 +25,10 @@ import {
   runImportAuthorityCommand,
   type ImportAuthorityArguments,
 } from '../../src/commands/import-authority.ts';
+import {
+  runValidateAuthorityCommand,
+} from '../../src/commands/validate-authority.ts';
+
 
 const encoder = new TextEncoder();
 const bundleInputFixture = fileURLToPath(new URL('./fixtures/bundle-input/', import.meta.url));
@@ -235,6 +239,20 @@ function importArgv(args: ImportAuthorityArguments): string[] {
   ];
 }
 
+function validateArgv(root: string, bundlePath: string, id: string, hash: string): string[] {
+  return ['--root', root, '--bundle', bundlePath, '--id', id, '--hash', hash];
+}
+
+async function captureValidationCommand(argv: readonly string[]) {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const exitCode = await runValidateAuthorityCommand(argv, {
+    stdout: (line) => stdout.push(line),
+    stderr: (line) => stderr.push(line),
+  });
+  return { exitCode, stdout, stderr };
+}
+
 test('DATA-01 resolves current official authority and retains winning source references', () => {
   const oldRulebook = manifestSource('source:rulebook-2025', { effectiveDate: '2025-12-19' });
   const currentRulebook = manifestSource('source:rulebook-2026', { effectiveDate: '2026-07-15' });
@@ -353,8 +371,92 @@ test('DATA-01 remains offline and fails if fetch HTTP HTTPS or net access is att
   assert.doesNotMatch(source, /node:(?:http|https|net)|\bfetch\s*\(/);
 });
 
-test.todo('DATA-01 rehashes stored source bytes and rejects one-byte tampering');
-test.todo('DATA-01 validates manifest-only locator hash procedure and SourceRef binding honestly');
+test('DATA-01 rehashes stored source bytes and rejects one-byte tampering', async () => {
+  const workspace = await createBuildWorkspace('fixture-stored-validation');
+  try {
+    const lock = await setCardStorage(workspace.inputRoot, true);
+    workspace.args = { ...workspace.args, expectedInputRootHash: lock.inputRootHash };
+    const imported = await importAuthority(workspace.args);
+    const argv = validateArgv(
+      workspace.outputRoot,
+      `${workspace.args.revisionId}/bundle.json`,
+      imported.bundleId,
+      imported.bundleRootHash,
+    );
+    const before = await fileMap(imported.revisionPath);
+    const valid = await captureValidationCommand(argv);
+    assert.equal(valid.exitCode, 0);
+    assert.deepEqual(valid.stderr, []);
+    assert.deepEqual(await fileMap(imported.revisionPath), before);
+    const success = JSON.parse(valid.stdout[0]!) as {
+      evidence: { sourceId: string; verification: string }[];
+    };
+    assert.deepEqual(
+      success.evidence.map(({ sourceId, verification }) => ({ sourceId, verification })),
+      [
+        { sourceId: 'source:cards-synthetic', verification: 'stored-bytes-rehashed' },
+        { sourceId: 'source:formats-synthetic', verification: 'manifest-binding-verified' },
+      ],
+    );
+
+    const storedPath = join(imported.revisionPath, 'raw/cards.raw.json');
+    await writeFile(storedPath, Buffer.concat([await readFile(storedPath), Buffer.from(' ')]));
+    const tampered = await fileMap(imported.revisionPath);
+    const invalid = await captureValidationCommand(argv);
+    assert.equal(invalid.exitCode, 1);
+    assert.deepEqual(
+      invalid.stderr.map((line) => {
+        const diagnostic = JSON.parse(line) as { path: string; code: string };
+        return { path: diagnostic.path, code: diagnostic.code };
+      }),
+      [{ path: '/identity/payload/sources/0/byteHash', code: 'stored_byte_hash_mismatch' }],
+    );
+    assert.deepEqual(await fileMap(imported.revisionPath), tampered);
+  } finally {
+    await rm(workspace.root, { recursive: true, force: true });
+  }
+});
+
+test('DATA-01 validates manifest-only locator hash procedure and SourceRef binding honestly', async () => {
+  const workspace = await createBuildWorkspace('fixture-manifest-validation');
+  try {
+    const imported = await importAuthority(workspace.args);
+    const argv = validateArgv(
+      workspace.outputRoot,
+      `${workspace.args.revisionId}/bundle.json`,
+      imported.bundleId,
+      imported.bundleRootHash,
+    );
+    const before = await fileMap(imported.revisionPath);
+    const valid = await captureValidationCommand(argv);
+    assert.equal(valid.exitCode, 0);
+    assert.deepEqual(valid.stderr, []);
+    assert.deepEqual(await fileMap(imported.revisionPath), before);
+    const success = JSON.parse(valid.stdout[0]!) as {
+      evidence: { sourceId: string; verification: string }[];
+    };
+    assert.deepEqual(
+      success.evidence.map(({ sourceId, verification }) => ({ sourceId, verification })),
+      [
+        { sourceId: 'source:cards-synthetic', verification: 'manifest-binding-verified' },
+        { sourceId: 'source:formats-synthetic', verification: 'manifest-binding-verified' },
+      ],
+    );
+
+    const manifestPath = join(imported.revisionPath, 'sources.json');
+    await writeFile(manifestPath, Buffer.concat([await readFile(manifestPath), Buffer.from(' ')]));
+    const tampered = await fileMap(imported.revisionPath);
+    const invalid = await captureValidationCommand(argv);
+    assert.equal(invalid.exitCode, 1);
+    assert.deepEqual(
+      invalid.stderr.map((line) => (JSON.parse(line) as { code: string }).code),
+      ['companion_content_mismatch'],
+    );
+    assert.deepEqual(await fileMap(imported.revisionPath), tampered);
+  } finally {
+    await rm(workspace.root, { recursive: true, force: true });
+  }
+});
 test('DATA-01 rejects changed expected input-root hashes before parsing inputs', async () => {
   const workspace = await createBuildWorkspace();
   try {
@@ -582,7 +684,126 @@ test('DATA-01 produces byte-identical bundles from two clean locked-input builds
     await rm(second.root, { recursive: true, force: true });
   }
 });
-test.todo('DATA-01 rejects stored manifest artifact and reference tamper copies');
+test('DATA-01 rejects stored manifest artifact and reference tamper copies', async () => {
+  const artifactWorkspace = await createBuildWorkspace('fixture-artifact-tamper');
+  try {
+    const imported = await importAuthority(artifactWorkspace.args);
+    const path = join(imported.revisionPath, 'cards.normalized.json');
+    await writeFile(path, Buffer.concat([await readFile(path), Buffer.from(' ')]));
+    const before = await fileMap(imported.revisionPath);
+    const result = await captureValidationCommand(validateArgv(
+      artifactWorkspace.outputRoot,
+      `${artifactWorkspace.args.revisionId}/bundle.json`,
+      imported.bundleId,
+      imported.bundleRootHash,
+    ));
+    assert.equal(result.exitCode, 1);
+    assert.deepEqual(
+      result.stderr.map((line) => (JSON.parse(line) as { code: string }).code),
+      ['companion_content_mismatch'],
+    );
+    assert.deepEqual(await fileMap(imported.revisionPath), before);
+  } finally {
+    await rm(artifactWorkspace.root, { recursive: true, force: true });
+  }
+
+  const referenceWorkspace = await createBuildWorkspace('fixture-reference-tamper');
+  try {
+    const imported = await importAuthority(referenceWorkspace.args);
+    const validated = await validateAuthorityBundle(
+      referenceWorkspace.outputRoot,
+      `${referenceWorkspace.args.revisionId}/bundle.json`,
+      { stableId: imported.bundleId, contentHash: imported.bundleRootHash },
+    );
+    const cardArtifact = validated.bundle.identity.payload.artifacts.find(
+      (artifact) => artifact.identity.artifactKind === 'card-snapshot',
+    );
+    assert.ok(cardArtifact);
+    const tamperedCard = createCanonicalArtifact({
+      ...cardArtifact.identity,
+      sourceRefs: cardArtifact.identity.sourceRefs.map((reference) => ({
+        ...reference,
+        byteHash: sha256(encoder.encode('reference-tamper')),
+      })),
+    });
+    const artifacts = validated.bundle.identity.payload.artifacts.map((artifact) =>
+      artifact.identity.stableId === tamperedCard.identity.stableId ? tamperedCard : artifact,
+    );
+    const tamperedBundle = createCanonicalArtifact({
+      ...validated.bundle.identity,
+      parentRefs: validated.bundle.identity.parentRefs.map((reference) =>
+        reference.stableId === tamperedCard.identity.stableId
+          ? { ...reference, contentHash: tamperedCard.contentHash }
+          : reference,
+      ),
+      payload: { ...validated.bundle.identity.payload, artifacts },
+    });
+    await writeFile(join(imported.revisionPath, 'cards.normalized.json'), canonicalJson(tamperedCard));
+    await writeFile(join(imported.revisionPath, 'bundle.json'), canonicalJson(tamperedBundle));
+    const before = await fileMap(imported.revisionPath);
+    const result = await captureValidationCommand(validateArgv(
+      referenceWorkspace.outputRoot,
+      `${referenceWorkspace.args.revisionId}/bundle.json`,
+      tamperedBundle.identity.stableId,
+      tamperedBundle.contentHash,
+    ));
+    assert.equal(result.exitCode, 1);
+    assert.deepEqual(
+      result.stderr.map((line) => (JSON.parse(line) as { code: string }).code),
+      ['source_ref_hash_mismatch'],
+    );
+    assert.deepEqual(await fileMap(imported.revisionPath), before);
+  } finally {
+    await rm(referenceWorkspace.root, { recursive: true, force: true });
+  }
+
+  const expectedWorkspace = await createBuildWorkspace('fixture-expected-mismatch');
+  try {
+    await importAuthority(expectedWorkspace.args);
+    const result = await captureValidationCommand(validateArgv(
+      expectedWorkspace.outputRoot,
+      `${expectedWorkspace.args.revisionId}/bundle.json`,
+      'bundle:wrong-id',
+      `sha256:${'0'.repeat(64)}`,
+    ));
+    assert.equal(result.exitCode, 1);
+    assert.deepEqual(
+      result.stderr.map((line) => (JSON.parse(line) as { path: string }).path),
+      ['/expected/contentHash', '/expected/stableId'],
+    );
+  } finally {
+    await rm(expectedWorkspace.root, { recursive: true, force: true });
+  }
+
+  const first = manifestSource('source:command-ambiguous-first', { effectiveDate: '2026-07-15' });
+  const second = manifestSource('source:command-ambiguous-second', { effectiveDate: '2026-07-15' });
+  const ambiguous = bundleOf([record(first, 'faq'), record(second, 'faq')]);
+  const materialized = await materialize(ambiguous);
+  try {
+    const before = await fileMap(materialized.root);
+    const result = await captureValidationCommand(validateArgv(
+      materialized.root,
+      'bundle.json',
+      ambiguous.identity.stableId,
+      ambiguous.contentHash,
+    ));
+    assert.equal(result.exitCode, 1);
+    assert.deepEqual(
+      result.stderr.map((line) => (JSON.parse(line) as { code: string }).code),
+      ['unsupported_precedence'],
+    );
+    assert.deepEqual(await fileMap(materialized.root), before);
+  } finally {
+    await rm(materialized.root, { recursive: true, force: true });
+  }
+
+  const invalidArguments = await captureValidationCommand([]);
+  assert.equal(invalidArguments.exitCode, 1);
+  assert.deepEqual(
+    invalidArguments.stderr.map((line) => (JSON.parse(line) as { code: string }).code),
+    ['invalid_arguments'],
+  );
+});
 
 test('DATA-01 fixture storage policy enforces synthetic clean-room inputs', async () => {
   const policy = (await readFile(new URL('./fixtures/README.md', import.meta.url), 'utf8')).toLowerCase();
