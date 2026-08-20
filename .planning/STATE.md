@@ -87,7 +87,7 @@ Recent decisions affecting current work:
 - [Phase 01]: Validation success explicitly reports stored-bytes-rehashed separately from manifest-binding-verified. — Manifest-only records bind provenance without falsely claiming absent raw bytes were independently rehashed.
 - [Phase 01]: Byte-locked fixture JSON is pinned to LF in .gitattributes for cross-platform hash stability. — Reviewed byte hashes must remain identical under Windows core.autocrlf checkouts.
 - [Phase 01]: Document the implemented official-only precedence order as a project fail-closed policy, not a publisher hierarchy claim. — The resolver must retain evidence and fail closed without overstating publisher guidance.
-- [Phase 01]: Permit only one manually browser-saved seven-file private source set plus an independent byte-identical backup for v1. — This preserves an offline reproducible path without adding prohibited acquisition automation.
+- [Phase 01]: Permit one fixed user-run one-shot PowerShell collection of the seven official sources plus an independent byte-identical backup, recording `acquisitionMethod: user-run-one-shot-powershell`. — The user accepts the unresolved private-use risk; publisher permission remains absent, and the exception adds no recurring acquisition, retry/evasion, artwork, redistribution, hosting, or public API.
 - [Phase 01]: Keep community corpora behavioral-reference only and require written publisher permission plus a separate plan for broader use. — Audited community sources do not grant a complete reusable gameplay corpus.
 
 ### Pending Todos
@@ -96,7 +96,7 @@ Recent decisions affecting current work:
 
 ### Blockers/Concerns
 
-- Phase 1 must resolve official source precedence, distribution/packaging/publication/automation/commercialization terms, and reference-tool licensing before those broader uses; the project decision permits only private manual browser copies plus an independent private backup, without claiming a legal conclusion.
+- Phase 1 still lacks publisher permission for broader use. Only the narrow user-run one-shot seven-source collector plus independent private backup is accepted without a legal conclusion; recurring/agent-run acquisition, retry/evasion, artwork collection, redistribution, hosting, third-party upload, public API, and commercialization remain blocked pending written permission and a separate plan.
 - Ranked results remain unavailable until the first owned and benchmark card pool passes transitive verified-coverage gates in Phase 6.
 
 ## Deferred Items

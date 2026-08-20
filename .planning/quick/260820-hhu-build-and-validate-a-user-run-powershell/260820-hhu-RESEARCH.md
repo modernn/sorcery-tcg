@@ -23,10 +23,10 @@ Source: `.planning/phases/01-rules-and-data-authority/01-CONTEXT.md`, copied ver
 - **D-07:** Canonical JSON uses one project-owned deterministic serialization routine before SHA-256 hashing. Validation reports exact paths and never silently repairs or drops malformed data.
 
 ### Distribution and reuse boundary
-- **D-08 (amended 2026-08-20, refined after verification):** For this private, noncommercial tool, the user manually saves one complete official source set beneath `.local/authority/inputs/official-2026-08-20/primary/`: current rulebook PDF, base Constructed page/export, Codex, FAQs, Codex changelog, official card-update notice, and full API JSON, at the fixed relative paths recorded by Plan 07. The user maintains an independent byte-identical private backup set outside the repository. Every entry records its official URL, retrieval/effective date, media type, byte length, and SHA-256; project code performs no fetch, scraping, polling, or automated acquisition. All raw sources, private locks, normalized snapshot, and built authority revision remain under git-ignored private roots and are never committed or packaged. Git may contain only project code/schemas/policies, synthetic or minimal fixtures, safe relative source metadata and independent hashes/receipts, and generic local-import/final-gate tests; card art and all publisher/API corpus bytes remain excluded from Git and packages.
+- **D-08 (amended 2026-08-20, user-run one-shot exception):** For this private, local, noncommercial tool, the user personally invokes the fixed one-shot PowerShell collector once, with an explicit private-use risk acknowledgment, to acquire exactly the seven official sources at the fixed Plan 07 paths plus an independent byte-identical private backup. The collector has no arbitrary production URL, scheduler, retry, polling, block-evasion, or artwork surface and stops on 401/403/429/CAPTCHA/block or publisher objection. The ignored lock records exact URL/date/media/length/hash evidence and `acquisitionMethod: user-run-one-shot-powershell`. Publisher permission remains absent; the user accepts the identified narrow risk without a legal conclusion. All source/derived bytes remain ignored/private and are never committed, packaged, shared, hosted, or uploaded; pending written permission, a later GUI may support only user-supplied private local images through a separate approved task.
 - **D-09:** Contested Realms (GPL-3.0) and spells.bar/the playtest project (no reusable license found in the audited revision) are behavioral and UX references only. Do not copy their source, card implementations, assets, or data into this project.
 - **D-10:** Phase 1 uses TypeScript and Node standard-library facilities first. Add a dependency only where runtime schema validation or deterministic normalization is materially safer than a small local implementation.
-- **D-11 (added 2026-08-20):** The current operating scope is private, local, and noncommercial. Sharing, releasing with publisher content, automated updating, or commercialization requires written publisher permission and a separate approved plan. No public/network HTTP card API is built; later consumers query the selected validated local JSON revision through a TypeScript module.
+- **D-11 (added 2026-08-20, clarified by D-08 exception):** The current operating scope is private, local, and noncommercial. The D-08 user-run one-shot collector is the only accepted acquisition exception. Recurring, scheduled, unattended, or agent-run acquisition; sharing/release with content; hosting, third-party upload, redistribution, public/network HTTP card APIs, or commercialization require written publisher permission and a separate approved plan.
 
 ### the agent's Discretion
 
@@ -45,7 +45,7 @@ Source: `.planning/phases/01-rules-and-data-authority/01-CONTEXT.md`, copied ver
 
 ### Latest Task Amendment
 
-The current quick-task brief explicitly asks for and accepts a **user-run, one-shot PowerShell collector**. That supersedes D-08's manual-browser/no-automation implementation choice only for this scoped task; it does not grant publisher permission or expand the private, noncommercial, no-redistribution boundary. [VERIFIED: quick-task brief]
+The current quick-task brief explicitly asks for and accepts a **user-run, one-shot PowerShell collector**, now codified as the narrow D-08 exception. It does not grant publisher permission or expand the private, noncommercial, no-redistribution boundary. [VERIFIED: quick-task brief; VERIFIED: `.planning/phases/01-rules-and-data-authority/01-CONTEXT.md`]
 
 The implementation must update the contradictory manual-only wording in `docs/external-reuse-policy.md`, Plan 01-07/checkpoint instructions, and the attestation before treating the collector path as accepted. It must not preserve the sentence claiming every file was manually browser-saved, because that would be false after the collector runs. [VERIFIED: codebase read; VERIFIED: quick-task brief]
 </user_constraints>
@@ -170,10 +170,16 @@ Sibling staging trees ---- oversize/signature/JSON error --> fail
 Ordinary byte copies to backup staging
                   |
                   v
+Existing verifyPrivateSourceSet on staging trees
+                  |
+                  v
 No-overwrite directory publication: backup, then primary
                   |
                   v
-Existing verifyPrivateSourceSet (roots, identities, bytes, JSON, root hash)
+Existing verifyPrivateSourceSet on final trees
+                  |
+                  v
+Verify BOM-free private lock candidate
                   |
                   v
 Atomic private receipt publication (commit marker)
@@ -223,13 +229,14 @@ Set each `retrievedAt` only after its complete body passes transport and content
 
 Build entries with **exactly** the seven fields accepted by the verifier: `relativePath`, `url`, `retrievedAt`, `effectiveDate`, `mediaType`, `byteLength`, and lowercase `byteHash`. Extra entry fields fail validation. [VERIFIED: `src/authority/private-source-set.ts`]
 
-After both trees are published, have the PowerShell script invoke Node from the repository root with a short in-memory module that reads the draft, calls `verifyPrivateSourceSet`, and returns its sorted entries plus `sourceSetRootHash`. PowerShell then writes the complete private lock to a sibling temporary file with BOM-free UTF-8, re-reads it, invokes the verifier again, and moves it to the absent final receipt path. Do not reproduce `identityHash` or canonical JSON in PowerShell. [RECOMMENDED; VERIFIED: `src/authority/private-source-set.ts`; VERIFIED: Plan 01-07]
+Before publication, have the PowerShell script invoke Node from the repository root with fixed, non-interpolated JavaScript and argument-array paths to read the draft and call `verifyPrivateSourceSet` against the two staging trees. Only after that succeeds may it publish the backup and primary with no-overwrite moves. Invoke `verifyPrivateSourceSet` again against the final roots, build the complete private lock from its sorted entries and `sourceSetRootHash`, write a BOM-free sibling temporary candidate, re-read and assert the fixed lock contract, and then move it to the absent final receipt path. If any final-tree verification or lock-candidate step fails after publication starts, move only final outputs created by this invocation to same-parent `.failed-<runId>` quarantine paths and leave no canonical receipt; never delete or overwrite pre-existing paths. Do not reproduce `identityHash` or canonical JSON in PowerShell. [RECOMMENDED; VERIFIED: `src/authority/private-source-set.ts`; VERIFIED: Plan 01-07]
 
 The private lock shape should remain:
 
 ```json
 {
   "schemaVersion": 1,
+  "acquisitionMethod": "user-run-one-shot-powershell",
   "primaryRoot": "<absolute ignored primary root>",
   "backupRoot": "<absolute outside-repository root>",
   "entries": ["<seven strict verifier entries>"],
@@ -397,12 +404,12 @@ The minimum meaningful cases are: [RECOMMENDED]
 |---|---|---|---|
 | A1 | Google Drive will continue accepting a download URI derived from the validated public file ID. [ASSUMED] | Safe Rulebook Resolution | Future Drive changes may make collection fail; fail closed and update the resolver from fresh official-page evidence rather than falling back to arbitrary scraping. |
 
-## Open Questions
+## Planning Resolution
 
-1. **Written publisher permission remains unresolved.**
-   - What we know: the public API page describes developer card-data access, but the Terms prohibit automated access and systematic collection without written permission. [CITED: https://api.sorcerytcg.com/; CITED: https://sorcerytcg.com/terms]
-   - What's unclear: whether the publisher authorizes this specific user-run collector. [VERIFIED: source comparison]
-   - Recommendation: proceed only within the user's explicitly accepted private/noncommercial/no-redistribution scope, state that no permission is established, and keep the existing publisher-authorization follow-up open. [RECOMMENDED; VERIFIED: `.planning/STATE.md`]
+1. **Publisher permission is absent; the narrow decision is resolved for this plan.**
+   - The public API page describes developer card-data access, while the Terms prohibit automated access and systematic collection without written permission. No publisher response resolves that conflict. [CITED: https://api.sorcerytcg.com/; CITED: https://sorcerytcg.com/terms]
+   - The user explicitly accepts the identified risk and chooses to personally run one fixed, one-shot PowerShell collector for the seven private authority sources and independent backup. This planning decision is not a legal conclusion or publisher authorization. [VERIFIED: quick-task brief; VERIFIED: `.planning/STATE.md`]
+   - Recurring, scheduled, unattended, or agent-run acquisition; retry or block evasion; artwork acquisition; sharing, hosting, third-party upload, redistribution, public API use, and commercialization remain gated on written publisher permission and a separate approved plan. [RECOMMENDED; VERIFIED: quick-task brief]
 
 ## Sources
 
