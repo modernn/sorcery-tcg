@@ -1,0 +1,62 @@
+{
+  "stableIdCollision": {
+    "cards": [
+      {
+        "sourceCardId": "synthetic-collision-001",
+        "name": "Synthetic Collision One",
+        "cardType": "minion",
+        "elements": ["earth"],
+        "rarity": "ordinary",
+        "manaCost": 1,
+        "attack": 1,
+        "defense": 1,
+        "rulesText": "",
+        "printingSlugs": ["synthetic-collision-one-alpha"],
+        "releasedAt": "2026-03-04"
+      },
+      {
+        "sourceCardId": "synthetic-collision-001",
+        "name": "Synthetic Collision Two",
+        "cardType": "minion",
+        "elements": ["water"],
+        "rarity": "ordinary",
+        "manaCost": 2,
+        "attack": 2,
+        "defense": 2,
+        "rulesText": "",
+        "printingSlugs": ["synthetic-collision-two-alpha"],
+        "releasedAt": "2026-03-04"
+      }
+    ]
+  },
+  "printingSlugCollision": {
+    "cards": [
+      {
+        "sourceCardId": "synthetic-printing-001",
+        "name": "Synthetic Printing One",
+        "cardType": "magic",
+        "elements": ["fire"],
+        "rarity": "exceptional",
+        "manaCost": 2,
+        "attack": null,
+        "defense": null,
+        "rulesText": "",
+        "printingSlugs": ["synthetic-shared-printing-alpha"],
+        "releasedAt": "2026-03-04"
+      },
+      {
+        "sourceCardId": "synthetic-printing-002",
+        "name": "Synthetic Printing Two",
+        "cardType": "magic",
+        "elements": ["air"],
+        "rarity": "exceptional",
+        "manaCost": 2,
+        "attack": null,
+        "defense": null,
+        "rulesText": "",
+        "printingSlugs": ["synthetic-shared-printing-alpha"],
+        "releasedAt": "2026-03-04"
+      }
+    ]
+  }
+}

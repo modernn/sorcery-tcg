@@ -1,0 +1,30 @@
+{
+  "cards": [
+    {
+      "sourceCardId": "synthetic-malformed-001",
+      "name": "Synthetic Unknown Field",
+      "cardType": "artifact",
+      "elements": [],
+      "rarity": "elite",
+      "manaCost": 2,
+      "attack": null,
+      "defense": null,
+      "rulesText": "",
+      "printingSlugs": ["synthetic-unknown-field-alpha"],
+      "releasedAt": "2026-02-03",
+      "unexpected": true
+    },
+    {
+      "sourceCardId": "synthetic-malformed-002",
+      "cardType": "aura",
+      "elements": ["water"],
+      "rarity": "unique",
+      "manaCost": 3,
+      "attack": null,
+      "defense": null,
+      "rulesText": "",
+      "printingSlugs": ["synthetic-missing-name-alpha"],
+      "releasedAt": "2026-02-03"
+    }
+  ]
+}

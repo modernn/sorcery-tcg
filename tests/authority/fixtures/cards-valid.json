@@ -1,0 +1,30 @@
+{
+  "cards": [
+    {
+      "sourceCardId": "synthetic-card-fire-001",
+      "name": "Synthetic Fire Keeper",
+      "cardType": "minion",
+      "elements": ["fire"],
+      "rarity": "ordinary",
+      "manaCost": 1,
+      "attack": 1,
+      "defense": 1,
+      "rulesText": "",
+      "printingSlugs": ["synthetic-fire-keeper-alpha"],
+      "releasedAt": "2026-01-02"
+    },
+    {
+      "sourceCardId": "synthetic-card-air-001",
+      "name": "Synthetic Air Scout",
+      "cardType": "site",
+      "elements": ["air"],
+      "rarity": "exceptional",
+      "manaCost": null,
+      "attack": null,
+      "defense": null,
+      "rulesText": "",
+      "printingSlugs": ["synthetic-air-scout-alpha"],
+      "releasedAt": null
+    }
+  ]
+}
