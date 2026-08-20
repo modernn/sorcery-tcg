@@ -118,6 +118,7 @@ function descriptor(relativePath: SourcePath, requestUrl: string): Record<string
           : null,
     maxBytes: 16_384,
     allowedHosts: ['127.0.0.1'],
+    allowedRedirectHosts: ['127.0.0.1'],
   };
 }
 
@@ -156,6 +157,7 @@ function testDescriptors(baseUrl: string): readonly Record<string, unknown>[] {
 async function invokeLoopback(
   fixture: Fixture,
   descriptors: readonly Record<string, unknown>[],
+  limits: Readonly<{ headerTimeoutSeconds?: number; bodyTimeoutSeconds?: number }> = {},
 ): Promise<ProcessResult> {
   const configurationPath = join(fixture.sandbox, 'configuration.json');
   await writeFile(
@@ -163,8 +165,8 @@ async function invokeLoopback(
     JSON.stringify({
       ...fixture,
       descriptors,
-      headerTimeoutSeconds: 3,
-      bodyTimeoutSeconds: 3,
+      headerTimeoutSeconds: limits.headerTimeoutSeconds ?? 3,
+      bodyTimeoutSeconds: limits.bodyTimeoutSeconds ?? 3,
       maxTotalBytes: 131_072,
     }),
   );
@@ -313,13 +315,37 @@ test('blocked status challenge malformed content and streamed size stop without 
     { name: '401', route: '/formats-constructed-current.html', status: 401, body: 'unauthorized' },
     { name: '403', route: '/formats-constructed-current.html', status: 403, body: 'forbidden' },
     { name: '429', route: '/formats-constructed-current.html', status: 429, body: 'slow down' },
+    { name: 'other non-success', route: '/formats-constructed-current.html', status: 500, body: 'failed' },
     {
       name: 'captcha',
       route: '/formats-constructed-current.html',
       status: 200,
       body: '<!doctype html><title>Attention Required</title><div>captcha</div>',
     },
-    { name: 'malformed card json', route: '/cards-cards.raw.json', status: 200, body: '[{"name":""}]' },
+    { name: 'malformed card json', route: '/cards-cards.raw.json', status: 200, body: '[}' },
+    { name: 'empty card json', route: '/cards-cards.raw.json', status: 200, body: '[]' },
+    { name: 'wrong card json root', route: '/cards-cards.raw.json', status: 200, body: '{}' },
+    { name: 'empty card name', route: '/cards-cards.raw.json', status: 200, body: '[{"name":""}]' },
+    {
+      name: 'wrong html media type',
+      route: '/formats-constructed-current.html',
+      status: 200,
+      body: '<!doctype html><title>Constructed Format</title>',
+      contentType: 'application/json',
+    },
+    {
+      name: 'missing html marker',
+      route: '/formats-constructed-current.html',
+      status: 200,
+      body: '<!doctype html><title>Wrong source</title>',
+    },
+    {
+      name: 'declared size',
+      route: '/formats-constructed-current.html',
+      status: 200,
+      body: '<!doctype html><title>Constructed Format</title>',
+      contentLength: 20_000,
+    },
     {
       name: 'streamed size',
       route: '/formats-constructed-current.html',
@@ -331,23 +357,184 @@ test('blocked status challenge malformed content and streamed size stop without 
     await context.test(scenario.name, async () => {
       const fixture = await createFixture();
       const counts = new Map<string, number>();
+      let serverPort = 0;
       const server = createServer((request, response) => {
         const path = request.url ?? '';
         counts.set(path, (counts.get(path) ?? 0) + 1);
         if (path === scenario.route) {
           response.statusCode = scenario.status;
-          response.setHeader('content-type', path.endsWith('.json') ? 'application/json' : 'text/html');
+          response.setHeader(
+            'content-type',
+            'contentType' in scenario
+              ? scenario.contentType
+              : path.endsWith('.json')
+                ? 'application/json'
+                : 'text/html',
+          );
+          if ('contentLength' in scenario) response.setHeader('content-length', scenario.contentLength);
           response.end(scenario.body);
           return;
         }
-        response.setHeader('content-type', 'text/html');
-        response.end('<!doctype html><title>Constructed Format</title>');
+        if (path === '/release') {
+          response.setHeader('content-type', 'text/html');
+          response.end(
+            '<!doctype html><title>Sorcery: Contested Realm December 2025 Rulebook Update</title>' +
+              '<time>2025-12-19</time>' +
+              `<a href="http://127.0.0.1:${String(serverPort)}/file/d/standard/view">Sorcery: Contested Realm Rulebook (December 2025)</a>`,
+          );
+          return;
+        }
+        if (path === '/drive-download?export=download&id=standard') {
+          response.statusCode = 303;
+          response.setHeader('location', '/pdf');
+          response.end();
+          return;
+        }
+        if (path === '/pdf') {
+          response.setHeader('content-type', 'application/pdf');
+          response.setHeader('content-disposition', 'attachment; filename=SorceryRulebook.pdf');
+          response.end(SOURCE_BYTES['rulebook/rulebook-current.pdf']);
+          return;
+        }
+        const relativePath = (Object.keys(SOURCE_BYTES) as SourcePath[]).find(
+          (candidate) => path === `/${candidate.replaceAll('/', '-')}`,
+        );
+        assert.ok(relativePath);
+        response.setHeader('content-type', relativePath.endsWith('.json') ? 'application/json' : 'text/html');
+        response.end(SOURCE_BYTES[relativePath]);
+      });
+      try {
+        serverPort = await listen(server);
+        const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${serverPort}`));
+        assert.notEqual(result.code, 0);
+        assert.equal(counts.get(scenario.route), 1);
+        assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
+      } finally {
+        await close(server);
+        await cleanupFixture(fixture);
+      }
+    });
+  }
+});
+
+test('rulebook anchor redirect and PDF controls fail closed', async (context) => {
+  const cases = [
+    'missing anchor',
+    'duplicate anchor',
+    'unexpected locator host',
+    'missing redirect location',
+    'redirect loop',
+    'redirect limit',
+    'wrong PDF filename',
+    'wrong PDF media',
+    'wrong PDF signature',
+  ] as const;
+  for (const scenario of cases) {
+    await context.test(scenario, async () => {
+      const fixture = await createFixture();
+      let port = 0;
+      const requests: string[] = [];
+      const server = createServer((request, response) => {
+        const path = request.url ?? '';
+        requests.push(path);
+        if (path === '/release') {
+          const standard =
+            scenario === 'unexpected locator host'
+              ? 'https://example.com/file/d/standard/view'
+              : `http://127.0.0.1:${String(port)}/file/d/standard/view`;
+          const anchors =
+            scenario === 'missing anchor'
+              ? ''
+              : `<a href="${standard}">Sorcery: Contested Realm Rulebook (December 2025)</a>` +
+                (scenario === 'duplicate anchor'
+                  ? `<a href="${standard}">Sorcery: Contested Realm Rulebook (December 2025)</a>`
+                  : '');
+          response.setHeader('content-type', 'text/html');
+          response.end(
+            '<!doctype html><title>Sorcery: Contested Realm December 2025 Rulebook Update</title>' +
+              '<time>2025-12-19</time>' +
+              anchors,
+          );
+          return;
+        }
+        if (path === '/drive-download?export=download&id=standard') {
+          response.statusCode = 303;
+          if (scenario !== 'missing redirect location') {
+            response.setHeader(
+              'location',
+              scenario === 'redirect loop'
+                ? '/drive-download?export=download&id=standard'
+                : scenario === 'redirect limit'
+                  ? '/redirect-1'
+                  : '/pdf',
+            );
+          }
+          response.end();
+          return;
+        }
+        const redirectMatch = /^\/redirect-(\d+)$/.exec(path);
+        if (redirectMatch) {
+          response.statusCode = 302;
+          response.setHeader('location', `/redirect-${Number(redirectMatch[1]) + 1}`);
+          response.end();
+          return;
+        }
+        if (path === '/pdf') {
+          response.setHeader(
+            'content-type',
+            scenario === 'wrong PDF media' ? 'text/html' : 'application/octet-stream',
+          );
+          response.setHeader(
+            'content-disposition',
+            `attachment; filename=${scenario === 'wrong PDF filename' ? 'Wrong.pdf' : 'SorceryRulebook.pdf'}`,
+          );
+          response.end(
+            scenario === 'wrong PDF signature'
+              ? Buffer.from('not a pdf at all')
+              : SOURCE_BYTES['rulebook/rulebook-current.pdf'],
+          );
+          return;
+        }
+        response.statusCode = 500;
+        response.end('unexpected route');
+      });
+      try {
+        port = await listen(server);
+        const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
+        assert.notEqual(result.code, 0);
+        assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
+        assert.equal(requests.filter((path) => path === '/release').length, 1);
+      } finally {
+        await close(server);
+        await cleanupFixture(fixture);
+      }
+    });
+  }
+});
+
+test('header timeout body timeout and disconnect are terminal', async (context) => {
+  for (const scenario of ['header timeout', 'body timeout', 'disconnect'] as const) {
+    await context.test(scenario, async () => {
+      const fixture = await createFixture();
+      let requestCount = 0;
+      const server = createServer((_request, response) => {
+        requestCount += 1;
+        if (scenario === 'header timeout') return;
+        response.writeHead(200, { 'content-type': 'text/html' });
+        response.flushHeaders();
+        response.write('<!doctype html>');
+        if (scenario === 'body timeout') return;
+        setTimeout(() => response.destroy(), 10);
       });
       try {
         const port = await listen(server);
-        const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
+        const result = await invokeLoopback(
+          fixture,
+          testDescriptors(`http://127.0.0.1:${port}`),
+          { headerTimeoutSeconds: 1, bodyTimeoutSeconds: 1 },
+        );
         assert.notEqual(result.code, 0);
-        assert.equal(counts.get(scenario.route), 1);
+        assert.equal(requestCount, 1);
         assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
       } finally {
         await close(server);
