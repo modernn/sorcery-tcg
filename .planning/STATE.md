@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-04-PLAN.md
-last_updated: "2026-08-20T16:59:16.782Z"
+stopped_at: Completed 01-05-PLAN.md
+last_updated: "2026-08-20T17:50:54.656Z"
 last_activity: 2026-08-20
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 8
-  completed_plans: 4
+  completed_plans: 5
   percent: 0
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-20)
 ## Current Position
 
 Phase: 1 (Rules and Data Authority) — EXECUTING
-Plan: 5 of 8
+Plan: 6 of 8
 Status: Ready to execute
 Last activity: 2026-08-20
 
-Progress: [█████░░░░░] 50%
+Progress: [██████░░░░] 63%
 
 ## Performance Metrics
 
@@ -56,6 +56,7 @@ Progress: [█████░░░░░] 50%
 | Phase 01 P02 | 28min | 2 tasks | 5 files |
 | Phase 01 P03 | 21min | 2 tasks | 6 files |
 | Phase 01 P04 | 34 min | 2 tasks | 6 files |
+| Phase 01 P05 | 42 min | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -80,6 +81,10 @@ Recent decisions affecting current work:
 - [Phase 01]: Treat stored-byte rehashing and manifest-only reference verification as distinct successful evidence states. — Stored bytes can be independently rehashed; manifest-only evidence can prove binding but must not claim absent bytes were reverified.
 - [Phase 01]: Resolve normative authority from official records only; equal-rank or unclear official outcomes remain unsupported. — Community provenance remains reviewable without becoming normative, and ambiguity must fail closed.
 - [Phase 01]: Require explicit approved license metadata before any stored source bytes may be accepted. — Permission is a trust-boundary prerequisite and must be checked before opening stored media or corpus files.
+- [Phase 01]: The durable input lock covers the command's fixed local inputs, and its independently supplied root is verified before content parsing. — This makes substitution or stale-lock failures occur before untrusted content reaches normalization.
+- [Phase 01]: Stored source paths resolve from the selected revision and only approved raw card bytes may occupy the fixed raw/cards.raw.json path. — Revision-relative confinement matches bundle semantics while the fixed path keeps publication storage narrowly reviewable.
+- [Phase 01]: Validation success explicitly reports stored-bytes-rehashed separately from manifest-binding-verified. — Manifest-only records bind provenance without falsely claiming absent raw bytes were independently rehashed.
+- [Phase 01]: Byte-locked fixture JSON is pinned to LF in .gitattributes for cross-platform hash stability. — Reviewed byte hashes must remain identical under Windows core.autocrlf checkouts.
 
 ### Pending Todos
 
@@ -100,6 +105,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-20T16:57:22.276Z
-Stopped at: Completed 01-04-PLAN.md
+Last session: 2026-08-20T17:50:54.652Z
+Stopped at: Completed 01-05-PLAN.md
 Resume file: None
