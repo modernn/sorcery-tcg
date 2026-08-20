@@ -18,6 +18,12 @@ function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
+function deepFreeze<T>(value: T): T {
+  if (value === null || typeof value !== 'object') return value;
+  for (const child of Object.values(value)) deepFreeze(child);
+  return Object.freeze(value);
+}
+
 function stableHash(prefix: 'card' | 'card-snapshot', fields: Readonly<Record<string, string>>): string {
   return prefix + ':' + identityHash(fields).slice('sha256:'.length);
 }
@@ -74,13 +80,13 @@ export function normalizeCards(
     ]);
   }
 
-  return createCanonicalArtifact({
+  return deepFreeze(createCanonicalArtifact({
     artifactKind: 'card-snapshot',
     stableId: stableHash('card-snapshot', { sourceId: source.sourceId }),
     schemaVersion: 1,
     parentRefs: [],
     sourceRefs: [{ sourceId: source.sourceId, byteHash }],
     payload: snapshot,
-  });
+  }));
 }
 
