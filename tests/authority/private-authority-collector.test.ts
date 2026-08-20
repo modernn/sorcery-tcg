@@ -166,6 +166,7 @@ async function invokeLoopback(
   options: Readonly<{
     headerTimeoutSeconds?: number;
     bodyTimeoutSeconds?: number;
+    maxTotalBytes?: number;
     faultPoint?: string;
   }> = {},
 ): Promise<ProcessResult> {
@@ -177,7 +178,7 @@ async function invokeLoopback(
       descriptors,
       headerTimeoutSeconds: options.headerTimeoutSeconds ?? 3,
       bodyTimeoutSeconds: options.bodyTimeoutSeconds ?? 3,
-      maxTotalBytes: 131_072,
+      maxTotalBytes: options.maxTotalBytes ?? 131_072,
       faultPoint: options.faultPoint ?? null,
     }),
   );
@@ -313,6 +314,74 @@ test('offline production manifest locks the seven non-artwork sources', async ()
   );
   assert.equal(JSON.stringify(manifest).toLowerCase().includes('artwork'), false);
   assert.equal(JSON.stringify(manifest).toLowerCase().includes('image'), false);
+});
+
+test('caller-supplied non-loopback configuration is rejected before transport', async (context) => {
+  let requestCount = 0;
+  const server = createServer((_request, response) => {
+    requestCount += 1;
+    response.statusCode = 500;
+    response.end('production configuration validation should prevent this request');
+  });
+  try {
+    const port = await listen(server);
+    await context.test('production wrapper rejects descriptor overrides', async () => {
+      const fixture = await createFixture();
+      try {
+        const configurationPath = join(fixture.sandbox, 'production-override.json');
+        await writeFile(
+          configurationPath,
+          JSON.stringify({ backupRoot: fixture.backupRoot, descriptors: testDescriptors(`http://127.0.0.1:${port}`) }),
+        );
+        const command = [
+          '. $env:SORCERY_COLLECTOR_SCRIPT',
+          '$c = Get-Content -Raw -LiteralPath $env:SORCERY_COLLECTOR_CONFIG | ConvertFrom-Json -Depth 32',
+          'Invoke-PrivateAuthorityCollection -BackupRoot $c.backupRoot -Descriptors $c.descriptors',
+        ].join('; ');
+        const result = await runPwsh(['-Command', command], {
+          SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH,
+          SORCERY_COLLECTOR_CONFIG: configurationPath,
+        });
+        assert.notEqual(result.code, 0);
+        assert.match(result.stderr, /Descriptors|parameter/i);
+        assert.equal(requestCount, 0);
+        assert.deepEqual(await readdir(fixture.sandbox), ['production-override.json', 'repository']);
+      } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+
+    await context.test('non-loopback core rejects caller roots limits and descriptors', async () => {
+      const fixture = await createFixture();
+      try {
+        const configurationPath = join(fixture.sandbox, 'core-override.json');
+        await writeFile(
+          configurationPath,
+          JSON.stringify({
+            ...fixture,
+            descriptors: testDescriptors(`http://127.0.0.1:${port}`),
+          }),
+        );
+        const command = [
+          '. $env:SORCERY_COLLECTOR_SCRIPT',
+          '$c = Get-Content -Raw -LiteralPath $env:SORCERY_COLLECTOR_CONFIG | ConvertFrom-Json -Depth 32',
+          'Invoke-PrivateAuthorityCollectionCore -RepositoryRoot $c.repositoryRoot -PrimaryRoot $c.primaryRoot -BackupRoot $c.backupRoot -LockPath $c.lockPath -Descriptors $c.descriptors -HeaderTimeoutSeconds 1 -BodyTimeoutSeconds 1 -MaxTotalBytes 1 -LoopbackOnly $false -FaultPoint $null',
+        ].join('; ');
+        const result = await runPwsh(['-Command', command], {
+          SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH,
+          SORCERY_COLLECTOR_CONFIG: configurationPath,
+        });
+        assert.notEqual(result.code, 0);
+        assert.match(result.stderr, /fixed production configuration/i);
+        assert.equal(requestCount, 0);
+        assert.deepEqual(await readdir(fixture.sandbox), ['core-override.json', 'repository']);
+      } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+  } finally {
+    await close(server);
+  }
 });
 
 test('loopback collection selects the standard rulebook and preserves exact bounded bytes', async () => {
@@ -585,6 +654,34 @@ test('header timeout body timeout and disconnect are terminal', async (context) 
   }
 });
 
+test('aggregate byte overflow stops before the next source and publishes no receipt', async () => {
+  const fixture = await createFixture();
+  const authority = createHappyAuthorityServer();
+  try {
+    const port = await listen(authority.server);
+    authority.setPort(port);
+    const maxTotalBytes =
+      SOURCE_BYTES['rulebook/rulebook-current.pdf'].byteLength +
+      SOURCE_BYTES['formats/constructed-current.html'].byteLength -
+      1;
+    const result = await invokeLoopback(
+      fixture,
+      testDescriptors(`http://127.0.0.1:${port}`),
+      { maxTotalBytes },
+    );
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /aggregate byte limit/i);
+    assert.equal(authority.requests.filter((path) => path === '/formats-constructed-current.html').length, 1);
+    assert.equal(authority.requests.includes('/codex-codex-current.html'), false);
+    assert.equal(await stat(fixture.primaryRoot).then(() => true, () => false), false);
+    assert.equal(await stat(fixture.backupRoot).then(() => true, () => false), false);
+    assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
+  } finally {
+    await close(authority.server);
+    await cleanupFixture(fixture);
+  }
+});
+
 test('publication creates independent exact trees and a verifier-approved private lock', async () => {
   const fixture = await createFixture();
   const authority = createHappyAuthorityServer();
@@ -768,6 +865,10 @@ test('controlled publication faults leave no canonical receipt and quarantine on
             { faultPoint },
           );
           assert.notEqual(result.code, 0);
+          if (faultPoint === 'during-final-verifier') {
+            assert.match(result.stderr, /Private source verifier failed/i);
+            assert.match(result.stderr, /ENOENT|no such file/i);
+          }
           assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
           assert.equal(await stat(fixture.primaryRoot).then(() => true, () => false), false);
           assert.equal(await stat(fixture.backupRoot).then(() => true, () => false), false);

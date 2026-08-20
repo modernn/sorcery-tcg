@@ -509,6 +509,46 @@ function Get-NormalizedPath {
     return $fullPath
 }
 
+function Get-ProductionCollectionConfiguration {
+    $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+    return [pscustomobject]@{
+        repositoryRoot = $repositoryRoot
+        primaryRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot '.local/authority/inputs/official-2026-08-20/primary'))
+        lockPath = [IO.Path]::GetFullPath((Join-Path $repositoryRoot '.local/authority/locks/official-2026-08-20/source-set-lock.json'))
+        descriptors = @(Get-ProductionSourceDescriptors)
+        headerTimeoutSeconds = 30
+        bodyTimeoutSeconds = 900
+        maxTotalBytes = 805306368L
+    }
+}
+
+function Assert-FixedProductionConfiguration {
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$PrimaryRoot,
+        [Parameter(Mandatory)][string]$LockPath,
+        [Parameter(Mandatory)][object[]]$Descriptors,
+        [Parameter(Mandatory)][int]$HeaderTimeoutSeconds,
+        [Parameter(Mandatory)][int]$BodyTimeoutSeconds,
+        [Parameter(Mandatory)][long]$MaxTotalBytes,
+        [AllowNull()][string]$FaultPoint
+    )
+
+    $expected = Get-ProductionCollectionConfiguration
+    $actualDescriptors = ConvertTo-Json -InputObject @($Descriptors) -Depth 16 -Compress
+    $expectedDescriptors = ConvertTo-Json -InputObject @($expected.descriptors) -Depth 16 -Compress
+    if ((Get-NormalizedPath $RepositoryRoot) -ne (Get-NormalizedPath $expected.repositoryRoot) -or
+        (Get-NormalizedPath $PrimaryRoot) -ne (Get-NormalizedPath $expected.primaryRoot) -or
+        (Get-NormalizedPath $LockPath) -ne (Get-NormalizedPath $expected.lockPath) -or
+        $actualDescriptors -cne $expectedDescriptors -or
+        $HeaderTimeoutSeconds -ne $expected.headerTimeoutSeconds -or
+        $BodyTimeoutSeconds -ne $expected.bodyTimeoutSeconds -or
+        $MaxTotalBytes -ne $expected.maxTotalBytes -or
+        -not [string]::IsNullOrEmpty($FaultPoint)) {
+        throw 'Non-loopback collection requires the fixed production configuration'
+    }
+}
+
 function Test-PathWithin {
     param(
         [Parameter(Mandatory)][string]$Parent,
@@ -620,7 +660,8 @@ function Invoke-PrivateSourceVerifier {
         [Parameter(Mandatory)][string]$PrimaryRoot,
         [Parameter(Mandatory)][string]$BackupRoot,
         [Parameter(Mandatory)][object[]]$Entries,
-        [Parameter(Mandatory)][string]$DraftPath
+        [Parameter(Mandatory)][string]$DraftPath,
+        [switch]$ForceBridgeFailure
     )
 
     Write-NewUtf8Json $DraftPath ([pscustomobject]@{
@@ -646,7 +687,8 @@ process.stdout.write(JSON.stringify(result));
     $startInfo.ArgumentList.Add('--input-type=module')
     $startInfo.ArgumentList.Add('--eval')
     $startInfo.ArgumentList.Add($bridgeSource)
-    $startInfo.ArgumentList.Add($DraftPath)
+    $verifierInputPath = if ($ForceBridgeFailure) { "$DraftPath.missing" } else { $DraftPath }
+    $startInfo.ArgumentList.Add($verifierInputPath)
     try {
         $process = [Diagnostics.Process]::Start($startInfo)
         $standardOutput = $process.StandardOutput.ReadToEnd()
@@ -697,6 +739,12 @@ function Invoke-PrivateAuthorityCollectionCore {
         [AllowNull()][string]$FaultPoint
     )
 
+    if ($LoopbackOnly) {
+        Assert-LoopbackDescriptors $Descriptors
+    }
+    else {
+        Assert-FixedProductionConfiguration $RepositoryRoot $PrimaryRoot $LockPath $Descriptors $HeaderTimeoutSeconds $BodyTimeoutSeconds $MaxTotalBytes $FaultPoint
+    }
     $paths = Resolve-CollectionPaths $RepositoryRoot $PrimaryRoot $BackupRoot $LockPath
     $runId = [Guid]::NewGuid().ToString('N')
     $primaryStage = "$($paths.primaryRoot).collecting-$runId"
@@ -720,8 +768,8 @@ function Invoke-PrivateAuthorityCollectionCore {
         [IO.Directory]::Move($primaryStage, $paths.primaryRoot)
         $primaryPublished = $true
         Invoke-TestFault $FaultPoint 'after-primary-move'
-        Invoke-TestFault $FaultPoint 'during-final-verifier'
-        $final = Invoke-PrivateSourceVerifier $paths.repositoryRoot $paths.primaryRoot $paths.backupRoot @($transport.entries) $draftPath
+        $forceVerifierFailure = $LoopbackOnly -and $FaultPoint -eq 'during-final-verifier'
+        $final = Invoke-PrivateSourceVerifier $paths.repositoryRoot $paths.primaryRoot $paths.backupRoot @($transport.entries) $draftPath -ForceBridgeFailure:$forceVerifierFailure
         Assert-SameVerification $staged $final
 
         $rulebookEntry = @($final.entries | Where-Object { $_.relativePath -eq 'rulebook/rulebook-current.pdf' })[0]
@@ -806,27 +854,18 @@ function Invoke-PrivateAuthorityCollectionForLoopbackTest {
         [AllowNull()][string]$FaultPoint
     )
 
-    Assert-LoopbackDescriptors $Descriptors
     return Invoke-PrivateAuthorityCollectionCore $RepositoryRoot $PrimaryRoot $BackupRoot $LockPath $Descriptors $HeaderTimeoutSeconds $BodyTimeoutSeconds $MaxTotalBytes $true $FaultPoint
 }
 
 function Invoke-PrivateAuthorityCollection {
-    param(
-        [Parameter(Mandatory)][string]$RepositoryRoot,
-        [Parameter(Mandatory)][string]$PrimaryRoot,
-        [Parameter(Mandatory)][string]$BackupRoot,
-        [Parameter(Mandatory)][string]$LockPath,
-        [Parameter(Mandatory)][object[]]$Descriptors
-    )
+    param([Parameter(Mandatory)][string]$BackupRoot)
 
-    return Invoke-PrivateAuthorityCollectionCore $RepositoryRoot $PrimaryRoot $BackupRoot $LockPath $Descriptors 30 900 805306368 $false $null
+    $configuration = Get-ProductionCollectionConfiguration
+    return Invoke-PrivateAuthorityCollectionCore $configuration.repositoryRoot $configuration.primaryRoot $BackupRoot $configuration.lockPath @($configuration.descriptors) $configuration.headerTimeoutSeconds $configuration.bodyTimeoutSeconds $configuration.maxTotalBytes $false $null
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
     if ([string]::IsNullOrWhiteSpace($BackupRoot)) { throw 'BackupRoot is required and must be an absolute path outside the repository.' }
     if (-not $AcknowledgePrivateUseRisk) { throw 'AcknowledgePrivateUseRisk is required before collection.' }
-    $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-    $primaryRoot = Join-Path $repositoryRoot '.local/authority/inputs/official-2026-08-20/primary'
-    $lockPath = Join-Path $repositoryRoot '.local/authority/locks/official-2026-08-20/source-set-lock.json'
-    Invoke-PrivateAuthorityCollection $repositoryRoot $primaryRoot $BackupRoot $lockPath (Get-ProductionSourceDescriptors)
+    Invoke-PrivateAuthorityCollection $BackupRoot
 }
