@@ -88,7 +88,7 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None yet.
+- 2026-08-20-authorize-card-data-and-catalog-updater.md — Request publisher/community data authorization and decide whether recurring updates justify a separate catalog-maintenance tool.
 
 ### Blockers/Concerns
 
