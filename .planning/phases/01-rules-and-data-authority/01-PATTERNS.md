@@ -1,8 +1,8 @@
 # Phase 1: Rules and Data Authority - Pattern Map
 
 **Mapped:** 2026-08-20
-**Files analyzed:** 22 expected new files/file groups
-**Analogs found:** 0 / 22
+**Files analyzed:** 24 expected new files/file groups
+**Analogs found:** 0 / 24
 
 This repository contains planning artifacts and `AGENTS.md`, but no production TypeScript, package configuration, command, data, or test files. Consequently, every assignment below is a research-derived starting contract, not an in-repository implementation analog. Do not treat either audited external project as a code analog: Contested Realms is GPL-3.0 and the audited spells.bar/playtest revision has no reusable license.
 
@@ -25,12 +25,14 @@ This repository contains planning artifacts and `AGENTS.md`, but no production T
 | `data/authority/<revision-id>/sources.json` | model | file-I/O | none; generated immutable artifact | no analog |
 | `data/authority/<revision-id>/formats.json` | model | file-I/O | none; generated immutable artifact | no analog |
 | `data/authority/<revision-id>/cards.normalized.json` | model | file-I/O | none; generated immutable artifact | no analog |
+| `data/authority/<revision-id>/raw/cards.raw.json` | model | file-I/O | none; conditional exact bytes only when Plan 07 explicitly approves repository storage | no analog |
 | `docs/authority-precedence.md` | config | request-response | none; `01-CONTEXT.md` D-01 through D-03 | no analog |
 | `docs/external-reuse-policy.md` | config | request-response | none; `01-RESEARCH.md:104-117` | no analog |
 | `tests/authority/canonical-json.test.ts` | test | transform | none; `01-VALIDATION.md:41,54` | no analog |
 | `tests/authority/provenance.test.ts` | test | file-I/O/transform | none; `01-VALIDATION.md:42,55` | no analog |
 | `tests/authority/card-snapshot.test.ts` | test | batch/transform | none; `01-VALIDATION.md:43,56` | no analog |
 | `tests/authority/bundle.test.ts` | test | file-I/O/batch | none; `01-VALIDATION.md:44-45,57` | no analog |
+| `tests/authority/official-revision.test.ts` | test | file-I/O/batch | none; Plan 08 independent release gate | no analog |
 | `tests/authority/fixtures/**` | config | file-I/O | none; synthetic/minimal test data only | no analog |
 
 The paths above come directly from the recommended structure in `01-RESEARCH.md:206-228` and the Wave 0 contract in `01-VALIDATION.md:51-57`. Do not add separate precedence, repository, network-client, database, container, or rules-engine modules in this phase unless implementation proves one of these files cannot hold the required behavior.
@@ -63,15 +65,34 @@ The test runner is `node:test` with `node:assert/strict`; no test-runner config 
 ```typescript
 import { z } from 'zod';
 
-const SourceRecord = z.strictObject({
+const SourceFields = {
   sourceId: z.string().min(1),
-  url: z.url(),
+  url: z.url().refine((value) => value.startsWith('https:')),
+  authorityClass: z.enum(['official', 'community-provenance', 'external-reference']),
   retrievedAt: z.iso.datetime(),
   effectiveDate: z.iso.date().nullable(),
   mediaType: z.string().min(1),
   byteHash: z.string().regex(/^sha256:[0-9a-f]{64}$/),
   licenseStatus: z.enum(['approved', 'manifest-only', 'permission-required']),
+} as const;
+
+const StoredSourceRecord = z.strictObject({
+  ...SourceFields,
+  storageMode: z.literal('stored'),
+  relativePath: z.string().min(1),
 });
+
+const ManifestOnlySourceRecord = z.strictObject({
+  ...SourceFields,
+  storageMode: z.literal('manifest-only'),
+  durableLocator: z.string().min(1),
+  acquisitionProcedureHash: z.string().regex(/^sha256:[0-9a-f]{64}$/).nullable(),
+});
+
+const SourceRecord = z.discriminatedUnion('storageMode', [
+  StoredSourceRecord,
+  ManifestOnlySourceRecord,
+]);
 
 export function validateSource(input: unknown) {
   const result = SourceRecord.safeParse(input);
@@ -86,6 +107,8 @@ export function validateSource(input: unknown) {
 ```
 
 Apply this shape to raw input, normalized cards, artifact envelopes, manifests, and bundles: strict objects, no coercion or repair, JSON-Pointer paths, and deterministic issue ordering. Add explicit size/count/depth limits and reject unknown keys, duplicate stable IDs/source IDs/printing slugs, invalid dates/hashes, and prohibited storage policy values.
+
+After schema validation, allowlist publisher hosts only for `authorityClass: official` and make all other authority classes ineligible for normative precedence. Rehash `stored` relative-path bytes offline. For `manifest-only` sources, validate the canonical durable locator/procedure, expected byte hash, and source-reference binding without claiming absent bytes were reread.
 
 ---
 
@@ -145,7 +168,7 @@ Keep normalization pure: accept pinned bytes plus explicit retrieval/effective m
 
 **Research fallback:** the architecture flow at `01-RESEARCH.md:177-203` and threats at `01-RESEARCH.md:453-461`.
 
-Recursively validate a selected local bundle without network access. Recompute raw and canonical hashes; validate schema versions, stable IDs, parent/source references, cycles, precedence results, storage policy, and path confinement. Resolve every path under configured authority roots and reject absolute paths, `..`, and symlink escapes. Sort diagnostics by JSON Pointer, code, then message. Ambiguous or equal-rank official conflicts become explicit `unsupported` records rather than guessed outcomes.
+Recursively validate a selected local bundle without network access. Recompute canonical hashes and permitted `stored` source-byte hashes; validate `manifest-only` locator/procedure/hash/reference binding without claiming absent raw bytes were reverified. Validate schema versions, stable IDs, parent/source references, cycles, precedence results, authority classes, storage policy, and path confinement. Resolve every stored path under configured authority roots and reject absolute paths, `..`, and symlink escapes. Sort diagnostics by JSON Pointer, code, then message. Ambiguous or equal-rank official conflicts become explicit `unsupported` records rather than guessed outcomes, and community/reference provenance never wins.
 
 ---
 
@@ -155,7 +178,7 @@ Recursively validate a selected local bundle without network access. Recompute r
 
 **Research fallback:** `01-RESEARCH.md:178-203,255-257`.
 
-This is an imperative filesystem shell around the pure authority functions. It consumes approved local files; it is not a live acquisition client. Build into a new revision path, use a same-directory temporary path and atomic rename, recursively validate before publication, refuse to overwrite an existing revision, and leave no published partial revision after failure. Any future network acquisition remains a separate human-permission-gated maintenance action.
+This is an imperative filesystem shell around the pure authority functions. It consumes a clean local materialization only after an independently expected canonical input-lock root and every exact file hash match; it is not a live acquisition client. Emit the verified input-root hash and calculated bundle-root hash before candidate validation so callers do not use the candidate's own hash as its oracle. Build into a new revision path, use a same-directory temporary path and atomic rename, recursively validate before publication, refuse to overwrite an existing revision, and leave no published partial revision after failure. Any future network acquisition remains a separate human-permission-gated maintenance action.
 
 ---
 
@@ -163,7 +186,7 @@ This is an imperative filesystem shell around the pure authority functions. It c
 
 **Analog:** None.
 
-Keep the command thin: parse arguments, call the offline bundle validator, print deterministically ordered diagnostics, and set a non-zero exit status on every invalid, tampered, ambiguous, unsupported, or policy-prohibited bundle. Do not fetch, repair, rewrite, or drop data during validation.
+Keep the command thin: parse arguments, call the offline bundle validator, distinguish stored-byte rehashing from manifest-only binding verification, print deterministically ordered diagnostics, and set a non-zero exit status on every invalid, tampered, ambiguous, unsupported, or policy-prohibited bundle. It accepts no external raw-input directory and must not claim manifest-only bytes were reread. Do not fetch, repair, rewrite, or drop data during validation.
 
 ---
 
@@ -195,6 +218,8 @@ type CanonicalArtifact<T> = Readonly<{
 `sources.json` records URL, retrieval timestamp, effective date when available, media type, byte hash, derivation metadata, and legal/storage status. `bundle.json` binds exact source/artifact references and precedence policy. `formats.json` keeps base formats separate from explicitly scoped overlays. `cards.normalized.json` contains deterministic canonical records, not executable behavior.
 
 Do not publish a real revision until its input and redistribution status are approved. Until then, only license-safe synthetic/minimal fixtures should exercise the pipeline.
+
+Plan 07 must also approve one durable exact-byte path: permitted fixed repository raw bytes, an immutable approved archive/custodian with exact locator and hashes, or an approved acquisition procedure that refuses mismatches. A caller-local input directory is not durable. When repository raw storage is explicitly approved, only the fixed `raw/cards.raw.json` path is added and rehashed; otherwise the revision contains the four canonical JSON files and source records remain manifest-only.
 
 ---
 
@@ -242,7 +267,7 @@ Normalize the same pinned synthetic fixture twice and from differently ordered o
 
 **Analog:** None.
 
-Cover current, superseded, explicitly scoped, and ambiguous source graphs; full recursive offline validation; source fields and hashes; prohibited publisher media/raw storage; immutable write-once publication; atomic-failure cleanup; tampering; and no-network execution. Two clean rebuilds from identical inputs must produce byte-identical output.
+Cover current, superseded, explicitly scoped, and ambiguous source graphs; full recursive offline validation; authority classes; stored-source rehashing; manifest-only locator/hash/ref binding; canonical input-lock mismatch; prohibited publisher media/raw storage; immutable write-once publication; atomic-failure cleanup; tampering; and no-network execution. Two clean rebuilds from the independently expected durable input lock must produce byte-identical output.
 
 ---
 
@@ -280,7 +305,7 @@ Stable ID names the logical entity; canonical content hash names the immutable r
 **Source:** `01-RESEARCH.md:255-257,304-306,453-461`  
 **Apply to:** import command, validator, bundle publication, and bundle tests.
 
-Constrain paths, reject escapes, build at a new location, validate before atomic rename, refuse overwrite, and never make runtime validation network-capable.
+Constrain paths, reject escapes, bind exact import bytes to an independent input-lock root, build at a new location, validate before atomic rename, refuse overwrite, and never make runtime validation network-capable. Rehash stored bytes; verify manifest-only canonical bindings honestly.
 
 ### Fail-Closed Error Handling
 
@@ -314,7 +339,7 @@ Publisher permission and external-reuse attestation are manual gates and cannot 
 
 ## No Analog Found
 
-All 22 classified files/file groups have no codebase analog. The planner should use the cited `01-RESEARCH.md`, `01-VALIDATION.md`, and locked `01-CONTEXT.md` contracts, not external implementation source.
+All 24 classified files/file groups have no codebase analog. The planner should use the cited `01-RESEARCH.md`, `01-VALIDATION.md`, and locked `01-CONTEXT.md` contracts, not external implementation source.
 
 | Area | Reason |
 |---|---|
