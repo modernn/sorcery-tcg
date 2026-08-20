@@ -179,7 +179,7 @@ async function materializeFixture(name = 'provenance-valid.json') {
   };
 }
 
-async function writeBundle(root: string, bundle: ReturnType<typeof buildFixtureBundle>): Promise<void> {
+async function writeBundle(root: string, bundle: JsonValue): Promise<void> {
   await writeFile(join(root, 'bundle.json'), canonicalJson(bundle));
 }
 
