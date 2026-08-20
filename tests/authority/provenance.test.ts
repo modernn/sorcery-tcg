@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
+import { canonicalJson, type JsonValue } from '../../src/authority/canonical-json.ts';
+import { sha256 } from '../../src/authority/hash.ts';
 import {
   AuthorityValidationError,
   createCanonicalArtifact,
@@ -17,8 +22,12 @@ import {
   type Diagnostic,
   type Hash,
   type IdentityDocument,
+  type SourceRecord,
 } from '../../src/authority/schemas.ts';
-import type { JsonValue } from '../../src/authority/canonical-json.ts';
+import {
+  resolveWithinAuthorityRoot,
+  validateAuthorityBundle as validateBundleGraph,
+} from '../../src/authority/validate-bundle.ts';
 
 const HASH_A = ('sha256:' + 'a'.repeat(64)) as Hash;
 const HASH_B = ('sha256:' + 'b'.repeat(64)) as Hash;
@@ -83,6 +92,95 @@ function captureDiagnostics(run: () => unknown): readonly Diagnostic[] {
     throw error;
   }
   return assert.fail('expected AuthorityValidationError');
+}
+
+async function captureAsyncDiagnostics(run: () => Promise<unknown>): Promise<readonly Diagnostic[]> {
+  try {
+    await run();
+  } catch (error: unknown) {
+    if (error instanceof AuthorityValidationError) return error.diagnostics;
+    throw error;
+  }
+  return assert.fail('expected AuthorityValidationError');
+}
+
+type ProvenanceFixture = Readonly<{
+  bundleStableId: string;
+  storedBytes: string;
+  storedSource: Record<string, JsonValue>;
+  manifestSource: Record<string, JsonValue>;
+}>;
+
+async function loadFixture(name: string): Promise<ProvenanceFixture> {
+  return JSON.parse(
+    await readFile(new URL(`./fixtures/${name}`, import.meta.url), 'utf8'),
+  ) as ProvenanceFixture;
+}
+
+function sourceRef(source: SourceRecord) {
+  return { sourceId: source.sourceId, byteHash: source.byteHash } as const;
+}
+
+function artifactRef(artifact: ReturnType<typeof createCanonicalArtifact>) {
+  return {
+    artifactKind: artifact.identity.artifactKind,
+    stableId: artifact.identity.stableId,
+    contentHash: artifact.contentHash,
+  } as const;
+}
+
+function buildFixtureBundle(fixture: ProvenanceFixture) {
+  const stored = validateSourceRecord(fixture.storedSource);
+  const manifest = validateSourceRecord(fixture.manifestSource);
+  const base = createCanonicalArtifact({
+    artifactKind: 'rule',
+    stableId: 'rule:synthetic-base',
+    schemaVersion: 1,
+    parentRefs: [],
+    sourceRefs: [sourceRef(stored)],
+    payload: { title: 'Synthetic base rule' },
+  });
+  const derived = createCanonicalArtifact({
+    artifactKind: 'rule',
+    stableId: 'rule:synthetic-derived',
+    schemaVersion: 1,
+    parentRefs: [artifactRef(base)],
+    sourceRefs: [sourceRef(manifest)],
+    payload: { title: 'Synthetic derived rule' },
+  });
+  return createCanonicalArtifact({
+    artifactKind: 'bundle',
+    stableId: fixture.bundleStableId,
+    schemaVersion: 1,
+    parentRefs: [],
+    sourceRefs: [sourceRef(stored), sourceRef(manifest)],
+    payload: {
+      effectiveDate: '2026-08-20',
+      precedencePolicyVersion: 1,
+      inputRootHash: null,
+      sources: [stored, manifest],
+      artifacts: [base, derived],
+    },
+  });
+}
+
+async function materializeFixture(name = 'provenance-valid.json') {
+  const fixture = await loadFixture(name);
+  const root = await mkdtemp(join(tmpdir(), 'sorcery-authority-'));
+  await mkdir(join(root, 'raw'));
+  await writeFile(join(root, 'raw', 'rules.json'), fixture.storedBytes);
+  const bundle = buildFixtureBundle(fixture);
+  await writeFile(join(root, 'bundle.json'), canonicalJson(bundle));
+  return {
+    root,
+    fixture,
+    bundle,
+    expected: { stableId: bundle.identity.stableId, contentHash: bundle.contentHash },
+  };
+}
+
+async function writeBundle(root: string, bundle: ReturnType<typeof buildFixtureBundle>): Promise<void> {
+  await writeFile(join(root, 'bundle.json'), canonicalJson(bundle));
 }
 
 test('DATA-03 accepts a strict artifact envelope with stable ID schema version provenance and content hash', () => {
@@ -229,8 +327,117 @@ test('DATA-03 rejects artifact tampering and recomputed-hash mismatch', () => {
   );
 });
 
-test.todo('DATA-03 rejects missing or broken parent and source references');
-test.todo('DATA-03 rejects reference cycles');
+test('DATA-03 rejects missing broken and duplicate parent and source references with sorted diagnostics', async () => {
+  const materialized = await materializeFixture();
+  try {
+    const [base, derived] = materialized.bundle.identity.payload.artifacts;
+    assert.ok(base);
+    assert.ok(derived);
+    const broken = createCanonicalArtifact({
+      ...derived.identity,
+      parentRefs: [{ ...artifactRef(base), stableId: 'rule:missing-parent' }],
+      sourceRefs: [{ sourceId: 'source:missing-source', byteHash: HASH_B }],
+    });
+    const bundle = createCanonicalArtifact({
+      ...materialized.bundle.identity,
+      payload: { ...materialized.bundle.identity.payload, artifacts: [base, broken] },
+    });
+    await writeBundle(materialized.root, bundle);
+    assert.deepEqual(
+      (await captureAsyncDiagnostics(() =>
+        validateBundleGraph(materialized.root, 'bundle.json', {
+          stableId: bundle.identity.stableId,
+          contentHash: bundle.contentHash,
+        }),
+      )).map(({ path, code }) => ({ path, code })),
+      [
+        {
+          path: '/identity/payload/artifacts/1/identity/parentRefs/0/stableId',
+          code: 'missing_parent_ref',
+        },
+        {
+          path: '/identity/payload/artifacts/1/identity/sourceRefs/0/sourceId',
+          code: 'missing_source_ref',
+        },
+      ],
+    );
+
+    const manifest = materialized.bundle.identity.payload.sources[1]!;
+    assert.deepEqual(
+      captureDiagnostics(() =>
+        validateCanonicalArtifact({
+          ...derived,
+          identity: {
+            ...derived.identity,
+            parentRefs: [artifactRef(base), artifactRef(base)],
+            sourceRefs: [sourceRef(manifest), sourceRef(manifest)],
+          },
+        }),
+      ).map(({ path, code }) => ({ path, code })),
+      [
+        { path: '/identity/parentRefs/1/stableId', code: 'duplicate_parent_ref' },
+        { path: '/identity/sourceRefs/1/sourceId', code: 'duplicate_source_ref' },
+      ],
+    );
+  } finally {
+    await rm(materialized.root, { recursive: true, force: true });
+  }
+});
+
+test('DATA-03 rejects reference cycles before returning a partial graph', async () => {
+  const materialized = await materializeFixture();
+  try {
+    const cycle = JSON.parse(
+      await readFile(new URL('./fixtures/provenance-cycle.json', import.meta.url), 'utf8'),
+    ) as { first: string; second: string };
+    const stored = materialized.bundle.identity.payload.sources[0]!;
+    const first = createCanonicalArtifact({
+      artifactKind: 'rule',
+      stableId: cycle.first,
+      schemaVersion: 1,
+      parentRefs: [{ artifactKind: 'rule', stableId: cycle.second, contentHash: HASH_A }],
+      sourceRefs: [sourceRef(stored)],
+      payload: { title: 'Cycle first' },
+    });
+    const second = createCanonicalArtifact({
+      artifactKind: 'rule',
+      stableId: cycle.second,
+      schemaVersion: 1,
+      parentRefs: [{ artifactKind: 'rule', stableId: cycle.first, contentHash: HASH_B }],
+      sourceRefs: [sourceRef(stored)],
+      payload: { title: 'Cycle second' },
+    });
+    const bundle = createCanonicalArtifact({
+      ...materialized.bundle.identity,
+      payload: { ...materialized.bundle.identity.payload, artifacts: [first, second] },
+    });
+    await writeBundle(materialized.root, bundle);
+    assert.deepEqual(
+      (await captureAsyncDiagnostics(() =>
+        validateBundleGraph(materialized.root, 'bundle.json', {
+          stableId: bundle.identity.stableId,
+          contentHash: bundle.contentHash,
+        }),
+      )).map(({ path, code }) => ({ path, code })),
+      [
+        {
+          path: '/identity/payload/artifacts/0/identity/parentRefs/0/contentHash',
+          code: 'parent_ref_hash_mismatch',
+        },
+        {
+          path: '/identity/payload/artifacts/1/identity/parentRefs/0',
+          code: 'reference_cycle',
+        },
+        {
+          path: '/identity/payload/artifacts/1/identity/parentRefs/0/contentHash',
+          code: 'parent_ref_hash_mismatch',
+        },
+      ],
+    );
+  } finally {
+    await rm(materialized.root, { recursive: true, force: true });
+  }
+});
 
 test('DATA-03 rejects relative traversal and absolute stored-source paths', () => {
   for (const relativePath of ['../outside.json', '/absolute.json', 'C:\\absolute.json', 'raw\\rules.json']) {
@@ -244,9 +451,188 @@ test('DATA-03 rejects relative traversal and absolute stored-source paths', () =
   }
 });
 
-test.todo('DATA-03 rejects stored-source symlink escape');
-test.todo('DATA-03 rehashes stored source bytes during offline validation');
-test.todo('DATA-03 rejects manifest-only locator procedure hash byte hash and SourceRef tampering');
+test('DATA-03 rejects bundle traversal absolute paths missing files and stored-source junction escape', async () => {
+  const materialized = await materializeFixture();
+  const outside = await mkdtemp(join(tmpdir(), 'sorcery-authority-outside-'));
+  try {
+    for (const candidate of ['../bundle.json', join(materialized.root, 'bundle.json')]) {
+      assert.deepEqual(
+        (await captureAsyncDiagnostics(() => resolveWithinAuthorityRoot(materialized.root, candidate))).map(
+          ({ path, code }) => ({ path, code }),
+        ),
+        [{ path: '', code: 'path_escape' }],
+      );
+    }
+    await rm(join(materialized.root, 'raw'), { recursive: true, force: true });
+    assert.deepEqual(
+      (await captureAsyncDiagnostics(() =>
+        validateBundleGraph(materialized.root, 'bundle.json', materialized.expected),
+      )).map(({ path, code }) => ({ path, code })),
+      [{ path: '/identity/payload/sources/0/relativePath', code: 'path_not_found' }],
+    );
+
+    await writeFile(join(outside, 'rules.json'), materialized.fixture.storedBytes);
+    await symlink(outside, join(materialized.root, 'raw'), 'junction');
+    assert.deepEqual(
+      (await captureAsyncDiagnostics(() =>
+        validateBundleGraph(materialized.root, 'bundle.json', materialized.expected),
+      )).map(({ path, code }) => ({ path, code })),
+      [{ path: '/identity/payload/sources/0/relativePath', code: 'path_escape' }],
+    );
+  } finally {
+    await rm(materialized.root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test('DATA-03 rehashes stored bytes and reports manifest-only bindings without reading absent bytes', async () => {
+  const materialized = await materializeFixture();
+  try {
+    const validated = await validateBundleGraph(materialized.root, 'bundle.json', materialized.expected);
+    assert.deepEqual(validated.storedBytesRehashed, [sourceRef(materialized.bundle.identity.payload.sources[0]!)]);
+    assert.deepEqual(validated.manifestBindingsVerified, [
+      sourceRef(materialized.bundle.identity.payload.sources[1]!),
+    ]);
+
+    const tampered = await loadFixture('provenance-tampered.json');
+    await writeFile(join(materialized.root, 'raw', 'rules.json'), tampered.storedBytes);
+    assert.deepEqual(
+      (await captureAsyncDiagnostics(() =>
+        validateBundleGraph(materialized.root, 'bundle.json', materialized.expected),
+      )).map(({ path, code }) => ({ path, code })),
+      [{ path: '/identity/payload/sources/0/byteHash', code: 'stored_byte_hash_mismatch' }],
+    );
+  } finally {
+    await rm(materialized.root, { recursive: true, force: true });
+  }
+});
+
+test('DATA-03 rejects manifest locator procedure byte hash SourceRef artifact and expected-root tampering', async () => {
+  const materialized = await materializeFixture();
+  try {
+    const [stored, manifest] = materialized.bundle.identity.payload.sources;
+    const [base, derived] = materialized.bundle.identity.payload.artifacts;
+    assert.ok(stored);
+    assert.ok(manifest);
+    assert.ok(base);
+    assert.ok(derived);
+
+    for (const changedManifest of [
+      { ...manifest, durableLocator: 'urn:sha256:' + 'c'.repeat(64) },
+      { ...manifest, acquisitionProcedureHash: HASH_A },
+      { ...manifest, byteHash: HASH_A },
+    ]) {
+      const tampered = {
+        ...materialized.bundle,
+        identity: {
+          ...materialized.bundle.identity,
+          payload: { ...materialized.bundle.identity.payload, sources: [stored, changedManifest] },
+        },
+      };
+      await writeFile(join(materialized.root, 'bundle.json'), canonicalJson(tampered));
+      assert.deepEqual(
+        (await captureAsyncDiagnostics(() =>
+          validateBundleGraph(materialized.root, 'bundle.json', materialized.expected),
+        )).map(({ path, code }) => ({ path, code })),
+        [{ path: '/contentHash', code: 'content_hash_mismatch' }],
+      );
+    }
+
+    const badBinding = createCanonicalArtifact({
+      ...derived.identity,
+      sourceRefs: [{ sourceId: manifest.sourceId, byteHash: HASH_A }],
+    });
+    const bindingBundle = createCanonicalArtifact({
+      ...materialized.bundle.identity,
+      payload: { ...materialized.bundle.identity.payload, artifacts: [base, badBinding] },
+    });
+    await writeBundle(materialized.root, bindingBundle);
+    assert.deepEqual(
+      (await captureAsyncDiagnostics(() =>
+        validateBundleGraph(materialized.root, 'bundle.json', {
+          stableId: bindingBundle.identity.stableId,
+          contentHash: bindingBundle.contentHash,
+        }),
+      )).map(({ path, code }) => ({ path, code })),
+      [
+        {
+          path: '/identity/payload/artifacts/1/identity/sourceRefs/0/byteHash',
+          code: 'source_ref_hash_mismatch',
+        },
+      ],
+    );
+
+    const artifactTamper = { ...derived, identity: { ...derived.identity, payload: { title: 'Tampered' } } };
+    const artifactBundle = createCanonicalArtifact({
+      ...materialized.bundle.identity,
+      payload: { ...materialized.bundle.identity.payload, artifacts: [base, artifactTamper] },
+    });
+    await writeBundle(materialized.root, artifactBundle);
+    assert.deepEqual(
+      (await captureAsyncDiagnostics(() =>
+        validateBundleGraph(materialized.root, 'bundle.json', {
+          stableId: artifactBundle.identity.stableId,
+          contentHash: artifactBundle.contentHash,
+        }),
+      )).map(({ path, code }) => ({ path, code })),
+      [
+        {
+          path: '/identity/payload/artifacts/1/contentHash',
+          code: 'content_hash_mismatch',
+        },
+      ],
+    );
+
+    await writeBundle(materialized.root, materialized.bundle);
+    assert.deepEqual(
+      (await captureAsyncDiagnostics(() =>
+        validateBundleGraph(materialized.root, 'bundle.json', {
+          stableId: 'bundle:wrong',
+          contentHash: sha256(new TextEncoder().encode('wrong')),
+        }),
+      )).map(({ path, code }) => ({ path, code })),
+      [
+        { path: '/expected/contentHash', code: 'unexpected_content_hash' },
+        { path: '/expected/stableId', code: 'unexpected_stable_id' },
+      ],
+    );
+  } finally {
+    await rm(materialized.root, { recursive: true, force: true });
+  }
+});
+
+test('DATA-03 caps recursive graph diagnostics before rejecting the bundle', async () => {
+  const materialized = await materializeFixture();
+  try {
+    const stored = materialized.bundle.identity.payload.sources[0]!;
+    const artifacts = Array.from({ length: 120 }, (_, index) =>
+      createCanonicalArtifact({
+        artifactKind: 'rule',
+        stableId: `rule:missing-source-${index}`,
+        schemaVersion: 1,
+        parentRefs: [],
+        sourceRefs: [{ sourceId: `source:missing-${index}`, byteHash: stored.byteHash }],
+        payload: { index },
+      }),
+    );
+    const bundle = createCanonicalArtifact({
+      ...materialized.bundle.identity,
+      payload: { ...materialized.bundle.identity.payload, artifacts },
+    });
+    await writeBundle(materialized.root, bundle);
+    const diagnostics = await captureAsyncDiagnostics(() =>
+      validateBundleGraph(materialized.root, 'bundle.json', {
+        stableId: bundle.identity.stableId,
+        contentHash: bundle.contentHash,
+      }),
+    );
+    assert.equal(diagnostics.length, 100);
+    assert.ok(diagnostics.every(({ code }) => code === 'missing_source_ref'));
+    assert.deepEqual(diagnostics, sortDiagnostics(diagnostics));
+  } finally {
+    await rm(materialized.root, { recursive: true, force: true });
+  }
+});
 
 test('DATA-03 bounds input bytes records nesting depth and diagnostic count', () => {
   const limits: AuthorityJsonLimits = { maxBytes: 256, maxDepth: 3, maxRecords: 5, maxDiagnostics: 2 };
