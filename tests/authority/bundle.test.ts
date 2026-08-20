@@ -1,0 +1,20 @@
+import test from 'node:test';
+
+test.todo('DATA-01 resolves current official authority and retains winning source references');
+test.todo('DATA-01 resolves explicit official supersession by effective date');
+test.todo('DATA-01 applies explicitly selected scoped overlays only in scope');
+test.todo('DATA-01 records equal-rank and ambiguous official conflicts as unsupported');
+test.todo('DATA-01 never lets community or external-reference sources become normative');
+test.todo('DATA-01 recursively validates a complete bundle offline');
+test.todo('DATA-01 fails if fetch HTTP HTTPS or net access is attempted');
+test.todo('DATA-01 rehashes stored source bytes and rejects one-byte tampering');
+test.todo('DATA-01 validates manifest-only locator hash procedure and SourceRef binding honestly');
+test.todo('DATA-01 rejects changed expected input-root hashes before parsing inputs');
+test.todo('DATA-01 rejects missing extra and one-byte-mismatched input-lock files');
+test.todo('DATA-01 records the verified input root and independently calculated bundle root');
+test.todo('DATA-01 rejects prohibited publisher PDFs images and raw corpus storage');
+test.todo('DATA-01 refuses to overwrite an immutable published revision');
+test.todo('DATA-01 removes no published data when an atomic candidate build fails');
+test.todo('DATA-01 produces byte-identical bundles from two clean locked-input builds');
+test.todo('DATA-01 rejects stored manifest artifact and reference tamper copies');
+test.todo('DATA-01 fixture storage policy enforces synthetic clean-room inputs');

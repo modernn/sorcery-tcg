@@ -10,7 +10,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "lint": "eslint .",
     "test": "node --test tests/authority/*.test.ts",
     "verify": "pnpm typecheck && pnpm lint && pnpm test"
   },
