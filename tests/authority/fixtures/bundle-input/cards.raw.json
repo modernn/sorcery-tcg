@@ -1,0 +1,17 @@
+{
+  "cards": [
+    {
+      "sourceCardId": "synthetic-apprentice",
+      "name": "Synthetic Apprentice",
+      "cardType": "minion",
+      "elements": ["air"],
+      "rarity": "ordinary",
+      "manaCost": 1,
+      "attack": 1,
+      "defense": 1,
+      "rulesText": "",
+      "printingSlugs": ["synthetic-apprentice-alpha"],
+      "releasedAt": "2026-08-20"
+    }
+  ]
+}

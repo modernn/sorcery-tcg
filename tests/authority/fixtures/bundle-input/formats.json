@@ -1,0 +1,23 @@
+{
+  "formats": [
+    {
+      "stableId": "format:synthetic-constructed",
+      "sourceId": "source:formats-synthetic",
+      "definition": {
+        "name": "Synthetic Constructed",
+        "effectiveDate": "2026-08-20",
+        "scope": null,
+        "parentFormatStableId": null,
+        "avatarCount": 1,
+        "spellbookMinimum": 60,
+        "atlasMinimum": 30,
+        "copyLimits": {
+          "ordinary": 4,
+          "exceptional": 3,
+          "elite": 2,
+          "unique": 1
+        }
+      }
+    }
+  ]
+}

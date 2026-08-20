@@ -1,13 +1,15 @@
-import { open, realpath } from 'node:fs/promises';
-import { isAbsolute, relative, resolve, sep, win32 } from 'node:path';
+import { open, readdir, realpath } from 'node:fs/promises';
+import { dirname, isAbsolute, relative, resolve, sep, win32 } from 'node:path';
 
-import type { JsonValue } from './canonical-json.ts';
+import { canonicalJson, type JsonValue } from './canonical-json.ts';
 import { sha256 } from './hash.ts';
 import {
   AuthorityValidationError,
   DEFAULT_AUTHORITY_JSON_LIMITS,
   parseAuthorityJson,
   sortDiagnostics,
+  validateFormatArtifact,
+  validateNormalizedCardSnapshot,
   validateAuthorityBundle as validateBundleSchema,
   validateCanonicalArtifact,
   type ArtifactKind,
@@ -569,12 +571,132 @@ function validateStoragePolicy(bundle: AuthorityBundle): void {
   if (diagnostics.length > 0) fail(diagnostics);
 }
 
-async function readStoredSources(  root: string,
+async function validateImportedRevisionFiles(
+  revisionRoot: string,
   bundleBytes: Uint8Array,
+  bundle: AuthorityBundle,
+): Promise<number> {
+  if (bundle.identity.payload.inputRootHash === null) return bundleBytes.byteLength;
+
+  const diagnostics: Diagnostic[] = [];
+  const sourceManifests = bundle.identity.payload.artifacts.filter(
+    (artifact) => artifact.identity.artifactKind === 'source-manifest',
+  );
+  const cardSnapshots = bundle.identity.payload.artifacts.filter(
+    (artifact) => artifact.identity.artifactKind === 'card-snapshot',
+  );
+  const formats = bundle.identity.payload.artifacts
+    .filter((artifact) => artifact.identity.artifactKind === 'format')
+    .sort((left, right) => left.identity.stableId < right.identity.stableId ? -1 : left.identity.stableId > right.identity.stableId ? 1 : 0);
+  if (sourceManifests.length !== 1 || cardSnapshots.length !== 1 || formats.length === 0) {
+    fail([{
+      path: '/identity/payload/artifacts',
+      code: 'invalid_imported_artifacts',
+      message: 'imported revisions require one source manifest, one card snapshot, and at least one format',
+    }]);
+  }
+  const sourceManifest = sourceManifests[0]!;
+  const cardSnapshot = cardSnapshots[0]!;
+  if (
+    canonicalJson(sourceManifest.identity.payload) !==
+    canonicalJson({ sources: bundle.identity.payload.sources })
+  ) {
+    diagnostics.push({
+      path: '/identity/payload/artifacts',
+      code: 'source_manifest_mismatch',
+      message: 'source manifest payload does not match bundle sources',
+    });
+  }
+  try {
+    validateNormalizedCardSnapshot(cardSnapshot.identity.payload);
+  } catch (error: unknown) {
+    appendValidationDiagnostics(diagnostics, error, '/identity/payload/artifacts');
+  }
+  formats.forEach((format, index) => {
+    try {
+      validateFormatArtifact(format);
+    } catch (error: unknown) {
+      appendValidationDiagnostics(diagnostics, error, `/identity/payload/artifacts/${index}`);
+    }
+  });
+  if (diagnostics.length > 0) fail(diagnostics);
+
+  const entries = await readdir(revisionRoot, { recursive: true, withFileTypes: true });
+  if (entries.length > MAX_AUTHORITY_FILES) {
+    fail([{
+      path: '/files',
+      code: 'max_files',
+      message: 'authority revision exceeds the fixed file-entry limit',
+    }]);
+  }
+  if (entries.some((entry) => !entry.isFile() && !entry.isDirectory())) {
+    fail([{
+      path: '/files',
+      code: 'unexpected_file_type',
+      message: 'authority revision contains a symlink or unsupported entry',
+    }]);
+  }
+  const actualFiles = entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => relative(revisionRoot, resolve(entry.parentPath, entry.name)).replaceAll('\\', '/'))
+    .sort();
+  const expectedFiles = [
+    'bundle.json',
+    'cards.normalized.json',
+    'formats.json',
+    'sources.json',
+    ...bundle.identity.payload.sources
+      .filter((source) => source.storageMode === 'stored')
+      .map((source) => source.relativePath),
+  ].sort();
+  if (
+    actualFiles.length !== expectedFiles.length ||
+    actualFiles.some((path, index) => path !== expectedFiles[index])
+  ) {
+    fail([{
+      path: '/files',
+      code: 'unexpected_file_set',
+      message: 'authority revision files do not match the imported bundle manifest',
+    }]);
+  }
+
+  const expectedCompanions = [
+    ['sources.json', sourceManifest],
+    ['formats.json', { formats }],
+    ['cards.normalized.json', cardSnapshot],
+  ] as const;
+  let totalBytes = bundleBytes.byteLength;
+  for (const [relativePath, expected] of expectedCompanions) {
+    const resolvedPath = await resolveWithinAuthorityRoot(revisionRoot, relativePath);
+    const read = await readBoundedFile(resolvedPath, MAX_AUTHORITY_BYTES - totalBytes);
+    if (read.status !== 'ok') {
+      diagnostics.push({
+        path: `/files/${relativePath}`,
+        code: read.status === 'too-large' ? 'max_bytes' : 'path_unreadable',
+        message: 'canonical companion file cannot be read within the fixed byte limit',
+      });
+      continue;
+    }
+    totalBytes += read.bytes.byteLength;
+    if (!Buffer.from(read.bytes).equals(Buffer.from(canonicalJson(expected as JsonValue), 'utf8'))) {
+      diagnostics.push({
+        path: `/files/${relativePath}`,
+        code: 'companion_content_mismatch',
+        message: 'canonical companion file does not match the bundle artifact',
+      });
+    }
+  }
+  if (diagnostics.length > 0) fail(diagnostics);
+  return totalBytes;
+}
+
+async function readStoredSources(
+  root: string,
+  initialBytes: number,
   bundle: AuthorityBundle,
 ): Promise<readonly SourceRef[]> {
   const stored = bundle.identity.payload.sources.filter((source) => source.storageMode === 'stored');
-  if (stored.length + 1 > MAX_AUTHORITY_FILES) {
+  if (stored.length + (bundle.identity.payload.inputRootHash === null ? 1 : 4) > MAX_AUTHORITY_FILES) {
     fail([
       {
         path: '/identity/payload/sources',
@@ -584,7 +706,7 @@ async function readStoredSources(  root: string,
     ]);
   }
 
-  let totalBytes = bundleBytes.byteLength;
+  let totalBytes = initialBytes;
   const diagnostics: Diagnostic[] = [];
   const rehashed: SourceRef[] = [];
   for (const source of stored) {
@@ -679,7 +801,11 @@ export async function validateAuthorityBundle(
   validateGraph(bundle);
   validateStoragePolicy(bundle);
   const precedenceResolutions = validateBundlePrecedence(bundle);
-  const storedBytesRehashed = [...(await readStoredSources(root, bundleBytes, bundle))].sort(compareSourceRefs);
+  const revisionRoot = dirname(resolvedBundlePath);
+  const validatedBytes = await validateImportedRevisionFiles(revisionRoot, bundleBytes, bundle);
+  const storedBytesRehashed = [
+    ...(await readStoredSources(revisionRoot, validatedBytes, bundle)),
+  ].sort(compareSourceRefs);
   const manifestBindingsVerified = bundle.identity.payload.sources
     .filter((source) => source.storageMode === 'manifest-only')
     .map((source) => ({ sourceId: source.sourceId, byteHash: source.byteHash }))

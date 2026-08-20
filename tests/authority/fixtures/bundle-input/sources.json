@@ -1,0 +1,42 @@
+{
+  "sources": [
+    {
+      "sourceId": "source:cards-synthetic",
+      "url": "https://api.sorcerytcg.com/api/cards",
+      "authorityClass": "official",
+      "retrievedAt": "2026-08-20T00:00:00Z",
+      "effectiveDate": "2026-08-20",
+      "mediaType": "application/json",
+      "byteHash": "sha256:754fe9900fa0f8b5109dabb69e4c96b5c6117ec50838d582a0b5170c1ca28f10",
+      "derivation": {
+        "method": "verbatim",
+        "parentByteHashes": [],
+        "notes": "Synthetic fixture"
+      },
+      "licenseStatus": "reference-only",
+      "storageMode": "manifest-only",
+      "storagePolicy": "manifest-only",
+      "durableLocator": "urn:sha256:754fe9900fa0f8b5109dabb69e4c96b5c6117ec50838d582a0b5170c1ca28f10",
+      "acquisitionProcedureHash": null
+    },
+    {
+      "sourceId": "source:formats-synthetic",
+      "url": "https://sorcerytcg.com/constructed",
+      "authorityClass": "official",
+      "retrievedAt": "2026-08-20T00:00:00Z",
+      "effectiveDate": "2026-08-20",
+      "mediaType": "application/json",
+      "byteHash": "sha256:6ffa7a2ecb2fca12b0906770c07da949bed279bca5da8e419aa1ea2344c95f02",
+      "derivation": {
+        "method": "manual-transcription",
+        "parentByteHashes": [],
+        "notes": "Synthetic fixture"
+      },
+      "licenseStatus": "reference-only",
+      "storageMode": "manifest-only",
+      "storagePolicy": "manifest-only",
+      "durableLocator": "urn:sha256:6ffa7a2ecb2fca12b0906770c07da949bed279bca5da8e419aa1ea2344c95f02",
+      "acquisitionProcedureHash": null
+    }
+  ]
+}

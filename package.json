@@ -10,6 +10,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "authority:import": "node src/commands/import-authority.ts",
     "lint": "eslint .",
     "test": "node --test tests/authority/*.test.ts",
     "verify": "pnpm typecheck && pnpm lint && pnpm test"

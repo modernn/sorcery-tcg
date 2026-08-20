@@ -2,20 +2,20 @@
   "schemaVersion": 1,
   "files": [
     {
-      "byteHash": "sha256:36a7aa3b38b6af1ef276fdf4a55359f227a260eada614a4b7db0977372c14e42",
+      "byteHash": "sha256:754fe9900fa0f8b5109dabb69e4c96b5c6117ec50838d582a0b5170c1ca28f10",
       "relativePath": "cards.raw.json",
       "storageMode": "manifest-only"
     },
     {
-      "byteHash": "sha256:1af9db5e367d7d6dbcdd3cf0742a3d8b527cb1605b8a462e2dd70302666be67a",
+      "byteHash": "sha256:6ffa7a2ecb2fca12b0906770c07da949bed279bca5da8e419aa1ea2344c95f02",
       "relativePath": "formats.json",
       "storageMode": "stored"
     },
     {
-      "byteHash": "sha256:bee7a88039d6c7375b5ec2d8eb062c1766a9113ff51c2a15c5290d27e4d8841d",
+      "byteHash": "sha256:930429fd804f826835e39765444c4302efcc878b0c2f7a29c4897e411be668c5",
       "relativePath": "sources.json",
       "storageMode": "stored"
     }
   ],
-  "inputRootHash": "sha256:535a1ee1f2b36b175982abf82fa33454e1f745cb436747c144f978c5d35acb8e"
+  "inputRootHash": "sha256:ae9ea71b47f85dba9a96f1ee80f3b950d49ae594e72802de3627f9bb72aa6a07"
 }
