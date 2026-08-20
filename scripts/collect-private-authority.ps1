@@ -6,8 +6,12 @@ param(
     [switch]$AcknowledgePrivateUseRisk
 )
 
+$collectorModule = New-Module -Name 'Sorcery.PrivateAuthorityCollector' -ArgumentList $PSScriptRoot -ScriptBlock {
+param([Parameter(Mandatory)][string]$CollectorScriptRoot)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:CollectorScriptRoot = [IO.Path]::GetFullPath($CollectorScriptRoot)
 
 function Get-ProductionSourceDescriptors {
     @(
@@ -510,7 +514,7 @@ function Get-NormalizedPath {
 }
 
 function Get-ProductionCollectionConfiguration {
-    $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+    $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $script:CollectorScriptRoot '..'))
     return [pscustomobject]@{
         repositoryRoot = $repositoryRoot
         primaryRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot '.local/authority/inputs/official-2026-08-20/primary'))
@@ -679,7 +683,7 @@ process.stdout.write(JSON.stringify(result));
 '@
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = 'node'
-    $startInfo.WorkingDirectory = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+    $startInfo.WorkingDirectory = [IO.Path]::GetFullPath((Join-Path $script:CollectorScriptRoot '..'))
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
@@ -863,6 +867,16 @@ function Invoke-PrivateAuthorityCollection {
     $configuration = Get-ProductionCollectionConfiguration
     return Invoke-PrivateAuthorityCollectionCore $configuration.repositoryRoot $configuration.primaryRoot $BackupRoot $configuration.lockPath @($configuration.descriptors) $configuration.headerTimeoutSeconds $configuration.bodyTimeoutSeconds $configuration.maxTotalBytes $false $null
 }
+
+Export-ModuleMember -Function @(
+    'Get-ProductionSourceDescriptors',
+    'Invoke-PrivateAuthorityCollection',
+    'Invoke-PrivateAuthorityCollectionForLoopbackTest'
+)
+}
+
+Import-Module -ModuleInfo $collectorModule -Scope Local
+Remove-Variable -Name collectorModule
 
 if ($MyInvocation.InvocationName -ne '.') {
     if ([string]::IsNullOrWhiteSpace($BackupRoot)) { throw 'BackupRoot is required and must be an absolute path outside the repository.' }

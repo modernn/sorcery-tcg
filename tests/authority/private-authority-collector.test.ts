@@ -263,20 +263,27 @@ async function safeReaddir(root: string): Promise<readonly string[]> {
   });
 }
 
-test('production wrapper is inert when dot-sourced and exposes only two direct parameters', async () => {
+test('dot-sourcing exports only the three intentional collector commands', async () => {
   const fixture = await createFixture();
   try {
     const command = [
       '. $env:SORCERY_COLLECTOR_SCRIPT',
       '$tokens = $null; $errors = $null',
       '$ast = [Management.Automation.Language.Parser]::ParseFile($env:SORCERY_COLLECTOR_SCRIPT, [ref]$tokens, [ref]$errors)',
-      '[pscustomobject]@{ parameters = @($ast.ParamBlock.Parameters.Name.VariablePath.UserPath); functions = @((Get-Command Get-ProductionSourceDescriptors).Name, (Get-Command Invoke-PrivateAuthorityCollectionForLoopbackTest).Name) } | ConvertTo-Json -Compress',
+      '$definedFunctions = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object Name)',
+      '$resolvedFunctions = @($definedFunctions | Where-Object { $null -ne (Get-Command -Name $_ -ErrorAction SilentlyContinue) } | Sort-Object -Unique)',
+      '[pscustomobject]@{ parameters = @($ast.ParamBlock.Parameters.Name.VariablePath.UserPath); functions = $resolvedFunctions; moduleVariableLeaked = [bool](Get-Variable collectorModule -ErrorAction SilentlyContinue) } | ConvertTo-Json -Compress',
     ].join('; ');
     const result = await runPwsh(['-Command', command], { SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH });
     assert.equal(result.code, 0, result.stderr);
     assert.deepEqual(JSON.parse(result.stdout.trim()), {
       parameters: ['BackupRoot', 'AcknowledgePrivateUseRisk'],
-      functions: ['Get-ProductionSourceDescriptors', 'Invoke-PrivateAuthorityCollectionForLoopbackTest'],
+      functions: [
+        'Get-ProductionSourceDescriptors',
+        'Invoke-PrivateAuthorityCollection',
+        'Invoke-PrivateAuthorityCollectionForLoopbackTest',
+      ],
+      moduleVariableLeaked: false,
     });
     assert.deepEqual(await readdir(fixture.sandbox), ['repository']);
   } finally {
@@ -351,30 +358,23 @@ test('caller-supplied non-loopback configuration is rejected before transport', 
       }
     });
 
-    await context.test('non-loopback core rejects caller roots limits and descriptors', async () => {
+    await context.test('lower transport and publication helpers are absent', async () => {
       const fixture = await createFixture();
       try {
-        const configurationPath = join(fixture.sandbox, 'core-override.json');
-        await writeFile(
-          configurationPath,
-          JSON.stringify({
-            ...fixture,
-            descriptors: testDescriptors(`http://127.0.0.1:${port}`),
-          }),
-        );
         const command = [
           '. $env:SORCERY_COLLECTOR_SCRIPT',
-          '$c = Get-Content -Raw -LiteralPath $env:SORCERY_COLLECTOR_CONFIG | ConvertFrom-Json -Depth 32',
-          'Invoke-PrivateAuthorityCollectionCore -RepositoryRoot $c.repositoryRoot -PrimaryRoot $c.primaryRoot -BackupRoot $c.backupRoot -LockPath $c.lockPath -Descriptors $c.descriptors -HeaderTimeoutSeconds 1 -BodyTimeoutSeconds 1 -MaxTotalBytes 1 -LoopbackOnly $false -FaultPoint $null',
+          "$names = @('Invoke-PrivateAuthorityCollectionCore', 'Invoke-PrivateAuthorityTransport', 'Invoke-BoundedHttpToFile', 'Assert-RequestUri', 'Resolve-CollectionPaths', 'Invoke-PrivateSourceVerifier')",
+          '$resolved = @($names | Where-Object { $null -ne (Get-Command -Name $_ -ErrorAction SilentlyContinue) })',
+          'if ($resolved.Count -ne 0) { throw "Private collector helpers leaked: $($resolved -join \", \")" }',
+          'ConvertTo-Json -InputObject @($resolved) -Compress',
         ].join('; ');
         const result = await runPwsh(['-Command', command], {
           SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH,
-          SORCERY_COLLECTOR_CONFIG: configurationPath,
         });
-        assert.notEqual(result.code, 0);
-        assert.match(result.stderr, /fixed production configuration/i);
+        assert.equal(result.code, 0, result.stderr);
+        assert.deepEqual(JSON.parse(result.stdout.trim()), []);
         assert.equal(requestCount, 0);
-        assert.deepEqual(await readdir(fixture.sandbox), ['core-override.json', 'repository']);
+        assert.deepEqual(await readdir(fixture.sandbox), ['repository']);
       } finally {
         await cleanupFixture(fixture);
       }
