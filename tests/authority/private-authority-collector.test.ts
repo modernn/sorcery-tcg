@@ -7,6 +7,12 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 
+import {
+  PRIVATE_AUTHORITY_SOURCE_PATHS,
+  verifyPrivateSourceSet,
+  type PrivateAuthoritySourceEntry,
+} from '../../src/authority/private-source-set.ts';
+
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
 const SCRIPT_PATH = join(REPOSITORY_ROOT, 'scripts', 'collect-private-authority.ps1');
 const OFFICIAL_URLS = Object.freeze({
@@ -157,7 +163,11 @@ function testDescriptors(baseUrl: string): readonly Record<string, unknown>[] {
 async function invokeLoopback(
   fixture: Fixture,
   descriptors: readonly Record<string, unknown>[],
-  limits: Readonly<{ headerTimeoutSeconds?: number; bodyTimeoutSeconds?: number }> = {},
+  options: Readonly<{
+    headerTimeoutSeconds?: number;
+    bodyTimeoutSeconds?: number;
+    faultPoint?: string;
+  }> = {},
 ): Promise<ProcessResult> {
   const configurationPath = join(fixture.sandbox, 'configuration.json');
   await writeFile(
@@ -165,19 +175,90 @@ async function invokeLoopback(
     JSON.stringify({
       ...fixture,
       descriptors,
-      headerTimeoutSeconds: limits.headerTimeoutSeconds ?? 3,
-      bodyTimeoutSeconds: limits.bodyTimeoutSeconds ?? 3,
+      headerTimeoutSeconds: options.headerTimeoutSeconds ?? 3,
+      bodyTimeoutSeconds: options.bodyTimeoutSeconds ?? 3,
       maxTotalBytes: 131_072,
+      faultPoint: options.faultPoint ?? null,
     }),
   );
   const command = [
     '. $env:SORCERY_COLLECTOR_SCRIPT',
     '$c = Get-Content -Raw -LiteralPath $env:SORCERY_COLLECTOR_CONFIG | ConvertFrom-Json -Depth 32',
-    'Invoke-PrivateAuthorityCollectionForLoopbackTest -RepositoryRoot $c.repositoryRoot -PrimaryRoot $c.primaryRoot -BackupRoot $c.backupRoot -LockPath $c.lockPath -Descriptors $c.descriptors -HeaderTimeoutSeconds $c.headerTimeoutSeconds -BodyTimeoutSeconds $c.bodyTimeoutSeconds -MaxTotalBytes $c.maxTotalBytes | ConvertTo-Json -Depth 32 -Compress',
+    'Invoke-PrivateAuthorityCollectionForLoopbackTest -RepositoryRoot $c.repositoryRoot -PrimaryRoot $c.primaryRoot -BackupRoot $c.backupRoot -LockPath $c.lockPath -Descriptors $c.descriptors -HeaderTimeoutSeconds $c.headerTimeoutSeconds -BodyTimeoutSeconds $c.bodyTimeoutSeconds -MaxTotalBytes $c.maxTotalBytes -FaultPoint $c.faultPoint | ConvertTo-Json -Depth 32 -Compress',
   ].join('; ');
   return runPwsh(['-Command', command], {
     SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH,
     SORCERY_COLLECTOR_CONFIG: configurationPath,
+  });
+}
+
+function createHappyAuthorityServer(): Readonly<{
+  server: Server;
+  requests: string[];
+  setPort: (value: number) => void;
+}> {
+  const requests: string[] = [];
+  let port = 0;
+  const server = createServer((request, response) => {
+    const path = request.url ?? '';
+    requests.push(path);
+    if (path === '/release') {
+      response.setHeader('content-type', 'text/html; charset=utf-8');
+      response.end(
+        '<!doctype html><title>Sorcery: Contested Realm December 2025 Rulebook Update</title>' +
+          '<time>2025-12-19</time>' +
+          `<a href="http://127.0.0.1:${port}/file/d/annotated/view">Sorcery: Contested Realm Rulebook (December 2025) Annotated</a>` +
+          `<a href="http://127.0.0.1:${port}/file/d/standard/view">Sorcery: Contested Realm Rulebook (December 2025)</a>` +
+          '<img src="/artwork-must-not-be-requested">',
+      );
+      return;
+    }
+    if (path === '/drive-download?export=download&id=standard') {
+      response.statusCode = 303;
+      response.setHeader('location', '/pdf');
+      response.end();
+      return;
+    }
+    if (path === '/pdf') {
+      response.setHeader('content-type', 'application/octet-stream');
+      response.setHeader('content-disposition', 'attachment; filename=SorceryRulebook.pdf');
+      response.end(SOURCE_BYTES['rulebook/rulebook-current.pdf']);
+      return;
+    }
+    const relativePath = (Object.keys(SOURCE_BYTES) as SourcePath[]).find(
+      (candidate) => path === `/${candidate.replaceAll('/', '-')}`,
+    );
+    if (relativePath === undefined || relativePath === 'rulebook/rulebook-current.pdf') {
+      response.statusCode = 500;
+      response.end('unexpected route');
+      return;
+    }
+    response.setHeader(
+      'content-type',
+      relativePath.endsWith('.json') ? 'application/json; charset=utf-8' : 'text/html; charset=utf-8',
+    );
+    response.end(SOURCE_BYTES[relativePath]);
+  });
+  return { server, requests, setPort: (value) => (port = value) };
+}
+
+async function relativeFiles(root: string): Promise<readonly string[]> {
+  const found: string[] = [];
+  async function visit(directory: string, prefix: string): Promise<void> {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const relativePath = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+      if (entry.isDirectory()) await visit(join(directory, entry.name), relativePath);
+      else found.push(relativePath);
+    }
+  }
+  await visit(root, '');
+  return found.sort();
+}
+
+async function safeReaddir(root: string): Promise<readonly string[]> {
+  return readdir(root).catch((error: unknown) => {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') return [];
+    throw error;
   });
 }
 
@@ -236,60 +317,20 @@ test('offline production manifest locks the seven non-artwork sources', async ()
 
 test('loopback collection selects the standard rulebook and preserves exact bounded bytes', async () => {
   const fixture = await createFixture();
-  const requests: string[] = [];
-  let port = 0;
-  const server = createServer((request, response) => {
-    const path = request.url ?? '';
-    requests.push(path);
-    if (path === '/release') {
-      response.setHeader('content-type', 'text/html; charset=utf-8');
-      response.end(
-        '<!doctype html><title>Sorcery: Contested Realm December 2025 Rulebook Update</title>' +
-          '<time>2025-12-19</time>' +
-          `<a href="http://127.0.0.1:${port}/file/d/annotated/view">Sorcery: Contested Realm Rulebook (December 2025) Annotated</a>` +
-          `<a href="http://127.0.0.1:${port}/file/d/standard/view">Sorcery: Contested Realm Rulebook (December 2025)</a>` +
-          '<img src="/artwork-must-not-be-requested">',
-      );
-      return;
-    }
-    if (path === '/drive-download?export=download&id=standard') {
-      response.statusCode = 303;
-      response.setHeader('location', '/pdf');
-      response.end();
-      return;
-    }
-    if (path === '/pdf') {
-      response.setHeader('content-type', 'application/octet-stream');
-      response.setHeader('content-disposition', 'attachment; filename=SorceryRulebook.pdf');
-      response.end(SOURCE_BYTES['rulebook/rulebook-current.pdf']);
-      return;
-    }
-    const relativePath = (Object.keys(SOURCE_BYTES) as SourcePath[]).find(
-      (candidate) => path === `/${candidate.replaceAll('/', '-')}`,
-    );
-    if (relativePath === undefined || relativePath === 'rulebook/rulebook-current.pdf') {
-      response.statusCode = 500;
-      response.end('unexpected route');
-      return;
-    }
-    response.setHeader(
-      'content-type',
-      relativePath.endsWith('.json') ? 'application/json; charset=utf-8' : 'text/html; charset=utf-8',
-    );
-    response.end(SOURCE_BYTES[relativePath]);
-  });
+  const authority = createHappyAuthorityServer();
   try {
-    port = await listen(server);
+    const port = await listen(authority.server);
+    authority.setPort(port);
     const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
     assert.equal(result.code, 0, result.stderr);
     for (const [relativePath, bytes] of Object.entries(SOURCE_BYTES)) {
       assert.deepEqual(await readFile(join(fixture.primaryRoot, ...relativePath.split('/'))), bytes);
     }
-    assert.equal(requests.includes('/artwork-must-not-be-requested'), false);
-    assert.equal(requests.includes('/file/d/annotated/view'), false);
-    assert.equal(requests.filter((path) => path === '/cards-cards.raw.json').length, 1);
+    assert.equal(authority.requests.includes('/artwork-must-not-be-requested'), false);
+    assert.equal(authority.requests.includes('/file/d/annotated/view'), false);
+    assert.equal(authority.requests.filter((path) => path === '/cards-cards.raw.json').length, 1);
   } finally {
-    await close(server);
+    await close(authority.server);
     await cleanupFixture(fixture);
   }
 });
@@ -541,6 +582,212 @@ test('header timeout body timeout and disconnect are terminal', async (context) 
         await cleanupFixture(fixture);
       }
     });
+  }
+});
+
+test('publication creates independent exact trees and a verifier-approved private lock', async () => {
+  const fixture = await createFixture();
+  const authority = createHappyAuthorityServer();
+  try {
+    const port = await listen(authority.server);
+    authority.setPort(port);
+    const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
+    assert.equal(result.code, 0, result.stderr);
+
+    const expectedFiles = [...PRIVATE_AUTHORITY_SOURCE_PATHS].sort();
+    assert.deepEqual(await relativeFiles(fixture.primaryRoot), expectedFiles);
+    assert.deepEqual(await relativeFiles(fixture.backupRoot), expectedFiles);
+    for (const relativePath of PRIVATE_AUTHORITY_SOURCE_PATHS) {
+      const primaryPath = join(fixture.primaryRoot, ...relativePath.split('/'));
+      const backupPath = join(fixture.backupRoot, ...relativePath.split('/'));
+      assert.deepEqual(await readFile(primaryPath), SOURCE_BYTES[relativePath]);
+      assert.deepEqual(await readFile(backupPath), SOURCE_BYTES[relativePath]);
+      const primaryIdentity = await stat(primaryPath);
+      const backupIdentity = await stat(backupPath);
+      assert.notDeepEqual(
+        [primaryIdentity.dev, primaryIdentity.ino],
+        [backupIdentity.dev, backupIdentity.ino],
+      );
+    }
+
+    const lockBytes = await readFile(fixture.lockPath);
+    assert.notEqual(lockBytes[0], 0xef);
+    const lock = JSON.parse(lockBytes.toString('utf8')) as {
+      acquisitionMethod: string;
+      primaryRoot: string;
+      backupRoot: string;
+      entries: readonly PrivateAuthoritySourceEntry[];
+      sourceSetRootHash: string;
+      operatingAcknowledgment: Record<string, unknown>;
+      rulebookAcquisitionEvidence: Record<string, unknown>;
+    };
+    assert.equal(lock.acquisitionMethod, 'user-run-one-shot-powershell');
+    assert.equal(lock.primaryRoot, resolve(fixture.primaryRoot));
+    assert.equal(lock.backupRoot, resolve(fixture.backupRoot));
+    assert.deepEqual(
+      lock.entries.map(({ relativePath }) => relativePath),
+      expectedFiles,
+    );
+    assert.deepEqual(
+      lock.entries.map(({ effectiveDate }) => effectiveDate),
+      [null, '2026-08-20', null, null, null, '2025-12-19', '2025-11-25'],
+    );
+    assert.deepEqual(lock.operatingAcknowledgment, {
+      scope: 'private-local-noncommercial',
+      noRedistributionReleaseHostingUploadOrArtwork: true,
+      apiTermsRobotsConflictAndPrivateUseRiskAccepted: true,
+      establishesLegalPermission: false,
+      stopOnBlockedStatusCaptchaOrPublisherObjection: true,
+      retryOrEvasion: false,
+    });
+    assert.equal(lock.rulebookAcquisitionEvidence.privateLocatorIsNormative, false);
+    assert.equal(lock.rulebookAcquisitionEvidence.observedFilename, 'SorceryRulebook.pdf');
+    assert.equal(lock.rulebookAcquisitionEvidence.sourceUrl, OFFICIAL_URLS['rulebook/rulebook-current.pdf']);
+    assert.equal(JSON.stringify(lock).includes('Synthetic Adept'), false);
+
+    const verified = await verifyPrivateSourceSet({
+      primaryRoot: lock.primaryRoot,
+      backupRoot: lock.backupRoot,
+      repositoryRoot: fixture.repositoryRoot,
+      entries: lock.entries,
+    });
+    assert.equal(lock.sourceSetRootHash, verified.sourceSetRootHash);
+    assert.deepEqual(lock.entries, verified.entries);
+  } finally {
+    await close(authority.server);
+    await cleanupFixture(fixture);
+  }
+});
+
+test('preflight rejects existing or overlapping destinations before any request', async (context) => {
+  const cases = [
+    {
+      name: 'existing primary',
+      expected: /already exists/i,
+      change: async (fixture: Fixture) => {
+        await mkdir(fixture.primaryRoot, { recursive: true });
+        await writeFile(join(fixture.primaryRoot, 'sentinel'), 'unchanged');
+        return fixture;
+      },
+    },
+    {
+      name: 'existing backup',
+      expected: /already exists/i,
+      change: async (fixture: Fixture) => {
+        await mkdir(fixture.backupRoot, { recursive: true });
+        await writeFile(join(fixture.backupRoot, 'sentinel'), 'unchanged');
+        return fixture;
+      },
+    },
+    {
+      name: 'existing lock',
+      expected: /already exists/i,
+      change: async (fixture: Fixture) => {
+        await mkdir(dirname(fixture.lockPath), { recursive: true });
+        await writeFile(fixture.lockPath, 'unchanged');
+        return fixture;
+      },
+    },
+    {
+      name: 'backup equals primary',
+      expected: /overlap|equal/i,
+      change: async (fixture: Fixture) => ({ ...fixture, backupRoot: fixture.primaryRoot }),
+    },
+    {
+      name: 'backup nested in repository',
+      expected: /outside|repository/i,
+      change: async (fixture: Fixture) => ({ ...fixture, backupRoot: join(fixture.repositoryRoot, 'backup') }),
+    },
+    {
+      name: 'backup contains repository',
+      expected: /outside|contain/i,
+      change: async (fixture: Fixture) => ({ ...fixture, backupRoot: fixture.sandbox }),
+    },
+    {
+      name: 'relative backup',
+      expected: /absolute/i,
+      change: async (fixture: Fixture) => ({ ...fixture, backupRoot: 'relative-backup' }),
+    },
+  ] as const;
+  let requestCount = 0;
+  const server = createServer((_request, response) => {
+    requestCount += 1;
+    response.statusCode = 500;
+    response.end('preflight should prevent this request');
+  });
+  try {
+    const port = await listen(server);
+    for (const scenario of cases) {
+      await context.test(scenario.name, async () => {
+        const original = await createFixture();
+        try {
+          const fixture = await scenario.change(original);
+          const before = requestCount;
+          const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
+          assert.notEqual(result.code, 0);
+          assert.match(result.stderr, scenario.expected);
+          assert.equal(requestCount, before);
+          if (scenario.name.startsWith('existing')) {
+            const sentinel =
+              scenario.name === 'existing primary'
+                ? join(fixture.primaryRoot, 'sentinel')
+                : scenario.name === 'existing backup'
+                  ? join(fixture.backupRoot, 'sentinel')
+                  : fixture.lockPath;
+            assert.equal(await readFile(sentinel, 'utf8'), 'unchanged');
+          }
+        } finally {
+          await cleanupFixture(original);
+        }
+      });
+    }
+  } finally {
+    await close(server);
+  }
+});
+
+test('controlled publication faults leave no canonical receipt and quarantine only owned outputs', async (context) => {
+  const faultPoints = [
+    'after-staged-verification',
+    'after-backup-move',
+    'after-primary-move',
+    'during-final-verifier',
+    'before-lock-move',
+  ] as const;
+  const authority = createHappyAuthorityServer();
+  try {
+    const port = await listen(authority.server);
+    authority.setPort(port);
+    for (const faultPoint of faultPoints) {
+      await context.test(faultPoint, async () => {
+        const fixture = await createFixture();
+        try {
+          const result = await invokeLoopback(
+            fixture,
+            testDescriptors(`http://127.0.0.1:${port}`),
+            { faultPoint },
+          );
+          assert.notEqual(result.code, 0);
+          assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
+          assert.equal(await stat(fixture.primaryRoot).then(() => true, () => false), false);
+          assert.equal(await stat(fixture.backupRoot).then(() => true, () => false), false);
+          const primarySiblings = await safeReaddir(dirname(fixture.primaryRoot));
+          const backupSiblings = await safeReaddir(dirname(fixture.backupRoot));
+          assert.equal(primarySiblings.some((name) => name.includes('.collecting-')), false);
+          assert.equal(backupSiblings.some((name) => name.includes('.collecting-')), false);
+          if (faultPoint === 'after-primary-move' || faultPoint === 'during-final-verifier' || faultPoint === 'before-lock-move') {
+            assert.equal(primarySiblings.some((name) => name.includes('.failed-')), true);
+          }
+          if (faultPoint !== 'after-staged-verification') {
+            assert.equal(backupSiblings.some((name) => name.includes('.failed-')), true);
+          }
+        } finally {
+          await cleanupFixture(fixture);
+        }
+      });
+    }
+  } finally {
+    await close(authority.server);
   }
 });
 
