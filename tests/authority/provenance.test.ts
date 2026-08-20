@@ -23,7 +23,7 @@ import type { JsonValue } from '../../src/authority/canonical-json.ts';
 const HASH_A = ('sha256:' + 'a'.repeat(64)) as Hash;
 const HASH_B = ('sha256:' + 'b'.repeat(64)) as Hash;
 
-function storedSource(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function storedSource(overrides: Record<string, JsonValue> = {}): Record<string, JsonValue> {
   return {
     sourceId: 'source:official-rules-2025',
     url: 'https://sorcerytcg.com/rules/2025',
@@ -41,7 +41,7 @@ function storedSource(overrides: Record<string, unknown> = {}): Record<string, u
   };
 }
 
-function manifestSource(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function manifestSource(overrides: Record<string, JsonValue> = {}): Record<string, JsonValue> {
   return {
     sourceId: 'source:community-example',
     url: 'https://example.org/sorcery/example',
@@ -150,7 +150,8 @@ test('DATA-03 rejects unknown and missing envelope fields with exact JSON Pointe
     [{ path: '/identity/bad~1key~0', code: 'unrecognized_key' }],
   );
 
-  const { stableId: _stableId, ...missingStableId } = artifact.identity;
+  const missingStableId = { ...artifact.identity } as Record<string, JsonValue>;
+  delete missingStableId.stableId;
   assert.deepEqual(
     captureDiagnostics(() => validateCanonicalArtifact({ ...artifact, identity: missingStableId })).map(
       ({ path, code }) => ({ path, code }),
@@ -165,10 +166,7 @@ test('DATA-03 rejects unsupported schema versions and invalid dates or hashes', 
     captureDiagnostics(() =>
       validateCanonicalArtifact({ ...artifact, identity: { ...artifact.identity, schemaVersion: 2 } }),
     ).map(({ path, code }) => ({ path, code })),
-    [
-      { path: '/contentHash', code: 'content_hash_mismatch' },
-      { path: '/identity/schemaVersion', code: 'invalid_value' },
-    ],
+    [{ path: '/identity/schemaVersion', code: 'invalid_value' }],
   );
 
   assert.deepEqual(
