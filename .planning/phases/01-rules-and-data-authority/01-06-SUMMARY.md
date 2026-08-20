@@ -33,7 +33,8 @@ key-decisions:
 patterns-established:
   - "Private authority boundary: all repository-side real authority inputs, locks, normalized data, and revisions live below ignored .local/authority/."
   - "Clean-room evidence: external observations require source revision, reviewer, review date, and independent-authorship attestation."
-requirements-completed: [DATA-01, DATA-03]
+requirements-completed: []
+requirements-progress: [DATA-01, DATA-03]
 metrics:
   duration: 9 min
   completed: 2026-08-20
