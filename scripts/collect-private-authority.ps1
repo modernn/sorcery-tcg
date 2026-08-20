@@ -383,7 +383,7 @@ function New-SourceEntry {
         [Parameter(Mandatory)][psobject]$Descriptor,
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][long]$ByteLength,
-        [AllowNull()][string]$EffectiveDate
+        [AllowNull()][object]$EffectiveDate
     )
 
     [pscustomobject]@{
@@ -472,6 +472,20 @@ function Assert-LoopbackDescriptors {
     param([Parameter(Mandatory)][object[]]$Descriptors)
 
     if ($Descriptors.Count -ne 7) { throw 'Loopback test requires exactly seven descriptors' }
+    $expectedPaths = @(
+        'rulebook/rulebook-current.pdf',
+        'formats/constructed-current.html',
+        'codex/codex-current.html',
+        'codex/faqs-current.html',
+        'codex/changelog-current.html',
+        'updates/card-updates-2025.html',
+        'cards/cards.raw.json'
+    )
+    $actualPaths = @($Descriptors | ForEach-Object { [string]$_.relativePath })
+    if (@($actualPaths | Sort-Object -Unique).Count -ne 7 -or
+        @(Compare-Object ($expectedPaths | Sort-Object) ($actualPaths | Sort-Object)).Count -ne 0) {
+        throw 'Loopback test descriptors must use exactly the seven locked source paths'
+    }
     foreach ($descriptor in $Descriptors) {
         $hostSets = @(@($descriptor.allowedHosts), @($descriptor.allowedRedirectHosts))
         if ($null -ne $descriptor.PSObject.Properties['rulebookLocatorHosts']) { $hostSets += ,@($descriptor.rulebookLocatorHosts) }
@@ -487,6 +501,298 @@ function Assert-LoopbackDescriptors {
     }
 }
 
+function Get-NormalizedPath {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $fullPath = [IO.Path]::GetFullPath($Path).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    if ($IsWindows) { return $fullPath.ToLowerInvariant() }
+    return $fullPath
+}
+
+function Test-PathWithin {
+    param(
+        [Parameter(Mandatory)][string]$Parent,
+        [Parameter(Mandatory)][string]$Candidate
+    )
+
+    $normalizedParent = Get-NormalizedPath $Parent
+    $normalizedCandidate = Get-NormalizedPath $Candidate
+    return $normalizedCandidate -eq $normalizedParent -or
+        $normalizedCandidate.StartsWith($normalizedParent + [IO.Path]::DirectorySeparatorChar, [StringComparison]::Ordinal)
+}
+
+function Assert-NoReparseAncestors {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $current = [IO.Path]::GetFullPath($Path)
+    while ($null -ne $current) {
+        if ([IO.Directory]::Exists($current) -or [IO.File]::Exists($current)) {
+            $attributes = [IO.File]::GetAttributes($current)
+            if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Destination path may not traverse a symlink or junction: $Path"
+            }
+        }
+        $parent = [IO.Directory]::GetParent($current)
+        $current = if ($null -eq $parent) { $null } else { $parent.FullName }
+    }
+}
+
+function Resolve-CollectionPaths {
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$PrimaryRoot,
+        [Parameter(Mandatory)][string]$BackupRoot,
+        [Parameter(Mandatory)][string]$LockPath
+    )
+
+    if (-not [IO.Path]::IsPathFullyQualified($RepositoryRoot) -or
+        -not [IO.Path]::IsPathFullyQualified($PrimaryRoot) -or
+        -not [IO.Path]::IsPathFullyQualified($BackupRoot) -or
+        -not [IO.Path]::IsPathFullyQualified($LockPath)) {
+        throw 'Repository, primary, backup, and lock paths must be absolute'
+    }
+    $repository = [IO.Path]::GetFullPath($RepositoryRoot)
+    $primary = [IO.Path]::GetFullPath($PrimaryRoot)
+    $backup = [IO.Path]::GetFullPath($BackupRoot)
+    $lock = [IO.Path]::GetFullPath($LockPath)
+    if (-not [IO.Directory]::Exists($repository)) { throw "Repository root does not exist: $repository" }
+    foreach ($path in @($repository, $primary, $backup, $lock)) { Assert-NoReparseAncestors $path }
+    if (-not (Test-PathWithin $repository $primary)) { throw 'Primary destination must be inside the repository' }
+    if (-not (Test-PathWithin $repository $lock)) { throw 'Lock destination must be inside the repository' }
+    if ((Test-PathWithin $repository $backup) -or (Test-PathWithin $backup $repository)) {
+        throw 'Backup destination must be outside and may not contain the repository'
+    }
+    if ((Test-PathWithin $primary $backup) -or (Test-PathWithin $backup $primary)) {
+        throw 'Primary and backup destinations may not overlap or be equal'
+    }
+    if (Test-PathWithin $primary $lock) { throw 'Lock destination may not be inside the primary tree' }
+    foreach ($destination in @($primary, $backup, $lock)) {
+        if (Test-Path -LiteralPath $destination) { throw "Destination already exists: $destination" }
+    }
+    return [pscustomobject]@{
+        repositoryRoot = $repository
+        primaryRoot = $primary
+        backupRoot = $backup
+        lockPath = $lock
+    }
+}
+
+function Write-NewUtf8Json {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][object]$Value
+    )
+
+    [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Path)) | Out-Null
+    $stream = [IO.FileStream]::new($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    $writer = [IO.StreamWriter]::new($stream, [Text.UTF8Encoding]::new($false, $true))
+    try {
+        $writer.Write(($Value | ConvertTo-Json -Depth 32))
+        $writer.Flush()
+        $stream.Flush($true)
+    }
+    finally {
+        $writer.Dispose()
+        $stream.Dispose()
+    }
+}
+
+function Copy-SourceTree {
+    param(
+        [Parameter(Mandatory)][string]$SourceRoot,
+        [Parameter(Mandatory)][string]$DestinationRoot,
+        [Parameter(Mandatory)][object[]]$Descriptors
+    )
+
+    [IO.Directory]::CreateDirectory($DestinationRoot) | Out-Null
+    foreach ($descriptor in $Descriptors) {
+        $relativePath = [string]$descriptor.relativePath
+        $source = Join-Path $SourceRoot $relativePath
+        $destination = Join-Path $DestinationRoot $relativePath
+        [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination)) | Out-Null
+        [IO.File]::Copy($source, $destination, $false)
+    }
+}
+
+function Invoke-PrivateSourceVerifier {
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$PrimaryRoot,
+        [Parameter(Mandatory)][string]$BackupRoot,
+        [Parameter(Mandatory)][object[]]$Entries,
+        [Parameter(Mandatory)][string]$DraftPath
+    )
+
+    Write-NewUtf8Json $DraftPath ([pscustomobject]@{
+        repositoryRoot = $RepositoryRoot
+        primaryRoot = $PrimaryRoot
+        backupRoot = $BackupRoot
+        entries = $Entries
+    })
+    $bridgeSource = @'
+import { readFile } from 'node:fs/promises';
+import { verifyPrivateSourceSet } from './src/authority/private-source-set.ts';
+const input = JSON.parse(await readFile(process.argv[1], 'utf8'));
+const result = await verifyPrivateSourceSet(input);
+process.stdout.write(JSON.stringify(result));
+'@
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = 'node'
+    $startInfo.WorkingDirectory = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.ArgumentList.Add('--input-type=module')
+    $startInfo.ArgumentList.Add('--eval')
+    $startInfo.ArgumentList.Add($bridgeSource)
+    $startInfo.ArgumentList.Add($DraftPath)
+    try {
+        $process = [Diagnostics.Process]::Start($startInfo)
+        $standardOutput = $process.StandardOutput.ReadToEnd()
+        $standardError = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+        if ($process.ExitCode -ne 0) { throw "Private source verifier failed: $standardError" }
+        try { return $standardOutput | ConvertFrom-Json -Depth 32 -DateKind String }
+        catch { throw "Private source verifier returned invalid JSON: $standardOutput" }
+    }
+    finally {
+        if (Test-Path -LiteralPath $DraftPath) { [IO.File]::Delete($DraftPath) }
+    }
+}
+
+function Assert-SameVerification {
+    param(
+        [Parameter(Mandatory)][object]$Expected,
+        [Parameter(Mandatory)][object]$Actual
+    )
+
+    $expectedEntries = $Expected.entries | ConvertTo-Json -Depth 16 -Compress
+    $actualEntries = $Actual.entries | ConvertTo-Json -Depth 16 -Compress
+    if ($Expected.sourceSetRootHash -ne $Actual.sourceSetRootHash -or $expectedEntries -ne $actualEntries) {
+        throw "Private source verification result changed between publication gates (expected $($Expected.sourceSetRootHash), actual $($Actual.sourceSetRootHash))"
+    }
+}
+
+function Invoke-TestFault {
+    param(
+        [AllowNull()][string]$FaultPoint,
+        [Parameter(Mandatory)][string]$Expected
+    )
+
+    if ($FaultPoint -eq $Expected) { throw "Controlled loopback test fault: $Expected" }
+}
+
+function Invoke-PrivateAuthorityCollectionCore {
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$PrimaryRoot,
+        [Parameter(Mandatory)][string]$BackupRoot,
+        [Parameter(Mandatory)][string]$LockPath,
+        [Parameter(Mandatory)][object[]]$Descriptors,
+        [Parameter(Mandatory)][int]$HeaderTimeoutSeconds,
+        [Parameter(Mandatory)][int]$BodyTimeoutSeconds,
+        [Parameter(Mandatory)][long]$MaxTotalBytes,
+        [Parameter(Mandatory)][bool]$LoopbackOnly,
+        [AllowNull()][string]$FaultPoint
+    )
+
+    $paths = Resolve-CollectionPaths $RepositoryRoot $PrimaryRoot $BackupRoot $LockPath
+    $runId = [Guid]::NewGuid().ToString('N')
+    $primaryStage = "$($paths.primaryRoot).collecting-$runId"
+    $backupStage = "$($paths.backupRoot).collecting-$runId"
+    $lockCandidate = "$($paths.lockPath).collecting-$runId"
+    $draftPath = "$($paths.lockPath).verifier-$runId.json"
+    $primaryPublished = $false
+    $backupPublished = $false
+    [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($paths.primaryRoot)) | Out-Null
+    [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($paths.backupRoot)) | Out-Null
+    [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($paths.lockPath)) | Out-Null
+    try {
+        $transport = Invoke-PrivateAuthorityTransport $primaryStage $Descriptors $HeaderTimeoutSeconds $BodyTimeoutSeconds $MaxTotalBytes $LoopbackOnly
+        Copy-SourceTree $primaryStage $backupStage $Descriptors
+        $staged = Invoke-PrivateSourceVerifier $paths.repositoryRoot $primaryStage $backupStage @($transport.entries) $draftPath
+        Invoke-TestFault $FaultPoint 'after-staged-verification'
+
+        [IO.Directory]::Move($backupStage, $paths.backupRoot)
+        $backupPublished = $true
+        Invoke-TestFault $FaultPoint 'after-backup-move'
+        [IO.Directory]::Move($primaryStage, $paths.primaryRoot)
+        $primaryPublished = $true
+        Invoke-TestFault $FaultPoint 'after-primary-move'
+        Invoke-TestFault $FaultPoint 'during-final-verifier'
+        $final = Invoke-PrivateSourceVerifier $paths.repositoryRoot $paths.primaryRoot $paths.backupRoot @($transport.entries) $draftPath
+        Assert-SameVerification $staged $final
+
+        $rulebookEntry = @($final.entries | Where-Object { $_.relativePath -eq 'rulebook/rulebook-current.pdf' })[0]
+        $rulebookEvidence = [ordered]@{
+            sourceUrl = $transport.rulebookAcquisitionEvidence.sourceUrl
+            relativePath = $rulebookEntry.relativePath
+            byteHash = $rulebookEntry.byteHash
+            observedFilename = $transport.rulebookAcquisitionEvidence.observedFilename
+            retrievedAt = $rulebookEntry.retrievedAt
+            privateLocatorEvidence = $transport.rulebookAcquisitionEvidence.privateLocatorEvidence
+            privateLocatorIsNormative = $false
+        }
+        $lock = [ordered]@{
+            schemaVersion = 1
+            acquisitionMethod = 'user-run-one-shot-powershell'
+            primaryRoot = $paths.primaryRoot
+            backupRoot = $paths.backupRoot
+            entries = @($final.entries)
+            sourceSetRootHash = $final.sourceSetRootHash
+            operatingAcknowledgment = [ordered]@{
+                scope = 'private-local-noncommercial'
+                noRedistributionReleaseHostingUploadOrArtwork = $true
+                apiTermsRobotsConflictAndPrivateUseRiskAccepted = $true
+                establishesLegalPermission = $false
+                stopOnBlockedStatusCaptchaOrPublisherObjection = $true
+                retryOrEvasion = $false
+            }
+            rulebookAcquisitionEvidence = $rulebookEvidence
+        }
+        Write-NewUtf8Json $lockCandidate $lock
+        $candidate = Get-Content -Raw -LiteralPath $lockCandidate | ConvertFrom-Json -Depth 32 -DateKind String
+        if ($candidate.acquisitionMethod -ne 'user-run-one-shot-powershell') { throw 'Lock candidate has an invalid acquisition method' }
+        $candidateVerification = Invoke-PrivateSourceVerifier $paths.repositoryRoot $candidate.primaryRoot $candidate.backupRoot @($candidate.entries) $draftPath
+        Assert-SameVerification $final $candidateVerification
+        if ($candidate.sourceSetRootHash -ne $candidateVerification.sourceSetRootHash) { throw 'Lock candidate root hash does not match final verification' }
+        Invoke-TestFault $FaultPoint 'before-lock-move'
+        [IO.File]::Move($lockCandidate, $paths.lockPath, $false)
+        return $lock
+    }
+    catch {
+        $originalError = $_
+        $quarantineErrors = [Collections.Generic.List[string]]::new()
+        foreach ($stage in @($primaryStage, $backupStage)) {
+            if ([IO.Directory]::Exists($stage)) {
+                try { [IO.Directory]::Delete($stage, $true) }
+                catch { $quarantineErrors.Add("Could not remove owned staging path $stage") }
+            }
+        }
+        if ($primaryPublished -and [IO.Directory]::Exists($paths.primaryRoot)) {
+            try { [IO.Directory]::Move($paths.primaryRoot, "$($paths.primaryRoot).failed-$runId") }
+            catch { $quarantineErrors.Add("Could not quarantine $($paths.primaryRoot)") }
+        }
+        if ($backupPublished -and [IO.Directory]::Exists($paths.backupRoot)) {
+            try { [IO.Directory]::Move($paths.backupRoot, "$($paths.backupRoot).failed-$runId") }
+            catch { $quarantineErrors.Add("Could not quarantine $($paths.backupRoot)") }
+        }
+        if ([IO.File]::Exists($lockCandidate)) {
+            try { [IO.File]::Move($lockCandidate, "$($paths.lockPath).failed-$runId", $false) }
+            catch { $quarantineErrors.Add("Could not quarantine $lockCandidate") }
+        }
+        if ([IO.File]::Exists($draftPath)) {
+            try { [IO.File]::Delete($draftPath) }
+            catch { $quarantineErrors.Add("Could not remove owned verifier draft $draftPath") }
+        }
+        if ($quarantineErrors.Count -gt 0) {
+            throw "$($originalError.Exception.Message) Quarantine failures: $($quarantineErrors -join '; ')"
+        }
+        throw $originalError
+    }
+}
+
 function Invoke-PrivateAuthorityCollectionForLoopbackTest {
     param(
         [Parameter(Mandatory)][string]$RepositoryRoot,
@@ -496,11 +802,12 @@ function Invoke-PrivateAuthorityCollectionForLoopbackTest {
         [Parameter(Mandatory)][object[]]$Descriptors,
         [Parameter(Mandatory)][int]$HeaderTimeoutSeconds,
         [Parameter(Mandatory)][int]$BodyTimeoutSeconds,
-        [Parameter(Mandatory)][long]$MaxTotalBytes
+        [Parameter(Mandatory)][long]$MaxTotalBytes,
+        [AllowNull()][string]$FaultPoint
     )
 
     Assert-LoopbackDescriptors $Descriptors
-    return Invoke-PrivateAuthorityTransport $PrimaryRoot $Descriptors $HeaderTimeoutSeconds $BodyTimeoutSeconds $MaxTotalBytes $true
+    return Invoke-PrivateAuthorityCollectionCore $RepositoryRoot $PrimaryRoot $BackupRoot $LockPath $Descriptors $HeaderTimeoutSeconds $BodyTimeoutSeconds $MaxTotalBytes $true $FaultPoint
 }
 
 function Invoke-PrivateAuthorityCollection {
@@ -512,7 +819,7 @@ function Invoke-PrivateAuthorityCollection {
         [Parameter(Mandatory)][object[]]$Descriptors
     )
 
-    return Invoke-PrivateAuthorityTransport $PrimaryRoot $Descriptors 30 900 805306368 $false
+    return Invoke-PrivateAuthorityCollectionCore $RepositoryRoot $PrimaryRoot $BackupRoot $LockPath $Descriptors 30 900 805306368 $false $null
 }
 
 if ($MyInvocation.InvocationName -ne '.') {

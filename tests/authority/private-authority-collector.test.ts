@@ -690,7 +690,7 @@ test('preflight rejects existing or overlapping destinations before any request'
     },
     {
       name: 'backup equals primary',
-      expected: /overlap|equal/i,
+      expected: /outside|overlap|equal/i,
       change: async (fixture: Fixture) => ({ ...fixture, backupRoot: fixture.primaryRoot }),
     },
     {
