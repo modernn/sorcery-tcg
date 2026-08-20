@@ -131,7 +131,7 @@ test('DATA-01 resolves current official authority and retains winning source ref
   assert.deepEqual(resolution.superseded, [ref(oldRulebook)]);
 });
 
-test('DATA-01 resolves explicit official supersession by effective date', () => {
+test('DATA-01 resolves explicit official superseded authority by effective date', () => {
   const oldFaq = manifestSource('source:faq-old', { effectiveDate: '2026-01-01' });
   const update = manifestSource('source:card-update-current', { effectiveDate: '2026-07-15' });
   const resolution = resolveAuthorityPrecedence(
@@ -173,6 +173,14 @@ test('DATA-01 records equal-rank and ambiguous official conflicts as unsupported
   assert.equal(resolution.status, 'unsupported');
   assert.equal(resolution.reason, 'equal-rank');
   assert.deepEqual(resolution.contending, [ref(first), ref(second)]);
+
+  const undated = manifestSource('source:faq-undated', { effectiveDate: null });
+  assert.equal(resolveAuthorityPrecedence([record(undated, 'faq')], null, '2026-08-20').reason, 'unclear-date');
+  const unscopedUpdate = manifestSource('source:update-unscoped', { effectiveDate: '2026-07-15' });
+  assert.equal(
+    resolveAuthorityPrecedence([record(unscopedUpdate, 'card-update')], null, '2026-08-20').reason,
+    'unclear-scope',
+  );
 
   const bundle = bundleOf(entries);
   const materialized = await materialize(bundle);
@@ -223,7 +231,7 @@ test('DATA-01 recursively validates a complete bundle offline', async () => {
   }
 });
 
-test('DATA-01 fails if fetch HTTP HTTPS or net access is attempted', async () => {
+test('DATA-01 remains offline and fails if fetch HTTP HTTPS or net access is attempted', async () => {
   const source = await readFile(new URL('../../src/authority/validate-bundle.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /node:(?:http|https|net)|\bfetch\s*\(/);
 });
@@ -259,7 +267,7 @@ test('DATA-01 rejects prohibited publisher PDFs images and raw corpus storage', 
     const materialized = await materialize(bundle);
     try {
       await mkdir(join(materialized.root, 'raw'));
-      await writeFile(join(materialized.root, relativePath.slice('raw/'.length)), bytes);
+      await writeFile(join(materialized.root, relativePath), bytes);
       assert.deepEqual(
         (await captureDiagnostics(() =>
           validateAuthorityBundle(materialized.root, 'bundle.json', materialized.expected),

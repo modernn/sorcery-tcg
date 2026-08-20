@@ -1,4 +1,4 @@
-import { readFile, realpath, stat } from 'node:fs/promises';
+import { open, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep, win32 } from 'node:path';
 
 import type { JsonValue } from './canonical-json.ts';
@@ -15,6 +15,7 @@ import {
   type Diagnostic,
   type Hash,
   type IdentityDocument,
+  type SourceRecord,
   type SourceRef,
 } from './schemas.ts';
 
@@ -26,11 +27,53 @@ const MAX_AUTHORITY_DIAGNOSTICS = DEFAULT_AUTHORITY_JSON_LIMITS.maxDiagnostics;
 
 type ExpectedBundle = Readonly<{ stableId: string; contentHash: string }>;
 
+export type AuthorityKind = 'rulebook' | 'format' | 'codex' | 'faq' | 'card-update' | 'card-data';
+
+export type AuthorityPrecedenceRecord = Readonly<{
+  source: SourceRecord;
+  authorityKind: AuthorityKind;
+  topic: string;
+  scope: string | null;
+  supersedes: readonly string[];
+}>;
+
+export type ResolutionResult =
+  | Readonly<{
+      status: 'resolved';
+      reason: null;
+      winning: SourceRef;
+      contending: readonly SourceRef[];
+      superseded: readonly SourceRef[];
+      provenance: readonly SourceRef[];
+    }>
+  | Readonly<{
+      status: 'unsupported';
+      reason:
+        | 'no-official-authority'
+        | 'unclear-date'
+        | 'unclear-scope'
+        | 'mixed-topic'
+        | 'broken-supersession'
+        | 'ambiguous-supersession'
+        | 'equal-rank';
+      winning: null;
+      contending: readonly SourceRef[];
+      superseded: readonly SourceRef[];
+      provenance: readonly SourceRef[];
+    }>;
+
+export type ValidatedPrecedenceResolution = Readonly<{
+  topic: string;
+  scope: string | null;
+  resolution: ResolutionResult;
+}>;
+
 export type ValidatedAuthorityBundle = Readonly<{
   bundle: AuthorityBundle;
   resolvedBundlePath: string;
   storedBytesRehashed: readonly SourceRef[];
   manifestBindingsVerified: readonly SourceRef[];
+  precedenceResolutions: readonly ValidatedPrecedenceResolution[];
 }>;
 
 type GraphNode = Readonly<{
@@ -56,6 +99,43 @@ function isErrno(error: unknown, code: string): boolean {
 
 function pathError(code: string, message: string): AuthorityValidationError {
   return new AuthorityValidationError([{ path: '', code, message }]);
+}
+
+type BoundedReadResult =
+  | Readonly<{ status: 'ok'; bytes: Uint8Array }>
+  | Readonly<{ status: 'not-file' }>
+  | Readonly<{ status: 'too-large' }>
+  | Readonly<{ status: 'unreadable' }>;
+
+async function readBoundedFile(path: string, maxBytes: number): Promise<BoundedReadResult> {
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    handle = await open(path, 'r');
+  } catch {
+    return { status: 'unreadable' };
+  }
+
+  try {
+    const metadata = await handle.stat();
+    if (!metadata.isFile()) return { status: 'not-file' };
+    if (metadata.size > maxBytes) return { status: 'too-large' };
+
+    const chunks: Uint8Array[] = [];
+    const buffer = Buffer.allocUnsafe(Math.min(65_536, maxBytes + 1));
+    let total = 0;
+    while (true) {
+      const allowance = Math.min(buffer.byteLength, maxBytes + 1 - total);
+      const { bytesRead } = await handle.read(buffer, 0, allowance, null);
+      if (bytesRead === 0) return { status: 'ok', bytes: Buffer.concat(chunks, total) };
+      total += bytesRead;
+      if (total > maxBytes) return { status: 'too-large' };
+      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
+    }
+  } catch {
+    return { status: 'unreadable' };
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
 }
 
 function isWithin(root: string, candidate: string): boolean {
@@ -101,6 +181,108 @@ export async function resolveWithinAuthorityRoot(root: string, candidate: string
     throw pathError('path_escape', 'resolved path escapes the configured authority root');
   }
   return resolvedCandidate;
+}
+
+function toSourceRef(entry: AuthorityPrecedenceRecord): SourceRef {
+  return { sourceId: entry.source.sourceId, byteHash: entry.source.byteHash };
+}
+
+function unsupportedResolution(
+  reason: Extract<ResolutionResult, { status: 'unsupported' }>['reason'],
+  contending: readonly AuthorityPrecedenceRecord[],
+  superseded: readonly AuthorityPrecedenceRecord[],
+  provenance: readonly SourceRef[],
+): ResolutionResult {
+  return Object.freeze({
+    status: 'unsupported',
+    reason,
+    winning: null,
+    contending: Object.freeze(contending.map(toSourceRef).sort(compareSourceRefs)),
+    superseded: Object.freeze(superseded.map(toSourceRef).sort(compareSourceRefs)),
+    provenance: Object.freeze([...provenance].sort(compareSourceRefs)),
+  });
+}
+
+function precedenceRank(entry: AuthorityPrecedenceRecord, scope: string | null): number {
+  if (entry.supersedes.length > 0) return 100;
+  if (scope !== null && entry.scope === scope) {
+    if (scope.startsWith('card:') && (entry.authorityKind === 'card-update' || entry.authorityKind === 'card-data')) {
+      return 90;
+    }
+    if (entry.authorityKind === 'format') return 80;
+    if (entry.authorityKind === 'codex' || entry.authorityKind === 'faq') return 70;
+  }
+  if (entry.authorityKind === 'card-update' || entry.authorityKind === 'card-data') return 60;
+  if (entry.authorityKind === 'codex' || entry.authorityKind === 'faq') return 50;
+  return 40;
+}
+
+export function resolveAuthorityPrecedence(
+  records: readonly AuthorityPrecedenceRecord[],
+  scope: string | null,
+  effectiveAt: string,
+): ResolutionResult {
+  const provenance = records
+    .filter((entry) => entry.source.authorityClass !== 'official')
+    .map(toSourceRef)
+    .sort(compareSourceRefs);
+  const official = records.filter((entry) => entry.source.authorityClass === 'official');
+  if (new Set(official.map((entry) => entry.topic)).size > 1) {
+    return unsupportedResolution('mixed-topic', official, [], provenance);
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveAt)) {
+    return unsupportedResolution('unclear-date', official, [], provenance);
+  }
+
+  const scoped = official.filter((entry) => entry.scope === null || entry.scope === scope);
+  if (scoped.some((entry) => entry.source.effectiveDate === null)) {
+    return unsupportedResolution('unclear-date', scoped, [], provenance);
+  }
+  if (
+    scoped.some(
+      (entry) =>
+        (entry.authorityKind === 'card-update' || entry.authorityKind === 'card-data') &&
+        (entry.scope === null || !entry.scope.startsWith('card:')),
+    )
+  ) {
+    return unsupportedResolution('unclear-scope', scoped, [], provenance);
+  }
+
+  const applicable = scoped.filter((entry) => entry.source.effectiveDate! <= effectiveAt);
+  if (applicable.length === 0) {
+    return unsupportedResolution('no-official-authority', [], [], provenance);
+  }
+
+  const applicableIds = new Set(applicable.map((entry) => entry.source.sourceId));
+  if (applicable.some((entry) => entry.supersedes.some((sourceId) => !applicableIds.has(sourceId)))) {
+    return unsupportedResolution('broken-supersession', applicable, [], provenance);
+  }
+  const supersededIds = new Set(applicable.flatMap((entry) => entry.supersedes));
+  const viable = applicable.filter((entry) => !supersededIds.has(entry.source.sourceId));
+  if (viable.length === 0) {
+    return unsupportedResolution('ambiguous-supersession', applicable, [], provenance);
+  }
+
+  const highestRank = Math.max(...viable.map((entry) => precedenceRank(entry, scope)));
+  const highest = viable.filter((entry) => precedenceRank(entry, scope) === highestRank);
+  const newestDate = highest.reduce(
+    (latest, entry) => (entry.source.effectiveDate! > latest ? entry.source.effectiveDate! : latest),
+    '',
+  );
+  const contenders = highest.filter((entry) => entry.source.effectiveDate === newestDate);
+  const displaced = applicable.filter((entry) => !contenders.includes(entry));
+  if (contenders.length !== 1) {
+    return unsupportedResolution('equal-rank', contenders, displaced, provenance);
+  }
+
+  return Object.freeze({
+    status: 'resolved',
+    reason: null,
+    winning: toSourceRef(contenders[0]!),
+    contending: Object.freeze([]),
+    superseded: Object.freeze(displaced.map(toSourceRef).sort(compareSourceRefs)),
+    provenance: Object.freeze(provenance),
+  });
 }
 
 function appendValidationDiagnostics(diagnostics: Diagnostic[], error: unknown, prefix: string): void {
@@ -259,8 +441,135 @@ function validateGraph(bundle: AuthorityBundle): void {
   if (diagnostics.length > 0) fail(diagnostics);
 }
 
-async function readStoredSources(
-  root: string,
+type ParsedPrecedence = Readonly<{
+  records: readonly AuthorityPrecedenceRecord[];
+  diagnostics: readonly Diagnostic[];
+}>;
+
+const AUTHORITY_KINDS = new Set<AuthorityKind>([
+  'rulebook',
+  'format',
+  'codex',
+  'faq',
+  'card-update',
+  'card-data',
+]);
+
+function asJsonRecord(value: JsonValue): Readonly<Record<string, JsonValue>> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Readonly<Record<string, JsonValue>>)
+    : null;
+}
+
+function parseBundlePrecedence(bundle: AuthorityBundle): ParsedPrecedence {
+  const diagnostics: Diagnostic[] = [];
+  const records: AuthorityPrecedenceRecord[] = [];
+  const sourceById = new Map(bundle.identity.payload.sources.map((source) => [source.sourceId, source]));
+
+  bundle.identity.payload.artifacts.forEach((artifact, index) => {
+    const payload = asJsonRecord(artifact.identity.payload);
+    if (payload === null || !('precedence' in payload)) return;
+    const path = `/identity/payload/artifacts/${index}/identity/payload/precedence`;
+    const precedence = asJsonRecord(payload.precedence);
+    const keys = precedence === null ? [] : Object.keys(precedence).sort();
+    const validKeys = keys.join('|') === 'authorityKind|scope|supersedes|topic';
+    const authorityKind = precedence?.authorityKind;
+    const topic = precedence?.topic;
+    const scope = precedence?.scope;
+    const supersedes = precedence?.supersedes;
+    const validSupersedes =
+      Array.isArray(supersedes) &&
+      supersedes.length <= 100 &&
+      supersedes.every((sourceId) => typeof sourceId === 'string' && sourceId.startsWith('source:')) &&
+      new Set(supersedes).size === supersedes.length;
+    const sourceReference = artifact.identity.sourceRefs.length === 1 ? artifact.identity.sourceRefs[0] : undefined;
+    const source = sourceReference === undefined ? undefined : sourceById.get(sourceReference.sourceId);
+
+    if (
+      !validKeys ||
+      typeof authorityKind !== 'string' ||
+      !AUTHORITY_KINDS.has(authorityKind as AuthorityKind) ||
+      typeof topic !== 'string' ||
+      topic.length === 0 ||
+      topic.length > 200 ||
+      !(scope === null || (typeof scope === 'string' && scope.length > 0 && scope.length <= 200)) ||
+      !validSupersedes ||
+      source === undefined
+    ) {
+      diagnostics.push({
+        path,
+        code: 'invalid_precedence_record',
+        message: 'precedence records must be strict, bounded, and bound to exactly one source',
+      });
+      return;
+    }
+
+    records.push({
+      source,
+      authorityKind: authorityKind as AuthorityKind,
+      topic,
+      scope,
+      supersedes: supersedes as string[],
+    });
+  });
+
+  return { records, diagnostics };
+}
+
+function validateBundlePrecedence(bundle: AuthorityBundle): readonly ValidatedPrecedenceResolution[] {
+  const parsed = parseBundlePrecedence(bundle);
+  if (parsed.diagnostics.length > 0) fail(parsed.diagnostics);
+
+  const byTopic = new Map<string, AuthorityPrecedenceRecord[]>();
+  for (const entry of parsed.records) {
+    const group = byTopic.get(entry.topic) ?? [];
+    group.push(entry);
+    byTopic.set(entry.topic, group);
+  }
+
+  const diagnostics: Diagnostic[] = [];
+  const validated: ValidatedPrecedenceResolution[] = [];
+  for (const [topic, entries] of [...byTopic.entries()].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))) {
+    const official = entries.filter((entry) => entry.source.authorityClass === 'official');
+    if (official.length === 0) continue;
+    const scopes = [...new Set(official.map((entry) => entry.scope))].sort((left, right) => {
+      if (left === right) return 0;
+      if (left === null) return -1;
+      if (right === null) return 1;
+      return left < right ? -1 : 1;
+    });
+    for (const scope of scopes) {
+      const resolution = resolveAuthorityPrecedence(entries, scope, bundle.identity.payload.effectiveDate);
+      validated.push({ topic, scope, resolution });
+      if (resolution.status === 'unsupported') {
+        diagnostics.push({
+          path: '/identity/payload/artifacts',
+          code: 'unsupported_precedence',
+          message: `${topic} authority is unsupported: ${resolution.reason}`,
+        });
+      }
+    }
+  }
+
+  if (diagnostics.length > 0) fail(diagnostics);
+  return validated;
+}
+
+function validateStoragePolicy(bundle: AuthorityBundle): void {
+  const diagnostics: Diagnostic[] = [];
+  bundle.identity.payload.sources.forEach((source, index) => {
+    if (source.storageMode === 'stored' && source.licenseStatus !== 'approved') {
+      diagnostics.push({
+        path: `/identity/payload/sources/${index}/licenseStatus`,
+        code: 'storage_prohibited',
+        message: 'stored source bytes require explicit approved permission metadata',
+      });
+    }
+  });
+  if (diagnostics.length > 0) fail(diagnostics);
+}
+
+async function readStoredSources(  root: string,
   bundleBytes: Uint8Array,
   bundle: AuthorityBundle,
 ): Promise<readonly SourceRef[]> {
@@ -289,58 +598,28 @@ async function readStoredSources(
       continue;
     }
 
-    let fileSize: number;
-    try {
-      const metadata = await stat(resolvedPath);
-      if (!metadata.isFile()) {
-        diagnostics.push({
-          path: path + '/relativePath',
-          code: 'path_not_file',
-          message: 'stored source path must resolve to a regular file',
-        });
-        continue;
-      }
-      fileSize = metadata.size;
-    } catch {
+    const read = await readBoundedFile(resolvedPath, MAX_AUTHORITY_BYTES - totalBytes);
+    if (read.status !== 'ok') {
       diagnostics.push({
         path: path + '/relativePath',
-        code: 'path_unreadable',
-        message: 'stored source cannot be inspected',
+        code:
+          read.status === 'not-file'
+            ? 'path_not_file'
+            : read.status === 'too-large'
+              ? 'max_bytes'
+              : 'path_unreadable',
+        message:
+          read.status === 'not-file'
+            ? 'stored source path must resolve to a regular file'
+            : read.status === 'too-large'
+              ? 'authority bundle exceeds the fixed aggregate byte limit'
+              : 'stored source cannot be read',
       });
       continue;
     }
+    totalBytes += read.bytes.byteLength;
 
-    if (totalBytes + fileSize > MAX_AUTHORITY_BYTES) {
-      diagnostics.push({
-        path: path + '/relativePath',
-        code: 'max_bytes',
-        message: 'authority bundle exceeds the fixed aggregate byte limit',
-      });
-      continue;
-    }
-
-    let bytes: Uint8Array;
-    try {
-      bytes = await readFile(resolvedPath);
-    } catch {
-      diagnostics.push({
-        path: path + '/relativePath',
-        code: 'path_unreadable',
-        message: 'stored source cannot be read',
-      });
-      continue;
-    }
-    totalBytes += bytes.byteLength;
-    if (totalBytes > MAX_AUTHORITY_BYTES) {
-      diagnostics.push({
-        path: path + '/relativePath',
-        code: 'max_bytes',
-        message: 'authority bundle exceeds the fixed aggregate byte limit',
-      });
-      continue;
-    }
-
-    if (sha256(bytes) !== source.byteHash) {
+    if (sha256(read.bytes) !== source.byteHash) {
       diagnostics.push({
         path: path + '/byteHash',
         code: 'stored_byte_hash_mismatch',
@@ -365,13 +644,18 @@ export async function validateAuthorityBundle(
   expected: ExpectedBundle,
 ): Promise<ValidatedAuthorityBundle> {
   const resolvedBundlePath = await resolveWithinAuthorityRoot(root, bundlePath);
-  const metadata = await stat(resolvedBundlePath);
-  if (!metadata.isFile()) throw pathError('path_not_file', 'bundle path must resolve to a regular file');
-  if (metadata.size > DEFAULT_AUTHORITY_JSON_LIMITS.maxBytes) {
+  const bundleRead = await readBoundedFile(resolvedBundlePath, DEFAULT_AUTHORITY_JSON_LIMITS.maxBytes);
+  if (bundleRead.status === 'not-file') {
+    throw pathError('path_not_file', 'bundle path must resolve to a regular file');
+  }
+  if (bundleRead.status === 'too-large') {
     fail([{ path: '', code: 'max_bytes', message: 'bundle exceeds the fixed byte limit' }]);
   }
+  if (bundleRead.status === 'unreadable') {
+    throw pathError('path_unreadable', 'bundle cannot be read');
+  }
 
-  const bundleBytes = await readFile(resolvedBundlePath);
+  const bundleBytes = bundleRead.bytes;
   const parsed = parseAuthorityJson(bundleBytes, DEFAULT_AUTHORITY_JSON_LIMITS);
   const bundle = validateBundleSchema(parsed);
 
@@ -393,6 +677,8 @@ export async function validateAuthorityBundle(
   if (expectedDiagnostics.length > 0) fail(expectedDiagnostics);
 
   validateGraph(bundle);
+  validateStoragePolicy(bundle);
+  const precedenceResolutions = validateBundlePrecedence(bundle);
   const storedBytesRehashed = [...(await readStoredSources(root, bundleBytes, bundle))].sort(compareSourceRefs);
   const manifestBindingsVerified = bundle.identity.payload.sources
     .filter((source) => source.storageMode === 'manifest-only')
@@ -404,5 +690,6 @@ export async function validateAuthorityBundle(
     resolvedBundlePath,
     storedBytesRehashed: Object.freeze(storedBytesRehashed),
     manifestBindingsVerified: Object.freeze(manifestBindingsVerified),
+    precedenceResolutions: Object.freeze(precedenceResolutions),
   });
 }
