@@ -16,6 +16,8 @@ The owner wants a reminder to contact relevant parties for authorization and to 
 
 ## Solution
 
+Ready-to-send outreach text and the implementation comparison are in `docs/card-data-authorization-outreach.md`.
+
 1. Contact Erik's Curiosa at `community@sorcerytcg.com` and request written permission for agreed-rate API access, indefinite private caching, normalization, derivative machine-readable data, full gameplay fields/current text/updates/errata/FAQs, automated update checks, attribution, commercial/noncommercial scope, snapshot survival after revocation, and any redistribution terms. Treat artwork as excluded unless separately granted.
 2. Contact SadKingLabs about licensing its registry-created stable IDs, mappings, slug/name history, corrections, schema, checksums, and export structure under CC0, CC BY 4.0, or ODC-By; confirm that publisher authorization separately covers underlying card content.
 3. Record responses, permitted fields, rate limits, attribution, update obligations, and durable source/revision terms in `docs/external-reuse-policy.md` before enabling automated acquisition.
