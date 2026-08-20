@@ -40,7 +40,7 @@ Plans:
 **Wave 1**
 
 - [x] 01-01-PLAN.md — Pin the one-package TypeScript toolchain and Phase 1 test contracts.
-- [ ] 01-02-PLAN.md — Implement canonical JSON, SHA-256 identity, and strict shared provenance schemas.
+- [x] 01-02-PLAN.md — Implement canonical JSON, SHA-256 identity, and strict shared provenance schemas.
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -200,7 +200,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Rules and Data Authority | 1/8 | In Progress|  |
+| 1. Rules and Data Authority | 2/8 | In Progress|  |
 | 2. Deterministic Engine Contract | 0/TBD | Not started | - |
 | 3. Complete Core Game Rules | 0/TBD | Not started | - |
 | 4. Storyline, Card Effects, and Coverage | 0/TBD | Not started | - |

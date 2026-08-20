@@ -112,6 +112,7 @@ Each TDD task was committed as a RED contract followed by its GREEN implementati
 
 - The built-in Windows `apply_patch` sandbox and its command wrapper both failed with the same helper/access errors recorded in Plan 01-01. Repository diffs were applied through `git apply` as the narrow patch-based fallback.
 - Context7 was unavailable in both MCP tools and the local CLI, so the installed Zod 4 boundary was checked against official Zod 4 documentation before implementation.
+- The GSD progress handler reported 25% but wrote `progress.percent: 0` in state frontmatter; the frontmatter was corrected to match the handler output and visible progress bar.
 
 ## Authentication Gates
 
