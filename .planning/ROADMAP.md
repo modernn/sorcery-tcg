@@ -56,7 +56,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 01-06-PLAN.md — Document official precedence and enforce the private-local clean-room/no-leakage policy.
+- [x] 01-06-PLAN.md — Document official precedence and enforce the private-local clean-room/no-leakage policy.
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
@@ -203,7 +203,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Rules and Data Authority | 5/8 | In Progress|  |
+| 1. Rules and Data Authority | 6/8 | In Progress|  |
 | 2. Deterministic Engine Contract | 0/TBD | Not started | - |
 | 3. Complete Core Game Rules | 0/TBD | Not started | - |
 | 4. Storyline, Card Effects, and Coverage | 0/TBD | Not started | - |

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-05-PLAN.md
-last_updated: "2026-08-20T19:32:13.442Z"
+stopped_at: Completed 01-06-PLAN.md
+last_updated: "2026-08-20T19:47:19.983Z"
 last_activity: 2026-08-20
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 8
-  completed_plans: 5
-  percent: 63
+  completed_plans: 6
+  percent: 75
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-20)
 ## Current Position
 
 Phase: 1 (Rules and Data Authority) — EXECUTING
-Plan: 6 of 8
+Plan: 7 of 8
 Status: Ready to execute
 Last activity: 2026-08-20
 
-Progress: [██████░░░░] 63%
+Progress: [████████░░] 75%
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Progress: [██████░░░░] 63%
 | Phase 01 P03 | 21min | 2 tasks | 6 files |
 | Phase 01 P04 | 34 min | 2 tasks | 6 files |
 | Phase 01 P05 | 42 min | 2 tasks | 12 files |
+| Phase 01 P06 | 9 min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -85,6 +86,9 @@ Recent decisions affecting current work:
 - [Phase 01]: Stored source paths resolve from the selected revision and only approved raw card bytes may occupy the fixed raw/cards.raw.json path. — Revision-relative confinement matches bundle semantics while the fixed path keeps publication storage narrowly reviewable.
 - [Phase 01]: Validation success explicitly reports stored-bytes-rehashed separately from manifest-binding-verified. — Manifest-only records bind provenance without falsely claiming absent raw bytes were independently rehashed.
 - [Phase 01]: Byte-locked fixture JSON is pinned to LF in .gitattributes for cross-platform hash stability. — Reviewed byte hashes must remain identical under Windows core.autocrlf checkouts.
+- [Phase 01]: Document the implemented official-only precedence order as a project fail-closed policy, not a publisher hierarchy claim. — The resolver must retain evidence and fail closed without overstating publisher guidance.
+- [Phase 01]: Permit only one manually browser-saved seven-file private source set plus an independent byte-identical backup for v1. — This preserves an offline reproducible path without adding prohibited acquisition automation.
+- [Phase 01]: Keep community corpora behavioral-reference only and require written publisher permission plus a separate plan for broader use. — Audited community sources do not grant a complete reusable gameplay corpus.
 
 ### Pending Todos
 
@@ -105,6 +109,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-20T17:50:54.652Z
-Stopped at: Completed 01-05-PLAN.md
+Last session: 2026-08-20T19:46:41.532Z
+Stopped at: Completed 01-06-PLAN.md
 Resume file: None

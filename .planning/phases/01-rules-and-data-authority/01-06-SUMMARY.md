@@ -78,11 +78,26 @@ Each task was committed atomically:
 
 ## Deviations from Plan
 
-None - plan executed exactly as written.
+### Auto-fixed Issues
+
+**1. [Rule 1 - Bug] Corrected SDK progress frontmatter**
+
+- **Found during:** Plan tracking updates
+- **Issue:** `state.advance-plan` set the frontmatter percentage to `0` while disk summaries and the rendered progress field correctly reported 6/8 (75%).
+- **Fix:** Corrected the frontmatter percentage to 75 after the SDK update and verified it against the summary count.
+- **Files modified:** `.planning/STATE.md`
+- **Verification:** STATE frontmatter and rendered progress both report 75%; roadmap reports 6/8 plans.
+- **Committed in:** final tracking commit
+
+---
+
+**Total deviations:** 1 auto-fixed (1 bug).
+**Impact on plan:** Tracking metadata was made internally consistent; policy scope and behavior were unchanged.
 
 ## Issues Encountered
 
 - The Windows patch helper intermittently failed to update existing files. The one-line ignore change was applied with a command-scoped Git patch, and one policy wording correction used an exact guarded replacement; scoped diffs and all verification gates passed afterward.
+- The installed GSD SDK requires named arguments for metrics and decisions despite the executor reference showing positional examples; the failed calls made no changes and were retried with the installed handler's supported flags.
 
 ## Authentication Gates
 
