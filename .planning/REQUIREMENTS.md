@@ -119,13 +119,67 @@
 
 ## Traceability
 
-Roadmap phase mappings are populated during roadmap creation.
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| DATA-01 | Phase 1 | Pending |
+| DATA-02 | Phase 1 | Pending |
+| DATA-03 | Phase 1 | Pending |
+| DATA-04 | Phase 6 | Pending |
+| DATA-05 | Phase 6 | Pending |
+| ENG-01 | Phase 2 | Pending |
+| ENG-02 | Phase 2 | Pending |
+| ENG-03 | Phase 2 | Pending |
+| ENG-04 | Phase 2 | Pending |
+| ENG-05 | Phase 2 | Pending |
+| ENG-06 | Phase 2 | Pending |
+| RULE-01 | Phase 3 | Pending |
+| RULE-02 | Phase 3 | Pending |
+| RULE-03 | Phase 3 | Pending |
+| RULE-04 | Phase 3 | Pending |
+| RULE-05 | Phase 4 | Pending |
+| RULE-06 | Phase 3 | Pending |
+| CARD-01 | Phase 4 | Pending |
+| CARD-02 | Phase 4 | Pending |
+| CARD-03 | Phase 4 | Pending |
+| CARD-04 | Phase 6 | Pending |
+| CARD-05 | Phase 4 | Pending |
+| SIM-01 | Phase 5 | Pending |
+| SIM-02 | Phase 5 | Pending |
+| SIM-03 | Phase 5 | Pending |
+| SIM-04 | Phase 5 | Pending |
+| SIM-05 | Phase 5 | Pending |
+| SIM-06 | Phase 5 | Pending |
+| SIM-07 | Phase 5 | Pending |
+| DECK-01 | Phase 6 | Pending |
+| DECK-02 | Phase 6 | Pending |
+| DECK-03 | Phase 6 | Pending |
+| DECK-04 | Phase 6 | Pending |
+| MODEL-01 | Phase 7 | Pending |
+| MODEL-02 | Phase 7 | Pending |
+| MODEL-03 | Phase 7 | Pending |
+| MODEL-04 | Phase 7 | Pending |
+| MODEL-05 | Phase 7 | Pending |
+| OPT-01 | Phase 8 | Pending |
+| OPT-02 | Phase 8 | Pending |
+| OPT-03 | Phase 8 | Pending |
+| OPT-04 | Phase 8 | Pending |
+| WEB-01 | Phase 9 | Pending |
+| WEB-02 | Phase 9 | Pending |
+| WEB-03 | Phase 9 | Pending |
+| WEB-04 | Phase 9 | Pending |
+| WEB-05 | Phase 9 | Pending |
+| WEB-06 | Phase 9 | Pending |
+| TEST-01 | Phase 9 | Pending |
+| TEST-02 | Phase 2 | Pending |
+| TEST-03 | Phase 2 | Pending |
+| TEST-04 | Phase 6 | Pending |
+| TEST-05 | Phase 5 | Pending |
 
 **Coverage:**
 - v1 requirements: 53 total
-- Mapped to phases: 0
-- Unmapped: 53
+- Mapped to phases: 53
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-08-20*
-*Last updated: 2026-08-20 after initial definition*
+*Last updated: 2026-08-20 after roadmap creation*
