@@ -1,6 +1,7 @@
 # Phase 1: Rules and Data Authority - Context
 
 **Gathered:** 2026-08-20
+**Amended:** 2026-08-20 — private-local card-data operating model
 **Status:** Ready for planning
 
 <domain>
@@ -25,13 +26,14 @@ Establish the offline, immutable authority bundle and normalized card snapshot t
 - **D-07:** Canonical JSON uses one project-owned deterministic serialization routine before SHA-256 hashing. Validation reports exact paths and never silently repairs or drops malformed data.
 
 ### Distribution and reuse boundary
-- **D-08:** Store derived normalized data and source manifests in the repository. Do not bundle copyrighted rulebook PDFs or card images unless their redistribution terms clearly allow it; keep retrieval instructions and verified hashes instead.
+- **D-08 (amended 2026-08-20):** For this private, noncommercial tool, the user manually saves one complete official API JSON response to `.local/authority/inputs/official-2026-08-20/cards.raw.json`. Project code performs no fetch, scraping, polling, or automated acquisition. The raw response, normalized snapshot, and built authority revision remain under git-ignored `.local/authority/` and are never committed or packaged. Git may contain only project code/schemas/policies, synthetic or minimal fixtures, official source URL/date, independent hashes/receipts, and generic local-import/final-gate tests; card art, publisher PDFs, and the full official corpus are always excluded.
 - **D-09:** Contested Realms (GPL-3.0) and spells.bar/the playtest project (no reusable license found in the audited revision) are behavioral and UX references only. Do not copy their source, card implementations, assets, or data into this project.
 - **D-10:** Phase 1 uses TypeScript and Node standard-library facilities first. Add a dependency only where runtime schema validation or deterministic normalization is materially safer than a small local implementation.
+- **D-11 (added 2026-08-20):** The current operating scope is private, local, and noncommercial. Sharing, releasing with publisher content, automated updating, or commercialization requires written publisher permission and a separate approved plan. No public/network HTTP card API is built; later consumers query the selected validated local JSON revision through a TypeScript module.
 
 ### the agent's Discretion
 - Exact directory names, JSON field ordering, command names, and test file layout, provided the offline validation and immutable provenance requirements remain obvious.
-- Whether raw official API responses can be committed after the source/licensing audit; otherwise commit only the normalized snapshot, manifest, and reproducible retrieval tooling.
+- Exact safe receipt fields and the durable private backup locator, provided neither exposes publisher corpus bytes or confidential material.
 
 </decisions>
 

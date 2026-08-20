@@ -2,7 +2,7 @@
 
 **Researched:** 2026-08-20
 **Domain:** Immutable rules authority, normalized card data, provenance, and clean-room reuse
-**Confidence:** HIGH for architecture and official-source inventory; MEDIUM for redistribution rights pending written permission
+**Confidence:** HIGH for architecture and official-source inventory; MEDIUM for the unresolved API-page/Terms conflict governing private personal use; no redistribution or automation permission is claimed
 
 <user_constraints>
 ## User Constraints (from CONTEXT.md)
@@ -27,7 +27,7 @@
 
 ### the agent's Discretion
 - Exact directory names, JSON field ordering, command names, and test file layout, provided the offline validation and immutable provenance requirements remain obvious.
-- Whether raw official API responses can be committed after the source/licensing audit; otherwise commit only the normalized snapshot, manifest, and reproducible retrieval tooling.
+- How to preserve exact private rebuild evidence without committing any raw response, normalized snapshot, built revision, or automated retrieval tooling; the resolved answer is an ignored primary file plus durable private backup and committed non-content hashes/receipts.
 
 ### Deferred Ideas (OUT OF SCOPE)
 - Owned collection import and common online deck acquisition belong to Phase 6.
@@ -47,19 +47,19 @@
 
 ## Summary
 
-Phase 1 should build one local, content-addressed authority pipeline, not a rules engine. Each source is captured with byte hash, reviewed HTTPS URL, authority class, retrieval time, effective date, and legal/storage status. Stored-source records point to confined permitted bytes that offline validation rehashes; manifest-only records bind an immutable locator or approved acquisition-procedure fingerprint and expected byte hash without claiming absent bytes were reread. A pure normalizer produces strict canonical artifacts, and a bundle manifest binds them under a documented precedence policy. Runtime consumers receive only a validated bundle ID and independently supplied hash and never fetch mutable authority data. [VERIFIED: 01-CONTEXT.md]
+Phase 1 should build one private, local, content-addressed authority pipeline, not a rules engine or network service. The user manually supplies one exact official API JSON response; project code validates and normalizes it under git-ignored `.local/authority/`, while Git retains only code, synthetic/minimal fixtures, policy, safe source metadata, and independent receipts. Runtime consumers receive only a validated local bundle ID and independently supplied hash and never fetch mutable authority data. [VERIFIED: 01-CONTEXT.md]
 
 The official authority is genuinely multi-versioned. The current official rulebook update is dated 19 December 2025, while the official Codex changelog contains rulings and Updated Cards through 15 July 2026, including reversals of earlier FAQs. The official Constructed baseline is 1 Avatar, a minimum 60-card Spellbook, a minimum 30-card Atlas, and rarity copy limits; event floor rules are separate overlays, not global game rules. [CITED: https://sorcerytcg.com/news/sorcery-contested-realm-december-2025-rulebook-update] [CITED: https://curiosa.io/codex/changelog] [CITED: https://sorcerytcg.com/constructed]
 
-The official card API is useful as an acquisition input, but it is mutable and exposes no observed top-level snapshot version or canonical card ID. More importantly, the site terms cover Curiosa and related media, reserve database/graphics rights, and prohibit automated access and systematic database extraction without permission. No API-specific open-data or image redistribution grant was found. Therefore the plan must add a human/legal checkpoint before automated retrieval or committing raw API responses, and must never commit rulebook PDFs or images without written permission. [CITED: https://api.sorcerytcg.com/api/cards] [CITED: https://sorcerytcg.com/terms]
+The official API landing page allows developer access and recommends intermittent polling, diffing, and hosting required data, while the site Terms prohibit automated access, systematic retrieval/database construction, and scraper/data-mining activity without written permission. Those official statements remain in tension. The private-local plan avoids making a legal conclusion: the user downloads one response manually through a browser; project code never fetches, polls, scrapes, hosts, commits, packages, or redistributes the corpus. Images/private CDN data remain excluded. [CITED: https://api.sorcerytcg.com/] [CITED: https://api.sorcerytcg.com/api/cards] [CITED: https://sorcerytcg.com/terms]
 
-**Primary recommendation:** Implement a strict offline import/build/validate toolchain whose canonical output is reproducible from a Plan 07-approved durable exact-byte input lock; keep network acquisition permission-gated and outside the runtime.
+**Primary recommendation:** Implement a strict offline import/build/validate toolchain over the manually saved, independently hashed private input and its durable private backup; git-ignore raw/normalized/built authority data and keep every acquisition/network path outside project code.
 
 ## Architectural Responsibility Map
 
 | Capability | Primary Tier | Secondary Tier | Rationale |
 |------------|-------------|----------------|-----------|
-| Official-source acquisition | Developer command / external boundary | Filesystem | Network access is an explicit maintenance action, never runtime behavior. [VERIFIED: 01-CONTEXT.md] |
+| Official-source acquisition | Human browser action outside project code | Private filesystem | One manually saved full JSON response plus durable backup; no project fetch/scrape/poll path. [VERIFIED: 01-CONTEXT.md] |
 | Strict parsing and normalization | Local TypeScript library | — | Pure functions make rebuilds deterministic and testable. [VERIFIED: 01-CONTEXT.md] |
 | Artifact identity and provenance | Local TypeScript library | Filesystem | One envelope and canonical hash contract must serve all later artifact kinds. [VERIFIED: 01-CONTEXT.md] |
 | Immutable authority storage | Filesystem | Local TypeScript library | Versioned JSON/manifests are inspectable and need no database service. [VERIFIED: .planning/research/STACK.md] |
@@ -79,7 +79,7 @@ The official card API is useful as an acquisition input, but it is mutable and e
 
 | Authority | Current audited source | Planning consequence |
 |-----------|------------------------|----------------------|
-| Rulebook | The 19 Dec 2025 official update says it aligns the rulebook with Gothic, changes constructed deck size to 60, and incorporates selected Codex terminology. [CITED: https://sorcerytcg.com/news/sorcery-contested-realm-december-2025-rulebook-update] | Store the standard and annotated PDFs as separate URL/hash records; do not store PDF bytes without permission. |
+| Rulebook | The 19 Dec 2025 official update says it aligns the rulebook with Gothic, changes constructed deck size to 60, and incorporates selected Codex terminology. [CITED: https://sorcerytcg.com/news/sorcery-contested-realm-december-2025-rulebook-update] | Record the standard and annotated PDF URLs and independently observed hashes only; do not store, commit, package, or import publisher PDF bytes in Phase 1. |
 | Constructed format | 1 Avatar; Spellbook ≥60; Atlas ≥30; copy limits 4 Ordinary/3 Exceptional/2 Elite/1 Unique. [CITED: https://sorcerytcg.com/constructed] | Encode a versioned base `constructed` format artifact. Preserve source wording; do not silently repair source typos. |
 | Collection/event policy | Gothic-era tournament guidance permits a Collection up to 10 cards; event floor rules can add registration, legality, or procedure policy. [CITED: https://sorcerytcg.com/news/what-you-carry-with-you-a-first-look-at-the-collection-and-deck-sizes-in-gothic] [CITED: https://sorcerytcg.com/news/everything-you-need-to-know-for-sorcery-at-gen-con-2026] | Model event rules as explicitly scoped overlays referencing the base format, never global authority. |
 | Codex/FAQ | Curiosa instructs readers to start with the rulebook, then use the Codex for detail and card FAQs for specific cards. [CITED: https://curiosa.io/codex] [CITED: https://curiosa.io/faqs] | Capture Codex concepts, FAQ/card pages, and changelog revision independently. |
@@ -103,7 +103,17 @@ Every resolution result should retain the winning source reference and all super
 
 ## Distribution and Clean-Room Boundary
 
-The official Terms cover `sorcerytcg.com`, `play.sorcerytcg.com`, and `curiosa.io`; reserve rights in site databases, text, photographs, and graphics; grant only limited personal/noncommercial use; and prohibit automated access, systematic retrieval, and database construction without permission. No audited API page supplied a separate open license. Treat automated API ingestion, raw API redistribution, PDFs, and card images as permission-required. A hash and URL are not redistribution. [CITED: https://sorcerytcg.com/terms]
+The official API landing page explicitly permits developer access and recommends intermittent polling, diffing, and hosting required data; it excludes images and private CDN use. [CITED: https://api.sorcerytcg.com/]
+
+The official Terms cover `sorcerytcg.com`, `play.sorcerytcg.com`, and `curiosa.io`; permit limited personal/noncommercial use; and prohibit automated access, systematic retrieval/database construction, and scraping/data mining without written permission. A hash and URL establish provenance/integrity, not legal permission. [CITED: https://sorcerytcg.com/terms]
+
+### Private-local resolution — 2026-08-20
+
+The two official pages are in tension. This research does not resolve that tension or claim legal certainty. For the user's entirely private, noncommercial, non-released tool, acquisition is one manual browser download; project code has no fetch, scraping, polling, update, hosting, or redistribution path.
+
+No audited community repository supplies a complete permissively licensed gameplay corpus. `sadkinglabs/sorcery-registry` is technically strong, but its MIT license covers code while its card data is explicitly reserved to Erik's Curiosa; other reviewed candidates are GPL, unlicensed, or insufficient. Community sources therefore remain behavioral/provenance references only. [CITED: https://github.com/sadkinglabs/sorcery-registry]
+
+The raw response, normalized snapshot, and built authority revision remain private under git-ignored `.local/authority/`. Git may contain project code/schemas/policies, synthetic or minimal fixtures, source URL/date, independent byte/root hashes and receipts, and generic final-gate tests. Card art, publisher PDFs, the full corpus, and any public/network HTTP card API are excluded. Sharing, releasing with content, automated updating, or commercialization requires written publisher permission and a separate plan. [VERIFIED: 01-CONTEXT.md]
 
 `realms-cards/contested-realms` declares GPL-3.0. GPL-covered copying or adaptation, including close translation, can impose GPL obligations on the combined conveyed work; D-09 therefore fixes a behavior-only boundary. Do not copy source, tests, rule implementations, assets, or data. [CITED: https://github.com/realms-cards/contested-realms/blob/main/LICENSE] [CITED: https://www.gnu.org/licenses/gpl] [CITED: https://www.gnu.org/licenses/gpl-faq.en.html]
 
@@ -112,12 +122,12 @@ The audited `JollyGrin/sorcery-tcg-playtest` repository had no LICENSE file even
 Required implementation guardrails:
 
 - Add `docs/external-reuse-policy.md` with allowed behavioral observations, forbidden copying, source URLs, audited revisions, and reviewer sign-off. [VERIFIED: 01-CONTEXT.md]
-- Keep publisher bytes outside git by default; commit source manifests, normalized output only after permission review, and fixtures that are synthetic or minimal facts rather than copied corpora. [VERIFIED: 01-CONTEXT.md]
+- Keep raw official bytes, normalized output, and built revisions outside Git and packages unconditionally for this operating model; allow only safe metadata/receipts and synthetic/minimal fixtures. [VERIFIED: 01-CONTEXT.md]
 - Put a `licenseStatus`/`storagePolicy` field on each source record so the builder rejects forbidden stored bytes. [ASSUMED]
-- Require a human checkpoint before first automated retrieval or redistribution; written permission should state API use, normalized-data redistribution, caching, images, attribution, and revocation/update expectations. [ASSUMED]
+- Require a blocking human checkpoint to perform/attest the manual browser save, private/noncommercial/no-redistribution scope, exact input hash, and durable private backup locator; the checkpoint records an operating decision, not legal permission. [VERIFIED: user clarification 2026-08-20]
 - Give every source an `authorityClass`. Reviewed secure community/reference sources may remain as provenance, but only allowlisted `official` sources can enter normative precedence. [VERIFIED: 01-CONTEXT.md]
-- Separate `stored` sources from `manifest-only` sources. Rehash permitted stored bytes offline; for absent bytes, validate the canonical durable-locator/procedure and source-reference binding, with the raw byte hash established during import. [VERIFIED: 01-CONTEXT.md]
-- Before DATA-02 publication, require Plan 07 to approve one durable exact-byte path and an independent canonical input-root hash; a mutable executor-local directory is not sufficient. [ASSUMED]
+- The remaining official-data path uses one exact private API input plus a durable private backup. Rehash both before each build and keep them outside Git. In the private authority bundle, record that API source as `manifest-only` with `licenseStatus: permission-required`, prohibited storage, and a SHA-256 URN locator; this preserves the implemented fail-closed permission guard while binding every normalized record to the independently verified private input without copying raw bytes into the revision. [VERIFIED: 01-CONTEXT.md]
+- Before DATA-02 completion, require Plan 07 to confirm the exact git-ignored input path, independently computed byte hash/length, matching durable private backup, and no corpus/art/PDF tracked by Git. [VERIFIED: user clarification 2026-08-20]
 
 ## Standard Stack
 
@@ -216,19 +226,23 @@ src/authority/
   normalize-cards.ts      # pure source -> project card mapping
   validate-bundle.ts      # recursive, offline integrity validation
 src/commands/
-  import-authority.ts     # consumes a clean materialization of the approved durable input lock
+  import-authority.ts     # consumes a clean private materialization matching the recorded input lock
   validate-authority.ts
-data/authority/<revision-id>/
+.local/authority/revisions/<revision-id>/  # private, Git-ignored, never packaged
   bundle.json             # refs/hashes, no copyrighted PDFs/images
   sources.json
   formats.json
   cards.normalized.json
-  raw/cards.raw.json      # only when written permission explicitly approves repository storage
+  # no raw input copy; the manifest binds the independently verified private SHA-256
+data/authority/receipts/<revision-id>.json # safe non-content URL/date/hash receipt only
+data/authority/README.md                   # private-local rebuild/selection policy
 docs/
   authority-precedence.md
   external-reuse-policy.md
 tests/authority/
   fixtures/               # synthetic/minimal and license-safe
+tests/private-authority/
+  private-revision.test.ts # opt-in gate; clean-clone default tests remain synthetic
 ```
 
 ### Pattern 1: Hashable Artifact Envelope
@@ -258,7 +272,7 @@ Stable IDs identify the logical project entity; immutable revision identity is t
 
 ### Pattern 2: Strict, Pure Build Pipeline
 
-`read independent input-root hash + canonical input lock -> require exact file set and byte hashes -> strict parse -> normalize -> strict validate -> canonicalize -> hash -> write new path -> offline revalidate`. Pass retrieval time/effective date as recorded source metadata; never call the clock, network, locale-sensitive sort, or random functions from normalization. Bind raw bytes at import. Offline validators rehash stored bytes and verify manifest-only canonical bindings without claiming absent bytes were reverified. Refuse to overwrite an existing revision and use a same-directory temporary file plus atomic rename for new writes. [VERIFIED: 01-CONTEXT.md]
+`independently hash the exact private input and durable private backup -> require byte-for-byte equality -> strict parse -> normalize -> strict validate -> canonicalize -> hash -> write a new private-local path -> offline revalidate`. Pass retrieval time/effective date as recorded source metadata; never call the clock, network, locale-sensitive sort, or random functions from normalization. Bind every normalized record to the exact input hash, refuse to overwrite an existing revision, and use a same-directory temporary file plus atomic rename for new writes. [VERIFIED: 01-CONTEXT.md]
 
 ### Pattern 3: Canonical JSON Contract
 
@@ -325,7 +339,7 @@ const SourceFields = {
   effectiveDate: z.iso.date().nullable(),
   mediaType: z.string().min(1),
   byteHash: z.string().regex(/^sha256:[0-9a-f]{64}$/),
-  licenseStatus: z.enum(['approved', 'manifest-only', 'permission-required']),
+  licenseStatus: z.enum(['approved', 'permission-required', 'reference-only', 'unknown']),
 } as const;
 
 const StoredSourceRecord = z.strictObject({
@@ -390,20 +404,21 @@ export function identityHash(value: unknown): `sha256:${string}` {
 | # | Claim | Section | Risk if Wrong |
 |---|-------|---------|---------------|
 | A1 | `licenseStatus`/`storagePolicy` fields are the best enforcement mechanism. | Distribution boundary | Low; exact field design can change without changing the required guardrail. |
-| A2 | Written publisher permission is required before automated API retrieval or normalized-data redistribution because no API-specific grant was found and the site terms prohibit automated/systematic extraction. | Distribution boundary | High; legal review or publisher permission must settle scope before acquisition tooling runs. |
+| A2 | The API landing page and Terms conflict is not legally resolved; manual single-response download plus private git-ignored use reduces operational exposure but does not establish permission. | Distribution boundary | High; any sharing, release with content, automation, or commercialization still requires written publisher permission and a separate plan. |
 
 ## Open Questions (RESOLVED)
 
-1. **Publisher permission and redistribution scope resolve only at Plan 07's blocking human gate.**
-   - Current site terms do not grant API/database/image redistribution and prohibit automated/systematic extraction. [CITED: https://sorcerytcg.com/terms]
-   - This research does not claim permission exists. Synthetic-fixture pipeline work may proceed, but official acquisition, normalized publication, or permitted stored raw bytes require explicit written scope and clean-room attestation in Plan 07.
-   - If that scope is absent or narrower than Plan 08, Phase 1 and DATA-01/02/03 remain pending and Plans 07/08 produce no completion summaries.
+1. **The API-page/Terms conflict is operationally avoided, not legally resolved.**
+   - The API page supports developer use; the Terms prohibit automated/systematic acquisition without written permission. [CITED: https://api.sorcerytcg.com/] [CITED: https://sorcerytcg.com/terms]
+   - Plan 07 records the user's private/noncommercial/no-redistribution operating decision and manual browser save; it does not claim publisher permission or legal certainty.
+   - Expansion to sharing, release with content, automated updating, or commercialization remains blocked on written publisher permission and a separate plan.
 2. **Precedence is resolved as a documented project fail-closed policy, not a publisher hierarchy claim.**
    - Official pages establish current rulebook, Codex usage, dated updates, and specific reversals; no audited official page states a complete conflict hierarchy. [CITED: https://curiosa.io/codex/changelog] [VERIFIED: 01-CONTEXT.md]
    - D-01/D-02 therefore require the project ordering documented above. Only `authorityClass: official` may win; equal-rank, unclear-date/scope, and unresolved conflicts remain `unsupported` while community/reference records remain non-normative provenance.
-3. **The first card snapshot requires one Plan 07-approved durable exact-byte path.**
-   - The gate must select permitted fixed repository bytes, an immutable approved archive/custodian with exact locator and SHA-256 values, or an approved acquisition procedure with exact expected hashes that refuses mismatched bytes.
-   - A caller-local `AUTHORITY_INPUT_DIR` by itself is not durable. Plan 08 must verify the independent canonical input-root hash, rebuild twice from a clean materialization with networking denied, and halt if no such path is approved.
+3. **The first card snapshot uses one exact manual download plus a durable private backup.**
+   - The primary file is `.local/authority/inputs/official-2026-08-20/cards.raw.json`; the user selects an exact durable local backup locator outside Git.
+   - Plan 07 computes/records byte length and SHA-256 and requires the backup bytes to match before producing its summary.
+   - Plan 08 independently rehashes both copies, builds from each with networking denied, compares outputs byte-for-byte, and keeps every raw/normalized/built byte git-ignored.
 
 ## Environment Availability
 
@@ -412,11 +427,11 @@ export function identityHash(value: unknown): `sha256:${string}` {
 | Node.js 24.19.0 | Runtime/native TS tests | Wrong version | 22.22.2 | Install/pin Node 24 before implementation. [VERIFIED: environment probe] |
 | pnpm 11.22.0 | Package management | Wrong version | 9.15.9 | Activate pinned pnpm after Node upgrade. [VERIFIED: environment probe] |
 | TypeScript 6.0.3 | Type checking | Missing | — | Install as dev dependency. [VERIFIED: environment probe] |
-| Official-source network access | Acquisition only | Available during research | — | Plan 07-approved repository/archive/procedure plus exact input lock; an executor-local directory alone is not a fallback. |
+| Official-source network access | Human browser download only | Available outside project code | — | Save one full response to the fixed git-ignored path and maintain a matching durable private backup; project code remains offline. |
 | Podman | Not required by Phase 1 | Not probed | — | No container should be introduced. [VERIFIED: AGENTS.md] |
 
 **Missing dependencies with no fallback:** Node 24 and the pinned development toolchain must be installed before implementation verification.  
-**Missing dependencies with fallback:** Network acquisition can remain disabled while the pipeline is developed against synthetic fixtures; official publication still halts until Plan 07 approves permission and one durable exact-byte path.
+**Missing dependencies with fallback:** Network acquisition remains absent while the pipeline is developed against synthetic fixtures. The private official build starts only after Plan 07 records the user's operating attestation plus matching exact bytes at the fixed local input path and a durable private backup; this checkpoint does not establish legal permission.
 
 ## Validation Architecture
 
@@ -433,8 +448,8 @@ export function identityHash(value: unknown): `sha256:${string}` {
 
 | Req ID | Behavior | Test Type | Automated Command | File Exists? |
 |--------|----------|-----------|-------------------|-------------|
-| DATA-01 | Builds write-once bundle; records every source field/authority class; resolves precedence; rehashes stored bytes and verifies manifest-only locator/hash/ref bindings offline; ambiguous authority fails. | integration/golden | `node --test tests/authority/bundle.test.ts` | No — Wave 0 |
-| DATA-02 | Exact durable input lock/root hash is verified before import; two clean no-network builds produce a byte-identical canonical card snapshot; malformed/unknown/duplicate/mismatched records fail. | integration/property loop/release | `node --test tests/authority/card-snapshot.test.ts tests/authority/official-revision.test.ts` | No — Wave 0 plus Plan 08 release test |
+| DATA-01 | Builds write-once bundle; records every source field/authority class; resolves precedence; rehashes the private exact input and backup offline; ambiguous authority fails; Git contains no official corpus bytes. | integration/golden | `node --test tests/authority/bundle.test.ts` plus Plan 08's explicit private-revision gate | No — Wave 0 |
+| DATA-02 | Exact private primary/backup bytes and input lock/root hash are verified before import; two clean no-network builds produce a byte-identical canonical card snapshot; malformed/unknown/duplicate/mismatched records fail. | integration/property loop/release | `node --test tests/authority/card-snapshot.test.ts` plus `pnpm authority:verify-private` | No — Wave 0 plus Plan 08 private gate |
 | DATA-03 | Every artifact envelope has stable ID/schema/provenance/hash; canonical vectors pass; tampering, missing refs, cycles, unsupported schema, and recomputed-hash mismatch fail. | unit/integration | `node --test tests/authority/canonical-json.test.ts tests/authority/provenance.test.ts` | No — Wave 0 |
 
 ### Required Test Cases
@@ -444,7 +459,7 @@ export function identityHash(value: unknown): `sha256:${string}` {
 - Normalize the same raw input repeatedly and in differently ordered object-property fixtures; canonical bytes/hash stay identical.
 - Reject unknown keys, missing fields, invalid dates/hashes, duplicate stable IDs/printing slugs, broken refs, reference cycles, disallowed stored media, and path traversal.
 - Accept reviewed HTTPS community/reference records only under non-normative authority classes; reject any attempt for them to win precedence.
-- Rehash permitted stored-source bytes. For manifest-only records, tamper the durable locator/procedure, expected byte hash, and `SourceRef` and prove canonical/root validation fails without claiming absent bytes were reread.
+- Rehash the fixed private input and durable private backup independently, require exact equality, then tamper source hashes, `SourceRef` bindings, and copied build artifacts to prove canonical/root validation fails without mutating the selected private revision.
 - Refuse a changed input-lock hash, missing/extra file, or one-byte raw mismatch before normalization; record the verified input-root hash and independently calculated bundle-root hash.
 - Sort all validation issues deterministically by JSON Pointer/code/message and assert exact paths.
 - Run successful bundle validation with network calls disabled/stubbed to throw.
@@ -455,7 +470,7 @@ export function identityHash(value: unknown): `sha256:${string}` {
 
 - **Per task commit:** relevant authority test file plus `pnpm typecheck`.
 - **Per wave merge:** `pnpm typecheck && pnpm lint && pnpm test`.
-- **Phase gate:** full suite green; permission/clean-room/durable-input review complete; explicit fetch/http/https/net denial active; two clean rebuilds from the approved input lock are byte-identical; expected bundle root is captured outside and recomputed independently; stored/manifest/artifact tamper copies fail; restricted-content scans pass; published bytes remain unchanged.
+- **Phase gate:** full suite green; private-use/clean-room/manual-input/backup evidence complete; explicit fetch/http/https/net denial active; two clean rebuilds from independently rehashed private primary/backup input locks are byte-identical; expected bundle root is captured outside and recomputed independently; raw-input/manifest-binding/artifact tamper cases fail; restricted-content scans pass; selected private revision bytes remain unchanged.
 
 ### Wave 0 Gaps
 
@@ -463,7 +478,7 @@ export function identityHash(value: unknown): `sha256:${string}` {
 - [ ] `tests/authority/canonical-json.test.ts` and RFC-derived vectors.
 - [ ] `tests/authority/provenance.test.ts` for envelope/reference/tamper behavior.
 - [ ] `tests/authority/card-snapshot.test.ts` with synthetic, malformed, and approved minimal fixtures.
-- [ ] `tests/authority/bundle.test.ts` with current/superseded/ambiguous source graphs, canonical input lock, stored-source and manifest-only validation cases, and offline guard.
+- [ ] `tests/authority/bundle.test.ts` with current/superseded/ambiguous source graphs, canonical input-lock validation cases, and offline guard; Plan 08 adds a separate opt-in private-revision test so clean-clone default tests remain synthetic.
 - [ ] License-safe fixture policy and a test ensuring prohibited media/raw source bytes are not publishable.
 
 ## Security Domain
@@ -485,8 +500,8 @@ export function identityHash(value: unknown): `sha256:${string}` {
 | Malformed or malicious JSON | Tampering / DoS | Strict schemas, bounded bytes/records/depth, no coercion, deterministic error cap. |
 | Path traversal/symlink escape | Tampering | Resolve and verify every input/output remains under configured authority roots; refuse absolute and `..` paths. |
 | Source substitution | Spoofing | Require reviewed HTTPS URL plus authority class; allowlist publisher hosts for normative official records; bind exact bytes to an independent durable input-root hash; hashes alone do not authenticate origin. |
-| Artifact/reference tampering | Tampering | Recompute every canonical/stored-source hash, verify manifest-only locator/hash/ref bindings, and recursively validate references/cycles against an independently supplied root hash. |
-| Restricted asset publication | Information disclosure / legal | Manifest storage policy, deny images/PDF/raw corpus by default, human approval checkpoint. |
+| Artifact/reference tampering | Tampering | Recompute every canonical and private-source hash, compare the primary file with its durable backup, and recursively validate references/cycles against an independently supplied root hash. |
+| Restricted asset publication | Information disclosure / legal | Git-ignore all real inputs, normalized snapshots, and built revisions; deny images/PDF/full-corpus bytes from Git and packages; make the final gate scan tracked and staged content. |
 
 ## Sources
 
@@ -498,6 +513,7 @@ export function identityHash(value: unknown): `sha256:${string}` {
 - https://curiosa.io/codex, https://curiosa.io/faqs, https://curiosa.io/codex/changelog — official Codex/FAQ/change history.
 - https://sorcerytcg.com/news/sorcery-contested-realm-card-updates-2025 — official Updated Cards policy.
 - https://api.sorcerytcg.com/api/cards — audited official card payload.
+- https://api.sorcerytcg.com/ — official developer-access/polling/self-host guidance and image/private-CDN exclusion.
 - https://sorcerytcg.com/terms — official terms governing site/Curiosa/database/media use.
 - https://nodejs.org/download/release/latest-v24.x/docs/api/typescript.html, https://nodejs.org/download/release/latest-v24.x/docs/api/test.html, https://nodejs.org/download/release/latest-v24.x/docs/api/crypto.html — runtime behavior.
 - https://zod.dev/api, https://zod.dev/error-customization — strict schemas and diagnostic paths.
@@ -507,6 +523,7 @@ export function identityHash(value: unknown): `sha256:${string}` {
 
 - https://github.com/realms-cards/contested-realms/blob/main/LICENSE and https://www.gnu.org/licenses/gpl — GPL boundary.
 - https://github.com/JollyGrin/sorcery-tcg-playtest and https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository — no-license boundary.
+- https://github.com/sadkinglabs/sorcery-registry — community audit: MIT code, card data reserved to Erik's Curiosa; not a reusable gameplay corpus.
 
 ### Tertiary (LOW confidence)
 

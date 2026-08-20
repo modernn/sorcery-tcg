@@ -60,3 +60,25 @@
 ## Deferred Ideas
 
 - Collection/deck importing, common online deck acquisition, rule execution, model play, and browser human play remain in their roadmap phases.
+
+---
+
+## Private-local card-data clarification — 2026-08-20
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Manual official snapshot, private local storage | User saves one full official API JSON response through the browser; project code imports it locally; raw and derived authority data stay git-ignored and private | ✓ |
+| Automated official API polling | Project fetches intermittently, diffs, and self-hosts data as suggested by the API landing page | |
+| Community gameplay corpus | Import a complete permissively licensed third-party card corpus | |
+| Public/network card API | Expose card queries through an HTTP service | |
+
+**User's choice:** The tool is entirely private, local, noncommercial, and will not be released to anyone else. Use the manual official snapshot path.
+
+**Evidence considered:**
+- The official API landing page permits developer access and recommends intermittent polling, diffing, and hosting required data, while excluding images/private CDN access.
+- The site Terms permit limited personal noncommercial use but prohibit automated access, systematic retrieval/database creation, and scraping/data mining without written permission. The project does not claim to resolve that conflict legally.
+- No audited community repository provides a complete permissively licensed gameplay corpus. `sadkinglabs/sorcery-registry` is technically strong, but its MIT license covers code while its card data remains reserved to Erik's Curiosa; other candidates were GPL, unlicensed, or incomplete.
+
+**Operating decision:** The user manually saves `https://api.sorcerytcg.com/api/cards` to `.local/authority/inputs/official-2026-08-20/cards.raw.json`, chooses a durable private backup locator, and records independent hashes/receipts. Project code never fetches, scrapes, polls, or hosts the upstream corpus. Raw input, normalized data, and the built revision are git-ignored and never packaged. Card art and publisher PDFs remain excluded.
+
+**Future trigger:** Sharing, releasing with content, automated updating, or commercialization requires written publisher permission and a separate plan. Later code queries validated local JSON through TypeScript; no public/network HTTP card API is planned.
