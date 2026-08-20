@@ -57,7 +57,7 @@ function pathsAndCodes(diagnostics: readonly Diagnostic[]): readonly Pick<Diagno
 test.todo('DATA-02 normalizes the same pinned synthetic card input byte-identically on repeated runs');
 test.todo('DATA-02 reordered object properties produce identical canonical card bytes and hashes');
 
-test('DATA-02 retains official source identifiers printing slugs and deterministic project stable IDs', () => {
+test('DATA-02 valid cards retain official source identifiers printing slugs and deterministic project stable IDs', () => {
   const artifact = normalizeCards(VALID_BYTES, sourceMetadata(VALID_BYTES));
 
   assert.equal(artifact.identity.artifactKind, 'card-snapshot');
@@ -79,6 +79,26 @@ test('DATA-02 retains official source identifiers printing slugs and determinist
   );
   assert.ok(artifact.identity.payload.cards.every(({ stableId }) => /^card:[0-9a-f]{64}$/.test(stableId)));
   assert.notEqual(artifact.identity.payload.cards[0]?.stableId, artifact.identity.payload.cards[1]?.stableId);
+  const displayVariant = JSON.parse(new TextDecoder().decode(VALID_BYTES)) as {
+    cards: Array<Record<string, unknown>>;
+  };
+  displayVariant.cards.reverse();
+  displayVariant.cards.forEach((card, index) => {
+    card.name = 'Display Variant ' + index;
+    card.rulesText = 'Display-only change';
+  });
+  const displayBytes = bytes(displayVariant);
+  const displayArtifact = normalizeCards(displayBytes, sourceMetadata(displayBytes));
+  assert.deepEqual(
+    displayArtifact.identity.payload.cards.map(({ officialSourceId, stableId }) => ({
+      officialSourceId,
+      stableId,
+    })),
+    artifact.identity.payload.cards.map(({ officialSourceId, stableId }) => ({
+      officialSourceId,
+      stableId,
+    })),
+  );
 });
 
 test('DATA-02 rejects malformed cards and unknown fields without repair at exact paths', () => {
@@ -127,14 +147,15 @@ test('DATA-02 rejects invalid source dates hashes and raw-byte hash mismatches',
   );
 
   const changedBytes = new Uint8Array(VALID_BYTES);
-  changedBytes[changedBytes.length - 2] ^= 1;
+  const changedIndex = changedBytes.length - 2;
+  changedBytes[changedIndex] = (changedBytes[changedIndex] ?? 0) ^ 1;
   assert.deepEqual(
     pathsAndCodes(captureDiagnostics(() => normalizeCards(changedBytes, sourceMetadata(VALID_BYTES)))),
     [{ path: '/byteHash', code: 'byte_hash_mismatch' }],
   );
 });
 
-test('DATA-02 preserves exact input and output cardinality and rejects derived ID collisions atomically', () => {
+test('DATA-02 valid card count preserves exact cardinality and rejects derived ID collisions atomically', () => {
   const artifact = normalizeCards(VALID_BYTES, sourceMetadata(VALID_BYTES));
   assert.equal(artifact.identity.payload.cards.length, 2);
 

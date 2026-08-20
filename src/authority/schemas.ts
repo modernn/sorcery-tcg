@@ -101,6 +101,10 @@ export type RawCard = Readonly<{
   releasedAt: string | null;
 }>;
 
+export type RawCardSnapshot = Readonly<{
+  cards: readonly RawCard[];
+}>;
+
 export type NormalizedCard = Readonly<{
   stableId: string;
   officialSourceId: string | null;
@@ -390,6 +394,26 @@ function addPrintingSlugIssues(
   });
 }
 
+function addSnapshotPrintingSlugIssues(
+  snapshot: { cards: readonly { printingSlugs: readonly string[] }[] },
+  context: z.RefinementCtx,
+): void {
+  const found = new Set<string>();
+  snapshot.cards.forEach((card, cardIndex) => {
+    card.printingSlugs.forEach((slug, slugIndex) => {
+      if (found.has(slug)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['cards', cardIndex, 'printingSlugs', slugIndex],
+          message: 'duplicate printing slug across cards',
+          params: { diagnosticCode: 'duplicate_printing_slug' },
+        });
+      }
+      found.add(slug);
+    });
+  });
+}
+
 export const rawCardSchema = z
   .strictObject({
     sourceCardId: z.string().min(1).max(200),
@@ -397,6 +421,12 @@ export const rawCardSchema = z
     releasedAt: z.iso.date().nullable(),
   })
   .superRefine(addPrintingSlugIssues);
+
+export const rawCardSnapshotSchema = z
+  .strictObject({
+    cards: z.array(rawCardSchema).max(MAX_CANONICAL_NODES),
+  })
+  .superRefine(addSnapshotPrintingSlugIssues);
 
 export const normalizedCardSchema = z
   .strictObject({
@@ -423,6 +453,7 @@ export const normalizedCardSnapshotSchema = z
       }
       found.add(card.stableId);
     });
+    addSnapshotPrintingSlugIssues(snapshot, context);
   });
 
 export const formatDefinitionSchema = z.strictObject({
@@ -614,8 +645,16 @@ export function validateRawCard(input: unknown): RawCard {
   return validateWithSchema(input, rawCardSchema) as RawCard;
 }
 
+export function validateRawCardSnapshot(input: unknown): RawCardSnapshot {
+  return validateWithSchema(input, rawCardSnapshotSchema) as RawCardSnapshot;
+}
+
 export function validateNormalizedCard(input: unknown): NormalizedCard {
   return validateWithSchema(input, normalizedCardSchema) as NormalizedCard;
+}
+
+export function validateNormalizedCardSnapshot(input: unknown): NormalizedCardSnapshot {
+  return validateWithSchema(input, normalizedCardSnapshotSchema) as NormalizedCardSnapshot;
 }
 
 export function validateIdentityDocument(input: unknown): IdentityDocument<JsonValue> {
