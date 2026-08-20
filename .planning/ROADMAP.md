@@ -30,7 +30,17 @@ Sorcery Simulator advances through one increasingly trustworthy evidence path: p
   1. A developer can validate an immutable authority bundle offline and see its pinned rulebook, format rules, Codex/FAQ/card updates, precedence, source URLs, retrieval dates, and SHA-256 hashes.
   2. A developer can build and validate the same versioned normalized card snapshot without live network access during a game or experiment.
   3. Every canonical rules, card, format, deck, collection, behavior, and experiment artifact resolves to a stable ID, schema version, provenance record, and content hash.
-**Plans**: TBD
+**Plans**: 8 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Pin the one-package TypeScript toolchain and Phase 1 test contracts.
+- [ ] 01-02-PLAN.md — Implement canonical JSON, SHA-256 identity, and strict shared provenance schemas.
+- [ ] 01-03-PLAN.md — Build deterministic offline card normalization over pinned local bytes.
+- [ ] 01-04-PLAN.md — Validate authority paths, references, hashes, precedence, and storage policy offline.
+- [ ] 01-05-PLAN.md — Add atomic write-once local build and deterministic validation commands.
+- [ ] 01-06-PLAN.md — Publish official precedence and clean-room/reuse policies.
+- [ ] 01-07-PLAN.md — Gate official publication on written publisher scope and clean-room review.
+- [ ] 01-08-PLAN.md — Publish and prove the approved immutable official authority revision.
 **Research**: Required — audit current rulebook/Codex/FAQ/card-update precedence, official data and image terms, format policies, and the GPL/no-license boundary for Contested Realms and spells.bar before any reuse.
 
 ### Phase 2: Deterministic Engine Contract
