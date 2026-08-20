@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { sha256 } from '../../src/authority/hash.ts';
+import { canonicalJson } from '../../src/authority/canonical-json.ts';
+import { identityHash, sha256 } from '../../src/authority/hash.ts';
 import { normalizeCards } from '../../src/authority/normalize-cards.ts';
 import {
   AuthorityValidationError,
@@ -54,8 +55,58 @@ function pathsAndCodes(diagnostics: readonly Diagnostic[]): readonly Pick<Diagno
   return diagnostics.map(({ path, code }) => ({ path, code }));
 }
 
-test.todo('DATA-02 normalizes the same pinned synthetic card input byte-identically on repeated runs');
-test.todo('DATA-02 reordered object properties produce identical canonical card bytes and hashes');
+test('DATA-02 normalizes the same pinned synthetic card input byte-identically on repeated runs', () => {
+  const metadata = sourceMetadata(VALID_BYTES);
+  const first = normalizeCards(VALID_BYTES, metadata);
+  const second = normalizeCards(VALID_BYTES, metadata);
+
+  assert.deepEqual(second, first);
+  assert.equal(canonicalJson(second), canonicalJson(first));
+  assert.equal(second.contentHash, first.contentHash);
+});
+
+test('DATA-02 reordered object properties preserve normalized canonical card bytes and payload hashes', () => {
+  const parsed = JSON.parse(new TextDecoder().decode(VALID_BYTES)) as {
+    cards: Array<Record<string, unknown>>;
+  };
+  const reorderedBytes = bytes({
+    cards: [...parsed.cards]
+      .reverse()
+      .map((card) => Object.fromEntries(Object.entries(card).reverse())),
+  });
+  const original = normalizeCards(VALID_BYTES, sourceMetadata(VALID_BYTES));
+  const reordered = normalizeCards(reorderedBytes, sourceMetadata(reorderedBytes));
+
+  assert.equal(canonicalJson(reordered.identity.payload), canonicalJson(original.identity.payload));
+  assert.equal(identityHash(reordered.identity.payload), identityHash(original.identity.payload));
+  assert.deepEqual(
+    reordered.identity.payload.cards.map(({ stableId }) => stableId),
+    original.identity.payload.cards.map(({ stableId }) => stableId),
+  );
+});
+
+test('DATA-02 separates raw byte identity from normalized semantic artifact identity', () => {
+  const formattingBytes = new Uint8Array(VALID_BYTES.length + 1);
+  formattingBytes.set(VALID_BYTES);
+  formattingBytes[formattingBytes.length - 1] = 0x20;
+
+  const original = normalizeCards(VALID_BYTES, sourceMetadata(VALID_BYTES));
+  const reformatted = normalizeCards(formattingBytes, sourceMetadata(formattingBytes));
+  assert.notEqual(reformatted.identity.sourceRefs[0]?.byteHash, original.identity.sourceRefs[0]?.byteHash);
+  assert.equal(identityHash(reformatted.identity.payload), identityHash(original.identity.payload));
+  assert.notEqual(reformatted.contentHash, original.contentHash);
+
+  const semanticInput = JSON.parse(new TextDecoder().decode(VALID_BYTES)) as {
+    cards: Array<Record<string, unknown>>;
+  };
+  const firstCard = semanticInput.cards[0];
+  assert.ok(firstCard);
+  firstCard.name = 'Synthetic Semantic Change';
+  const semanticBytes = bytes(semanticInput);
+  const semantic = normalizeCards(semanticBytes, sourceMetadata(semanticBytes));
+  assert.notEqual(identityHash(semantic.identity.payload), identityHash(original.identity.payload));
+  assert.notEqual(semantic.contentHash, original.contentHash);
+});
 
 test('DATA-02 valid cards retain official source identifiers printing slugs and deterministic project stable IDs', () => {
   const artifact = normalizeCards(VALID_BYTES, sourceMetadata(VALID_BYTES));
@@ -167,7 +218,51 @@ test('DATA-02 valid card count preserves exact cardinality and rejects derived I
 });
 
 test.todo('DATA-02 rejects changed input-lock roots before normalization');
-test.todo('DATA-02 performs deterministic normalization with networking disabled');
+test('DATA-02 performs deterministic normalization with network clock and randomness disabled', () => {
+  const originalFetch = globalThis.fetch;
+  const originalNow = Date.now;
+  const originalRandom = Math.random;
+  const forbidden = (): never => {
+    throw new Error('non-deterministic dependency accessed');
+  };
+
+  globalThis.fetch = forbidden as typeof fetch;
+  Date.now = forbidden;
+  Math.random = forbidden;
+  try {
+    assert.doesNotThrow(() => normalizeCards(VALID_BYTES, sourceMetadata(VALID_BYTES)));
+  } finally {
+    globalThis.fetch = originalFetch;
+    Date.now = originalNow;
+    Math.random = originalRandom;
+  }
+});
+
+test('DATA-02 returns a defensive deeply frozen artifact that cannot change after hashing', () => {
+  const mutableBytes = new Uint8Array(VALID_BYTES);
+  const mutableMetadata = sourceMetadata(mutableBytes);
+  const artifact = normalizeCards(mutableBytes, mutableMetadata);
+  const canonicalBefore = canonicalJson(artifact);
+
+  mutableBytes[0] = (mutableBytes[0] ?? 0) ^ 1;
+  (mutableMetadata as unknown as { retrievedAt: string }).retrievedAt = '1999-01-01T00:00:00Z';
+  assert.equal(canonicalJson(artifact), canonicalBefore);
+
+  const firstCard = artifact.identity.payload.cards[0];
+  assert.ok(firstCard);
+  assert.ok(Object.isFrozen(artifact));
+  assert.ok(Object.isFrozen(artifact.identity));
+  assert.ok(Object.isFrozen(artifact.identity.sourceRefs));
+  assert.ok(Object.isFrozen(artifact.identity.payload));
+  assert.ok(Object.isFrozen(artifact.identity.payload.cards));
+  assert.ok(Object.isFrozen(firstCard));
+  assert.ok(Object.isFrozen(firstCard.elements));
+  assert.ok(Object.isFrozen(firstCard.printingSlugs));
+  assert.throws(() => {
+    (firstCard as unknown as { name: string }).name = 'Tampered';
+  }, TypeError);
+  assert.equal(canonicalJson(artifact), canonicalBefore);
+});
 
 test('DATA-02 reports duplicate JSON object keys with an exact deterministic path', () => {
   const duplicateKeyBytes = new TextEncoder().encode(
