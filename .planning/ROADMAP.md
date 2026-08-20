@@ -37,9 +37,12 @@ Sorcery Simulator advances through one increasingly trustworthy evidence path: p
 **Plans**: 8 plans
 
 Plans:
-**Wave 1**
+**Wave 0**
 
 - [x] 01-01-PLAN.md — Pin the one-package TypeScript toolchain and Phase 1 test contracts.
+
+**Wave 1** *(blocked on Wave 0 completion)*
+
 - [x] 01-02-PLAN.md — Implement canonical JSON, SHA-256 identity, and strict shared provenance schemas.
 
 **Wave 2** *(blocked on Wave 1 completion)*

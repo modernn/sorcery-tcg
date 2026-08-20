@@ -92,7 +92,7 @@ Recent decisions affecting current work:
 
 ### Blockers/Concerns
 
-- Phase 1 must resolve official source precedence, data/image redistribution terms, and reference-tool licensing before copying or publishing protected material.
+- Phase 1 must resolve official source precedence, distribution/packaging/publication/automation/commercialization terms, and reference-tool licensing before those broader uses; the project decision permits only private manual browser copies plus an independent private backup, without claiming a legal conclusion.
 - Ranked results remain unavailable until the first owned and benchmark card pool passes transitive verified-coverage gates in Phase 6.
 
 ## Deferred Items
