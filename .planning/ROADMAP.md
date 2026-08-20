@@ -53,15 +53,15 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 01-06-PLAN.md — Publish official precedence and clean-room/reuse policies.
+- [ ] 01-06-PLAN.md — Document official precedence and enforce the private-local clean-room/no-leakage policy.
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 01-07-PLAN.md — Gate official publication on written publisher scope and clean-room review.
+- [ ] 01-07-PLAN.md — Verify the complete manually saved official source set, independent private backup, provenance, and scoped attestation.
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 01-08-PLAN.md — Publish and prove the approved immutable official authority revision.
+- [ ] 01-08-PLAN.md — Build and prove the immutable private official revision, deterministic rebuilds, offline operation, and zero Git/package leakage.
 
 **Research**: Required — audit current rulebook/Codex/FAQ/card-update precedence, official data and image terms, format policies, and the GPL/no-license boundary for Contested Realms and spells.bar before any reuse.
 

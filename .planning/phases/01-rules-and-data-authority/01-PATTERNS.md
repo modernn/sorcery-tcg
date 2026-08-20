@@ -1,358 +1,128 @@
-# Phase 1: Rules and Data Authority - Pattern Map
+# Phase 1: Rules and Data Authority — Current Pattern Map
 
-**Mapped:** 2026-08-20
-**Files analyzed:** 24 expected new files/file groups
-**Analogs found:** 0 / 24
+**Originally mapped:** 2026-08-20
+**Updated:** 2026-08-20 after Plans 01-01 through 01-05 and the private-local source-set decision
 
-This repository contains planning artifacts and `AGENTS.md`, but no production TypeScript, package configuration, command, data, or test files. Consequently, every assignment below is a research-derived starting contract, not an in-repository implementation analog. Do not treat either audited external project as a code analog: Contested Realms is GPL-3.0 and the audited spells.bar/playtest revision has no reusable license.
+Plans 01-01 through 01-05 established the package, strict authority schemas, canonical hashing, normalization, offline validation, and atomic import/validate commands. Remaining Plans 01-06 through 01-08 must extend those files and conventions; external projects remain behavior-only references and are never code/data analogs.
 
-## File Classification
+## Current File Map
 
-| New/Modified File | Role | Data Flow | Closest Analog | Match Quality |
-|---|---|---|---|---|
-| `package.json` | config | batch | none; `01-RESEARCH.md:119-155`, `01-VALIDATION.md:16-24` | no analog |
-| `pnpm-lock.yaml` | config | batch | none; generated from pinned dependencies | no analog |
-| `tsconfig.json` | config | transform | none; `01-RESEARCH.md:123-130` | no analog |
-| `eslint.config.js` | config | transform | none; `01-RESEARCH.md:132-139` | no analog |
-| `src/authority/schemas.ts` | model | transform | none; `01-RESEARCH.md:310-336` | no analog |
-| `src/authority/canonical-json.ts` | utility | transform | none; `01-RESEARCH.md:259-261` | no analog |
-| `src/authority/hash.ts` | utility | transform | none; `01-RESEARCH.md:338-353` | no analog |
-| `src/authority/normalize-cards.ts` | service | batch/transform | none; `01-RESEARCH.md:255-257` | no analog |
-| `src/authority/validate-bundle.ts` | service | file-I/O/batch | none; `01-RESEARCH.md:175-204` | no analog |
-| `src/commands/import-authority.ts` | controller | file-I/O/batch | none; `01-RESEARCH.md:206-228` | no analog |
-| `src/commands/validate-authority.ts` | controller | file-I/O/request-response | none; `01-RESEARCH.md:206-228` | no analog |
-| `data/authority/<revision-id>/bundle.json` | config | file-I/O | none; generated immutable artifact | no analog |
-| `data/authority/<revision-id>/sources.json` | model | file-I/O | none; generated immutable artifact | no analog |
-| `data/authority/<revision-id>/formats.json` | model | file-I/O | none; generated immutable artifact | no analog |
-| `data/authority/<revision-id>/cards.normalized.json` | model | file-I/O | none; generated immutable artifact | no analog |
-| `data/authority/<revision-id>/raw/cards.raw.json` | model | file-I/O | none; conditional exact bytes only when Plan 07 explicitly approves repository storage | no analog |
-| `docs/authority-precedence.md` | config | request-response | none; `01-CONTEXT.md` D-01 through D-03 | no analog |
-| `docs/external-reuse-policy.md` | config | request-response | none; `01-RESEARCH.md:104-117` | no analog |
-| `tests/authority/canonical-json.test.ts` | test | transform | none; `01-VALIDATION.md:41,54` | no analog |
-| `tests/authority/provenance.test.ts` | test | file-I/O/transform | none; `01-VALIDATION.md:42,55` | no analog |
-| `tests/authority/card-snapshot.test.ts` | test | batch/transform | none; `01-VALIDATION.md:43,56` | no analog |
-| `tests/authority/bundle.test.ts` | test | file-I/O/batch | none; `01-VALIDATION.md:44-45,57` | no analog |
-| `tests/authority/official-revision.test.ts` | test | file-I/O/batch | none; Plan 08 independent release gate | no analog |
-| `tests/authority/fixtures/**` | config | file-I/O | none; synthetic/minimal test data only | no analog |
+| File or private path | Role | Current analog/contract |
+|---|---|---|
+| `src/authority/schemas.ts` | Strict trust-boundary schemas and common provenance envelopes | Existing implementation; use its official-host, source-record, stable-ID, diagnostic, and size-bound conventions |
+| `src/authority/canonical-json.ts` | One deterministic JSON serializer | Existing implementation; all identity/root hashes use it |
+| `src/authority/hash.ts` | Raw-byte and canonical identity SHA-256 | Existing implementation; hashes prove integrity, not publisher authenticity |
+| `src/authority/normalize-cards.ts` | Pure deterministic card normalization | Existing implementation; no clock/network/randomness/repair |
+| `src/authority/validate-bundle.ts` | Recursive offline bundle/path/reference/precedence/storage validation | Existing implementation; callers supply expected stable ID/root hash externally |
+| `src/commands/import-authority.ts` | Exact locked-input, write-once local revision builder | Existing Plan 05 command and programmatic `importAuthority()` contract |
+| `src/commands/validate-authority.ts` | Thin offline validation CLI | Existing Plan 05 relative-root/bundle contract |
+| `src/authority/private-source-set.ts` | Complete primary/backup source-set verifier | New Plan 07 helper; reuse existing diagnostics, canonicalization, and hash conventions |
+| `docs/authority-precedence.md` | D-01/D-02 official precedence policy | Plan 06 |
+| `docs/external-reuse-policy.md` | D-08/D-09/D-11 private-local/no-leakage/clean-room policy | Plan 06 |
+| `.local/authority/inputs/official-2026-08-20/primary/**` | Seven manually saved official primary files | Private, Git-ignored, never packaged |
+| user-selected independent backup root | Byte-identical seven-file backup tree | Private, outside repository; exact locator only in ignored lock |
+| `.local/authority/locks/official-2026-08-20/source-set-lock.json` | Exact private roots, seven-entry metadata/hash map, source-set root | Private, Git-ignored |
+| `.local/authority/build-inputs/official-2026-08-20/{primary,backup}/` | Derived four-file importer inputs | Private, Git-ignored; independently generated from each source root |
+| `.local/authority/revisions/official-2026-08-20/` | Selected immutable authority revision | Private, Git-ignored, selected locally by stable ID/root hash |
+| `data/authority/receipts/official-2026-08-20.json` | Safe non-content source/revision receipt | Tracked; relative paths/URLs/dates/media/hashes and non-sensitive labels only |
+| `data/authority/README.md` | Private rebuild/runtime/no-release instructions | Tracked; explicitly says Git alone is insufficient |
+| `tests/authority/private-source-set.test.ts` | Generic source-set identity/path/bounds tests | Default clean-clone suite |
+| `tests/private-authority/private-revision.test.ts` | Full-set double-build/tamper/immutability gate | Explicit private-data command only |
+| `tests/private-authority/repository-boundary.test.ts` | No-network and Git/staged/package leakage gate | Explicit private-data command only |
+| `tests/authority/fixtures/**` | Synthetic/minimal fixtures | Existing license-safe default tests only |
 
-The paths above come directly from the recommended structure in `01-RESEARCH.md:206-228` and the Wave 0 contract in `01-VALIDATION.md:51-57`. Do not add separate precedence, repository, network-client, database, container, or rules-engine modules in this phase unless implementation proves one of these files cannot hold the required behavior.
-
-## Pattern Assignments
-
-### `package.json`, `pnpm-lock.yaml`, `tsconfig.json`, `eslint.config.js` (config)
-
-**Analog:** None. The repository has no package/tooling implementation.
-
-**Research fallback:** `01-RESEARCH.md:123-139`; commands are locked by `01-VALIDATION.md:20-23`.
-
-Use one pnpm package, pin `packageManager` and the researched versions, use ESM-compatible native TypeScript, and keep type checking separate because Node's type stripping does not type-check. Required command surface:
+## Private Authority Layout
 
 ```text
-node --test tests/authority/*.test.ts
-pnpm typecheck && pnpm lint && pnpm test
+.local/authority/                           # anchored Git-ignore
+  inputs/official-2026-08-20/primary/
+    rulebook/rulebook-current.pdf
+    formats/constructed-current.html
+    codex/codex-current.html
+    codex/faqs-current.html
+    codex/changelog-current.html
+    updates/card-updates-2025.html
+    cards/cards.raw.json
+  locks/official-2026-08-20/
+    source-set-lock.json                    # includes exact private roots; never tracked
+  build-inputs/official-2026-08-20/
+    primary/{cards.raw.json,formats.json,sources.json,input-lock.json}
+    backup/{cards.raw.json,formats.json,sources.json,input-lock.json}
+  revisions/official-2026-08-20/
+    bundle.json
+    sources.json
+    formats.json
+    cards.normalized.json
+
+data/authority/
+  README.md                                 # safe tracked instructions
+  receipts/official-2026-08-20.json         # safe tracked metadata/hashes only
 ```
 
-The test runner is `node:test` with `node:assert/strict`; no test-runner config or additional test framework is needed. The only Phase 1 production dependency identified by research is Zod for strict trust-boundary schemas. Use Node built-ins for hashing, filesystem operations, paths, and tests. `pnpm-lock.yaml` is generated, never manually patterned.
+Publisher PDF/HTML/API bytes are permitted only in the two private source roots for the current operating model. They are never copied into the selected revision, Git, or packages. Card art remains excluded everywhere.
 
----
+## Source-Set Verification Pattern
 
-### `src/authority/schemas.ts` (model, transform)
+`verifyPrivateSourceSet` is the reusable trust boundary for Plans 07–08:
 
-**Analog:** None.
+- Require exactly the seven fixed canonical relative paths and complete URL/retrieval/effective-date/media/byte-length/SHA-256 metadata.
+- Allow normative URLs only on audited official Sorcery/Curiosa HTTPS hosts with no credentials.
+- Resolve repository, primary root, backup root, and every file through `realpath`; use platform-aware `path.relative`, not textual prefix checks.
+- Reject same/nested roots, backup beneath the repository, symlinks, junction/reparse aliases, non-files, duplicate identities, and hardlinks using bigint `stat.dev`/`stat.ino`.
+- Compare exact sorted path sets, byte lengths, and streaming SHA-256 values. `cards/cards.raw.json` must also satisfy the importer's 10,000,000-byte JSON limit; all source reads remain bounded.
+- Compute a deterministic `sourceSetRootHash` over canonical metadata/byte evidence while excluding machine-specific root locators.
+- Repeat verification in Plan 08 and private tests; never trust Plan 07 summary values alone.
 
-**Research fallback — strict validation pattern** (`01-RESEARCH.md:312-335`):
+## Completed Importer Contract
 
-```typescript
-import { z } from 'zod';
-
-const SourceFields = {
-  sourceId: z.string().min(1),
-  url: z.url().refine((value) => value.startsWith('https:')),
-  authorityClass: z.enum(['official', 'community-provenance', 'external-reference']),
-  retrievedAt: z.iso.datetime(),
-  effectiveDate: z.iso.date().nullable(),
-  mediaType: z.string().min(1),
-  byteHash: z.string().regex(/^sha256:[0-9a-f]{64}$/),
-  licenseStatus: z.enum(['approved', 'manifest-only', 'permission-required']),
-} as const;
-
-const StoredSourceRecord = z.strictObject({
-  ...SourceFields,
-  storageMode: z.literal('stored'),
-  relativePath: z.string().min(1),
-});
-
-const ManifestOnlySourceRecord = z.strictObject({
-  ...SourceFields,
-  storageMode: z.literal('manifest-only'),
-  durableLocator: z.string().min(1),
-  acquisitionProcedureHash: z.string().regex(/^sha256:[0-9a-f]{64}$/).nullable(),
-});
-
-const SourceRecord = z.discriminatedUnion('storageMode', [
-  StoredSourceRecord,
-  ManifestOnlySourceRecord,
-]);
-
-export function validateSource(input: unknown) {
-  const result = SourceRecord.safeParse(input);
-  if (result.success) return result.data;
-  const issues = result.error.issues.map((issue) => ({
-    path: '/' + issue.path.map(String).map((p) => p.replaceAll('~', '~0').replaceAll('/', '~1')).join('/'),
-    code: issue.code,
-    message: issue.message,
-  })).sort((a, b) => a.path.localeCompare(b.path) || a.code.localeCompare(b.code) || a.message.localeCompare(b.message));
-  throw new AggregateError(issues.map((i) => new Error(`${i.path}: ${i.code}: ${i.message}`)), 'Invalid source');
-}
-```
-
-Apply this shape to raw input, normalized cards, artifact envelopes, manifests, and bundles: strict objects, no coercion or repair, JSON-Pointer paths, and deterministic issue ordering. Add explicit size/count/depth limits and reject unknown keys, duplicate stable IDs/source IDs/printing slugs, invalid dates/hashes, and prohibited storage policy values.
-
-After schema validation, allowlist publisher hosts only for `authorityClass: official` and make all other authority classes ineligible for normative precedence. Rehash `stored` relative-path bytes offline. For `manifest-only` sources, validate the canonical durable locator/procedure, expected byte hash, and source-reference binding without claiming absent bytes were reread.
-
----
-
-### `src/authority/canonical-json.ts` (utility, transform)
-
-**Analog:** None.
-
-**Research fallback:** `01-RESEARCH.md:259-261`.
-
-Implement one project-owned serializer over already validated JSON values. It must use UTF-8, recursively sort object keys by UTF-16 code units, preserve array order, use ECMAScript primitive serialization, and perform no Unicode normalization. Reject non-finite or unsafe numbers, `undefined`, sparse arrays, unsupported prototypes, and duplicate-key input before canonicalization. Do not scatter ordinary `JSON.stringify` calls across identity-producing code.
-
-The canonical serializer is the single shared identity boundary for source manifests, normalized snapshots, bundles, and all later canonical artifacts. Lock it with RFC 8785-derived vectors before other authority code depends on it.
-
----
-
-### `src/authority/hash.ts` (utility, transform)
-
-**Analog:** None.
-
-**Research fallback — Node hashing pattern** (`01-RESEARCH.md:340-352`):
-
-```typescript
-import { createHash } from 'node:crypto';
-import { canonicalJson } from './canonical-json.ts';
-
-export function sha256(bytes: Uint8Array): `sha256:${string}` {
-  return `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
-}
-
-export function identityHash(value: unknown): `sha256:${string}` {
-  return sha256(Buffer.from(canonicalJson(value), 'utf8'));
-}
-```
-
-Hash raw source bytes directly. Hash canonical artifact identity documents with `contentHash` omitted, then store the result beside the identity. A hash proves byte integrity, not publisher authenticity.
-
----
-
-### `src/authority/normalize-cards.ts` (service, batch/transform)
-
-**Analog:** None.
-
-**Research fallback:** the pure pipeline at `01-RESEARCH.md:255-257`:
+The importer input root contains exactly four files:
 
 ```text
-read bytes -> hash bytes -> strict parse -> normalize -> strict validate
--> canonicalize -> hash -> write new path -> offline revalidate
+cards.raw.json
+formats.json
+sources.json
+input-lock.json
 ```
 
-Keep normalization pure: accept pinned bytes plus explicit retrieval/effective metadata and return normalized values. Do not read the clock, network, locale, directory order, or randomness. Preserve official source identifiers when present, mint stable project IDs deterministically, and fail if input/output counts differ without an explicit mapping result. Do not interpret card rules text or implement card behavior in Phase 1.
+`input-lock.json` covers exactly the first three in that order. Storage modes are `manifest-only`, `stored`, `stored`. Each JSON input is at most 10,000,000 bytes and the three total at most 32,000,000 bytes.
 
----
+Use the CLI exactly:
 
-### `src/authority/validate-bundle.ts` (service, file-I/O/batch)
-
-**Analog:** None.
-
-**Research fallback:** the architecture flow at `01-RESEARCH.md:177-203` and threats at `01-RESEARCH.md:453-461`.
-
-Recursively validate a selected local bundle without network access. Recompute canonical hashes and permitted `stored` source-byte hashes; validate `manifest-only` locator/procedure/hash/reference binding without claiming absent raw bytes were reverified. Validate schema versions, stable IDs, parent/source references, cycles, precedence results, authority classes, storage policy, and path confinement. Resolve every stored path under configured authority roots and reject absolute paths, `..`, and symlink escapes. Sort diagnostics by JSON Pointer, code, then message. Ambiguous or equal-rank official conflicts become explicit `unsupported` records rather than guessed outcomes, and community/reference provenance never wins.
-
----
-
-### `src/commands/import-authority.ts` (controller, file-I/O/batch)
-
-**Analog:** None.
-
-**Research fallback:** `01-RESEARCH.md:178-203,255-257`.
-
-This is an imperative filesystem shell around the pure authority functions. It consumes a clean local materialization only after an independently expected canonical input-lock root and every exact file hash match; it is not a live acquisition client. Emit the verified input-root hash and calculated bundle-root hash before candidate validation so callers do not use the candidate's own hash as its oracle. Build into a new revision path, use a same-directory temporary path and atomic rename, recursively validate before publication, refuse to overwrite an existing revision, and leave no published partial revision after failure. Any future network acquisition remains a separate human-permission-gated maintenance action.
-
----
-
-### `src/commands/validate-authority.ts` (controller, file-I/O/request-response)
-
-**Analog:** None.
-
-Keep the command thin: parse arguments, call the offline bundle validator, distinguish stored-byte rehashing from manifest-only binding verification, print deterministically ordered diagnostics, and set a non-zero exit status on every invalid, tampered, ambiguous, unsupported, or policy-prohibited bundle. It accepts no external raw-input directory and must not claim manifest-only bytes were reread. Do not fetch, repair, rewrite, or drop data during validation.
-
----
-
-### `data/authority/<revision-id>/{bundle,sources,formats,cards.normalized}.json` (immutable data, file-I/O)
-
-**Analog:** None.
-
-These are generated outputs, not hand-maintained examples. The common identity pattern from `01-RESEARCH.md:234-250` is:
-
-```typescript
-type ArtifactRef = Readonly<{ artifactKind: string; stableId: string; contentHash: `sha256:${string}` }>;
-type SourceRef = Readonly<{ sourceId: string; byteHash: `sha256:${string}` }>;
-
-type IdentityDocument<T> = Readonly<{
-  artifactKind: string;
-  stableId: string;
-  schemaVersion: number;
-  parentRefs: readonly ArtifactRef[];
-  sourceRefs: readonly SourceRef[];
-  payload: T;
-}>;
-
-type CanonicalArtifact<T> = Readonly<{
-  identity: IdentityDocument<T>;
-  contentHash: `sha256:${string}`;
-}>;
+```text
+pnpm authority:import -- --input <input-root> --input-lock input-lock.json --expected-input-root-hash <sha256:...> --output-root .local/authority/revisions --revision-id official-2026-08-20
 ```
 
-`sources.json` records URL, retrieval timestamp, effective date when available, media type, byte hash, derivation metadata, and legal/storage status. `bundle.json` binds exact source/artifact references and precedence policy. `formats.json` keeps base formats separate from explicitly scoped overlays. `cards.normalized.json` contains deterministic canonical records, not executable behavior.
+Import stdout emits candidate `verifiedInputRootHash` and `bundleRootHash`, not `bundleId`. The deterministic stable ID is `bundle:official-2026-08-20`; independently read/recompute it after the build.
 
-Do not publish a real revision until its input and redistribution status are approved. Until then, only license-safe synthetic/minimal fixtures should exercise the pipeline.
+Every format row must reference a derived format-input source record whose byte hash equals canonical `formats.json`. Its derivation parent hashes bind the locked official rulebook/Constructed/Codex-FAQ/changelog/card-update evidence. All publisher-source records remain manifest-only/permission-required/prohibited-storage so no raw source is copied into the revision.
 
-Plan 07 must also approve one durable exact-byte path: permitted fixed repository raw bytes, an immutable approved archive/custodian with exact locator and hashes, or an approved acquisition procedure that refuses mismatches. A caller-local input directory is not durable. When repository raw storage is explicitly approved, only the fixed `raw/cards.raw.json` path is added and rehashed; otherwise the revision contains the four canonical JSON files and source records remain manifest-only.
+## Completed Validator Contract
 
----
+Use revision root plus a root-relative bundle path:
 
-### `docs/authority-precedence.md` and `docs/external-reuse-policy.md` (config/policy)
+```text
+pnpm authority:validate -- --root .local/authority/revisions/official-2026-08-20 --bundle bundle.json --id bundle:official-2026-08-20 --hash <independently captured root>
+```
 
-**Analog:** None.
+Do not duplicate the revision path between `--root` and `--bundle`. Validation accepts no source/input directory and performs no fetch, repair, rewrite, or data acquisition.
 
-`authority-precedence.md` must record the locked precedence and effective-date policy: explicit official supersession/reversal; current card-specific updates; explicitly selected scoped overlays; compatible rulebook/Codex/FAQ detail; then `unsupported` when rank, scope, or dates cannot resolve a conflict. Retain both winning and superseded/contending source references.
+## Testing and Commit Pattern
 
-`external-reuse-policy.md` must name allowed behavioral observations, forbidden copying, source URLs, audited revisions, and reviewer sign-off. It must state:
+- Default clean-clone suite: `pnpm verify`; all `tests/authority/*.test.ts` use project code and synthetic/minimal fixtures.
+- Plan 07 focused test: `node --test tests/authority/private-source-set.test.ts`.
+- Explicit private gate: `pnpm authority:verify-private`, running both files under `tests/private-authority/` and failing rather than skipping when private evidence is absent.
+- Deterministic integrity and tamper/immutability stay in `private-revision.test.ts`.
+- Network denial and Git/staged/package leakage stay in `repository-boundary.test.ts`.
+- Commit implementation/helper, policy, receipt/docs, and test/script slices atomically after their focused checks and `pnpm verify` pass. Never force-add `.local/authority/`.
+
+## Clean-Room and Future-Use Boundary
 
 - Official sources are normative; community projects are provenance/examples only.
-- Do not copy code, tests, assets, card implementations, or data from Contested Realms without an explicit GPL product decision.
-- Do not copy code, tests, assets, or data from the unlicensed spells.bar/playtest revision without written permission.
-- Do not commit publisher PDFs, images, raw API corpora, or normalized derivatives until permission/storage review allows it.
-- Fixtures remain synthetic or minimal factual records; independent implementation and reviewer attestation are required.
+- Do not copy Contested Realms GPL code/tests/assets/card implementations/data or unlicensed spells.bar/playtest material.
+- Current Phase 1 human action is manual private source provision and scoped attestation—not a publisher-permission adjudication.
+- Sharing, releasing with publisher content, automated updating, commercialization, or a public/network card API requires written publisher permission and a separate approved plan.
+- Hashes prove byte identity, not legal permission or publisher authenticity.
 
----
+## Scope Fence
 
-### `tests/authority/canonical-json.test.ts` (test, transform)
-
-**Analog:** None.
-
-Use `node:test` and `node:assert/strict`. Cover RFC-derived key ordering, numeric encoding, Unicode, array ordering, official examples, and rejection of unsupported JS values. Assert that formatting/property insertion order does not change canonical bytes or identity, while a one-byte/payload change changes its respective hash.
-
----
-
-### `tests/authority/provenance.test.ts` (test, file-I/O/transform)
-
-**Analog:** None.
-
-Cover strict artifact/source envelopes, unknown fields, unsupported schema versions, stable IDs, tampering, recomputed-hash mismatch, missing and broken references, reference cycles, path traversal, absolute paths, and symlink escape. Assert exact, deterministically sorted diagnostic paths.
-
----
-
-### `tests/authority/card-snapshot.test.ts` (test, batch/transform)
-
-**Analog:** None.
-
-Normalize the same pinned synthetic fixture twice and from differently ordered object-property inputs; canonical bytes and hashes must match. Reject malformed/unknown records, duplicate stable IDs and printing slugs, invalid dates/hashes, and unexplained input/output count differences. Stub or disable networking so any accidental access fails the test.
-
----
-
-### `tests/authority/bundle.test.ts` (test, file-I/O/batch)
-
-**Analog:** None.
-
-Cover current, superseded, explicitly scoped, and ambiguous source graphs; full recursive offline validation; authority classes; stored-source rehashing; manifest-only locator/hash/ref binding; canonical input-lock mismatch; prohibited publisher media/raw storage; immutable write-once publication; atomic-failure cleanup; tampering; and no-network execution. Two clean rebuilds from the independently expected durable input lock must produce byte-identical output.
-
----
-
-### `tests/authority/fixtures/**` (test data, file-I/O)
-
-**Analog:** None.
-
-Keep fixtures compact, synthetic, deterministic, and license-safe. Include only the minimal valid/malformed records, graph edges, and factual fields needed by the four tests. Do not copy external repository tests or publisher corpora as “fixtures.”
-
-## Shared Patterns
-
-### Functional Core, Imperative Shell
-
-**Source:** `.planning/research/ARCHITECTURE.md:377-383`; `01-RESEARCH.md:255-257`  
-**Apply to:** normalization and hashing as pure functions; commands as the only filesystem shell.
-
-No clock, network, locale-sensitive ordering, random input, or filesystem enumeration may influence canonical values.
-
-### Strict Boundary Validation
-
-**Source:** `01-RESEARCH.md:310-335`  
-**Apply to:** raw inputs, normalized cards, source records, artifact envelopes, and bundles.
-
-Use `z.strictObject`, no coercion or silent repair, exact JSON-Pointer paths, and deterministic issue sorting.
-
-### Canonical Identity
-
-**Source:** `01-RESEARCH.md:230-253,259-261,338-353`  
-**Apply to:** every canonical artifact and later deck, collection, behavior, and experiment artifact.
-
-Stable ID names the logical entity; canonical content hash names the immutable revision. Never conflate them or hash a document containing its own digest.
-
-### Offline, Write-Once File Safety
-
-**Source:** `01-RESEARCH.md:255-257,304-306,453-461`  
-**Apply to:** import command, validator, bundle publication, and bundle tests.
-
-Constrain paths, reject escapes, bind exact import bytes to an independent input-lock root, build at a new location, validate before atomic rename, refuse overwrite, and never make runtime validation network-capable. Rehash stored bytes; verify manifest-only canonical bindings honestly.
-
-### Fail-Closed Error Handling
-
-**Source:** `01-CONTEXT.md` D-02 and D-07; `01-RESEARCH.md:291-306`  
-**Apply to:** all schemas, normalization, bundle validation, precedence, and commands.
-
-Malformed data, ambiguity, restricted storage, and broken integrity stop the operation with stable diagnostics. No “best effort,” dropped cards, inferred ruling, or automatic repair is authoritative.
-
-### Native Node Test and Verification Commands
-
-**Source:** `01-VALIDATION.md:16-33`  
-**Apply to:** all implementation tasks.
-
-```text
-# directly relevant test, then typecheck after every task commit
-node --test tests/authority/<area>.test.ts
-pnpm typecheck
-
-# after every wave and at the phase gate
-pnpm typecheck && pnpm lint && pnpm test
-```
-
-At the phase gate, run the full suite with networking unavailable and confirm two clean rebuilds are byte-identical.
-
-### Clean-Room Review Gate
-
-**Source:** `01-VALIDATION.md:61-67`; `01-RESEARCH.md:104-117`  
-**Apply to:** all code, tests, fixtures, data, and source manifests.
-
-Publisher permission and external-reuse attestation are manual gates and cannot be replaced by automated tests. Record reviewer, date, source/revision, permitted storage/use, attribution, and any revocation/update expectations.
-
-## No Analog Found
-
-All 24 classified files/file groups have no codebase analog. The planner should use the cited `01-RESEARCH.md`, `01-VALIDATION.md`, and locked `01-CONTEXT.md` contracts, not external implementation source.
-
-| Area | Reason |
-|---|---|
-| Tooling/config | Repository has no `package.json`, TypeScript config, ESLint config, or lockfile. |
-| Authority library | Repository has no `src/` directory or TypeScript implementation. |
-| Commands | Repository has no CLI/command implementation. |
-| Data artifacts | Repository has no committed authority revision. |
-| Tests/fixtures | Repository has no `tests/` directory or fixture convention. |
-| Documentation | Existing planning documents define decisions, but no production policy document exists to copy structurally. |
-
-## Metadata
-
-**Analog search scope:** entire repository via hidden-file inventory; `.codex/skills/` and `.agents/skills/` were also checked and do not exist.  
-**Files scanned:** 15 repository files; all are planning documents or `AGENTS.md`.  
-**External-source policy:** external repositories were not used as code analogs and no external code was copied.  
-**Pattern extraction date:** 2026-08-20
+Do not add a network acquisition client, public card API, database, container, rules engine, deck/collection code, simulator, model integration, or GUI in Phase 1. Use Podman, not Docker, if a later phase genuinely needs containers.
