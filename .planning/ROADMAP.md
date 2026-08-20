@@ -44,7 +44,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 01-03-PLAN.md — Build deterministic offline card normalization over pinned local bytes.
+- [x] 01-03-PLAN.md — Build deterministic offline card normalization over pinned local bytes.
 - [ ] 01-04-PLAN.md — Validate authority paths, references, hashes, precedence, and storage policy offline.
 
 **Wave 3** *(blocked on Wave 2 completion)*
@@ -200,7 +200,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Rules and Data Authority | 2/8 | In Progress|  |
+| 1. Rules and Data Authority | 3/8 | In Progress|  |
 | 2. Deterministic Engine Contract | 0/TBD | Not started | - |
 | 3. Complete Core Game Rules | 0/TBD | Not started | - |
 | 4. Storyline, Card Effects, and Coverage | 0/TBD | Not started | - |

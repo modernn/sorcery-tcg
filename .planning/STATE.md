@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-02-PLAN.md
-last_updated: "2026-08-20T15:46:24.138Z"
+stopped_at: Completed 01-03-PLAN.md
+last_updated: "2026-08-20T16:15:32.424Z"
 last_activity: 2026-08-20
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 8
-  completed_plans: 2
-  percent: 25
+  completed_plans: 3
+  percent: 38
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-20)
 ## Current Position
 
 Phase: 1 (Rules and Data Authority) — EXECUTING
-Plan: 3 of 8
+Plan: 4 of 8
 Status: Ready to execute
 Last activity: 2026-08-20
 
-Progress: [███░░░░░░░] 25%
+Progress: [████░░░░░░] 38%
 
 ## Performance Metrics
 
@@ -54,6 +54,7 @@ Progress: [███░░░░░░░] 25%
 *Updated after each plan completion*
 | Phase 01 P01 | 15min | 2 tasks | 11 files |
 | Phase 01 P02 | 28min | 2 tasks | 5 files |
+| Phase 01 P03 | 21min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -72,6 +73,9 @@ Recent decisions affecting current work:
 - [Phase 01]: Canonical identity uses one bounded project-owned serializer; raw bytes and canonical identity documents are hashed separately. — Duplicate-aware parsing and bounded canonicalization must precede identity hashing.
 - [Phase 01]: Source storage is a strict stored-versus-manifest-only union, and normative eligibility is derived only from authorityClass: official. — This prevents ambiguous storage state and caller-controlled promotion of community material.
 - [Phase 01]: Recursive graph validation, symlink confinement, stored-byte rehashing, and manifest reference binding remain owned by Plan 01-04. — Plan 01-02 defines shared envelopes while Plan 01-04 owns repository resolution and graph traversal.
+- [Phase 01]: Mint card stable IDs from source ID plus source card ID, independent of display fields, array order, and filesystem names. — Stable logical identity must not change with presentation or local storage.
+- [Phase 01]: Keep full artifact hashes bound to exact raw-source provenance while normalized payload hashes remain property-order independent. — The D-06 SourceRef binds exact source bytes while semantic normalization remains canonical.
+- [Phase 01]: Enforce cross-card identity and printing-slug uniqueness in shared snapshot schemas. — One trust boundary preserves exact diagnostics and prevents duplicated validation logic.
 
 ### Pending Todos
 
@@ -92,6 +96,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-20T15:45:13.199Z
-Stopped at: Completed 01-02-PLAN.md
+Last session: 2026-08-20T16:15:05.593Z
+Stopped at: Completed 01-03-PLAN.md
 Resume file: None
