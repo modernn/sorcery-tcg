@@ -349,7 +349,9 @@ function Receive-Rulebook {
     try {
         $html = Assert-HtmlSource $releasePath $release.contentType ([string]$Descriptor.sourceMarker)
         $visible = Get-NormalizedVisibleText $html
-        if ($visible -notmatch '\b2025-12-19\b') { throw 'Rulebook release date 2025-12-19 is missing' }
+        $releaseDate = [DateTime]::ParseExact([string]$Descriptor.effectiveDate, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+        $visibleReleaseDate = $releaseDate.ToString('dd MMM yyyy', [Globalization.CultureInfo]::InvariantCulture)
+        if (-not $visible.Contains($visibleReleaseDate, [StringComparison]::Ordinal)) { throw ('Rulebook release date {0} is missing' -f $Descriptor.effectiveDate) }
         $anchorPattern = '(?is)<a\b[^>]*\bhref\s*=\s*(?:"(?<double>[^"]*)"|''(?<single>[^'']*)'')[^>]*>(?<text>.*?)</a>'
         $matches = @([Text.RegularExpressions.Regex]::Matches($html, $anchorPattern) | Where-Object {
             (Get-NormalizedVisibleText $_.Groups['text'].Value) -eq 'Sorcery: Contested Realm Rulebook (December 2025)'

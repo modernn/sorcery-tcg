@@ -207,7 +207,7 @@ function createHappyAuthorityServer(): Readonly<{
       response.setHeader('content-type', 'text/html; charset=utf-8');
       response.end(
         '<!doctype html><title>Sorcery: Contested Realm December 2025 Rulebook Update</title>' +
-          '<time>2025-12-19</time>' +
+          '<time>19 Dec 2025</time>' +
           `<a href="http://127.0.0.1:${port}/file/d/annotated/view">Sorcery: Contested Realm Rulebook (December 2025) Annotated</a>` +
           `<a href="http://127.0.0.1:${port}/file/d/standard/view">Sorcery: Contested Realm Rulebook (December 2025)</a>` +
           '<img src="/artwork-must-not-be-requested">',
@@ -489,7 +489,7 @@ test('blocked status challenge malformed content and streamed size stop without 
           response.setHeader('content-type', 'text/html');
           response.end(
             '<!doctype html><title>Sorcery: Contested Realm December 2025 Rulebook Update</title>' +
-              '<time>2025-12-19</time>' +
+              '<time>19 Dec 2025</time>' +
               `<a href="http://127.0.0.1:${String(serverPort)}/file/d/standard/view">Sorcery: Contested Realm Rulebook (December 2025)</a>`,
           );
           return;
@@ -529,6 +529,7 @@ test('blocked status challenge malformed content and streamed size stop without 
 
 test('rulebook anchor redirect and PDF controls fail closed', async (context) => {
   const cases = [
+    'wrong release date',
     'missing anchor',
     'duplicate anchor',
     'unexpected locator host',
@@ -562,7 +563,7 @@ test('rulebook anchor redirect and PDF controls fail closed', async (context) =>
           response.setHeader('content-type', 'text/html');
           response.end(
             '<!doctype html><title>Sorcery: Contested Realm December 2025 Rulebook Update</title>' +
-              '<time>2025-12-19</time>' +
+              (scenario === 'wrong release date' ? '<time>18 Dec 2025</time>' : '<time>19 Dec 2025</time>') +
               anchors,
           );
           return;
