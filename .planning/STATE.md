@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-08-20)
 Phase: 1 (Rules and Data Authority) — EXECUTING
 Plan: 7 of 8
 Status: Ready to execute
-Last activity: 2026-08-20 - Completed quick task 260820-hhu: user-run private authority collector
+Last activity: 2026-08-26 - Completed quick task 260825-mhh: authorized one-shot private authority collection
 
 Progress: [████████░░] 75%
 
@@ -104,6 +104,7 @@ Recent decisions affecting current work:
 | # | Description | Date | Commit | Status | Directory |
 |---|-------------|------|--------|--------|-----------|
 | 260820-hhu | Build and validate a user-run PowerShell collector for the seven private Sorcery authority sources and independent backup | 2026-08-20 | 302a685 | Verified | [260820-hhu-build-and-validate-a-user-run-powershell](./quick/260820-hhu-build-and-validate-a-user-run-powershell/) |
+| 260825-mhh | Allow one explicitly user-authorized agent-run private authority collection, retain private-local/no-redistribution/no-recurring/no-artwork limits, run the collector, and independently validate the source set | 2026-08-26 | 6b05b86 | Verified | [260825-mhh-allow-one-explicitly-user-authorized-age](./quick/260825-mhh-allow-one-explicitly-user-authorized-age/) |
 
 ## Deferred Items
 
