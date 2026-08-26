@@ -148,6 +148,13 @@ function adaptCard(card: OfficialCard): RawCard {
     manaCost: card.guardian.cost,
     attack: card.guardian.attack,
     defense: card.guardian.defence,
+    life: card.guardian.life,
+    thresholds: {
+      air: card.guardian.thresholds.air,
+      earth: card.guardian.thresholds.earth,
+      fire: card.guardian.thresholds.fire,
+      water: card.guardian.thresholds.water,
+    },
     rulesText: card.guardian.rulesText,
     printingSlugs: printings.map(({ slug }) => slug).sort(compareText),
     releasedAt: new Date(first.releasedAt).toISOString().slice(0, 10),

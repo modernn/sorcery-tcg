@@ -43,6 +43,13 @@ function normalizeCard(card: RawCard, source: SourceMetadata): NormalizedCard {
     manaCost: card.manaCost,
     attack: card.attack,
     defense: card.defense,
+    life: card.life,
+    thresholds: {
+      air: card.thresholds.air,
+      earth: card.thresholds.earth,
+      fire: card.thresholds.fire,
+      water: card.thresholds.water,
+    },
     rulesText: card.rulesText,
     printingSlugs: [...card.printingSlugs],
   };

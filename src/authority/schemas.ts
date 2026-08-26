@@ -96,6 +96,13 @@ export type RawCard = Readonly<{
   manaCost: number | null;
   attack: number | null;
   defense: number | null;
+  life: number | null;
+  thresholds: Readonly<{
+    air: number;
+    earth: number;
+    fire: number;
+    water: number;
+  }>;
   rulesText: string;
   printingSlugs: readonly string[];
   releasedAt: string | null;
@@ -115,6 +122,8 @@ export type NormalizedCard = Readonly<{
   manaCost: number | null;
   attack: number | null;
   defense: number | null;
+  life: RawCard['life'];
+  thresholds: RawCard['thresholds'];
   rulesText: string;
   printingSlugs: readonly string[];
 }>;
@@ -363,7 +372,8 @@ export const canonicalArtifactSchema = z.strictObject({
   contentHash: hashSchema,
 });
 
-const nullableNonnegativeInteger = z.number().int().nonnegative().safe().nullable();
+const nonnegativeInteger = z.number().int().nonnegative().safe();
+const nullableNonnegativeInteger = nonnegativeInteger.nullable();
 const cardFields = {
   name: z.string().min(1).max(300),
   cardType: z.enum(['avatar', 'site', 'minion', 'aura', 'artifact', 'magic']),
@@ -372,6 +382,13 @@ const cardFields = {
   manaCost: nullableNonnegativeInteger,
   attack: nullableNonnegativeInteger,
   defense: nullableNonnegativeInteger,
+  life: nullableNonnegativeInteger,
+  thresholds: z.strictObject({
+    air: nonnegativeInteger,
+    earth: nonnegativeInteger,
+    fire: nonnegativeInteger,
+    water: nonnegativeInteger,
+  }),
   rulesText: z.string().max(20_000),
   printingSlugs: z.array(z.string().min(1).max(200).regex(SLUG_PATTERN)).min(1).max(100),
 };
