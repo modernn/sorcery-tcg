@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 01-07-PLAN.md; Plan 01-08 blocked pending receipt-contract revision
-last_updated: "2026-08-26T05:06:22.200Z"
+status: verifying
+stopped_at: Completed 01-08-PLAN.md
+last_updated: "2026-08-26T19:18:48.822Z"
 last_activity: 2026-08-26
 progress:
   total_phases: 9
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 8
-  completed_plans: 7
-  percent: 88
+  completed_plans: 8
+  percent: 11
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-20)
 
 **Core value:** Simulation results must be reproducible and rules-correct enough that deck and model comparisons are trustworthy.
-**Current focus:** Phase 1 — Rules and Data Authority
+**Current focus:** Phase 01 — rules-and-data-authority
 
 ## Current Position
 
-Phase: 1 (Rules and Data Authority) — EXECUTING
+Phase: 01 (rules-and-data-authority) — EXECUTING
 Plan: 8 of 8
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-26
 
-Progress: [█████████░] 88%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -59,6 +59,7 @@ Progress: [█████████░] 88%
 | Phase 01 P05 | 42 min | 2 tasks | 12 files |
 | Phase 01 P06 | 9 min | 2 tasks | 3 files |
 | Phase 01 P07 | 5 min | 2 tasks | 3 files |
+| Phase 01 P08 | 33 min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -93,6 +94,9 @@ Recent decisions affecting current work:
 - [Phase 01]: Accept the exact consumed quick-260825-mhh-retry-1 agent-run evidence pair while preserving all private-use limits. — The current D-08/D-11 contract permits this closed pair and the private lock, consumed record, and bytes independently verify.
 - [Phase 01]: Treat source and lock hashes as byte-identity evidence only. — Hashes establish neither publisher authenticity nor legal permission.
 - [Phase 01]: Keep DATA-01, DATA-02, and DATA-03 pending through Plan 01-08. — The final private revision and phase gate have not executed.
+- [Phase 01]: Adapt unchanged official API bytes through a strict bounded in-memory TypeScript adapter — Original-byte hashes and provenance remain authoritative while derived records are deterministic.
+- [Phase 01]: Bind claimed derivation parent hashes to another bundle source — Forged, verbatim-parent, and self-parent claims fail closed.
+- [Phase 01]: Keep the real authority revision private and select it only by fixed ID and root hash — Runtime authority stays immutable and offline without public API or corpus distribution.
 
 ### Pending Todos
 
@@ -100,9 +104,8 @@ Recent decisions affecting current work:
 
 ### Blockers/Concerns
 
-- Phase 1 still lacks publisher permission for broader use. Only the narrow user-run one-shot seven-source collector plus independent private backup is accepted without a legal conclusion; recurring/agent-run acquisition, retry/evasion, artwork collection, redistribution, hosting, third-party upload, public API, and commercialization remain blocked pending written permission and a separate plan.
+- Phase 1 still lacks publisher permission for broader use. Only the three closed one-shot evidence pairs and independent private backup are accepted without a legal conclusion; recurring acquisition, retry/evasion, artwork collection, redistribution, hosting, third-party upload, public API, and commercialization remain blocked pending written permission and a separate plan.
 - Ranked results remain unavailable until the first owned and benchmark card pool passes transitive verified-coverage gates in Phase 6.
-- Plan 01-08 still hard-requires acquisitionMethod user-run-one-shot-powershell, conflicting with the verified accepted agent-run quick-260825-mhh-retry-1 receipt; revise and validate 01-08 before execution.
 
 ### Quick Tasks Completed
 
@@ -121,6 +124,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-26T05:06:22.195Z
-Stopped at: Completed 01-07-PLAN.md; Plan 01-08 blocked pending receipt-contract revision
+Last session: 2026-08-26T19:18:48.815Z
+Stopped at: Completed 01-08-PLAN.md
 Resume file: None

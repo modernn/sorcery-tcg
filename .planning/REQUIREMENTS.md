@@ -7,9 +7,9 @@
 
 ### Rules and Data Authority
 
-- [ ] **DATA-01**: A developer can build an immutable authority bundle containing the pinned official rulebook, format rules, Codex/FAQ/card updates, precedence policy, source URLs, retrieval dates, and SHA-256 hashes.
-- [ ] **DATA-02**: A developer can build and validate a versioned normalized card snapshot without live network access during a game or experiment.
-- [ ] **DATA-03**: Every canonical card, rule, format, deck, collection, behavior, and experiment artifact has a stable ID, schema version, provenance record, and content hash.
+- [x] **DATA-01**: A developer can build an immutable authority bundle containing the pinned official rulebook, format rules, Codex/FAQ/card updates, precedence policy, source URLs, retrieval dates, and SHA-256 hashes.
+- [x] **DATA-02**: A developer can build and validate a versioned normalized card snapshot without live network access during a game or experiment.
+- [x] **DATA-03**: Every canonical card, rule, format, deck, collection, behavior, and experiment artifact has a stable ID, schema version, provenance record, and content hash.
 - [ ] **DATA-04**: The application imports the supplied collection as exactly 223 copies across 149 canonical card names and reports every unknown, ambiguous, or mismatched entry.
 - [ ] **DATA-05**: The application imports decklists without silently changing them and reports format legality, copy-limit, inventory, card-data, and implementation-coverage failures.
 
@@ -121,9 +121,9 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DATA-01 | Phase 1 | Pending |
-| DATA-02 | Phase 1 | Pending |
-| DATA-03 | Phase 1 | Pending |
+| DATA-01 | Phase 1 | Complete |
+| DATA-02 | Phase 1 | Complete |
+| DATA-03 | Phase 1 | Complete |
 | DATA-04 | Phase 6 | Pending |
 | DATA-05 | Phase 6 | Pending |
 | ENG-01 | Phase 2 | Pending |
