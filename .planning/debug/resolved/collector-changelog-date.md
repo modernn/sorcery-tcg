@@ -18,9 +18,9 @@ updated: 2026-08-25T18:00:00-08:00
 ## Current Focus
 
 - hypothesis: Confirmed — `Get-ChangelogDate` rejects the official day-first `d MMMM yyyy` text because its allowlist accepts only ISO and month-first forms.
-- test: Focused regression, full repository verification, and human verification are complete.
-- expecting: Session is ready for archival and knowledge-base capture.
-- next_action: Move this file to `.planning/debug/resolved/` and record the resolved pattern in the debug knowledge base.
+- test: Focused regression, full repository verification, human verification, archival, and knowledge-base capture are complete.
+- expecting: No further debug action is required.
+- next_action: None — resolved and archived.
 - reasoning_checkpoint:
     hypothesis: `Get-ChangelogDate` causes collection to stop because the public page's first visible date is day-first (`19 May 2026`) while the regex and ParseExact format only allow ISO or month-first text.
     confirming_evidence:
