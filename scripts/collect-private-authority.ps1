@@ -317,12 +317,14 @@ function Get-ChangelogDate {
     $visible = Get-NormalizedVisibleText $Html.Substring($markerIndex)
     $match = [Text.RegularExpressions.Regex]::Match(
         $visible,
-        '\b(?<date>\d{4}-\d{2}-\d{2}|(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4})\b',
+        '\b(?<date>\d{4}-\d{2}-\d{2}|(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4}|\d{1,2} (?:January|February|March|April|May|June|July|August|September|October|November|December) \d{4})\b',
         [Text.RegularExpressions.RegexOptions]::CultureInvariant
     )
     if (-not $match.Success) { throw 'The first visible changelog date is missing or invalid' }
     $dateText = $match.Groups['date'].Value
-    $format = if ($dateText -match '^\d{4}-') { 'yyyy-MM-dd' } else { 'MMMM d, yyyy' }
+    $format = if ($dateText -match '^\d{4}-') { 'yyyy-MM-dd' }
+        elseif ($dateText -match '^\d') { 'd MMMM yyyy' }
+        else { 'MMMM d, yyyy' }
     try {
         $date = [DateTime]::ParseExact(
             $dateText,

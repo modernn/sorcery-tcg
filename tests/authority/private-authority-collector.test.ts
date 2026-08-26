@@ -205,6 +205,7 @@ async function invokeLoopback(
 
 function createHappyAuthorityServer(
   rulebookBytes: Buffer = SOURCE_BYTES['rulebook/rulebook-current.pdf'],
+  changelogBytes: Buffer = SOURCE_BYTES['codex/changelog-current.html'],
 ): Readonly<{
   server: Server;
   requests: string[];
@@ -250,7 +251,9 @@ function createHappyAuthorityServer(
       'content-type',
       relativePath.endsWith('.json') ? 'application/json; charset=utf-8' : 'text/html; charset=utf-8',
     );
-    response.end(SOURCE_BYTES[relativePath]);
+    response.end(
+      relativePath === 'codex/changelog-current.html' ? changelogBytes : SOURCE_BYTES[relativePath],
+    );
   });
   return { server, requests, setPort: (value) => (port = value) };
 }
@@ -568,6 +571,44 @@ test('loopback collection selects the standard rulebook and preserves exact boun
   } finally {
     await close(authority.server);
     await cleanupFixture(fixture);
+  }
+});
+
+test('changelog accepts the official day-first date and rejects impossible dates', async (context) => {
+  for (const scenario of [
+    { name: 'official day-first date', text: '19 May 2026', expected: '2026-05-19' },
+    { name: 'impossible day-first date', text: '31 February 2026', expected: null },
+  ] as const) {
+    await context.test(scenario.name, async () => {
+      const fixture = await createFixture();
+      const authority = createHappyAuthorityServer(
+        SOURCE_BYTES['rulebook/rulebook-current.pdf'],
+        Buffer.from(`<!doctype html><h1>Codex Changelog</h1><time>${scenario.text}</time>`),
+      );
+      try {
+        const port = await listen(authority.server);
+        authority.setPort(port);
+        const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
+        if (scenario.expected === null) {
+          assert.notEqual(result.code, 0);
+          assert.match(result.stderr, /changelog date is invalid/i);
+          assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
+        } else {
+          assert.equal(result.code, 0, result.stderr);
+          const lock = JSON.parse(await readFile(fixture.lockPath, 'utf8')) as {
+            entries: readonly PrivateAuthoritySourceEntry[];
+          };
+          assert.equal(
+            lock.entries.find(({ relativePath }) => relativePath === 'codex/changelog-current.html')
+              ?.effectiveDate,
+            scenario.expected,
+          );
+        }
+      } finally {
+        await close(authority.server);
+        await cleanupFixture(fixture);
+      }
+    });
   }
 });
 
