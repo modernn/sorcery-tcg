@@ -288,8 +288,8 @@ test('DATA-02 valid cards retain official source identifiers printing slugs and 
       printingSlugs,
     })),
     [
-      { officialSourceId: 'synthetic-card-air-001', printingSlugs: ['synthetic-air-scout-alpha'] },
       { officialSourceId: 'synthetic-card-fire-001', printingSlugs: ['synthetic-fire-keeper-alpha'] },
+      { officialSourceId: 'synthetic-card-air-001', printingSlugs: ['synthetic-air-scout-alpha'] },
     ],
   );
   assert.ok(artifact.identity.payload.cards.every(({ stableId }) => /^card:[0-9a-f]{64}$/.test(stableId)));

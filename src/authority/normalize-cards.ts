@@ -30,9 +30,10 @@ function stableHash(prefix: 'card' | 'card-snapshot', fields: Readonly<Record<st
 }
 
 function normalizeCard(card: RawCard, source: SourceMetadata): NormalizedCard {
+  const namespace = source.authorityClass === 'official' ? 'sorcerytcg' : source.sourceId;
   return {
     stableId: stableHash('card', {
-      sourceId: source.sourceId,
+      namespace,
       sourceCardId: card.sourceCardId,
     }),
     officialSourceId: source.authorityClass === 'official' ? card.sourceCardId : null,

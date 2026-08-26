@@ -7,7 +7,7 @@
       "retrievedAt": "2026-08-20T00:00:00Z",
       "effectiveDate": "2026-08-20",
       "mediaType": "application/json",
-      "byteHash": "sha256:754fe9900fa0f8b5109dabb69e4c96b5c6117ec50838d582a0b5170c1ca28f10",
+      "byteHash": "sha256:de752ecc83cf3ac8e17a461de270e13c98866783d70f81059f992dc95927e588",
       "derivation": {
         "method": "verbatim",
         "parentByteHashes": [],
@@ -16,7 +16,7 @@
       "licenseStatus": "reference-only",
       "storageMode": "manifest-only",
       "storagePolicy": "manifest-only",
-      "durableLocator": "urn:sha256:754fe9900fa0f8b5109dabb69e4c96b5c6117ec50838d582a0b5170c1ca28f10",
+      "durableLocator": "urn:sha256:de752ecc83cf3ac8e17a461de270e13c98866783d70f81059f992dc95927e588",
       "acquisitionProcedureHash": null
     },
     {

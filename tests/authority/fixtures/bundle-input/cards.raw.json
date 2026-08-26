@@ -9,6 +9,8 @@
       "manaCost": 1,
       "attack": 1,
       "defense": 1,
+      "life": null,
+      "thresholds": { "air": 1, "earth": 0, "fire": 0, "water": 0 },
       "rulesText": "",
       "printingSlugs": ["synthetic-apprentice-alpha"],
       "releasedAt": "2026-08-20"
