@@ -297,6 +297,18 @@ export const sourceRecordSchema = z
         message: 'manifest-only sources require a durable locator or acquisition procedure hash',
       });
     }
+    if (
+      source.storageMode === 'manifest-only' &&
+      source.durableLocator?.startsWith('urn:sha256:') === true &&
+      source.durableLocator !== `urn:${source.byteHash}`
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['durableLocator'],
+        message: 'SHA-256 locator digest must equal the declared source byte hash',
+        params: { diagnosticCode: 'locator_byte_hash_mismatch' },
+      });
+    }
   });
 
 export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>

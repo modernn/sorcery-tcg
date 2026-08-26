@@ -526,10 +526,10 @@ test('DATA-03 rehashes stored bytes and reports manifest-only bindings without r
   try {
     const validated = await validateBundleGraph(materialized.root, 'bundle.json', materialized.expected);
     assert.deepEqual(validated.storedBytesRehashed, [sourceRef(materialized.bundle.identity.payload.sources[0]!)]);
-    assert.deepEqual(validated.manifestByteBindingsVerified, []);
-    assert.deepEqual(validated.manifestDeclarationsBound, [
+    assert.deepEqual(validated.manifestByteBindingsVerified, [
       sourceRef(materialized.bundle.identity.payload.sources[1]!),
     ]);
+    assert.deepEqual(validated.manifestDeclarationsBound, []);
 
     const tampered = await loadFixture('provenance-tampered.json');
     await writeFile(join(materialized.root, 'raw', 'rules.json'), tampered.storedBytes);
@@ -556,7 +556,7 @@ test('DATA-03 rejects manifest locator procedure byte hash SourceRef artifact an
 
     for (const changedManifest of [
       { ...manifest, acquisitionProcedureHash: HASH_A },
-      { ...manifest, byteHash: HASH_A },
+      { ...manifest, byteHash: HASH_A, durableLocator: `urn:${HASH_A}` },
     ]) {
       const tampered = {
         ...materialized.bundle,

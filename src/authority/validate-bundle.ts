@@ -74,7 +74,8 @@ export type ValidatedAuthorityBundle = Readonly<{
   bundle: AuthorityBundle;
   resolvedBundlePath: string;
   storedBytesRehashed: readonly SourceRef[];
-  manifestBindingsVerified: readonly SourceRef[];
+  manifestByteBindingsVerified: readonly SourceRef[];
+  manifestDeclarationsBound: readonly SourceRef[];
   precedenceResolutions: readonly ValidatedPrecedenceResolution[];
 }>;
 
@@ -871,8 +872,15 @@ export async function validateAuthorityBundle(
   const storedBytesRehashed = [
     ...(await readStoredSources(revisionRoot, validatedBytes, bundle)),
   ].sort(compareSourceRefs);
-  const manifestBindingsVerified = bundle.identity.payload.sources
-    .filter((source) => source.storageMode === 'manifest-only')
+  const manifestSources = bundle.identity.payload.sources.filter(
+    (source) => source.storageMode === 'manifest-only',
+  );
+  const manifestByteBindingsVerified = manifestSources
+    .filter((source) => source.durableLocator?.startsWith('urn:sha256:') === true)
+    .map((source) => ({ sourceId: source.sourceId, byteHash: source.byteHash }))
+    .sort(compareSourceRefs);
+  const manifestDeclarationsBound = manifestSources
+    .filter((source) => source.durableLocator?.startsWith('urn:sha256:') !== true)
     .map((source) => ({ sourceId: source.sourceId, byteHash: source.byteHash }))
     .sort(compareSourceRefs);
 
@@ -880,7 +888,8 @@ export async function validateAuthorityBundle(
     bundle,
     resolvedBundlePath,
     storedBytesRehashed: Object.freeze(storedBytesRehashed),
-    manifestBindingsVerified: Object.freeze(manifestBindingsVerified),
+    manifestByteBindingsVerified: Object.freeze(manifestByteBindingsVerified),
+    manifestDeclarationsBound: Object.freeze(manifestDeclarationsBound),
     precedenceResolutions: Object.freeze(precedenceResolutions),
   });
 }

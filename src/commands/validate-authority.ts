@@ -89,9 +89,13 @@ export async function runValidateAuthorityCommand(
         ...source,
         verification: 'stored-bytes-rehashed',
       })),
-      ...validated.manifestBindingsVerified.map((source) => ({
+      ...validated.manifestByteBindingsVerified.map((source) => ({
         ...source,
-        verification: 'manifest-binding-verified',
+        verification: 'manifest-byte-binding-verified',
+      })),
+      ...validated.manifestDeclarationsBound.map((source) => ({
+        ...source,
+        verification: 'manifest-declaration-bound',
       })),
     ].sort((left, right) =>
       left.sourceId < right.sourceId
