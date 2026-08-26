@@ -3,7 +3,8 @@
 [CmdletBinding()]
 param(
     [string]$BackupRoot,
-    [switch]$AcknowledgePrivateUseRisk
+    [switch]$AcknowledgePrivateUseRisk,
+    [AllowNull()][string]$UserAuthorizationReference
 )
 
 $collectorModule = New-Module -Name 'Sorcery.PrivateAuthorityCollector' -ArgumentList $PSScriptRoot -ScriptBlock {
@@ -643,6 +644,47 @@ function Write-NewUtf8Json {
     }
 }
 
+function New-PrivateAuthorityAcquisitionContext {
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [AllowNull()][string]$UserAuthorizationReference
+    )
+
+    if ([string]::IsNullOrEmpty($UserAuthorizationReference)) {
+        return [pscustomobject]@{
+            acquisitionMethod = 'user-run-one-shot-powershell'
+            authorizationReference = $null
+        }
+    }
+    if ($UserAuthorizationReference -cne 'quick-260825-mhh') {
+        throw 'User authorization reference must be absent or exactly quick-260825-mhh.'
+    }
+
+    $authorizationPath = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot '.local/authority/authorizations/quick-260825-mhh.consumed.json'))
+    if (Test-Path -LiteralPath $authorizationPath) {
+        throw 'User authorization quick-260825-mhh has already been consumed.'
+    }
+    try {
+        Write-NewUtf8Json $authorizationPath ([ordered]@{
+            schemaVersion = 1
+            revisionId = 'official-2026-08-20'
+            acquisitionMethod = 'user-authorized-agent-run-one-shot-powershell'
+            authorizationReference = 'quick-260825-mhh'
+            consumedAt = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [Globalization.CultureInfo]::InvariantCulture)
+        })
+    }
+    catch {
+        if (Test-Path -LiteralPath $authorizationPath) {
+            throw 'User authorization quick-260825-mhh has already been consumed.'
+        }
+        throw
+    }
+    return [pscustomobject]@{
+        acquisitionMethod = 'user-authorized-agent-run-one-shot-powershell'
+        authorizationReference = 'quick-260825-mhh'
+    }
+}
+
 function Copy-SourceTree {
     param(
         [Parameter(Mandatory)][string]$SourceRoot,
@@ -742,7 +784,8 @@ function Invoke-PrivateAuthorityCollectionCore {
         [Parameter(Mandatory)][int]$BodyTimeoutSeconds,
         [Parameter(Mandatory)][long]$MaxTotalBytes,
         [Parameter(Mandatory)][bool]$LoopbackOnly,
-        [AllowNull()][string]$FaultPoint
+        [AllowNull()][string]$FaultPoint,
+        [AllowNull()][string]$UserAuthorizationReference
     )
 
     if ($LoopbackOnly) {
@@ -752,6 +795,8 @@ function Invoke-PrivateAuthorityCollectionCore {
         Assert-FixedProductionConfiguration $RepositoryRoot $PrimaryRoot $LockPath $Descriptors $HeaderTimeoutSeconds $BodyTimeoutSeconds $MaxTotalBytes $FaultPoint
     }
     $paths = Resolve-CollectionPaths $RepositoryRoot $PrimaryRoot $BackupRoot $LockPath
+    $acquisition = New-PrivateAuthorityAcquisitionContext $paths.repositoryRoot $UserAuthorizationReference
+    Invoke-TestFault $FaultPoint 'after-authorization-consumption'
     $runId = [Guid]::NewGuid().ToString('N')
     $primaryStage = "$($paths.primaryRoot).collecting-$runId"
     $backupStage = "$($paths.backupRoot).collecting-$runId"
@@ -790,7 +835,7 @@ function Invoke-PrivateAuthorityCollectionCore {
         }
         $lock = [ordered]@{
             schemaVersion = 1
-            acquisitionMethod = 'user-run-one-shot-powershell'
+            acquisitionMethod = $acquisition.acquisitionMethod
             primaryRoot = $paths.primaryRoot
             backupRoot = $paths.backupRoot
             entries = @($final.entries)
@@ -805,9 +850,18 @@ function Invoke-PrivateAuthorityCollectionCore {
             }
             rulebookAcquisitionEvidence = $rulebookEvidence
         }
+        if ($null -ne $acquisition.authorizationReference) {
+            $lock['authorizationReference'] = $acquisition.authorizationReference
+        }
         Write-NewUtf8Json $lockCandidate $lock
         $candidate = Get-Content -Raw -LiteralPath $lockCandidate | ConvertFrom-Json -Depth 32 -DateKind String
-        if ($candidate.acquisitionMethod -ne 'user-run-one-shot-powershell') { throw 'Lock candidate has an invalid acquisition method' }
+        $candidateAuthorization = $candidate.PSObject.Properties['authorizationReference']
+        if ($candidate.acquisitionMethod -cne $acquisition.acquisitionMethod -or
+            ($null -eq $acquisition.authorizationReference -and $null -ne $candidateAuthorization) -or
+            ($null -ne $acquisition.authorizationReference -and
+                ($null -eq $candidateAuthorization -or $candidate.authorizationReference -cne $acquisition.authorizationReference))) {
+            throw 'Lock candidate has an invalid acquisition method and authorization reference pair'
+        }
         $candidateVerification = Invoke-PrivateSourceVerifier $paths.repositoryRoot $candidate.primaryRoot $candidate.backupRoot @($candidate.entries) $draftPath
         Assert-SameVerification $final $candidateVerification
         if ($candidate.sourceSetRootHash -ne $candidateVerification.sourceSetRootHash) { throw 'Lock candidate root hash does not match final verification' }
@@ -857,17 +911,21 @@ function Invoke-PrivateAuthorityCollectionForLoopbackTest {
         [Parameter(Mandatory)][int]$HeaderTimeoutSeconds,
         [Parameter(Mandatory)][int]$BodyTimeoutSeconds,
         [Parameter(Mandatory)][long]$MaxTotalBytes,
-        [AllowNull()][string]$FaultPoint
+        [AllowNull()][string]$FaultPoint,
+        [AllowNull()][string]$UserAuthorizationReference
     )
 
-    return Invoke-PrivateAuthorityCollectionCore $RepositoryRoot $PrimaryRoot $BackupRoot $LockPath $Descriptors $HeaderTimeoutSeconds $BodyTimeoutSeconds $MaxTotalBytes $true $FaultPoint
+    return Invoke-PrivateAuthorityCollectionCore -RepositoryRoot $RepositoryRoot -PrimaryRoot $PrimaryRoot -BackupRoot $BackupRoot -LockPath $LockPath -Descriptors $Descriptors -HeaderTimeoutSeconds $HeaderTimeoutSeconds -BodyTimeoutSeconds $BodyTimeoutSeconds -MaxTotalBytes $MaxTotalBytes -LoopbackOnly $true -FaultPoint $FaultPoint -UserAuthorizationReference $UserAuthorizationReference
 }
 
 function Invoke-PrivateAuthorityCollection {
-    param([Parameter(Mandatory)][string]$BackupRoot)
+    param(
+        [Parameter(Mandatory)][string]$BackupRoot,
+        [AllowNull()][string]$UserAuthorizationReference
+    )
 
     $configuration = Get-ProductionCollectionConfiguration
-    return Invoke-PrivateAuthorityCollectionCore $configuration.repositoryRoot $configuration.primaryRoot $BackupRoot $configuration.lockPath @($configuration.descriptors) $configuration.headerTimeoutSeconds $configuration.bodyTimeoutSeconds $configuration.maxTotalBytes $false $null
+    return Invoke-PrivateAuthorityCollectionCore -RepositoryRoot $configuration.repositoryRoot -PrimaryRoot $configuration.primaryRoot -BackupRoot $BackupRoot -LockPath $configuration.lockPath -Descriptors @($configuration.descriptors) -HeaderTimeoutSeconds $configuration.headerTimeoutSeconds -BodyTimeoutSeconds $configuration.bodyTimeoutSeconds -MaxTotalBytes $configuration.maxTotalBytes -LoopbackOnly $false -FaultPoint $null -UserAuthorizationReference $UserAuthorizationReference
 }
 
 Export-ModuleMember -Function @(
@@ -883,5 +941,5 @@ Remove-Variable -Name collectorModule
 if ($MyInvocation.InvocationName -ne '.') {
     if ([string]::IsNullOrWhiteSpace($BackupRoot)) { throw 'BackupRoot is required and must be an absolute path outside the repository.' }
     if (-not $AcknowledgePrivateUseRisk) { throw 'AcknowledgePrivateUseRisk is required before collection.' }
-    Invoke-PrivateAuthorityCollection $BackupRoot
+    Invoke-PrivateAuthorityCollection -BackupRoot $BackupRoot -UserAuthorizationReference $UserAuthorizationReference
 }

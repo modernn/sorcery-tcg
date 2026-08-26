@@ -412,7 +412,7 @@ test('authorized success and transport failure remain consumed after cleanup and
         authority.setPort(port);
         const descriptors = testDescriptors(`http://127.0.0.1:${port}`);
         const first = await invokeLoopback(fixture, descriptors, {
-          faultPoint: scenario === 'success' ? undefined : 'after-staged-verification',
+          ...(scenario === 'success' ? {} : { faultPoint: 'after-staged-verification' }),
           userAuthorizationReference: 'quick-260825-mhh',
         });
         if (scenario === 'success') {
@@ -877,6 +877,7 @@ test('publication creates independent exact trees and a verifier-approved privat
     assert.notEqual(lockBytes[0], 0xef);
     const lock = JSON.parse(lockBytes.toString('utf8')) as {
       acquisitionMethod: string;
+      authorizationReference?: string;
       primaryRoot: string;
       backupRoot: string;
       entries: readonly PrivateAuthoritySourceEntry[];
@@ -885,6 +886,7 @@ test('publication creates independent exact trees and a verifier-approved privat
       rulebookAcquisitionEvidence: Record<string, unknown>;
     };
     assert.equal(lock.acquisitionMethod, 'user-run-one-shot-powershell');
+    assert.equal('authorizationReference' in lock, false);
     assert.equal(lock.primaryRoot, resolve(fixture.primaryRoot));
     assert.equal(lock.backupRoot, resolve(fixture.backupRoot));
     assert.deepEqual(

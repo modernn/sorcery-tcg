@@ -150,7 +150,13 @@ test('safe relative metadata and hashes pass the Git index and package boundary'
 
 test('private bytes locators excerpts paths and artwork fail without disclosing content', async (context) => {
   const firstSource = PRIVATE_AUTHORITY_SOURCE_PATHS[0];
-  const cases = [
+  const cases: readonly Readonly<{
+    name: string;
+    path: string;
+    bytes: (fixture: Fixture) => string | Buffer;
+    mode: 'commit' | 'stage' | 'untracked' | 'stage-force';
+    category: RegExp;
+  }>[] = [
     {
       name: 'exact bytes in HEAD under another name',
       path: 'included/exact-copy.bin',
