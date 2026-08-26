@@ -316,6 +316,43 @@ test('DATA-02 valid cards retain official source identifiers printing slugs and 
   );
 });
 
+test('DATA-03 keeps official card stable IDs across revisions while preserving revision provenance', () => {
+  const firstRevision = normalizeCards(
+    VALID_BYTES,
+    sourceMetadata(VALID_BYTES, { sourceId: 'source:sorcerytcg-cards-2026-08' }),
+  );
+  const secondRevision = normalizeCards(
+    VALID_BYTES,
+    sourceMetadata(VALID_BYTES, { sourceId: 'source:sorcerytcg-cards-2026-09' }),
+  );
+  const officialIds = (artifact: typeof firstRevision) => Object.fromEntries(
+    artifact.identity.payload.cards.map(({ officialSourceId, stableId }) => [officialSourceId, stableId]),
+  );
+
+  assert.deepEqual(officialIds(secondRevision), officialIds(firstRevision));
+  assert.equal(new Set(Object.values(officialIds(firstRevision))).size, 2);
+  assert.notDeepEqual(secondRevision.identity.sourceRefs, firstRevision.identity.sourceRefs);
+  assert.notEqual(secondRevision.contentHash, firstRevision.contentHash);
+
+  const communitySource = {
+    authorityClass: 'community-provenance',
+    url: 'https://example.org/synthetic-cards',
+    licenseStatus: 'reference-only',
+  } as const;
+  const firstCommunity = normalizeCards(
+    VALID_BYTES,
+    sourceMetadata(VALID_BYTES, { ...communitySource, sourceId: 'source:community-cards-a' }),
+  );
+  const secondCommunity = normalizeCards(
+    VALID_BYTES,
+    sourceMetadata(VALID_BYTES, { ...communitySource, sourceId: 'source:community-cards-b' }),
+  );
+  assert.notDeepEqual(
+    firstCommunity.identity.payload.cards.map(({ stableId }) => stableId),
+    secondCommunity.identity.payload.cards.map(({ stableId }) => stableId),
+  );
+});
+
 test('DATA-02 rejects malformed cards and unknown fields without repair at exact paths', () => {
   assert.deepEqual(
     pathsAndCodes(captureDiagnostics(() => normalizeCards(MALFORMED_BYTES, sourceMetadata(MALFORMED_BYTES)))),
