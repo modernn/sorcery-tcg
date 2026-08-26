@@ -286,6 +286,101 @@ test('DATA-01 resolves explicit official superseded authority by effective date'
   assert.deepEqual(resolution.superseded, [ref(oldFaq)]);
 });
 
+test('DATA-01 partial supersession remains unsupported beside an unrelated viable peer', () => {
+  const superseded = manifestSource('source:partial-superseded', { effectiveDate: '2026-01-01' });
+  const superseder = manifestSource('source:partial-superseder', { effectiveDate: '2026-07-15' });
+  const unrelated = manifestSource('source:partial-unrelated', { effectiveDate: '2026-07-15' });
+  const resolution = resolveAuthorityPrecedence(
+    [
+      record(superseded, 'rulebook'),
+      record(superseder, 'rulebook', { supersedes: [superseded.sourceId] }),
+      record(unrelated, 'rulebook'),
+    ],
+    null,
+    '2026-08-20',
+  );
+  assert.equal(resolution.status, 'unsupported');
+  assert.equal(resolution.reason, 'equal-rank');
+  assert.deepEqual(resolution.contending, [ref(superseder), ref(unrelated)]);
+  assert.deepEqual(resolution.superseded, [ref(superseded)]);
+});
+
+test('DATA-01 handles competing superseders and transitive supersession as graph edges', () => {
+  const oldest = manifestSource('source:graph-oldest', { effectiveDate: '2026-01-01' });
+  const middle = manifestSource('source:graph-middle', { effectiveDate: '2026-04-01' });
+  const newest = manifestSource('source:graph-newest', { effectiveDate: '2026-07-15' });
+  const transitive = resolveAuthorityPrecedence(
+    [
+      record(oldest, 'faq'),
+      record(middle, 'faq', { supersedes: [oldest.sourceId] }),
+      record(newest, 'faq', { supersedes: [middle.sourceId] }),
+    ],
+    null,
+    '2026-08-20',
+  );
+  assert.equal(transitive.status, 'resolved');
+  assert.deepEqual(transitive.winning, ref(newest));
+  assert.deepEqual(transitive.superseded, [ref(middle), ref(oldest)]);
+
+  const first = manifestSource('source:graph-first', { effectiveDate: '2026-07-15' });
+  const second = manifestSource('source:graph-second', { effectiveDate: '2026-07-15' });
+  const competing = resolveAuthorityPrecedence(
+    [
+      record(oldest, 'faq'),
+      record(first, 'faq', { supersedes: [oldest.sourceId] }),
+      record(second, 'faq', { supersedes: [oldest.sourceId] }),
+    ],
+    null,
+    '2026-08-20',
+  );
+  assert.equal(competing.status, 'unsupported');
+  assert.equal(competing.reason, 'equal-rank');
+  assert.deepEqual(competing.contending, [ref(first), ref(second)]);
+  assert.deepEqual(competing.superseded, [ref(oldest)]);
+});
+
+test('DATA-01 rejects a supersession cycle even when an unrelated record is viable', () => {
+  const first = manifestSource('source:cycle-first', { effectiveDate: '2026-07-15' });
+  const second = manifestSource('source:cycle-second', { effectiveDate: '2026-07-15' });
+  const unrelated = manifestSource('source:cycle-unrelated', { effectiveDate: '2026-08-01' });
+  const resolution = resolveAuthorityPrecedence(
+    [
+      record(first, 'faq', { supersedes: [second.sourceId] }),
+      record(second, 'faq', { supersedes: [first.sourceId] }),
+      record(unrelated, 'faq'),
+    ],
+    null,
+    '2026-08-20',
+  );
+  assert.equal(resolution.status, 'unsupported');
+  assert.equal(resolution.reason, 'ambiguous-supersession');
+  assert.deepEqual(resolution.contending, [ref(first), ref(second), ref(unrelated)]);
+  assert.deepEqual(resolution.superseded, []);
+});
+
+test('DATA-01 rejects impossible dates and accepts a real leap day', () => {
+  const source = manifestSource('source:date-rule', { effectiveDate: '2024-02-29' });
+  for (const impossible of ['2026-13-01', '2026-04-31', '2026-02-29']) {
+    assert.equal(
+      resolveAuthorityPrecedence([record(source, 'rulebook')], null, impossible).reason,
+      'unclear-date',
+      impossible,
+    );
+  }
+  assert.equal(
+    resolveAuthorityPrecedence(
+      [record({ ...source, effectiveDate: '2026-02-29' }, 'rulebook')],
+      null,
+      '2026-08-20',
+    ).reason,
+    'unclear-date',
+  );
+  assert.deepEqual(
+    resolveAuthorityPrecedence([record(source, 'rulebook')], null, '2024-02-29').winning,
+    ref(source),
+  );
+});
+
 test('DATA-01 applies explicitly selected scoped overlays only in scope', () => {
   const base = manifestSource('source:constructed-base', { effectiveDate: '2025-12-19' });
   const overlay = manifestSource('source:gothic-overlay', { effectiveDate: '2026-06-01' });
