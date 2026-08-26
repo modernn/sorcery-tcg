@@ -131,7 +131,7 @@ test('DATA-02 life and threshold schemas require exact nonnegative safe-integer 
     ['/cards/0/life', (card) => { card.life = -1; }],
     ['/cards/0/life', (card) => { card.life = 1.5; }],
     ['/cards/0/life', (card) => { card.life = Number.MAX_SAFE_INTEGER + 1; }],
-    ['/cards/0/thresholds', (card) => { delete card.thresholds; }],
+    ['/cards/0/thresholds', (card) => { delete (card as Record<string, unknown>).thresholds; }],
     ['/cards/0/thresholds/air', (card) => { card.thresholds.air = -1; }],
     ['/cards/0/thresholds/earth', (card) => { card.thresholds.earth = 1.5; }],
     ['/cards/0/thresholds/fire', (card) => { card.thresholds.fire = Number.MAX_SAFE_INTEGER + 1; }],
@@ -167,8 +167,9 @@ test('DATA-02 strictly adapts the audited official API shape without changing so
       attack: null,
       cost: null,
       defence: null,
+      life: 20,
       rarity: null,
-      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      thresholds: { air: 1, earth: 2, fire: 3, water: 4 },
       type: 'Avatar',
     },
   });
@@ -181,7 +182,16 @@ test('DATA-02 strictly adapts the audited official API shape without changing so
   assert.deepEqual(adapted.cards[0]?.elements, []);
   assert.deepEqual(adapted.cards[0]?.printingSlugs, ['synthetic_card_2']);
   assert.equal(adapted.cards[0]?.sourceCardId, 'synthetic_card_2');
+  assert.equal(adapted.cards[0]?.life, 20);
+  assert.deepEqual(adapted.cards[0]?.thresholds, { air: 1, earth: 2, fire: 3, water: 4 });
   assert.equal(normalized.identity.sourceRefs[0]?.byteHash, sha256(rawBytes));
+  const normalizedAvatar = normalized.identity.payload.cards.find(
+    ({ officialSourceId }) => officialSourceId === 'synthetic_card_2',
+  );
+  assert.ok(normalizedAvatar);
+  assert.equal(normalizedAvatar.life, 20);
+  assert.deepEqual(normalizedAvatar.thresholds, { air: 1, earth: 2, fire: 3, water: 4 });
+  assert.ok(Object.isFrozen(normalizedAvatar.thresholds));
 
   const reorderedBytes = bytes([
     Object.fromEntries(Object.entries(first).reverse()),
