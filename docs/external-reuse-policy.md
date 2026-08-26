@@ -2,13 +2,26 @@
 
 This policy implements D-08, D-09, and D-11 for the current private, local, noncommercial Sorcery Simulator. It is an operating boundary, not legal advice or a claim of legal certainty. The narrow Phase 1 exception below records the user's risk acceptance; it does not establish legal permission. Any broader use requires written publisher permission and a separate approved plan.
 
-## Sole Phase 1 acquisition path
+## Exactly two Phase 1 acquisition evidence pairs
 
-The sole accepted Phase 1 acquisition path is one explicit user-run, one-shot invocation:
+The fixed one-shot collector accepts exactly two acquisition method/reference pairs; no other method/reference pair is valid:
+
+- `acquisitionMethod: user-run-one-shot-powershell` with `authorizationReference` absent.
+- `acquisitionMethod: user-authorized-agent-run-one-shot-powershell` with `authorizationReference: quick-260825-mhh` plus durable ignored `.local/authority/authorizations/quick-260825-mhh.consumed.json`.
+
+The personal user-run command remains:
 
 ```powershell
 pwsh -NoProfile -NonInteractive -File scripts/collect-private-authority.ps1 -BackupRoot <absolute-independent-path> -AcknowledgePrivateUseRisk
 ```
+
+The sole explicitly authorized agent-run command is:
+
+```powershell
+pwsh -NoProfile -NonInteractive -File scripts/collect-private-authority.ps1 -BackupRoot <absolute-independent-path> -AcknowledgePrivateUseRisk -UserAuthorizationReference quick-260825-mhh
+```
+
+The user's 2026-08-25 authorization permits one attempted agent invocation for `official-2026-08-20`. It is exhausted when the consumed record is atomically created before transport, not when primary or lock publication succeeds. Success, failure, cleanup, or deletion of collected primary, backup, or lock outputs does not renew it; the consumed record must never be removed or reset. This narrow historical authorization supersedes only the prior actor restriction for this reference.
 
 `-BackupRoot` must name an absent absolute destination outside the repository. The collector acquires exactly one complete official source set under `.local/authority/inputs/official-2026-08-20/primary/` and creates an independent ordinary byte-identical backup: the current standard rulebook PDF, base Constructed page, Codex, FAQ, Codex changelog, official card update notice, and full card API JSON.
 
@@ -22,13 +35,13 @@ pwsh -NoProfile -NonInteractive -File scripts/collect-private-authority.ps1 -Bac
 | `updates/card-updates-2025.html` | `https://sorcerytcg.com/news/sorcery-contested-realm-card-updates-2025` | `text/html` |
 | `cards/cards.raw.json` | `https://api.sorcerytcg.com/api/cards` | `application/json` |
 
-There is no second acquisition branch. The production wrapper exposes no URL, manifest, artwork, scheduling, polling, concurrency, retry, timeout, or update override. It makes one bounded sequential pass over the fixed seven-source manifest, publishes no lock on failure, and stops on HTTP 401, 403, 429, CAPTCHA/block evidence, or publisher objection. It performs no retry and no evasion. It has no recurring mode and exposes no public/network HTTP card API. Later code reads only the selected validated local revision through a local TypeScript catalog/query module.
+There is no configurable or recurring acquisition branch. The production wrapper exposes no URL, manifest, artwork, scheduling, polling, concurrency, retry, timeout, update, or authorization-record override. It makes one bounded sequential pass over the fixed seven-source manifest, publishes no lock on failure, and stops on HTTP 401, 403, 429, CAPTCHA/block evidence, or publisher objection. It performs no retry and no evasion. It exposes no public/network HTTP card API. Later code reads only the selected validated local revision through a local TypeScript catalog/query module.
 
-The official API page describes developer access, intermittent polling, and self-hosting of required data, while the publisher Terms restrict automated access and systematic database construction without written permission and the API host's `robots.txt` disallows bots. The user accepts the identified private-use risk from this unresolved API/Terms/robots conflict by supplying `-AcknowledgePrivateUseRisk`. The collector does not establish legal permission. Recurring, scheduled, unattended, or agent-run acquisition remains blocked pending written publisher permission and a separate plan.
+The official API page describes developer access, intermittent polling, and self-hosting of required data, while the publisher Terms restrict automated access and systematic database construction without written permission and the API host's `robots.txt` disallows bots. The user accepts the identified private-use risk from this unresolved API/Terms/robots conflict by supplying `-AcknowledgePrivateUseRisk`. The collector does not establish legal permission. All other agent-run acquisition remains blocked; written publisher permission and a separate plan are required, as they are for recurring, scheduled, or unattended acquisition.
 
 ## Private source-set lock and backup
 
-The collector must block unless the user supplies the explicit risk acknowledgment. It creates a seven-entry source set lock containing `acquisitionMethod: user-run-one-shot-powershell`, exact absolute private roots, and for every row:
+The collector must block unless the user supplies the explicit risk acknowledgment. It creates a seven-entry source set lock containing exactly one of the two allowed method/reference evidence pairs above, exact absolute private roots, and for every row:
 
 - the fixed relative path and official URL above;
 - retrieval date/time and effective date when published;
@@ -81,4 +94,4 @@ Community observations remain provenance/examples only. Official sources alone d
 
 ## Permission gate for broader use
 
-Sharing, release with publisher content, packaging or publication of official/derived content, recurring or agent-run acquisition, commercialization, a public/network card API, bulk art, private-CDN access, or any changed operating scope requires written publisher permission and a separate approved plan before implementation. Artwork requires its own explicit grant for acquisition or distribution. Until then, the only GUI allowance is separately supplied private local images under the limited boundary above. Written permission is a future expansion trigger, not a claim that the narrow user-run one-shot exception is legally cleared.
+Sharing, release with publisher content, packaging or publication of official/derived content, recurring acquisition, all other agent-run acquisition, commercialization, a public/network card API, bulk art, private-CDN access, or any changed operating scope requires written publisher permission and a separate approved plan before implementation. There is no redistribution and no artwork acquisition under this exception; artwork requires its own explicit grant. Until then, the only GUI allowance is separately supplied private local images under the limited boundary above. Written permission is a future expansion trigger, not a claim that either narrow one-shot evidence pair is legally cleared.
