@@ -663,6 +663,16 @@ test('offline production manifest locks the seven non-artwork sources', async ()
   );
   assert.equal(JSON.stringify(manifest).toLowerCase().includes('artwork'), false);
   assert.equal(JSON.stringify(manifest).toLowerCase().includes('image'), false);
+  assert.equal(
+    manifest
+      .filter(({ mediaType }) => mediaType === 'text/html')
+      .every(({ visibleBodyMarkers }) => Array.isArray(visibleBodyMarkers) && visibleBodyMarkers.length > 0),
+    true,
+  );
+  assert.equal(
+    manifest.find(({ relativePath }) => relativePath === 'cards/cards.raw.json')?.expectedCardCount,
+    1100,
+  );
 });
 
 test('caller-supplied non-loopback configuration is rejected before transport', async (context) => {
@@ -755,7 +765,9 @@ test('changelog accepts the official day-first date and rejects impossible dates
       const fixture = await createFixture();
       const authority = createHappyAuthorityServer(
         SOURCE_BYTES['rulebook/rulebook-current.pdf'],
-        Buffer.from(`<!doctype html><h1>Codex Changelog</h1><time>${scenario.text}</time>`),
+        Buffer.from(
+          `<!doctype html><title>Codex Changelog</title><main><h1>Codex Changelog</h1><article><h2>${scenario.text}</h2><p>Rules update</p></article></main>`,
+        ),
       );
       try {
         const port = await listen(authority.server);
@@ -763,7 +775,7 @@ test('changelog accepts the official day-first date and rejects impossible dates
         const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
         if (scenario.expected === null) {
           assert.notEqual(result.code, 0);
-          assert.match(result.stderr, /changelog date is invalid/i);
+          assert.match(result.stderr, /visible changelog entry|valid date/i);
           assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
         } else {
           assert.equal(result.code, 0, result.stderr);

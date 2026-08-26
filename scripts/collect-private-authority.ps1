@@ -36,6 +36,7 @@ function Get-ProductionSourceDescriptors {
             requestUrl = 'https://sorcerytcg.com/constructed'
             mediaType = 'text/html'
             sourceMarker = 'Constructed Format'
+            visibleBodyMarkers = @('Constructed Format', 'Deck Construction')
             effectiveDatePolicy = 'none'
             effectiveDate = $null
             maxBytes = 268435456
@@ -48,6 +49,7 @@ function Get-ProductionSourceDescriptors {
             requestUrl = 'https://curiosa.io/codex'
             mediaType = 'text/html'
             sourceMarker = 'Welcome to the Codex'
+            visibleBodyMarkers = @('Welcome to the Codex', 'Card Rulings')
             effectiveDatePolicy = 'none'
             effectiveDate = $null
             maxBytes = 268435456
@@ -60,6 +62,7 @@ function Get-ProductionSourceDescriptors {
             requestUrl = 'https://curiosa.io/faqs'
             mediaType = 'text/html'
             sourceMarker = 'FAQs'
+            visibleBodyMarkers = @('FAQs', 'Frequently Asked Questions')
             effectiveDatePolicy = 'none'
             effectiveDate = $null
             maxBytes = 268435456
@@ -72,6 +75,7 @@ function Get-ProductionSourceDescriptors {
             requestUrl = 'https://curiosa.io/codex/changelog'
             mediaType = 'text/html'
             sourceMarker = 'Codex Changelog'
+            visibleBodyMarkers = @('Codex Changelog')
             effectiveDatePolicy = 'changelog'
             effectiveDate = $null
             maxBytes = 268435456
@@ -84,6 +88,7 @@ function Get-ProductionSourceDescriptors {
             requestUrl = 'https://sorcerytcg.com/news/sorcery-contested-realm-card-updates-2025'
             mediaType = 'text/html'
             sourceMarker = 'Sorcery: Contested Realm Card Updates 2025'
+            visibleBodyMarkers = @('Sorcery: Contested Realm Card Updates 2025', 'Card Updates')
             effectiveDatePolicy = 'fixed'
             effectiveDate = '2025-11-25'
             maxBytes = 268435456
@@ -96,6 +101,7 @@ function Get-ProductionSourceDescriptors {
             requestUrl = 'https://api.sorcerytcg.com/api/cards'
             mediaType = 'application/json'
             sourceMarker = $null
+            expectedCardCount = 1100
             effectiveDatePolicy = 'none'
             effectiveDate = $null
             maxBytes = 10000000
@@ -144,10 +150,21 @@ function Get-StrictUtf8Text {
     }
 }
 
+function Get-VisibleHtml {
+    param([Parameter(Mandatory)][string]$Html)
+
+    $withoutComments = [Text.RegularExpressions.Regex]::Replace($Html, '(?is)<!--.*?-->', ' ')
+    return [Text.RegularExpressions.Regex]::Replace(
+        $withoutComments,
+        '(?is)<(?<hidden>head|script|style|template|noscript|title)\b[^>]*>.*?</\k<hidden>\s*>',
+        ' '
+    )
+}
+
 function Get-NormalizedVisibleText {
     param([Parameter(Mandatory)][string]$Html)
 
-    $withoutTags = [Text.RegularExpressions.Regex]::Replace($Html, '(?is)<[^>]+>', ' ')
+    $withoutTags = [Text.RegularExpressions.Regex]::Replace((Get-VisibleHtml $Html), '(?is)<[^>]+>', ' ')
     $decoded = [Net.WebUtility]::HtmlDecode($withoutTags)
     return [Text.RegularExpressions.Regex]::Replace($decoded, '\s+', ' ').Trim()
 }
@@ -275,35 +292,105 @@ function Assert-HtmlSource {
     param(
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$ContentType,
-        [Parameter(Mandatory)][string]$Marker
+        [Parameter(Mandatory)][string]$Marker,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$VisibleBodyMarkers
     )
 
     if ($ContentType -ne 'text/html') { throw "Expected text/html content: $Path" }
     $html = Get-StrictUtf8Text $Path
     if ($html -notmatch '(?is)^\s*(?:<!doctype\s+html|<html\b)') { throw "HTML signature is missing: $Path" }
-    if (-not $html.Contains($Marker, [StringComparison]::Ordinal)) { throw "Required source marker is missing: $Marker" }
     if (Test-ChallengePage $html) { throw "Challenge or block page detected: $Path" }
+    if ($VisibleBodyMarkers.Count -eq 0) {
+        if (-not $html.Contains($Marker, [StringComparison]::Ordinal)) { throw 'Required source marker is missing' }
+        return $html
+    }
+    $visible = Get-NormalizedVisibleText $html
+    foreach ($requiredMarker in @($Marker) + @($VisibleBodyMarkers) | Select-Object -Unique) {
+        if ([string]::IsNullOrWhiteSpace($requiredMarker) -or
+            -not $visible.Contains($requiredMarker, [StringComparison]::Ordinal)) {
+            throw 'Required visible source structure is missing'
+        }
+    }
     return $html
+}
+
+function Invoke-BoundedProcess {
+    param(
+        [Parameter(Mandatory)][string]$FileName,
+        [Parameter(Mandatory)][string[]]$ArgumentList,
+        [Parameter(Mandatory)][string]$WorkingDirectory,
+        [Parameter(Mandatory)][int]$TimeoutSeconds,
+        [int]$MaximumOutputCharacters = 4096
+    )
+
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $FileName
+    $start.WorkingDirectory = $WorkingDirectory
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    foreach ($argument in $ArgumentList) { $start.ArgumentList.Add($argument) }
+
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    try {
+        if (-not $process.Start()) { throw 'Subprocess did not start' }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit([int][TimeSpan]::FromSeconds($TimeoutSeconds).TotalMilliseconds)) {
+            try { $process.Kill($true) } catch { }
+            $process.WaitForExit()
+            $stdoutTask.GetAwaiter().GetResult() | Out-Null
+            $stderrTask.GetAwaiter().GetResult() | Out-Null
+            throw 'Subprocess timed out'
+        }
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        return [pscustomobject]@{
+            exitCode = $process.ExitCode
+            stdout = if ($stdout.Length -le $MaximumOutputCharacters) { $stdout } else { $stdout.Substring(0, $MaximumOutputCharacters) }
+            stderr = if ($stderr.Length -le $MaximumOutputCharacters) { $stderr } else { $stderr.Substring(0, $MaximumOutputCharacters) }
+        }
+    }
+    finally {
+        $process.Dispose()
+    }
 }
 
 function Assert-CardJsonSource {
     param(
         [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$ContentType
+        [Parameter(Mandatory)][string]$ContentType,
+        [Parameter(Mandatory)][ValidateRange(1, 2000)][int]$ExpectedCardCount
     )
 
-    if ($ContentType -ne 'application/json') { throw "Expected application/json content: $Path" }
-    $text = Get-StrictUtf8Text $Path
-    try { $cards = $text | ConvertFrom-Json -NoEnumerate }
-    catch { throw "Card source contains malformed JSON: $Path" }
-    if ($cards -isnot [array] -or $cards.Count -eq 0) { throw "Card JSON must have a nonempty array root: $Path" }
-    foreach ($card in $cards) {
-        if ($null -eq $card -or $card -isnot [psobject] -or
-            $null -eq $card.PSObject.Properties['name'] -or
-            $card.name -isnot [string] -or [string]::IsNullOrWhiteSpace($card.name)) {
-            throw "Every card must be an object with a nonempty string name: $Path"
-        }
+    if ($ContentType -ne 'application/json') { throw 'Card source has the wrong media type' }
+    $adapterPath = [IO.Path]::GetFullPath((Join-Path $script:CollectorScriptRoot '../src/authority/official-card-api-adapter.ts'))
+    $adapterUrl = [Uri]::new($adapterPath).AbsoluteUri
+    $bridge = @'
+import { readFile } from 'node:fs/promises';
+try {
+  const { adaptOfficialCardApiSnapshot } = await import(process.argv[3]);
+  const input = JSON.parse(await readFile(process.argv[1], 'utf8'));
+  const snapshot = adaptOfficialCardApiSnapshot(input);
+  if (snapshot.cards.length !== Number(process.argv[2])) process.exitCode = 1;
+} catch {
+  process.exitCode = 1;
+}
+'@
+    try {
+        $result = Invoke-BoundedProcess 'node' @(
+            '--input-type=module',
+            '--eval',
+            $bridge,
+            $Path,
+            [string]$ExpectedCardCount,
+            $adapterUrl
+        ) ([IO.Path]::GetDirectoryName($adapterPath)) 30
     }
+    catch { throw 'Card source validation did not complete' }
+    if ($result.exitCode -ne 0) { throw 'Card source failed strict shape or cardinality validation' }
 }
 
 function Get-ChangelogDate {
@@ -312,29 +399,37 @@ function Get-ChangelogDate {
         [Parameter(Mandatory)][string]$Marker
     )
 
-    $markerIndex = $Html.IndexOf($Marker, [StringComparison]::Ordinal)
+    $visibleHtml = Get-VisibleHtml $Html
+    $markerIndex = $visibleHtml.IndexOf($Marker, [StringComparison]::Ordinal)
     if ($markerIndex -lt 0) { throw "Changelog marker is missing: $Marker" }
-    $visible = Get-NormalizedVisibleText $Html.Substring($markerIndex)
-    $match = [Text.RegularExpressions.Regex]::Match(
-        $visible,
+    $entryMatch = [Text.RegularExpressions.Regex]::Match(
+        $visibleHtml.Substring($markerIndex),
+        '(?is)<article\b[^>]*>(?<entry>.*?)</article\s*>'
+    )
+    if (-not $entryMatch.Success) { throw 'The first visible changelog entry is missing' }
+    $visibleEntry = Get-NormalizedVisibleText $entryMatch.Groups['entry'].Value
+    $matches = [Text.RegularExpressions.Regex]::Matches(
+        $visibleEntry,
         '\b(?<date>\d{4}-\d{2}-\d{2}|(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4}|\d{1,2} (?:January|February|March|April|May|June|July|August|September|October|November|December) \d{4})\b',
         [Text.RegularExpressions.RegexOptions]::CultureInvariant
     )
-    if (-not $match.Success) { throw 'The first visible changelog date is missing or invalid' }
-    $dateText = $match.Groups['date'].Value
-    $format = if ($dateText -match '^\d{4}-') { 'yyyy-MM-dd' }
-        elseif ($dateText -match '^\d') { 'd MMMM yyyy' }
-        else { 'MMMM d, yyyy' }
-    try {
-        $date = [DateTime]::ParseExact(
+    $dates = [Collections.Generic.List[DateTime]]::new()
+    foreach ($match in $matches) {
+        $dateText = $match.Groups['date'].Value
+        $format = if ($dateText -match '^\d{4}-') { 'yyyy-MM-dd' }
+            elseif ($dateText -match '^\d') { 'd MMMM yyyy' }
+            else { 'MMMM d, yyyy' }
+        $parsed = [DateTime]::MinValue
+        if ([DateTime]::TryParseExact(
             $dateText,
             $format,
             [Globalization.CultureInfo]::InvariantCulture,
-            [Globalization.DateTimeStyles]::None
-        )
+            [Globalization.DateTimeStyles]::None,
+            [ref]$parsed
+        )) { $dates.Add($parsed) }
     }
-    catch { throw 'The first visible changelog date is invalid' }
-    return $date.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+    if ($dates.Count -ne 1) { throw 'The first visible changelog entry must contain exactly one valid date' }
+    return $dates[0].ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
 }
 
 function Receive-Rulebook {
@@ -350,7 +445,7 @@ function Receive-Rulebook {
     $releasePath = "$DestinationPath.release-page"
     $release = Invoke-BoundedHttpToFile $Client ([Uri]$Descriptor.requestUrl) @($Descriptor.allowedHosts) $releasePath ([long]$Descriptor.maxBytes) $HeaderTimeoutSeconds $BodyTimeoutSeconds $LoopbackOnly
     try {
-        $html = Assert-HtmlSource $releasePath $release.contentType ([string]$Descriptor.sourceMarker)
+        $html = Assert-HtmlSource $releasePath $release.contentType ([string]$Descriptor.sourceMarker) @()
         $visible = Get-NormalizedVisibleText $html
         $releaseDate = [DateTime]::ParseExact([string]$Descriptor.effectiveDate, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
         $visibleReleaseDate = $releaseDate.ToString('dd MMM yyyy', [Globalization.CultureInfo]::InvariantCulture)
@@ -454,10 +549,10 @@ function Invoke-PrivateAuthorityTransport {
             else {
                 $transfer = Invoke-BoundedHttpToFile $client ([Uri]$descriptor.requestUrl) @($descriptor.allowedRedirectHosts) $destination ([long]$descriptor.maxBytes) $HeaderTimeoutSeconds $BodyTimeoutSeconds $LoopbackOnly
                 if ([string]$descriptor.mediaType -eq 'text/html') {
-                    $html = Assert-HtmlSource $destination $transfer.contentType ([string]$descriptor.sourceMarker)
+                    $html = Assert-HtmlSource $destination $transfer.contentType ([string]$descriptor.sourceMarker) @($descriptor.visibleBodyMarkers)
                 }
                 elseif ([string]$descriptor.mediaType -eq 'application/json') {
-                    Assert-CardJsonSource $destination $transfer.contentType
+                    Assert-CardJsonSource $destination $transfer.contentType ([int]$descriptor.expectedCardCount)
                 }
                 else { throw "Unsupported source media type: $($descriptor.mediaType)" }
             }
@@ -505,6 +600,14 @@ function Assert-LoopbackDescriptors {
         throw 'Loopback test descriptors must use exactly the seven locked source paths'
     }
     foreach ($descriptor in $Descriptors) {
+        if ([string]$descriptor.mediaType -eq 'text/html' -and
+            @($descriptor.visibleBodyMarkers).Count -eq 0) {
+            throw 'Loopback HTML descriptors require visible body markers'
+        }
+        if ([string]$descriptor.mediaType -eq 'application/json' -and
+            ([int]$descriptor.expectedCardCount -lt 1 -or [int]$descriptor.expectedCardCount -gt 2000)) {
+            throw 'Loopback card descriptor requires a bounded expected count'
+        }
         $hostSets = @(@($descriptor.allowedHosts), @($descriptor.allowedRedirectHosts))
         if ($null -ne $descriptor.PSObject.Properties['rulebookLocatorHosts']) { $hostSets += ,@($descriptor.rulebookLocatorHosts) }
         foreach ($hostSet in $hostSets) {
