@@ -193,6 +193,7 @@ async function invokeLoopback(
     maxTotalBytes?: number;
     faultPoint?: string;
     userAuthorizationReference?: string;
+    acknowledgePrivateUseRisk?: boolean;
   }> = {},
 ): Promise<ProcessResult> {
   const configurationPath = join(fixture.sandbox, `configuration-${randomUUID()}.json`);
@@ -206,12 +207,13 @@ async function invokeLoopback(
       maxTotalBytes: options.maxTotalBytes ?? 131_072,
       faultPoint: options.faultPoint ?? null,
       userAuthorizationReference: options.userAuthorizationReference ?? null,
+      acknowledgePrivateUseRisk: options.acknowledgePrivateUseRisk ?? true,
     }),
   );
   const command = [
     '. $env:SORCERY_COLLECTOR_SCRIPT',
     '$c = Get-Content -Raw -LiteralPath $env:SORCERY_COLLECTOR_CONFIG | ConvertFrom-Json -Depth 32',
-    'Invoke-PrivateAuthorityCollectionForLoopbackTest -RepositoryRoot $c.repositoryRoot -PrimaryRoot $c.primaryRoot -BackupRoot $c.backupRoot -LockPath $c.lockPath -Descriptors $c.descriptors -HeaderTimeoutSeconds $c.headerTimeoutSeconds -BodyTimeoutSeconds $c.bodyTimeoutSeconds -MaxTotalBytes $c.maxTotalBytes -FaultPoint $c.faultPoint -UserAuthorizationReference $c.userAuthorizationReference | ConvertTo-Json -Depth 32 -Compress',
+    'Invoke-PrivateAuthorityCollectionForLoopbackTest -RepositoryRoot $c.repositoryRoot -PrimaryRoot $c.primaryRoot -BackupRoot $c.backupRoot -LockPath $c.lockPath -Descriptors $c.descriptors -HeaderTimeoutSeconds $c.headerTimeoutSeconds -BodyTimeoutSeconds $c.bodyTimeoutSeconds -MaxTotalBytes $c.maxTotalBytes -AcknowledgePrivateUseRisk:$c.acknowledgePrivateUseRisk -FaultPoint $c.faultPoint -UserAuthorizationReference $c.userAuthorizationReference | ConvertTo-Json -Depth 32 -Compress',
   ].join('; ');
   return runPwsh(['-Command', command], {
     SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH,
@@ -317,7 +319,11 @@ test('dot-sourcing exposes only the closed collector surface and forwards author
         'Invoke-PrivateAuthorityCollectionForLoopbackTest',
       ],
       signatures: {
-        'Invoke-PrivateAuthorityCollection': ['BackupRoot', 'UserAuthorizationReference'],
+        'Invoke-PrivateAuthorityCollection': [
+          'BackupRoot',
+          'AcknowledgePrivateUseRisk',
+          'UserAuthorizationReference',
+        ],
         'Invoke-PrivateAuthorityCollectionForLoopbackTest': [
           'RepositoryRoot',
           'PrimaryRoot',
@@ -327,6 +333,7 @@ test('dot-sourcing exposes only the closed collector surface and forwards author
           'HeaderTimeoutSeconds',
           'BodyTimeoutSeconds',
           'MaxTotalBytes',
+          'AcknowledgePrivateUseRisk',
           'FaultPoint',
           'UserAuthorizationReference',
         ],
@@ -339,6 +346,7 @@ test('dot-sourcing exposes only the closed collector surface and forwards author
           'HeaderTimeoutSeconds',
           'BodyTimeoutSeconds',
           'MaxTotalBytes',
+          'AcknowledgePrivateUseRisk',
           'LoopbackOnly',
           'FaultPoint',
           'UserAuthorizationReference',
@@ -364,6 +372,56 @@ test('direct wrapper rejects missing backup or acknowledgment before filesystem 
     assert.match(noAcknowledgment.stderr, /AcknowledgePrivateUseRisk/);
     assert.deepEqual(await readdir(fixture.sandbox), ['repository']);
   } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
+test('every exported collection path requires acknowledgment before authorization or transport', async () => {
+  const fixture = await createFixture();
+  const authority = createHappyAuthorityServer();
+  try {
+    const exported = await runPwsh(
+      [
+        '-Command',
+        '. $env:SORCERY_COLLECTOR_SCRIPT; Invoke-PrivateAuthorityCollection -BackupRoot relative -UserAuthorizationReference unknown',
+      ],
+      { SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH },
+    );
+    assert.notEqual(exported.code, 0);
+    assert.match(exported.stderr, /AcknowledgePrivateUseRisk/);
+
+    const port = await listen(authority.server);
+    authority.setPort(port);
+    const descriptors = testDescriptors(`http://127.0.0.1:${port}`);
+    const missing = await invokeLoopback(fixture, descriptors, {
+      acknowledgePrivateUseRisk: false,
+      userAuthorizationReference: 'quick-260825-mhh-retry-1',
+    });
+    assert.notEqual(missing.code, 0);
+    assert.match(missing.stderr, /AcknowledgePrivateUseRisk/);
+    assert.equal(authority.requests.length, 0);
+    assert.equal(await stat(fixture.retryAuthorizationPath).then(() => true, () => false), false);
+    assert.equal(await stat(fixture.primaryRoot).then(() => true, () => false), false);
+    assert.equal(await stat(fixture.backupRoot).then(() => true, () => false), false);
+    assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
+
+    const acknowledged = await invokeLoopback(fixture, descriptors, {
+      userAuthorizationReference: 'quick-260825-mhh-retry-1',
+    });
+    assert.equal(acknowledged.code, 0, acknowledged.stderr);
+    assert.ok(authority.requests.length > 0);
+    const lock = JSON.parse(await readFile(fixture.lockPath, 'utf8')) as Record<string, unknown>;
+    assert.equal(lock.authorizationReference, 'quick-260825-mhh-retry-1');
+    assert.deepEqual(lock.operatingAcknowledgment, {
+      scope: 'private-local-noncommercial',
+      noRedistributionReleaseHostingUploadOrArtwork: true,
+      apiTermsRobotsConflictAndPrivateUseRiskAccepted: true,
+      establishesLegalPermission: false,
+      stopOnBlockedStatusCaptchaOrPublisherObjection: true,
+      retryOrEvasion: false,
+    });
+  } finally {
+    await close(authority.server);
     await cleanupFixture(fixture);
   }
 });

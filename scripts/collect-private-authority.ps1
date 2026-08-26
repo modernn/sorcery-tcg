@@ -798,11 +798,13 @@ function Invoke-PrivateAuthorityCollectionCore {
         [Parameter(Mandatory)][int]$HeaderTimeoutSeconds,
         [Parameter(Mandatory)][int]$BodyTimeoutSeconds,
         [Parameter(Mandatory)][long]$MaxTotalBytes,
+        [Parameter(Mandatory)][bool]$AcknowledgePrivateUseRisk,
         [Parameter(Mandatory)][bool]$LoopbackOnly,
         [AllowNull()][string]$FaultPoint,
         [AllowNull()][string]$UserAuthorizationReference
     )
 
+    if (-not $AcknowledgePrivateUseRisk) { throw 'AcknowledgePrivateUseRisk is required before collection.' }
     if ($LoopbackOnly) {
         Assert-LoopbackDescriptors $Descriptors
     }
@@ -858,7 +860,7 @@ function Invoke-PrivateAuthorityCollectionCore {
             operatingAcknowledgment = [ordered]@{
                 scope = 'private-local-noncommercial'
                 noRedistributionReleaseHostingUploadOrArtwork = $true
-                apiTermsRobotsConflictAndPrivateUseRiskAccepted = $true
+                apiTermsRobotsConflictAndPrivateUseRiskAccepted = $AcknowledgePrivateUseRisk
                 establishesLegalPermission = $false
                 stopOnBlockedStatusCaptchaOrPublisherObjection = $true
                 retryOrEvasion = $false
@@ -926,21 +928,23 @@ function Invoke-PrivateAuthorityCollectionForLoopbackTest {
         [Parameter(Mandatory)][int]$HeaderTimeoutSeconds,
         [Parameter(Mandatory)][int]$BodyTimeoutSeconds,
         [Parameter(Mandatory)][long]$MaxTotalBytes,
+        [switch]$AcknowledgePrivateUseRisk,
         [AllowNull()][string]$FaultPoint,
         [AllowNull()][string]$UserAuthorizationReference
     )
 
-    return Invoke-PrivateAuthorityCollectionCore -RepositoryRoot $RepositoryRoot -PrimaryRoot $PrimaryRoot -BackupRoot $BackupRoot -LockPath $LockPath -Descriptors $Descriptors -HeaderTimeoutSeconds $HeaderTimeoutSeconds -BodyTimeoutSeconds $BodyTimeoutSeconds -MaxTotalBytes $MaxTotalBytes -LoopbackOnly $true -FaultPoint $FaultPoint -UserAuthorizationReference $UserAuthorizationReference
+    return Invoke-PrivateAuthorityCollectionCore -RepositoryRoot $RepositoryRoot -PrimaryRoot $PrimaryRoot -BackupRoot $BackupRoot -LockPath $LockPath -Descriptors $Descriptors -HeaderTimeoutSeconds $HeaderTimeoutSeconds -BodyTimeoutSeconds $BodyTimeoutSeconds -MaxTotalBytes $MaxTotalBytes -AcknowledgePrivateUseRisk:$AcknowledgePrivateUseRisk -LoopbackOnly $true -FaultPoint $FaultPoint -UserAuthorizationReference $UserAuthorizationReference
 }
 
 function Invoke-PrivateAuthorityCollection {
     param(
         [Parameter(Mandatory)][string]$BackupRoot,
+        [switch]$AcknowledgePrivateUseRisk,
         [AllowNull()][string]$UserAuthorizationReference
     )
 
     $configuration = Get-ProductionCollectionConfiguration
-    return Invoke-PrivateAuthorityCollectionCore -RepositoryRoot $configuration.repositoryRoot -PrimaryRoot $configuration.primaryRoot -BackupRoot $BackupRoot -LockPath $configuration.lockPath -Descriptors @($configuration.descriptors) -HeaderTimeoutSeconds $configuration.headerTimeoutSeconds -BodyTimeoutSeconds $configuration.bodyTimeoutSeconds -MaxTotalBytes $configuration.maxTotalBytes -LoopbackOnly $false -FaultPoint $null -UserAuthorizationReference $UserAuthorizationReference
+    return Invoke-PrivateAuthorityCollectionCore -RepositoryRoot $configuration.repositoryRoot -PrimaryRoot $configuration.primaryRoot -BackupRoot $BackupRoot -LockPath $configuration.lockPath -Descriptors @($configuration.descriptors) -HeaderTimeoutSeconds $configuration.headerTimeoutSeconds -BodyTimeoutSeconds $configuration.bodyTimeoutSeconds -MaxTotalBytes $configuration.maxTotalBytes -AcknowledgePrivateUseRisk:$AcknowledgePrivateUseRisk -LoopbackOnly $false -FaultPoint $null -UserAuthorizationReference $UserAuthorizationReference
 }
 
 Export-ModuleMember -Function @(
@@ -956,5 +960,5 @@ Remove-Variable -Name collectorModule
 if ($MyInvocation.InvocationName -ne '.') {
     if ([string]::IsNullOrWhiteSpace($BackupRoot)) { throw 'BackupRoot is required and must be an absolute path outside the repository.' }
     if (-not $AcknowledgePrivateUseRisk) { throw 'AcknowledgePrivateUseRisk is required before collection.' }
-    Invoke-PrivateAuthorityCollection -BackupRoot $BackupRoot -UserAuthorizationReference $UserAuthorizationReference
+    Invoke-PrivateAuthorityCollection -BackupRoot $BackupRoot -AcknowledgePrivateUseRisk:$AcknowledgePrivateUseRisk -UserAuthorizationReference $UserAuthorizationReference
 }
