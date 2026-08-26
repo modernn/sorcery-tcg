@@ -827,7 +827,9 @@ function Invoke-PrivateSourceVerifier {
         [Parameter(Mandatory)][string]$BackupRoot,
         [Parameter(Mandatory)][object[]]$Entries,
         [Parameter(Mandatory)][string]$DraftPath,
-        [switch]$ForceBridgeFailure
+        [Parameter(Mandatory)][ValidateRange(1, 30)][int]$TimeoutSeconds,
+        [switch]$ForceBridgeFailure,
+        [switch]$ForceBridgeHang
     )
 
     Write-NewUtf8Json $DraftPath ([pscustomobject]@{
@@ -836,33 +838,34 @@ function Invoke-PrivateSourceVerifier {
         backupRoot = $BackupRoot
         entries = $Entries
     })
-    $bridgeSource = @'
+    $bridgeSource = if ($ForceBridgeHang) { @'
+process.stderr.write('CANARY_VERIFIER_PIPE'.repeat(65536));
+setInterval(() => {}, 1000);
+'@ } else { @'
 import { readFile } from 'node:fs/promises';
 import { verifyPrivateSourceSet } from './src/authority/private-source-set.ts';
 const input = JSON.parse(await readFile(process.argv[1], 'utf8'));
 const result = await verifyPrivateSourceSet(input);
 process.stdout.write(JSON.stringify(result));
 '@
-    $startInfo = [Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = 'node'
-    $startInfo.WorkingDirectory = [IO.Path]::GetFullPath((Join-Path $script:CollectorScriptRoot '..'))
-    $startInfo.UseShellExecute = $false
-    $startInfo.CreateNoWindow = $true
-    $startInfo.RedirectStandardOutput = $true
-    $startInfo.RedirectStandardError = $true
-    $startInfo.ArgumentList.Add('--input-type=module')
-    $startInfo.ArgumentList.Add('--eval')
-    $startInfo.ArgumentList.Add($bridgeSource)
+    }
     $verifierInputPath = if ($ForceBridgeFailure) { "$DraftPath.missing" } else { $DraftPath }
-    $startInfo.ArgumentList.Add($verifierInputPath)
     try {
-        $process = [Diagnostics.Process]::Start($startInfo)
-        $standardOutput = $process.StandardOutput.ReadToEnd()
-        $standardError = $process.StandardError.ReadToEnd()
-        $process.WaitForExit()
-        if ($process.ExitCode -ne 0) { throw "Private source verifier failed: $standardError" }
-        try { return $standardOutput | ConvertFrom-Json -Depth 32 -DateKind String }
-        catch { throw "Private source verifier returned invalid JSON: $standardOutput" }
+        try {
+            $result = Invoke-BoundedProcess 'node' @(
+                '--input-type=module',
+                '--eval',
+                $bridgeSource,
+                $verifierInputPath
+            ) ([IO.Path]::GetFullPath((Join-Path $script:CollectorScriptRoot '..'))) $TimeoutSeconds
+        }
+        catch {
+            if ($_.Exception.Message -eq 'Subprocess timed out') { throw 'Private source verifier timed out' }
+            throw 'Private source verifier could not run'
+        }
+        if ($result.exitCode -ne 0) { throw 'Private source verifier failed' }
+        try { return $result.stdout | ConvertFrom-Json -Depth 32 -DateKind String }
+        catch { throw 'Private source verifier returned invalid output' }
     }
     finally {
         if (Test-Path -LiteralPath $DraftPath) { [IO.File]::Delete($DraftPath) }
@@ -924,13 +927,15 @@ function Invoke-PrivateAuthorityCollectionCore {
     $draftPath = "$($paths.lockPath).verifier-$runId.json"
     $primaryPublished = $false
     $backupPublished = $false
+    $verifierTimeoutSeconds = if ($LoopbackOnly -and $FaultPoint -eq 'verifier-hang') { 1 } else { 30 }
     [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($paths.primaryRoot)) | Out-Null
     [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($paths.backupRoot)) | Out-Null
     [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($paths.lockPath)) | Out-Null
     try {
         $transport = Invoke-PrivateAuthorityTransport $primaryStage $Descriptors $HeaderTimeoutSeconds $BodyTimeoutSeconds $MaxTotalBytes $LoopbackOnly
         Copy-SourceTree $primaryStage $backupStage $Descriptors
-        $staged = Invoke-PrivateSourceVerifier $paths.repositoryRoot $primaryStage $backupStage @($transport.entries) $draftPath
+        $forceVerifierHang = $LoopbackOnly -and $FaultPoint -eq 'verifier-hang'
+        $staged = Invoke-PrivateSourceVerifier $paths.repositoryRoot $primaryStage $backupStage @($transport.entries) $draftPath $verifierTimeoutSeconds -ForceBridgeHang:$forceVerifierHang
         Invoke-TestFault $FaultPoint 'after-staged-verification'
 
         [IO.Directory]::Move($backupStage, $paths.backupRoot)
@@ -940,7 +945,7 @@ function Invoke-PrivateAuthorityCollectionCore {
         $primaryPublished = $true
         Invoke-TestFault $FaultPoint 'after-primary-move'
         $forceVerifierFailure = $LoopbackOnly -and $FaultPoint -eq 'during-final-verifier'
-        $final = Invoke-PrivateSourceVerifier $paths.repositoryRoot $paths.primaryRoot $paths.backupRoot @($transport.entries) $draftPath -ForceBridgeFailure:$forceVerifierFailure
+        $final = Invoke-PrivateSourceVerifier $paths.repositoryRoot $paths.primaryRoot $paths.backupRoot @($transport.entries) $draftPath $verifierTimeoutSeconds -ForceBridgeFailure:$forceVerifierFailure
         Assert-SameVerification $staged $final
 
         $rulebookEntry = @($final.entries | Where-Object { $_.relativePath -eq 'rulebook/rulebook-current.pdf' })[0]
@@ -982,7 +987,7 @@ function Invoke-PrivateAuthorityCollectionCore {
                 ($null -eq $candidateAuthorization -or $candidate.authorizationReference -cne $acquisition.authorizationReference))) {
             throw 'Lock candidate has an invalid acquisition method and authorization reference pair'
         }
-        $candidateVerification = Invoke-PrivateSourceVerifier $paths.repositoryRoot $candidate.primaryRoot $candidate.backupRoot @($candidate.entries) $draftPath
+        $candidateVerification = Invoke-PrivateSourceVerifier $paths.repositoryRoot $candidate.primaryRoot $candidate.backupRoot @($candidate.entries) $draftPath $verifierTimeoutSeconds
         Assert-SameVerification $final $candidateVerification
         if ($candidate.sourceSetRootHash -ne $candidateVerification.sourceSetRootHash) { throw 'Lock candidate root hash does not match final verification' }
         Invoke-TestFault $FaultPoint 'before-lock-move'
@@ -1046,8 +1051,11 @@ function Invoke-PrivateAuthorityCollection {
         [AllowNull()][string]$UserAuthorizationReference
     )
 
-    $configuration = Get-ProductionCollectionConfiguration
-    return Invoke-PrivateAuthorityCollectionCore -RepositoryRoot $configuration.repositoryRoot -PrimaryRoot $configuration.primaryRoot -BackupRoot $BackupRoot -LockPath $configuration.lockPath -Descriptors @($configuration.descriptors) -HeaderTimeoutSeconds $configuration.headerTimeoutSeconds -BodyTimeoutSeconds $configuration.bodyTimeoutSeconds -MaxTotalBytes $configuration.maxTotalBytes -AcknowledgePrivateUseRisk:$AcknowledgePrivateUseRisk -LoopbackOnly $false -FaultPoint $null -UserAuthorizationReference $UserAuthorizationReference
+    try {
+        $configuration = Get-ProductionCollectionConfiguration
+        $null = Invoke-PrivateAuthorityCollectionCore -RepositoryRoot $configuration.repositoryRoot -PrimaryRoot $configuration.primaryRoot -BackupRoot $BackupRoot -LockPath $configuration.lockPath -Descriptors @($configuration.descriptors) -HeaderTimeoutSeconds $configuration.headerTimeoutSeconds -BodyTimeoutSeconds $configuration.bodyTimeoutSeconds -MaxTotalBytes $configuration.maxTotalBytes -AcknowledgePrivateUseRisk:$AcknowledgePrivateUseRisk -LoopbackOnly $false -FaultPoint $null -UserAuthorizationReference $UserAuthorizationReference
+    }
+    catch { throw 'Private authority collection failed.' }
 }
 
 Export-ModuleMember -Function @(
@@ -1061,7 +1069,14 @@ Import-Module -ModuleInfo $collectorModule -Scope Local
 Remove-Variable -Name collectorModule
 
 if ($MyInvocation.InvocationName -ne '.') {
-    if ([string]::IsNullOrWhiteSpace($BackupRoot)) { throw 'BackupRoot is required and must be an absolute path outside the repository.' }
-    if (-not $AcknowledgePrivateUseRisk) { throw 'AcknowledgePrivateUseRisk is required before collection.' }
-    Invoke-PrivateAuthorityCollection -BackupRoot $BackupRoot -AcknowledgePrivateUseRisk:$AcknowledgePrivateUseRisk -UserAuthorizationReference $UserAuthorizationReference
+    try {
+        if ([string]::IsNullOrWhiteSpace($BackupRoot)) { throw 'Missing backup root' }
+        if (-not $AcknowledgePrivateUseRisk) { throw 'Missing private-use acknowledgment' }
+        $null = Invoke-PrivateAuthorityCollection -BackupRoot $BackupRoot -AcknowledgePrivateUseRisk:$AcknowledgePrivateUseRisk -UserAuthorizationReference $UserAuthorizationReference
+        Write-Output 'Private authority collection completed.'
+    }
+    catch {
+        [Console]::Error.WriteLine('Private authority collection failed.')
+        exit 1
+    }
 }

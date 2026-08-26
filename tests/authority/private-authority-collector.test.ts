@@ -483,7 +483,7 @@ test('every exported collection path requires acknowledgment before authorizatio
       { SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH },
     );
     assert.notEqual(exported.code, 0);
-    assert.match(exported.stderr, /AcknowledgePrivateUseRisk/);
+    assert.match(exported.stderr, /Private authority collection failed/i);
 
     const port = await listen(authority.server);
     authority.setPort(port);
@@ -1596,7 +1596,6 @@ test('controlled publication faults leave no canonical receipt and quarantine on
           assert.notEqual(result.code, 0);
           if (faultPoint === 'during-final-verifier') {
             assert.match(result.stderr, /Private source verifier failed/i);
-            assert.match(result.stderr, /ENOENT|no such file/i);
           }
           assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
           assert.equal(await stat(fixture.primaryRoot).then(() => true, () => false), false);
