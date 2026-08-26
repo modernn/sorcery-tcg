@@ -206,7 +206,6 @@ function unsupportedResolution(
 }
 
 function precedenceRank(entry: AuthorityPrecedenceRecord, scope: string | null): number {
-  if (entry.supersedes.length > 0) return 100;
   if (scope !== null && entry.scope === scope) {
     if (scope.startsWith('card:') && (entry.authorityKind === 'card-update' || entry.authorityKind === 'card-data')) {
       return 90;
@@ -217,6 +216,12 @@ function precedenceRank(entry: AuthorityPrecedenceRecord, scope: string | null):
   if (entry.authorityKind === 'card-update' || entry.authorityKind === 'card-data') return 60;
   if (entry.authorityKind === 'codex' || entry.authorityKind === 'faq') return 50;
   return 40;
+}
+
+function isStrictDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
 export function resolveAuthorityPrecedence(
@@ -232,12 +237,16 @@ export function resolveAuthorityPrecedence(
   if (new Set(official.map((entry) => entry.topic)).size > 1) {
     return unsupportedResolution('mixed-topic', official, [], provenance);
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveAt)) {
+  if (!isStrictDate(effectiveAt)) {
     return unsupportedResolution('unclear-date', official, [], provenance);
   }
 
   const scoped = official.filter((entry) => entry.scope === null || entry.scope === scope);
-  if (scoped.some((entry) => entry.source.effectiveDate === null)) {
+  if (
+    scoped.some(
+      (entry) => entry.source.effectiveDate === null || !isStrictDate(entry.source.effectiveDate),
+    )
+  ) {
     return unsupportedResolution('unclear-date', scoped, [], provenance);
   }
   if (
@@ -259,6 +268,33 @@ export function resolveAuthorityPrecedence(
   if (applicable.some((entry) => entry.supersedes.some((sourceId) => !applicableIds.has(sourceId)))) {
     return unsupportedResolution('broken-supersession', applicable, [], provenance);
   }
+  const supersessionCount = applicable.reduce((count, entry) => count + entry.supersedes.length, 0);
+  if (supersessionCount > MAX_AUTHORITY_REFERENCES || applicableIds.size !== applicable.length) {
+    return unsupportedResolution('ambiguous-supersession', applicable, [], provenance);
+  }
+
+  const applicableById = new Map(applicable.map((entry) => [entry.source.sourceId, entry]));
+  const supersessionState = new Map<string, 0 | 1 | 2>();
+  let invalidSupersessionGraph = false;
+  function visitSupersession(entry: AuthorityPrecedenceRecord, depth: number): void {
+    supersessionState.set(entry.source.sourceId, 1);
+    for (const targetId of entry.supersedes) {
+      const target = applicableById.get(targetId)!;
+      if (supersessionState.get(targetId) === 1 || depth >= MAX_AUTHORITY_GRAPH_DEPTH) {
+        invalidSupersessionGraph = true;
+        continue;
+      }
+      if (supersessionState.get(targetId) !== 2) visitSupersession(target, depth + 1);
+    }
+    supersessionState.set(entry.source.sourceId, 2);
+  }
+  for (const entry of applicable) {
+    if (supersessionState.get(entry.source.sourceId) === undefined) visitSupersession(entry, 0);
+  }
+  if (invalidSupersessionGraph) {
+    return unsupportedResolution('ambiguous-supersession', applicable, [], provenance);
+  }
+
   const supersededIds = new Set(applicable.flatMap((entry) => entry.supersedes));
   const viable = applicable.filter((entry) => !supersededIds.has(entry.source.sourceId));
   if (viable.length === 0) {
