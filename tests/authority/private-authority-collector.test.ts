@@ -48,6 +48,7 @@ type Fixture = Readonly<{
   backupRoot: string;
   lockPath: string;
   authorizationPath: string;
+  retryAuthorizationPath: string;
 }>;
 type ProcessResult = Readonly<{ code: number | null; stdout: string; stderr: string }>;
 
@@ -87,8 +88,23 @@ async function createFixture(): Promise<Fixture> {
     'authorizations',
     'quick-260825-mhh.consumed.json',
   );
+  const retryAuthorizationPath = join(
+    repositoryRoot,
+    '.local',
+    'authority',
+    'authorizations',
+    'quick-260825-mhh-retry-1.consumed.json',
+  );
   await mkdir(repositoryRoot, { recursive: true });
-  return { sandbox, repositoryRoot, primaryRoot, backupRoot, lockPath, authorizationPath };
+  return {
+    sandbox,
+    repositoryRoot,
+    primaryRoot,
+    backupRoot,
+    lockPath,
+    authorizationPath,
+    retryAuthorizationPath,
+  };
 }
 
 async function cleanupFixture(fixture: Fixture): Promise<void> {
@@ -352,7 +368,7 @@ test('direct wrapper rejects missing backup or acknowledgment before filesystem 
   }
 });
 
-test('only the exact agent authorization is consumed durably before transport', async () => {
+test('only the two exact agent authorizations are consumed independently before transport', async () => {
   const fixture = await createFixture();
   const authority = createHappyAuthorityServer();
   try {
@@ -360,7 +376,16 @@ test('only the exact agent authorization is consumed durably before transport', 
     authority.setPort(port);
     const descriptors = testDescriptors(`http://127.0.0.1:${port}`);
 
-    for (const reference of ['unknown', ' quick-260825-mhh', 'quick-260825-mhh ', 'QUICK-260825-MHH']) {
+    for (const reference of [
+      'unknown',
+      ' quick-260825-mhh',
+      'quick-260825-mhh ',
+      'QUICK-260825-MHH',
+      ' quick-260825-mhh-retry-1',
+      'quick-260825-mhh-retry-1 ',
+      'QUICK-260825-MHH-RETRY-1',
+      'quick-260825-mhh-retry-2',
+    ]) {
       const rejected = await invokeLoopback(fixture, descriptors, {
         userAuthorizationReference: reference,
       });
@@ -400,6 +425,34 @@ test('only the exact agent authorization is consumed durably before transport', 
     assert.notEqual(retried.code, 0);
     assert.match(retried.stderr, /authorization.*consumed|already exists/i);
     assert.equal(authority.requests.length, 0);
+    assert.equal(await readFile(fixture.authorizationPath, 'utf8'), recordBytes);
+
+    const retryConsumed = await invokeLoopback(fixture, descriptors, {
+      faultPoint: 'after-authorization-consumption',
+      userAuthorizationReference: 'quick-260825-mhh-retry-1',
+    });
+    assert.notEqual(retryConsumed.code, 0);
+    assert.match(retryConsumed.stderr, /after-authorization-consumption/i);
+    assert.equal(authority.requests.length, 0);
+
+    const retryRecordBytes = await readFile(fixture.retryAuthorizationPath, 'utf8');
+    const retryRecord = JSON.parse(retryRecordBytes) as Record<string, unknown>;
+    assert.deepEqual(Object.keys(retryRecord).sort(), Object.keys(record).sort());
+    assert.equal(retryRecord.schemaVersion, 1);
+    assert.equal(retryRecord.revisionId, 'official-2026-08-20');
+    assert.equal(retryRecord.acquisitionMethod, 'user-authorized-agent-run-one-shot-powershell');
+    assert.equal(retryRecord.authorizationReference, 'quick-260825-mhh-retry-1');
+    assert.match(String(retryRecord.consumedAt), /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    assert.doesNotMatch(retryRecordBytes, /https?:|primaryRoot|backupRoot|locator/i);
+    assert.equal(await readFile(fixture.authorizationPath, 'utf8'), recordBytes);
+
+    const retryBlocked = await invokeLoopback(fixture, descriptors, {
+      userAuthorizationReference: 'quick-260825-mhh-retry-1',
+    });
+    assert.notEqual(retryBlocked.code, 0);
+    assert.match(retryBlocked.stderr, /authorization.*consumed|already exists/i);
+    assert.equal(authority.requests.length, 0);
+    assert.equal(await readFile(fixture.retryAuthorizationPath, 'utf8'), retryRecordBytes);
     assert.equal(await readFile(fixture.authorizationPath, 'utf8'), recordBytes);
   } finally {
     await close(authority.server);

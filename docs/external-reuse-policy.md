@@ -2,12 +2,13 @@
 
 This policy implements D-08, D-09, and D-11 for the current private, local, noncommercial Sorcery Simulator. It is an operating boundary, not legal advice or a claim of legal certainty. The narrow Phase 1 exception below records the user's risk acceptance; it does not establish legal permission. Any broader use requires written publisher permission and a separate approved plan.
 
-## Exactly two Phase 1 acquisition evidence pairs
+## Exactly three Phase 1 acquisition evidence pairs
 
-The fixed one-shot collector accepts exactly two acquisition method/reference pairs; no other method/reference pair is valid:
+The fixed one-shot collector accepts exactly three acquisition method/reference pairs; no other method/reference pair is valid:
 
 - `acquisitionMethod: user-run-one-shot-powershell` with `authorizationReference` absent.
-- `acquisitionMethod: user-authorized-agent-run-one-shot-powershell` with `authorizationReference: quick-260825-mhh` plus durable ignored `.local/authority/authorizations/quick-260825-mhh.consumed.json`.
+- `acquisitionMethod: user-authorized-agent-run-one-shot-powershell` with `authorizationReference: quick-260825-mhh` plus durable ignored `.local/authority/authorizations/quick-260825-mhh.consumed.json`; this was the initial 2026-08-25 attempt and remains consumed forever.
+- `acquisitionMethod: user-authorized-agent-run-one-shot-powershell` with `authorizationReference: quick-260825-mhh-retry-1` plus its distinct durable ignored `.local/authority/authorizations/quick-260825-mhh-retry-1.consumed.json`; this is the single fresh attempt authorized by the user's later `Authorize new run` instruction after the PDF and changelog parser fixes.
 
 The personal user-run command remains:
 
@@ -15,13 +16,19 @@ The personal user-run command remains:
 pwsh -NoProfile -NonInteractive -File scripts/collect-private-authority.ps1 -BackupRoot <absolute-independent-path> -AcknowledgePrivateUseRisk
 ```
 
-The sole explicitly authorized agent-run command is:
+The initial explicitly authorized agent-run command was:
 
 ```powershell
 pwsh -NoProfile -NonInteractive -File scripts/collect-private-authority.ps1 -BackupRoot <absolute-independent-path> -AcknowledgePrivateUseRisk -UserAuthorizationReference quick-260825-mhh
 ```
 
-The user's 2026-08-25 authorization permits one attempted agent invocation for `official-2026-08-20`. It is exhausted when the consumed record is atomically created before transport, not when primary or lock publication succeeds. Success, failure, cleanup, or deletion of collected primary, backup, or lock outputs does not renew it; the consumed record must never be removed or reset. This narrow historical authorization supersedes only the prior actor restriction for this reference.
+The fresh explicitly authorized retry command is:
+
+```powershell
+pwsh -NoProfile -NonInteractive -File scripts/collect-private-authority.ps1 -BackupRoot <absolute-independent-path> -AcknowledgePrivateUseRisk -UserAuthorizationReference quick-260825-mhh-retry-1
+```
+
+Each fixed agent authorization permits exactly one attempted invocation for `official-2026-08-20`. Each is independently exhausted when its own consumed record is atomically created before transport, not when primary or lock publication succeeds. Success, failure, cleanup, or deletion of collected primary, backup, or lock outputs does not renew either authorization; neither consumed record may ever be removed, reset, changed, or reused. These narrow historical authorizations supersede only the prior actor restriction for their respective fixed references and create no standing permission.
 
 `-BackupRoot` must name an absent absolute destination outside the repository. The collector acquires exactly one complete official source set under `.local/authority/inputs/official-2026-08-20/primary/` and creates an independent ordinary byte-identical backup: the current standard rulebook PDF, base Constructed page, Codex, FAQ, Codex changelog, official card update notice, and full card API JSON.
 
@@ -41,7 +48,7 @@ The official API page describes developer access, intermittent polling, and self
 
 ## Private source-set lock and backup
 
-The collector must block unless the user supplies the explicit risk acknowledgment. It creates a seven-entry source set lock containing exactly one of the two allowed method/reference evidence pairs above, exact absolute private roots, and for every row:
+The collector must block unless the user supplies the explicit risk acknowledgment. It creates a seven-entry source set lock containing exactly one of the three allowed method/reference evidence pairs above, exact absolute private roots, and for every row:
 
 - the fixed relative path and official URL above;
 - retrieval date/time and effective date when published;
@@ -94,4 +101,4 @@ Community observations remain provenance/examples only. Official sources alone d
 
 ## Permission gate for broader use
 
-Sharing, release with publisher content, packaging or publication of official/derived content, recurring acquisition, all other agent-run acquisition, commercialization, a public/network card API, bulk art, private-CDN access, or any changed operating scope requires written publisher permission and a separate approved plan before implementation. There is no redistribution and no artwork acquisition under this exception; artwork requires its own explicit grant. Until then, the only GUI allowance is separately supplied private local images under the limited boundary above. Written permission is a future expansion trigger, not a claim that either narrow one-shot evidence pair is legally cleared.
+Sharing, release with publisher content, packaging or publication of official/derived content, recurring acquisition, all other agent-run acquisition, commercialization, a public/network card API, bulk art, private-CDN access, or any changed operating scope requires written publisher permission and a separate approved plan before implementation. There is no redistribution and no artwork acquisition under this exception; artwork requires its own explicit grant. Until then, the only GUI allowance is separately supplied private local images under the limited boundary above. Written permission is a future expansion trigger, not a claim that any narrow one-shot evidence pair is legally cleared.

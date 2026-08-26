@@ -667,32 +667,36 @@ function New-PrivateAuthorityAcquisitionContext {
             authorizationReference = $null
         }
     }
-    if ($UserAuthorizationReference -cne 'quick-260825-mhh') {
-        throw 'User authorization reference must be absent or exactly quick-260825-mhh.'
+    $allowedAuthorizationReferences = @(
+        'quick-260825-mhh',
+        'quick-260825-mhh-retry-1'
+    )
+    if ($allowedAuthorizationReferences -cnotcontains $UserAuthorizationReference) {
+        throw 'User authorization reference must be absent or exactly quick-260825-mhh or quick-260825-mhh-retry-1.'
     }
 
-    $authorizationPath = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot '.local/authority/authorizations/quick-260825-mhh.consumed.json'))
+    $authorizationPath = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot ".local/authority/authorizations/$UserAuthorizationReference.consumed.json"))
     if (Test-Path -LiteralPath $authorizationPath) {
-        throw 'User authorization quick-260825-mhh has already been consumed.'
+        throw "User authorization $UserAuthorizationReference has already been consumed."
     }
     try {
         Write-NewUtf8Json $authorizationPath ([ordered]@{
             schemaVersion = 1
             revisionId = 'official-2026-08-20'
             acquisitionMethod = 'user-authorized-agent-run-one-shot-powershell'
-            authorizationReference = 'quick-260825-mhh'
+            authorizationReference = $UserAuthorizationReference
             consumedAt = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [Globalization.CultureInfo]::InvariantCulture)
         })
     }
     catch {
         if (Test-Path -LiteralPath $authorizationPath) {
-            throw 'User authorization quick-260825-mhh has already been consumed.'
+            throw "User authorization $UserAuthorizationReference has already been consumed."
         }
         throw
     }
     return [pscustomobject]@{
         acquisitionMethod = 'user-authorized-agent-run-one-shot-powershell'
-        authorizationReference = 'quick-260825-mhh'
+        authorizationReference = $UserAuthorizationReference
     }
 }
 
