@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -47,6 +47,7 @@ type Fixture = Readonly<{
   primaryRoot: string;
   backupRoot: string;
   lockPath: string;
+  authorizationPath: string;
 }>;
 type ProcessResult = Readonly<{ code: number | null; stdout: string; stderr: string }>;
 
@@ -79,8 +80,15 @@ async function createFixture(): Promise<Fixture> {
   const primaryRoot = join(repositoryRoot, '.local', 'authority', 'inputs', 'test', 'primary');
   const backupRoot = join(sandbox, "backup with spaces & apostrophe's ($) [safe]");
   const lockPath = join(repositoryRoot, '.local', 'authority', 'locks', 'test', 'source-set-lock.json');
+  const authorizationPath = join(
+    repositoryRoot,
+    '.local',
+    'authority',
+    'authorizations',
+    'quick-260825-mhh.consumed.json',
+  );
   await mkdir(repositoryRoot, { recursive: true });
-  return { sandbox, repositoryRoot, primaryRoot, backupRoot, lockPath };
+  return { sandbox, repositoryRoot, primaryRoot, backupRoot, lockPath, authorizationPath };
 }
 
 async function cleanupFixture(fixture: Fixture): Promise<void> {
@@ -168,9 +176,10 @@ async function invokeLoopback(
     bodyTimeoutSeconds?: number;
     maxTotalBytes?: number;
     faultPoint?: string;
+    userAuthorizationReference?: string;
   }> = {},
 ): Promise<ProcessResult> {
-  const configurationPath = join(fixture.sandbox, 'configuration.json');
+  const configurationPath = join(fixture.sandbox, `configuration-${randomUUID()}.json`);
   await writeFile(
     configurationPath,
     JSON.stringify({
@@ -180,12 +189,13 @@ async function invokeLoopback(
       bodyTimeoutSeconds: options.bodyTimeoutSeconds ?? 3,
       maxTotalBytes: options.maxTotalBytes ?? 131_072,
       faultPoint: options.faultPoint ?? null,
+      userAuthorizationReference: options.userAuthorizationReference ?? null,
     }),
   );
   const command = [
     '. $env:SORCERY_COLLECTOR_SCRIPT',
     '$c = Get-Content -Raw -LiteralPath $env:SORCERY_COLLECTOR_CONFIG | ConvertFrom-Json -Depth 32',
-    'Invoke-PrivateAuthorityCollectionForLoopbackTest -RepositoryRoot $c.repositoryRoot -PrimaryRoot $c.primaryRoot -BackupRoot $c.backupRoot -LockPath $c.lockPath -Descriptors $c.descriptors -HeaderTimeoutSeconds $c.headerTimeoutSeconds -BodyTimeoutSeconds $c.bodyTimeoutSeconds -MaxTotalBytes $c.maxTotalBytes -FaultPoint $c.faultPoint | ConvertTo-Json -Depth 32 -Compress',
+    'Invoke-PrivateAuthorityCollectionForLoopbackTest -RepositoryRoot $c.repositoryRoot -PrimaryRoot $c.primaryRoot -BackupRoot $c.backupRoot -LockPath $c.lockPath -Descriptors $c.descriptors -HeaderTimeoutSeconds $c.headerTimeoutSeconds -BodyTimeoutSeconds $c.bodyTimeoutSeconds -MaxTotalBytes $c.maxTotalBytes -FaultPoint $c.faultPoint -UserAuthorizationReference $c.userAuthorizationReference | ConvertTo-Json -Depth 32 -Compress',
   ].join('; ');
   return runPwsh(['-Command', command], {
     SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH,
@@ -263,7 +273,7 @@ async function safeReaddir(root: string): Promise<readonly string[]> {
   });
 }
 
-test('dot-sourcing exports only the three intentional collector commands', async () => {
+test('dot-sourcing exposes only the closed collector surface and forwards authorization context', async () => {
   const fixture = await createFixture();
   try {
     const command = [
@@ -272,17 +282,47 @@ test('dot-sourcing exports only the three intentional collector commands', async
       '$ast = [Management.Automation.Language.Parser]::ParseFile($env:SORCERY_COLLECTOR_SCRIPT, [ref]$tokens, [ref]$errors)',
       '$definedFunctions = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object Name)',
       '$resolvedFunctions = @($definedFunctions | Where-Object { $null -ne (Get-Command -Name $_ -ErrorAction SilentlyContinue) } | Sort-Object -Unique)',
-      '[pscustomobject]@{ parameters = @($ast.ParamBlock.Parameters.Name.VariablePath.UserPath); functions = $resolvedFunctions; moduleVariableLeaked = [bool](Get-Variable collectorModule -ErrorAction SilentlyContinue) } | ConvertTo-Json -Compress',
+      '$signatures = [ordered]@{}',
+      "foreach ($name in @('Invoke-PrivateAuthorityCollection', 'Invoke-PrivateAuthorityCollectionForLoopbackTest', 'Invoke-PrivateAuthorityCollectionCore')) { $functionAst = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true))[0]; $signatures[$name] = @($functionAst.Body.ParamBlock.Parameters.Name.VariablePath.UserPath) }",
+      '[pscustomobject]@{ parameters = @($ast.ParamBlock.Parameters.Name.VariablePath.UserPath); functions = $resolvedFunctions; signatures = $signatures; moduleVariableLeaked = [bool](Get-Variable collectorModule -ErrorAction SilentlyContinue) } | ConvertTo-Json -Depth 8 -Compress',
     ].join('; ');
     const result = await runPwsh(['-Command', command], { SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH });
     assert.equal(result.code, 0, result.stderr);
     assert.deepEqual(JSON.parse(result.stdout.trim()), {
-      parameters: ['BackupRoot', 'AcknowledgePrivateUseRisk'],
+      parameters: ['BackupRoot', 'AcknowledgePrivateUseRisk', 'UserAuthorizationReference'],
       functions: [
         'Get-ProductionSourceDescriptors',
         'Invoke-PrivateAuthorityCollection',
         'Invoke-PrivateAuthorityCollectionForLoopbackTest',
       ],
+      signatures: {
+        'Invoke-PrivateAuthorityCollection': ['BackupRoot', 'UserAuthorizationReference'],
+        'Invoke-PrivateAuthorityCollectionForLoopbackTest': [
+          'RepositoryRoot',
+          'PrimaryRoot',
+          'BackupRoot',
+          'LockPath',
+          'Descriptors',
+          'HeaderTimeoutSeconds',
+          'BodyTimeoutSeconds',
+          'MaxTotalBytes',
+          'FaultPoint',
+          'UserAuthorizationReference',
+        ],
+        'Invoke-PrivateAuthorityCollectionCore': [
+          'RepositoryRoot',
+          'PrimaryRoot',
+          'BackupRoot',
+          'LockPath',
+          'Descriptors',
+          'HeaderTimeoutSeconds',
+          'BodyTimeoutSeconds',
+          'MaxTotalBytes',
+          'LoopbackOnly',
+          'FaultPoint',
+          'UserAuthorizationReference',
+        ],
+      },
       moduleVariableLeaked: false,
     });
     assert.deepEqual(await readdir(fixture.sandbox), ['repository']);
@@ -303,6 +343,131 @@ test('direct wrapper rejects missing backup or acknowledgment before filesystem 
     assert.match(noAcknowledgment.stderr, /AcknowledgePrivateUseRisk/);
     assert.deepEqual(await readdir(fixture.sandbox), ['repository']);
   } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
+test('only the exact agent authorization is consumed durably before transport', async () => {
+  const fixture = await createFixture();
+  const authority = createHappyAuthorityServer();
+  try {
+    const port = await listen(authority.server);
+    authority.setPort(port);
+    const descriptors = testDescriptors(`http://127.0.0.1:${port}`);
+
+    for (const reference of ['unknown', ' quick-260825-mhh', 'quick-260825-mhh ', 'QUICK-260825-MHH']) {
+      const rejected = await invokeLoopback(fixture, descriptors, {
+        userAuthorizationReference: reference,
+      });
+      assert.notEqual(rejected.code, 0);
+      assert.match(rejected.stderr, /authorization reference/i);
+    }
+    assert.equal(authority.requests.length, 0);
+    assert.equal(await stat(fixture.authorizationPath).then(() => true, () => false), false);
+
+    const consumed = await invokeLoopback(fixture, descriptors, {
+      faultPoint: 'after-authorization-consumption',
+      userAuthorizationReference: 'quick-260825-mhh',
+    });
+    assert.notEqual(consumed.code, 0);
+    assert.match(consumed.stderr, /after-authorization-consumption/i);
+    assert.equal(authority.requests.length, 0);
+
+    const recordBytes = await readFile(fixture.authorizationPath, 'utf8');
+    const record = JSON.parse(recordBytes) as Record<string, unknown>;
+    assert.deepEqual(Object.keys(record).sort(), [
+      'acquisitionMethod',
+      'authorizationReference',
+      'consumedAt',
+      'revisionId',
+      'schemaVersion',
+    ]);
+    assert.equal(record.schemaVersion, 1);
+    assert.equal(record.revisionId, 'official-2026-08-20');
+    assert.equal(record.acquisitionMethod, 'user-authorized-agent-run-one-shot-powershell');
+    assert.equal(record.authorizationReference, 'quick-260825-mhh');
+    assert.match(String(record.consumedAt), /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    assert.doesNotMatch(recordBytes, /https?:|primaryRoot|backupRoot|locator/i);
+
+    const retried = await invokeLoopback(fixture, descriptors, {
+      userAuthorizationReference: 'quick-260825-mhh',
+    });
+    assert.notEqual(retried.code, 0);
+    assert.match(retried.stderr, /authorization.*consumed|already exists/i);
+    assert.equal(authority.requests.length, 0);
+    assert.equal(await readFile(fixture.authorizationPath, 'utf8'), recordBytes);
+  } finally {
+    await close(authority.server);
+    await cleanupFixture(fixture);
+  }
+});
+
+test('authorized success and transport failure remain consumed after cleanup and output deletion', async (context) => {
+  for (const scenario of ['success', 'failure after transport'] as const) {
+    await context.test(scenario, async () => {
+      const fixture = await createFixture();
+      const authority = createHappyAuthorityServer();
+      try {
+        const port = await listen(authority.server);
+        authority.setPort(port);
+        const descriptors = testDescriptors(`http://127.0.0.1:${port}`);
+        const first = await invokeLoopback(fixture, descriptors, {
+          faultPoint: scenario === 'success' ? undefined : 'after-staged-verification',
+          userAuthorizationReference: 'quick-260825-mhh',
+        });
+        if (scenario === 'success') {
+          assert.equal(first.code, 0, first.stderr);
+          const lock = JSON.parse(await readFile(fixture.lockPath, 'utf8')) as Record<string, unknown>;
+          assert.equal(lock.acquisitionMethod, 'user-authorized-agent-run-one-shot-powershell');
+          assert.equal(lock.authorizationReference, 'quick-260825-mhh');
+        } else {
+          assert.notEqual(first.code, 0);
+          assert.match(first.stderr, /after-staged-verification/i);
+          assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
+        }
+        assert.ok(authority.requests.length > 0);
+        const requestCount = authority.requests.length;
+        const recordBytes = await readFile(fixture.authorizationPath, 'utf8');
+
+        await rm(fixture.primaryRoot, { recursive: true, force: true });
+        await rm(fixture.backupRoot, { recursive: true, force: true });
+        await rm(fixture.lockPath, { force: true });
+        const retried = await invokeLoopback(fixture, descriptors, {
+          userAuthorizationReference: 'quick-260825-mhh',
+        });
+        assert.notEqual(retried.code, 0);
+        assert.match(retried.stderr, /authorization.*consumed|already exists/i);
+        assert.equal(authority.requests.length, requestCount);
+        assert.equal(await readFile(fixture.authorizationPath, 'utf8'), recordBytes);
+      } finally {
+        await close(authority.server);
+        await cleanupFixture(fixture);
+      }
+    });
+  }
+});
+
+test('concurrent authorized invocations let at most one cross the atomic consumption guard', async () => {
+  const fixture = await createFixture();
+  const authority = createHappyAuthorityServer();
+  try {
+    const port = await listen(authority.server);
+    authority.setPort(port);
+    const descriptors = testDescriptors(`http://127.0.0.1:${port}`);
+    const options = {
+      faultPoint: 'after-authorization-consumption',
+      userAuthorizationReference: 'quick-260825-mhh',
+    } as const;
+    const results = await Promise.all([
+      invokeLoopback(fixture, descriptors, options),
+      invokeLoopback(fixture, descriptors, options),
+    ]);
+    assert.equal(results.filter(({ stderr }) => /after-authorization-consumption/i.test(stderr)).length, 1);
+    assert.equal(results.filter(({ stderr }) => /authorization.*consumed|already exists/i.test(stderr)).length, 1);
+    assert.equal(authority.requests.length, 0);
+    assert.equal(await stat(fixture.authorizationPath).then(() => true, () => false), true);
+  } finally {
+    await close(authority.server);
     await cleanupFixture(fixture);
   }
 });
