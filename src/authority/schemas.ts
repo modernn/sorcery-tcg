@@ -300,6 +300,7 @@ export const sourceRecordSchema = z
     if (
       source.storageMode === 'manifest-only' &&
       source.durableLocator?.startsWith('urn:sha256:') === true &&
+      HASH_PATTERN.test(source.byteHash) &&
       source.durableLocator !== `urn:${source.byteHash}`
     ) {
       context.addIssue({
