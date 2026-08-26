@@ -26,6 +26,46 @@ const OFFICIAL_URLS = Object.freeze({
     'https://sorcerytcg.com/news/sorcery-contested-realm-card-updates-2025',
   'cards/cards.raw.json': 'https://api.sorcerytcg.com/api/cards',
 });
+
+function syntheticOfficialCard(
+  name = 'Synthetic Adept',
+  slug = 'synthetic-adept',
+): Record<string, unknown> {
+  const metadata = {
+    attack: 1,
+    cost: 1,
+    defence: 1,
+    life: null,
+    rarity: 'Ordinary',
+    rulesText: 'Synthetic rules text.',
+    thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+    type: 'Minion',
+  };
+  return {
+    elements: 'Fire',
+    guardian: metadata,
+    name,
+    sets: [
+      {
+        metadata,
+        name: 'Synthetic Set',
+        releasedAt: '2026-08-20T00:00:00Z',
+        variants: [
+          {
+            artist: 'Synthetic Artist',
+            finish: 'Standard',
+            flavorText: '',
+            product: 'Synthetic Product',
+            slug,
+            typeText: 'Minion',
+          },
+        ],
+      },
+    ],
+    subTypes: 'Synthetic',
+  };
+}
+
 const SOURCE_BYTES = Object.freeze({
   'rulebook/rulebook-current.pdf': Buffer.from('%PDF-1.7\nsynthetic rulebook\n%%EOF'),
   'formats/constructed-current.html': Buffer.from(
@@ -43,7 +83,7 @@ const SOURCE_BYTES = Object.freeze({
   'updates/card-updates-2025.html': Buffer.from(
     '<!doctype html><title>Sorcery: Contested Realm Card Updates 2025</title><main><h1>Sorcery: Contested Realm Card Updates 2025</h1><article><h2>Card Updates</h2><p>Effective November 25</p></article></main>',
   ),
-  'cards/cards.raw.json': Buffer.from('[{"name":"Synthetic Adept","power":1}]\n'),
+  'cards/cards.raw.json': Buffer.from(`${JSON.stringify([syntheticOfficialCard()])}\n`),
 });
 
 type SourcePath = keyof typeof SOURCE_BYTES;
@@ -866,7 +906,7 @@ test('partial and structurally invalid card arrays fail before publication', asy
   const cases = [
     {
       name: 'one-card truncated array',
-      cards: [{ name: 'Synthetic Adept', power: 1 }],
+      cards: [syntheticOfficialCard()],
       expectedCardCount: 2,
     },
     {
@@ -876,14 +916,14 @@ test('partial and structurally invalid card arrays fail before publication', asy
     },
     {
       name: 'unknown card field',
-      cards: [{ name: 'Synthetic Adept', power: 1, unknownField: true }],
+      cards: [{ ...syntheticOfficialCard(), unknownField: true }],
       expectedCardCount: 1,
     },
     {
       name: 'duplicate printing slugs',
       cards: [
-        { name: 'Synthetic Adept', slug: 'duplicate-printing' },
-        { name: 'Synthetic Avatar', slug: 'duplicate-printing' },
+        syntheticOfficialCard('Synthetic Adept', 'duplicate-printing'),
+        syntheticOfficialCard('Synthetic Avatar', 'duplicate-printing'),
       ],
       expectedCardCount: 2,
     },
@@ -1451,6 +1491,6 @@ test('controlled publication faults leave no canonical receipt and quarantine on
 test('hash helper fixture remains synthetic and deterministic', () => {
   assert.equal(
     createHash('sha256').update(SOURCE_BYTES['cards/cards.raw.json']).digest('hex'),
-    'd8d2bd6cffb31825441021dec513cdb3403f29fc4b458af9093113365d909d4f',
+    'c073ef9097c6a1593b5d87b24fee13886577966648c3f59edef1a91e278bca64',
   );
 });
