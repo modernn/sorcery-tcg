@@ -13,6 +13,8 @@ import {
   AuthorityValidationError,
   type Diagnostic,
   type SourceMetadata,
+  validateNormalizedCardSnapshot,
+  validateRawCardSnapshot,
 } from '../../src/authority/schemas.ts';
 import { importAuthority } from '../../src/commands/import-authority.ts';
 
@@ -95,6 +97,56 @@ function captureDiagnostics(run: () => unknown): readonly Diagnostic[] {
 function pathsAndCodes(diagnostics: readonly Diagnostic[]): readonly Pick<Diagnostic, 'path' | 'code'>[] {
   return diagnostics.map(({ path, code }) => ({ path, code }));
 }
+
+test('DATA-02 life and threshold schemas require exact nonnegative safe-integer gameplay fields', () => {
+  const valid = JSON.parse(new TextDecoder().decode(VALID_BYTES)) as {
+    cards: Array<Record<string, unknown> & { thresholds: Record<string, unknown> }>;
+  };
+  const raw = validateRawCardSnapshot(valid);
+
+  assert.equal(raw.cards[0]?.life, null);
+  assert.deepEqual(raw.cards[0]?.thresholds, { air: 0, earth: 0, fire: 1, water: 0 });
+  assert.equal(raw.cards[1]?.life, 20);
+  assert.deepEqual(raw.cards[1]?.thresholds, { air: 1, earth: 0, fire: 0, water: 0 });
+  assert.doesNotThrow(() => validateNormalizedCardSnapshot({
+    cards: raw.cards.map((card, index) => ({
+      stableId: `card:${index.toString(16).padStart(64, '0')}`,
+      officialSourceId: card.sourceCardId,
+      name: card.name,
+      cardType: card.cardType,
+      elements: card.elements,
+      rarity: card.rarity,
+      manaCost: card.manaCost,
+      attack: card.attack,
+      defense: card.defense,
+      life: card.life,
+      thresholds: card.thresholds,
+      rulesText: card.rulesText,
+      printingSlugs: card.printingSlugs,
+    })),
+  }));
+
+  const invalidCases: readonly [string, (card: Record<string, unknown> & { thresholds: Record<string, unknown> }) => void][] = [
+    ['/cards/0/life', (card) => { delete card.life; }],
+    ['/cards/0/life', (card) => { card.life = -1; }],
+    ['/cards/0/life', (card) => { card.life = 1.5; }],
+    ['/cards/0/life', (card) => { card.life = Number.MAX_SAFE_INTEGER + 1; }],
+    ['/cards/0/thresholds', (card) => { delete card.thresholds; }],
+    ['/cards/0/thresholds/air', (card) => { card.thresholds.air = -1; }],
+    ['/cards/0/thresholds/earth', (card) => { card.thresholds.earth = 1.5; }],
+    ['/cards/0/thresholds/fire', (card) => { card.thresholds.fire = Number.MAX_SAFE_INTEGER + 1; }],
+    ['/cards/0/thresholds/water', (card) => { delete card.thresholds.water; }],
+    ['/cards/0/thresholds/spirit', (card) => { card.thresholds.spirit = 1; }],
+  ];
+  for (const [expectedPath, mutate] of invalidCases) {
+    const candidate = structuredClone(valid);
+    mutate(candidate.cards[0]!);
+    assert.deepEqual(
+      captureDiagnostics(() => validateRawCardSnapshot(candidate)).map(({ path }) => path),
+      [expectedPath],
+    );
+  }
+});
 
 test('DATA-02 normalizes the same pinned synthetic card input byte-identically on repeated runs', () => {
   const metadata = sourceMetadata(VALID_BYTES);

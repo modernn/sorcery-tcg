@@ -9,6 +9,8 @@
       "manaCost": 1,
       "attack": 1,
       "defense": 1,
+      "life": null,
+      "thresholds": { "air": 0, "earth": 0, "fire": 1, "water": 0 },
       "rulesText": "",
       "printingSlugs": ["synthetic-fire-keeper-alpha"],
       "releasedAt": "2026-01-02"
@@ -22,6 +24,8 @@
       "manaCost": null,
       "attack": null,
       "defense": null,
+      "life": 20,
+      "thresholds": { "air": 1, "earth": 0, "fire": 0, "water": 0 },
       "rulesText": "",
       "printingSlugs": ["synthetic-air-scout-alpha"],
       "releasedAt": null

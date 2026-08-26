@@ -9,6 +9,8 @@
       "manaCost": 2,
       "attack": null,
       "defense": null,
+      "life": null,
+      "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
       "rulesText": "",
       "printingSlugs": ["synthetic-unknown-field-alpha"],
       "releasedAt": "2026-02-03",
@@ -22,6 +24,8 @@
       "manaCost": 3,
       "attack": null,
       "defense": null,
+      "life": null,
+      "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 1 },
       "rulesText": "",
       "printingSlugs": ["synthetic-missing-name-alpha"],
       "releasedAt": "2026-02-03"
