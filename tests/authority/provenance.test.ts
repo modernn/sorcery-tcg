@@ -214,6 +214,42 @@ test('DATA-03 accepts manifest-only sources only with locator or procedure finge
     ).map(({ path, code }) => ({ path, code })),
     [{ path: '/durableLocator', code: 'custom' }],
   );
+  assert.equal(
+    validateSourceRecord(manifestSource({ durableLocator: `urn:sha256:${'b'.repeat(64)}` })).byteHash,
+    HASH_B,
+  );
+});
+
+test('DATA-03 rejects a mismatched SHA locator after enclosing hashes are recomputed', async () => {
+  const materialized = await materializeFixture();
+  try {
+    const [stored, manifest] = materialized.bundle.identity.payload.sources;
+    assert.ok(stored);
+    assert.ok(manifest);
+    const mismatched = {
+      ...manifest,
+      durableLocator: `urn:sha256:${'c'.repeat(64)}`,
+    };
+    const bundle = createCanonicalArtifact({
+      ...materialized.bundle.identity,
+      payload: { ...materialized.bundle.identity.payload, sources: [stored, mismatched] },
+    });
+    await writeBundle(materialized.root, bundle);
+    assert.deepEqual(
+      (await captureAsyncDiagnostics(() =>
+        validateBundleGraph(materialized.root, 'bundle.json', {
+          stableId: bundle.identity.stableId,
+          contentHash: bundle.contentHash,
+        }),
+      )).map(({ path, code }) => ({ path, code })),
+      [{
+        path: '/identity/payload/sources/1/durableLocator',
+        code: 'locator_byte_hash_mismatch',
+      }],
+    );
+  } finally {
+    await rm(materialized.root, { recursive: true, force: true });
+  }
 });
 
 test('DATA-03 accepts reviewed community and external sources as non-normative provenance', () => {
@@ -490,7 +526,8 @@ test('DATA-03 rehashes stored bytes and reports manifest-only bindings without r
   try {
     const validated = await validateBundleGraph(materialized.root, 'bundle.json', materialized.expected);
     assert.deepEqual(validated.storedBytesRehashed, [sourceRef(materialized.bundle.identity.payload.sources[0]!)]);
-    assert.deepEqual(validated.manifestBindingsVerified, [
+    assert.deepEqual(validated.manifestByteBindingsVerified, []);
+    assert.deepEqual(validated.manifestDeclarationsBound, [
       sourceRef(materialized.bundle.identity.payload.sources[1]!),
     ]);
 
@@ -518,7 +555,6 @@ test('DATA-03 rejects manifest locator procedure byte hash SourceRef artifact an
     assert.ok(derived);
 
     for (const changedManifest of [
-      { ...manifest, durableLocator: 'urn:sha256:' + 'c'.repeat(64) },
       { ...manifest, acquisitionProcedureHash: HASH_A },
       { ...manifest, byteHash: HASH_A },
     ]) {

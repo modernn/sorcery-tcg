@@ -454,7 +454,8 @@ test('DATA-01 recursively validates a complete bundle offline', async () => {
   try {
     const validated = await validateAuthorityBundle(materialized.root, 'bundle.json', materialized.expected);
     assert.equal(validated.bundle.contentHash, bundle.contentHash);
-    assert.deepEqual(validated.manifestBindingsVerified, [ref(source)]);
+    assert.deepEqual(validated.manifestByteBindingsVerified, [ref(source)]);
+    assert.deepEqual(validated.manifestDeclarationsBound, []);
   } finally {
     globalThis.fetch = originalFetch;
     await rm(materialized.root, { recursive: true, force: true });
@@ -490,7 +491,7 @@ test('DATA-01 rehashes stored source bytes and rejects one-byte tampering', asyn
       success.evidence.map(({ sourceId, verification }) => ({ sourceId, verification })),
       [
         { sourceId: 'source:cards-synthetic', verification: 'stored-bytes-rehashed' },
-        { sourceId: 'source:formats-synthetic', verification: 'manifest-binding-verified' },
+        { sourceId: 'source:formats-synthetic', verification: 'manifest-byte-binding-verified' },
       ],
     );
 
@@ -533,8 +534,8 @@ test('DATA-01 validates manifest-only locator hash procedure and SourceRef bindi
     assert.deepEqual(
       success.evidence.map(({ sourceId, verification }) => ({ sourceId, verification })),
       [
-        { sourceId: 'source:cards-synthetic', verification: 'manifest-binding-verified' },
-        { sourceId: 'source:formats-synthetic', verification: 'manifest-binding-verified' },
+        { sourceId: 'source:cards-synthetic', verification: 'manifest-byte-binding-verified' },
+        { sourceId: 'source:formats-synthetic', verification: 'manifest-byte-binding-verified' },
       ],
     );
 
@@ -550,6 +551,55 @@ test('DATA-01 validates manifest-only locator hash procedure and SourceRef bindi
     assert.deepEqual(await fileMap(imported.revisionPath), tampered);
   } finally {
     await rm(workspace.root, { recursive: true, force: true });
+  }
+});
+
+test('DATA-01 validation command distinguishes manifest byte and declaration evidence', async () => {
+  const sha = manifestSource('source:command-sha');
+  const https = manifestSource('source:command-declaration-https', {
+    durableLocator: 'https://curiosa.io/codex/synthetic-declaration',
+  });
+  const procedure = manifestSource('source:command-declaration-procedure', {
+    durableLocator: null,
+    acquisitionProcedureHash: sha256(encoder.encode('synthetic-procedure')),
+  });
+  const bundle = bundleOf([
+    record(sha, 'rulebook', { topic: 'sha-evidence' }),
+    record(https, 'rulebook', { topic: 'https-evidence' }),
+    record(procedure, 'rulebook', { topic: 'procedure-evidence' }),
+  ]);
+  const materialized = await materialize(bundle);
+  try {
+    const result = await captureValidationCommand(validateArgv(
+      materialized.root,
+      'bundle.json',
+      bundle.identity.stableId,
+      bundle.contentHash,
+    ));
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(result.stderr, []);
+    const success = JSON.parse(result.stdout[0]!) as {
+      evidence: { sourceId: string; verification: string }[];
+    };
+    assert.deepEqual(success.evidence, [
+      {
+        sourceId: 'source:command-declaration-https',
+        byteHash: https.byteHash,
+        verification: 'manifest-declaration-bound',
+      },
+      {
+        sourceId: 'source:command-declaration-procedure',
+        byteHash: procedure.byteHash,
+        verification: 'manifest-declaration-bound',
+      },
+      {
+        sourceId: 'source:command-sha',
+        byteHash: sha.byteHash,
+        verification: 'manifest-byte-binding-verified',
+      },
+    ]);
+  } finally {
+    await rm(materialized.root, { recursive: true, force: true });
   }
 });
 test('DATA-01 rejects changed expected input-root hashes before parsing inputs', async () => {
