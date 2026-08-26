@@ -28,14 +28,20 @@ const OFFICIAL_URLS = Object.freeze({
 });
 const SOURCE_BYTES = Object.freeze({
   'rulebook/rulebook-current.pdf': Buffer.from('%PDF-1.7\nsynthetic rulebook\n%%EOF'),
-  'formats/constructed-current.html': Buffer.from('<!doctype html><title>Constructed Format</title>'),
-  'codex/codex-current.html': Buffer.from('<!doctype html><title>Welcome to the Codex</title>'),
-  'codex/faqs-current.html': Buffer.from('<!doctype html><title>FAQs</title>'),
+  'formats/constructed-current.html': Buffer.from(
+    '<!doctype html><title>Constructed Format</title><main><h1>Constructed Format</h1><h2>Deck Construction</h2><p>minimum deck size</p></main>',
+  ),
+  'codex/codex-current.html': Buffer.from(
+    '<!doctype html><title>Welcome to the Codex</title><main><h1>Welcome to the Codex</h1><nav>Card Rulings</nav><article>Rules Questions</article></main>',
+  ),
+  'codex/faqs-current.html': Buffer.from(
+    '<!doctype html><title>FAQs</title><main><h1>FAQs</h1><h2>Frequently Asked Questions</h2><article>Gameplay Questions</article></main>',
+  ),
   'codex/changelog-current.html': Buffer.from(
-    '<!doctype html><h1>Codex Changelog</h1><time>August 20, 2026</time>',
+    '<!doctype html><title>Codex Changelog</title><main><h1>Codex Changelog</h1><article><h2>20 August 2026</h2><p>Rules update</p></article></main>',
   ),
   'updates/card-updates-2025.html': Buffer.from(
-    '<!doctype html><title>Sorcery: Contested Realm Card Updates 2025</title>',
+    '<!doctype html><title>Sorcery: Contested Realm Card Updates 2025</title><main><h1>Sorcery: Contested Realm Card Updates 2025</h1><article><h2>Card Updates</h2><p>Effective November 25</p></article></main>',
   ),
   'cards/cards.raw.json': Buffer.from('[{"name":"Synthetic Adept","power":1}]\n'),
 });
@@ -122,6 +128,17 @@ function descriptor(relativePath: SourcePath, requestUrl: string): Record<string
     'codex/changelog-current.html': 'Codex Changelog',
     'updates/card-updates-2025.html': 'Sorcery: Contested Realm Card Updates 2025',
   };
+  const visibleBodyMarkers: Partial<Record<SourcePath, readonly string[]>> = {
+    'formats/constructed-current.html': ['Constructed Format', 'Deck Construction', 'minimum deck size'],
+    'codex/codex-current.html': ['Welcome to the Codex', 'Card Rulings', 'Rules Questions'],
+    'codex/faqs-current.html': ['FAQs', 'Frequently Asked Questions', 'Gameplay Questions'],
+    'codex/changelog-current.html': ['Codex Changelog', 'Rules update'],
+    'updates/card-updates-2025.html': [
+      'Sorcery: Contested Realm Card Updates 2025',
+      'Card Updates',
+      'Effective November 25',
+    ],
+  };
   return {
     relativePath,
     provenanceUrl: OFFICIAL_URLS[relativePath],
@@ -135,6 +152,8 @@ function descriptor(relativePath: SourcePath, requestUrl: string): Record<string
       relativePath === 'rulebook/rulebook-current.pdf'
         ? 'Sorcery: Contested Realm December 2025 Rulebook Update'
         : (htmlMarkers[relativePath] ?? null),
+    visibleBodyMarkers: visibleBodyMarkers[relativePath] ?? null,
+    expectedCardCount: relativePath === 'cards/cards.raw.json' ? 1 : null,
     effectiveDatePolicy: relativePath.includes('changelog')
       ? 'changelog'
       : relativePath === 'rulebook/rulebook-current.pdf' || relativePath.includes('card-updates')
@@ -224,6 +243,7 @@ async function invokeLoopback(
 function createHappyAuthorityServer(
   rulebookBytes: Buffer = SOURCE_BYTES['rulebook/rulebook-current.pdf'],
   changelogBytes: Buffer = SOURCE_BYTES['codex/changelog-current.html'],
+  overrides: Readonly<Partial<Record<SourcePath, Buffer>>> = {},
 ): Readonly<{
   server: Server;
   requests: string[];
@@ -270,7 +290,8 @@ function createHappyAuthorityServer(
       relativePath.endsWith('.json') ? 'application/json; charset=utf-8' : 'text/html; charset=utf-8',
     );
     response.end(
-      relativePath === 'codex/changelog-current.html' ? changelogBytes : SOURCE_BYTES[relativePath],
+      overrides[relativePath] ??
+        (relativePath === 'codex/changelog-current.html' ? changelogBytes : SOURCE_BYTES[relativePath]),
     );
   });
   return { server, requests, setPort: (value) => (port = value) };
@@ -715,6 +736,180 @@ test('changelog accepts the official day-first date and rejects impossible dates
             scenario.expected,
           );
         }
+      } finally {
+        await close(authority.server);
+        await cleanupFixture(fixture);
+      }
+    });
+  }
+});
+
+test('changelog ignores hidden dates and requires one semantic date in the first visible entry', async (context) => {
+  const cases = [
+    {
+      name: 'hidden earlier dates do not win over a unique visible day-first date',
+      html:
+        '<!doctype html><head><title>Codex Changelog</title>' +
+        '<script>August 19, 2026</script><style>.date::after{content:"August 18, 2026"}</style>' +
+        '<template>August 17, 2026</template><noscript>August 16, 2026</noscript>' +
+        '<!-- August 15, 2026 --></head><body><main><h1>Codex Changelog</h1>' +
+        '<article><h2>20 August 2026</h2><p>Rules update</p></article></main></body>',
+      effectiveDate: '2026-08-20',
+    },
+    {
+      name: 'ambiguous first visible entry dates fail closed',
+      html:
+        '<!doctype html><title>Codex Changelog</title><main><h1>Codex Changelog</h1>' +
+        '<article><h2>20 August 2026 / August 21, 2026</h2><p>Rules update</p></article></main>',
+      effectiveDate: null,
+    },
+    {
+      name: 'a date in only the second visible entry fails closed',
+      html:
+        '<!doctype html><title>Codex Changelog</title><main><h1>Codex Changelog</h1>' +
+        '<article><h2>Rules update</h2><p>No effective date</p></article>' +
+        '<article><h2>20 August 2026</h2><p>Older entry</p></article></main>',
+      effectiveDate: null,
+    },
+  ] as const;
+
+  for (const scenario of cases) {
+    await context.test(scenario.name, async () => {
+      const fixture = await createFixture();
+      const authority = createHappyAuthorityServer(
+        SOURCE_BYTES['rulebook/rulebook-current.pdf'],
+        Buffer.from(scenario.html),
+      );
+      try {
+        const port = await listen(authority.server);
+        authority.setPort(port);
+        const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
+        if (scenario.effectiveDate === null) {
+          assert.notEqual(result.code, 0);
+          assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
+          assert.equal(await stat(fixture.primaryRoot).then(() => true, () => false), false);
+          assert.equal(await stat(fixture.backupRoot).then(() => true, () => false), false);
+        } else {
+          assert.equal(result.code, 0, result.stderr);
+          const lock = JSON.parse(await readFile(fixture.lockPath, 'utf8')) as {
+            entries: readonly PrivateAuthoritySourceEntry[];
+          };
+          assert.equal(
+            lock.entries.find(({ relativePath }) => relativePath === 'codex/changelog-current.html')
+              ?.effectiveDate,
+            scenario.effectiveDate,
+          );
+        }
+      } finally {
+        await close(authority.server);
+        await cleanupFixture(fixture);
+      }
+    });
+  }
+});
+
+test('complete HTML sources require their source-specific visible body structure', async (context) => {
+  const shells: Readonly<Partial<Record<SourcePath, Buffer>>>[] = [
+    {
+      'formats/constructed-current.html': Buffer.from(
+        '<!doctype html><title>Constructed Format</title><main><h1>Constructed Format</h1></main>',
+      ),
+    },
+    {
+      'codex/codex-current.html': Buffer.from(
+        '<!doctype html><title>Welcome to the Codex</title><main><h1>Welcome to the Codex</h1></main>',
+      ),
+    },
+    {
+      'codex/faqs-current.html': Buffer.from(
+        '<!doctype html><title>FAQs</title><main><h1>FAQs</h1></main>',
+      ),
+    },
+    {
+      'codex/changelog-current.html': Buffer.from(
+        '<!doctype html><title>Codex Changelog</title><main><h1>Codex Changelog</h1><article><h2>20 August 2026</h2></article></main>',
+      ),
+    },
+    {
+      'updates/card-updates-2025.html': Buffer.from(
+        '<!doctype html><title>Sorcery: Contested Realm Card Updates 2025</title><main><h1>Sorcery: Contested Realm Card Updates 2025</h1></main>',
+      ),
+    },
+  ];
+
+  for (const sourceOverride of shells) {
+    const relativePath = Object.keys(sourceOverride)[0] as SourcePath;
+    await context.test(relativePath, async () => {
+      const fixture = await createFixture();
+      const authority = createHappyAuthorityServer(
+        SOURCE_BYTES['rulebook/rulebook-current.pdf'],
+        SOURCE_BYTES['codex/changelog-current.html'],
+        sourceOverride,
+      );
+      try {
+        const port = await listen(authority.server);
+        authority.setPort(port);
+        const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
+        assert.notEqual(result.code, 0);
+        assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
+        assert.equal(await stat(fixture.primaryRoot).then(() => true, () => false), false);
+        assert.equal(await stat(fixture.backupRoot).then(() => true, () => false), false);
+      } finally {
+        await close(authority.server);
+        await cleanupFixture(fixture);
+      }
+    });
+  }
+});
+
+test('partial and structurally invalid card arrays fail before publication', async (context) => {
+  const cases = [
+    {
+      name: 'one-card truncated array',
+      cards: [{ name: 'Synthetic Adept', power: 1 }],
+      expectedCardCount: 2,
+    },
+    {
+      name: 'missing guardian and set fields',
+      cards: [{ name: 'Synthetic Adept', power: 1 }],
+      expectedCardCount: 1,
+    },
+    {
+      name: 'unknown card field',
+      cards: [{ name: 'Synthetic Adept', power: 1, unknownField: true }],
+      expectedCardCount: 1,
+    },
+    {
+      name: 'duplicate printing slugs',
+      cards: [
+        { name: 'Synthetic Adept', slug: 'duplicate-printing' },
+        { name: 'Synthetic Avatar', slug: 'duplicate-printing' },
+      ],
+      expectedCardCount: 2,
+    },
+  ] as const;
+
+  for (const scenario of cases) {
+    await context.test(scenario.name, async () => {
+      const fixture = await createFixture();
+      const authority = createHappyAuthorityServer(
+        SOURCE_BYTES['rulebook/rulebook-current.pdf'],
+        SOURCE_BYTES['codex/changelog-current.html'],
+        { 'cards/cards.raw.json': Buffer.from(JSON.stringify(scenario.cards)) },
+      );
+      try {
+        const port = await listen(authority.server);
+        authority.setPort(port);
+        const descriptors = testDescriptors(`http://127.0.0.1:${port}`).map((value) =>
+          value.relativePath === 'cards/cards.raw.json'
+            ? { ...value, expectedCardCount: scenario.expectedCardCount }
+            : value,
+        );
+        const result = await invokeLoopback(fixture, descriptors);
+        assert.notEqual(result.code, 0);
+        assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
+        assert.equal(await stat(fixture.primaryRoot).then(() => true, () => false), false);
+        assert.equal(await stat(fixture.backupRoot).then(() => true, () => false), false);
       } finally {
         await close(authority.server);
         await cleanupFixture(fixture);
