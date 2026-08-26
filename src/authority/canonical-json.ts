@@ -7,8 +7,8 @@ export type JsonValue =
   | { readonly [key: string]: JsonValue };
 
 export const MAX_CANONICAL_DEPTH = 64;
-export const MAX_CANONICAL_NODES = 10_000;
-export const MAX_CANONICAL_STRING_BYTES = 1_000_000;
+export const MAX_CANONICAL_NODES = 100_000;
+export const MAX_CANONICAL_STRING_BYTES = 2_000_000;
 
 export type CanonicalJsonErrorCode =
   | 'cyclic_value'

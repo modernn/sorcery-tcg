@@ -8,6 +8,7 @@ import test from 'node:test';
 import { canonicalJson } from '../../src/authority/canonical-json.ts';
 import { identityHash, sha256 } from '../../src/authority/hash.ts';
 import { normalizeCards } from '../../src/authority/normalize-cards.ts';
+import { adaptOfficialCardApiSnapshot } from '../../src/authority/official-card-api-adapter.ts';
 import {
   AuthorityValidationError,
   type Diagnostic,
@@ -23,6 +24,42 @@ const DUPLICATE_CASES = JSON.parse(
 
 function bytes(value: unknown): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(value));
+}
+
+function officialApiCard(
+  index: number,
+  overrides: Readonly<Record<string, unknown>> = {},
+): Readonly<Record<string, unknown>> {
+  const metadata = {
+    attack: index,
+    cost: index,
+    defence: index + 1,
+    life: null,
+    rarity: 'Ordinary',
+    rulesText: 'Synthetic rules',
+    thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+    type: 'Minion',
+  };
+  return {
+    elements: 'Fire',
+    guardian: metadata,
+    name: `Synthetic API Card ${index}`,
+    sets: [{
+      metadata,
+      name: 'Synthetic Set',
+      releasedAt: '2026-01-01T00:00:00.000Z',
+      variants: [{
+        artist: 'Synthetic Artist',
+        finish: 'Standard',
+        flavorText: '',
+        product: 'Synthetic Product',
+        slug: `synthetic_card_${index}`,
+        typeText: 'Minion',
+      }],
+    }],
+    subTypes: '',
+    ...overrides,
+  };
 }
 
 function sourceMetadata(rawBytes: Uint8Array, overrides: Record<string, unknown> = {}): SourceMetadata {
@@ -67,6 +104,67 @@ test('DATA-02 normalizes the same pinned synthetic card input byte-identically o
   assert.deepEqual(second, first);
   assert.equal(canonicalJson(second), canonicalJson(first));
   assert.equal(second.contentHash, first.contentHash);
+});
+
+test('DATA-02 strictly adapts the audited official API shape without changing source provenance', () => {
+  const first = officialApiCard(1);
+  const second = officialApiCard(2, {
+    elements: 'None',
+    guardian: {
+      ...(first.guardian as Record<string, unknown>),
+      attack: null,
+      cost: null,
+      defence: null,
+      rarity: null,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      type: 'Avatar',
+    },
+  });
+  const rawBytes = bytes([second, first]);
+  const adapted = adaptOfficialCardApiSnapshot(JSON.parse(new TextDecoder().decode(rawBytes)));
+  const normalized = normalizeCards(rawBytes, sourceMetadata(rawBytes));
+
+  assert.equal(adapted.cards.length, 2);
+  assert.equal(adapted.cards[0]?.rarity, null);
+  assert.deepEqual(adapted.cards[0]?.elements, []);
+  assert.deepEqual(adapted.cards[0]?.printingSlugs, ['synthetic_card_2']);
+  assert.equal(adapted.cards[0]?.sourceCardId, 'synthetic_card_2');
+  assert.equal(normalized.identity.sourceRefs[0]?.byteHash, sha256(rawBytes));
+
+  const reorderedBytes = bytes([
+    Object.fromEntries(Object.entries(first).reverse()),
+    Object.fromEntries(Object.entries(second).reverse()),
+  ]);
+  assert.equal(
+    identityHash(normalizeCards(reorderedBytes, sourceMetadata(reorderedBytes)).identity.payload),
+    identityHash(normalized.identity.payload),
+  );
+});
+
+test('DATA-02 rejects malformed and unknown official API fields at exact paths', () => {
+  const unknown = officialApiCard(1, { unexpected: true });
+  assert.deepEqual(
+    pathsAndCodes(captureDiagnostics(() => normalizeCards(bytes([unknown]), sourceMetadata(bytes([unknown]))))),
+    [{ path: '/0/unexpected', code: 'unrecognized_key' }],
+  );
+
+  const valid = officialApiCard(1);
+  const malformed = officialApiCard(1, {
+    guardian: { ...(valid.guardian as Record<string, unknown>), cost: '1' },
+  });
+  assert.deepEqual(
+    pathsAndCodes(captureDiagnostics(() =>
+      normalizeCards(bytes([malformed]), sourceMetadata(bytes([malformed]))),
+    )),
+    [{ path: '/0/guardian/cost', code: 'invalid_type' }],
+  );
+});
+
+test('DATA-02 keeps the reviewed 1,100-record official API workload bounded and lossless', () => {
+  const rawBytes = bytes(Array.from({ length: 1_100 }, (_, index) => officialApiCard(index)));
+  const normalized = normalizeCards(rawBytes, sourceMetadata(rawBytes));
+  assert.equal(normalized.identity.payload.cards.length, 1_100);
+  assert.equal(new Set(normalized.identity.payload.cards.map(({ stableId }) => stableId)).size, 1_100);
 });
 
 test('DATA-02 reordered object properties preserve normalized canonical card bytes and payload hashes', () => {

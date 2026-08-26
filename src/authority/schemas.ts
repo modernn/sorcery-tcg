@@ -92,7 +92,7 @@ export type RawCard = Readonly<{
   name: string;
   cardType: 'avatar' | 'site' | 'minion' | 'aura' | 'artifact' | 'magic';
   elements: readonly ('earth' | 'fire' | 'water' | 'air')[];
-  rarity: 'ordinary' | 'exceptional' | 'elite' | 'unique';
+  rarity: 'ordinary' | 'exceptional' | 'elite' | 'unique' | null;
   manaCost: number | null;
   attack: number | null;
   defense: number | null;
@@ -184,7 +184,7 @@ export const DEFAULT_AUTHORITY_JSON_LIMITS: AuthorityJsonLimits = Object.freeze(
 const HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const STABLE_ID_PATTERN = /^[a-z][a-z0-9-]*(?::[a-z0-9][a-z0-9._-]*)+$/;
 const SOURCE_ID_PATTERN = /^source:[a-z0-9][a-z0-9._-]*$/;
-const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const SLUG_PATTERN = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/;
 const MEDIA_TYPE_PATTERN = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i;
 const OFFICIAL_HOSTS = new Set([
   'sorcerytcg.com',
@@ -368,7 +368,7 @@ const cardFields = {
   name: z.string().min(1).max(300),
   cardType: z.enum(['avatar', 'site', 'minion', 'aura', 'artifact', 'magic']),
   elements: z.array(z.enum(['earth', 'fire', 'water', 'air'])).max(4),
-  rarity: z.enum(['ordinary', 'exceptional', 'elite', 'unique']),
+  rarity: z.enum(['ordinary', 'exceptional', 'elite', 'unique']).nullable(),
   manaCost: nullableNonnegativeInteger,
   attack: nullableNonnegativeInteger,
   defense: nullableNonnegativeInteger,

@@ -1,4 +1,5 @@
 import { identityHash, sha256 } from './hash.ts';
+import { adaptOfficialCardApiSnapshot } from './official-card-api-adapter.ts';
 import {
   AuthorityValidationError,
   DEFAULT_AUTHORITY_JSON_LIMITS,
@@ -63,9 +64,10 @@ export function normalizeCards(
     ]);
   }
 
-  const rawSnapshot = validateRawCardSnapshot(
-    parseAuthorityJson(rawBytes, DEFAULT_AUTHORITY_JSON_LIMITS),
-  );
+  const parsed = parseAuthorityJson(rawBytes, DEFAULT_AUTHORITY_JSON_LIMITS);
+  const rawSnapshot = Array.isArray(parsed)
+    ? adaptOfficialCardApiSnapshot(parsed)
+    : validateRawCardSnapshot(parsed);
   const cards = rawSnapshot.cards.map((card) => normalizeCard(card, source));
   cards.sort((left, right) => compareText(left.stableId, right.stableId));
 
@@ -89,4 +91,3 @@ export function normalizeCards(
     payload: snapshot,
   }));
 }
-
