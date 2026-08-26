@@ -101,6 +101,7 @@ type ProcessResult = Readonly<{ code: number | null; stdout: string; stderr: str
 function runPwsh(
   arguments_: readonly string[],
   environment: Readonly<Record<string, string>> = {},
+  timeoutMilliseconds = 20_000,
 ): Promise<ProcessResult> {
   return new Promise((resolveProcess, reject) => {
     const child = spawn('pwsh', ['-NoProfile', '-NonInteractive', ...arguments_], {
@@ -110,14 +111,40 @@ function runPwsh(
     });
     let stdout = '';
     let stderr = '';
+    let timedOut = false;
+    const appendBounded = (current: string, chunk: string): string =>
+      (current + chunk).slice(0, 1_048_576);
     child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
-      stdout += chunk;
+      stdout = appendBounded(stdout, chunk);
     });
     child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
-      stderr += chunk;
+      stderr = appendBounded(stderr, chunk);
     });
-    child.once('error', reject);
-    child.once('close', (code) => resolveProcess({ code, stdout, stderr }));
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      if (child.pid === undefined) return;
+      if (process.platform === 'win32') {
+        const killer = spawn('taskkill.exe', ['/pid', String(child.pid), '/t', '/f'], {
+          stdio: 'ignore',
+          windowsHide: true,
+        });
+        killer.once('error', () => child.kill('SIGKILL'));
+      } else {
+        child.kill('SIGKILL');
+      }
+    }, timeoutMilliseconds);
+    child.once('error', (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.once('close', (code) => {
+      clearTimeout(timeout);
+      resolveProcess({
+        code: timedOut ? null : code,
+        stdout,
+        stderr: timedOut ? `${stderr}\nPowerShell test process timed out.` : stderr,
+      });
+    });
   });
 }
 
@@ -251,6 +278,7 @@ async function invokeLoopback(
     bodyTimeoutSeconds?: number;
     maxTotalBytes?: number;
     faultPoint?: string;
+    pwshTimeoutMilliseconds?: number;
     userAuthorizationReference?: string;
     acknowledgePrivateUseRisk?: boolean;
   }> = {},
@@ -274,10 +302,14 @@ async function invokeLoopback(
     '$c = Get-Content -Raw -LiteralPath $env:SORCERY_COLLECTOR_CONFIG | ConvertFrom-Json -Depth 32',
     'Invoke-PrivateAuthorityCollectionForLoopbackTest -RepositoryRoot $c.repositoryRoot -PrimaryRoot $c.primaryRoot -BackupRoot $c.backupRoot -LockPath $c.lockPath -Descriptors $c.descriptors -HeaderTimeoutSeconds $c.headerTimeoutSeconds -BodyTimeoutSeconds $c.bodyTimeoutSeconds -MaxTotalBytes $c.maxTotalBytes -AcknowledgePrivateUseRisk:$c.acknowledgePrivateUseRisk -FaultPoint $c.faultPoint -UserAuthorizationReference $c.userAuthorizationReference | ConvertTo-Json -Depth 32 -Compress',
   ].join('; ');
-  return runPwsh(['-Command', command], {
-    SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH,
-    SORCERY_COLLECTOR_CONFIG: configurationPath,
-  });
+  return runPwsh(
+    ['-Command', command],
+    {
+      SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH,
+      SORCERY_COLLECTOR_CONFIG: configurationPath,
+    },
+    options.pwshTimeoutMilliseconds,
+  );
 }
 
 function createHappyAuthorityServer(
@@ -426,11 +458,13 @@ test('direct wrapper rejects missing backup or acknowledgment before filesystem 
   try {
     const noBackup = await runPwsh(['-File', SCRIPT_PATH, '-AcknowledgePrivateUseRisk']);
     assert.notEqual(noBackup.code, 0);
-    assert.match(noBackup.stderr, /BackupRoot/);
+    assert.equal(noBackup.stdout, '');
+    assert.equal(noBackup.stderr.trim(), 'Private authority collection failed.');
 
     const noAcknowledgment = await runPwsh(['-File', SCRIPT_PATH, '-BackupRoot', fixture.backupRoot]);
     assert.notEqual(noAcknowledgment.code, 0);
-    assert.match(noAcknowledgment.stderr, /AcknowledgePrivateUseRisk/);
+    assert.equal(noAcknowledgment.stdout, '');
+    assert.equal(noAcknowledgment.stderr.trim(), 'Private authority collection failed.');
     assert.deepEqual(await readdir(fixture.sandbox), ['repository']);
   } finally {
     await cleanupFixture(fixture);
@@ -857,6 +891,60 @@ test('changelog ignores hidden dates and requires one semantic date in the first
         await cleanupFixture(fixture);
       }
     });
+  }
+});
+
+test('direct output is fixed and sanitized for synthetic success and canary failure', async () => {
+  const fixture = await createFixture();
+  const invocation =
+    'Invoke-PrivateAuthorityCollection -BackupRoot $BackupRoot -AcknowledgePrivateUseRisk:$AcknowledgePrivateUseRisk -UserAuthorizationReference $UserAuthorizationReference';
+  const canaries = [
+    join(fixture.sandbox, 'CANARY-PRIVATE-ROOT'),
+    'https://canary.invalid/private/path?secret=CANARY_QUERY',
+    'sourceSetRootHash=CANARY_LOCK_HASH',
+  ] as const;
+  try {
+    const source = await readFile(SCRIPT_PATH, 'utf8');
+    assert.equal(source.includes(invocation), true);
+
+    const successScript = join(fixture.sandbox, 'collector-success.ps1');
+    await writeFile(
+      successScript,
+      source.replace(
+        invocation,
+        `[pscustomobject]@{ primaryRoot = '${canaries[0]}'; privateLocatorEvidence = '${canaries[1]}'; sourceSetRootHash = '${canaries[2]}' }`,
+      ),
+    );
+    const success = await runPwsh([
+      '-File',
+      successScript,
+      '-BackupRoot',
+      fixture.backupRoot,
+      '-AcknowledgePrivateUseRisk',
+    ]);
+    assert.equal(success.code, 0, success.stderr);
+    assert.equal(success.stdout.trim(), 'Private authority collection completed.');
+    assert.equal(success.stderr, '');
+    for (const canary of canaries) assert.doesNotMatch(`${success.stdout}${success.stderr}`, new RegExp(canary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+
+    const failureScript = join(fixture.sandbox, 'collector-failure.ps1');
+    await writeFile(
+      failureScript,
+      source.replace(invocation, `throw '${canaries.join(' ')}'`),
+    );
+    const failure = await runPwsh([
+      '-File',
+      failureScript,
+      '-BackupRoot',
+      fixture.backupRoot,
+      '-AcknowledgePrivateUseRisk',
+    ]);
+    assert.notEqual(failure.code, 0);
+    assert.equal(failure.stdout, '');
+    assert.equal(failure.stderr.trim(), 'Private authority collection failed.');
+    for (const canary of canaries) assert.doesNotMatch(`${failure.stdout}${failure.stderr}`, new RegExp(canary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  } finally {
+    await cleanupFixture(fixture);
   }
 });
 
@@ -1448,6 +1536,39 @@ test('preflight rejects existing or overlapping destinations before any request'
     }
   } finally {
     await close(server);
+  }
+});
+
+test('verifier timeout drains pipe pressure, kills the child, and removes owned staging', async () => {
+  const fixture = await createFixture();
+  const authority = createHappyAuthorityServer();
+  try {
+    const port = await listen(authority.server);
+    authority.setPort(port);
+    const started = Date.now();
+    const result = await invokeLoopback(
+      fixture,
+      testDescriptors(`http://127.0.0.1:${port}`),
+      { faultPoint: 'verifier-hang', pwshTimeoutMilliseconds: 7_000 },
+    );
+    assert.notEqual(result.code, 0);
+    assert.ok(Date.now() - started < 6_000, `verifier timeout took ${String(Date.now() - started)}ms`);
+    assert.match(result.stderr, /Private source verifier timed out/i);
+    assert.doesNotMatch(`${result.stdout}${result.stderr}`, /CANARY_VERIFIER_PIPE/);
+    assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
+    assert.equal(await stat(fixture.primaryRoot).then(() => true, () => false), false);
+    assert.equal(await stat(fixture.backupRoot).then(() => true, () => false), false);
+    assert.equal(
+      (await safeReaddir(dirname(fixture.primaryRoot))).some((name) => name.includes('.collecting-')),
+      false,
+    );
+    assert.equal(
+      (await safeReaddir(dirname(fixture.backupRoot))).some((name) => name.includes('.collecting-')),
+      false,
+    );
+  } finally {
+    await close(authority.server);
+    await cleanupFixture(fixture);
   }
 });
 
