@@ -311,6 +311,7 @@ function asGraphNode(
 function validateGraph(bundle: AuthorityBundle): void {
   const diagnostics: Diagnostic[] = [];
   const sourceById = new Map(bundle.identity.payload.sources.map((source) => [source.sourceId, source]));
+  const sourceHashes = new Set(bundle.identity.payload.sources.map((source) => source.byteHash));
   const nodes = new Map<string, GraphNode>();
   const rootNode = asGraphNode(bundle.identity, bundle.contentHash, '/identity');
   nodes.set(rootNode.stableId, rootNode);
@@ -346,6 +347,34 @@ function validateGraph(bundle: AuthorityBundle): void {
       message: 'authority graph exceeds the fixed reference limit',
     });
   }
+
+  bundle.identity.payload.sources.forEach((source, sourceIndex) => {
+    const path = `/identity/payload/sources/${sourceIndex}/derivation/parentByteHashes`;
+    const parents = source.derivation.parentByteHashes;
+    if (source.derivation.method === 'verbatim' && parents.length > 0) {
+      diagnostics.push({
+        path,
+        code: 'verbatim_source_has_parents',
+        message: 'verbatim source bytes must not claim derivation parents',
+      });
+    }
+    parents.forEach((parentHash, parentIndex) => {
+      const parentPath = `${path}/${parentIndex}`;
+      if (parentHash === source.byteHash) {
+        diagnostics.push({
+          path: parentPath,
+          code: 'self_derivation',
+          message: 'a source cannot derive from its own byte hash',
+        });
+      } else if (!sourceHashes.has(parentHash)) {
+        diagnostics.push({
+          path: parentPath,
+          code: 'missing_derivation_parent',
+          message: 'derivation parent hash does not resolve to another source record',
+        });
+      }
+    });
+  });
 
   const referencedSources = new Set<string>();
   for (const node of nodes.values()) {
