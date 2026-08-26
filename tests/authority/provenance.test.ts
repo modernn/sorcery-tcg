@@ -31,6 +31,7 @@ import {
 
 const HASH_A = ('sha256:' + 'a'.repeat(64)) as Hash;
 const HASH_B = ('sha256:' + 'b'.repeat(64)) as Hash;
+const encoder = new TextEncoder();
 
 function storedSource(overrides: Record<string, JsonValue> = {}): Record<string, JsonValue> {
   return {
@@ -181,6 +182,68 @@ async function materializeFixture(name = 'provenance-valid.json') {
 
 async function writeBundle(root: string, bundle: JsonValue): Promise<void> {
   await writeFile(join(root, 'bundle.json'), canonicalJson(bundle));
+}
+
+function derivationSource(sourceId: string, parentByteHashes: readonly Hash[] = []): SourceRecord {
+  const byteHash = sha256(encoder.encode(sourceId));
+  return validateSourceRecord({
+    sourceId,
+    url: `https://example.org/${sourceId.slice('source:'.length)}`,
+    authorityClass: 'community-provenance',
+    retrievedAt: '2026-08-20T00:00:00Z',
+    effectiveDate: null,
+    mediaType: 'application/json',
+    byteHash,
+    derivation: {
+      method: parentByteHashes.length === 0 ? 'verbatim' : 'normalized',
+      parentByteHashes,
+      notes: 'Synthetic derivation fixture',
+    },
+    licenseStatus: 'reference-only',
+    storageMode: 'manifest-only',
+    storagePolicy: 'manifest-only',
+    durableLocator: `urn:${byteHash}`,
+    acquisitionProcedureHash: null,
+  });
+}
+
+function derivationBundle(sources: readonly SourceRecord[]) {
+  const artifact = createCanonicalArtifact({
+    artifactKind: 'rule',
+    stableId: 'rule:derivation-fixture',
+    schemaVersion: 1,
+    parentRefs: [],
+    sourceRefs: sources.map(sourceRef),
+    payload: { title: 'Synthetic derivation graph' },
+  });
+  return createCanonicalArtifact({
+    artifactKind: 'bundle',
+    stableId: 'bundle:derivation-fixture',
+    schemaVersion: 1,
+    parentRefs: [],
+    sourceRefs: sources.map(sourceRef),
+    payload: {
+      effectiveDate: '2026-08-20',
+      precedencePolicyVersion: 1,
+      inputRootHash: null,
+      sources,
+      artifacts: [artifact],
+    },
+  });
+}
+
+async function withDerivationBundle<T>(
+  sources: readonly SourceRecord[],
+  run: (root: string, bundle: ReturnType<typeof derivationBundle>) => Promise<T>,
+): Promise<T> {
+  const root = await mkdtemp(join(tmpdir(), 'sorcery-derivation-'));
+  const bundle = derivationBundle(sources);
+  try {
+    await writeBundle(root, bundle);
+    return await run(root, bundle);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 }
 
 test('DATA-03 accepts a strict artifact envelope with stable ID schema version provenance and content hash', () => {
@@ -473,6 +536,126 @@ test('DATA-03 rejects reference cycles before returning a partial graph', async 
   } finally {
     await rm(materialized.root, { recursive: true, force: true });
   }
+});
+
+test('DATA-03 rejects a duplicate derivation parent at the repeated edge', async () => {
+  const root = derivationSource('source:derivation-duplicate-root');
+  const derived = derivationSource('source:derivation-duplicate-child', [
+    root.byteHash,
+    root.byteHash,
+  ]);
+  const diagnostics = await withDerivationBundle([root, derived], (bundleRoot, bundle) =>
+    captureAsyncDiagnostics(() => validateBundleGraph(bundleRoot, 'bundle.json', {
+      stableId: bundle.identity.stableId,
+      contentHash: bundle.contentHash,
+    })),
+  );
+  assert.deepEqual(
+    diagnostics.map(({ path, code }) => ({ path, code })),
+    [{
+      path: '/identity/payload/sources/1/derivation/parentByteHashes/1',
+      code: 'duplicate_derivation_parent',
+    }],
+  );
+});
+
+test('DATA-03 rejects two-node and longer derivation cycles deterministically', async () => {
+  const twoFirstBase = derivationSource('source:derivation-two-first');
+  const twoSecondBase = derivationSource('source:derivation-two-second');
+  const twoFirst = derivationSource(twoFirstBase.sourceId, [twoSecondBase.byteHash]);
+  const twoSecond = derivationSource(twoSecondBase.sourceId, [twoFirstBase.byteHash]);
+  const twoDiagnostics = await withDerivationBundle(
+    [twoFirst, twoSecond],
+    (bundleRoot, bundle) => captureAsyncDiagnostics(() =>
+      validateBundleGraph(bundleRoot, 'bundle.json', {
+        stableId: bundle.identity.stableId,
+        contentHash: bundle.contentHash,
+      }),
+    ),
+  );
+  assert.deepEqual(twoDiagnostics.map(({ path, code }) => ({ path, code })), [{
+    path: '/identity/payload/sources/1/derivation/parentByteHashes/0',
+    code: 'derivation_cycle',
+  }]);
+
+  const firstBase = derivationSource('source:derivation-long-first');
+  const secondBase = derivationSource('source:derivation-long-second');
+  const thirdBase = derivationSource('source:derivation-long-third');
+  const first = derivationSource(firstBase.sourceId, [secondBase.byteHash]);
+  const second = derivationSource(secondBase.sourceId, [thirdBase.byteHash]);
+  const third = derivationSource(thirdBase.sourceId, [firstBase.byteHash]);
+  const longDiagnostics = await withDerivationBundle(
+    [first, second, third],
+    (bundleRoot, bundle) => captureAsyncDiagnostics(() =>
+      validateBundleGraph(bundleRoot, 'bundle.json', {
+        stableId: bundle.identity.stableId,
+        contentHash: bundle.contentHash,
+      }),
+    ),
+  );
+  assert.deepEqual(longDiagnostics.map(({ path, code }) => ({ path, code })), [{
+    path: '/identity/payload/sources/2/derivation/parentByteHashes/0',
+    code: 'derivation_cycle',
+  }]);
+  assert.deepEqual(longDiagnostics, sortDiagnostics(longDiagnostics));
+});
+
+test('DATA-03 accepts a rooted acyclic multi-source derivation graph', async () => {
+  const firstRoot = derivationSource('source:derivation-dag-first-root');
+  const secondRoot = derivationSource('source:derivation-dag-second-root');
+  const middle = derivationSource('source:derivation-dag-middle', [
+    firstRoot.byteHash,
+    secondRoot.byteHash,
+  ]);
+  const leaf = derivationSource('source:derivation-dag-leaf', [
+    middle.byteHash,
+    secondRoot.byteHash,
+  ]);
+  await withDerivationBundle(
+    [firstRoot, secondRoot, middle, leaf],
+    async (bundleRoot, bundle) => {
+      const validated = await validateBundleGraph(bundleRoot, 'bundle.json', {
+        stableId: bundle.identity.stableId,
+        contentHash: bundle.contentHash,
+      });
+      assert.equal(validated.bundle.contentHash, bundle.contentHash);
+    },
+  );
+});
+
+test('DATA-03 retains missing self and verbatim derivation diagnostics', async () => {
+  const root = derivationSource('source:derivation-existing-root');
+  const selfBase = derivationSource('source:derivation-existing-self');
+  const self = derivationSource(selfBase.sourceId, [selfBase.byteHash]);
+  const missing = derivationSource('source:derivation-existing-missing', [HASH_A]);
+  const verbatimBase = derivationSource('source:derivation-existing-verbatim');
+  const verbatim = validateSourceRecord({
+    ...verbatimBase,
+    derivation: { ...verbatimBase.derivation, parentByteHashes: [root.byteHash] },
+  });
+  const diagnostics = await withDerivationBundle(
+    [root, self, missing, verbatim],
+    (bundleRoot, bundle) => captureAsyncDiagnostics(() =>
+      validateBundleGraph(bundleRoot, 'bundle.json', {
+        stableId: bundle.identity.stableId,
+        contentHash: bundle.contentHash,
+      }),
+    ),
+  );
+  assert.deepEqual(diagnostics.map(({ path, code }) => ({ path, code })), [
+    {
+      path: '/identity/payload/sources/1/derivation/parentByteHashes/0',
+      code: 'self_derivation',
+    },
+    {
+      path: '/identity/payload/sources/2/derivation/parentByteHashes/0',
+      code: 'missing_derivation_parent',
+    },
+    {
+      path: '/identity/payload/sources/3/derivation/parentByteHashes',
+      code: 'verbatim_source_has_parents',
+    },
+  ]);
 });
 
 test('DATA-03 rejects relative traversal and absolute stored-source paths', () => {
