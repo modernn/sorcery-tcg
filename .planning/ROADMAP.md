@@ -60,7 +60,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 01-07-PLAN.md — Verify the complete manually saved official source set, independent private backup, provenance, and scoped attestation.
+- [x] 01-07-PLAN.md — Verify the complete manually saved official source set, independent private backup, provenance, and scoped attestation.
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
@@ -203,7 +203,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Rules and Data Authority | 6/8 | In Progress|  |
+| 1. Rules and Data Authority | 7/8 | In Progress|  |
 | 2. Deterministic Engine Contract | 0/TBD | Not started | - |
 | 3. Complete Core Game Rules | 0/TBD | Not started | - |
 | 4. Storyline, Card Effects, and Coverage | 0/TBD | Not started | - |

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-06-PLAN.md
-last_updated: "2026-08-20T19:47:19.983Z"
-last_activity: 2026-08-20
+stopped_at: Completed 01-07-PLAN.md; Plan 01-08 blocked pending receipt-contract revision
+last_updated: "2026-08-26T05:06:22.200Z"
+last_activity: 2026-08-26
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 8
-  completed_plans: 6
-  percent: 75
+  completed_plans: 7
+  percent: 88
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-20)
 ## Current Position
 
 Phase: 1 (Rules and Data Authority) — EXECUTING
-Plan: 7 of 8
+Plan: 8 of 8
 Status: Ready to execute
-Last activity: 2026-08-26 - Completed quick task 260825-mhh: authorized one-shot private authority collection
+Last activity: 2026-08-26
 
-Progress: [████████░░] 75%
+Progress: [█████████░] 88%
 
 ## Performance Metrics
 
@@ -58,6 +58,7 @@ Progress: [████████░░] 75%
 | Phase 01 P04 | 34 min | 2 tasks | 6 files |
 | Phase 01 P05 | 42 min | 2 tasks | 12 files |
 | Phase 01 P06 | 9 min | 2 tasks | 3 files |
+| Phase 01 P07 | 5 min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -89,6 +90,9 @@ Recent decisions affecting current work:
 - [Phase 01]: Document the implemented official-only precedence order as a project fail-closed policy, not a publisher hierarchy claim. — The resolver must retain evidence and fail closed without overstating publisher guidance.
 - [Phase 01]: Permit one fixed user-run one-shot PowerShell collection of the seven official sources plus an independent byte-identical backup, recording `acquisitionMethod: user-run-one-shot-powershell`. — The user accepts the unresolved private-use risk; publisher permission remains absent, and the exception adds no recurring acquisition, retry/evasion, artwork, redistribution, hosting, or public API.
 - [Phase 01]: Keep community corpora behavioral-reference only and require written publisher permission plus a separate plan for broader use. — Audited community sources do not grant a complete reusable gameplay corpus.
+- [Phase 01]: Accept the exact consumed quick-260825-mhh-retry-1 agent-run evidence pair while preserving all private-use limits. — The current D-08/D-11 contract permits this closed pair and the private lock, consumed record, and bytes independently verify.
+- [Phase 01]: Treat source and lock hashes as byte-identity evidence only. — Hashes establish neither publisher authenticity nor legal permission.
+- [Phase 01]: Keep DATA-01, DATA-02, and DATA-03 pending through Plan 01-08. — The final private revision and phase gate have not executed.
 
 ### Pending Todos
 
@@ -98,6 +102,7 @@ Recent decisions affecting current work:
 
 - Phase 1 still lacks publisher permission for broader use. Only the narrow user-run one-shot seven-source collector plus independent private backup is accepted without a legal conclusion; recurring/agent-run acquisition, retry/evasion, artwork collection, redistribution, hosting, third-party upload, public API, and commercialization remain blocked pending written permission and a separate plan.
 - Ranked results remain unavailable until the first owned and benchmark card pool passes transitive verified-coverage gates in Phase 6.
+- Plan 01-08 still hard-requires acquisitionMethod user-run-one-shot-powershell, conflicting with the verified accepted agent-run quick-260825-mhh-retry-1 receipt; revise and validate 01-08 before execution.
 
 ### Quick Tasks Completed
 
@@ -116,6 +121,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-20T19:46:41.532Z
-Stopped at: Completed 01-06-PLAN.md
+Last session: 2026-08-26T05:06:22.195Z
+Stopped at: Completed 01-07-PLAN.md; Plan 01-08 blocked pending receipt-contract revision
 Resume file: None
