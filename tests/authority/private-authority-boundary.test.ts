@@ -18,7 +18,10 @@ type Fixture = Readonly<{
   backupRoot: string;
   lockPath: string;
   sourceBytes: ReadonlyMap<string, Buffer>;
+  protectedCard: Readonly<Record<string, unknown>>;
 }>;
+
+type Surface = 'reachable-history' | 'worktree' | 'index' | 'package';
 
 function run(
   command: string,
@@ -48,11 +51,34 @@ async function createFixture(): Promise<Fixture> {
   const backupRoot = join(sandbox, 'backup');
   const lockPath = join(repositoryRoot, '.local', 'authority', 'locks', 'synthetic', 'source-set-lock.json');
   const sourceBytes = new Map<string, Buffer>();
+  const protectedCard = {
+    name: 'Synthetic Boundary Sentinel',
+    guardian: {
+      rulesText: 'A deliberately private synthetic card record used only for boundary verification.',
+      threshold: { air: 1, earth: 2, fire: 3, water: 4 },
+    },
+    sets: [{ variants: [{ finish: 'standard', slug: 'synthetic-boundary-sentinel' }] }],
+  } as const;
   const entries = [];
   await mkdir(repositoryRoot, { recursive: true });
   for (const [sourceIndex, relativePath] of PRIVATE_AUTHORITY_SOURCE_PATHS.entries()) {
-    const bytes = Buffer.alloc(96);
-    for (let index = 0; index < bytes.length; index += 1) bytes[index] = 65 + ((sourceIndex * 7 + index) % 26);
+    const bytes = relativePath.endsWith('.json')
+      ? Buffer.from(JSON.stringify([protectedCard, { name: 'Second Synthetic Record', ordinal: sourceIndex }]), 'utf8')
+      : relativePath.endsWith('.html')
+        ? Buffer.from(
+            '<!doctype html><html><head><style>.hidden { display: none }</style></head><body>' +
+              '<h1>Visible Private Heading ' + sourceIndex + '</h1><p>Alpha   Beta\nGamma Secret Passage ' +
+              sourceIndex + ' ' + 'visible-boundary-text '.repeat(8) + '</p></body></html>',
+            'utf8',
+          )
+        : Buffer.from(
+            'Synthetic source ' + sourceIndex + ': ' +
+              Array.from(
+                { length: 90 },
+                (_, index) => 'segment-' + sourceIndex + '-' + String(index).padStart(3, '0') + ';',
+              ).join(''),
+            'utf8',
+          );
     sourceBytes.set(relativePath, bytes);
     const primaryPath = join(primaryRoot, ...relativePath.split('/'));
     const backupPath = join(backupRoot, ...relativePath.split('/'));
@@ -99,13 +125,62 @@ async function createFixture(): Promise<Fixture> {
       byteHashes: entries.map(({ byteHash }) => byteHash),
     }),
   );
-  const fixture = { sandbox, repositoryRoot, primaryRoot, backupRoot, lockPath, sourceBytes };
+  const fixture = { sandbox, repositoryRoot, primaryRoot, backupRoot, lockPath, sourceBytes, protectedCard };
   await git(fixture, 'init', '--quiet');
   await git(fixture, 'config', 'user.email', 'boundary@example.invalid');
   await git(fixture, 'config', 'user.name', 'Boundary Fixture');
   await git(fixture, 'add', '.gitignore', 'package.json', 'safe-metadata.json');
   await git(fixture, 'commit', '--quiet', '-m', 'safe fixture');
   return fixture;
+}
+
+async function addSurfaceCandidate(
+  fixture: Fixture,
+  surface: Surface,
+  name: string,
+  bytes: string | Buffer,
+): Promise<void> {
+  const relativePath = surface === 'package'
+    ? 'included/' + name + '.txt'
+    : surface === 'worktree'
+      ? 'worktree-only/' + name + '.tmp'
+      : surface === 'index'
+        ? 'index-only/' + name + '.txt'
+        : 'history-only/' + name + '.txt';
+  if (surface === 'reachable-history') {
+    await addCandidate(fixture, relativePath, bytes, 'commit');
+    await rm(join(fixture.repositoryRoot, ...relativePath.split('/')));
+    await git(fixture, 'add', '-u', relativePath);
+    await git(fixture, 'commit', '--quiet', '-m', 'remove ' + relativePath);
+    return;
+  }
+  await addCandidate(
+    fixture,
+    relativePath,
+    bytes,
+    surface === 'index' ? 'stage' : 'untracked',
+  );
+}
+
+function reorderedProtectedCard(fixture: Fixture): string {
+  const card = fixture.protectedCard as {
+    name: string;
+    guardian: { rulesText: string; threshold: Record<string, number> };
+    sets: readonly unknown[];
+  };
+  return JSON.stringify({
+    sets: card.sets,
+    guardian: {
+      threshold: {
+        water: card.guardian.threshold.water,
+        fire: card.guardian.threshold.fire,
+        earth: card.guardian.threshold.earth,
+        air: card.guardian.threshold.air,
+      },
+      rulesText: card.guardian.rulesText,
+    },
+    name: card.name,
+  });
 }
 
 async function cleanupFixture(fixture: Fixture): Promise<void> {
@@ -246,6 +321,73 @@ test('every pnpm dry-run package file is inspected even when untracked', async (
     assert.match(result.stderr, /exact-private-bytes/i);
   } finally {
     await cleanupFixture(fixture);
+  }
+});
+
+test('arbitrary offset raw excerpts and normalized semantic derivatives fail', async (context) => {
+  const cases: readonly Readonly<{
+    name: string;
+    candidate: (fixture: Fixture) => string | Buffer;
+    category: RegExp;
+  }>[] = [
+    {
+      name: 'arbitrary unsampled offset',
+      candidate: (fixture) => fixture.sourceBytes.get(PRIVATE_AUTHORITY_SOURCE_PATHS[0])!.subarray(137, 169),
+      category: /source-derived/i,
+    },
+    {
+      name: 'reordered partial card record',
+      candidate: reorderedProtectedCard,
+      category: /semantic|source-derived/i,
+    },
+    {
+      name: 'normalized visible HTML text',
+      candidate: () => 'VISIBLE private heading 1 alpha beta gamma secret passage 1 visible-boundary-text',
+      category: /semantic|source-derived/i,
+    },
+  ];
+  for (const scenario of cases) {
+    await context.test(scenario.name, async () => {
+      const fixture = await createFixture();
+      try {
+        await addCandidate(fixture, 'included/' + scenario.name.replaceAll(' ', '-') + '.txt', scenario.candidate(fixture));
+        const result = await runGate(fixture);
+        assert.notEqual(result.code, 0);
+        assert.match(result.stderr, scenario.category);
+        assert.equal(result.stderr.includes(fixture.primaryRoot), false);
+      } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+  }
+});
+
+test('encoded and escaped source excerpts and card records fail on every history worktree index and package surface', async (context) => {
+  const surfaces: readonly Surface[] = ['reachable-history', 'worktree', 'index', 'package'];
+  for (const surface of surfaces) {
+    for (const encoding of ['escaped source', 'escaped card'] as const) {
+      await context.test(encoding + ' on ' + surface, async () => {
+        const fixture = await createFixture();
+        try {
+          const raw = encoding === 'escaped source'
+            ? fixture.sourceBytes.get(PRIVATE_AUTHORITY_SOURCE_PATHS[0])!.subarray(137, 169).toString('utf8')
+            : reorderedProtectedCard(fixture);
+          const candidate = encoding === 'escaped source'
+            ? 'const protectedExcerpt = ' + JSON.stringify(raw) + ';'
+            : "const protectedCard = '" + raw + "';";
+          await addSurfaceCandidate(fixture, surface, encoding.replaceAll(' ', '-') + '-' + surface, candidate);
+          const result = await runGate(fixture);
+          assert.notEqual(result.code, 0, encoding + ' unexpectedly passed on ' + surface);
+          assert.match(result.stderr, /source-derived|semantic/i);
+          assert.match(result.stderr, new RegExp(surface));
+          assert.equal(result.stderr.includes(fixture.primaryRoot), false);
+          assert.equal(result.stderr.includes(fixture.backupRoot), false);
+          assert.equal(result.stderr.includes('private.invalid'), false);
+        } finally {
+          await cleanupFixture(fixture);
+        }
+      });
+    }
   }
 });
 
