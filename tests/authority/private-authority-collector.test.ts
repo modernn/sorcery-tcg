@@ -203,7 +203,9 @@ async function invokeLoopback(
   });
 }
 
-function createHappyAuthorityServer(): Readonly<{
+function createHappyAuthorityServer(
+  rulebookBytes: Buffer = SOURCE_BYTES['rulebook/rulebook-current.pdf'],
+): Readonly<{
   server: Server;
   requests: string[];
   setPort: (value: number) => void;
@@ -233,7 +235,7 @@ function createHappyAuthorityServer(): Readonly<{
     if (path === '/pdf') {
       response.setHeader('content-type', 'application/octet-stream');
       response.setHeader('content-disposition', 'attachment; filename=SorceryRulebook.pdf');
-      response.end(SOURCE_BYTES['rulebook/rulebook-current.pdf']);
+      response.end(rulebookBytes);
       return;
     }
     const relativePath = (Object.keys(SOURCE_BYTES) as SourcePath[]).find(
@@ -569,6 +571,44 @@ test('loopback collection selects the standard rulebook and preserves exact boun
   }
 });
 
+test('rulebook accepts only EOF with no bytes LF CR or CRLF after it', async (context) => {
+  for (const ending of ['\n', '\r', '\r\n'] as const) {
+    await context.test(JSON.stringify(ending), async () => {
+      const fixture = await createFixture();
+      const bytes = Buffer.concat([SOURCE_BYTES['rulebook/rulebook-current.pdf'], Buffer.from(ending)]);
+      const authority = createHappyAuthorityServer(bytes);
+      try {
+        const port = await listen(authority.server);
+        authority.setPort(port);
+        const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
+        assert.equal(result.code, 0, result.stderr);
+        assert.deepEqual(await readFile(join(fixture.primaryRoot, 'rulebook', 'rulebook-current.pdf')), bytes);
+      } finally {
+        await close(authority.server);
+        await cleanupFixture(fixture);
+      }
+    });
+  }
+
+  await context.test('rejects arbitrary trailing bytes', async () => {
+    const fixture = await createFixture();
+    const authority = createHappyAuthorityServer(
+      Buffer.concat([SOURCE_BYTES['rulebook/rulebook-current.pdf'], Buffer.from('junk')]),
+    );
+    try {
+      const port = await listen(authority.server);
+      authority.setPort(port);
+      const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
+      assert.notEqual(result.code, 0);
+      assert.match(result.stderr, /EOF marker or trailing bytes/i);
+      assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
+    } finally {
+      await close(authority.server);
+      await cleanupFixture(fixture);
+    }
+  });
+});
+
 test('loopback seam rejects non-loopback request targets before filesystem mutation', async () => {
   const fixture = await createFixture();
   try {
@@ -778,6 +818,7 @@ test('rulebook anchor redirect and PDF controls fail closed', async (context) =>
         port = await listen(server);
         const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
         assert.notEqual(result.code, 0);
+        if (scenario === 'wrong PDF signature') assert.match(result.stderr, /PDF prefix/i);
         assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
         assert.equal(requests.filter((path) => path === '/release').length, 1);
       } finally {

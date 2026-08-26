@@ -370,9 +370,18 @@ function Receive-Rulebook {
         if ($download.contentType -notin @('application/pdf', 'application/octet-stream')) { throw 'Rulebook response has the wrong media type' }
         if ($download.fileName -ne 'SorceryRulebook.pdf') { throw 'Rulebook response filename must be SorceryRulebook.pdf' }
         $bytes = [IO.File]::ReadAllBytes($DestinationPath)
-        if ($bytes.Length -lt 10 -or [Text.Encoding]::ASCII.GetString($bytes, 0, 5) -ne '%PDF-' -or
-            [Text.Encoding]::ASCII.GetString($bytes, $bytes.Length - 5, 5) -ne '%%EOF') {
-            throw 'Rulebook PDF signature or EOF marker is invalid'
+        if ($bytes.Length -lt 5 -or [Text.Encoding]::ASCII.GetString($bytes, 0, 5) -ne '%PDF-') {
+            throw 'Rulebook PDF prefix is invalid'
+        }
+        $ending = if ($bytes.Length -ge 2 -and $bytes[$bytes.Length - 2] -eq 13 -and $bytes[$bytes.Length - 1] -eq 10) {
+            "%%EOF`r`n"
+        }
+        elseif ($bytes[$bytes.Length - 1] -eq 10) { "%%EOF`n" }
+        elseif ($bytes[$bytes.Length - 1] -eq 13) { "%%EOF`r" }
+        else { '%%EOF' }
+        if ($bytes.Length -lt $ending.Length -or
+            [Text.Encoding]::ASCII.GetString($bytes, $bytes.Length - $ending.Length, $ending.Length) -cne $ending) {
+            throw 'Rulebook PDF EOF marker or trailing bytes are invalid'
         }
         return [pscustomobject]@{
             transfer = $download
