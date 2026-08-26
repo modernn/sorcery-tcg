@@ -349,6 +349,9 @@ function validateGraph(bundle: AuthorityBundle): void {
   const diagnostics: Diagnostic[] = [];
   const sourceById = new Map(bundle.identity.payload.sources.map((source) => [source.sourceId, source]));
   const sourceHashes = new Set(bundle.identity.payload.sources.map((source) => source.byteHash));
+  const sourceIndexByHash = new Map(
+    bundle.identity.payload.sources.map((source, index) => [source.byteHash, index]),
+  );
   const nodes = new Map<string, GraphNode>();
   const rootNode = asGraphNode(bundle.identity, bundle.contentHash, '/identity');
   nodes.set(rootNode.stableId, rootNode);
@@ -376,6 +379,9 @@ function validateGraph(bundle: AuthorityBundle): void {
   const referenceCount = [...nodes.values()].reduce(
     (count, node) => count + node.identity.parentRefs.length + node.identity.sourceRefs.length,
     0,
+  ) + bundle.identity.payload.sources.reduce(
+    (count, source) => count + source.derivation.parentByteHashes.length,
+    0,
   );
   if (referenceCount > MAX_AUTHORITY_REFERENCES) {
     diagnostics.push({
@@ -395,8 +401,17 @@ function validateGraph(bundle: AuthorityBundle): void {
         message: 'verbatim source bytes must not claim derivation parents',
       });
     }
+    const foundParents = new Set<Hash>();
     parents.forEach((parentHash, parentIndex) => {
       const parentPath = `${path}/${parentIndex}`;
+      if (foundParents.has(parentHash)) {
+        diagnostics.push({
+          path: parentPath,
+          code: 'duplicate_derivation_parent',
+          message: 'derivation parent byte hash duplicates an earlier edge',
+        });
+      }
+      foundParents.add(parentHash);
       if (parentHash === source.byteHash) {
         diagnostics.push({
           path: parentPath,
@@ -411,6 +426,40 @@ function validateGraph(bundle: AuthorityBundle): void {
         });
       }
     });
+  });
+
+  const derivationState = new Map<Hash, 0 | 1 | 2>();
+  function visitDerivation(sourceIndex: number, depth: number): void {
+    const source = bundle.identity.payload.sources[sourceIndex]!;
+    derivationState.set(source.byteHash, 1);
+    source.derivation.parentByteHashes.forEach((parentHash, parentIndex) => {
+      if (parentHash === source.byteHash) return;
+      const parentSourceIndex = sourceIndexByHash.get(parentHash);
+      if (parentSourceIndex === undefined) return;
+      const path = `/identity/payload/sources/${sourceIndex}/derivation/parentByteHashes/${parentIndex}`;
+      if (derivationState.get(parentHash) === 1) {
+        diagnostics.push({
+          path,
+          code: 'derivation_cycle',
+          message: 'source byte derivation contains a cycle',
+        });
+        return;
+      }
+      if (depth >= MAX_AUTHORITY_GRAPH_DEPTH) {
+        diagnostics.push({
+          path,
+          code: 'max_graph_depth',
+          message: 'authority graph exceeds the fixed depth limit',
+        });
+        return;
+      }
+      if (derivationState.get(parentHash) !== 2) visitDerivation(parentSourceIndex, depth + 1);
+    });
+    derivationState.set(source.byteHash, 2);
+  }
+
+  bundle.identity.payload.sources.forEach((source, index) => {
+    if (derivationState.get(source.byteHash) === undefined) visitDerivation(index, 0);
   });
 
   const referencedSources = new Set<string>();
