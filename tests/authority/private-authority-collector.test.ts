@@ -1,8 +1,17 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
-import { createServer, type Server } from 'node:http';
+import { createServer as createTcpServer } from 'node:net';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import test from 'node:test';
@@ -15,9 +24,10 @@ import {
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
 const SCRIPT_PATH = join(REPOSITORY_ROOT, 'scripts', 'collect-private-authority.ps1');
-const FRESH_AUTHORIZATION_REFERENCE = 'phase-01-20260827-private-reacquisition-1';
-const FRESH_REVISION_ID = 'official-2026-08-27-v3';
-const FRESH_ACQUISITION_METHOD = 'user-authorized-user-run-one-shot-powershell';
+const REVISION_ID = 'official-2026-08-27-v3';
+const MANUAL_METHOD = 'user-provided-manual-download';
+const MANUAL_REFERENCE = 'phase-01-20260827-manual-provision-1';
+const RETRIEVED_AT = '2026-08-27T20:00:00.000Z';
 const OFFICIAL_URLS = Object.freeze({
   'rulebook/rulebook-current.pdf':
     'https://sorcerytcg.com/news/sorcery-contested-realm-december-2025-rulebook-update',
@@ -30,10 +40,18 @@ const OFFICIAL_URLS = Object.freeze({
   'cards/cards.raw.json': 'https://api.sorcerytcg.com/api/cards',
 });
 
-function syntheticOfficialCard(
-  name = 'Synthetic Adept',
-  slug = 'synthetic-adept',
-): Record<string, unknown> {
+type SourcePath = (typeof PRIVATE_AUTHORITY_SOURCE_PATHS)[number];
+type ProcessResult = Readonly<{ code: number | null; stdout: string; stderr: string }>;
+type Fixture = Readonly<{
+  sandbox: string;
+  repositoryRoot: string;
+  inboxRoot: string;
+  primaryRoot: string;
+  backupRoot: string;
+  lockPath: string;
+}>;
+
+function syntheticOfficialCard(index: number): Record<string, unknown> {
   const metadata = {
     attack: 1,
     cost: 1,
@@ -47,7 +65,7 @@ function syntheticOfficialCard(
   return {
     elements: 'Fire',
     guardian: metadata,
-    name,
+    name: 'Synthetic Card ' + String(index),
     sets: [
       {
         metadata,
@@ -59,7 +77,7 @@ function syntheticOfficialCard(
             finish: 'Standard',
             flavorText: '',
             product: 'Synthetic Product',
-            slug,
+            slug: 'synthetic-card-' + String(index),
             typeText: 'Minion',
           },
         ],
@@ -69,41 +87,110 @@ function syntheticOfficialCard(
   };
 }
 
-const SOURCE_BYTES = Object.freeze({
-  'rulebook/rulebook-current.pdf': Buffer.from('%PDF-1.7\nsynthetic rulebook\n%%EOF'),
-  'formats/constructed-current.html': Buffer.from(
-    '<!doctype html><title>Constructed Format</title><main><h1>Constructed Format</h1><h2>Deck Construction</h2><p>minimum deck size</p></main>',
+function syntheticPdf(): Buffer {
+  const content = 'BT /F1 12 Tf ET\n%' + 'synthetic-padding'.repeat(2_048) + '\n';
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R >>',
+    '<< /Length ' + String(Buffer.byteLength(content)) + ' >>\nstream\n' + content + 'endstream',
+  ];
+  let document = '%PDF-1.7\n';
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(document));
+    document += String(index + 1) + ' 0 obj\n' + object + '\nendobj\n';
+  }
+  const xrefOffset = Buffer.byteLength(document);
+  document +=
+    'xref\n0 5\n0000000000 65535 f \n' +
+    offsets
+      .slice(1)
+      .map((offset) => String(offset).padStart(10, '0') + ' 00000 n \n')
+      .join('') +
+    'trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n' +
+    String(xrefOffset) +
+    '\n%%EOF';
+  return Buffer.from(document);
+}
+
+function syntheticHtml(body: string): Buffer {
+  const detail =
+    '<p>' +
+    'Synthetic independently authored authority material for offline validation only. '.repeat(12) +
+    '</p>';
+  return Buffer.from('<!doctype html><html><body><main>' + body + detail + '</main></body></html>');
+}
+
+const SOURCE_BYTES: Readonly<Record<SourcePath, Buffer>> = Object.freeze({
+  'rulebook/rulebook-current.pdf': syntheticPdf(),
+  'formats/constructed-current.html': syntheticHtml(
+    '<h1>Constructed Format</h1><h2>Deck Construction</h2>',
   ),
-  'codex/codex-current.html': Buffer.from(
-    '<!doctype html><title>Welcome to the Codex</title><main><h1>Welcome to the Codex</h1><nav>Card Rulings</nav><article>Rules Questions</article></main>',
+  'codex/codex-current.html': syntheticHtml(
+    '<h1>Welcome to the Codex</h1><p>Card Rulings</p>',
   ),
-  'codex/faqs-current.html': Buffer.from(
-    '<!doctype html><title>FAQs</title><main><h1>FAQs</h1><h2>Frequently Asked Questions</h2><article>Gameplay Questions</article></main>',
+  'codex/faqs-current.html': syntheticHtml(
+    '<h1>FAQs</h1><h2>Frequently Asked Questions</h2>',
   ),
-  'codex/changelog-current.html': Buffer.from(
-    '<!doctype html><title>Codex Changelog</title><main><h1>Codex Changelog</h1><article><h2>20 August 2026</h2><p>Rules update</p></article></main>',
+  'codex/changelog-current.html': syntheticHtml(
+    '<h1>Codex Changelog</h1><article><h2>20 August 2026</h2><p>Rules update</p></article>',
   ),
-  'updates/card-updates-2025.html': Buffer.from(
-    '<!doctype html><title>Sorcery: Contested Realm Card Updates 2025</title><main><h1>Sorcery: Contested Realm Card Updates 2025</h1><article><h2>Card Updates</h2><p>Effective November 25</p></article></main>',
+  'updates/card-updates-2025.html': syntheticHtml(
+    '<h1>Sorcery: Contested Realm Card Updates 2025</h1><h2>Card Updates</h2>',
   ),
-  'cards/cards.raw.json': Buffer.from(`${JSON.stringify([syntheticOfficialCard()])}\n`),
+  'cards/cards.raw.json': Buffer.from(
+    JSON.stringify(Array.from({ length: 1_100 }, (_, index) => syntheticOfficialCard(index))) +
+      '\n',
+  ),
 });
 
-type SourcePath = keyof typeof SOURCE_BYTES;
-type Fixture = Readonly<{
-  sandbox: string;
-  repositoryRoot: string;
-  primaryRoot: string;
-  backupRoot: string;
-  lockPath: string;
-  authorizationPath: string;
-}>;
-type ProcessResult = Readonly<{ code: number | null; stdout: string; stderr: string }>;
+function descriptors(): readonly Record<string, unknown>[] {
+  const markers: Partial<Record<SourcePath, readonly string[]>> = {
+    'formats/constructed-current.html': ['Constructed Format', 'Deck Construction'],
+    'codex/codex-current.html': ['Welcome to the Codex', 'Card Rulings'],
+    'codex/faqs-current.html': ['FAQs', 'Frequently Asked Questions'],
+    'codex/changelog-current.html': ['Codex Changelog'],
+    'updates/card-updates-2025.html': [
+      'Sorcery: Contested Realm Card Updates 2025',
+      'Card Updates',
+    ],
+  };
+  return PRIVATE_AUTHORITY_SOURCE_PATHS.map((relativePath) => ({
+    relativePath,
+    provenanceUrl: OFFICIAL_URLS[relativePath],
+    mediaType: relativePath.endsWith('.pdf')
+      ? 'application/pdf'
+      : relativePath.endsWith('.json')
+        ? 'application/json'
+        : 'text/html',
+    sourceMarker:
+      relativePath === 'rulebook/rulebook-current.pdf'
+        ? 'Sorcery: Contested Realm December 2025 Rulebook Update'
+        : (markers[relativePath]?.[0] ?? null),
+    visibleBodyMarkers: markers[relativePath] ?? null,
+    expectedCardCount: relativePath === 'cards/cards.raw.json' ? 1_100 : null,
+    effectiveDatePolicy: relativePath.includes('changelog')
+      ? 'changelog'
+      : relativePath === 'rulebook/rulebook-current.pdf' ||
+          relativePath === 'updates/card-updates-2025.html'
+        ? 'fixed'
+        : 'none',
+    effectiveDate:
+      relativePath === 'rulebook/rulebook-current.pdf'
+        ? '2025-12-19'
+        : relativePath === 'updates/card-updates-2025.html'
+          ? '2025-11-25'
+          : null,
+    minBytes: 1,
+    maxBytes: 10_000_000,
+  }));
+}
 
 function runPwsh(
   arguments_: readonly string[],
   environment: Readonly<Record<string, string>> = {},
-  timeoutMilliseconds = 20_000,
+  timeoutMilliseconds = 30_000,
 ): Promise<ProcessResult> {
   return new Promise((resolveProcess, reject) => {
     const child = spawn('pwsh', ['-NoProfile', '-NonInteractive', ...arguments_], {
@@ -114,13 +201,11 @@ function runPwsh(
     let stdout = '';
     let stderr = '';
     let timedOut = false;
-    const appendBounded = (current: string, chunk: string): string =>
-      (current + chunk).slice(0, 1_048_576);
     child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
-      stdout = appendBounded(stdout, chunk);
+      stdout = (stdout + chunk).slice(0, 1_048_576);
     });
     child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
-      stderr = appendBounded(stderr, chunk);
+      stderr = (stderr + chunk).slice(0, 1_048_576);
     });
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -144,160 +229,86 @@ function runPwsh(
       resolveProcess({
         code: timedOut ? null : code,
         stdout,
-        stderr: timedOut ? `${stderr}\nPowerShell test process timed out.` : stderr,
+        stderr: timedOut ? stderr + '\nPowerShell test process timed out.' : stderr,
       });
     });
   });
 }
 
 async function createFixture(): Promise<Fixture> {
-  const sandbox = await mkdtemp(join(tmpdir(), 'sorcery-private-collector-'));
+  const sandbox = await mkdtemp(join(tmpdir(), 'sorcery-manual-intake-'));
   const repositoryRoot = join(sandbox, 'repository');
-  const primaryRoot = join(repositoryRoot, '.local', 'authority', 'inputs', 'test', 'primary');
-  const backupRoot = join(sandbox, "backup with spaces & apostrophe's ($) [safe]");
-  const lockPath = join(repositoryRoot, '.local', 'authority', 'locks', 'test', 'source-set-lock.json');
-  const authorizationPath = join(
-    repositoryRoot,
-    '.local',
-    'authority',
-    'authorizations',
-    `${FRESH_AUTHORIZATION_REFERENCE}.consumed.json`,
-  );
-  await mkdir(repositoryRoot, { recursive: true });
   return {
     sandbox,
     repositoryRoot,
-    primaryRoot,
-    backupRoot,
-    lockPath,
-    authorizationPath,
+    inboxRoot: join(
+      repositoryRoot,
+      '.local',
+      'authority',
+      'manual-inbox',
+      REVISION_ID,
+    ),
+    primaryRoot: join(repositoryRoot, '.local', 'authority', 'inputs', REVISION_ID, 'primary'),
+    backupRoot: join(sandbox, 'sorcery-tcg-authority-backup-official-2026-08-27-v3'),
+    lockPath: join(
+      repositoryRoot,
+      '.local',
+      'authority',
+      'locks',
+      REVISION_ID,
+      'source-set-lock.json',
+    ),
   };
 }
 
 async function cleanupFixture(fixture: Fixture): Promise<void> {
   const sandbox = resolve(fixture.sandbox);
   assert.equal(dirname(sandbox), resolve(tmpdir()));
-  assert.match(basename(sandbox), /^sorcery-private-collector-/);
+  assert.match(basename(sandbox), /^sorcery-manual-intake-/);
   await rm(sandbox, { recursive: true, force: true });
 }
 
-function descriptor(relativePath: SourcePath, requestUrl: string): Record<string, unknown> {
-  const htmlMarkers: Partial<Record<SourcePath, string>> = {
-    'formats/constructed-current.html': 'Constructed Format',
-    'codex/codex-current.html': 'Welcome to the Codex',
-    'codex/faqs-current.html': 'FAQs',
-    'codex/changelog-current.html': 'Codex Changelog',
-    'updates/card-updates-2025.html': 'Sorcery: Contested Realm Card Updates 2025',
-  };
-  const visibleBodyMarkers: Partial<Record<SourcePath, readonly string[]>> = {
-    'formats/constructed-current.html': ['Constructed Format', 'Deck Construction', 'minimum deck size'],
-    'codex/codex-current.html': ['Welcome to the Codex', 'Card Rulings', 'Rules Questions'],
-    'codex/faqs-current.html': ['FAQs', 'Frequently Asked Questions', 'Gameplay Questions'],
-    'codex/changelog-current.html': ['Codex Changelog', 'Rules update'],
-    'updates/card-updates-2025.html': [
-      'Sorcery: Contested Realm Card Updates 2025',
-      'Card Updates',
-      'Effective November 25',
-    ],
-  };
-  return {
-    relativePath,
-    provenanceUrl: OFFICIAL_URLS[relativePath],
-    requestUrl,
-    mediaType: relativePath.endsWith('.pdf')
-      ? 'application/pdf'
-      : relativePath.endsWith('.json')
-        ? 'application/json'
-        : 'text/html',
-    sourceMarker:
-      relativePath === 'rulebook/rulebook-current.pdf'
-        ? 'Sorcery: Contested Realm December 2025 Rulebook Update'
-        : (htmlMarkers[relativePath] ?? null),
-    visibleBodyMarkers: visibleBodyMarkers[relativePath] ?? null,
-    expectedCardCount: relativePath === 'cards/cards.raw.json' ? 1 : null,
-    effectiveDatePolicy: relativePath.includes('changelog')
-      ? 'changelog'
-      : relativePath === 'rulebook/rulebook-current.pdf' || relativePath.includes('card-updates')
-        ? 'fixed'
-        : 'none',
-    effectiveDate:
-      relativePath === 'rulebook/rulebook-current.pdf'
-        ? '2025-12-19'
-        : relativePath.includes('card-updates')
-          ? '2025-11-25'
-          : null,
-    maxBytes: 16_384,
-    allowedHosts: ['127.0.0.1'],
-    allowedRedirectHosts: ['127.0.0.1'],
-  };
+async function writeSourceRoot(
+  root: string,
+  overrides: Readonly<Partial<Record<SourcePath, Buffer>>> = {},
+): Promise<void> {
+  for (const relativePath of PRIVATE_AUTHORITY_SOURCE_PATHS) {
+    const destination = join(root, ...relativePath.split('/'));
+    await mkdir(dirname(destination), { recursive: true });
+    await writeFile(destination, overrides[relativePath] ?? SOURCE_BYTES[relativePath]);
+  }
 }
 
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolveListen, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => resolveListen());
-  });
-  const address = server.address();
-  assert.ok(address && typeof address === 'object');
-  return address.port;
-}
-
-async function close(server: Server): Promise<void> {
-  await new Promise<void>((resolveClose, reject) =>
-    server.close((error) => (error === undefined ? resolveClose() : reject(error))),
-  );
-}
-
-function testDescriptors(baseUrl: string): readonly Record<string, unknown>[] {
-  return (Object.keys(SOURCE_BYTES) as SourcePath[]).map((relativePath) => {
-    const route =
-      relativePath === 'rulebook/rulebook-current.pdf'
-        ? '/release'
-        : `/${relativePath.replaceAll('/', '-')}`;
-    const value = descriptor(relativePath, `${baseUrl}${route}`);
-    if (relativePath === 'rulebook/rulebook-current.pdf') {
-      value.rulebookDownloadBaseUrl = `${baseUrl}/drive-download`;
-      value.rulebookLocatorHosts = ['127.0.0.1'];
-      value.allowedRedirectHosts = ['127.0.0.1'];
-    }
-    return value;
-  });
-}
-
-async function invokeLoopback(
+async function writeInbox(
   fixture: Fixture,
-  descriptors: readonly Record<string, unknown>[],
+  overrides: Readonly<Partial<Record<SourcePath, Buffer>>> = {},
+): Promise<void> {
+  await writeSourceRoot(fixture.inboxRoot, overrides);
+}
+
+async function invokeManualIntake(
+  fixture: Fixture,
   options: Readonly<{
-    headerTimeoutSeconds?: number;
-    bodyTimeoutSeconds?: number;
-    maxTotalBytes?: number;
-    faultPoint?: string;
-    pwshTimeoutMilliseconds?: number;
-    userAuthorizationReference?: string | null;
-    acknowledgePrivateUseRisk?: boolean;
+    acknowledge?: boolean;
+    faultPoint?: string | null;
+    descriptorSet?: readonly Record<string, unknown>[];
   }> = {},
 ): Promise<ProcessResult> {
-  const configurationPath = join(fixture.sandbox, `configuration-${randomUUID()}.json`);
+  const configurationPath = join(fixture.sandbox, 'configuration-' + randomUUID() + '.json');
   await writeFile(
     configurationPath,
     JSON.stringify({
       ...fixture,
-      descriptors,
-      headerTimeoutSeconds: options.headerTimeoutSeconds ?? 3,
-      bodyTimeoutSeconds: options.bodyTimeoutSeconds ?? 3,
-      maxTotalBytes: options.maxTotalBytes ?? 131_072,
+      descriptors: options.descriptorSet ?? descriptors(),
+      retrievedAt: RETRIEVED_AT,
+      acknowledge: options.acknowledge ?? true,
       faultPoint: options.faultPoint ?? null,
-      userAuthorizationReference:
-        'userAuthorizationReference' in options
-          ? (options.userAuthorizationReference ?? null)
-          : FRESH_AUTHORIZATION_REFERENCE,
-      acknowledgePrivateUseRisk: options.acknowledgePrivateUseRisk ?? true,
     }),
   );
   const command = [
     '. $env:SORCERY_COLLECTOR_SCRIPT',
-    '$c = Get-Content -Raw -LiteralPath $env:SORCERY_COLLECTOR_CONFIG | ConvertFrom-Json -Depth 32',
-    'Invoke-PrivateAuthorityCollectionForLoopbackTest -RepositoryRoot $c.repositoryRoot -PrimaryRoot $c.primaryRoot -BackupRoot $c.backupRoot -LockPath $c.lockPath -Descriptors $c.descriptors -HeaderTimeoutSeconds $c.headerTimeoutSeconds -BodyTimeoutSeconds $c.bodyTimeoutSeconds -MaxTotalBytes $c.maxTotalBytes -AcknowledgePrivateUseRisk:$c.acknowledgePrivateUseRisk -FaultPoint $c.faultPoint -UserAuthorizationReference $c.userAuthorizationReference | ConvertTo-Json -Depth 32 -Compress',
+    '$c = Get-Content -Raw -LiteralPath $env:SORCERY_COLLECTOR_CONFIG | ConvertFrom-Json -Depth 32 -DateKind String',
+    'try { Invoke-PrivateAuthorityManualIntakeForTest -RepositoryRoot $c.repositoryRoot -InboxRoot $c.inboxRoot -PrimaryRoot $c.primaryRoot -BackupRoot $c.backupRoot -LockPath $c.lockPath -Descriptors $c.descriptors -AcknowledgePrivateUseRisk:$c.acknowledge -RetrievedAt $c.retrievedAt -FaultPoint $c.faultPoint | ConvertTo-Json -Depth 32 -Compress } catch { [Console]::Error.WriteLine("Synthetic manual intake failed."); exit 1 }',
   ].join('; ');
   return runPwsh(
     ['-Command', command],
@@ -305,1614 +316,541 @@ async function invokeLoopback(
       SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH,
       SORCERY_COLLECTOR_CONFIG: configurationPath,
     },
-    options.pwshTimeoutMilliseconds,
+    60_000,
   );
 }
 
-function createHappyAuthorityServer(
-  rulebookBytes: Buffer = SOURCE_BYTES['rulebook/rulebook-current.pdf'],
-  changelogBytes: Buffer = SOURCE_BYTES['codex/changelog-current.html'],
-  overrides: Readonly<Partial<Record<SourcePath, Buffer>>> = {},
-): Readonly<{
-  server: Server;
-  requests: string[];
-  setPort: (value: number) => void;
-}> {
-  const requests: string[] = [];
-  let port = 0;
-  const server = createServer((request, response) => {
-    const path = request.url ?? '';
-    requests.push(path);
-    if (path === '/release') {
-      response.setHeader('content-type', 'text/html; charset=utf-8');
-      response.end(
-        '<!doctype html><title>Sorcery: Contested Realm December 2025 Rulebook Update</title>' +
-          '<time>19 Dec 2025</time>' +
-          `<a href="http://127.0.0.1:${port}/file/d/annotated/view">Sorcery: Contested Realm Rulebook (December 2025) Annotated</a>` +
-          `<a href="http://127.0.0.1:${port}/file/d/standard/view">Sorcery: Contested Realm Rulebook (December 2025)</a>` +
-          '<img src="/artwork-must-not-be-requested">',
-      );
-      return;
-    }
-    if (path === '/drive-download?export=download&id=standard') {
-      response.statusCode = 303;
-      response.setHeader('location', '/pdf');
-      response.end();
-      return;
-    }
-    if (path === '/pdf') {
-      response.setHeader('content-type', 'application/octet-stream');
-      response.setHeader('content-disposition', 'attachment; filename=SorceryRulebook.pdf');
-      response.end(rulebookBytes);
-      return;
-    }
-    const relativePath = (Object.keys(SOURCE_BYTES) as SourcePath[]).find(
-      (candidate) => path === `/${candidate.replaceAll('/', '-')}`,
-    );
-    if (relativePath === undefined || relativePath === 'rulebook/rulebook-current.pdf') {
-      response.statusCode = 500;
-      response.end('unexpected route');
-      return;
-    }
-    response.setHeader(
-      'content-type',
-      relativePath.endsWith('.json') ? 'application/json; charset=utf-8' : 'text/html; charset=utf-8',
-    );
-    response.end(
-      overrides[relativePath] ??
-        (relativePath === 'codex/changelog-current.html' ? changelogBytes : SOURCE_BYTES[relativePath]),
-    );
-  });
-  return { server, requests, setPort: (value) => (port = value) };
+async function exists(path: string): Promise<boolean> {
+  return stat(path)
+    .then(() => true)
+    .catch((error: unknown) => {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
+        return false;
+      }
+      throw error;
+    });
 }
 
-async function relativeFiles(root: string): Promise<readonly string[]> {
-  const found: string[] = [];
-  async function visit(directory: string, prefix: string): Promise<void> {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      const relativePath = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
-      if (entry.isDirectory()) await visit(join(directory, entry.name), relativePath);
-      else found.push(relativePath);
-    }
+async function inboxHashes(fixture: Fixture): Promise<Readonly<Record<string, string>>> {
+  const hashes: Record<string, string> = {};
+  for (const relativePath of PRIVATE_AUTHORITY_SOURCE_PATHS) {
+    hashes[relativePath] = createHash('sha256')
+      .update(await readFile(join(fixture.inboxRoot, ...relativePath.split('/'))))
+      .digest('hex');
   }
-  await visit(root, '');
-  return found.sort();
+  return hashes;
 }
 
-async function safeReaddir(root: string): Promise<readonly string[]> {
-  return readdir(root).catch((error: unknown) => {
-    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') return [];
-    throw error;
-  });
-}
-
-async function createExistingRootsLock(fixture: Fixture): Promise<void> {
-  const sourceBytes: Record<SourcePath, Buffer> = {
-    ...SOURCE_BYTES,
-    'cards/cards.raw.json': Buffer.from(
-      `${JSON.stringify(
-        Array.from({ length: 1_100 }, (_, index) =>
-          syntheticOfficialCard(`Synthetic Card ${String(index)}`, `synthetic-card-${String(index)}`),
-        ),
-      )}\n`,
-    ),
-  };
-
-  for (const root of [fixture.primaryRoot, fixture.backupRoot]) {
-    for (const relativePath of PRIVATE_AUTHORITY_SOURCE_PATHS) {
-      const destination = join(root, ...relativePath.split('/'));
-      await mkdir(dirname(destination), { recursive: true });
-      await writeFile(destination, sourceBytes[relativePath]);
-    }
-  }
-
-  const effectiveDates: Partial<Record<SourcePath, string>> = {
-    'rulebook/rulebook-current.pdf': '2025-12-19',
-    'codex/changelog-current.html': '2026-08-20',
-    'updates/card-updates-2025.html': '2025-11-25',
-  };
-  const entries: PrivateAuthoritySourceEntry[] = PRIVATE_AUTHORITY_SOURCE_PATHS.map(
-    (relativePath) => ({
-      relativePath,
-      url: OFFICIAL_URLS[relativePath],
-      retrievedAt: '2026-08-20T00:00:00.000Z',
-      effectiveDate: effectiveDates[relativePath] ?? null,
-      mediaType: relativePath.endsWith('.pdf')
-        ? 'application/pdf'
-        : relativePath.endsWith('.json')
-          ? 'application/json'
-          : 'text/html',
-      byteLength: sourceBytes[relativePath].byteLength,
-      byteHash: `sha256:${createHash('sha256').update(sourceBytes[relativePath]).digest('hex')}`,
-    }),
-  );
-  const verified = await verifyPrivateSourceSet({
-    primaryRoot: fixture.primaryRoot,
-    backupRoot: fixture.backupRoot,
-    repositoryRoot: fixture.repositoryRoot,
-    entries,
-  });
-  const rulebookEntry = verified.entries.find(
-    ({ relativePath }) => relativePath === 'rulebook/rulebook-current.pdf',
-  );
-  assert.ok(rulebookEntry);
-  await mkdir(dirname(fixture.lockPath), { recursive: true });
-  await writeFile(
-    fixture.lockPath,
-    `${JSON.stringify({
-      schemaVersion: 1,
-      acquisitionMethod: 'user-authorized-agent-run-one-shot-powershell',
-      authorizationReference: 'quick-260825-mhh-retry-1',
-      primaryRoot: resolve(fixture.primaryRoot),
-      backupRoot: resolve(fixture.backupRoot),
-      entries: verified.entries,
-      sourceSetRootHash: verified.sourceSetRootHash,
-      operatingAcknowledgment: {
-        scope: 'private-local-noncommercial',
-        noRedistributionReleaseHostingUploadOrArtwork: true,
-        apiTermsRobotsConflictAndPrivateUseRiskAccepted: true,
-        establishesLegalPermission: false,
-        stopOnBlockedStatusCaptchaOrPublisherObjection: true,
-        retryOrEvasion: false,
-      },
-      rulebookAcquisitionEvidence: {
-        sourceUrl: OFFICIAL_URLS['rulebook/rulebook-current.pdf'],
-        relativePath: rulebookEntry.relativePath,
-        byteHash: rulebookEntry.byteHash,
-        observedFilename: 'SorceryRulebook.pdf',
-        retrievedAt: rulebookEntry.retrievedAt,
-        privateLocatorEvidence: 'CANARY_PRIVATE_LOCATOR',
-        privateLocatorIsNormative: false,
-      },
-    })}\n`,
-    'utf8',
-  );
-}
-
-async function captureExistingRootBytes(fixture: Fixture): Promise<Readonly<Record<string, Buffer>>> {
-  const captured: Record<string, Buffer> = {};
-  for (const [rootName, root] of [
-    ['primary', fixture.primaryRoot],
-    ['backup', fixture.backupRoot],
-  ] as const) {
-    for (const relativePath of PRIVATE_AUTHORITY_SOURCE_PATHS) {
-      captured[`${rootName}/${relativePath}`] = await readFile(join(root, ...relativePath.split('/')));
-    }
-  }
-  return captured;
-}
-
-test('offline mode verifies complete local roots without transport or publication', async () => {
+test('manual intake publishes exact independent roots and a lock last without transport', async () => {
   const fixture = await createFixture();
   try {
-    await createExistingRootsLock(fixture);
-    const script = await readFile(SCRIPT_PATH, 'utf8');
-    const transportAnchor = '$handler = [Net.Http.HttpClientHandler]::new()';
-    assert.ok(script.includes(transportAnchor));
-    const offlineScript = script
-      .replace('-ArgumentList $PSScriptRoot', '-ArgumentList $env:SORCERY_COLLECTOR_SCRIPT_ROOT')
-      .replace(transportAnchor, `throw 'OFFLINE_TRANSPORT_CANARY'\n    ${transportAnchor}`);
-    const offlineScriptPath = join(fixture.sandbox, 'collect-private-authority-offline.ps1');
-    await writeFile(offlineScriptPath, offlineScript, 'utf8');
-    const historicalAuthorizationPath = join(
+    await writeInbox(fixture);
+    const before = await inboxHashes(fixture);
+    const result = await invokeManualIntake(fixture);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stderr, '');
+    assert.equal(result.stdout, '');
+    const lock = JSON.parse(await readFile(fixture.lockPath, 'utf8')) as {
+      acquisitionMethod: string;
+      authorizationReference: string;
+      primaryRoot: string;
+      backupRoot: string;
+      entries: PrivateAuthoritySourceEntry[];
+      sourceSetRootHash: string;
+      rulebookAcquisitionEvidence: {
+        byteHash: string;
+        retrievedAt: string;
+      };
+    };
+    assert.equal(lock.acquisitionMethod, MANUAL_METHOD);
+    assert.equal(lock.authorizationReference, MANUAL_REFERENCE);
+    assert.equal(lock.entries.length, 7);
+    assert.equal(await exists(join(fixture.repositoryRoot, '.local', 'authority', 'authorizations')), false);
+    assert.deepEqual(await inboxHashes(fixture), before);
+
+    const verified = await verifyPrivateSourceSet({
+      repositoryRoot: fixture.repositoryRoot,
+      primaryRoot: fixture.primaryRoot,
+      backupRoot: fixture.backupRoot,
+      entries: lock.entries,
+    });
+    assert.equal(verified.sourceSetRootHash, lock.sourceSetRootHash);
+    for (const relativePath of PRIVATE_AUTHORITY_SOURCE_PATHS) {
+      const original = await readFile(join(fixture.inboxRoot, ...relativePath.split('/')));
+      assert.deepEqual(
+        await readFile(join(fixture.primaryRoot, ...relativePath.split('/'))),
+        original,
+      );
+      assert.deepEqual(
+        await readFile(join(fixture.backupRoot, ...relativePath.split('/'))),
+        original,
+      );
+    }
+
+    const offline = await runPwsh([
+      '-File',
+      SCRIPT_PATH,
+      '-VerifyExistingRoots',
+      '-LockPath',
+      fixture.lockPath,
+    ]);
+    assert.equal(offline.code, 0, offline.stderr);
+    assert.equal(offline.stdout.trimEnd(), 'Private authority existing roots verified.');
+    assert.equal(offline.stderr, '');
+
+    const historicalPrimary = join(
+      fixture.repositoryRoot,
+      '.local',
+      'authority',
+      'inputs',
+      'official-2026-08-20',
+      'primary',
+    );
+    const historicalBackup = join(fixture.sandbox, 'historical-independent-backup');
+    const historicalLockPath = join(
+      fixture.repositoryRoot,
+      '.local',
+      'authority',
+      'locks',
+      'official-2026-08-20',
+      'source-set-lock.json',
+    );
+    await writeSourceRoot(historicalPrimary);
+    await writeSourceRoot(historicalBackup);
+    await mkdir(dirname(historicalLockPath), { recursive: true });
+    const historicalBase = {
+      ...lock,
+      primaryRoot: historicalPrimary,
+      backupRoot: historicalBackup,
+    };
+    const legacyLock: Partial<typeof lock> = {
+      ...historicalBase,
+      acquisitionMethod: 'user-run-one-shot-powershell',
+    };
+    delete legacyLock.authorizationReference;
+    await writeFile(historicalLockPath, JSON.stringify(legacyLock));
+    const legacy = await runPwsh([
+      '-File',
+      SCRIPT_PATH,
+      '-VerifyExistingRoots',
+      '-LockPath',
+      historicalLockPath,
+    ]);
+    assert.equal(legacy.code, 0, legacy.stderr);
+
+    const agentLock = {
+      ...historicalBase,
+      acquisitionMethod: 'user-authorized-agent-run-one-shot-powershell',
+      authorizationReference: 'quick-260825-mhh-retry-1',
+    };
+    await writeFile(fixture.lockPath, JSON.stringify(agentLock));
+    const wrongRevision = await runPwsh([
+      '-File',
+      SCRIPT_PATH,
+      '-VerifyExistingRoots',
+      '-LockPath',
+      fixture.lockPath,
+    ]);
+    assert.notEqual(wrongRevision.code, 0);
+
+    await writeFile(historicalLockPath, JSON.stringify(agentLock));
+    const unboundAgent = await runPwsh([
+      '-File',
+      SCRIPT_PATH,
+      '-VerifyExistingRoots',
+      '-LockPath',
+      historicalLockPath,
+    ]);
+    assert.notEqual(unboundAgent.code, 0);
+
+    const authorizationPath = join(
       fixture.repositoryRoot,
       '.local',
       'authority',
       'authorizations',
       'quick-260825-mhh-retry-1.consumed.json',
     );
-    await mkdir(dirname(historicalAuthorizationPath), { recursive: true });
-    await writeFile(historicalAuthorizationPath, 'unchanged historical authorization');
-    const before = await captureExistingRootBytes(fixture);
-    const lockBefore = await readFile(fixture.lockPath);
-    const authorizationBefore = await readFile(historicalAuthorizationPath);
-
-    const result = await runPwsh(
-      ['-File', offlineScriptPath, '-VerifyExistingRoots', '-LockPath', fixture.lockPath],
-      { SORCERY_COLLECTOR_SCRIPT_ROOT: dirname(SCRIPT_PATH) },
+    await mkdir(dirname(authorizationPath), { recursive: true });
+    const authorizationRecord = {
+      schemaVersion: 1,
+      revisionId: 'official-2026-08-20',
+      acquisitionMethod: 'user-authorized-agent-run-one-shot-powershell',
+      authorizationReference: 'quick-260825-mhh-retry-1',
+      consumedAt: RETRIEVED_AT,
+    };
+    await writeFile(
+      authorizationPath,
+      JSON.stringify({ ...authorizationRecord, consumedAt: '2026-99-99T99:99:99.999Z' }),
     );
+    const impossibleTimestamp = await runPwsh([
+      '-File',
+      SCRIPT_PATH,
+      '-VerifyExistingRoots',
+      '-LockPath',
+      historicalLockPath,
+    ]);
+    assert.notEqual(impossibleTimestamp.code, 0);
 
-    assert.equal(result.code, 0, result.stderr);
-    assert.equal(result.stdout.trim(), 'Private authority existing roots verified.');
-    assert.equal(result.stderr, '');
-    assert.equal(`${result.stdout}${result.stderr}`.includes('OFFLINE_TRANSPORT_CANARY'), false);
-    assert.deepEqual(await captureExistingRootBytes(fixture), before);
-    assert.deepEqual(await readFile(fixture.lockPath), lockBefore);
-    assert.deepEqual(await readFile(historicalAuthorizationPath), authorizationBefore);
-  } finally {
-    await cleanupFixture(fixture);
-  }
-});
+    await writeFile(authorizationPath, JSON.stringify(authorizationRecord));
+    const boundAgent = await runPwsh([
+      '-File',
+      SCRIPT_PATH,
+      '-VerifyExistingRoots',
+      '-LockPath',
+      historicalLockPath,
+    ]);
+    assert.equal(boundAgent.code, 0, boundAgent.stderr);
 
-test('offline authorization identity accepts historical and fresh exact pairs only', async () => {
-  const fixture = await createFixture();
-  try {
-    await createExistingRootsLock(fixture);
-    const historicalLock = JSON.parse(await readFile(fixture.lockPath, 'utf8')) as Record<
-      string,
-      unknown
-    >;
-    for (const identity of [
-      {
-        acquisitionMethod: 'user-authorized-agent-run-one-shot-powershell',
-        authorizationReference: 'quick-260825-mhh-retry-1',
-        accepted: true,
-      },
-      {
-        acquisitionMethod: FRESH_ACQUISITION_METHOD,
-        authorizationReference: FRESH_AUTHORIZATION_REFERENCE,
-        accepted: true,
-      },
-      {
-        acquisitionMethod: 'user-authorized-agent-run-one-shot-powershell',
-        authorizationReference: FRESH_AUTHORIZATION_REFERENCE,
-        accepted: false,
-      },
-      {
-        acquisitionMethod: FRESH_ACQUISITION_METHOD,
-        authorizationReference: 'quick-260825-mhh-retry-1',
-        accepted: false,
-      },
-    ] as const) {
-      await writeFile(
-        fixture.lockPath,
-        JSON.stringify({ ...historicalLock, acquisitionMethod: identity.acquisitionMethod, authorizationReference: identity.authorizationReference }) + '\n',
-      );
-      const result = await runPwsh([
-        '-File',
-        SCRIPT_PATH,
-        '-VerifyExistingRoots',
-        '-LockPath',
-        fixture.lockPath,
-      ]);
-      assert.equal(result.code === 0, identity.accepted);
-      assert.equal(
-        result.stderr.trim(),
-        identity.accepted ? '' : 'Private authority existing-root verification failed.',
-      );
-    }
-  } finally {
-    await cleanupFixture(fixture);
-  }
-});
-
-test('offline mode rejects incomplete existing roots with fixed sanitized output', async () => {
-  const fixture = await createFixture();
-  try {
-    await createExistingRootsLock(fixture);
-    await rm(join(fixture.backupRoot, 'codex', 'faqs-current.html'));
-
-    const result = await runPwsh([
+    await writeFile(
+      fixture.lockPath,
+      JSON.stringify({
+        ...lock,
+        acquisitionMethod: 'user-authorized-user-run-one-shot-powershell',
+        authorizationReference: 'phase-01-20260827-private-reacquisition-1',
+      }),
+    );
+    const retired = await runPwsh([
       '-File',
       SCRIPT_PATH,
       '-VerifyExistingRoots',
       '-LockPath',
       fixture.lockPath,
     ]);
+    assert.notEqual(retired.code, 0);
 
-    assert.notEqual(result.code, 0);
-    assert.equal(result.stdout, '');
-    assert.equal(result.stderr.trim(), 'Private authority existing-root verification failed.');
-    const combined = `${result.stdout}${result.stderr}`;
-    for (const secret of [
-      fixture.primaryRoot,
-      fixture.backupRoot,
+    await writeFile(
       fixture.lockPath,
-      'CANARY_PRIVATE_LOCATOR',
-      'primaryRoot',
-      'backupRoot',
-      'privateLocator',
-    ]) {
-      assert.equal(combined.includes(secret), false, `leaked private failure detail: ${secret}`);
-    }
-  } finally {
-    await cleanupFixture(fixture);
-  }
-});
-
-test('offline mode is mutually exclusive with collection parameters', async () => {
-  const fixture = await createFixture();
-  try {
-    await createExistingRootsLock(fixture);
-    const result = await runPwsh([
+      JSON.stringify({
+        ...lock,
+        rulebookAcquisitionEvidence: {
+          ...lock.rulebookAcquisitionEvidence,
+          byteHash: 'sha256:' + '0'.repeat(64),
+        },
+      }),
+    );
+    const evidenceMismatch = await runPwsh([
       '-File',
       SCRIPT_PATH,
       '-VerifyExistingRoots',
       '-LockPath',
       fixture.lockPath,
-      '-BackupRoot',
-      fixture.backupRoot,
     ]);
-    assert.notEqual(result.code, 0);
-    assert.equal(result.stdout, '');
-    assert.equal(result.stderr.trim(), 'Private authority existing-root verification failed.');
+    assert.notEqual(evidenceMismatch.code, 0);
   } finally {
     await cleanupFixture(fixture);
   }
 });
 
-test('dot-sourcing exposes only the closed collector surface and forwards authorization context', async () => {
-  const fixture = await createFixture();
-  try {
-    const command = [
-      '. $env:SORCERY_COLLECTOR_SCRIPT',
-      '$tokens = $null; $errors = $null',
-      '$ast = [Management.Automation.Language.Parser]::ParseFile($env:SORCERY_COLLECTOR_SCRIPT, [ref]$tokens, [ref]$errors)',
-      '$definedFunctions = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object Name)',
-      '$resolvedFunctions = @($definedFunctions | Where-Object { $null -ne (Get-Command -Name $_ -ErrorAction SilentlyContinue) } | Sort-Object -Unique)',
-      '$signatures = [ordered]@{}',
-      "foreach ($name in @('Invoke-PrivateAuthorityCollection', 'Invoke-PrivateAuthorityCollectionForLoopbackTest', 'Invoke-PrivateAuthorityCollectionCore')) { $functionAst = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true))[0]; $signatures[$name] = @($functionAst.Body.ParamBlock.Parameters.Name.VariablePath.UserPath) }",
-      '[pscustomobject]@{ parameters = @($ast.ParamBlock.Parameters.Name.VariablePath.UserPath); functions = $resolvedFunctions; signatures = $signatures; moduleVariableLeaked = [bool](Get-Variable collectorModule -ErrorAction SilentlyContinue) } | ConvertTo-Json -Depth 8 -Compress',
-    ].join('; ');
-    const result = await runPwsh(['-Command', command], { SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH });
-    assert.equal(result.code, 0, result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout.trim()), {
-      parameters: [
-        'BackupRoot',
-        'AcknowledgePrivateUseRisk',
-        'UserAuthorizationReference',
-        'VerifyExistingRoots',
-        'LockPath',
-      ],
-      functions: [
-        'Get-ProductionSourceDescriptors',
-        'Invoke-PrivateAuthorityCollection',
-        'Invoke-PrivateAuthorityCollectionForLoopbackTest',
-      ],
-      signatures: {
-        'Invoke-PrivateAuthorityCollection': [
-          'BackupRoot',
-          'AcknowledgePrivateUseRisk',
-          'UserAuthorizationReference',
-        ],
-        'Invoke-PrivateAuthorityCollectionForLoopbackTest': [
-          'RepositoryRoot',
-          'PrimaryRoot',
-          'BackupRoot',
-          'LockPath',
-          'Descriptors',
-          'HeaderTimeoutSeconds',
-          'BodyTimeoutSeconds',
-          'MaxTotalBytes',
-          'AcknowledgePrivateUseRisk',
-          'FaultPoint',
-          'UserAuthorizationReference',
-        ],
-        'Invoke-PrivateAuthorityCollectionCore': [
-          'RepositoryRoot',
-          'PrimaryRoot',
-          'BackupRoot',
-          'LockPath',
-          'Descriptors',
-          'HeaderTimeoutSeconds',
-          'BodyTimeoutSeconds',
-          'MaxTotalBytes',
-          'AcknowledgePrivateUseRisk',
-          'LoopbackOnly',
-          'FaultPoint',
-          'UserAuthorizationReference',
-        ],
-      },
-      moduleVariableLeaked: false,
-    });
-    assert.deepEqual(await readdir(fixture.sandbox), ['repository']);
-  } finally {
-    await cleanupFixture(fixture);
-  }
-});
-
-test('direct wrapper rejects missing backup or acknowledgment before filesystem work', async () => {
-  const fixture = await createFixture();
-  try {
-    const noBackup = await runPwsh([
-      '-File',
-      SCRIPT_PATH,
-      '-AcknowledgePrivateUseRisk',
-      '-UserAuthorizationReference',
-      FRESH_AUTHORIZATION_REFERENCE,
-    ]);
-    assert.notEqual(noBackup.code, 0);
-    assert.equal(noBackup.stdout, '');
-    assert.equal(noBackup.stderr.trim(), 'Private authority collection failed.');
-
-    const noAcknowledgment = await runPwsh([
-      '-File',
-      SCRIPT_PATH,
-      '-BackupRoot',
-      fixture.backupRoot,
-      '-UserAuthorizationReference',
-      FRESH_AUTHORIZATION_REFERENCE,
-    ]);
-    assert.notEqual(noAcknowledgment.code, 0);
-    assert.equal(noAcknowledgment.stdout, '');
-    assert.equal(noAcknowledgment.stderr.trim(), 'Private authority collection failed.');
-
-    const noAuthorization = await runPwsh([
-      '-File',
-      SCRIPT_PATH,
-      '-BackupRoot',
-      fixture.backupRoot,
-      '-AcknowledgePrivateUseRisk',
-    ]);
-    assert.notEqual(noAuthorization.code, 0);
-    assert.equal(noAuthorization.stdout, '');
-    assert.equal(noAuthorization.stderr.trim(), 'Private authority collection failed.');
-    assert.deepEqual(await readdir(fixture.sandbox), ['repository']);
-  } finally {
-    await cleanupFixture(fixture);
-  }
-});
-
-test('every exported collection path requires acknowledgment before authorization or transport', async () => {
-  const fixture = await createFixture();
-  const authority = createHappyAuthorityServer();
-  try {
-    const exported = await runPwsh(
-      [
-        '-Command',
-        `. $env:SORCERY_COLLECTOR_SCRIPT; Invoke-PrivateAuthorityCollection -BackupRoot relative -UserAuthorizationReference ${FRESH_AUTHORIZATION_REFERENCE}`,
-      ],
-      { SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH },
-    );
-    assert.notEqual(exported.code, 0);
-    assert.match(exported.stderr, /Private authority collection failed/i);
-
-    const port = await listen(authority.server);
-    authority.setPort(port);
-    const descriptors = testDescriptors(`http://127.0.0.1:${port}`);
-    const missing = await invokeLoopback(fixture, descriptors, {
-      acknowledgePrivateUseRisk: false,
-      userAuthorizationReference: FRESH_AUTHORIZATION_REFERENCE,
-    });
-    assert.notEqual(missing.code, 0);
-    assert.match(missing.stderr, /AcknowledgePrivateUseRisk/);
-    assert.equal(authority.requests.length, 0);
-    assert.equal(await stat(fixture.authorizationPath).then(() => true, () => false), false);
-    assert.equal(await stat(fixture.primaryRoot).then(() => true, () => false), false);
-    assert.equal(await stat(fixture.backupRoot).then(() => true, () => false), false);
-    assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
-
-    const acknowledged = await invokeLoopback(fixture, descriptors, {
-      userAuthorizationReference: FRESH_AUTHORIZATION_REFERENCE,
-    });
-    assert.equal(acknowledged.code, 0, acknowledged.stderr);
-    assert.ok(authority.requests.length > 0);
-    const lock = JSON.parse(await readFile(fixture.lockPath, 'utf8')) as Record<string, unknown>;
-    assert.equal(lock.acquisitionMethod, FRESH_ACQUISITION_METHOD);
-    assert.equal(lock.authorizationReference, FRESH_AUTHORIZATION_REFERENCE);
-    assert.deepEqual(lock.operatingAcknowledgment, {
-      scope: 'private-local-noncommercial',
-      noRedistributionReleaseHostingUploadOrArtwork: true,
-      apiTermsRobotsConflictAndPrivateUseRiskAccepted: true,
-      establishesLegalPermission: false,
-      stopOnBlockedStatusCaptchaOrPublisherObjection: true,
-      retryOrEvasion: false,
-    });
-  } finally {
-    await close(authority.server);
-    await cleanupFixture(fixture);
-  }
-});
-
-test('phase-01-20260827-private-reacquisition-1 is the only authorization and is consumed before transport', async () => {
-  const fixture = await createFixture();
-  const authority = createHappyAuthorityServer();
-  try {
-    const port = await listen(authority.server);
-    authority.setPort(port);
-    const descriptors = testDescriptors(`http://127.0.0.1:${port}`);
-
-    for (const reference of [
-      null,
-      '',
-      ' ',
-      'unknown',
-      'quick-260825-mhh',
-      'quick-260825-mhh-retry-1',
-      ` ${FRESH_AUTHORIZATION_REFERENCE}`,
-      `${FRESH_AUTHORIZATION_REFERENCE} `,
-      FRESH_AUTHORIZATION_REFERENCE.toUpperCase(),
-      `${FRESH_AUTHORIZATION_REFERENCE}-retry`,
-    ]) {
-      const rejected = await invokeLoopback(fixture, descriptors, {
-        userAuthorizationReference: reference,
-      });
-      assert.notEqual(rejected.code, 0);
-      assert.match(rejected.stderr, /authorization reference/i);
-    }
-    assert.equal(authority.requests.length, 0);
-    assert.equal(await stat(fixture.authorizationPath).then(() => true, () => false), false);
-
-    const consumed = await invokeLoopback(fixture, descriptors, {
-      faultPoint: 'after-authorization-consumption',
-      userAuthorizationReference: FRESH_AUTHORIZATION_REFERENCE,
-    });
-    assert.notEqual(consumed.code, 0);
-    assert.match(consumed.stderr, /after-authorization-consumption/i);
-    assert.equal(authority.requests.length, 0);
-
-    const recordBytes = await readFile(fixture.authorizationPath, 'utf8');
-    const record = JSON.parse(recordBytes) as Record<string, unknown>;
-    assert.deepEqual(Object.keys(record).sort(), [
-      'acquisitionMethod',
-      'authorizationReference',
-      'consumedAt',
-      'revisionId',
-      'schemaVersion',
-    ]);
-    assert.equal(record.schemaVersion, 1);
-    assert.equal(record.revisionId, FRESH_REVISION_ID);
-    assert.equal(record.acquisitionMethod, FRESH_ACQUISITION_METHOD);
-    assert.equal(record.authorizationReference, FRESH_AUTHORIZATION_REFERENCE);
-    assert.match(String(record.consumedAt), /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
-    assert.doesNotMatch(recordBytes, /https?:|primaryRoot|backupRoot|locator/i);
-
-    const retried = await invokeLoopback(fixture, descriptors, {
-      userAuthorizationReference: FRESH_AUTHORIZATION_REFERENCE,
-    });
-    assert.notEqual(retried.code, 0);
-    assert.match(retried.stderr, /authorization.*consumed|already exists/i);
-    assert.equal(authority.requests.length, 0);
-    assert.equal(await readFile(fixture.authorizationPath, 'utf8'), recordBytes);
-
-  } finally {
-    await close(authority.server);
-    await cleanupFixture(fixture);
-  }
-});
-
-test('authorized success and transport failure remain consumed after cleanup and output deletion', async (context) => {
-  for (const scenario of ['success', 'failure after transport'] as const) {
-    await context.test(scenario, async () => {
-      const fixture = await createFixture();
-      const authority = createHappyAuthorityServer();
-      try {
-        const port = await listen(authority.server);
-        authority.setPort(port);
-        const descriptors = testDescriptors(`http://127.0.0.1:${port}`);
-        const first = await invokeLoopback(fixture, descriptors, {
-          ...(scenario === 'success' ? {} : { faultPoint: 'after-staged-verification' }),
-          userAuthorizationReference: FRESH_AUTHORIZATION_REFERENCE,
-        });
-        if (scenario === 'success') {
-          assert.equal(first.code, 0, first.stderr);
-          const lock = JSON.parse(await readFile(fixture.lockPath, 'utf8')) as Record<string, unknown>;
-          assert.equal(lock.acquisitionMethod, FRESH_ACQUISITION_METHOD);
-          assert.equal(lock.authorizationReference, FRESH_AUTHORIZATION_REFERENCE);
-        } else {
-          assert.notEqual(first.code, 0);
-          assert.match(first.stderr, /after-staged-verification/i);
-          assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
-        }
-        assert.ok(authority.requests.length > 0);
-        const requestCount = authority.requests.length;
-        const recordBytes = await readFile(fixture.authorizationPath, 'utf8');
-
-        await rm(fixture.primaryRoot, { recursive: true, force: true });
-        await rm(fixture.backupRoot, { recursive: true, force: true });
-        await rm(fixture.lockPath, { force: true });
-        const retried = await invokeLoopback(fixture, descriptors, {
-          userAuthorizationReference: FRESH_AUTHORIZATION_REFERENCE,
-        });
-        assert.notEqual(retried.code, 0);
-        assert.match(retried.stderr, /authorization.*consumed|already exists/i);
-        assert.equal(authority.requests.length, requestCount);
-        assert.equal(await readFile(fixture.authorizationPath, 'utf8'), recordBytes);
-      } finally {
-        await close(authority.server);
-        await cleanupFixture(fixture);
-      }
-    });
-  }
-});
-
-test('concurrent authorized invocations let at most one cross the atomic consumption guard', async () => {
-  const fixture = await createFixture();
-  const authority = createHappyAuthorityServer();
-  try {
-    const port = await listen(authority.server);
-    authority.setPort(port);
-    const descriptors = testDescriptors(`http://127.0.0.1:${port}`);
-    const options = {
-      faultPoint: 'after-authorization-consumption',
-      userAuthorizationReference: FRESH_AUTHORIZATION_REFERENCE,
-    } as const;
-    const results = await Promise.all([
-      invokeLoopback(fixture, descriptors, options),
-      invokeLoopback(fixture, descriptors, options),
-    ]);
-    assert.equal(results.filter(({ stderr }) => /after-authorization-consumption/i.test(stderr)).length, 1);
-    assert.equal(results.filter(({ stderr }) => /authorization.*consumed|already exists/i.test(stderr)).length, 1);
-    assert.equal(authority.requests.length, 0);
-    assert.equal(await stat(fixture.authorizationPath).then(() => true, () => false), true);
-  } finally {
-    await close(authority.server);
-    await cleanupFixture(fixture);
-  }
-});
-
-test('offline production manifest locks the seven non-artwork sources', async () => {
-  const source = await readFile(SCRIPT_PATH, 'utf8');
-  const configuration = /function Get-ProductionCollectionConfiguration \{(?<body>[\s\S]*?)\n\}/.exec(
-    source,
-  )?.groups?.body;
-  assert.ok(configuration);
-  assert.match(configuration, new RegExp(`inputs/${FRESH_REVISION_ID}/primary`));
-  assert.match(configuration, new RegExp(`locks/${FRESH_REVISION_ID}/source-set-lock\\.json`));
-  assert.match(
-    configuration,
-    new RegExp('sorcery-tcg-authority-backup-' + FRESH_REVISION_ID),
-  );
-  assert.doesNotMatch(configuration, /official-2026-08-20/);
-
-  const result = await runPwsh([
-    '-Command',
-    '. $env:SORCERY_COLLECTOR_SCRIPT; Get-ProductionSourceDescriptors | ConvertTo-Json -Depth 16 -Compress',
-  ], { SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH });
-  assert.equal(result.code, 0, result.stderr);
-  const manifest = JSON.parse(result.stdout.trim()) as readonly Record<string, unknown>[];
-  assert.equal(manifest.length, 7);
-  assert.deepEqual(
-    manifest.map(({ relativePath, provenanceUrl }) => [relativePath, provenanceUrl]),
-    Object.entries(OFFICIAL_URLS),
-  );
-  assert.equal(JSON.stringify(manifest).toLowerCase().includes('artwork'), false);
-  assert.equal(JSON.stringify(manifest).toLowerCase().includes('image'), false);
-  assert.equal(
-    manifest
-      .filter(({ mediaType }) => mediaType === 'text/html')
-      .every(({ visibleBodyMarkers }) => Array.isArray(visibleBodyMarkers) && visibleBodyMarkers.length > 0),
-    true,
-  );
-  assert.equal(
-    manifest.find(({ relativePath }) => relativePath === 'cards/cards.raw.json')?.expectedCardCount,
-    1100,
-  );
-});
-
-test('caller-supplied non-loopback configuration is rejected before transport', async (context) => {
-  let requestCount = 0;
-  const server = createServer((_request, response) => {
-    requestCount += 1;
-    response.statusCode = 500;
-    response.end('production configuration validation should prevent this request');
-  });
-  try {
-    const port = await listen(server);
-    await context.test('production wrapper rejects descriptor overrides', async () => {
-      const fixture = await createFixture();
-      try {
-        const configurationPath = join(fixture.sandbox, 'production-override.json');
-        await writeFile(
-          configurationPath,
-          JSON.stringify({ backupRoot: fixture.backupRoot, descriptors: testDescriptors(`http://127.0.0.1:${port}`) }),
-        );
-        const command = [
-          '. $env:SORCERY_COLLECTOR_SCRIPT',
-          '$c = Get-Content -Raw -LiteralPath $env:SORCERY_COLLECTOR_CONFIG | ConvertFrom-Json -Depth 32',
-          'Invoke-PrivateAuthorityCollection -BackupRoot $c.backupRoot -Descriptors $c.descriptors',
-        ].join('; ');
-        const result = await runPwsh(['-Command', command], {
-          SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH,
-          SORCERY_COLLECTOR_CONFIG: configurationPath,
-        });
-        assert.notEqual(result.code, 0);
-        assert.match(result.stderr, /Descriptors|parameter/i);
-        assert.equal(requestCount, 0);
-        assert.deepEqual(await readdir(fixture.sandbox), ['production-override.json', 'repository']);
-      } finally {
-        await cleanupFixture(fixture);
-      }
-    });
-
-    await context.test('lower transport and publication helpers are absent', async () => {
-      const fixture = await createFixture();
-      try {
-        const command = [
-          '. $env:SORCERY_COLLECTOR_SCRIPT',
-          "$names = @('Invoke-PrivateAuthorityCollectionCore', 'Invoke-PrivateAuthorityTransport', 'Invoke-BoundedHttpToFile', 'Assert-RequestUri', 'Resolve-CollectionPaths', 'Invoke-PrivateSourceVerifier')",
-          '$resolved = @($names | Where-Object { $null -ne (Get-Command -Name $_ -ErrorAction SilentlyContinue) })',
-          'if ($resolved.Count -ne 0) { throw "Private collector helpers leaked: $($resolved -join \", \")" }',
-          'ConvertTo-Json -InputObject @($resolved) -Compress',
-        ].join('; ');
-        const result = await runPwsh(['-Command', command], {
-          SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH,
-        });
-        assert.equal(result.code, 0, result.stderr);
-        assert.deepEqual(JSON.parse(result.stdout.trim()), []);
-        assert.equal(requestCount, 0);
-        assert.deepEqual(await readdir(fixture.sandbox), ['repository']);
-      } finally {
-        await cleanupFixture(fixture);
-      }
-    });
-  } finally {
-    await close(server);
-  }
-});
-
-test('loopback collection selects the standard rulebook and preserves exact bounded bytes', async () => {
-  const fixture = await createFixture();
-  const authority = createHappyAuthorityServer();
-  try {
-    const port = await listen(authority.server);
-    authority.setPort(port);
-    const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
-    assert.equal(result.code, 0, result.stderr);
-    for (const [relativePath, bytes] of Object.entries(SOURCE_BYTES)) {
-      assert.deepEqual(await readFile(join(fixture.primaryRoot, ...relativePath.split('/'))), bytes);
-    }
-    assert.equal(authority.requests.includes('/artwork-must-not-be-requested'), false);
-    assert.equal(authority.requests.includes('/file/d/annotated/view'), false);
-    assert.equal(authority.requests.filter((path) => path === '/cards-cards.raw.json').length, 1);
-  } finally {
-    await close(authority.server);
-    await cleanupFixture(fixture);
-  }
-});
-
-test('changelog accepts the official day-first date and rejects impossible dates', async (context) => {
-  for (const scenario of [
-    { name: 'official day-first date', text: '19 May 2026', expected: '2026-05-19' },
-    { name: 'impossible day-first date', text: '31 February 2026', expected: null },
-  ] as const) {
-    await context.test(scenario.name, async () => {
-      const fixture = await createFixture();
-      const authority = createHappyAuthorityServer(
-        SOURCE_BYTES['rulebook/rulebook-current.pdf'],
-        Buffer.from(
-          `<!doctype html><title>Codex Changelog</title><main><h1>Codex Changelog</h1><article><h2>${scenario.text}</h2><p>Rules update</p></article></main>`,
+test('manual intake rejects missing extra linked and malformed inboxes before publication', async (context) => {
+  const cases: readonly Readonly<{
+    name: string;
+    mutate: (fixture: Fixture) => Promise<void>;
+    mutatedPath?: SourcePath;
+    descriptorSet?: readonly Record<string, unknown>[];
+  }>[] = [
+    {
+      name: 'missing file',
+      mutate: async (fixture) =>
+        rm(join(fixture.inboxRoot, 'codex', 'faqs-current.html')),
+    },
+    {
+      name: 'extra file',
+      mutate: async (fixture) =>
+        writeFile(join(fixture.inboxRoot, 'codex', 'extra.html'), '<!doctype html>extra'),
+    },
+    {
+      name: 'file above declared maximum',
+      mutate: () => Promise.resolve(),
+      descriptorSet: descriptors().map((descriptor) =>
+        descriptor.relativePath === 'formats/constructed-current.html'
+          ? {
+              ...descriptor,
+              maxBytes: SOURCE_BYTES['formats/constructed-current.html'].byteLength - 1,
+            }
+          : descriptor,
+      ),
+    },
+    {
+      name: 'header and navigation only HTML shell',
+      mutatedPath: 'formats/constructed-current.html',
+      mutate: async (fixture) =>
+        writeFile(
+          join(fixture.inboxRoot, 'formats', 'constructed-current.html'),
+          '<!doctype html><header><h1>Constructed Format</h1></header>' +
+            '<nav>Deck Construction</nav><script>' +
+            'x'.repeat(600) +
+            '</script>',
         ),
-      );
-      try {
-        const port = await listen(authority.server);
-        authority.setPort(port);
-        const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
-        if (scenario.expected === null) {
-          assert.notEqual(result.code, 0);
-          assert.match(result.stderr, /visible changelog entry|valid date/i);
-          assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
-        } else {
-          assert.equal(result.code, 0, result.stderr);
-          const lock = JSON.parse(await readFile(fixture.lockPath, 'utf8')) as {
-            entries: readonly PrivateAuthoritySourceEntry[];
-          };
-          assert.equal(
-            lock.entries.find(({ relativePath }) => relativePath === 'codex/changelog-current.html')
-              ?.effectiveDate,
-            scenario.expected,
-          );
-        }
-      } finally {
-        await close(authority.server);
-        await cleanupFixture(fixture);
-      }
-    });
-  }
-});
-
-test('changelog ignores hidden dates and requires one semantic date in the first visible entry', async (context) => {
-  const cases = [
-    {
-      name: 'hidden earlier dates do not win over a unique visible day-first date',
-      html:
-        '<!doctype html><head><title>Codex Changelog</title>' +
-        '<script>August 19, 2026</script><style>.date::after{content:"August 18, 2026"}</style>' +
-        '<template>August 17, 2026</template><noscript>August 16, 2026</noscript>' +
-        '<!-- August 15, 2026 --></head><body><main><h1>Codex Changelog</h1>' +
-        '<article><h2>20 August 2026</h2><p>Rules update</p></article></main></body>',
-      effectiveDate: '2026-08-20',
+    },    {
+      name: 'HTML truncated after valid visible content',
+      mutatedPath: 'formats/constructed-current.html',
+      mutate: async (fixture) =>
+        writeFile(
+          join(fixture.inboxRoot, 'formats', 'constructed-current.html'),
+          '<!doctype html><html><body><main><h1>Constructed Format</h1>' +
+            '<h2>Deck Construction</h2><p>' +
+            'visible content '.repeat(50),
+        ),
     },
     {
-      name: 'ambiguous first visible entry dates fail closed',
-      html:
-        '<!doctype html><title>Codex Changelog</title><main><h1>Codex Changelog</h1>' +
-        '<article><h2>20 August 2026 / August 21, 2026</h2><p>Rules update</p></article></main>',
-      effectiveDate: null,
+      name: 'structurally incomplete PDF',
+      mutatedPath: 'rulebook/rulebook-current.pdf',
+      mutate: async (fixture) =>
+        writeFile(
+          join(fixture.inboxRoot, 'rulebook', 'rulebook-current.pdf'),
+          '%PDF-1.7\n' + 'x'.repeat(32_768) + '\n%%EOF',
+        ),
+    },    {
+      name: 'PDF with invalid startxref target',
+      mutatedPath: 'rulebook/rulebook-current.pdf',
+      mutate: async (fixture) =>
+        writeFile(
+          join(fixture.inboxRoot, 'rulebook', 'rulebook-current.pdf'),
+          SOURCE_BYTES['rulebook/rulebook-current.pdf']
+            .toString('utf8')
+            .replace(/startxref\n\d+/, 'startxref\n0'),
+        ),
     },
     {
-      name: 'a date in only the second visible entry fails closed',
-      html:
-        '<!doctype html><title>Codex Changelog</title><main><h1>Codex Changelog</h1>' +
-        '<article><h2>Rules update</h2><p>No effective date</p></article>' +
-        '<article><h2>20 August 2026</h2><p>Older entry</p></article></main>',
-      effectiveDate: null,
-    },
-  ] as const;
-
-  for (const scenario of cases) {
-    await context.test(scenario.name, async () => {
-      const fixture = await createFixture();
-      const authority = createHappyAuthorityServer(
-        SOURCE_BYTES['rulebook/rulebook-current.pdf'],
-        Buffer.from(scenario.html),
-      );
-      try {
-        const port = await listen(authority.server);
-        authority.setPort(port);
-        const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
-        if (scenario.effectiveDate === null) {
-          assert.notEqual(result.code, 0);
-          assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
-          assert.equal(await stat(fixture.primaryRoot).then(() => true, () => false), false);
-          assert.equal(await stat(fixture.backupRoot).then(() => true, () => false), false);
-        } else {
-          assert.equal(result.code, 0, result.stderr);
-          const lock = JSON.parse(await readFile(fixture.lockPath, 'utf8')) as {
-            entries: readonly PrivateAuthoritySourceEntry[];
-          };
-          assert.equal(
-            lock.entries.find(({ relativePath }) => relativePath === 'codex/changelog-current.html')
-              ?.effectiveDate,
-            scenario.effectiveDate,
-          );
-        }
-      } finally {
-        await close(authority.server);
-        await cleanupFixture(fixture);
-      }
-    });
-  }
-});
-
-test('direct output is fixed and sanitized for synthetic success and canary failure', async () => {
-  const fixture = await createFixture();
-  const invocation =
-    'Invoke-PrivateAuthorityCollection -BackupRoot $BackupRoot -AcknowledgePrivateUseRisk:$AcknowledgePrivateUseRisk -UserAuthorizationReference $UserAuthorizationReference';
-  const canaries = [
-    join(fixture.sandbox, 'CANARY-PRIVATE-ROOT'),
-    fixture.lockPath,
-    fixture.authorizationPath,
-    FRESH_AUTHORIZATION_REFERENCE,
-    'https://canary.invalid/private/path?secret=CANARY_QUERY',
-    'sourceSetRootHash=CANARY_LOCK_HASH',
-    'Synthetic Adept',
-  ] as const;
-  try {
-    const source = await readFile(SCRIPT_PATH, 'utf8');
-    assert.equal(source.includes(invocation), true);
-
-    const successScript = join(fixture.sandbox, 'collector-success.ps1');
-    await writeFile(
-      successScript,
-      source.replace(
-        invocation,
-        `[pscustomobject]@{ primaryRoot = '${canaries[0]}'; privateLocatorEvidence = '${canaries[1]}'; sourceSetRootHash = '${canaries[2]}' }`,
-      ),
-    );
-    const success = await runPwsh([
-      '-File',
-      successScript,
-      '-BackupRoot',
-      fixture.backupRoot,
-      '-AcknowledgePrivateUseRisk',
-      '-UserAuthorizationReference',
-      FRESH_AUTHORIZATION_REFERENCE,
-    ]);
-    assert.equal(success.code, 0, success.stderr);
-    assert.equal(success.stdout.trim(), 'Private authority collection completed.');
-    assert.equal(success.stderr, '');
-    for (const canary of canaries) assert.doesNotMatch(`${success.stdout}${success.stderr}`, new RegExp(canary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-
-    const failureScript = join(fixture.sandbox, 'collector-failure.ps1');
-    await writeFile(
-      failureScript,
-      source.replace(invocation, `throw '${canaries.join(' ')}'`),
-    );
-    const failure = await runPwsh([
-      '-File',
-      failureScript,
-      '-BackupRoot',
-      fixture.backupRoot,
-      '-AcknowledgePrivateUseRisk',
-      '-UserAuthorizationReference',
-      FRESH_AUTHORIZATION_REFERENCE,
-    ]);
-    assert.notEqual(failure.code, 0);
-    assert.equal(failure.stdout, '');
-    assert.equal(failure.stderr.trim(), 'Private authority collection failed.');
-    for (const canary of canaries) assert.doesNotMatch(`${failure.stdout}${failure.stderr}`, new RegExp(canary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  } finally {
-    await cleanupFixture(fixture);
-  }
-});
-
-test('complete HTML sources require their source-specific visible body structure', async (context) => {
-  const shells: Readonly<Partial<Record<SourcePath, Buffer>>>[] = [
-    {
-      'formats/constructed-current.html': Buffer.from(
-        '<!doctype html><title>Constructed Format</title><main><h1>Constructed Format</h1></main>',
-      ),
-    },
-    {
-      'codex/codex-current.html': Buffer.from(
-        '<!doctype html><title>Welcome to the Codex</title><main><h1>Welcome to the Codex</h1></main>',
-      ),
-    },
-    {
-      'codex/faqs-current.html': Buffer.from(
-        '<!doctype html><title>FAQs</title><main><h1>FAQs</h1></main>',
-      ),
-    },
-    {
-      'codex/changelog-current.html': Buffer.from(
-        '<!doctype html><title>Codex Changelog</title><main><h1>Codex Changelog</h1><article><h2>20 August 2026</h2></article></main>',
-      ),
-    },
-    {
-      'updates/card-updates-2025.html': Buffer.from(
-        '<!doctype html><title>Sorcery: Contested Realm Card Updates 2025</title><main><h1>Sorcery: Contested Realm Card Updates 2025</h1></main>',
-      ),
+      name: 'partial card array',
+      mutatedPath: 'cards/cards.raw.json',
+      mutate: async (fixture) =>
+        writeFile(
+          join(fixture.inboxRoot, 'cards', 'cards.raw.json'),
+          JSON.stringify([syntheticOfficialCard(0)]),
+        ),
     },
   ];
-
-  for (const sourceOverride of shells) {
-    const relativePath = Object.keys(sourceOverride)[0] as SourcePath;
-    await context.test(relativePath, async () => {
-      const fixture = await createFixture();
-      const authority = createHappyAuthorityServer(
-        SOURCE_BYTES['rulebook/rulebook-current.pdf'],
-        SOURCE_BYTES['codex/changelog-current.html'],
-        sourceOverride,
-      );
-      try {
-        const port = await listen(authority.server);
-        authority.setPort(port);
-        const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
-        assert.notEqual(result.code, 0);
-        assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
-        assert.equal(await stat(fixture.primaryRoot).then(() => true, () => false), false);
-        assert.equal(await stat(fixture.backupRoot).then(() => true, () => false), false);
-      } finally {
-        await close(authority.server);
-        await cleanupFixture(fixture);
-      }
-    });
-  }
-});
-
-test('partial and structurally invalid card arrays fail before publication', async (context) => {
-  const cases = [
-    {
-      name: 'one-card truncated array',
-      cards: [syntheticOfficialCard()],
-      expectedCardCount: 2,
-    },
-    {
-      name: 'missing guardian and set fields',
-      cards: [{ name: 'Synthetic Adept', power: 1 }],
-      expectedCardCount: 1,
-    },
-    {
-      name: 'unknown card field',
-      cards: [{ ...syntheticOfficialCard(), unknownField: true }],
-      expectedCardCount: 1,
-    },
-    {
-      name: 'duplicate printing slugs',
-      cards: [
-        syntheticOfficialCard('Synthetic Adept', 'duplicate-printing'),
-        syntheticOfficialCard('Synthetic Avatar', 'duplicate-printing'),
-      ],
-      expectedCardCount: 2,
-    },
-  ] as const;
-
   for (const scenario of cases) {
     await context.test(scenario.name, async () => {
       const fixture = await createFixture();
-      const authority = createHappyAuthorityServer(
-        SOURCE_BYTES['rulebook/rulebook-current.pdf'],
-        SOURCE_BYTES['codex/changelog-current.html'],
-        { 'cards/cards.raw.json': Buffer.from(JSON.stringify(scenario.cards)) },
-      );
       try {
-        const port = await listen(authority.server);
-        authority.setPort(port);
-        const descriptors = testDescriptors(`http://127.0.0.1:${port}`).map((value) =>
-          value.relativePath === 'cards/cards.raw.json'
-            ? { ...value, expectedCardCount: scenario.expectedCardCount }
-            : value,
+        await writeInbox(fixture);
+        const before = await inboxHashes(fixture).catch(() => null);
+        await scenario.mutate(fixture);
+        const result = await invokeManualIntake(
+          fixture,
+          scenario.descriptorSet === undefined
+            ? {}
+            : { descriptorSet: scenario.descriptorSet },
         );
-        const result = await invokeLoopback(fixture, descriptors);
         assert.notEqual(result.code, 0);
-        assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
-        assert.equal(await stat(fixture.primaryRoot).then(() => true, () => false), false);
-        assert.equal(await stat(fixture.backupRoot).then(() => true, () => false), false);
+        assert.equal(result.stdout, '');
+        assert.equal(result.stderr.trimEnd(), 'Synthetic manual intake failed.');
+        assert.equal(await exists(fixture.primaryRoot), false);
+        assert.equal(await exists(fixture.backupRoot), false);
+        assert.equal(await exists(fixture.lockPath), false);
+        if (before !== null && scenario.name !== 'missing file') {
+          const after = await inboxHashes(fixture);
+          for (const relativePath of PRIVATE_AUTHORITY_SOURCE_PATHS) {
+            if (relativePath === scenario.mutatedPath) continue;
+            assert.equal(after[relativePath], before[relativePath]);
+          }
+        }
       } finally {
-        await close(authority.server);
-        await cleanupFixture(fixture);
-      }
-    });
-  }
-});
-
-test('rulebook accepts only EOF with no bytes LF CR or CRLF after it', async (context) => {
-  for (const ending of ['\n', '\r', '\r\n'] as const) {
-    await context.test(JSON.stringify(ending), async () => {
-      const fixture = await createFixture();
-      const bytes = Buffer.concat([SOURCE_BYTES['rulebook/rulebook-current.pdf'], Buffer.from(ending)]);
-      const authority = createHappyAuthorityServer(bytes);
-      try {
-        const port = await listen(authority.server);
-        authority.setPort(port);
-        const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
-        assert.equal(result.code, 0, result.stderr);
-        assert.deepEqual(await readFile(join(fixture.primaryRoot, 'rulebook', 'rulebook-current.pdf')), bytes);
-      } finally {
-        await close(authority.server);
         await cleanupFixture(fixture);
       }
     });
   }
 
-  await context.test('rejects arbitrary trailing bytes', async () => {
+  await context.test('linked file', async (nested) => {
     const fixture = await createFixture();
-    const authority = createHappyAuthorityServer(
-      Buffer.concat([SOURCE_BYTES['rulebook/rulebook-current.pdf'], Buffer.from('junk')]),
-    );
     try {
-      const port = await listen(authority.server);
-      authority.setPort(port);
-      const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
+      await writeInbox(fixture);
+      const linkedPath = join(fixture.inboxRoot, 'formats', 'constructed-current.html');
+      const targetPath = join(fixture.sandbox, 'linked-source.html');
+      await writeFile(targetPath, SOURCE_BYTES['formats/constructed-current.html']);
+      await rm(linkedPath);
+      try {
+        await symlink(targetPath, linkedPath, 'file');
+      } catch (error: unknown) {
+        if (
+          typeof error === 'object' &&
+          error !== null &&
+          'code' in error &&
+          (error.code === 'EPERM' || error.code === 'EACCES')
+        ) {
+          nested.skip('file symlink creation is unavailable');
+          return;
+        }
+        throw error;
+      }
+      const result = await invokeManualIntake(fixture);
       assert.notEqual(result.code, 0);
-      assert.match(result.stderr, /EOF marker or trailing bytes/i);
-      assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
+      assert.equal(result.stderr.trimEnd(), 'Synthetic manual intake failed.');
+      assert.equal(await exists(fixture.lockPath), false);
     } finally {
-      await close(authority.server);
       await cleanupFixture(fixture);
     }
   });
 });
 
-test('authorization is consumed before loopback request-target validation', async () => {
-  const fixture = await createFixture();
-  try {
-    const descriptors = testDescriptors('http://127.0.0.1:1').map((value, index) =>
-      index === 0 ? { ...value, requestUrl: 'https://example.com/not-loopback' } : value,
-    );
-    const result = await invokeLoopback(fixture, descriptors);
-    assert.notEqual(result.code, 0);
-    assert.match(result.stderr, /loopback/i);
-    assert.equal(await stat(fixture.authorizationPath).then(() => true, () => false), true);
-    assert.equal(await stat(fixture.primaryRoot).then(() => true, () => false), false);
-    assert.equal(await stat(fixture.backupRoot).then(() => true, () => false), false);
-    assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
-
-    const retried = await invokeLoopback(fixture, descriptors);
-    assert.notEqual(retried.code, 0);
-    assert.match(retried.stderr, /authorization.*consumed|already exists/i);
-  } finally {
-    await cleanupFixture(fixture);
-  }
-});
-
-test('blocked status challenge malformed content and streamed size stop without retry', async (context) => {
-  const cases = [
-    { name: '401', route: '/formats-constructed-current.html', status: 401, body: 'unauthorized' },
-    { name: '403', route: '/formats-constructed-current.html', status: 403, body: 'forbidden' },
-    { name: '429', route: '/formats-constructed-current.html', status: 429, body: 'slow down' },
-    { name: 'other non-success', route: '/formats-constructed-current.html', status: 500, body: 'failed' },
-    {
-      name: 'captcha',
-      route: '/formats-constructed-current.html',
-      status: 200,
-      body: '<!doctype html><title>Attention Required</title><div>captcha</div>',
-    },
-    { name: 'malformed card json', route: '/cards-cards.raw.json', status: 200, body: '[}' },
-    { name: 'empty card json', route: '/cards-cards.raw.json', status: 200, body: '[]' },
-    { name: 'wrong card json root', route: '/cards-cards.raw.json', status: 200, body: '{}' },
-    { name: 'empty card name', route: '/cards-cards.raw.json', status: 200, body: '[{"name":""}]' },
-    {
-      name: 'wrong html media type',
-      route: '/formats-constructed-current.html',
-      status: 200,
-      body: '<!doctype html><title>Constructed Format</title>',
-      contentType: 'application/json',
-    },
-    {
-      name: 'missing html marker',
-      route: '/formats-constructed-current.html',
-      status: 200,
-      body: '<!doctype html><title>Wrong source</title>',
-    },
-    {
-      name: 'declared size',
-      route: '/formats-constructed-current.html',
-      status: 200,
-      body: '<!doctype html><title>Constructed Format</title>',
-      contentLength: 20_000,
-    },
-    {
-      name: 'streamed size',
-      route: '/formats-constructed-current.html',
-      status: 200,
-      body: '<!doctype html><title>Constructed Format</title>' + 'x'.repeat(20_000),
-    },
-  ] as const;
-  for (const scenario of cases) {
-    await context.test(scenario.name, async () => {
-      const fixture = await createFixture();
-      const counts = new Map<string, number>();
-      let serverPort = 0;
-      const server = createServer((request, response) => {
-        const path = request.url ?? '';
-        counts.set(path, (counts.get(path) ?? 0) + 1);
-        if (path === scenario.route) {
-          response.statusCode = scenario.status;
-          response.setHeader(
-            'content-type',
-            'contentType' in scenario
-              ? scenario.contentType
-              : path.endsWith('.json')
-                ? 'application/json'
-                : 'text/html',
-          );
-          if ('contentLength' in scenario) response.setHeader('content-length', scenario.contentLength);
-          response.end(scenario.body);
-          return;
-        }
-        if (path === '/release') {
-          response.setHeader('content-type', 'text/html');
-          response.end(
-            '<!doctype html><title>Sorcery: Contested Realm December 2025 Rulebook Update</title>' +
-              '<time>19 Dec 2025</time>' +
-              `<a href="http://127.0.0.1:${String(serverPort)}/file/d/standard/view">Sorcery: Contested Realm Rulebook (December 2025)</a>`,
-          );
-          return;
-        }
-        if (path === '/drive-download?export=download&id=standard') {
-          response.statusCode = 303;
-          response.setHeader('location', '/pdf');
-          response.end();
-          return;
-        }
-        if (path === '/pdf') {
-          response.setHeader('content-type', 'application/pdf');
-          response.setHeader('content-disposition', 'attachment; filename=SorceryRulebook.pdf');
-          response.end(SOURCE_BYTES['rulebook/rulebook-current.pdf']);
-          return;
-        }
-        const relativePath = (Object.keys(SOURCE_BYTES) as SourcePath[]).find(
-          (candidate) => path === `/${candidate.replaceAll('/', '-')}`,
-        );
-        assert.ok(relativePath);
-        response.setHeader('content-type', relativePath.endsWith('.json') ? 'application/json' : 'text/html');
-        response.end(SOURCE_BYTES[relativePath]);
-      });
-      try {
-        serverPort = await listen(server);
-        const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${serverPort}`));
-        assert.notEqual(result.code, 0);
-        assert.equal(counts.get(scenario.route), 1);
-        assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
-      } finally {
-        await close(server);
-        await cleanupFixture(fixture);
-      }
-    });
-  }
-});
-
-test('rulebook anchor redirect and PDF controls fail closed', async (context) => {
-  const cases = [
-    'wrong release date',
-    'missing anchor',
-    'duplicate anchor',
-    'unexpected locator host',
-    'missing redirect location',
-    'redirect loop',
-    'redirect limit',
-    'wrong PDF filename',
-    'wrong PDF media',
-    'wrong PDF signature',
-  ] as const;
-  for (const scenario of cases) {
-    await context.test(scenario, async () => {
-      const fixture = await createFixture();
-      let port = 0;
-      const requests: string[] = [];
-      const server = createServer((request, response) => {
-        const path = request.url ?? '';
-        requests.push(path);
-        if (path === '/release') {
-          const standard =
-            scenario === 'unexpected locator host'
-              ? 'https://example.com/file/d/standard/view'
-              : `http://127.0.0.1:${String(port)}/file/d/standard/view`;
-          const anchors =
-            scenario === 'missing anchor'
-              ? ''
-              : `<a href="${standard}">Sorcery: Contested Realm Rulebook (December 2025)</a>` +
-                (scenario === 'duplicate anchor'
-                  ? `<a href="${standard}">Sorcery: Contested Realm Rulebook (December 2025)</a>`
-                  : '');
-          response.setHeader('content-type', 'text/html');
-          response.end(
-            '<!doctype html><title>Sorcery: Contested Realm December 2025 Rulebook Update</title>' +
-              (scenario === 'wrong release date' ? '<time>18 Dec 2025</time>' : '<time>19 Dec 2025</time>') +
-              anchors,
-          );
-          return;
-        }
-        if (path === '/drive-download?export=download&id=standard') {
-          response.statusCode = 303;
-          if (scenario !== 'missing redirect location') {
-            response.setHeader(
-              'location',
-              scenario === 'redirect loop'
-                ? '/drive-download?export=download&id=standard'
-                : scenario === 'redirect limit'
-                  ? '/redirect-1'
-                  : '/pdf',
-            );
-          }
-          response.end();
-          return;
-        }
-        const redirectMatch = /^\/redirect-(\d+)$/.exec(path);
-        if (redirectMatch) {
-          response.statusCode = 302;
-          response.setHeader('location', `/redirect-${Number(redirectMatch[1]) + 1}`);
-          response.end();
-          return;
-        }
-        if (path === '/pdf') {
-          response.setHeader(
-            'content-type',
-            scenario === 'wrong PDF media' ? 'text/html' : 'application/octet-stream',
-          );
-          response.setHeader(
-            'content-disposition',
-            `attachment; filename=${scenario === 'wrong PDF filename' ? 'Wrong.pdf' : 'SorceryRulebook.pdf'}`,
-          );
-          response.end(
-            scenario === 'wrong PDF signature'
-              ? Buffer.from('not a pdf at all')
-              : SOURCE_BYTES['rulebook/rulebook-current.pdf'],
-          );
-          return;
-        }
-        response.statusCode = 500;
-        response.end('unexpected route');
-      });
-      try {
-        port = await listen(server);
-        const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
-        assert.notEqual(result.code, 0);
-        if (scenario === 'wrong PDF signature') assert.match(result.stderr, /PDF prefix/i);
-        assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
-        assert.equal(requests.filter((path) => path === '/release').length, 1);
-      } finally {
-        await close(server);
-        await cleanupFixture(fixture);
-      }
-    });
-  }
-});
-
-test('header timeout body timeout and disconnect are terminal', async (context) => {
-  for (const scenario of ['header timeout', 'body timeout', 'disconnect'] as const) {
-    await context.test(scenario, async () => {
-      const fixture = await createFixture();
-      let requestCount = 0;
-      const server = createServer((_request, response) => {
-        requestCount += 1;
-        if (scenario === 'header timeout') return;
-        response.writeHead(200, { 'content-type': 'text/html' });
-        response.flushHeaders();
-        response.write('<!doctype html>');
-        if (scenario === 'body timeout') return;
-        setTimeout(() => response.destroy(), 10);
-      });
-      try {
-        const port = await listen(server);
-        const result = await invokeLoopback(
-          fixture,
-          testDescriptors(`http://127.0.0.1:${port}`),
-          { headerTimeoutSeconds: 1, bodyTimeoutSeconds: 1 },
-        );
-        assert.notEqual(result.code, 0);
-        assert.equal(requestCount, 1);
-        assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
-      } finally {
-        await close(server);
-        await cleanupFixture(fixture);
-      }
-    });
-  }
-});
-
-test('aggregate byte overflow stops before the next source and publishes no receipt', async () => {
-  const fixture = await createFixture();
-  const authority = createHappyAuthorityServer();
-  try {
-    const port = await listen(authority.server);
-    authority.setPort(port);
-    const maxTotalBytes =
-      SOURCE_BYTES['rulebook/rulebook-current.pdf'].byteLength +
-      SOURCE_BYTES['formats/constructed-current.html'].byteLength -
-      1;
-    const result = await invokeLoopback(
-      fixture,
-      testDescriptors(`http://127.0.0.1:${port}`),
-      { maxTotalBytes },
-    );
-    assert.notEqual(result.code, 0);
-    assert.match(result.stderr, /aggregate byte limit/i);
-    assert.equal(authority.requests.filter((path) => path === '/formats-constructed-current.html').length, 1);
-    assert.equal(authority.requests.includes('/codex-codex-current.html'), false);
-    assert.equal(await stat(fixture.primaryRoot).then(() => true, () => false), false);
-    assert.equal(await stat(fixture.backupRoot).then(() => true, () => false), false);
-    assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
-  } finally {
-    await close(authority.server);
-    await cleanupFixture(fixture);
-  }
-});
-
-test('publication creates independent exact trees and a verifier-approved private lock', async () => {
-  const fixture = await createFixture();
-  const authority = createHappyAuthorityServer();
-  try {
-    const port = await listen(authority.server);
-    authority.setPort(port);
-    const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
-    assert.equal(result.code, 0, result.stderr);
-
-    const expectedFiles = [...PRIVATE_AUTHORITY_SOURCE_PATHS].sort();
-    assert.deepEqual(await relativeFiles(fixture.primaryRoot), expectedFiles);
-    assert.deepEqual(await relativeFiles(fixture.backupRoot), expectedFiles);
-    for (const relativePath of PRIVATE_AUTHORITY_SOURCE_PATHS) {
-      const primaryPath = join(fixture.primaryRoot, ...relativePath.split('/'));
-      const backupPath = join(fixture.backupRoot, ...relativePath.split('/'));
-      assert.deepEqual(await readFile(primaryPath), SOURCE_BYTES[relativePath]);
-      assert.deepEqual(await readFile(backupPath), SOURCE_BYTES[relativePath]);
-      const primaryIdentity = await stat(primaryPath);
-      const backupIdentity = await stat(backupPath);
-      assert.notDeepEqual(
-        [primaryIdentity.dev, primaryIdentity.ino],
-        [backupIdentity.dev, backupIdentity.ino],
-      );
+test('manual intake never overwrites destinations and preserves inbox on publication failure', async (context) => {
+  await context.test('preexisting destination', async () => {
+    const fixture = await createFixture();
+    try {
+      await writeInbox(fixture);
+      await mkdir(fixture.primaryRoot, { recursive: true });
+      await writeFile(join(fixture.primaryRoot, 'sentinel'), 'unchanged');
+      const result = await invokeManualIntake(fixture);
+      assert.notEqual(result.code, 0);
+      assert.equal(await readFile(join(fixture.primaryRoot, 'sentinel'), 'utf8'), 'unchanged');
+      assert.equal(await exists(fixture.backupRoot), false);
+      assert.equal(await exists(fixture.lockPath), false);
+    } finally {
+      await cleanupFixture(fixture);
     }
+  });
 
-    const lockBytes = await readFile(fixture.lockPath);
-    assert.notEqual(lockBytes[0], 0xef);
-    const lock = JSON.parse(lockBytes.toString('utf8')) as {
-      acquisitionMethod: string;
-      authorizationReference: string;
-      primaryRoot: string;
-      backupRoot: string;
-      entries: readonly PrivateAuthoritySourceEntry[];
-      sourceSetRootHash: string;
-      operatingAcknowledgment: Record<string, unknown>;
-      rulebookAcquisitionEvidence: Record<string, unknown>;
-    };
-    assert.equal(lock.acquisitionMethod, FRESH_ACQUISITION_METHOD);
-    assert.equal(lock.authorizationReference, FRESH_AUTHORIZATION_REFERENCE);
-    assert.equal(lock.primaryRoot, resolve(fixture.primaryRoot));
-    assert.equal(lock.backupRoot, resolve(fixture.backupRoot));
-    assert.deepEqual(
-      lock.entries.map(({ relativePath }) => relativePath),
-      expectedFiles,
-    );
-    assert.deepEqual(
-      lock.entries.map(({ effectiveDate }) => effectiveDate),
-      [null, '2026-08-20', null, null, null, '2025-12-19', '2025-11-25'],
-    );
-    assert.deepEqual(lock.operatingAcknowledgment, {
-      scope: 'private-local-noncommercial',
-      noRedistributionReleaseHostingUploadOrArtwork: true,
-      apiTermsRobotsConflictAndPrivateUseRiskAccepted: true,
-      establishesLegalPermission: false,
-      stopOnBlockedStatusCaptchaOrPublisherObjection: true,
-      retryOrEvasion: false,
-    });
-    assert.equal(lock.rulebookAcquisitionEvidence.privateLocatorIsNormative, false);
-    assert.equal(lock.rulebookAcquisitionEvidence.observedFilename, 'SorceryRulebook.pdf');
-    assert.equal(lock.rulebookAcquisitionEvidence.sourceUrl, OFFICIAL_URLS['rulebook/rulebook-current.pdf']);
-    assert.equal(JSON.stringify(lock).includes('Synthetic Adept'), false);
+  await context.test('publication destination overlapping inbox', async () => {
+    const fixture = await createFixture();
+    try {
+      await writeInbox(fixture);
+      const before = await inboxHashes(fixture);
+      const overlapping = {
+        ...fixture,
+        primaryRoot: join(fixture.inboxRoot, 'published'),
+      };
+      const result = await invokeManualIntake(overlapping);
+      assert.notEqual(result.code, 0);
+      assert.deepEqual(await inboxHashes(fixture), before);
+      assert.equal(await exists(overlapping.primaryRoot), false);
+      assert.equal(await exists(fixture.backupRoot), false);
+      assert.equal(await exists(fixture.lockPath), false);
+    } finally {
+      await cleanupFixture(fixture);
+    }
+  });
 
-    const verified = await verifyPrivateSourceSet({
-      primaryRoot: lock.primaryRoot,
-      backupRoot: lock.backupRoot,
-      repositoryRoot: fixture.repositoryRoot,
-      entries: lock.entries,
-    });
-    assert.equal(lock.sourceSetRootHash, verified.sourceSetRootHash);
-    assert.deepEqual(lock.entries, verified.entries);
+  await context.test('failure before lock publication', async () => {
+    const fixture = await createFixture();
+    try {
+      await writeInbox(fixture);
+      const before = await inboxHashes(fixture);
+      const result = await invokeManualIntake(fixture, { faultPoint: 'before-lock-move' });
+      assert.notEqual(result.code, 0);
+      assert.equal(result.stderr.trimEnd(), 'Synthetic manual intake failed.');
+      assert.deepEqual(await inboxHashes(fixture), before);
+      assert.equal(await exists(fixture.primaryRoot), false);
+      assert.equal(await exists(fixture.backupRoot), false);
+      assert.equal(await exists(fixture.lockPath), false);
+      const backupParent = dirname(fixture.backupRoot);
+      assert.ok(
+        (await readdir(backupParent)).some((name) =>
+          name.startsWith(basename(fixture.backupRoot) + '.failed-'),
+        ),
+      );
+      assert.ok(
+        (await readdir(dirname(fixture.primaryRoot))).some((name) =>
+          name.startsWith(basename(fixture.primaryRoot) + '.failed-'),
+        ),
+      );
+    } finally {
+      await cleanupFixture(fixture);
+    }
+  });
+});
+
+test('manual intake requires acknowledgment before reading the inbox', async () => {
+  const fixture = await createFixture();
+  try {
+    const result = await invokeManualIntake(fixture, { acknowledge: false });
+    assert.notEqual(result.code, 0);
+    assert.equal(result.stdout, '');
+    assert.equal(result.stderr.trimEnd(), 'Synthetic manual intake failed.');
+    assert.equal(await exists(fixture.primaryRoot), false);
+    assert.equal(await exists(fixture.backupRoot), false);
+    assert.equal(await exists(fixture.lockPath), false);
   } finally {
-    await close(authority.server);
     await cleanupFixture(fixture);
   }
 });
 
-test('authorized preflight consumes authorization before rejecting destinations or requests', async (context) => {
-  const cases = [
-    {
-      name: 'existing primary',
-      expected: /already exists/i,
-      change: async (fixture: Fixture) => {
-        await mkdir(fixture.primaryRoot, { recursive: true });
-        await writeFile(join(fixture.primaryRoot, 'sentinel'), 'unchanged');
-        return fixture;
-      },
-    },
-    {
-      name: 'existing backup',
-      expected: /already exists/i,
-      change: async (fixture: Fixture) => {
-        await mkdir(fixture.backupRoot, { recursive: true });
-        await writeFile(join(fixture.backupRoot, 'sentinel'), 'unchanged');
-        return fixture;
-      },
-    },
-    {
-      name: 'existing lock',
-      expected: /already exists/i,
-      change: async (fixture: Fixture) => {
-        await mkdir(dirname(fixture.lockPath), { recursive: true });
-        await writeFile(fixture.lockPath, 'unchanged');
-        return fixture;
-      },
-    },
-    {
-      name: 'backup equals primary',
-      expected: /outside|overlap|equal/i,
-      change: async (fixture: Fixture) => ({ ...fixture, backupRoot: fixture.primaryRoot }),
-    },
-    {
-      name: 'backup nested in repository',
-      expected: /outside|repository/i,
-      change: async (fixture: Fixture) => ({ ...fixture, backupRoot: join(fixture.repositoryRoot, 'backup') }),
-    },
-    {
-      name: 'backup contains repository',
-      expected: /outside|contain/i,
-      change: async (fixture: Fixture) => ({ ...fixture, backupRoot: fixture.sandbox }),
-    },
-    {
-      name: 'relative backup',
-      expected: /absolute/i,
-      change: async (fixture: Fixture) => ({ ...fixture, backupRoot: 'relative-backup' }),
-    },
-  ] as const;
+test('manual intake performs no runtime network requests', async () => {
+  const fixture = await createFixture();
   let requestCount = 0;
-  const server = createServer((_request, response) => {
+  const server = createTcpServer((socket) => {
     requestCount += 1;
-    response.statusCode = 500;
-    response.end('preflight should prevent this request');
+    socket.destroy();
   });
   try {
-    const port = await listen(server);
-    for (const scenario of cases) {
-      await context.test(scenario.name, async () => {
-        const original = await createFixture();
-        try {
-          const fixture = await scenario.change(original);
-          const before = requestCount;
-          const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
-          assert.notEqual(result.code, 0);
-          assert.match(result.stderr, scenario.expected);
-          assert.equal(requestCount, before);
-          assert.equal(await stat(fixture.authorizationPath).then(() => true, () => false), true);
-          const retried = await invokeLoopback(
-            fixture,
-            testDescriptors('http://127.0.0.1:' + String(port)),
-          );
-          assert.notEqual(retried.code, 0);
-          assert.match(retried.stderr, /authorization.*consumed|already exists/i);
-          assert.equal(requestCount, before);
-          if (scenario.name.startsWith('existing')) {
-            const sentinel =
-              scenario.name === 'existing primary'
-                ? join(fixture.primaryRoot, 'sentinel')
-                : scenario.name === 'existing backup'
-                  ? join(fixture.backupRoot, 'sentinel')
-                  : fixture.lockPath;
-            assert.equal(await readFile(sentinel, 'utf8'), 'unchanged');
-          }
-        } finally {
-          await cleanupFixture(original);
-        }
+    await writeInbox(fixture);
+    await new Promise<void>((resolveListen, rejectListen) => {
+      server.once('error', rejectListen);
+      server.listen(0, '127.0.0.1', resolveListen);
+    });
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('Loopback canary failed');
+    const canaryDescriptors = descriptors().map((descriptor, index) => ({
+      ...descriptor,
+      provenanceUrl:
+        'https://127.0.0.1:' + String(address.port) + '/unexpected-' + String(index),
+    }));
+    const result = await invokeManualIntake(fixture, { descriptorSet: canaryDescriptors });
+    assert.notEqual(result.code, 0);
+    assert.equal(result.stdout, '');
+    assert.equal(requestCount, 0);
+    assert.equal(await exists(fixture.primaryRoot), false);
+    assert.equal(await exists(fixture.backupRoot), false);
+    assert.equal(await exists(fixture.lockPath), false);
+  } finally {
+    if (server.listening) {
+      await new Promise<void>((resolveClose, rejectClose) => {
+        server.close((error) => {
+          if (error) rejectClose(error);
+          else resolveClose();
+        });
       });
     }
-  } finally {
-    await close(server);
-  }
-});
-
-test('verifier timeout drains pipe pressure, kills the child, and removes owned staging', async () => {
-  const fixture = await createFixture();
-  const authority = createHappyAuthorityServer();
-  try {
-    const port = await listen(authority.server);
-    authority.setPort(port);
-    const started = Date.now();
-    const result = await invokeLoopback(
-      fixture,
-      testDescriptors(`http://127.0.0.1:${port}`),
-      { faultPoint: 'verifier-hang', pwshTimeoutMilliseconds: 7_000 },
-    );
-    assert.notEqual(result.code, 0);
-    assert.ok(Date.now() - started < 6_000, `verifier timeout took ${String(Date.now() - started)}ms`);
-    assert.match(result.stderr, /Private source verifier timed out/i);
-    assert.doesNotMatch(`${result.stdout}${result.stderr}`, /CANARY_VERIFIER_PIPE/);
-    assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
-    assert.equal(await stat(fixture.primaryRoot).then(() => true, () => false), false);
-    assert.equal(await stat(fixture.backupRoot).then(() => true, () => false), false);
-    assert.equal(
-      (await safeReaddir(dirname(fixture.primaryRoot))).some((name) => name.includes('.collecting-')),
-      false,
-    );
-    assert.equal(
-      (await safeReaddir(dirname(fixture.backupRoot))).some((name) => name.includes('.collecting-')),
-      false,
-    );
-  } finally {
-    await close(authority.server);
     await cleanupFixture(fixture);
   }
 });
 
-test('controlled publication faults leave no canonical receipt and quarantine only owned outputs', async (context) => {
-  const faultPoints = [
-    'after-staged-verification',
-    'after-backup-move',
-    'after-primary-move',
-    'during-final-verifier',
-    'before-lock-move',
-  ] as const;
-  const authority = createHappyAuthorityServer();
-  try {
-    const port = await listen(authority.server);
-    authority.setPort(port);
-    for (const faultPoint of faultPoints) {
-      await context.test(faultPoint, async () => {
-        const fixture = await createFixture();
-        try {
-          const result = await invokeLoopback(
-            fixture,
-            testDescriptors(`http://127.0.0.1:${port}`),
-            { faultPoint },
-          );
-          assert.notEqual(result.code, 0);
-          if (faultPoint === 'during-final-verifier') {
-            assert.match(result.stderr, /Private source verifier failed/i);
-          }
-          assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
-          assert.equal(await stat(fixture.primaryRoot).then(() => true, () => false), false);
-          assert.equal(await stat(fixture.backupRoot).then(() => true, () => false), false);
-          const primarySiblings = await safeReaddir(dirname(fixture.primaryRoot));
-          const backupSiblings = await safeReaddir(dirname(fixture.backupRoot));
-          assert.equal(primarySiblings.some((name) => name.includes('.collecting-')), false);
-          assert.equal(backupSiblings.some((name) => name.includes('.collecting-')), false);
-          if (faultPoint === 'after-primary-move' || faultPoint === 'during-final-verifier' || faultPoint === 'before-lock-move') {
-            assert.equal(primarySiblings.some((name) => name.includes('.failed-')), true);
-          }
-          if (faultPoint !== 'after-staged-verification') {
-            assert.equal(backupSiblings.some((name) => name.includes('.failed-')), true);
-          }
-        } finally {
-          await cleanupFixture(fixture);
-        }
-      });
-    }
-  } finally {
-    await close(authority.server);
-  }
-});
-
-test('hash helper fixture remains synthetic and deterministic', () => {
-  assert.equal(
-    createHash('sha256').update(SOURCE_BYTES['cards/cards.raw.json']).digest('hex'),
-    'c073ef9097c6a1593b5d87b24fee13886577966648c3f59edef1a91e278bca64',
-  );
-});
 test('production manual intake has one fixed offline source and no transport surface', async () => {
   const source = await readFile(SCRIPT_PATH, 'utf8');
-  assert.match(source, /manual-inbox\/official-2026-08-27-v3/);
-  assert.match(source, /user-provided-manual-download/);
-  assert.match(source, /phase-01-20260827-manual-provision-1/);
-  assert.doesNotMatch(source, /\.consumed\.json|Invoke-BoundedHttpToFile|HttpClient|Invoke-WebRequest|Invoke-RestMethod/);
+  for (const required of [
+    '.local/authority/manual-inbox/official-2026-08-27-v3',
+    '.local/authority/inputs/official-2026-08-27-v3/primary',
+    '.local/authority/locks/official-2026-08-27-v3/source-set-lock.json',
+    'sorcery-tcg-authority-backup-official-2026-08-27-v3',
+    MANUAL_METHOD,
+    MANUAL_REFERENCE,
+    'Private authority manual intake completed.',
+    'Private authority manual intake failed.',
+    'Private authority existing roots verified.',
+  ]) {
+    assert.ok(source.includes(required), 'missing fixed manual-intake contract');
+  }
+  for (const relativePath of PRIVATE_AUTHORITY_SOURCE_PATHS) {
+    assert.ok(source.includes(relativePath));
+  }
+  assert.doesNotMatch(
+    source,
+    /\b(?:HttpClient|HttpWebRequest|Invoke-WebRequest|Invoke-RestMethod|WebClient|TcpClient|Start-BitsTransfer|Start-Process|curl(?:\.exe)?|fetch|Socket|Invoke-PrivateAuthorityTransport|Invoke-BoundedHttpToFile|New-PrivateAuthorityAcquisitionContext)\b|node:(?:http|https|net|tls)/i,
+  );
+  assert.doesNotMatch(source, /Start-Sleep|while\s*\(\s*\$true|\.png|\.jpe?g/i);
+
+
+  const ast = await runPwsh([
+    '-Command',
+    [
+      '$tokens=$null; $errors=$null',
+      '$ast=[Management.Automation.Language.Parser]::ParseFile($env:SORCERY_COLLECTOR_SCRIPT,[ref]$tokens,[ref]$errors)',
+      'if($errors.Count){exit 1}',
+      '$params=@($ast.ParamBlock.Parameters.Name.VariablePath.UserPath)',
+      '$exports=@($ast.FindAll({param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq "Export-ModuleMember"},$true) | ForEach-Object {$_.Extent.Text})',
+      '[pscustomobject]@{params=$params;exports=$exports} | ConvertTo-Json -Depth 8 -Compress',
+    ].join('; '),
+  ], { SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH });
+  assert.equal(ast.code, 0, ast.stderr);
+  const shape = JSON.parse(ast.stdout) as { params: string[]; exports: string[] };
+  assert.deepEqual(shape.params, [
+    'ImportManualInbox',
+    'AcknowledgePrivateUseRisk',
+    'VerifyExistingRoots',
+    'LockPath',
+  ]);
+  assert.equal(shape.exports.length, 1);
+  assert.match(shape.exports[0] ?? '', /Invoke-PrivateAuthorityManualIntakeForTest/);
+  assert.doesNotMatch(shape.exports[0] ?? '', /Collection|Transport|Http/i);
 });

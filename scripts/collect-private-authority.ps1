@@ -2,12 +2,12 @@
 
 [CmdletBinding()]
 param(
-    [string]$BackupRoot,
+    [switch]$ImportManualInbox,
     [switch]$AcknowledgePrivateUseRisk,
-    [AllowNull()][string]$UserAuthorizationReference,
     [switch]$VerifyExistingRoots,
     [AllowNull()][string]$LockPath
 )
+
 
 $collectorModule = New-Module -Name 'Sorcery.PrivateAuthorityCollector' -ArgumentList $PSScriptRoot -ScriptBlock {
 param([Parameter(Mandatory)][string]$CollectorScriptRoot)
@@ -21,123 +21,80 @@ function Get-ProductionSourceDescriptors {
         [pscustomobject]@{
             relativePath = 'rulebook/rulebook-current.pdf'
             provenanceUrl = 'https://sorcerytcg.com/news/sorcery-contested-realm-december-2025-rulebook-update'
-            requestUrl = 'https://sorcerytcg.com/news/sorcery-contested-realm-december-2025-rulebook-update'
             mediaType = 'application/pdf'
             sourceMarker = 'Sorcery: Contested Realm December 2025 Rulebook Update'
             effectiveDatePolicy = 'fixed'
             effectiveDate = '2025-12-19'
+            minBytes = 32768
             maxBytes = 268435456
-            allowedHosts = @('sorcerytcg.com', 'www.sorcerytcg.com')
-            allowedRedirectHosts = @('drive.google.com', 'drive.usercontent.google.com')
-            rulebookLocatorHosts = @('drive.google.com')
-            rulebookDownloadBaseUrl = 'https://drive.google.com/uc'
         }
         [pscustomobject]@{
             relativePath = 'formats/constructed-current.html'
             provenanceUrl = 'https://sorcerytcg.com/constructed'
-            requestUrl = 'https://sorcerytcg.com/constructed'
             mediaType = 'text/html'
             sourceMarker = 'Constructed Format'
             visibleBodyMarkers = @('Constructed Format', 'Deck Construction')
             effectiveDatePolicy = 'none'
             effectiveDate = $null
+            minBytes = 512
             maxBytes = 268435456
-            allowedHosts = @('sorcerytcg.com', 'www.sorcerytcg.com')
-            allowedRedirectHosts = @('sorcerytcg.com', 'www.sorcerytcg.com')
         }
         [pscustomobject]@{
             relativePath = 'codex/codex-current.html'
             provenanceUrl = 'https://curiosa.io/codex'
-            requestUrl = 'https://curiosa.io/codex'
             mediaType = 'text/html'
             sourceMarker = 'Welcome to the Codex'
             visibleBodyMarkers = @('Welcome to the Codex', 'Card Rulings')
             effectiveDatePolicy = 'none'
             effectiveDate = $null
+            minBytes = 512
             maxBytes = 268435456
-            allowedHosts = @('curiosa.io', 'www.curiosa.io')
-            allowedRedirectHosts = @('curiosa.io', 'www.curiosa.io')
         }
         [pscustomobject]@{
             relativePath = 'codex/faqs-current.html'
             provenanceUrl = 'https://curiosa.io/faqs'
-            requestUrl = 'https://curiosa.io/faqs'
             mediaType = 'text/html'
             sourceMarker = 'FAQs'
             visibleBodyMarkers = @('FAQs', 'Frequently Asked Questions')
             effectiveDatePolicy = 'none'
             effectiveDate = $null
+            minBytes = 512
             maxBytes = 268435456
-            allowedHosts = @('curiosa.io', 'www.curiosa.io')
-            allowedRedirectHosts = @('curiosa.io', 'www.curiosa.io')
         }
         [pscustomobject]@{
             relativePath = 'codex/changelog-current.html'
             provenanceUrl = 'https://curiosa.io/codex/changelog'
-            requestUrl = 'https://curiosa.io/codex/changelog'
             mediaType = 'text/html'
             sourceMarker = 'Codex Changelog'
             visibleBodyMarkers = @('Codex Changelog')
             effectiveDatePolicy = 'changelog'
             effectiveDate = $null
+            minBytes = 512
             maxBytes = 268435456
-            allowedHosts = @('curiosa.io', 'www.curiosa.io')
-            allowedRedirectHosts = @('curiosa.io', 'www.curiosa.io')
         }
         [pscustomobject]@{
             relativePath = 'updates/card-updates-2025.html'
             provenanceUrl = 'https://sorcerytcg.com/news/sorcery-contested-realm-card-updates-2025'
-            requestUrl = 'https://sorcerytcg.com/news/sorcery-contested-realm-card-updates-2025'
             mediaType = 'text/html'
             sourceMarker = 'Sorcery: Contested Realm Card Updates 2025'
             visibleBodyMarkers = @('Sorcery: Contested Realm Card Updates 2025', 'Card Updates')
             effectiveDatePolicy = 'fixed'
             effectiveDate = '2025-11-25'
+            minBytes = 512
             maxBytes = 268435456
-            allowedHosts = @('sorcerytcg.com', 'www.sorcerytcg.com')
-            allowedRedirectHosts = @('sorcerytcg.com', 'www.sorcerytcg.com')
         }
         [pscustomobject]@{
             relativePath = 'cards/cards.raw.json'
             provenanceUrl = 'https://api.sorcerytcg.com/api/cards'
-            requestUrl = 'https://api.sorcerytcg.com/api/cards'
             mediaType = 'application/json'
             sourceMarker = $null
             expectedCardCount = 1100
             effectiveDatePolicy = 'none'
             effectiveDate = $null
+            minBytes = 65536
             maxBytes = 10000000
-            allowedHosts = @('api.sorcerytcg.com')
-            allowedRedirectHosts = @('api.sorcerytcg.com')
         }
     )
-}
-
-function Test-LoopbackHost {
-    param([Parameter(Mandatory)][string]$HostName)
-
-    if ($HostName -eq 'localhost') { return $true }
-    $address = $null
-    return [Net.IPAddress]::TryParse($HostName, [ref]$address) -and [Net.IPAddress]::IsLoopback($address)
-}
-
-function Assert-RequestUri {
-    param(
-        [Parameter(Mandatory)][Uri]$Uri,
-        [Parameter(Mandatory)][string[]]$AllowedHosts,
-        [Parameter(Mandatory)][bool]$LoopbackOnly
-    )
-
-    if (-not $Uri.IsAbsoluteUri) { throw "Request URI must be absolute: $Uri" }
-    if ($Uri.UserInfo) { throw "Request URI credentials are forbidden: $Uri" }
-    if ($LoopbackOnly) {
-        if (-not (Test-LoopbackHost $Uri.DnsSafeHost)) { throw "Loopback test request escaped loopback: $Uri" }
-        if ($Uri.Scheme -notin @('http', 'https')) { throw "Loopback test request uses an invalid scheme: $Uri" }
-    }
-    elseif ($Uri.Scheme -ne 'https') {
-        throw "Production request must use HTTPS: $Uri"
-    }
-    if ($Uri.DnsSafeHost -notin $AllowedHosts) { throw "Request host is not allowed: $Uri" }
 }
 
 function Get-StrictUtf8Text {
@@ -158,7 +115,7 @@ function Get-VisibleHtml {
     $withoutComments = [Text.RegularExpressions.Regex]::Replace($Html, '(?is)<!--.*?-->', ' ')
     return [Text.RegularExpressions.Regex]::Replace(
         $withoutComments,
-        '(?is)<(?<hidden>head|script|style|template|noscript|title)\b[^>]*>.*?</\k<hidden>\s*>',
+        '(?is)<(?<hidden>head|script|style|template|noscript|title|nav|header|footer|aside)\b[^>]*>.*?</\k<hidden>\s*>',
         ' '
     )
 }
@@ -177,119 +134,6 @@ function Test-ChallengePage {
     return $Html -match '(?is)(captcha|cf-chl-|challenge-platform|<title[^>]*>\s*(?:Access Denied|Request Blocked|Attention Required)|unusual traffic)'
 }
 
-function Invoke-BoundedHttpToFile {
-    param(
-        [Parameter(Mandatory)][Net.Http.HttpClient]$Client,
-        [Parameter(Mandatory)][Uri]$RequestUri,
-        [Parameter(Mandatory)][string[]]$AllowedHosts,
-        [Parameter(Mandatory)][string]$DestinationPath,
-        [Parameter(Mandatory)][long]$MaximumBytes,
-        [Parameter(Mandatory)][int]$HeaderTimeoutSeconds,
-        [Parameter(Mandatory)][int]$BodyTimeoutSeconds,
-        [Parameter(Mandatory)][bool]$LoopbackOnly
-    )
-
-    $current = $RequestUri
-    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    for ($hop = 0; $hop -le 5; $hop++) {
-        Assert-RequestUri $current $AllowedHosts $LoopbackOnly
-        if (-not $seen.Add($current.AbsoluteUri)) { throw "Redirect loop detected: $current" }
-
-        $request = [Net.Http.HttpRequestMessage]::new([Net.Http.HttpMethod]::Get, $current)
-        $headerCancellation = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($HeaderTimeoutSeconds))
-        $response = $null
-        try {
-            $response = $Client.SendAsync(
-                $request,
-                [Net.Http.HttpCompletionOption]::ResponseHeadersRead,
-                $headerCancellation.Token
-            ).GetAwaiter().GetResult()
-        }
-        catch [OperationCanceledException] {
-            throw "Response header timeout: $current"
-        }
-        finally {
-            $headerCancellation.Dispose()
-            $request.Dispose()
-        }
-
-        $status = [int]$response.StatusCode
-        if ($status -in @(301, 302, 303, 307, 308)) {
-            try {
-                if ($hop -eq 5) { throw "Redirect limit exceeded: $current" }
-                $location = $response.Headers.Location
-                if ($null -eq $location) { throw "Redirect response omitted Location: $current" }
-                $next = if ($location.IsAbsoluteUri) { $location } else { [Uri]::new($current, $location) }
-                Assert-RequestUri $next $AllowedHosts $LoopbackOnly
-                $current = $next
-                continue
-            }
-            finally {
-                $response.Dispose()
-            }
-        }
-        if ($status -in @(401, 403, 429)) {
-            $response.Dispose()
-            throw "Request stopped on HTTP $status without retry: $current"
-        }
-        if ($status -ne 200) {
-            $response.Dispose()
-            throw "Request failed on HTTP $status without retry: $current"
-        }
-
-        $declaredLength = $response.Content.Headers.ContentLength
-        if ($null -ne $declaredLength -and $declaredLength -gt $MaximumBytes) {
-            $response.Dispose()
-            throw "Declared response size exceeds the byte limit: $current"
-        }
-
-        [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($DestinationPath)) | Out-Null
-        $output = $null
-        $input = $null
-        $bodyCancellation = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($BodyTimeoutSeconds))
-        $written = 0L
-        try {
-            $output = [IO.FileStream]::new(
-                $DestinationPath,
-                [IO.FileMode]::CreateNew,
-                [IO.FileAccess]::Write,
-                [IO.FileShare]::None
-            )
-            $input = $response.Content.ReadAsStream($bodyCancellation.Token)
-            $buffer = [byte[]]::new(65536)
-            while (($count = $input.ReadAsync($buffer, 0, $buffer.Length, $bodyCancellation.Token).GetAwaiter().GetResult()) -gt 0) {
-                $written += $count
-                if ($written -gt $MaximumBytes) { throw "Streamed response size exceeds the byte limit: $current" }
-                $output.Write($buffer, 0, $count)
-            }
-            if ($written -eq 0) { throw "Response body is empty: $current" }
-            $output.Flush($true)
-        }
-        catch [OperationCanceledException] {
-            throw "Response body timeout: $current"
-        }
-        finally {
-            if ($null -ne $input) { $input.Dispose() }
-            if ($null -ne $output) { $output.Dispose() }
-            $bodyCancellation.Dispose()
-            $response.Dispose()
-        }
-
-        $contentType = if ($null -eq $response.Content.Headers.ContentType) { '' } else { $response.Content.Headers.ContentType.MediaType }
-        $disposition = $response.Content.Headers.ContentDisposition
-        $fileName = if ($null -eq $disposition) { $null } else { $disposition.FileNameStar }
-        if ($null -ne $disposition -and [string]::IsNullOrWhiteSpace($fileName)) { $fileName = $disposition.FileName }
-        if ($null -ne $fileName) { $fileName = $fileName.Trim('"') }
-        return [pscustomobject]@{
-            byteLength = $written
-            contentType = $contentType
-            fileName = $fileName
-            finalUri = $current.AbsoluteUri
-        }
-    }
-    throw "Redirect limit exceeded: $RequestUri"
-}
-
 function Assert-HtmlSource {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -301,12 +145,14 @@ function Assert-HtmlSource {
     if ($ContentType -ne 'text/html') { throw "Expected text/html content: $Path" }
     $html = Get-StrictUtf8Text $Path
     if ($html -notmatch '(?is)^\s*(?:<!doctype\s+html|<html\b)') { throw "HTML signature is missing: $Path" }
+    if ($html -notmatch '(?is)</html\s*>\s*$') { throw 'HTML closing structure is missing' }
     if (Test-ChallengePage $html) { throw "Challenge or block page detected: $Path" }
     if ($VisibleBodyMarkers.Count -eq 0) {
         if (-not $html.Contains($Marker, [StringComparison]::Ordinal)) { throw 'Required source marker is missing' }
         return $html
     }
     $visible = Get-NormalizedVisibleText $html
+    if ($visible.Length -lt 128) { throw 'Visible source content is too short to be complete' }
     foreach ($requiredMarker in @($Marker) + @($VisibleBodyMarkers) | Select-Object -Unique) {
         if ([string]::IsNullOrWhiteSpace($requiredMarker) -or
             -not $visible.Contains($requiredMarker, [StringComparison]::Ordinal)) {
@@ -332,6 +178,21 @@ function Assert-PdfSource {
     if ($bytes.Length -lt $ending.Length -or
         [Text.Encoding]::ASCII.GetString($bytes, $bytes.Length - $ending.Length, $ending.Length) -cne $ending) {
         throw 'Rulebook PDF EOF marker or trailing bytes are invalid'
+    }
+    $ascii = [Text.Encoding]::ASCII.GetString($bytes)
+    $startXref = [Text.RegularExpressions.Regex]::Match($ascii, '(?s)startxref\s+(?<offset>\d+)\s+%%EOF\s*$')
+    $xrefOffset = [long]0
+    if ($ascii -cnotmatch '(?s)/Type\s*/Page\b' -or
+        -not $startXref.Success -or
+        -not [long]::TryParse($startXref.Groups['offset'].Value, [ref]$xrefOffset) -or
+        $xrefOffset -lt 0 -or
+        $xrefOffset -ge $ascii.Length) {
+        throw 'Rulebook PDF structure is incomplete'
+    }
+    $xref = $ascii.Substring([int]$xrefOffset)
+    if ($xref -cnotmatch '(?s)^xref\b.*?\btrailer\b' -and
+        $xref -cnotmatch '(?s)^\d+\s+\d+\s+obj\b.*?/Type\s*/XRef\b') {
+        throw 'Rulebook PDF cross-reference structure is invalid'
     }
 }
 
@@ -366,6 +227,10 @@ function Assert-PrivateAuthorityContentSet {
         if (-not $path.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase) -or
             -not [IO.File]::Exists($path)) {
             throw 'Private authority content path is missing or escapes its root'
+        }
+        $file = [IO.FileInfo]::new($path)
+        if ($file.Length -lt [long]$descriptor.minBytes -or $file.Length -gt [long]$descriptor.maxBytes) {
+            throw 'Private authority content size is invalid'
         }
         $html = $null
         switch ([string]$descriptor.mediaType) {
@@ -506,235 +371,12 @@ function Get-ChangelogDate {
     return $dates[0].ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
 }
 
-function Receive-Rulebook {
-    param(
-        [Parameter(Mandatory)][Net.Http.HttpClient]$Client,
-        [Parameter(Mandatory)][psobject]$Descriptor,
-        [Parameter(Mandatory)][string]$DestinationPath,
-        [Parameter(Mandatory)][int]$HeaderTimeoutSeconds,
-        [Parameter(Mandatory)][int]$BodyTimeoutSeconds,
-        [Parameter(Mandatory)][bool]$LoopbackOnly
-    )
-
-    $releasePath = "$DestinationPath.release-page"
-    $release = Invoke-BoundedHttpToFile $Client ([Uri]$Descriptor.requestUrl) @($Descriptor.allowedHosts) $releasePath ([long]$Descriptor.maxBytes) $HeaderTimeoutSeconds $BodyTimeoutSeconds $LoopbackOnly
-    try {
-        $html = Assert-HtmlSource $releasePath $release.contentType ([string]$Descriptor.sourceMarker) @()
-        $visible = Get-NormalizedVisibleText $html
-        $releaseDate = [DateTime]::ParseExact([string]$Descriptor.effectiveDate, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
-        $visibleReleaseDate = $releaseDate.ToString('dd MMM yyyy', [Globalization.CultureInfo]::InvariantCulture)
-        if (-not $visible.Contains($visibleReleaseDate, [StringComparison]::Ordinal)) { throw ('Rulebook release date {0} is missing' -f $Descriptor.effectiveDate) }
-        $anchorPattern = '(?is)<a\b[^>]*\bhref\s*=\s*(?:"(?<double>[^"]*)"|''(?<single>[^'']*)'')[^>]*>(?<text>.*?)</a>'
-        $matches = @([Text.RegularExpressions.Regex]::Matches($html, $anchorPattern) | Where-Object {
-            (Get-NormalizedVisibleText $_.Groups['text'].Value) -eq 'Sorcery: Contested Realm Rulebook (December 2025)'
-        })
-        if ($matches.Count -ne 1) { throw 'Expected exactly one standard December 2025 rulebook anchor' }
-        $href = if ($matches[0].Groups['double'].Success) { $matches[0].Groups['double'].Value } else { $matches[0].Groups['single'].Value }
-        $locator = [Uri]::new([Uri]$Descriptor.requestUrl, [Net.WebUtility]::HtmlDecode($href))
-        Assert-RequestUri $locator @($Descriptor.rulebookLocatorHosts) $LoopbackOnly
-        $locatorMatch = [Text.RegularExpressions.Regex]::Match($locator.AbsolutePath, '^/file/d/(?<id>[^/]+)/view/?$')
-        if (-not $locatorMatch.Success) { throw 'Rulebook locator is not a Drive file viewer path' }
-        $id = [Uri]::EscapeDataString($locatorMatch.Groups['id'].Value)
-        $downloadBuilder = [UriBuilder]::new([string]$Descriptor.rulebookDownloadBaseUrl)
-        $downloadBuilder.Query = "export=download&id=$id"
-        $download = Invoke-BoundedHttpToFile $Client $downloadBuilder.Uri @($Descriptor.allowedRedirectHosts) $DestinationPath ([long]$Descriptor.maxBytes) $HeaderTimeoutSeconds $BodyTimeoutSeconds $LoopbackOnly
-        if ($download.contentType -notin @('application/pdf', 'application/octet-stream')) { throw 'Rulebook response has the wrong media type' }
-        if ($download.fileName -ne 'SorceryRulebook.pdf') { throw 'Rulebook response filename must be SorceryRulebook.pdf' }
-        Assert-PdfSource $DestinationPath
-        return [pscustomobject]@{
-            transfer = $download
-            locator = $locator.AbsoluteUri
-            observedFilename = $download.fileName
-        }
-    }
-    finally {
-        if ([IO.File]::Exists($releasePath)) { [IO.File]::Delete($releasePath) }
-    }
-}
-
-function New-SourceEntry {
-    param(
-        [Parameter(Mandatory)][psobject]$Descriptor,
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][long]$ByteLength,
-        [AllowNull()][object]$EffectiveDate
-    )
-
-    [pscustomobject]@{
-        relativePath = [string]$Descriptor.relativePath
-        url = [string]$Descriptor.provenanceUrl
-        retrievedAt = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [Globalization.CultureInfo]::InvariantCulture)
-        effectiveDate = $EffectiveDate
-        mediaType = [string]$Descriptor.mediaType
-        byteLength = $ByteLength
-        byteHash = 'sha256:' + (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
-    }
-}
-
-function Invoke-PrivateAuthorityTransport {
-    param(
-        [Parameter(Mandatory)][string]$PrimaryRoot,
-        [Parameter(Mandatory)][object[]]$Descriptors,
-        [Parameter(Mandatory)][int]$HeaderTimeoutSeconds,
-        [Parameter(Mandatory)][int]$BodyTimeoutSeconds,
-        [Parameter(Mandatory)][long]$MaxTotalBytes,
-        [Parameter(Mandatory)][bool]$LoopbackOnly
-    )
-
-    if ([IO.Directory]::Exists($PrimaryRoot) -or [IO.File]::Exists($PrimaryRoot)) { throw "Primary destination already exists: $PrimaryRoot" }
-    $handler = [Net.Http.HttpClientHandler]::new()
-    $handler.AllowAutoRedirect = $false
-    $client = [Net.Http.HttpClient]::new($handler)
-    $client.Timeout = [Threading.Timeout]::InfiniteTimeSpan
-    $entries = [Collections.Generic.List[object]]::new()
-    $transfers = [Collections.Generic.List[object]]::new()
-    $totalBytes = 0L
-    $rulebookEvidence = $null
-    [IO.Directory]::CreateDirectory($PrimaryRoot) | Out-Null
-    try {
-        foreach ($descriptor in $Descriptors) {
-            $destination = [IO.Path]::GetFullPath((Join-Path $PrimaryRoot ([string]$descriptor.relativePath)))
-            if (-not $destination.StartsWith([IO.Path]::GetFullPath($PrimaryRoot) + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
-                throw "Source destination escapes primary root: $($descriptor.relativePath)"
-            }
-            if ([string]$descriptor.relativePath -eq 'rulebook/rulebook-current.pdf') {
-                $rulebook = Receive-Rulebook $client $descriptor $destination $HeaderTimeoutSeconds $BodyTimeoutSeconds $LoopbackOnly
-                $transfer = $rulebook.transfer
-                $rulebookEvidence = [pscustomobject]@{
-                    sourceUrl = [string]$descriptor.provenanceUrl
-                    relativePath = [string]$descriptor.relativePath
-                    observedFilename = $rulebook.observedFilename
-                    privateLocatorEvidence = $rulebook.locator
-                    privateLocatorIsNormative = $false
-                }
-            }
-            else {
-                $transfer = Invoke-BoundedHttpToFile $client ([Uri]$descriptor.requestUrl) @($descriptor.allowedRedirectHosts) $destination ([long]$descriptor.maxBytes) $HeaderTimeoutSeconds $BodyTimeoutSeconds $LoopbackOnly
-                if ([string]$descriptor.mediaType -eq 'text/html' -and $transfer.contentType -ne 'text/html') {
-                    throw 'HTML source has the wrong response media type'
-                }
-                if ([string]$descriptor.mediaType -eq 'application/json' -and $transfer.contentType -ne 'application/json') {
-                    throw 'Card source has the wrong response media type'
-                }
-            }
-            $totalBytes += [long]$transfer.byteLength
-            if ($totalBytes -gt $MaxTotalBytes) { throw 'Source set exceeds the aggregate byte limit' }
-            $transfers.Add([pscustomobject]@{
-                descriptor = $descriptor
-                destination = $destination
-                byteLength = [long]$transfer.byteLength
-            })
-        }
-        $effectiveDates = Assert-PrivateAuthorityContentSet $PrimaryRoot $Descriptors
-        foreach ($completedTransfer in $transfers) {
-            $descriptor = $completedTransfer.descriptor
-            $entries.Add((New-SourceEntry $descriptor $completedTransfer.destination $completedTransfer.byteLength $effectiveDates[[string]$descriptor.relativePath]))
-        }
-        return [pscustomobject]@{
-            entries = @($entries)
-            rulebookAcquisitionEvidence = $rulebookEvidence
-        }
-    }
-    catch {
-        if ([IO.Directory]::Exists($PrimaryRoot)) { [IO.Directory]::Delete($PrimaryRoot, $true) }
-        throw
-    }
-    finally {
-        $client.Dispose()
-        $handler.Dispose()
-    }
-}
-
-function Assert-LoopbackDescriptors {
-    param([Parameter(Mandatory)][object[]]$Descriptors)
-
-    if ($Descriptors.Count -ne 7) { throw 'Loopback test requires exactly seven descriptors' }
-    $expectedPaths = @(
-        'rulebook/rulebook-current.pdf',
-        'formats/constructed-current.html',
-        'codex/codex-current.html',
-        'codex/faqs-current.html',
-        'codex/changelog-current.html',
-        'updates/card-updates-2025.html',
-        'cards/cards.raw.json'
-    )
-    $actualPaths = @($Descriptors | ForEach-Object { [string]$_.relativePath })
-    if (@($actualPaths | Sort-Object -Unique).Count -ne 7 -or
-        @(Compare-Object ($expectedPaths | Sort-Object) ($actualPaths | Sort-Object)).Count -ne 0) {
-        throw 'Loopback test descriptors must use exactly the seven locked source paths'
-    }
-    foreach ($descriptor in $Descriptors) {
-        if ([string]$descriptor.mediaType -eq 'text/html' -and
-            @($descriptor.visibleBodyMarkers).Count -eq 0) {
-            throw 'Loopback HTML descriptors require visible body markers'
-        }
-        if ([string]$descriptor.mediaType -eq 'application/json' -and
-            ([int]$descriptor.expectedCardCount -lt 1 -or [int]$descriptor.expectedCardCount -gt 2000)) {
-            throw 'Loopback card descriptor requires a bounded expected count'
-        }
-        $hostSets = @(@($descriptor.allowedHosts), @($descriptor.allowedRedirectHosts))
-        if ($null -ne $descriptor.PSObject.Properties['rulebookLocatorHosts']) { $hostSets += ,@($descriptor.rulebookLocatorHosts) }
-        foreach ($hostSet in $hostSets) {
-            foreach ($hostName in $hostSet) {
-                if (-not (Test-LoopbackHost ([string]$hostName))) { throw "Loopback test host is not loopback: $hostName" }
-            }
-        }
-        Assert-RequestUri ([Uri]$descriptor.requestUrl) @($descriptor.allowedHosts) $true
-        if ($null -ne $descriptor.PSObject.Properties['rulebookDownloadBaseUrl']) {
-            Assert-RequestUri ([Uri]$descriptor.rulebookDownloadBaseUrl) @($descriptor.allowedRedirectHosts) $true
-        }
-    }
-}
-
 function Get-NormalizedPath {
     param([Parameter(Mandatory)][string]$Path)
 
     $fullPath = [IO.Path]::GetFullPath($Path).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
     if ($IsWindows) { return $fullPath.ToLowerInvariant() }
     return $fullPath
-}
-
-function Get-ProductionCollectionConfiguration {
-    $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $script:CollectorScriptRoot '..'))
-    return [pscustomobject]@{
-        repositoryRoot = $repositoryRoot
-        primaryRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot '.local/authority/inputs/official-2026-08-27-v3/primary'))
-        backupRoot = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $repositoryRoot) 'sorcery-tcg-authority-backup-official-2026-08-27-v3'))
-        lockPath = [IO.Path]::GetFullPath((Join-Path $repositoryRoot '.local/authority/locks/official-2026-08-27-v3/source-set-lock.json'))
-        descriptors = @(Get-ProductionSourceDescriptors)
-        headerTimeoutSeconds = 30
-        bodyTimeoutSeconds = 900
-        maxTotalBytes = 805306368L
-    }
-}
-
-function Assert-FixedProductionConfiguration {
-    param(
-        [Parameter(Mandatory)][string]$RepositoryRoot,
-        [Parameter(Mandatory)][string]$PrimaryRoot,
-        [Parameter(Mandatory)][string]$BackupRoot,
-        [Parameter(Mandatory)][string]$LockPath,
-        [Parameter(Mandatory)][object[]]$Descriptors,
-        [Parameter(Mandatory)][int]$HeaderTimeoutSeconds,
-        [Parameter(Mandatory)][int]$BodyTimeoutSeconds,
-        [Parameter(Mandatory)][long]$MaxTotalBytes,
-        [AllowNull()][string]$FaultPoint
-    )
-
-    $expected = Get-ProductionCollectionConfiguration
-    $actualDescriptors = ConvertTo-Json -InputObject @($Descriptors) -Depth 16 -Compress
-    $expectedDescriptors = ConvertTo-Json -InputObject @($expected.descriptors) -Depth 16 -Compress
-    if ((Get-NormalizedPath $RepositoryRoot) -ne (Get-NormalizedPath $expected.repositoryRoot) -or
-        (Get-NormalizedPath $PrimaryRoot) -ne (Get-NormalizedPath $expected.primaryRoot) -or
-        (Get-NormalizedPath $BackupRoot) -ne (Get-NormalizedPath $expected.backupRoot) -or
-        (Get-NormalizedPath $LockPath) -ne (Get-NormalizedPath $expected.lockPath) -or
-        $actualDescriptors -cne $expectedDescriptors -or
-        $HeaderTimeoutSeconds -ne $expected.headerTimeoutSeconds -or
-        $BodyTimeoutSeconds -ne $expected.bodyTimeoutSeconds -or
-        $MaxTotalBytes -ne $expected.maxTotalBytes -or
-        -not [string]::IsNullOrEmpty($FaultPoint)) {
-        throw 'Non-loopback collection requires the fixed production configuration'
-    }
 }
 
 function Test-PathWithin {
@@ -822,41 +464,6 @@ function Write-NewUtf8Json {
     finally {
         $writer.Dispose()
         $stream.Dispose()
-    }
-}
-
-function New-PrivateAuthorityAcquisitionContext {
-    param(
-        [Parameter(Mandatory)][string]$RepositoryRoot,
-        [AllowNull()][string]$UserAuthorizationReference
-    )
-
-    if ($UserAuthorizationReference -cne 'phase-01-20260827-private-reacquisition-1') {
-        throw 'User authorization reference is invalid.'
-    }
-
-    $authorizationPath = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot ".local/authority/authorizations/$UserAuthorizationReference.consumed.json"))
-    if (Test-Path -LiteralPath $authorizationPath) {
-        throw "User authorization $UserAuthorizationReference has already been consumed."
-    }
-    try {
-        Write-NewUtf8Json $authorizationPath ([ordered]@{
-            schemaVersion = 1
-            revisionId = 'official-2026-08-27-v3'
-            acquisitionMethod = 'user-authorized-user-run-one-shot-powershell'
-            authorizationReference = $UserAuthorizationReference
-            consumedAt = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [Globalization.CultureInfo]::InvariantCulture)
-        })
-    }
-    catch {
-        if (Test-Path -LiteralPath $authorizationPath) {
-            throw "User authorization $UserAuthorizationReference has already been consumed."
-        }
-        throw
-    }
-    return [pscustomobject]@{
-        acquisitionMethod = 'user-authorized-user-run-one-shot-powershell'
-        authorizationReference = $UserAuthorizationReference
     }
 }
 
@@ -958,6 +565,38 @@ function Get-RepositoryRootFromAuthorityLockPath {
     throw 'Lock path is outside the private authority lock hierarchy'
 }
 
+function Assert-HistoricalAgentAuthorizationRecord {
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$AuthorizationReference
+    )
+
+    $recordPath = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot ".local/authority/authorizations/$AuthorizationReference.consumed.json"))
+    Assert-NoReparseAncestors $recordPath
+    $file = [IO.FileInfo]::new($recordPath)
+    if (-not $file.Exists -or $file.Length -lt 1 -or $file.Length -gt 4096) {
+        throw 'Historical agent authorization record is missing or invalid'
+    }
+    try { $record = Get-Content -Raw -LiteralPath $recordPath | ConvertFrom-Json -Depth 8 -DateKind String }
+    catch { throw 'Historical agent authorization record is invalid' }
+    $fields = @('schemaVersion', 'revisionId', 'acquisitionMethod', 'authorizationReference', 'consumedAt')
+    $consumedAt = [DateTime]::MinValue
+    if (@(Compare-Object ($fields | Sort-Object) (@($record.PSObject.Properties.Name) | Sort-Object)).Count -ne 0 -or
+        $record.schemaVersion -ne 1 -or
+        $record.revisionId -cne 'official-2026-08-20' -or
+        $record.acquisitionMethod -cne 'user-authorized-agent-run-one-shot-powershell' -or
+        $record.authorizationReference -cne $AuthorizationReference -or
+        -not [DateTime]::TryParseExact(
+            [string]$record.consumedAt,
+            "yyyy-MM-dd'T'HH:mm:ss.fff'Z'",
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::AssumeUniversal,
+            [ref]$consumedAt
+        )) {
+        throw 'Historical agent authorization record is invalid'
+    }
+}
+
 function Read-ConsumedPrivateAuthorityLock {
     param([Parameter(Mandatory)][string]$LockPath)
 
@@ -967,10 +606,9 @@ function Read-ConsumedPrivateAuthorityLock {
     if (-not [IO.File]::Exists($resolvedPath)) { throw 'Lock file does not exist' }
     try { $lock = Get-Content -Raw -LiteralPath $resolvedPath | ConvertFrom-Json -Depth 32 -DateKind String }
     catch { throw 'Lock file is not valid JSON' }
-    $requiredFields = @(
+    $baseFields = @(
         'schemaVersion',
         'acquisitionMethod',
-        'authorizationReference',
         'primaryRoot',
         'backupRoot',
         'entries',
@@ -979,15 +617,36 @@ function Read-ConsumedPrivateAuthorityLock {
         'rulebookAcquisitionEvidence'
     )
     $actualFields = @($lock.PSObject.Properties.Name)
-    if (@(Compare-Object ($requiredFields | Sort-Object) ($actualFields | Sort-Object)).Count -ne 0) {
-        throw 'Consumed lock fields are invalid'
-    }
-    $historicalIdentity = $lock.acquisitionMethod -ceq 'user-authorized-agent-run-one-shot-powershell' -and
+    $hasAuthorizationReference = $actualFields -ccontains 'authorizationReference'
+    $legacyIdentity = $lock.acquisitionMethod -ceq 'user-run-one-shot-powershell' -and -not $hasAuthorizationReference
+    $historicalAgentIdentity = $hasAuthorizationReference -and
+        $lock.acquisitionMethod -ceq 'user-authorized-agent-run-one-shot-powershell' -and
         @('quick-260825-mhh', 'quick-260825-mhh-retry-1') -ccontains [string]$lock.authorizationReference
-    $freshIdentity = $lock.acquisitionMethod -ceq 'user-authorized-user-run-one-shot-powershell' -and
-        [string]$lock.authorizationReference -ceq 'phase-01-20260827-private-reacquisition-1'
-    if ($lock.schemaVersion -ne 1 -or (-not $historicalIdentity -and -not $freshIdentity)) {
-        throw 'Consumed lock acquisition identity is invalid'
+    $manualIdentity = $hasAuthorizationReference -and
+        $lock.acquisitionMethod -ceq 'user-provided-manual-download' -and
+        [string]$lock.authorizationReference -ceq 'phase-01-20260827-manual-provision-1'
+    $requiredFields = if ($legacyIdentity) { $baseFields } else { @($baseFields) + 'authorizationReference' }
+    if (@(Compare-Object ($requiredFields | Sort-Object) ($actualFields | Sort-Object)).Count -ne 0 -or
+        $lock.schemaVersion -ne 1 -or
+        (-not $legacyIdentity -and -not $historicalAgentIdentity -and -not $manualIdentity)) {
+        throw 'Private lock fields or acquisition identity are invalid'
+    }
+    $repositoryRoot = Get-RepositoryRootFromAuthorityLockPath $resolvedPath
+    $revisionId = if ($manualIdentity) { 'official-2026-08-27-v3' } else { 'official-2026-08-20' }
+    $expectedLockPath = [IO.Path]::GetFullPath((Join-Path $repositoryRoot ".local/authority/locks/$revisionId/source-set-lock.json"))
+    $expectedPrimaryRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot ".local/authority/inputs/$revisionId/primary"))
+    if ((Get-NormalizedPath $resolvedPath) -cne (Get-NormalizedPath $expectedLockPath) -or
+        (Get-NormalizedPath ([string]$lock.primaryRoot)) -cne (Get-NormalizedPath $expectedPrimaryRoot)) {
+        throw 'Private lock identity does not match its revision paths'
+    }
+    if ($manualIdentity) {
+        $expectedBackupRoot = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $repositoryRoot) 'sorcery-tcg-authority-backup-official-2026-08-27-v3'))
+        if ((Get-NormalizedPath ([string]$lock.backupRoot)) -cne (Get-NormalizedPath $expectedBackupRoot)) {
+            throw 'Manual lock backup path is invalid'
+        }
+    }
+    if ($historicalAgentIdentity) {
+        Assert-HistoricalAgentAuthorizationRecord $repositoryRoot ([string]$lock.authorizationReference)
     }
     if ([string]::IsNullOrWhiteSpace([string]$lock.primaryRoot) -or
         [string]::IsNullOrWhiteSpace([string]$lock.backupRoot) -or
@@ -1007,22 +666,23 @@ function Read-ConsumedPrivateAuthorityLock {
         throw 'Consumed lock operating acknowledgment is invalid'
     }
     $evidence = $lock.rulebookAcquisitionEvidence
-    if ($evidence.sourceUrl -cne 'https://sorcerytcg.com/news/sorcery-contested-realm-december-2025-rulebook-update' -or
+    $rulebookEntries = @($lock.entries | Where-Object { $_.relativePath -ceq 'rulebook/rulebook-current.pdf' })
+    if ($rulebookEntries.Count -ne 1 -or
+        $evidence.sourceUrl -cne 'https://sorcerytcg.com/news/sorcery-contested-realm-december-2025-rulebook-update' -or
         $evidence.relativePath -cne 'rulebook/rulebook-current.pdf' -or
-        [string]$evidence.byteHash -cnotmatch '^sha256:[0-9a-f]{64}$' -or
+        $evidence.byteHash -cne $rulebookEntries[0].byteHash -or
+        $evidence.retrievedAt -cne $rulebookEntries[0].retrievedAt -or
         [string]::IsNullOrWhiteSpace([string]$evidence.observedFilename) -or
-        [string]::IsNullOrWhiteSpace([string]$evidence.retrievedAt) -or
         [string]::IsNullOrWhiteSpace([string]$evidence.privateLocatorEvidence) -or
         $evidence.privateLocatorIsNormative -ne $false) {
-        throw 'Consumed lock rulebook evidence is invalid'
+        throw 'Private lock rulebook evidence is invalid'
     }
     return [pscustomobject]@{
         path = $resolvedPath
-        repositoryRoot = Get-RepositoryRootFromAuthorityLockPath $resolvedPath
+        repositoryRoot = $repositoryRoot
         lock = $lock
     }
 }
-
 function Invoke-ExistingPrivateSourceVerifier {
     param(
         [Parameter(Mandatory)][string]$RepositoryRoot,
@@ -1085,6 +745,114 @@ function Invoke-PrivateAuthorityExistingRootsVerification {
         }
     }
 }
+function Get-ProductionManualIntakeConfiguration {
+    $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $script:CollectorScriptRoot '..'))
+    return [pscustomobject]@{
+        repositoryRoot = $repositoryRoot
+        inboxRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot '.local/authority/manual-inbox/official-2026-08-27-v3'))
+        primaryRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot '.local/authority/inputs/official-2026-08-27-v3/primary'))
+        backupRoot = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $repositoryRoot) 'sorcery-tcg-authority-backup-official-2026-08-27-v3'))
+        lockPath = [IO.Path]::GetFullPath((Join-Path $repositoryRoot '.local/authority/locks/official-2026-08-27-v3/source-set-lock.json'))
+        descriptors = @(Get-ProductionSourceDescriptors)
+    }
+}
+
+function Assert-ManualInboxTree {
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$InboxRoot,
+        [Parameter(Mandatory)][object[]]$Descriptors
+    )
+
+    if (-not [IO.Path]::IsPathFullyQualified($InboxRoot)) { throw 'Manual inbox path must be absolute' }
+    $repository = [IO.Path]::GetFullPath($RepositoryRoot)
+    $inbox = [IO.Path]::GetFullPath($InboxRoot)
+    Assert-NoReparseAncestors $inbox
+    if (-not (Test-PathWithin $repository $inbox) -or -not [IO.Directory]::Exists($inbox)) {
+        throw 'Manual inbox is missing or outside the repository'
+    }
+
+    $expectedFiles = @($Descriptors | ForEach-Object { [string]$_.relativePath } | Sort-Object)
+    if ($Descriptors.Count -ne 7 -or @($expectedFiles | Sort-Object -Unique).Count -ne 7) {
+        throw 'Manual intake requires exactly seven descriptors'
+    }
+    $expectedDirectories = @(
+        $expectedFiles |
+            ForEach-Object { [IO.Path]::GetDirectoryName($_).Replace('\', '/') } |
+            Sort-Object -Unique
+    )
+    $actualFiles = [Collections.Generic.List[string]]::new()
+    $actualDirectories = [Collections.Generic.List[string]]::new()
+    $items = @(Get-ChildItem -LiteralPath $inbox -Recurse -Force | Select-Object -First 13)
+    if ($items.Count -gt 12) { throw 'Manual inbox contains too many entries' }
+    foreach ($item in $items) {
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw 'Manual inbox may not contain links or junctions'
+        }
+        $relativePath = [IO.Path]::GetRelativePath($inbox, $item.FullName).Replace('\', '/')
+        if ($item.PSIsContainer) {
+            $actualDirectories.Add($relativePath)
+        }
+        elseif ($item -is [IO.FileInfo]) {
+            $actualFiles.Add($relativePath)
+        }
+        else {
+            throw 'Manual inbox contains a non-ordinary entry'
+        }
+    }
+    if (@(Compare-Object $expectedFiles @($actualFiles | Sort-Object)).Count -ne 0 -or
+        @(Compare-Object $expectedDirectories @($actualDirectories | Sort-Object)).Count -ne 0) {
+        throw 'Manual inbox must contain exactly the seven fixed files and directories'
+    }
+    foreach ($descriptor in $Descriptors) {
+        $file = [IO.FileInfo]::new((Join-Path $inbox ([string]$descriptor.relativePath)))
+        if (-not $file.Exists -or
+            $file.Length -lt [long]$descriptor.minBytes -or
+            $file.Length -gt [long]$descriptor.maxBytes) {
+            throw 'Manual source file size is invalid'
+        }
+    }
+    return $inbox
+}
+
+function New-ManualSourceEntries {
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][object[]]$Descriptors,
+        [Parameter(Mandatory)][hashtable]$EffectiveDates,
+        [Parameter(Mandatory)][string]$RetrievedAt
+    )
+
+    $timestamp = [DateTime]::MinValue
+    if (-not [DateTime]::TryParseExact(
+        $RetrievedAt,
+        "yyyy-MM-dd'T'HH:mm:ss.fff'Z'",
+        [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::AssumeUniversal,
+        [ref]$timestamp
+    )) { throw 'Manual intake timestamp is invalid' }
+
+    return @($Descriptors | ForEach-Object {
+        $descriptor = $_
+        $relativePath = [string]$descriptor.relativePath
+        $path = Join-Path $Root $relativePath
+        $file = [IO.FileInfo]::new($path)
+        if (-not $file.Exists -or
+            $file.Length -lt [long]$descriptor.minBytes -or
+            $file.Length -gt [long]$descriptor.maxBytes) {
+            throw 'Manual source file size is invalid'
+        }
+        [pscustomobject][ordered]@{
+            relativePath = $relativePath
+            url = [string]$descriptor.provenanceUrl
+            retrievedAt = $RetrievedAt
+            effectiveDate = $EffectiveDates[$relativePath]
+            mediaType = [string]$descriptor.mediaType
+            byteLength = $file.Length
+            byteHash = "sha256:$((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant())"
+        }
+    })
+}
 
 function Invoke-TestFault {
     param(
@@ -1092,54 +860,56 @@ function Invoke-TestFault {
         [Parameter(Mandatory)][string]$Expected
     )
 
-    if ($FaultPoint -eq $Expected) { throw "Controlled loopback test fault: $Expected" }
+    if ($FaultPoint -eq $Expected) { throw "Controlled manual-intake test fault: $Expected" }
 }
 
-function Invoke-PrivateAuthorityCollectionCore {
+function Invoke-PrivateAuthorityManualIntakeCore {
     param(
         [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$InboxRoot,
         [Parameter(Mandatory)][string]$PrimaryRoot,
         [Parameter(Mandatory)][string]$BackupRoot,
         [Parameter(Mandatory)][string]$LockPath,
         [Parameter(Mandatory)][object[]]$Descriptors,
-        [Parameter(Mandatory)][int]$HeaderTimeoutSeconds,
-        [Parameter(Mandatory)][int]$BodyTimeoutSeconds,
-        [Parameter(Mandatory)][long]$MaxTotalBytes,
         [Parameter(Mandatory)][bool]$AcknowledgePrivateUseRisk,
-        [Parameter(Mandatory)][bool]$LoopbackOnly,
-        [AllowNull()][string]$FaultPoint,
-        [AllowNull()][string]$UserAuthorizationReference
+        [Parameter(Mandatory)][string]$RetrievedAt,
+        [AllowNull()][string]$FaultPoint
     )
 
-    if (-not $AcknowledgePrivateUseRisk) { throw 'AcknowledgePrivateUseRisk is required before collection.' }
-    if ($UserAuthorizationReference -cne 'phase-01-20260827-private-reacquisition-1') {
-        throw 'User authorization reference is invalid.'
-    }
-    $acquisition = New-PrivateAuthorityAcquisitionContext $RepositoryRoot $UserAuthorizationReference
-    Invoke-TestFault $FaultPoint 'after-authorization-consumption'
-    if ($LoopbackOnly) {
-        Assert-LoopbackDescriptors $Descriptors
-    }
-    else {
-        Assert-FixedProductionConfiguration $RepositoryRoot $PrimaryRoot $BackupRoot $LockPath $Descriptors $HeaderTimeoutSeconds $BodyTimeoutSeconds $MaxTotalBytes $FaultPoint
-    }
+    if (-not $AcknowledgePrivateUseRisk) { throw 'AcknowledgePrivateUseRisk is required before manual intake.' }
     $paths = Resolve-CollectionPaths $RepositoryRoot $PrimaryRoot $BackupRoot $LockPath
+    $inbox = Assert-ManualInboxTree $paths.repositoryRoot $InboxRoot $Descriptors
+    foreach ($destination in @($paths.primaryRoot, $paths.backupRoot, $paths.lockPath)) {
+        if ((Test-PathWithin $inbox $destination) -or (Test-PathWithin $destination $inbox)) {
+            throw 'Manual inbox and publication destinations may not overlap'
+        }
+    }
+    $effectiveDates = Assert-PrivateAuthorityContentSet $inbox $Descriptors
+    $entries = @(New-ManualSourceEntries $inbox $Descriptors $effectiveDates $RetrievedAt)
+
     $runId = [Guid]::NewGuid().ToString('N')
-    $primaryStage = "$($paths.primaryRoot).collecting-$runId"
-    $backupStage = "$($paths.backupRoot).collecting-$runId"
-    $lockCandidate = "$($paths.lockPath).collecting-$runId"
+    $primaryStage = "$($paths.primaryRoot).intake-$runId"
+    $backupStage = "$($paths.backupRoot).intake-$runId"
+    $lockCandidate = "$($paths.lockPath).intake-$runId"
     $draftPath = "$($paths.lockPath).verifier-$runId.json"
     $primaryPublished = $false
     $backupPublished = $false
-    $verifierTimeoutSeconds = if ($LoopbackOnly -and $FaultPoint -eq 'verifier-hang') { 1 } else { 30 }
     [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($paths.primaryRoot)) | Out-Null
     [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($paths.backupRoot)) | Out-Null
     [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($paths.lockPath)) | Out-Null
     try {
-        $transport = Invoke-PrivateAuthorityTransport $primaryStage $Descriptors $HeaderTimeoutSeconds $BodyTimeoutSeconds $MaxTotalBytes $LoopbackOnly
+        Copy-SourceTree $inbox $primaryStage $Descriptors
         Copy-SourceTree $primaryStage $backupStage $Descriptors
-        $forceVerifierHang = $LoopbackOnly -and $FaultPoint -eq 'verifier-hang'
-        $staged = Invoke-PrivateSourceVerifier $paths.repositoryRoot $primaryStage $backupStage @($transport.entries) $draftPath $verifierTimeoutSeconds -ForceBridgeHang:$forceVerifierHang
+        $primaryDates = Assert-PrivateAuthorityContentSet $primaryStage $Descriptors
+        $backupDates = Assert-PrivateAuthorityContentSet $backupStage $Descriptors
+        foreach ($entry in $entries) {
+            $relativePath = [string]$entry.relativePath
+            if ($entry.effectiveDate -cne $primaryDates[$relativePath] -or
+                $entry.effectiveDate -cne $backupDates[$relativePath]) {
+                throw 'Manual source effective date changed during staging'
+            }
+        }
+        $staged = Invoke-PrivateSourceVerifier $paths.repositoryRoot $primaryStage $backupStage $entries $draftPath 30
         Invoke-TestFault $FaultPoint 'after-staged-verification'
 
         [IO.Directory]::Move($backupStage, $paths.backupRoot)
@@ -1148,23 +918,24 @@ function Invoke-PrivateAuthorityCollectionCore {
         [IO.Directory]::Move($primaryStage, $paths.primaryRoot)
         $primaryPublished = $true
         Invoke-TestFault $FaultPoint 'after-primary-move'
-        $forceVerifierFailure = $LoopbackOnly -and $FaultPoint -eq 'during-final-verifier'
-        $final = Invoke-PrivateSourceVerifier $paths.repositoryRoot $paths.primaryRoot $paths.backupRoot @($transport.entries) $draftPath $verifierTimeoutSeconds -ForceBridgeFailure:$forceVerifierFailure
-        Assert-SameVerification $staged $final
 
-        $rulebookEntry = @($final.entries | Where-Object { $_.relativePath -eq 'rulebook/rulebook-current.pdf' })[0]
-        $rulebookEvidence = [ordered]@{
-            sourceUrl = $transport.rulebookAcquisitionEvidence.sourceUrl
-            relativePath = $rulebookEntry.relativePath
-            byteHash = $rulebookEntry.byteHash
-            observedFilename = $transport.rulebookAcquisitionEvidence.observedFilename
-            retrievedAt = $rulebookEntry.retrievedAt
-            privateLocatorEvidence = $transport.rulebookAcquisitionEvidence.privateLocatorEvidence
-            privateLocatorIsNormative = $false
+        $final = Invoke-PrivateSourceVerifier $paths.repositoryRoot $paths.primaryRoot $paths.backupRoot $entries $draftPath 30
+        Assert-SameVerification $staged $final
+        $finalPrimaryDates = Assert-PrivateAuthorityContentSet $paths.primaryRoot $Descriptors
+        $finalBackupDates = Assert-PrivateAuthorityContentSet $paths.backupRoot $Descriptors
+        foreach ($entry in @($final.entries)) {
+            $relativePath = [string]$entry.relativePath
+            if ($entry.effectiveDate -cne $finalPrimaryDates[$relativePath] -or
+                $entry.effectiveDate -cne $finalBackupDates[$relativePath]) {
+                throw 'Manual source effective date changed after publication'
+            }
         }
+
+        $rulebookEntry = @($final.entries | Where-Object { $_.relativePath -ceq 'rulebook/rulebook-current.pdf' })[0]
         $lock = [ordered]@{
             schemaVersion = 1
-            acquisitionMethod = $acquisition.acquisitionMethod
+            acquisitionMethod = 'user-provided-manual-download'
+            authorizationReference = 'phase-01-20260827-manual-provision-1'
             primaryRoot = $paths.primaryRoot
             backupRoot = $paths.backupRoot
             entries = @($final.entries)
@@ -1172,28 +943,32 @@ function Invoke-PrivateAuthorityCollectionCore {
             operatingAcknowledgment = [ordered]@{
                 scope = 'private-local-noncommercial'
                 noRedistributionReleaseHostingUploadOrArtwork = $true
-                apiTermsRobotsConflictAndPrivateUseRiskAccepted = $AcknowledgePrivateUseRisk
+                apiTermsRobotsConflictAndPrivateUseRiskAccepted = $true
                 establishesLegalPermission = $false
                 stopOnBlockedStatusCaptchaOrPublisherObjection = $true
                 retryOrEvasion = $false
             }
-            rulebookAcquisitionEvidence = $rulebookEvidence
-        }
-        if ($null -ne $acquisition.authorizationReference) {
-            $lock['authorizationReference'] = $acquisition.authorizationReference
+            rulebookAcquisitionEvidence = [ordered]@{
+                sourceUrl = 'https://sorcerytcg.com/news/sorcery-contested-realm-december-2025-rulebook-update'
+                relativePath = $rulebookEntry.relativePath
+                byteHash = $rulebookEntry.byteHash
+                observedFilename = 'rulebook-current.pdf'
+                retrievedAt = $rulebookEntry.retrievedAt
+                privateLocatorEvidence = 'user-provided-manual-local-file'
+                privateLocatorIsNormative = $false
+            }
         }
         Write-NewUtf8Json $lockCandidate $lock
         $candidate = Get-Content -Raw -LiteralPath $lockCandidate | ConvertFrom-Json -Depth 32 -DateKind String
-        $candidateAuthorization = $candidate.PSObject.Properties['authorizationReference']
-        if ($candidate.acquisitionMethod -cne $acquisition.acquisitionMethod -or
-            ($null -eq $acquisition.authorizationReference -and $null -ne $candidateAuthorization) -or
-            ($null -ne $acquisition.authorizationReference -and
-                ($null -eq $candidateAuthorization -or $candidate.authorizationReference -cne $acquisition.authorizationReference))) {
-            throw 'Lock candidate has an invalid acquisition method and authorization reference pair'
+        if ($candidate.acquisitionMethod -cne 'user-provided-manual-download' -or
+            $candidate.authorizationReference -cne 'phase-01-20260827-manual-provision-1') {
+            throw 'Manual lock identity is invalid'
         }
-        $candidateVerification = Invoke-PrivateSourceVerifier $paths.repositoryRoot $candidate.primaryRoot $candidate.backupRoot @($candidate.entries) $draftPath $verifierTimeoutSeconds
+        $candidateVerification = Invoke-PrivateSourceVerifier $paths.repositoryRoot $candidate.primaryRoot $candidate.backupRoot @($candidate.entries) $draftPath 30
         Assert-SameVerification $final $candidateVerification
-        if ($candidate.sourceSetRootHash -ne $candidateVerification.sourceSetRootHash) { throw 'Lock candidate root hash does not match final verification' }
+        if ($candidate.sourceSetRootHash -cne $candidateVerification.sourceSetRootHash) {
+            throw 'Manual lock root hash does not match final verification'
+        }
         Invoke-TestFault $FaultPoint 'before-lock-move'
         [IO.File]::Move($lockCandidate, $paths.lockPath, $false)
         return $lock
@@ -1230,42 +1005,36 @@ function Invoke-PrivateAuthorityCollectionCore {
     }
 }
 
-function Invoke-PrivateAuthorityCollectionForLoopbackTest {
+function Invoke-PrivateAuthorityManualIntakeForTest {
     param(
         [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$InboxRoot,
         [Parameter(Mandatory)][string]$PrimaryRoot,
         [Parameter(Mandatory)][string]$BackupRoot,
         [Parameter(Mandatory)][string]$LockPath,
         [Parameter(Mandatory)][object[]]$Descriptors,
-        [Parameter(Mandatory)][int]$HeaderTimeoutSeconds,
-        [Parameter(Mandatory)][int]$BodyTimeoutSeconds,
-        [Parameter(Mandatory)][long]$MaxTotalBytes,
         [switch]$AcknowledgePrivateUseRisk,
-        [AllowNull()][string]$FaultPoint,
-        [AllowNull()][string]$UserAuthorizationReference
+        [Parameter(Mandatory)][string]$RetrievedAt,
+        [AllowNull()][string]$FaultPoint
     )
 
-    return Invoke-PrivateAuthorityCollectionCore -RepositoryRoot $RepositoryRoot -PrimaryRoot $PrimaryRoot -BackupRoot $BackupRoot -LockPath $LockPath -Descriptors $Descriptors -HeaderTimeoutSeconds $HeaderTimeoutSeconds -BodyTimeoutSeconds $BodyTimeoutSeconds -MaxTotalBytes $MaxTotalBytes -AcknowledgePrivateUseRisk:$AcknowledgePrivateUseRisk -LoopbackOnly $true -FaultPoint $FaultPoint -UserAuthorizationReference $UserAuthorizationReference
+    $null = Invoke-PrivateAuthorityManualIntakeCore -RepositoryRoot $RepositoryRoot -InboxRoot $InboxRoot -PrimaryRoot $PrimaryRoot -BackupRoot $BackupRoot -LockPath $LockPath -Descriptors $Descriptors -AcknowledgePrivateUseRisk:$AcknowledgePrivateUseRisk -RetrievedAt $RetrievedAt -FaultPoint $FaultPoint
 }
 
-function Invoke-PrivateAuthorityCollection {
-    param(
-        [Parameter(Mandatory)][string]$BackupRoot,
-        [switch]$AcknowledgePrivateUseRisk,
-        [AllowNull()][string]$UserAuthorizationReference
-    )
+function Invoke-PrivateAuthorityManualIntake {
+    param([switch]$AcknowledgePrivateUseRisk)
 
     try {
-        $configuration = Get-ProductionCollectionConfiguration
-        $null = Invoke-PrivateAuthorityCollectionCore -RepositoryRoot $configuration.repositoryRoot -PrimaryRoot $configuration.primaryRoot -BackupRoot $BackupRoot -LockPath $configuration.lockPath -Descriptors @($configuration.descriptors) -HeaderTimeoutSeconds $configuration.headerTimeoutSeconds -BodyTimeoutSeconds $configuration.bodyTimeoutSeconds -MaxTotalBytes $configuration.maxTotalBytes -AcknowledgePrivateUseRisk:$AcknowledgePrivateUseRisk -LoopbackOnly $false -FaultPoint $null -UserAuthorizationReference $UserAuthorizationReference
+        $configuration = Get-ProductionManualIntakeConfiguration
+        $retrievedAt = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [Globalization.CultureInfo]::InvariantCulture)
+        $null = Invoke-PrivateAuthorityManualIntakeCore -RepositoryRoot $configuration.repositoryRoot -InboxRoot $configuration.inboxRoot -PrimaryRoot $configuration.primaryRoot -BackupRoot $configuration.backupRoot -LockPath $configuration.lockPath -Descriptors @($configuration.descriptors) -AcknowledgePrivateUseRisk:$AcknowledgePrivateUseRisk -RetrievedAt $retrievedAt -FaultPoint $null
     }
-    catch { throw 'Private authority collection failed.' }
+    catch { throw 'Private authority manual intake failed.' }
 }
 
 Export-ModuleMember -Function @(
     'Get-ProductionSourceDescriptors',
-    'Invoke-PrivateAuthorityCollection',
-    'Invoke-PrivateAuthorityCollectionForLoopbackTest'
+    'Invoke-PrivateAuthorityManualIntakeForTest'
 )
 }
 
@@ -1274,28 +1043,30 @@ Import-Module -ModuleInfo $collectorModule -Scope Local
 if ($MyInvocation.InvocationName -ne '.') {
     try {
         if ($VerifyExistingRoots) {
-            if ([string]::IsNullOrWhiteSpace($LockPath) -or
-                -not [string]::IsNullOrWhiteSpace($BackupRoot) -or
-                $AcknowledgePrivateUseRisk -or
-                -not [string]::IsNullOrWhiteSpace($UserAuthorizationReference)) {
+            if ($ImportManualInbox -or
+                [string]::IsNullOrWhiteSpace($LockPath) -or
+                $AcknowledgePrivateUseRisk) {
                 throw 'Offline verification parameters are invalid'
             }
             & $collectorModule { param($ExistingLockPath) Invoke-PrivateAuthorityExistingRootsVerification $ExistingLockPath } $LockPath
             Write-Output 'Private authority existing roots verified.'
         }
+        elseif ($ImportManualInbox) {
+            if (-not [string]::IsNullOrWhiteSpace($LockPath) -or -not $AcknowledgePrivateUseRisk) {
+                throw 'Manual intake parameters are invalid'
+            }
+            & $collectorModule { param($Acknowledged) Invoke-PrivateAuthorityManualIntake -AcknowledgePrivateUseRisk:$Acknowledged } $AcknowledgePrivateUseRisk
+            Write-Output 'Private authority manual intake completed.'
+        }
         else {
-            if (-not [string]::IsNullOrWhiteSpace($LockPath)) { throw 'LockPath requires VerifyExistingRoots' }
-            if ([string]::IsNullOrWhiteSpace($BackupRoot)) { throw 'Missing backup root' }
-            if (-not $AcknowledgePrivateUseRisk) { throw 'Missing private-use acknowledgment' }
-            $null = Invoke-PrivateAuthorityCollection -BackupRoot $BackupRoot -AcknowledgePrivateUseRisk:$AcknowledgePrivateUseRisk -UserAuthorizationReference $UserAuthorizationReference
-            Write-Output 'Private authority collection completed.'
+            throw 'Exactly one of ImportManualInbox or VerifyExistingRoots is required'
         }
     }
     catch {
         $failureMessage = if ($VerifyExistingRoots) {
             'Private authority existing-root verification failed.'
         }
-        else { 'Private authority collection failed.' }
+        else { 'Private authority manual intake failed.' }
         [Console]::Error.WriteLine($failureMessage)
         exit 1
     }

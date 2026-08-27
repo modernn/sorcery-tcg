@@ -155,7 +155,7 @@ function inputLockHash(bytes: Uint8Array): `sha256:${string}` {
   return `sha256:${sha256(bytes)}`;
 }
 
-test('only the audited fixed collector exists and no runtime acquisition or public API surface is added', async () => {
+test('only the fixed offline manual importer exists and no runtime acquisition or public API surface is added', async () => {
   const packageDocument = JSON.parse(await readFile(join(REPOSITORY_ROOT, 'package.json'), 'utf8')) as {
     scripts: Record<string, string>;
     dependencies: Record<string, string>;
@@ -170,7 +170,7 @@ test('only the audited fixed collector exists and no runtime acquisition or publ
   ]);
   for (const [name, command] of Object.entries(packageDocument.scripts)) {
     if (name === 'authority:verify-private') continue;
-    assert.doesNotMatch(`${name}:${command}`, /(?:fetch|poll|scrape|crawl|serve|listen|latest)/i);
+    assert.doesNotMatch(name + ':' + command, /(?:fetch|poll|scrape|crawl|serve|listen|latest)/i);
   }
 
   const sourceFiles = (await readdir(join(REPOSITORY_ROOT, 'src'), { recursive: true, withFileTypes: true }))
@@ -193,25 +193,29 @@ test('only the audited fixed collector exists and no runtime acquisition or publ
     'codex/changelog-current.html',
     'updates/card-updates-2025.html',
     'cards/cards.raw.json',
+    '.local/authority/manual-inbox/official-2026-08-27-v3',
+    'ImportManualInbox',
     'AcknowledgePrivateUseRisk',
-    'CAPTCHA',
-    '401',
-    '403',
-    '429',
+    'user-provided-manual-download',
+    'phase-01-20260827-manual-provision-1',
   ]) assert.ok(collectorLower.includes(required.toLowerCase()));
   assert.equal(/InvocationName[^\r\n]+['"]\.['"]/i.test(collector), true, 'collector dot-source guard missing');
-  assert.equal(
-    /(?:Start-Sleep|while\s*\(\s*\$true|\.png|\.jpe?g)/i.test(collector),
-    false,
-    'collector exposes retry or image-acquisition surface',
+  assert.doesNotMatch(
+    collector,
+    /\b(?:HttpClient|HttpWebRequest|Invoke-WebRequest|Invoke-RestMethod|WebClient|TcpClient|Start-BitsTransfer|Start-Process|curl(?:\.exe)?|fetch|Socket|Invoke-PrivateAuthorityTransport|Invoke-BoundedHttpToFile|New-PrivateAuthorityAcquisitionContext)\b|node:(?:http|https|net|tls)|Start-Sleep|while\s*\(\s*\$true|\.png|\.jpe?g/i,
+    'manual importer exposes network, retry, polling, or artwork-acquisition surface',
   );
+
 
   const collectorTests = await readFile(
     join(REPOSITORY_ROOT, 'tests', 'authority', 'private-authority-collector.test.ts'),
     'utf8',
   );
-  for (const required of ['dot-sourcing', 'seven', 'artwork', 'retry', 'production']) {
-    assert.ok(collectorTests.toLowerCase().includes(required), `collector loopback suite missing ${required} evidence`);
+  for (const required of ['manual intake', 'without transport', 'linked', 'production', 'acknowledgment']) {
+    assert.ok(
+      collectorTests.toLowerCase().includes(required),
+      'manual-intake suite missing ' + required + ' evidence',
+    );
   }
 });
 
