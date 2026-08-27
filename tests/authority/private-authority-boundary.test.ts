@@ -10,6 +10,7 @@ import { PRIVATE_AUTHORITY_SOURCE_PATHS } from '../../src/authority/private-sour
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
 const SCRIPT_PATH = join(REPOSITORY_ROOT, 'scripts', 'verify-private-authority-boundary.ts');
+const SYNTHETIC_PUBLIC_PROVENANCE_URL = 'https://official.invalid/formats/constructed-current.html';
 
 type Fixture = Readonly<{
   sandbox: string;
@@ -63,18 +64,21 @@ async function createFixture(
     name: 'Synthetic Boundary Sentinel',
     guardian: {
       rulesText: 'A deliberately private synthetic card record used only for boundary verification.',
-      threshold: { air: 1, earth: 2, fire: 3, water: 4 },
+      threshold: { air: 1, earth: 0, fire: 0, water: 0 },
     },
     sets: [{ variants: [{ finish: 'standard', slug: 'synthetic-boundary-sentinel' }] }],
   } as const;
   const entries = [];
   await mkdir(repositoryRoot, { recursive: true });
   for (const [sourceIndex, relativePath] of PRIVATE_AUTHORITY_SOURCE_PATHS.entries()) {
+    const canonicalLink = relativePath === 'formats/constructed-current.html'
+      ? '<link rel="canonical" href="' + SYNTHETIC_PUBLIC_PROVENANCE_URL + '">'
+      : '';
     const bytes = relativePath.endsWith('.json')
       ? Buffer.from(JSON.stringify([protectedCard, { name: 'Second Synthetic Record', ordinal: sourceIndex }]), 'utf8')
       : relativePath.endsWith('.html')
         ? Buffer.from(
-            '<!doctype html><html><head><style>.hidden { display: none }</style></head><body>' +
+            '<!doctype html><html><head>' + canonicalLink + '<style>.hidden { display: none }</style></head><body>' +
               '<h1>Visible Private Heading ' + sourceIndex + '</h1><p>Alpha   Beta\nGamma Secret Passage ' +
               sourceIndex + ' ' + 'visible-boundary-text '.repeat(8) + '</p><h2>' +
               publicProvenanceMarker + '</h2></body></html>',
@@ -385,8 +389,33 @@ test('exact declared public provenance literals pass while one-byte extensions a
   const cases = [
     { name: 'exact public metadata', candidate: (fixture: Fixture) => '`' + fixture.publicProvenanceMarker + '`', passes: true },
     {
+      name: 'embedded exact public metadata',
+      candidate: (fixture: Fixture) => '<title>' + fixture.publicProvenanceMarker + '</title>',
+      passes: true,
+    },
+    {
+      name: 'common semantic fragment',
+      candidate: () => JSON.stringify({ water: 0, fire: 0, earth: 0, air: 1 }, null, 2),
+      passes: true,
+    },
+    {
+      name: 'exact Markdown provenance URL',
+      candidate: () => '[CITED: ' + SYNTHETIC_PUBLIC_PROVENANCE_URL + ']',
+      passes: true,
+    },
+    {
       name: 'one-byte-extended public metadata',
       candidate: (fixture: Fixture) => '`' + fixture.publicProvenanceMarker + 'x`',
+      passes: false,
+    },
+    {
+      name: 'embedded one-byte-extended public metadata',
+      candidate: (fixture: Fixture) => '<title>' + fixture.publicProvenanceMarker + 'x</title>',
+      passes: false,
+    },
+    {
+      name: 'one-byte-extended Markdown provenance URL',
+      candidate: () => '[CITED: ' + SYNTHETIC_PUBLIC_PROVENANCE_URL + 'x]',
       passes: false,
     },
     {

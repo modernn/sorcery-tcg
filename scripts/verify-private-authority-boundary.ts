@@ -27,7 +27,7 @@ type PrivateLock = Readonly<{
 type CandidateSurface = 'reachable-history' | 'worktree' | 'index' | 'package';
 type Candidate = Readonly<{ path: string; bytes: Buffer; surface: CandidateSurface }>;
 type PackResult = Readonly<{ files?: readonly Readonly<{ path?: string }>[] }>;
-type Locator = Readonly<{ bytes: Buffer }>;
+type Locator = Readonly<{ bytes: Buffer; caseInsensitive: boolean }>;
 type SemanticIndex = Map<string, string[]>;
 type RawFingerprintIndex = Readonly<{
   fingerprints: BigUint64Array;
@@ -42,6 +42,7 @@ type InspectionState = {
 
 const MIN_PROTECTED_EXCERPT_BYTES = 32;
 const MIN_NORMALIZED_TEXT_BYTES = 96;
+const MIN_SEMANTIC_RECORD_BYTES = 96;
 const MAX_PRIVATE_BYTES = 128_000_000;
 const MAX_PRIVATE_FINGERPRINTS = 128_000_000;
 const MAX_CANDIDATE_BYTES = 64_000_000;
@@ -54,6 +55,7 @@ const MAX_COMMAND_BUFFER = 268_435_456;
 const HASH_BASE_A = 16_777_619;
 const HASH_BASE_B = 2_246_822_519;
 const PUBLIC_PROVENANCE_VALUE_HASHES = new Set([
+  '3b199aa2163bc7a7e2d8ef516d9121e517a4969ed23bc4a06c4ba431febc75de',
   '16a25c7198ec8d34bad13e0c00c8e5f82f74c33f7f5789c86b3d28556c6e7544',
   '58cdb645b9874da1e86634e50903f346bf66a121b1fdedf8217ba25f1a1a51f8',
   '7e7a9cb3fb2bb612b68073ecec741350f675c464f39aa54cc07fb2579ed0a491',
@@ -63,6 +65,10 @@ const PUBLIC_PROVENANCE_VALUE_HASHES = new Set([
   'ee06a5b6402cb919ede6e8acb348a4d40aa8f64a29edd143cb4292a87e47deae',
   'ffbceac6cdd294322c4470b46a705a7d77b78726dafd0b5b7ad938d684d090d5',
 ]);
+const EMBEDDED_PUBLIC_PROVENANCE_VALUES = [
+  Buffer.from('Sorcery: Contested Realm December 2025 Rulebook Update', 'utf8'),
+  Buffer.from('Sorcery: Contested Realm Card Updates 2025', 'utf8'),
+] as const;
 const MAX_PUBLIC_PROVENANCE_LITERAL_BYTES = 256;
 
 class BoundaryViolation extends Error {}
@@ -337,7 +343,39 @@ function containsProtectedWindow(bytes: Buffer, index: RawFingerprintIndex): boo
 function publicProvenanceFreeSegments(bytes: Buffer): readonly Buffer[] {
   const segments: Buffer[] = [];
   let segmentStart = 0;
+  const isAsciiWord = (byte: number | undefined): boolean =>
+    byte !== undefined &&
+    ((byte >= 0x30 && byte <= 0x39) ||
+      (byte >= 0x41 && byte <= 0x5a) ||
+      (byte >= 0x61 && byte <= 0x7a) ||
+      byte === 0x5f);
   for (let index = 0; index < bytes.length; index += 1) {
+    const embedded = EMBEDDED_PUBLIC_PROVENANCE_VALUES.find((value) =>
+      !isAsciiWord(bytes[index - 1]) &&
+      bytes.subarray(index, index + value.length).equals(value) &&
+      !isAsciiWord(bytes[index + value.length]),
+    );
+    if (embedded !== undefined) {
+      segments.push(bytes.subarray(segmentStart, index));
+      segmentStart = index + embedded.length;
+      index = segmentStart - 1;
+      continue;
+    }
+    if (bytes.subarray(index, index + 8).toString('ascii') === 'https://') {
+      const searchLimit = Math.min(bytes.length, index + MAX_PUBLIC_PROVENANCE_LITERAL_BYTES);
+      let closing = index + 8;
+      while (
+        closing < searchLimit &&
+        ![0x09, 0x0a, 0x0d, 0x20, 0x22, 0x27, 0x29, 0x3e, 0x5d, 0x60].includes(bytes[closing]!)
+      ) closing += 1;
+      const literal = bytes.subarray(index, closing);
+      if (PUBLIC_PROVENANCE_VALUE_HASHES.has(sha256Hex(literal))) {
+        segments.push(bytes.subarray(segmentStart, index));
+        segmentStart = closing;
+        index = closing - 1;
+        continue;
+      }
+    }
     const delimiter = bytes[index];
     if (delimiter !== 0x22 && delimiter !== 0x27 && delimiter !== 0x60) continue;
     const searchLimit = Math.min(bytes.length, index + MAX_PUBLIC_PROVENANCE_LITERAL_BYTES + 2);
@@ -379,7 +417,7 @@ function addSemanticValue(
     throw new BoundaryViolation('Private semantic fingerprint work exceeded the fixed limit.');
   }
   const canonical = canonicalJson(value);
-  if (Buffer.byteLength(canonical, 'utf8') >= MIN_PROTECTED_EXCERPT_BYTES) {
+  if (Buffer.byteLength(canonical, 'utf8') >= MIN_SEMANTIC_RECORD_BYTES) {
     const fingerprint = semanticFingerprint(canonical);
     const matches = semanticIndex.get(fingerprint) ?? [];
     if (!matches.includes(canonical)) matches.push(canonical);
@@ -430,7 +468,7 @@ function inspectJsonSemantics(bytes: Buffer, semanticIndex: SemanticIndex): bool
       throw new BoundaryViolation('Candidate semantic work exceeded the fixed limit.');
     }
     const canonical = canonicalJson(child);
-    if (Buffer.byteLength(canonical, 'utf8') >= MIN_PROTECTED_EXCERPT_BYTES) {
+    if (Buffer.byteLength(canonical, 'utf8') >= MIN_SEMANTIC_RECORD_BYTES) {
       const matches = semanticIndex.get(semanticFingerprint(canonical));
       if (matches?.includes(canonical) === true) {
         matched = true;
@@ -566,7 +604,7 @@ function inspectContent(
   }
   if (containsProtectedContent(bytes, rawIndex)) fail('source-derived-content', candidate);
   if (inspectJsonSemantics(bytes, semanticIndex)) fail('semantic-private-content', candidate);
-  if (locators.some((locator) => bytes.includes(locator.bytes))) fail('private-locator', candidate);
+  if (matchesLocator(bytes, locators)) fail('private-locator', candidate);
 
   const prefix = bytes.subarray(0, 512).toString('utf8');
   if (bytes.length > 1_000 && /^(?:%PDF-|\s*<!doctype html|\s*<html\b)/i.test(prefix)) {
@@ -691,9 +729,49 @@ function addSelectedRevisionEvidence(
   }
 }
 
+function lowercaseAscii(bytes: Buffer): Buffer {
+  const folded = Buffer.from(bytes);
+  for (let index = 0; index < folded.length; index += 1) {
+    if (folded[index]! >= 0x41 && folded[index]! <= 0x5a) folded[index]! += 0x20;
+  }
+  return folded;
+}
+
+function matchesLocator(bytes: Buffer, locators: readonly Locator[]): boolean {
+  const folded = locators.some(({ caseInsensitive }) => caseInsensitive)
+    ? lowercaseAscii(bytes)
+    : null;
+  return locators.some(({ bytes: locator, caseInsensitive }) =>
+    (caseInsensitive ? folded! : bytes).includes(locator),
+  );
+}
+
 function buildLocators(values: readonly string[]): readonly Locator[] {
-  return [...new Set(values.flatMap((value) => [value, value.replaceAll('\\', '/')]))]
-    .map((value) => ({ bytes: Buffer.from(value, 'utf8') }));
+  const locators = new Map<string, Locator>();
+  for (const value of values) {
+    const caseInsensitive = /^[a-z]:[\\/]/i.test(value) || /^(?:\\\\|\/\/)[^\\/]/.test(value);
+    for (const form of new Set([
+      value,
+      value.replaceAll('\\', '/'),
+      value.replaceAll('/', '\\'),
+    ])) {
+      const json = JSON.stringify(form);
+      const representations = [
+        form,
+        json,
+        "'" + json.slice(1, -1).replaceAll("'", "\\'") + "'",
+      ];
+      for (const representation of representations) {
+        const bytes = Buffer.from(representation, 'utf8');
+        const locator = caseInsensitive ? lowercaseAscii(bytes) : bytes;
+        locators.set(String(caseInsensitive) + ':' + locator.toString('hex'), {
+          bytes: locator,
+          caseInsensitive,
+        });
+      }
+    }
+  }
+  return [...locators.values()];
 }
 
 function main(): void {
