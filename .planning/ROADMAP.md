@@ -75,7 +75,7 @@ Plans:
 **Wave 8** *(blocked on Wave 7 completion)*
 
 - [x] 01-10-PLAN.md — Fail closed on precedence, calendar, locator, evidence, and derivation-graph defects.
-- [ ] 01-14-PLAN.md — Close out the committed reusable offline verifier without claiming the nonconforming historical roots passed.
+- [x] 01-14-PLAN.md — Close out the committed reusable offline verifier without claiming the nonconforming historical roots passed.
 
 **Wave 9** *(blocked on Wave 8 completion)*
 
@@ -222,7 +222,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Rules and Data Authority | 12/15 | In Progress | - |
+| 1. Rules and Data Authority | 13/15 | In Progress | - |
 | 2. Deterministic Engine Contract | 0/TBD | Not started | - |
 | 3. Complete Core Game Rules | 0/TBD | Not started | - |
 | 4. Storyline, Card Effects, and Coverage | 0/TBD | Not started | - |
