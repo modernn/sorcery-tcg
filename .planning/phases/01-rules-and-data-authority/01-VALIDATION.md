@@ -5,7 +5,7 @@ status: draft
 nyquist_compliant: true
 wave_0_complete: true
 created: 2026-08-20
-updated: 2026-08-26
+updated: 2026-08-27
 ---
 
 # Phase 1 — Validation Strategy
@@ -22,7 +22,7 @@ updated: 2026-08-26
 | **Config file** | none |
 | **Quick run command** | `node --test tests/authority/*.test.ts` |
 | **Full suite command** | `pnpm typecheck && pnpm lint && pnpm test` |
-| **Phase release command** | `pnpm verify && node --test --test-name-pattern="existing primary and backup completeness" tests/private-authority/private-source-completeness.test.ts && pnpm authority:verify-private && node --test tests/private-authority/repository-boundary.test.ts` |
+| **Phase release command** | `pnpm verify && node --test --test-name-pattern="fresh v3 primary and backup completeness" tests/private-authority/private-source-completeness.test.ts && pnpm authority:verify-private && node --test tests/private-authority/repository-boundary.test.ts` |
 | **Estimated runtime** | default suite under 30 seconds; final private release gate under 180 seconds |
 
 ---
@@ -65,24 +65,26 @@ updated: 2026-08-26
 | 01-10-03 | 10 | 8 | DATA-01, DATA-03 | T-01-47 | Duplicate and cyclic source derivation edges fail deterministically | unit/integration | `node --test tests/authority/provenance.test.ts && pnpm verify` | ✅ 01-10-SUMMARY.md | ✅ green |
 | 01-11-01 | 11 | 7 | DATA-01 | T-01-49 | Source-specific visible/date/card checks reject shells, truncation, ambiguity, and malformed staged inputs before publication | integration | `node --test tests/authority/private-authority-collector.test.ts && pnpm typecheck` | ✅ present | ✅ green |
 | 01-11-02 | 11 | 7 | DATA-01 | T-01-50, T-01-51 | Production output is sanitized and child processes are concurrently drained and bounded | integration | `node --test tests/authority/private-authority-collector.test.ts && pnpm verify` | ✅ present | ✅ green |
-| 01-12-01 | 12 | 7 | DATA-01, DATA-02, DATA-03 | T-01-53, T-01-56 | Every-offset and semantic fingerprints scan history, worktree, index, and package candidates | security/integration | `node --test tests/authority/private-authority-boundary.test.ts && pnpm typecheck` | ❌ P12 | ⬜ pending |
-| 01-12-02 | 12 | 7 | DATA-01, DATA-02, DATA-03 | T-01-54, T-01-55 | Encoded/case-varied locators fail through the single production boundary scanner | security/private | `node --test tests/authority/private-authority-boundary.test.ts tests/private-authority/repository-boundary.test.ts` | ❌ P12 | ⬜ pending |
-| 01-12-03 | 12 | 7 | DATA-01, DATA-02, DATA-03 | T-01-53 | Policy permits normalized data only in ignored private revisions and forbids external publication | policy | `pnpm verify` | ❌ P12 | ⬜ pending |
-| 01-14-01 | 14 | 8 | DATA-01 | T-01-62, T-01-64, T-01-65 | Executed Plan 11 checks are reused by a no-transport, content-free offline mode without changing collector behavior | integration | `node --test --test-name-pattern="offline mode|local root|no transport|incomplete existing|sanitized" tests/authority/private-authority-collector.test.ts && pnpm typecheck` | ❌ P14 | ⬜ pending |
-| 01-14-02 | 14 | 8 | DATA-01 | T-01-63, T-01-64, T-01-65 | Both existing roots pass the shared content and byte contracts with identical before/after maps | private integration | `node --test --test-name-pattern="existing primary and backup completeness" tests/private-authority/private-source-completeness.test.ts && pnpm verify` | ❌ P14 | ⬜ pending |
-| 01-13-01 | 13 | 9 | DATA-01, DATA-02, DATA-03 | T-01-57, T-01-58 | Plan 14-complete roots build byte-identical new-ID candidates; old revision is unchanged | private release/integration | `node --test tests/private-authority/private-source-completeness.test.ts tests/private-authority/private-revision.test.ts` | ❌ P13 | ⬜ pending |
-| 01-13-02 | 13 | 9 | DATA-01, DATA-02, DATA-03 | T-01-59 | The write-once final revision, safe receipt, and README bind exact ID/root selection | private release/integration | `node --test tests/private-authority/private-revision.test.ts` | ❌ P13 | ⬜ pending |
-| 01-13-03 | 13 | 9 | DATA-01, DATA-02, DATA-03 | T-01-60, T-01-61 | Default, full private, and narrow boundary gates pass with no network or leakage | private release/security | `pnpm verify && node --test --test-name-pattern="existing primary and backup completeness" tests/private-authority/private-source-completeness.test.ts && pnpm authority:verify-private && node --test tests/private-authority/repository-boundary.test.ts` | ❌ P13 | ⬜ pending |
+| 01-12-01 | 12 | 7 | DATA-01, DATA-02, DATA-03 | T-01-53, T-01-56 | Every-offset and semantic fingerprints scan history, worktree, index, and package candidates | security/integration | `node --test tests/authority/private-authority-boundary.test.ts && pnpm typecheck` | ✅ 01-12-SUMMARY.md | ✅ green |
+| 01-12-02 | 12 | 7 | DATA-01, DATA-02, DATA-03 | T-01-54, T-01-55 | Encoded/case-varied locators fail through the single production boundary scanner | security/private | `node --test tests/authority/private-authority-boundary.test.ts tests/private-authority/repository-boundary.test.ts` | ✅ 01-12-SUMMARY.md | ✅ green |
+| 01-12-03 | 12 | 7 | DATA-01, DATA-02, DATA-03 | T-01-53 | Policy permits normalized data only in ignored private revisions and forbids external publication | policy | `pnpm verify` | ✅ 01-12-SUMMARY.md | ✅ green |
+| 01-14-01 | 14 | 8 | DATA-01 | T-01-62, T-01-64, T-01-65 | Executed Plan 11 checks are reused by a no-transport, content-free offline mode without changing collector behavior; no historical-root pass is claimed | integration | `git merge-base --is-ancestor 5aadff3 HEAD && git merge-base --is-ancestor 77c6000 HEAD && node --test --test-name-pattern="offline mode|local root|no transport|incomplete existing|sanitized" tests/authority/private-authority-collector.test.ts && pnpm typecheck` | ✅ commits 5aadff3/77c6000 | ✅ green |
+| 01-15-01 | 15 | 9 | DATA-01, DATA-02, DATA-03 | T-01-66, T-01-69, T-01-70 | The exact fresh reference is consumed before transport and binds only the user-run v3 acquisition | security/integration | `node --test --test-name-pattern="phase-01-20260827-private-reacquisition-1\|official-2026-08-27-v3\|consumed before transport\|authorization\|production manifest\|sanitized" tests/authority/private-authority-collector.test.ts && pnpm typecheck` | ❌ P15 | ⬜ pending |
+| 01-15-02 | 15 | 9 | DATA-01, DATA-02 | T-01-66, T-01-67, T-01-70 | User personally runs the exact one-use command; exit/failure consumes authorization and no retry is allowed | blocking human action + automated postcheck | `node --input-type=module -e "import fs from 'node:fs';const c=JSON.parse(fs.readFileSync('.local/authority/authorizations/phase-01-20260827-private-reacquisition-1.consumed.json','utf8')),k=JSON.parse(fs.readFileSync('.local/authority/locks/official-2026-08-27-v3/source-set-lock.json','utf8'));if(c.revisionId!=='official-2026-08-27-v3'||c.authorizationReference!=='phase-01-20260827-private-reacquisition-1'||k.entries?.length!==7)process.exit(1)"` | ❌ P15 | ⬜ pending |
+| 01-15-03 | 15 | 9 | DATA-01, DATA-02, DATA-03 | T-01-68, T-01-69 | Both fresh roots pass structural/content proof offline with identical unchanged before/after maps | private integration | `node --test --test-name-pattern="fresh v3 primary and backup completeness" tests/private-authority/private-source-completeness.test.ts && pnpm verify && node --test tests/private-authority/repository-boundary.test.ts` | ❌ P15 | ⬜ pending |
+| 01-13-01 | 13 | 10 | DATA-01, DATA-02, DATA-03 | T-01-57, T-01-58 | Only Plan 15 fresh roots build byte-identical v3 candidates; all historical evidence is unchanged | private release/integration | `node --test --test-name-pattern="fresh v3 roots\|final v3 candidates\|historical evidence remains immutable" tests/private-authority/private-source-completeness.test.ts tests/private-authority/private-revision.test.ts` | ❌ P13 | ⬜ pending |
+| 01-13-02 | 13 | 10 | DATA-01, DATA-02, DATA-03 | T-01-59 | The write-once v3 revision, safe receipt, and README bind exact ID/root selection | private release/integration | `node --test --test-name-pattern="official-2026-08-27-v3\|safe receipt\|write-once selection\|receipt root validates" tests/private-authority/private-revision.test.ts` | ❌ P13 | ⬜ pending |
+| 01-13-03 | 13 | 10 | DATA-01, DATA-02, DATA-03 | T-01-60, T-01-61 | Default, fresh-root, full private, and narrow boundary gates pass with no network or leakage | private release/security | `pnpm verify && node --test --test-name-pattern="fresh v3 primary and backup completeness" tests/private-authority/private-source-completeness.test.ts && pnpm authority:verify-private && node --test tests/private-authority/repository-boundary.test.ts` | ❌ P13 | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
 ### Safe-Resume Status
 
-- **Total plans:** 14
-- **Complete (SUMMARY exists):** 11 — `01-01` through `01-11`
-- **Incomplete (no SUMMARY):** exactly `01-12`, `01-13`, and `01-14`
-- **Resume order:** finish `01-12`; execute `01-14`; then execute final rebuild/release `01-13` (which depends on all required predecessors).
-- **Historical integrity:** `01-11-PLAN.md` matches its executed `01-11-SUMMARY.md`; post-summary offline existing-root work belongs only to `01-14-PLAN.md`.
+- **Total plans:** 15
+- **Complete (SUMMARY exists):** 12 — `01-01` through `01-12`
+- **Incomplete (no SUMMARY):** exactly `01-14`, `01-15`, and `01-13`
+- **Resume order:** close `01-14` from committed RED/GREEN work; execute the user-gated fresh acquisition/proof in `01-15`; then execute final v3 rebuild/release `01-13`.
+- **Historical integrity:** `01-14` owns only commits `5aadff3` and `77c6000`; the historical roots failed the strengthened content contract but remained byte-identical and unchanged. Plan 15 owns all fresh acquisition/proof work.
 
 ---
 
@@ -95,7 +97,7 @@ updated: 2026-08-26
 - [x] `tests/authority/bundle.test.ts` with current, superseded, ambiguous, authority-class, stored/manifest-only, input-lock, prohibited-media, write-once, atomic-failure, and offline fixtures.
 - [x] `tests/authority/fixtures/bundle-input/input-lock.json` with the exact synthetic three-file lock, hashes, modes, and canonical input-root hash.
 
-Plan 07 adds the generic clean-clone-safe `tests/authority/private-source-set.test.ts`. Plans 08 and 12-14 add or extend opt-in tests under `tests/private-authority/` outside the default glob. `pnpm authority:verify-private` must fail rather than skip when any private source set, lock, receipt, revision, completeness proof, or attestation is absent.
+Plan 07 adds the generic clean-clone-safe `tests/authority/private-source-set.test.ts`. Plans 08 and 12-15 add or extend opt-in tests under `tests/private-authority/` outside the default glob. `pnpm authority:verify-private` must fail rather than skip when any private source set, lock, receipt, revision, completeness proof, or attestation is absent.
 
 ---
 
@@ -103,7 +105,7 @@ Plan 07 adds the generic clean-clone-safe `tests/authority/private-source-set.te
 
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
-| Complete seven-file official source set and independent byte-identical backup exist for private local use | DATA-01, DATA-02 | Only the user may trigger the risk-accepted live request and choose independent private backup storage; executors/tests never invoke publisher endpoints | Run the fixed PowerShell command with an absent absolute outside-repository backup and explicit acknowledgment; require `acquisitionMethod: user-run-one-shot-powershell`, exact seven entries/root hash/rulebook evidence, no artwork, stop/no-evasion semantics, and verifier acceptance; halt without Plan 07/08 summaries if incomplete |
+| One fresh v3 seven-file source set and independent byte-identical backup exist under the new explicit one-use authorization | DATA-01, DATA-02 | Only the user personally triggers the risk-accepted live request; executor/tests never invoke publisher endpoints | After Plan 15 Task 1 passes and all fresh destinations are absent, run its exact fixed PowerShell command once with `phase-01-20260827-private-reacquisition-1`; require pre-transport consumption, exact v3 identity, seven entries, no artwork/retry/evasion, and offline verifier acceptance. Any nonzero exit blocks the phase and cannot be retried. |
 | External reuse audit confirms no copied GPL, unlicensed, or publisher-reserved community material | DATA-03 | Independent clean-room provenance requires human review | Review changed files against `docs/external-reuse-policy.md`; record audited repository revisions/sign-off; never treat community card data as a licensed corpus |
 
 ---
@@ -116,14 +118,16 @@ Plan 07 adds the generic clean-clone-safe `tests/authority/private-source-set.te
 - [ ] All seven primary/backup source files are ordinary, independent, path-contained, byte-identical, and metadata/hash complete.
 - [ ] Two independently derived four-file importer inputs obey exact order/modes and 10,000,000-per/32,000,000-total bounds.
 - [ ] Import stdout is used only for candidate input/bundle roots; fixed stable ID is independently checked.
-- [ ] Both existing primary and backup roots pass the shared Plan 14 completeness verifier offline and retain identical before/after file maps.
-- [ ] Final import uses `--input`, `--input-lock input-lock.json`, `--expected-input-root-hash`, `--output-root`, and `--revision-id official-2026-08-26-v2`.
-- [ ] Final validation uses `--root .local/authority/revisions/official-2026-08-26-v2 --bundle bundle.json --id bundle:official-2026-08-26-v2 --hash &lt;receipt bundleRootHash&gt;`.
+- [ ] Plan 14 is summarized only from commits `5aadff3` and `77c6000`; no historical-root pass is claimed.
+- [ ] The exact Plan 15 authorization is consumed once before transport, the user personally runs the command once, and failure permits no retry.
+- [ ] Both fresh v3 roots pass the structural/shared-content verifier offline and retain identical before/after file maps.
+- [ ] Final import uses `--input`, `--input-lock input-lock.json`, `--expected-input-root-hash`, `--output-root`, and `--revision-id official-2026-08-27-v3`.
+- [ ] Final validation uses `--root .local/authority/revisions/official-2026-08-27-v3 --bundle bundle.json --id bundle:official-2026-08-27-v3 --hash &lt;receipt bundleRootHash&gt;`.
 - [ ] Two full-set rebuilds are path/byte-identical; source-set/input/derivation/artifact/reference/cycle tamper cases fail.
-- [ ] Both final-contract candidates are byte-identical; the old revision's before/after map is unchanged; the new selected revision is write-once.
+- [ ] Both v3 candidates are byte-identical; all historical evidence maps are unchanged; the new selected revision is write-once.
 - [ ] Fetch/http/https/net denial stays active during real helper/import/validation.
 - [ ] Tracked, staged, and package scans find no private absolute locator or official source/API/normalized/revision/art/PDF/page bytes.
-- [ ] Default `pnpm verify` remains synthetic and clean-clone-safe; the focused completeness test, full `pnpm authority:verify-private`, and narrow repository-boundary test all pass.
+- [ ] Default `pnpm verify` remains synthetic and clean-clone-safe; the focused fresh v3 completeness test, full `pnpm authority:verify-private`, and narrow repository-boundary test all pass.
 - [ ] DATA-01/02/03 remain Pending until Plan 13 and phase verification pass.
 
 **Approval:** pending

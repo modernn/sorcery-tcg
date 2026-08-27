@@ -34,7 +34,7 @@ Sorcery Simulator advances through one increasingly trustworthy evidence path: p
   2. A developer can build and validate the same versioned normalized card snapshot without live network access during a game or experiment.
   3. Every canonical rules, card, format, deck, collection, behavior, and experiment artifact resolves to a stable ID, schema version, provenance record, and content hash.
 
-**Plans**: 14 plans
+**Plans**: 15 plans
 
 Plans:
 **Wave 0**
@@ -75,11 +75,15 @@ Plans:
 **Wave 8** *(blocked on Wave 7 completion)*
 
 - [x] 01-10-PLAN.md — Fail closed on precedence, calendar, locator, evidence, and derivation-graph defects.
-- [ ] 01-14-PLAN.md — Apply the executed collector checks to both existing roots offline without network access or mutation.
+- [ ] 01-14-PLAN.md — Close out the committed reusable offline verifier without claiming the nonconforming historical roots passed.
 
-**Wave 9** *(blocked on Waves 7-8 completion)*
+**Wave 9** *(blocked on Wave 8 completion)*
 
-- [ ] 01-13-PLAN.md — Build and select the final-contract immutable authority revision with complete release gates.
+- [ ] 01-15-PLAN.md — Perform the single newly authorized user-run v3 acquisition and prove both fresh roots complete, immutable, offline, and non-disclosing.
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
+- [ ] 01-13-PLAN.md — Build and select the final immutable v3 authority revision from only the verified fresh roots, with complete release gates.
 
 **Research**: Required — audit current rulebook/Codex/FAQ/card-update precedence, official data and image terms, format policies, and the GPL/no-license boundary for Contested Realms and spells.bar before any reuse.
 
@@ -218,7 +222,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Rules and Data Authority | 12/14 | In Progress | - |
+| 1. Rules and Data Authority | 12/15 | In Progress | - |
 | 2. Deterministic Engine Contract | 0/TBD | Not started | - |
 | 3. Complete Core Game Rules | 0/TBD | Not started | - |
 | 4. Storyline, Card Effects, and Coverage | 0/TBD | Not started | - |
