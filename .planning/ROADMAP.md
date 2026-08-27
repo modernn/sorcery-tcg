@@ -34,7 +34,7 @@ Sorcery Simulator advances through one increasingly trustworthy evidence path: p
   2. A developer can build and validate the same versioned normalized card snapshot without live network access during a game or experiment.
   3. Every canonical rules, card, format, deck, collection, behavior, and experiment artifact resolves to a stable ID, schema version, provenance record, and content hash.
 
-**Plans**: 12 plans
+**Plans**: 13 plans
 
 Plans:
 **Wave 0**
@@ -75,6 +75,10 @@ Plans:
 **Wave 8** *(blocked on Wave 7 completion)*
 
 - [ ] 01-10-PLAN.md — Fail closed on precedence, calendar, locator, evidence, and derivation-graph defects.
+
+**Wave 9** *(blocked on Waves 7-8 completion)*
+
+- [ ] 01-13-PLAN.md — Reverify both existing roots and publish the final-contract immutable authority revision with complete release gates.
 
 **Research**: Required — audit current rulebook/Codex/FAQ/card-update precedence, official data and image terms, format policies, and the GPL/no-license boundary for Contested Realms and spells.bar before any reuse.
 
@@ -213,7 +217,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Rules and Data Authority | 8/12 | Gap closure planned | - |
+| 1. Rules and Data Authority | 8/13 | Gap closure planned | - |
 | 2. Deterministic Engine Contract | 0/TBD | Not started | - |
 | 3. Complete Core Game Rules | 0/TBD | Not started | - |
 | 4. Storyline, Card Effects, and Coverage | 0/TBD | Not started | - |

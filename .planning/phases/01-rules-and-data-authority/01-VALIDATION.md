@@ -5,7 +5,7 @@ status: draft
 nyquist_compliant: true
 wave_0_complete: true
 created: 2026-08-20
-updated: 2026-08-20
+updated: 2026-08-26
 ---
 
 # Phase 1 — Validation Strategy
@@ -22,8 +22,8 @@ updated: 2026-08-20
 | **Config file** | none |
 | **Quick run command** | `node --test tests/authority/*.test.ts` |
 | **Full suite command** | `pnpm typecheck && pnpm lint && pnpm test` |
-| **Phase release command** | `pnpm verify && pnpm authority:verify-private` (explicit private-data gate added by Plan 08; default tests stay clean-clone-safe) |
-| **Estimated runtime** | default suite under 30 seconds; private gate under 60 seconds |
+| **Phase release command** | `pnpm verify && node --test --test-name-pattern="existing primary and backup completeness" tests/private-authority/private-source-completeness.test.ts && pnpm authority:verify-private && node --test tests/private-authority/repository-boundary.test.ts` |
+| **Estimated runtime** | default suite under 30 seconds; final private release gate under 180 seconds |
 
 ---
 
@@ -32,7 +32,7 @@ updated: 2026-08-20
 - **After every task commit:** Run the directly relevant focused test/assertion plus `pnpm typecheck`.
 - **After every plan wave:** Run `pnpm verify`.
 - **Before `$gsd-verify-work`:** Run the phase release command with the complete private source set available; require full-set source verification, two independent rebuilds, exact CLI validation, tamper rejection, no-network execution, unchanged selected revision, and zero tracked/staged/package leakage.
-- **Max feedback latency:** 60 seconds.
+- **Max feedback latency:** 180 seconds for the final private release gate; focused task checks remain under 60 seconds.
 
 ---
 
@@ -57,6 +57,20 @@ updated: 2026-08-20
 | 01-08-01 | 08 | 6 | DATA-01, DATA-02, DATA-03 | T-01-36, T-01-37, T-01-38, T-01-39 | Both full source sets are reverified, independently derive identical bounded importer inputs, and build/validate the selected private revision with the exact CLI contract | integration/golden | `node --input-type=module -e "import fs from 'node:fs';import cp from 'node:child_process';import {identityHash} from './src/authority/hash.ts';import {verifyPrivateSourceSet} from './src/authority/private-source-set.ts';const lock=JSON.parse(fs.readFileSync('.local/authority/locks/official-2026-08-20/source-set-lock.json','utf8')),r=JSON.parse(fs.readFileSync('data/authority/receipts/official-2026-08-20.json','utf8')),v=await verifyPrivateSourceSet({primaryRoot:lock.primaryRoot,backupRoot:lock.backupRoot,repositoryRoot:'.',entries:lock.entries});if(v.entries.length!==7||v.sourceSetRootHash!==lock.sourceSetRootHash||r.sourceSetRootHash!==lock.sourceSetRootHash)process.exit(1);const b=JSON.parse(fs.readFileSync('.local/authority/revisions/official-2026-08-20/bundle.json','utf8'));if(b.identity.stableId!=='bundle:official-2026-08-20'||identityHash(b.identity)!==r.bundleRootHash)process.exit(1);const x=cp.spawnSync('pnpm',['authority:validate','--','--root','.local/authority/revisions/official-2026-08-20','--bundle','bundle.json','--id','bundle:official-2026-08-20','--hash',r.bundleRootHash],{stdio:'inherit',shell:process.platform==='win32'});process.exit(x.status??1)"` | ❌ P08 | ⬜ pending |
 | 01-08-02 | 08 | 6 | DATA-01, DATA-02, DATA-03 | T-01-36, T-01-37, T-01-38, T-01-39 | Independent primary/backup full-set rebuilds, byte maps, derivation/reference tamper cases, and selected immutability all pass | private release/integration | `node --test tests/private-authority/private-revision.test.ts && pnpm typecheck` | ❌ P08 | ⬜ pending |
 | 01-08-03 | 08 | 6 | DATA-01, DATA-02, DATA-03 | T-01-40, T-01-41 | Fetch/http/https/net denial plus tracked/staged/package source/corpus/PDF/page/art/revision leakage scans pass | private boundary/integration | `pnpm verify && pnpm authority:verify-private` | ❌ P08 | ⬜ pending |
+| 01-09-01 | 09 | 7 | DATA-02, DATA-03 | T-01-42, T-01-44 | Strict card contracts require lossless avatar life and four elemental thresholds | unit/schema | `node --test tests/authority/card-snapshot.test.ts && pnpm typecheck` | ❌ P09 | ⬜ pending |
+| 01-09-02 | 09 | 7 | DATA-02, DATA-03 | T-01-42 | Official adaptation and normalization preserve all gameplay fields and freezing | integration | `node --test tests/authority/card-snapshot.test.ts tests/authority/provenance.test.ts && pnpm typecheck` | ❌ P09 | ⬜ pending |
+| 01-09-03 | 09 | 7 | DATA-02, DATA-03 | T-01-43 | Official logical card IDs remain stable across authority revisions while SourceRefs differ | integration/property | `node --test tests/authority/card-snapshot.test.ts tests/authority/bundle.test.ts && pnpm verify` | ❌ P09 | ⬜ pending |
+| 01-10-01 | 10 | 8 | DATA-01, DATA-03 | T-01-45 | Supersession graphs and semantic dates resolve only one justified official winner | unit/integration | `node --test tests/authority/bundle.test.ts && pnpm typecheck` | ❌ P10 | ⬜ pending |
+| 01-10-02 | 10 | 8 | DATA-01, DATA-03 | T-01-46 | SHA locators bind byte hashes and command evidence distinguishes bytes from declarations | integration | `node --test tests/authority/provenance.test.ts tests/authority/bundle.test.ts && pnpm typecheck && pnpm lint` | ❌ P10 | ⬜ pending |
+| 01-10-03 | 10 | 8 | DATA-01, DATA-03 | T-01-47 | Duplicate and cyclic source derivation edges fail deterministically | unit/integration | `node --test tests/authority/provenance.test.ts && pnpm verify` | ❌ P10 | ⬜ pending |
+| 01-11-01 | 11 | 7 | DATA-01 | T-01-49, T-01-49A | One source-specific verifier rejects partial inputs and checks both existing roots offline without mutation | integration/private | `node --test tests/authority/private-authority-collector.test.ts tests/private-authority/private-source-completeness.test.ts && pnpm typecheck` | ❌ P11 revision | ⬜ pending |
+| 01-11-02 | 11 | 7 | DATA-01 | T-01-50, T-01-51 | Production output is sanitized and child processes are concurrently drained and bounded | integration | `node --test tests/authority/private-authority-collector.test.ts && pnpm verify` | ❌ P11 | ⬜ pending |
+| 01-12-01 | 12 | 7 | DATA-01, DATA-02, DATA-03 | T-01-53, T-01-56 | Every-offset and semantic fingerprints scan history, worktree, index, and package candidates | security/integration | `node --test tests/authority/private-authority-boundary.test.ts && pnpm typecheck` | ❌ P12 | ⬜ pending |
+| 01-12-02 | 12 | 7 | DATA-01, DATA-02, DATA-03 | T-01-54, T-01-55 | Encoded/case-varied locators fail through the single production boundary scanner | security/private | `node --test tests/authority/private-authority-boundary.test.ts tests/private-authority/repository-boundary.test.ts` | ❌ P12 | ⬜ pending |
+| 01-12-03 | 12 | 7 | DATA-01, DATA-02, DATA-03 | T-01-53 | Policy permits normalized data only in ignored private revisions and forbids external publication | policy | `pnpm verify` | ❌ P12 | ⬜ pending |
+| 01-13-01 | 13 | 9 | DATA-01, DATA-02, DATA-03 | T-01-57, T-01-58 | Both existing roots pass final completeness and build byte-identical new-ID candidates; old revision is unchanged | private release/integration | `node --test tests/private-authority/private-source-completeness.test.ts tests/private-authority/private-revision.test.ts` | ❌ P13 | ⬜ pending |
+| 01-13-02 | 13 | 9 | DATA-01, DATA-02, DATA-03 | T-01-59 | The write-once final revision, safe receipt, and README bind exact ID/root selection | private release/integration | `node --test tests/private-authority/private-revision.test.ts` | ❌ P13 | ⬜ pending |
+| 01-13-03 | 13 | 9 | DATA-01, DATA-02, DATA-03 | T-01-60, T-01-61 | Default, full private, and narrow boundary gates pass with no network or leakage | private release/security | `pnpm verify && node --test --test-name-pattern="existing primary and backup completeness" tests/private-authority/private-source-completeness.test.ts && pnpm authority:verify-private && node --test tests/private-authority/repository-boundary.test.ts` | ❌ P13 | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -71,7 +85,7 @@ updated: 2026-08-20
 - [x] `tests/authority/bundle.test.ts` with current, superseded, ambiguous, authority-class, stored/manifest-only, input-lock, prohibited-media, write-once, atomic-failure, and offline fixtures.
 - [x] `tests/authority/fixtures/bundle-input/input-lock.json` with the exact synthetic three-file lock, hashes, modes, and canonical input-root hash.
 
-Plan 07 adds the generic clean-clone-safe `tests/authority/private-source-set.test.ts`. Plan 08 adds the two tests under `tests/private-authority/` outside the default glob. `pnpm authority:verify-private` must fail rather than skip when any private source set, lock, receipt, revision, or attestation is absent.
+Plan 07 adds the generic clean-clone-safe `tests/authority/private-source-set.test.ts`. Plans 08 and 11-13 add opt-in tests under `tests/private-authority/` outside the default glob. `pnpm authority:verify-private` must fail rather than skip when any private source set, lock, receipt, revision, completeness proof, or attestation is absent.
 
 ---
 
@@ -92,12 +106,14 @@ Plan 07 adds the generic clean-clone-safe `tests/authority/private-source-set.te
 - [ ] All seven primary/backup source files are ordinary, independent, path-contained, byte-identical, and metadata/hash complete.
 - [ ] Two independently derived four-file importer inputs obey exact order/modes and 10,000,000-per/32,000,000-total bounds.
 - [ ] Import stdout is used only for candidate input/bundle roots; fixed stable ID is independently checked.
-- [ ] Validation uses `--root .local/authority/revisions/official-2026-08-20 --bundle bundle.json` plus external ID/root.
+- [ ] Both existing primary and backup roots pass the shared Plan 11 completeness verifier offline and retain identical before/after file maps.
+- [ ] Final import uses `--input`, `--input-lock input-lock.json`, `--expected-input-root-hash`, `--output-root`, and `--revision-id official-2026-08-26-v2`.
+- [ ] Final validation uses `--root .local/authority/revisions/official-2026-08-26-v2 --bundle bundle.json --id bundle:official-2026-08-26-v2 --hash &lt;receipt bundleRootHash&gt;`.
 - [ ] Two full-set rebuilds are path/byte-identical; source-set/input/derivation/artifact/reference/cycle tamper cases fail.
-- [ ] Selected local revision's before/after byte map is identical.
+- [ ] Both final-contract candidates are byte-identical; the old revision's before/after map is unchanged; the new selected revision is write-once.
 - [ ] Fetch/http/https/net denial stays active during real helper/import/validation.
 - [ ] Tracked, staged, and package scans find no private absolute locator or official source/API/normalized/revision/art/PDF/page bytes.
-- [ ] Default `pnpm verify` remains synthetic and clean-clone-safe; explicit `pnpm authority:verify-private` fails on missing private evidence.
-- [ ] DATA-01/02/03 remain Pending until Plan 08 and phase verification pass.
+- [ ] Default `pnpm verify` remains synthetic and clean-clone-safe; the focused completeness test, full `pnpm authority:verify-private`, and narrow repository-boundary test all pass.
+- [ ] DATA-01/02/03 remain Pending until Plan 13 and phase verification pass.
 
 **Approval:** pending
