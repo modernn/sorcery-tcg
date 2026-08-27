@@ -70,7 +70,7 @@ Plans:
 
 - [x] 01-09-PLAN.md — Preserve game-critical card fields and revision-independent logical card identities.
 - [x] 01-11-PLAN.md — Make private collection complete, visible-date-bound, sanitized, and timeout-safe.
-- [ ] 01-12-PLAN.md — Strengthen private leakage detection and align the derivative-data policy.
+- [x] 01-12-PLAN.md — Strengthen private leakage detection and align the derivative-data policy.
 
 **Wave 8** *(blocked on Wave 7 completion)*
 
@@ -218,7 +218,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Rules and Data Authority | 11/14 | Gap closure planned | - |
+| 1. Rules and Data Authority | 12/14 | In Progress | - |
 | 2. Deterministic Engine Contract | 0/TBD | Not started | - |
 | 3. Complete Core Game Rules | 0/TBD | Not started | - |
 | 4. Storyline, Card Effects, and Coverage | 0/TBD | Not started | - |

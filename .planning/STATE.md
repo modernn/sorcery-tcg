@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 2 context gathered
-last_updated: "2026-08-27T06:45:03.643Z"
-last_activity: 2026-08-27 -- Phase 1 planning complete
+stopped_at: Completed 01-12-PLAN.md
+last_updated: "2026-08-27T18:20:26.230Z"
+last_activity: 2026-08-27 -- Plan 01-12 complete
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 14
-  completed_plans: 11
-  percent: 0
+  completed_plans: 12
+  percent: 86
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-20)
 ## Current Position
 
 Phase: 01 (rules-and-data-authority) — EXECUTING
-Plan: 11 of 13
+Plan: 13 of 14
 Status: Ready to execute
-Last activity: 2026-08-27 -- Phase 1 planning complete
+Last activity: 2026-08-27 -- Plan 01-12 complete
 
-Progress: [█████████░] 85%
+Progress: [█████████░] 86%
 
 ## Performance Metrics
 
@@ -60,6 +60,7 @@ Progress: [█████████░] 85%
 | Phase 01 P06 | 9 min | 2 tasks | 3 files |
 | Phase 01 P07 | 5 min | 2 tasks | 3 files |
 | Phase 01 P08 | 33 min | 3 tasks | 12 files |
+| Phase 01 P12 | 13 min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -97,6 +98,9 @@ Recent decisions affecting current work:
 - [Phase 01]: Adapt unchanged official API bytes through a strict bounded in-memory TypeScript adapter — Original-byte hashes and provenance remain authoritative while derived records are deterministic.
 - [Phase 01]: Bind claimed derivation parent hashes to another bundle source — Forged, verbatim-parent, and self-parent claims fail closed.
 - [Phase 01]: Keep the real authority revision private and select it only by fixed ID and root hash — Runtime authority stays immutable and offline without public API or corpus distribution.
+- [Phase 01]: Windows private locator matching is ASCII case-insensitive while POSIX matching remains exact.
+- [Phase 01]: Only exact audited public provenance is exempt from semantic private-locator detection.
+- [Phase 01]: Normalized official derivatives may exist only in the ignored private built revision unless a separate approved plan changes that boundary.
 
 ### Pending Todos
 
@@ -124,6 +128,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-27T06:16:26.212Z
-Stopped at: Phase 2 context gathered
-Resume file: .planning/phases/02-deterministic-engine-contract/02-CONTEXT.md
+Last session: 2026-08-27T18:20:26.224Z
+Stopped at: Completed 01-12-PLAN.md
+Resume file: None
