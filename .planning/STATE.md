@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-14-PLAN.md
-last_updated: "2026-08-27T19:55:38.544Z"
+stopped_at: Option 3 selected; Plan 15 replanned for manual intake
+last_updated: "2026-08-27T21:30:00.000Z"
 last_activity: 2026-08-27
 progress:
   total_phases: 9
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-08-20)
 ## Current Position
 
 Phase: 01 (rules-and-data-authority) — EXECUTING
-Plan: 14 of 15
+Plan: 15 of 15
 Status: Ready to execute
 Last activity: 2026-08-27
 
@@ -91,7 +91,7 @@ Recent decisions affecting current work:
 - [Phase 01]: Validation success explicitly reports stored-bytes-rehashed separately from manifest-binding-verified. — Manifest-only records bind provenance without falsely claiming absent raw bytes were independently rehashed.
 - [Phase 01]: Byte-locked fixture JSON is pinned to LF in .gitattributes for cross-platform hash stability. — Reviewed byte hashes must remain identical under Windows core.autocrlf checkouts.
 - [Phase 01]: Document the implemented official-only precedence order as a project fail-closed policy, not a publisher hierarchy claim. — The resolver must retain evidence and fail closed without overstating publisher guidance.
-- [Phase 01]: Permit one fixed user-run one-shot PowerShell collection of the seven official sources plus an independent byte-identical backup, recording `acquisitionMethod: user-run-one-shot-powershell`. — The user accepts the unresolved private-use risk; publisher permission remains absent, and the exception adds no recurring acquisition, retry/evasion, artwork, redistribution, hosting, or public API.
+- [Phase 01]: Preserve every completed one-shot acquisition pair as immutable historical evidence, but retire new production transport. — Option 3 uses a fixed ignored user-provided manual inbox, offline validation, an independent backup, and a lock written last.
 - [Phase 01]: Keep community corpora behavioral-reference only and require written publisher permission plus a separate plan for broader use. — Audited community sources do not grant a complete reusable gameplay corpus.
 - [Phase 01]: Accept the exact consumed quick-260825-mhh-retry-1 agent-run evidence pair while preserving all private-use limits. — The current D-08/D-11 contract permits this closed pair and the private lock, consumed record, and bytes independently verify.
 - [Phase 01]: Treat source and lock hashes as byte-identity evidence only. — Hashes establish neither publisher authenticity nor legal permission.
@@ -104,6 +104,8 @@ Recent decisions affecting current work:
 - [Phase 01]: Normalized official derivatives may exist only in the ignored private built revision unless a separate approved plan changes that boundary.
 - [Phase 01]: Plan 14 certifies only the reusable verifier extraction and synthetic offline routing committed in 5aadff3 and 77c6000.
 - [Phase 01]: The historical authority roots remain unchanged but did not satisfy the strengthened content contract; fresh evidence and proof belong to Plan 15.
+- [Phase 01]: Phase 7 owns a versioned LLM player skill that can select only engine-enumerated action IDs and a cited read-only rules-adviser skill whose consultation is always unranked; neither can mutate engine state.
+- [Phase 01]: Phase 9 presentation uses only original/project-owned art or user-supplied private local images; official artwork is neither acquired nor shipped.
 
 ### Pending Todos
 
@@ -111,7 +113,7 @@ Recent decisions affecting current work:
 
 ### Blockers/Concerns
 
-- Phase 1 still lacks publisher permission for broader use. Only the three closed one-shot evidence pairs and independent private backup are accepted without a legal conclusion; recurring acquisition, retry/evasion, artwork collection, redistribution, hosting, third-party upload, public API, and commercialization remain blocked pending written permission and a separate plan.
+- Phase 1 still lacks publisher permission for broader use. Historical acquisition evidence remains immutable; the current path is user-provided manual local files only. New project/agent acquisition, recurring updates, redistribution, official artwork, hosting, third-party upload, public APIs, and commercialization remain blocked pending written permission and a separate plan.
 - Ranked results remain unavailable until the first owned and benchmark card pool passes transitive verified-coverage gates in Phase 6.
 
 ### Quick Tasks Completed

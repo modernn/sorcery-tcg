@@ -58,11 +58,12 @@
 
 ### AI Competitors
 
-- [ ] **MODEL-01**: Provider-neutral model adapters receive only the same redacted observation and legal-action list as other competitors and can return only an action ID.
+- [ ] **MODEL-01**: A versioned provider-neutral player skill and its adapters receive only the same redacted observation and legal-action list as other competitors and can return only an action ID.
 - [ ] **MODEL-02**: Each model decision records model/configuration, prompt/template version, response or response hash, selected/fallback action, classification, latency, tokens, cost, and provider failure details.
 - [ ] **MODEL-03**: Malformed, illegal, timed-out, or failed model decisions follow one predeclared deterministic fallback or forfeit policy and remain visible in reliability metrics.
 - [ ] **MODEL-04**: Model experiments use the same decks, opponents, seats, seed blocks, observation schema, legal-action ordering, prompt, sampling settings, and budgets, and report deck, model, and model-by-deck effects separately.
 - [ ] **MODEL-05**: Recorded model action IDs can be replayed without contacting the provider to reproduce engine outcomes exactly.
+- [ ] **MODEL-06**: A versioned rules-adviser skill retrieves only from the selected local authority, cites its evidence, and returns explanation only; it cannot mutate state, invent legal actions, or make a consulted game ranked.
 
 ### Collection-Constrained Optimization
 
@@ -74,7 +75,7 @@
 ### Browser Human Play
 
 - [ ] **WEB-01**: A human can start and complete a local browser game against an automated or model competitor without using an interactive CLI.
-- [ ] **WEB-02**: The browser renders the realm, regions, zones, cards, public state, current Storyline, and forced choices from engine observations and engine events.
+- [ ] **WEB-02**: The browser renders the realm, regions, zones, cards, public state, current Storyline, and forced choices from engine observations and engine events, using only original/project-owned presentation art or user-supplied private local images.
 - [ ] **WEB-03**: The browser exposes only engine-issued legal actions, targets, paths, defenses, reactions, and choices and never computes rules or card effects independently.
 - [ ] **WEB-04**: A human can load and inspect a recorded replay with step-by-step state, event, action, and eligibility information.
 - [ ] **WEB-05**: All game interactions have keyboard equivalents, visible focus, non-color-only state cues, and accessible action/rejection/event text.
@@ -108,7 +109,7 @@
 | Feature | Reason |
 |---------|--------|
 | Interactive human CLI | Humans will play in the browser; CLI commands are automation-only. |
-| Runtime LLM referee | Unreviewed model mutations invalidate authoritative competitive results. |
+| Authoritative LLM referee or ranked-state mutation | The cited rules adviser may explain local authority for unranked use, but model output never mutates or overrules the engine. |
 | Rule changes made to improve measured balance | Official rules are evidence inputs, never tuning parameters. |
 | Silent card approximations or no-ops | They can reverse deck rankings without visible evidence. |
 | Perfect-play solver | Computationally premature and unnecessary for comparing practical competitors. |
@@ -159,6 +160,7 @@
 | MODEL-03 | Phase 7 | Pending |
 | MODEL-04 | Phase 7 | Pending |
 | MODEL-05 | Phase 7 | Pending |
+| MODEL-06 | Phase 7 | Pending |
 | OPT-01 | Phase 8 | Pending |
 | OPT-02 | Phase 8 | Pending |
 | OPT-03 | Phase 8 | Pending |
@@ -176,8 +178,8 @@
 | TEST-05 | Phase 5 | Pending |
 
 **Coverage:**
-- v1 requirements: 53 total
-- Mapped to phases: 53
+- v1 requirements: 54 total
+- Mapped to phases: 54
 - Unmapped: 0
 
 ---

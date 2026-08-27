@@ -79,7 +79,7 @@ Plans:
 
 **Wave 9** *(blocked on Wave 8 completion)*
 
-- [ ] 01-15-PLAN.md — Perform the single newly authorized user-run v3 acquisition and prove both fresh roots complete, immutable, offline, and non-disclosing.
+- [ ] 01-15-PLAN.md — Import the user-provided seven-file v3 manual inbox offline and prove both fresh roots complete, immutable, and non-disclosing.
 
 **Wave 10** *(blocked on Wave 9 completion)*
 
@@ -169,16 +169,17 @@ Plans:
 
 ### Phase 7: AI Model Competitors
 
-**Goal**: Users can compare AI models as game competitors without granting them rules authority or hiding reliability, latency, and cost tradeoffs.
+**Goal**: Users can compare AI models through a versioned legal-action player skill and use a cited rules-adviser skill without granting either rules authority or hiding reliability, latency, and cost tradeoffs.
 **Depends on**: Phase 6
-**Requirements**: MODEL-01, MODEL-02, MODEL-03, MODEL-04, MODEL-05
+**Requirements**: MODEL-01, MODEL-02, MODEL-03, MODEL-04, MODEL-05, MODEL-06
 **Success Criteria** (what must be TRUE):
 
-  1. Every model receives only its redacted observation and the same ordered legal-action list as other competitors and can return only one action ID.
+  1. A versioned player skill gives every model only its redacted observation and the same ordered legal-action list as other competitors and accepts only one action ID.
   2. Every model decision records model/configuration, prompt version, response or hash, selected or fallback action, classification, latency, tokens, cost, and provider failure details.
   3. Malformed, illegal, timed-out, and failed decisions follow the predeclared deterministic fallback or forfeit policy and remain visible in reliability reports.
   4. Fixed model experiments use identical decks, opponents, seats, seeds, observations, action ordering, prompts, sampling, and budgets, and reports separate deck, model, and model-by-deck effects.
   5. Recorded model action IDs replay to the same engine outcome without contacting the provider.
+  6. A versioned rules-adviser skill retrieves and cites only the selected local authority, cannot mutate state or invent actions, and every game that consults it remains explicitly unranked or invalid-unsupported.
 
 **Plans**: TBD
 **Research**: Required — verify provider model identifiers and schemas, nondeterminism and retry semantics, prompt/tool formats, fair token/time budgets, and cost-aware sample sizes during planning.
@@ -206,7 +207,7 @@ Plans:
 **Success Criteria** (what must be TRUE):
 
   1. A human can start and complete a local browser game against an automated or model competitor without interactive CLI play.
-  2. The browser presents the realm, regions, zones, cards, public state, current Storyline, and forced choices from engine observations and events.
+  2. The browser presents the realm, regions, zones, cards, public state, current Storyline, and forced choices from engine observations and events using only original/project-owned presentation art or user-supplied private local images.
   3. Every target, path, defense, reaction, and choice offered to the human is engine-issued, and browser code never computes rules or card effects independently.
   4. A human can load a recorded replay and inspect its action, event, state, and rank-eligibility evidence step by step.
   5. Play has keyboard equivalents, visible focus, non-color cues, and accessible action/rejection/event text; the single project verification command proves headless and browser adapters produce identical hashes for the same transcript.
