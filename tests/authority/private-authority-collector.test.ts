@@ -1909,3 +1909,10 @@ test('hash helper fixture remains synthetic and deterministic', () => {
     'c073ef9097c6a1593b5d87b24fee13886577966648c3f59edef1a91e278bca64',
   );
 });
+test('production manual intake has one fixed offline source and no transport surface', async () => {
+  const source = await readFile(SCRIPT_PATH, 'utf8');
+  assert.match(source, /manual-inbox\/official-2026-08-27-v3/);
+  assert.match(source, /user-provided-manual-download/);
+  assert.match(source, /phase-01-20260827-manual-provision-1/);
+  assert.doesNotMatch(source, /\.consumed\.json|Invoke-BoundedHttpToFile|HttpClient|Invoke-WebRequest|Invoke-RestMethod/);
+});
