@@ -4,7 +4,9 @@
 param(
     [string]$BackupRoot,
     [switch]$AcknowledgePrivateUseRisk,
-    [AllowNull()][string]$UserAuthorizationReference
+    [AllowNull()][string]$UserAuthorizationReference,
+    [switch]$VerifyExistingRoots,
+    [AllowNull()][string]$LockPath
 )
 
 $collectorModule = New-Module -Name 'Sorcery.PrivateAuthorityCollector' -ArgumentList $PSScriptRoot -ScriptBlock {
@@ -314,6 +316,78 @@ function Assert-HtmlSource {
     return $html
 }
 
+function Assert-PdfSource {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -lt 5 -or [Text.Encoding]::ASCII.GetString($bytes, 0, 5) -ne '%PDF-') {
+        throw 'Rulebook PDF prefix is invalid'
+    }
+    $ending = if ($bytes.Length -ge 2 -and $bytes[$bytes.Length - 2] -eq 13 -and $bytes[$bytes.Length - 1] -eq 10) {
+        "%%EOF`r`n"
+    }
+    elseif ($bytes[$bytes.Length - 1] -eq 10) { "%%EOF`n" }
+    elseif ($bytes[$bytes.Length - 1] -eq 13) { "%%EOF`r" }
+    else { '%%EOF' }
+    if ($bytes.Length -lt $ending.Length -or
+        [Text.Encoding]::ASCII.GetString($bytes, $bytes.Length - $ending.Length, $ending.Length) -cne $ending) {
+        throw 'Rulebook PDF EOF marker or trailing bytes are invalid'
+    }
+}
+
+function Assert-PrivateAuthorityContentSet {
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][object[]]$Descriptors
+    )
+
+    $expectedPaths = @(
+        'rulebook/rulebook-current.pdf',
+        'formats/constructed-current.html',
+        'codex/codex-current.html',
+        'codex/faqs-current.html',
+        'codex/changelog-current.html',
+        'updates/card-updates-2025.html',
+        'cards/cards.raw.json'
+    )
+    $actualPaths = @($Descriptors | ForEach-Object { [string]$_.relativePath })
+    if ($Descriptors.Count -ne 7 -or
+        @($actualPaths | Sort-Object -Unique).Count -ne 7 -or
+        @(Compare-Object ($expectedPaths | Sort-Object) ($actualPaths | Sort-Object)).Count -ne 0) {
+        throw 'Private content verification requires exactly the seven authority descriptors'
+    }
+    $resolvedRoot = [IO.Path]::GetFullPath($Root)
+    if (-not [IO.Directory]::Exists($resolvedRoot)) { throw 'Private authority root does not exist' }
+    $rootPrefix = $resolvedRoot + [IO.Path]::DirectorySeparatorChar
+    $effectiveDates = @{}
+    foreach ($descriptor in $Descriptors) {
+        $relativePath = [string]$descriptor.relativePath
+        $path = [IO.Path]::GetFullPath((Join-Path $resolvedRoot $relativePath))
+        if (-not $path.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+            -not [IO.File]::Exists($path)) {
+            throw 'Private authority content path is missing or escapes its root'
+        }
+        $html = $null
+        switch ([string]$descriptor.mediaType) {
+            'application/pdf' { Assert-PdfSource $path }
+            'text/html' {
+                $html = Assert-HtmlSource $path 'text/html' ([string]$descriptor.sourceMarker) @($descriptor.visibleBodyMarkers)
+            }
+            'application/json' {
+                Assert-CardJsonSource $path 'application/json' ([int]$descriptor.expectedCardCount)
+            }
+            default { throw 'Unsupported private authority content media type' }
+        }
+        $effectiveDates[$relativePath] = switch ([string]$descriptor.effectiveDatePolicy) {
+            'fixed' { [string]$descriptor.effectiveDate }
+            'none' { $null }
+            'changelog' { Get-ChangelogDate $html ([string]$descriptor.sourceMarker) }
+            default { throw 'Unknown private authority effective-date policy' }
+        }
+    }
+    return $effectiveDates
+}
+
 function Invoke-BoundedProcess {
     param(
         [Parameter(Mandatory)][string]$FileName,
@@ -466,20 +540,7 @@ function Receive-Rulebook {
         $download = Invoke-BoundedHttpToFile $Client $downloadBuilder.Uri @($Descriptor.allowedRedirectHosts) $DestinationPath ([long]$Descriptor.maxBytes) $HeaderTimeoutSeconds $BodyTimeoutSeconds $LoopbackOnly
         if ($download.contentType -notin @('application/pdf', 'application/octet-stream')) { throw 'Rulebook response has the wrong media type' }
         if ($download.fileName -ne 'SorceryRulebook.pdf') { throw 'Rulebook response filename must be SorceryRulebook.pdf' }
-        $bytes = [IO.File]::ReadAllBytes($DestinationPath)
-        if ($bytes.Length -lt 5 -or [Text.Encoding]::ASCII.GetString($bytes, 0, 5) -ne '%PDF-') {
-            throw 'Rulebook PDF prefix is invalid'
-        }
-        $ending = if ($bytes.Length -ge 2 -and $bytes[$bytes.Length - 2] -eq 13 -and $bytes[$bytes.Length - 1] -eq 10) {
-            "%%EOF`r`n"
-        }
-        elseif ($bytes[$bytes.Length - 1] -eq 10) { "%%EOF`n" }
-        elseif ($bytes[$bytes.Length - 1] -eq 13) { "%%EOF`r" }
-        else { '%%EOF' }
-        if ($bytes.Length -lt $ending.Length -or
-            [Text.Encoding]::ASCII.GetString($bytes, $bytes.Length - $ending.Length, $ending.Length) -cne $ending) {
-            throw 'Rulebook PDF EOF marker or trailing bytes are invalid'
-        }
+        Assert-PdfSource $DestinationPath
         return [pscustomobject]@{
             transfer = $download
             locator = $locator.AbsoluteUri
@@ -526,6 +587,7 @@ function Invoke-PrivateAuthorityTransport {
     $client = [Net.Http.HttpClient]::new($handler)
     $client.Timeout = [Threading.Timeout]::InfiniteTimeSpan
     $entries = [Collections.Generic.List[object]]::new()
+    $transfers = [Collections.Generic.List[object]]::new()
     $totalBytes = 0L
     $rulebookEvidence = $null
     [IO.Directory]::CreateDirectory($PrimaryRoot) | Out-Null
@@ -548,23 +610,25 @@ function Invoke-PrivateAuthorityTransport {
             }
             else {
                 $transfer = Invoke-BoundedHttpToFile $client ([Uri]$descriptor.requestUrl) @($descriptor.allowedRedirectHosts) $destination ([long]$descriptor.maxBytes) $HeaderTimeoutSeconds $BodyTimeoutSeconds $LoopbackOnly
-                if ([string]$descriptor.mediaType -eq 'text/html') {
-                    $html = Assert-HtmlSource $destination $transfer.contentType ([string]$descriptor.sourceMarker) @($descriptor.visibleBodyMarkers)
+                if ([string]$descriptor.mediaType -eq 'text/html' -and $transfer.contentType -ne 'text/html') {
+                    throw 'HTML source has the wrong response media type'
                 }
-                elseif ([string]$descriptor.mediaType -eq 'application/json') {
-                    Assert-CardJsonSource $destination $transfer.contentType ([int]$descriptor.expectedCardCount)
+                if ([string]$descriptor.mediaType -eq 'application/json' -and $transfer.contentType -ne 'application/json') {
+                    throw 'Card source has the wrong response media type'
                 }
-                else { throw "Unsupported source media type: $($descriptor.mediaType)" }
             }
             $totalBytes += [long]$transfer.byteLength
             if ($totalBytes -gt $MaxTotalBytes) { throw 'Source set exceeds the aggregate byte limit' }
-            $effectiveDate = switch ([string]$descriptor.effectiveDatePolicy) {
-                'fixed' { [string]$descriptor.effectiveDate }
-                'none' { $null }
-                'changelog' { Get-ChangelogDate $html ([string]$descriptor.sourceMarker) }
-                default { throw "Unknown effective-date policy: $($descriptor.effectiveDatePolicy)" }
-            }
-            $entries.Add((New-SourceEntry $descriptor $destination ([long]$transfer.byteLength) $effectiveDate))
+            $transfers.Add([pscustomobject]@{
+                descriptor = $descriptor
+                destination = $destination
+                byteLength = [long]$transfer.byteLength
+            })
+        }
+        $effectiveDates = Assert-PrivateAuthorityContentSet $PrimaryRoot $Descriptors
+        foreach ($completedTransfer in $transfers) {
+            $descriptor = $completedTransfer.descriptor
+            $entries.Add((New-SourceEntry $descriptor $completedTransfer.destination $completedTransfer.byteLength $effectiveDates[[string]$descriptor.relativePath]))
         }
         return [pscustomobject]@{
             entries = @($entries)
@@ -885,6 +949,148 @@ function Assert-SameVerification {
     }
 }
 
+function Get-RepositoryRootFromAuthorityLockPath {
+    param([Parameter(Mandatory)][string]$LockPath)
+
+    $current = [IO.Directory]::GetParent($LockPath)
+    while ($null -ne $current) {
+        if ($current.Name -ceq 'locks' -and
+            $null -ne $current.Parent -and $current.Parent.Name -ceq 'authority' -and
+            $null -ne $current.Parent.Parent -and $current.Parent.Parent.Name -ceq '.local' -and
+            $null -ne $current.Parent.Parent.Parent) {
+            return $current.Parent.Parent.Parent.FullName
+        }
+        $current = $current.Parent
+    }
+    throw 'Lock path is outside the private authority lock hierarchy'
+}
+
+function Read-ConsumedPrivateAuthorityLock {
+    param([Parameter(Mandatory)][string]$LockPath)
+
+    if ([string]::IsNullOrWhiteSpace($LockPath)) { throw 'Lock path is required' }
+    $resolvedPath = [IO.Path]::GetFullPath($LockPath)
+    Assert-NoReparseAncestors $resolvedPath
+    if (-not [IO.File]::Exists($resolvedPath)) { throw 'Lock file does not exist' }
+    try { $lock = Get-Content -Raw -LiteralPath $resolvedPath | ConvertFrom-Json -Depth 32 -DateKind String }
+    catch { throw 'Lock file is not valid JSON' }
+    $requiredFields = @(
+        'schemaVersion',
+        'acquisitionMethod',
+        'authorizationReference',
+        'primaryRoot',
+        'backupRoot',
+        'entries',
+        'sourceSetRootHash',
+        'operatingAcknowledgment',
+        'rulebookAcquisitionEvidence'
+    )
+    $actualFields = @($lock.PSObject.Properties.Name)
+    if (@(Compare-Object ($requiredFields | Sort-Object) ($actualFields | Sort-Object)).Count -ne 0) {
+        throw 'Consumed lock fields are invalid'
+    }
+    if ($lock.schemaVersion -ne 1 -or
+        $lock.acquisitionMethod -cne 'user-authorized-agent-run-one-shot-powershell' -or
+        @('quick-260825-mhh', 'quick-260825-mhh-retry-1') -cnotcontains [string]$lock.authorizationReference) {
+        throw 'Consumed lock acquisition identity is invalid'
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$lock.primaryRoot) -or
+        [string]::IsNullOrWhiteSpace([string]$lock.backupRoot) -or
+        -not [IO.Path]::IsPathFullyQualified([string]$lock.primaryRoot) -or
+        -not [IO.Path]::IsPathFullyQualified([string]$lock.backupRoot) -or
+        @($lock.entries).Count -ne 7 -or
+        [string]$lock.sourceSetRootHash -cnotmatch '^sha256:[0-9a-f]{64}$') {
+        throw 'Consumed lock source-set fields are invalid'
+    }
+    $acknowledgment = $lock.operatingAcknowledgment
+    if ($acknowledgment.scope -cne 'private-local-noncommercial' -or
+        $acknowledgment.noRedistributionReleaseHostingUploadOrArtwork -ne $true -or
+        $acknowledgment.apiTermsRobotsConflictAndPrivateUseRiskAccepted -ne $true -or
+        $acknowledgment.establishesLegalPermission -ne $false -or
+        $acknowledgment.stopOnBlockedStatusCaptchaOrPublisherObjection -ne $true -or
+        $acknowledgment.retryOrEvasion -ne $false) {
+        throw 'Consumed lock operating acknowledgment is invalid'
+    }
+    $evidence = $lock.rulebookAcquisitionEvidence
+    if ($evidence.sourceUrl -cne 'https://sorcerytcg.com/news/sorcery-contested-realm-december-2025-rulebook-update' -or
+        $evidence.relativePath -cne 'rulebook/rulebook-current.pdf' -or
+        [string]$evidence.byteHash -cnotmatch '^sha256:[0-9a-f]{64}$' -or
+        [string]::IsNullOrWhiteSpace([string]$evidence.observedFilename) -or
+        [string]::IsNullOrWhiteSpace([string]$evidence.retrievedAt) -or
+        [string]::IsNullOrWhiteSpace([string]$evidence.privateLocatorEvidence) -or
+        $evidence.privateLocatorIsNormative -ne $false) {
+        throw 'Consumed lock rulebook evidence is invalid'
+    }
+    return [pscustomobject]@{
+        path = $resolvedPath
+        repositoryRoot = Get-RepositoryRootFromAuthorityLockPath $resolvedPath
+        lock = $lock
+    }
+}
+
+function Invoke-ExistingPrivateSourceVerifier {
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$LockPath
+    )
+
+    $verifierPath = [IO.Path]::GetFullPath((Join-Path $script:CollectorScriptRoot '../src/authority/private-source-set.ts'))
+    $verifierUrl = [Uri]::new($verifierPath).AbsoluteUri
+    $bridge = @'
+import { readFile } from 'node:fs/promises';
+const lock = JSON.parse(await readFile(process.argv[1], 'utf8'));
+const { verifyPrivateSourceSet } = await import(process.argv[3]);
+const result = await verifyPrivateSourceSet({
+  primaryRoot: lock.primaryRoot,
+  backupRoot: lock.backupRoot,
+  repositoryRoot: process.argv[2],
+  entries: lock.entries,
+});
+process.stdout.write(JSON.stringify(result));
+'@
+    try {
+        $result = Invoke-BoundedProcess 'node' @(
+            '--input-type=module',
+            '--eval',
+            $bridge,
+            $LockPath,
+            $RepositoryRoot,
+            $verifierUrl
+        ) ([IO.Path]::GetDirectoryName($verifierPath)) 30
+    }
+    catch { throw 'Existing private source verifier did not complete' }
+    if ($result.exitCode -ne 0) { throw 'Existing private source verifier failed' }
+    try { return $result.stdout | ConvertFrom-Json -Depth 32 -DateKind String }
+    catch { throw 'Existing private source verifier returned invalid output' }
+}
+
+function Invoke-PrivateAuthorityExistingRootsVerification {
+    param([Parameter(Mandatory)][string]$LockPath)
+
+    $record = Read-ConsumedPrivateAuthorityLock $LockPath
+    $lock = $record.lock
+    $descriptors = @(Get-ProductionSourceDescriptors)
+    foreach ($entry in @($lock.entries)) {
+        $descriptor = @($descriptors | Where-Object { $_.relativePath -ceq $entry.relativePath })
+        if ($descriptor.Count -ne 1 -or
+            $entry.url -cne [string]$descriptor[0].provenanceUrl -or
+            $entry.mediaType -cne [string]$descriptor[0].mediaType) {
+            throw 'Consumed lock entry provenance is invalid'
+        }
+    }
+    $structural = Invoke-ExistingPrivateSourceVerifier $record.repositoryRoot $record.path
+    Assert-SameVerification $lock $structural
+    $primaryDates = Assert-PrivateAuthorityContentSet ([string]$lock.primaryRoot) $descriptors
+    $backupDates = Assert-PrivateAuthorityContentSet ([string]$lock.backupRoot) $descriptors
+    foreach ($entry in @($lock.entries)) {
+        $relativePath = [string]$entry.relativePath
+        if ($entry.effectiveDate -cne $primaryDates[$relativePath] -or
+            $entry.effectiveDate -cne $backupDates[$relativePath]) {
+            throw 'Consumed lock effective date does not match verified content'
+        }
+    }
+}
+
 function Invoke-TestFault {
     param(
         [AllowNull()][string]$FaultPoint,
@@ -1066,17 +1272,35 @@ Export-ModuleMember -Function @(
 }
 
 Import-Module -ModuleInfo $collectorModule -Scope Local
-Remove-Variable -Name collectorModule
 
 if ($MyInvocation.InvocationName -ne '.') {
     try {
-        if ([string]::IsNullOrWhiteSpace($BackupRoot)) { throw 'Missing backup root' }
-        if (-not $AcknowledgePrivateUseRisk) { throw 'Missing private-use acknowledgment' }
-        $null = Invoke-PrivateAuthorityCollection -BackupRoot $BackupRoot -AcknowledgePrivateUseRisk:$AcknowledgePrivateUseRisk -UserAuthorizationReference $UserAuthorizationReference
-        Write-Output 'Private authority collection completed.'
+        if ($VerifyExistingRoots) {
+            if ([string]::IsNullOrWhiteSpace($LockPath) -or
+                -not [string]::IsNullOrWhiteSpace($BackupRoot) -or
+                $AcknowledgePrivateUseRisk -or
+                -not [string]::IsNullOrWhiteSpace($UserAuthorizationReference)) {
+                throw 'Offline verification parameters are invalid'
+            }
+            & $collectorModule { param($ExistingLockPath) Invoke-PrivateAuthorityExistingRootsVerification $ExistingLockPath } $LockPath
+            Write-Output 'Private authority existing roots verified.'
+        }
+        else {
+            if (-not [string]::IsNullOrWhiteSpace($LockPath)) { throw 'LockPath requires VerifyExistingRoots' }
+            if ([string]::IsNullOrWhiteSpace($BackupRoot)) { throw 'Missing backup root' }
+            if (-not $AcknowledgePrivateUseRisk) { throw 'Missing private-use acknowledgment' }
+            $null = Invoke-PrivateAuthorityCollection -BackupRoot $BackupRoot -AcknowledgePrivateUseRisk:$AcknowledgePrivateUseRisk -UserAuthorizationReference $UserAuthorizationReference
+            Write-Output 'Private authority collection completed.'
+        }
     }
     catch {
-        [Console]::Error.WriteLine('Private authority collection failed.')
+        $failureMessage = if ($VerifyExistingRoots) {
+            'Private authority existing-root verification failed.'
+        }
+        else { 'Private authority collection failed.' }
+        [Console]::Error.WriteLine($failureMessage)
         exit 1
     }
 }
+
+Remove-Variable -Name collectorModule

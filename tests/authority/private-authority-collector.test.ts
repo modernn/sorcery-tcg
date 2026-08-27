@@ -435,6 +435,10 @@ async function createExistingRootsLock(fixture: Fixture): Promise<void> {
     repositoryRoot: fixture.repositoryRoot,
     entries,
   });
+  const rulebookEntry = verified.entries.find(
+    ({ relativePath }) => relativePath === 'rulebook/rulebook-current.pdf',
+  );
+  assert.ok(rulebookEntry);
   await mkdir(dirname(fixture.lockPath), { recursive: true });
   await writeFile(
     fixture.lockPath,
@@ -444,7 +448,7 @@ async function createExistingRootsLock(fixture: Fixture): Promise<void> {
       authorizationReference: 'quick-260825-mhh-retry-1',
       primaryRoot: resolve(fixture.primaryRoot),
       backupRoot: resolve(fixture.backupRoot),
-      entries,
+      entries: verified.entries,
       sourceSetRootHash: verified.sourceSetRootHash,
       operatingAcknowledgment: {
         scope: 'private-local-noncommercial',
@@ -456,9 +460,12 @@ async function createExistingRootsLock(fixture: Fixture): Promise<void> {
       },
       rulebookAcquisitionEvidence: {
         sourceUrl: OFFICIAL_URLS['rulebook/rulebook-current.pdf'],
-        privateLocator: 'CANARY_PRIVATE_LOCATOR',
-        privateLocatorIsNormative: false,
+        relativePath: rulebookEntry.relativePath,
+        byteHash: rulebookEntry.byteHash,
         observedFilename: 'SorceryRulebook.pdf',
+        retrievedAt: rulebookEntry.retrievedAt,
+        privateLocatorEvidence: 'CANARY_PRIVATE_LOCATOR',
+        privateLocatorIsNormative: false,
       },
     })}\n`,
     'utf8',
