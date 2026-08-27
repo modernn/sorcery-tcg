@@ -62,7 +62,7 @@ The user must maintain a durable, independent, byte-identical private backup sou
 
 ## Storage and repository boundary
 
-The anchored `.local/authority/` ignore rule protects every repository-side official input, private source/input lock, normalized snapshot, derived build input, and built official authority revision. They remain private/local, Git-ignored, and excluded from every package. The independent backup is likewise private and unpackaged outside the repository.
+The anchored `.local/authority/` ignore rule protects every repository-side official input, private source/input lock, normalized snapshot, derived build input, and built official authority revision. Normalized official derivatives may exist only inside the ignored private built revision selected for offline importer and runtime use. Every private authority artifact remains private/local, Git-ignored, and excluded from every package. The independent backup is likewise private and unpackaged outside the repository. Broader use requires written publisher permission and a separate plan approved for that scope.
 
 Git may contain only:
 
@@ -72,7 +72,7 @@ Git may contain only:
 - independent non-content hashes and receipts without private absolute locators; and
 - generic local-import, validation, and final-gate tests.
 
-The current official rulebook PDF, saved official HTML pages, and full API corpus may exist only in the private primary and backup source roots. They must not enter the built revision, Git, or packages. The collector acquires no artwork and exposes no art endpoint. Pending written permission, a later browser GUI may display only user-supplied local images from private storage through a separate permission-reviewed task. Bulk art acquisition, private-CDN access, hotlinking, proxying, hosting, packaging, and redistribution remain prohibited. Full corpus bytes, normalized official derivatives, copied community data, and copied external code, tests, assets, or card implementations are also forbidden from Git, packages, and the built revision.
+The current official rulebook PDF, saved official HTML pages, and full API corpus may exist only in the private primary and backup source roots. Those raw publisher PDF, HTML, and API corpus bytes must not enter the built revision, Git, or packages. The collector acquires no artwork and exposes no art endpoint. Pending written permission, a later browser GUI may display only user-supplied local images from private storage through a separate permission-reviewed task. Bulk art acquisition, private-CDN access, hotlinking, proxying, hosting, packaging, and redistribution remain prohibited. Normalized official derivatives are forbidden from Git, packages, sharing, hosting, third-party upload, redistribution, public or network APIs, and commercialization without written publisher permission and a separate approved plan. Copied community data and copied external code, tests, assets, or card implementations remain excluded from Git, packages, and the built revision.
 
 ## Community and commercial-source audit
 
