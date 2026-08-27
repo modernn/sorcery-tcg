@@ -45,7 +45,9 @@ async function git(fixture: Fixture, ...arguments_: readonly string[]): Promise<
   assert.equal(result.code, 0, result.stderr);
 }
 
-async function createFixture(): Promise<Fixture> {
+async function createFixture(
+  privateLocatorEvidence = 'https://private.invalid/rulebook-locator',
+): Promise<Fixture> {
   const sandbox = await mkdtemp(join(tmpdir(), 'sorcery-private-boundary-'));
   const repositoryRoot = join(sandbox, 'repository');
   const primaryRoot = join(repositoryRoot, '.local', 'authority', 'inputs', 'synthetic', 'primary');
@@ -116,7 +118,7 @@ async function createFixture(): Promise<Fixture> {
       entries,
       sourceSetRootHash: `sha256:${'1'.repeat(64)}`,
       rulebookAcquisitionEvidence: {
-        privateLocatorEvidence: 'https://private.invalid/rulebook-locator',
+        privateLocatorEvidence,
       },
     }),
   );
@@ -440,6 +442,60 @@ test('encoded and escaped source excerpts and card records fail on every history
       });
     }
   }
+});
+
+test('locator escaped and case-varied Windows forms fail on every surface', async (context) => {
+  const locator = 'C:\\Private\\Authority\\Rulebook';
+  const mixedCase = 'c:\\pRIVATE\\AUTHORITY\\rULEBOOK';
+  const candidates = {
+    'JSON escaped': 'const locator = ' + JSON.stringify(mixedCase) + ';',
+    'TypeScript escaped': "const locator = '" + mixedCase.replaceAll('\\', '\\\\') + "';",
+    'slash-normalized case-varied': mixedCase.replaceAll('\\', '/'),
+  } as const;
+  for (const surface of ['reachable-history', 'worktree', 'index', 'package'] as const) {
+    for (const [encoding, candidate] of Object.entries(candidates)) {
+      await context.test(encoding + ' on ' + surface, async () => {
+        const fixture = await createFixture(locator);
+        try {
+          await addSurfaceCandidate(fixture, surface, 'locator-' + encoding.replaceAll(' ', '-') + '-' + surface, candidate);
+          const result = await runGate(fixture);
+          assert.notEqual(result.code, 0, encoding + ' unexpectedly passed on ' + surface);
+          assert.match(result.stderr, /private-locator/i);
+          assert.match(result.stderr, new RegExp(surface));
+          assert.equal(result.stderr.includes(locator), false);
+          assert.equal(result.stderr.includes(mixedCase), false);
+        } finally {
+          await cleanupFixture(fixture);
+        }
+      });
+    }
+  }
+});
+
+test('POSIX locator matching remains exact and case-sensitive', async (context) => {
+  const locator = '/Private/Authority/Rulebook';
+  await context.test('exact locator fails', async () => {
+    const fixture = await createFixture(locator);
+    try {
+      await addCandidate(fixture, 'included/posix-exact.txt', locator);
+      const result = await runGate(fixture);
+      assert.notEqual(result.code, 0);
+      assert.match(result.stderr, /private-locator/i);
+    } finally {
+      await cleanupFixture(fixture);
+    }
+  });
+  await context.test('case-varied locator passes', async () => {
+    const fixture = await createFixture(locator);
+    try {
+      await addCandidate(fixture, 'included/posix-case-varied.txt', locator.toLowerCase());
+      const result = await runGate(fixture);
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal(result.stdout, 'Private authority boundary verified.\n');
+    } finally {
+      await cleanupFixture(fixture);
+    }
+  });
 });
 
 test('boundary verifier source remains standard-library only', async () => {
