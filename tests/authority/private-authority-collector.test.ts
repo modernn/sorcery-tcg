@@ -15,6 +15,9 @@ import {
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
 const SCRIPT_PATH = join(REPOSITORY_ROOT, 'scripts', 'collect-private-authority.ps1');
+const FRESH_AUTHORIZATION_REFERENCE = 'phase-01-20260827-private-reacquisition-1';
+const FRESH_REVISION_ID = 'official-2026-08-27-v3';
+const FRESH_ACQUISITION_METHOD = 'user-authorized-user-run-one-shot-powershell';
 const OFFICIAL_URLS = Object.freeze({
   'rulebook/rulebook-current.pdf':
     'https://sorcerytcg.com/news/sorcery-contested-realm-december-2025-rulebook-update',
@@ -94,7 +97,6 @@ type Fixture = Readonly<{
   backupRoot: string;
   lockPath: string;
   authorizationPath: string;
-  retryAuthorizationPath: string;
 }>;
 type ProcessResult = Readonly<{ code: number | null; stdout: string; stderr: string }>;
 
@@ -159,14 +161,7 @@ async function createFixture(): Promise<Fixture> {
     '.local',
     'authority',
     'authorizations',
-    'quick-260825-mhh.consumed.json',
-  );
-  const retryAuthorizationPath = join(
-    repositoryRoot,
-    '.local',
-    'authority',
-    'authorizations',
-    'quick-260825-mhh-retry-1.consumed.json',
+    `${FRESH_AUTHORIZATION_REFERENCE}.consumed.json`,
   );
   await mkdir(repositoryRoot, { recursive: true });
   return {
@@ -176,7 +171,6 @@ async function createFixture(): Promise<Fixture> {
     backupRoot,
     lockPath,
     authorizationPath,
-    retryAuthorizationPath,
   };
 }
 
@@ -279,7 +273,7 @@ async function invokeLoopback(
     maxTotalBytes?: number;
     faultPoint?: string;
     pwshTimeoutMilliseconds?: number;
-    userAuthorizationReference?: string;
+    userAuthorizationReference?: string | null;
     acknowledgePrivateUseRisk?: boolean;
   }> = {},
 ): Promise<ProcessResult> {
@@ -293,7 +287,10 @@ async function invokeLoopback(
       bodyTimeoutSeconds: options.bodyTimeoutSeconds ?? 3,
       maxTotalBytes: options.maxTotalBytes ?? 131_072,
       faultPoint: options.faultPoint ?? null,
-      userAuthorizationReference: options.userAuthorizationReference ?? null,
+      userAuthorizationReference:
+        'userAuthorizationReference' in options
+          ? (options.userAuthorizationReference ?? null)
+          : FRESH_AUTHORIZATION_REFERENCE,
       acknowledgePrivateUseRisk: options.acknowledgePrivateUseRisk ?? true,
     }),
   );
@@ -497,8 +494,18 @@ test('offline mode verifies complete local roots without transport or publicatio
       .replace(transportAnchor, `throw 'OFFLINE_TRANSPORT_CANARY'\n    ${transportAnchor}`);
     const offlineScriptPath = join(fixture.sandbox, 'collect-private-authority-offline.ps1');
     await writeFile(offlineScriptPath, offlineScript, 'utf8');
+    const historicalAuthorizationPath = join(
+      fixture.repositoryRoot,
+      '.local',
+      'authority',
+      'authorizations',
+      'quick-260825-mhh-retry-1.consumed.json',
+    );
+    await mkdir(dirname(historicalAuthorizationPath), { recursive: true });
+    await writeFile(historicalAuthorizationPath, 'unchanged historical authorization');
     const before = await captureExistingRootBytes(fixture);
     const lockBefore = await readFile(fixture.lockPath);
+    const authorizationBefore = await readFile(historicalAuthorizationPath);
 
     const result = await runPwsh(
       ['-File', offlineScriptPath, '-VerifyExistingRoots', '-LockPath', fixture.lockPath],
@@ -511,6 +518,59 @@ test('offline mode verifies complete local roots without transport or publicatio
     assert.equal(`${result.stdout}${result.stderr}`.includes('OFFLINE_TRANSPORT_CANARY'), false);
     assert.deepEqual(await captureExistingRootBytes(fixture), before);
     assert.deepEqual(await readFile(fixture.lockPath), lockBefore);
+    assert.deepEqual(await readFile(historicalAuthorizationPath), authorizationBefore);
+  } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
+test('offline authorization identity accepts historical and fresh exact pairs only', async () => {
+  const fixture = await createFixture();
+  try {
+    await createExistingRootsLock(fixture);
+    const historicalLock = JSON.parse(await readFile(fixture.lockPath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    for (const identity of [
+      {
+        acquisitionMethod: 'user-authorized-agent-run-one-shot-powershell',
+        authorizationReference: 'quick-260825-mhh-retry-1',
+        accepted: true,
+      },
+      {
+        acquisitionMethod: FRESH_ACQUISITION_METHOD,
+        authorizationReference: FRESH_AUTHORIZATION_REFERENCE,
+        accepted: true,
+      },
+      {
+        acquisitionMethod: 'user-authorized-agent-run-one-shot-powershell',
+        authorizationReference: FRESH_AUTHORIZATION_REFERENCE,
+        accepted: false,
+      },
+      {
+        acquisitionMethod: FRESH_ACQUISITION_METHOD,
+        authorizationReference: 'quick-260825-mhh-retry-1',
+        accepted: false,
+      },
+    ] as const) {
+      await writeFile(
+        fixture.lockPath,
+        JSON.stringify({ ...historicalLock, acquisitionMethod: identity.acquisitionMethod, authorizationReference: identity.authorizationReference }) + '\n',
+      );
+      const result = await runPwsh([
+        '-File',
+        SCRIPT_PATH,
+        '-VerifyExistingRoots',
+        '-LockPath',
+        fixture.lockPath,
+      ]);
+      assert.equal(result.code === 0, identity.accepted);
+      assert.equal(
+        result.stderr.trim(),
+        identity.accepted ? '' : 'Private authority existing-root verification failed.',
+      );
+    }
   } finally {
     await cleanupFixture(fixture);
   }
@@ -644,15 +704,39 @@ test('dot-sourcing exposes only the closed collector surface and forwards author
 test('direct wrapper rejects missing backup or acknowledgment before filesystem work', async () => {
   const fixture = await createFixture();
   try {
-    const noBackup = await runPwsh(['-File', SCRIPT_PATH, '-AcknowledgePrivateUseRisk']);
+    const noBackup = await runPwsh([
+      '-File',
+      SCRIPT_PATH,
+      '-AcknowledgePrivateUseRisk',
+      '-UserAuthorizationReference',
+      FRESH_AUTHORIZATION_REFERENCE,
+    ]);
     assert.notEqual(noBackup.code, 0);
     assert.equal(noBackup.stdout, '');
     assert.equal(noBackup.stderr.trim(), 'Private authority collection failed.');
 
-    const noAcknowledgment = await runPwsh(['-File', SCRIPT_PATH, '-BackupRoot', fixture.backupRoot]);
+    const noAcknowledgment = await runPwsh([
+      '-File',
+      SCRIPT_PATH,
+      '-BackupRoot',
+      fixture.backupRoot,
+      '-UserAuthorizationReference',
+      FRESH_AUTHORIZATION_REFERENCE,
+    ]);
     assert.notEqual(noAcknowledgment.code, 0);
     assert.equal(noAcknowledgment.stdout, '');
     assert.equal(noAcknowledgment.stderr.trim(), 'Private authority collection failed.');
+
+    const noAuthorization = await runPwsh([
+      '-File',
+      SCRIPT_PATH,
+      '-BackupRoot',
+      fixture.backupRoot,
+      '-AcknowledgePrivateUseRisk',
+    ]);
+    assert.notEqual(noAuthorization.code, 0);
+    assert.equal(noAuthorization.stdout, '');
+    assert.equal(noAuthorization.stderr.trim(), 'Private authority collection failed.');
     assert.deepEqual(await readdir(fixture.sandbox), ['repository']);
   } finally {
     await cleanupFixture(fixture);
@@ -666,7 +750,7 @@ test('every exported collection path requires acknowledgment before authorizatio
     const exported = await runPwsh(
       [
         '-Command',
-        '. $env:SORCERY_COLLECTOR_SCRIPT; Invoke-PrivateAuthorityCollection -BackupRoot relative -UserAuthorizationReference unknown',
+        `. $env:SORCERY_COLLECTOR_SCRIPT; Invoke-PrivateAuthorityCollection -BackupRoot relative -UserAuthorizationReference ${FRESH_AUTHORIZATION_REFERENCE}`,
       ],
       { SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH },
     );
@@ -678,23 +762,24 @@ test('every exported collection path requires acknowledgment before authorizatio
     const descriptors = testDescriptors(`http://127.0.0.1:${port}`);
     const missing = await invokeLoopback(fixture, descriptors, {
       acknowledgePrivateUseRisk: false,
-      userAuthorizationReference: 'quick-260825-mhh-retry-1',
+      userAuthorizationReference: FRESH_AUTHORIZATION_REFERENCE,
     });
     assert.notEqual(missing.code, 0);
     assert.match(missing.stderr, /AcknowledgePrivateUseRisk/);
     assert.equal(authority.requests.length, 0);
-    assert.equal(await stat(fixture.retryAuthorizationPath).then(() => true, () => false), false);
+    assert.equal(await stat(fixture.authorizationPath).then(() => true, () => false), false);
     assert.equal(await stat(fixture.primaryRoot).then(() => true, () => false), false);
     assert.equal(await stat(fixture.backupRoot).then(() => true, () => false), false);
     assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
 
     const acknowledged = await invokeLoopback(fixture, descriptors, {
-      userAuthorizationReference: 'quick-260825-mhh-retry-1',
+      userAuthorizationReference: FRESH_AUTHORIZATION_REFERENCE,
     });
     assert.equal(acknowledged.code, 0, acknowledged.stderr);
     assert.ok(authority.requests.length > 0);
     const lock = JSON.parse(await readFile(fixture.lockPath, 'utf8')) as Record<string, unknown>;
-    assert.equal(lock.authorizationReference, 'quick-260825-mhh-retry-1');
+    assert.equal(lock.acquisitionMethod, FRESH_ACQUISITION_METHOD);
+    assert.equal(lock.authorizationReference, FRESH_AUTHORIZATION_REFERENCE);
     assert.deepEqual(lock.operatingAcknowledgment, {
       scope: 'private-local-noncommercial',
       noRedistributionReleaseHostingUploadOrArtwork: true,
@@ -709,7 +794,7 @@ test('every exported collection path requires acknowledgment before authorizatio
   }
 });
 
-test('only the two exact agent authorizations are consumed independently before transport', async () => {
+test('phase-01-20260827-private-reacquisition-1 is the only authorization and is consumed before transport', async () => {
   const fixture = await createFixture();
   const authority = createHappyAuthorityServer();
   try {
@@ -718,14 +803,16 @@ test('only the two exact agent authorizations are consumed independently before 
     const descriptors = testDescriptors(`http://127.0.0.1:${port}`);
 
     for (const reference of [
+      null,
+      '',
+      ' ',
       'unknown',
-      ' quick-260825-mhh',
-      'quick-260825-mhh ',
-      'QUICK-260825-MHH',
-      ' quick-260825-mhh-retry-1',
-      'quick-260825-mhh-retry-1 ',
-      'QUICK-260825-MHH-RETRY-1',
-      'quick-260825-mhh-retry-2',
+      'quick-260825-mhh',
+      'quick-260825-mhh-retry-1',
+      ` ${FRESH_AUTHORIZATION_REFERENCE}`,
+      `${FRESH_AUTHORIZATION_REFERENCE} `,
+      FRESH_AUTHORIZATION_REFERENCE.toUpperCase(),
+      `${FRESH_AUTHORIZATION_REFERENCE}-retry`,
     ]) {
       const rejected = await invokeLoopback(fixture, descriptors, {
         userAuthorizationReference: reference,
@@ -738,7 +825,7 @@ test('only the two exact agent authorizations are consumed independently before 
 
     const consumed = await invokeLoopback(fixture, descriptors, {
       faultPoint: 'after-authorization-consumption',
-      userAuthorizationReference: 'quick-260825-mhh',
+      userAuthorizationReference: FRESH_AUTHORIZATION_REFERENCE,
     });
     assert.notEqual(consumed.code, 0);
     assert.match(consumed.stderr, /after-authorization-consumption/i);
@@ -754,47 +841,20 @@ test('only the two exact agent authorizations are consumed independently before 
       'schemaVersion',
     ]);
     assert.equal(record.schemaVersion, 1);
-    assert.equal(record.revisionId, 'official-2026-08-20');
-    assert.equal(record.acquisitionMethod, 'user-authorized-agent-run-one-shot-powershell');
-    assert.equal(record.authorizationReference, 'quick-260825-mhh');
+    assert.equal(record.revisionId, FRESH_REVISION_ID);
+    assert.equal(record.acquisitionMethod, FRESH_ACQUISITION_METHOD);
+    assert.equal(record.authorizationReference, FRESH_AUTHORIZATION_REFERENCE);
     assert.match(String(record.consumedAt), /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     assert.doesNotMatch(recordBytes, /https?:|primaryRoot|backupRoot|locator/i);
 
     const retried = await invokeLoopback(fixture, descriptors, {
-      userAuthorizationReference: 'quick-260825-mhh',
+      userAuthorizationReference: FRESH_AUTHORIZATION_REFERENCE,
     });
     assert.notEqual(retried.code, 0);
     assert.match(retried.stderr, /authorization.*consumed|already exists/i);
     assert.equal(authority.requests.length, 0);
     assert.equal(await readFile(fixture.authorizationPath, 'utf8'), recordBytes);
 
-    const retryConsumed = await invokeLoopback(fixture, descriptors, {
-      faultPoint: 'after-authorization-consumption',
-      userAuthorizationReference: 'quick-260825-mhh-retry-1',
-    });
-    assert.notEqual(retryConsumed.code, 0);
-    assert.match(retryConsumed.stderr, /after-authorization-consumption/i);
-    assert.equal(authority.requests.length, 0);
-
-    const retryRecordBytes = await readFile(fixture.retryAuthorizationPath, 'utf8');
-    const retryRecord = JSON.parse(retryRecordBytes) as Record<string, unknown>;
-    assert.deepEqual(Object.keys(retryRecord).sort(), Object.keys(record).sort());
-    assert.equal(retryRecord.schemaVersion, 1);
-    assert.equal(retryRecord.revisionId, 'official-2026-08-20');
-    assert.equal(retryRecord.acquisitionMethod, 'user-authorized-agent-run-one-shot-powershell');
-    assert.equal(retryRecord.authorizationReference, 'quick-260825-mhh-retry-1');
-    assert.match(String(retryRecord.consumedAt), /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
-    assert.doesNotMatch(retryRecordBytes, /https?:|primaryRoot|backupRoot|locator/i);
-    assert.equal(await readFile(fixture.authorizationPath, 'utf8'), recordBytes);
-
-    const retryBlocked = await invokeLoopback(fixture, descriptors, {
-      userAuthorizationReference: 'quick-260825-mhh-retry-1',
-    });
-    assert.notEqual(retryBlocked.code, 0);
-    assert.match(retryBlocked.stderr, /authorization.*consumed|already exists/i);
-    assert.equal(authority.requests.length, 0);
-    assert.equal(await readFile(fixture.retryAuthorizationPath, 'utf8'), retryRecordBytes);
-    assert.equal(await readFile(fixture.authorizationPath, 'utf8'), recordBytes);
   } finally {
     await close(authority.server);
     await cleanupFixture(fixture);
@@ -812,13 +872,13 @@ test('authorized success and transport failure remain consumed after cleanup and
         const descriptors = testDescriptors(`http://127.0.0.1:${port}`);
         const first = await invokeLoopback(fixture, descriptors, {
           ...(scenario === 'success' ? {} : { faultPoint: 'after-staged-verification' }),
-          userAuthorizationReference: 'quick-260825-mhh',
+          userAuthorizationReference: FRESH_AUTHORIZATION_REFERENCE,
         });
         if (scenario === 'success') {
           assert.equal(first.code, 0, first.stderr);
           const lock = JSON.parse(await readFile(fixture.lockPath, 'utf8')) as Record<string, unknown>;
-          assert.equal(lock.acquisitionMethod, 'user-authorized-agent-run-one-shot-powershell');
-          assert.equal(lock.authorizationReference, 'quick-260825-mhh');
+          assert.equal(lock.acquisitionMethod, FRESH_ACQUISITION_METHOD);
+          assert.equal(lock.authorizationReference, FRESH_AUTHORIZATION_REFERENCE);
         } else {
           assert.notEqual(first.code, 0);
           assert.match(first.stderr, /after-staged-verification/i);
@@ -832,7 +892,7 @@ test('authorized success and transport failure remain consumed after cleanup and
         await rm(fixture.backupRoot, { recursive: true, force: true });
         await rm(fixture.lockPath, { force: true });
         const retried = await invokeLoopback(fixture, descriptors, {
-          userAuthorizationReference: 'quick-260825-mhh',
+          userAuthorizationReference: FRESH_AUTHORIZATION_REFERENCE,
         });
         assert.notEqual(retried.code, 0);
         assert.match(retried.stderr, /authorization.*consumed|already exists/i);
@@ -855,7 +915,7 @@ test('concurrent authorized invocations let at most one cross the atomic consump
     const descriptors = testDescriptors(`http://127.0.0.1:${port}`);
     const options = {
       faultPoint: 'after-authorization-consumption',
-      userAuthorizationReference: 'quick-260825-mhh',
+      userAuthorizationReference: FRESH_AUTHORIZATION_REFERENCE,
     } as const;
     const results = await Promise.all([
       invokeLoopback(fixture, descriptors, options),
@@ -872,6 +932,19 @@ test('concurrent authorized invocations let at most one cross the atomic consump
 });
 
 test('offline production manifest locks the seven non-artwork sources', async () => {
+  const source = await readFile(SCRIPT_PATH, 'utf8');
+  const configuration = /function Get-ProductionCollectionConfiguration \{(?<body>[\s\S]*?)\n\}/.exec(
+    source,
+  )?.groups?.body;
+  assert.ok(configuration);
+  assert.match(configuration, new RegExp(`inputs/${FRESH_REVISION_ID}/primary`));
+  assert.match(configuration, new RegExp(`locks/${FRESH_REVISION_ID}/source-set-lock\\.json`));
+  assert.match(
+    configuration,
+    new RegExp('sorcery-tcg-authority-backup-' + FRESH_REVISION_ID),
+  );
+  assert.doesNotMatch(configuration, /official-2026-08-20/);
+
   const result = await runPwsh([
     '-Command',
     '. $env:SORCERY_COLLECTOR_SCRIPT; Get-ProductionSourceDescriptors | ConvertTo-Json -Depth 16 -Compress',
@@ -1088,8 +1161,12 @@ test('direct output is fixed and sanitized for synthetic success and canary fail
     'Invoke-PrivateAuthorityCollection -BackupRoot $BackupRoot -AcknowledgePrivateUseRisk:$AcknowledgePrivateUseRisk -UserAuthorizationReference $UserAuthorizationReference';
   const canaries = [
     join(fixture.sandbox, 'CANARY-PRIVATE-ROOT'),
+    fixture.lockPath,
+    fixture.authorizationPath,
+    FRESH_AUTHORIZATION_REFERENCE,
     'https://canary.invalid/private/path?secret=CANARY_QUERY',
     'sourceSetRootHash=CANARY_LOCK_HASH',
+    'Synthetic Adept',
   ] as const;
   try {
     const source = await readFile(SCRIPT_PATH, 'utf8');
@@ -1109,6 +1186,8 @@ test('direct output is fixed and sanitized for synthetic success and canary fail
       '-BackupRoot',
       fixture.backupRoot,
       '-AcknowledgePrivateUseRisk',
+      '-UserAuthorizationReference',
+      FRESH_AUTHORIZATION_REFERENCE,
     ]);
     assert.equal(success.code, 0, success.stderr);
     assert.equal(success.stdout.trim(), 'Private authority collection completed.');
@@ -1126,6 +1205,8 @@ test('direct output is fixed and sanitized for synthetic success and canary fail
       '-BackupRoot',
       fixture.backupRoot,
       '-AcknowledgePrivateUseRisk',
+      '-UserAuthorizationReference',
+      FRESH_AUTHORIZATION_REFERENCE,
     ]);
     assert.notEqual(failure.code, 0);
     assert.equal(failure.stdout, '');
@@ -1284,7 +1365,7 @@ test('rulebook accepts only EOF with no bytes LF CR or CRLF after it', async (co
   });
 });
 
-test('loopback seam rejects non-loopback request targets before filesystem mutation', async () => {
+test('authorization is consumed before loopback request-target validation', async () => {
   const fixture = await createFixture();
   try {
     const descriptors = testDescriptors('http://127.0.0.1:1').map((value, index) =>
@@ -1293,8 +1374,14 @@ test('loopback seam rejects non-loopback request targets before filesystem mutat
     const result = await invokeLoopback(fixture, descriptors);
     assert.notEqual(result.code, 0);
     assert.match(result.stderr, /loopback/i);
+    assert.equal(await stat(fixture.authorizationPath).then(() => true, () => false), true);
     assert.equal(await stat(fixture.primaryRoot).then(() => true, () => false), false);
     assert.equal(await stat(fixture.backupRoot).then(() => true, () => false), false);
+    assert.equal(await stat(fixture.lockPath).then(() => true, () => false), false);
+
+    const retried = await invokeLoopback(fixture, descriptors);
+    assert.notEqual(retried.code, 0);
+    assert.match(retried.stderr, /authorization.*consumed|already exists/i);
   } finally {
     await cleanupFixture(fixture);
   }
@@ -1593,7 +1680,7 @@ test('publication creates independent exact trees and a verifier-approved privat
     assert.notEqual(lockBytes[0], 0xef);
     const lock = JSON.parse(lockBytes.toString('utf8')) as {
       acquisitionMethod: string;
-      authorizationReference?: string;
+      authorizationReference: string;
       primaryRoot: string;
       backupRoot: string;
       entries: readonly PrivateAuthoritySourceEntry[];
@@ -1601,8 +1688,8 @@ test('publication creates independent exact trees and a verifier-approved privat
       operatingAcknowledgment: Record<string, unknown>;
       rulebookAcquisitionEvidence: Record<string, unknown>;
     };
-    assert.equal(lock.acquisitionMethod, 'user-run-one-shot-powershell');
-    assert.equal('authorizationReference' in lock, false);
+    assert.equal(lock.acquisitionMethod, FRESH_ACQUISITION_METHOD);
+    assert.equal(lock.authorizationReference, FRESH_AUTHORIZATION_REFERENCE);
     assert.equal(lock.primaryRoot, resolve(fixture.primaryRoot));
     assert.equal(lock.backupRoot, resolve(fixture.backupRoot));
     assert.deepEqual(
@@ -1640,7 +1727,7 @@ test('publication creates independent exact trees and a verifier-approved privat
   }
 });
 
-test('preflight rejects existing or overlapping destinations before any request', async (context) => {
+test('authorized preflight consumes authorization before rejecting destinations or requests', async (context) => {
   const cases = [
     {
       name: 'existing primary',
@@ -1707,6 +1794,14 @@ test('preflight rejects existing or overlapping destinations before any request'
           const result = await invokeLoopback(fixture, testDescriptors(`http://127.0.0.1:${port}`));
           assert.notEqual(result.code, 0);
           assert.match(result.stderr, scenario.expected);
+          assert.equal(requestCount, before);
+          assert.equal(await stat(fixture.authorizationPath).then(() => true, () => false), true);
+          const retried = await invokeLoopback(
+            fixture,
+            testDescriptors('http://127.0.0.1:' + String(port)),
+          );
+          assert.notEqual(retried.code, 0);
+          assert.match(retried.stderr, /authorization.*consumed|already exists/i);
           assert.equal(requestCount, before);
           if (scenario.name.startsWith('existing')) {
             const sentinel =

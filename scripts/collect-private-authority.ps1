@@ -698,8 +698,9 @@ function Get-ProductionCollectionConfiguration {
     $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $script:CollectorScriptRoot '..'))
     return [pscustomobject]@{
         repositoryRoot = $repositoryRoot
-        primaryRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot '.local/authority/inputs/official-2026-08-20/primary'))
-        lockPath = [IO.Path]::GetFullPath((Join-Path $repositoryRoot '.local/authority/locks/official-2026-08-20/source-set-lock.json'))
+        primaryRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot '.local/authority/inputs/official-2026-08-27-v3/primary'))
+        backupRoot = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $repositoryRoot) 'sorcery-tcg-authority-backup-official-2026-08-27-v3'))
+        lockPath = [IO.Path]::GetFullPath((Join-Path $repositoryRoot '.local/authority/locks/official-2026-08-27-v3/source-set-lock.json'))
         descriptors = @(Get-ProductionSourceDescriptors)
         headerTimeoutSeconds = 30
         bodyTimeoutSeconds = 900
@@ -711,6 +712,7 @@ function Assert-FixedProductionConfiguration {
     param(
         [Parameter(Mandatory)][string]$RepositoryRoot,
         [Parameter(Mandatory)][string]$PrimaryRoot,
+        [Parameter(Mandatory)][string]$BackupRoot,
         [Parameter(Mandatory)][string]$LockPath,
         [Parameter(Mandatory)][object[]]$Descriptors,
         [Parameter(Mandatory)][int]$HeaderTimeoutSeconds,
@@ -724,6 +726,7 @@ function Assert-FixedProductionConfiguration {
     $expectedDescriptors = ConvertTo-Json -InputObject @($expected.descriptors) -Depth 16 -Compress
     if ((Get-NormalizedPath $RepositoryRoot) -ne (Get-NormalizedPath $expected.repositoryRoot) -or
         (Get-NormalizedPath $PrimaryRoot) -ne (Get-NormalizedPath $expected.primaryRoot) -or
+        (Get-NormalizedPath $BackupRoot) -ne (Get-NormalizedPath $expected.backupRoot) -or
         (Get-NormalizedPath $LockPath) -ne (Get-NormalizedPath $expected.lockPath) -or
         $actualDescriptors -cne $expectedDescriptors -or
         $HeaderTimeoutSeconds -ne $expected.headerTimeoutSeconds -or
@@ -828,18 +831,8 @@ function New-PrivateAuthorityAcquisitionContext {
         [AllowNull()][string]$UserAuthorizationReference
     )
 
-    if ([string]::IsNullOrEmpty($UserAuthorizationReference)) {
-        return [pscustomobject]@{
-            acquisitionMethod = 'user-run-one-shot-powershell'
-            authorizationReference = $null
-        }
-    }
-    $allowedAuthorizationReferences = @(
-        'quick-260825-mhh',
-        'quick-260825-mhh-retry-1'
-    )
-    if ($allowedAuthorizationReferences -cnotcontains $UserAuthorizationReference) {
-        throw 'User authorization reference must be absent or exactly quick-260825-mhh or quick-260825-mhh-retry-1.'
+    if ($UserAuthorizationReference -cne 'phase-01-20260827-private-reacquisition-1') {
+        throw 'User authorization reference is invalid.'
     }
 
     $authorizationPath = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot ".local/authority/authorizations/$UserAuthorizationReference.consumed.json"))
@@ -849,8 +842,8 @@ function New-PrivateAuthorityAcquisitionContext {
     try {
         Write-NewUtf8Json $authorizationPath ([ordered]@{
             schemaVersion = 1
-            revisionId = 'official-2026-08-20'
-            acquisitionMethod = 'user-authorized-agent-run-one-shot-powershell'
+            revisionId = 'official-2026-08-27-v3'
+            acquisitionMethod = 'user-authorized-user-run-one-shot-powershell'
             authorizationReference = $UserAuthorizationReference
             consumedAt = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [Globalization.CultureInfo]::InvariantCulture)
         })
@@ -862,7 +855,7 @@ function New-PrivateAuthorityAcquisitionContext {
         throw
     }
     return [pscustomobject]@{
-        acquisitionMethod = 'user-authorized-agent-run-one-shot-powershell'
+        acquisitionMethod = 'user-authorized-user-run-one-shot-powershell'
         authorizationReference = $UserAuthorizationReference
     }
 }
@@ -989,9 +982,11 @@ function Read-ConsumedPrivateAuthorityLock {
     if (@(Compare-Object ($requiredFields | Sort-Object) ($actualFields | Sort-Object)).Count -ne 0) {
         throw 'Consumed lock fields are invalid'
     }
-    if ($lock.schemaVersion -ne 1 -or
-        $lock.acquisitionMethod -cne 'user-authorized-agent-run-one-shot-powershell' -or
-        @('quick-260825-mhh', 'quick-260825-mhh-retry-1') -cnotcontains [string]$lock.authorizationReference) {
+    $historicalIdentity = $lock.acquisitionMethod -ceq 'user-authorized-agent-run-one-shot-powershell' -and
+        @('quick-260825-mhh', 'quick-260825-mhh-retry-1') -ccontains [string]$lock.authorizationReference
+    $freshIdentity = $lock.acquisitionMethod -ceq 'user-authorized-user-run-one-shot-powershell' -and
+        [string]$lock.authorizationReference -ceq 'phase-01-20260827-private-reacquisition-1'
+    if ($lock.schemaVersion -ne 1 -or (-not $historicalIdentity -and -not $freshIdentity)) {
         throw 'Consumed lock acquisition identity is invalid'
     }
     if ([string]::IsNullOrWhiteSpace([string]$lock.primaryRoot) -or
@@ -1117,15 +1112,18 @@ function Invoke-PrivateAuthorityCollectionCore {
     )
 
     if (-not $AcknowledgePrivateUseRisk) { throw 'AcknowledgePrivateUseRisk is required before collection.' }
+    if ($UserAuthorizationReference -cne 'phase-01-20260827-private-reacquisition-1') {
+        throw 'User authorization reference is invalid.'
+    }
+    $acquisition = New-PrivateAuthorityAcquisitionContext $RepositoryRoot $UserAuthorizationReference
+    Invoke-TestFault $FaultPoint 'after-authorization-consumption'
     if ($LoopbackOnly) {
         Assert-LoopbackDescriptors $Descriptors
     }
     else {
-        Assert-FixedProductionConfiguration $RepositoryRoot $PrimaryRoot $LockPath $Descriptors $HeaderTimeoutSeconds $BodyTimeoutSeconds $MaxTotalBytes $FaultPoint
+        Assert-FixedProductionConfiguration $RepositoryRoot $PrimaryRoot $BackupRoot $LockPath $Descriptors $HeaderTimeoutSeconds $BodyTimeoutSeconds $MaxTotalBytes $FaultPoint
     }
     $paths = Resolve-CollectionPaths $RepositoryRoot $PrimaryRoot $BackupRoot $LockPath
-    $acquisition = New-PrivateAuthorityAcquisitionContext $paths.repositoryRoot $UserAuthorizationReference
-    Invoke-TestFault $FaultPoint 'after-authorization-consumption'
     $runId = [Guid]::NewGuid().ToString('N')
     $primaryStage = "$($paths.primaryRoot).collecting-$runId"
     $backupStage = "$($paths.backupRoot).collecting-$runId"

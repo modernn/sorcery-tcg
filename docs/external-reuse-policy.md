@@ -2,35 +2,28 @@
 
 This policy implements D-08, D-09, and D-11 for the current private, local, noncommercial Sorcery Simulator. It is an operating boundary, not legal advice or a claim of legal certainty. The narrow Phase 1 exception below records the user's risk acceptance; it does not establish legal permission. Any broader use requires written publisher permission and a separate approved plan.
 
-## Exactly three Phase 1 acquisition evidence pairs
+## Exactly four closed Phase 1 acquisition evidence identities
 
-The fixed one-shot collector accepts exactly three acquisition method/reference pairs; no other method/reference pair is valid:
+The project recognizes exactly four closed acquisition method/reference identities:
 
-- `acquisitionMethod: user-run-one-shot-powershell` with `authorizationReference` absent.
-- `acquisitionMethod: user-authorized-agent-run-one-shot-powershell` with `authorizationReference: quick-260825-mhh` plus durable ignored `.local/authority/authorizations/quick-260825-mhh.consumed.json`; this was the initial 2026-08-25 attempt and remains consumed forever.
-- `acquisitionMethod: user-authorized-agent-run-one-shot-powershell` with `authorizationReference: quick-260825-mhh-retry-1` plus its distinct durable ignored `.local/authority/authorizations/quick-260825-mhh-retry-1.consumed.json`; this is the single fresh attempt authorized by the user's later `Authorize new run` instruction after the PDF and changelog parser fixes.
+- `acquisitionMethod: user-run-one-shot-powershell` with `authorizationReference` absent; this is historical evidence only.
+- `acquisitionMethod: user-authorized-agent-run-one-shot-powershell` with `authorizationReference: quick-260825-mhh` and its durable ignored consumed record; this initial 2026-08-25 attempt remains consumed forever.
+- `acquisitionMethod: user-authorized-agent-run-one-shot-powershell` with `authorizationReference: quick-260825-mhh-retry-1` and its distinct durable ignored consumed record; this later 2026-08-25 attempt remains consumed forever.
+- `acquisitionMethod: user-authorized-user-run-one-shot-powershell` with `authorizationReference: phase-01-20260827-private-reacquisition-1` and `.local/authority/authorizations/phase-01-20260827-private-reacquisition-1.consumed.json`; this is the one user-personal attempt for `official-2026-08-27-v3`.
 
-The personal user-run command remains:
+The first three identities and every `official-2026-08-20` root, lock, receipt, and authorization record are immutable historical evidence. Historical locks that satisfy the existing verifier remain eligible only for read-only verification; none can authorize new transport. Production acquisition now accepts only the exact fourth identity together with `-AcknowledgePrivateUseRisk`.
 
-```powershell
-pwsh -NoProfile -NonInteractive -File scripts/collect-private-authority.ps1 -BackupRoot <absolute-independent-path> -AcknowledgePrivateUseRisk
-```
-
-The initial explicitly authorized agent-run command was:
+The user explicitly authorized one additional private-local, noncommercial, no-redistribution acquisition of the fixed seven official non-artwork sources and acknowledged the private-use risk. The user—not an agent, test, scheduled job, or recurring process—must personally run this exact command once from the repository root:
 
 ```powershell
-pwsh -NoProfile -NonInteractive -File scripts/collect-private-authority.ps1 -BackupRoot <absolute-independent-path> -AcknowledgePrivateUseRisk -UserAuthorizationReference quick-260825-mhh
+$backupRoot = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent (Get-Location).Path) 'sorcery-tcg-authority-backup-official-2026-08-27-v3')); pwsh -NoProfile -NonInteractive -File .\scripts\collect-private-authority.ps1 -BackupRoot $backupRoot -AcknowledgePrivateUseRisk -UserAuthorizationReference phase-01-20260827-private-reacquisition-1
 ```
 
-The fresh explicitly authorized retry command is:
+The collector hard-binds the repository-local primary to `.local/authority/inputs/official-2026-08-27-v3/primary/`, the lock to `.local/authority/locks/official-2026-08-27-v3/source-set-lock.json`, and the independent backup to the fixed sibling named `sorcery-tcg-authority-backup-official-2026-08-27-v3` beneath the repository parent. All four fresh destinations must be absent before the command runs.
 
-```powershell
-pwsh -NoProfile -NonInteractive -File scripts/collect-private-authority.ps1 -BackupRoot <absolute-independent-path> -AcknowledgePrivateUseRisk -UserAuthorizationReference quick-260825-mhh-retry-1
-```
+The fourth authorization is atomically consumed before request construction, descriptor or destination preflight, or transport. Success, failure, cleanup, or deletion of primary, backup, lock, or other outputs never renews it; the consumed record must not be removed, reset, changed, or reused. A failed attempt is a hard stop requiring a separate future explicit authorization and plan, never a rerun or evasion.
 
-Each fixed agent authorization permits exactly one attempted invocation for `official-2026-08-20`. Each is independently exhausted when its own consumed record is atomically created before transport, not when primary or lock publication succeeds. Success, failure, cleanup, or deletion of collected primary, backup, or lock outputs does not renew either authorization; neither consumed record may ever be removed, reset, changed, or reused. These narrow historical authorizations supersede only the prior actor restriction for their respective fixed references and create no standing permission.
-
-`-BackupRoot` must name an absent absolute destination outside the repository. The collector acquires exactly one complete official source set under `.local/authority/inputs/official-2026-08-20/primary/` and creates an independent ordinary byte-identical backup: the current standard rulebook PDF, base Constructed page, Codex, FAQ, Codex changelog, official card update notice, and full card API JSON.
+The collector acquires exactly one complete official source set: the current standard rulebook PDF, base Constructed page, Codex, FAQ, Codex changelog, official card update notice, and full card API JSON. The authorization and resulting hashes establish neither publisher permission, publisher authenticity, nor legal clearance and create no standing or broader permission.
 
 | Relative path | Official source URL | Media type |
 |---|---|---|
@@ -44,11 +37,11 @@ Each fixed agent authorization permits exactly one attempted invocation for `off
 
 There is no configurable or recurring acquisition branch. The production wrapper exposes no URL, manifest, artwork, scheduling, polling, concurrency, retry, timeout, update, or authorization-record override. It makes one bounded sequential pass over the fixed seven-source manifest, publishes no lock on failure, and stops on HTTP 401, 403, 429, CAPTCHA/block evidence, or publisher objection. It performs no retry and no evasion. It exposes no public/network HTTP card API. Later code reads only the selected validated local revision through a local TypeScript catalog/query module.
 
-The official API page describes developer access, intermittent polling, and self-hosting of required data, while the publisher Terms restrict automated access and systematic database construction without written permission and the API host's `robots.txt` disallows bots. The user accepts the identified private-use risk from this unresolved API/Terms/robots conflict by supplying `-AcknowledgePrivateUseRisk`. The collector does not establish legal permission. All other agent-run acquisition remains blocked; written publisher permission and a separate plan are required, as they are for recurring, scheduled, or unattended acquisition.
+The official API page describes developer access, intermittent polling, and self-hosting of required data, while the publisher Terms restrict automated access and systematic database construction without written permission and the API host's `robots.txt` disallows bots. The user accepts the identified private-use risk from this unresolved API/Terms/robots conflict by supplying `-AcknowledgePrivateUseRisk`. The collector does not establish legal permission. All other acquisition remains blocked; written publisher permission and a separate plan are required, as they are for recurring, scheduled, or unattended acquisition.
 
 ## Private source-set lock and backup
 
-The collector must block unless the user supplies the explicit risk acknowledgment. It creates a seven-entry source set lock containing exactly one of the three allowed method/reference evidence pairs above, exact absolute private roots, and for every row:
+The collector must block unless the user supplies the explicit risk acknowledgment and exact current reference. A current v3 run creates a seven-entry source set lock containing the exact fourth method/reference identity above and exact absolute private roots; historical locks retain their immutable historical identities for read-only verification. Every lock records:
 
 - the fixed relative path and official URL above;
 - retrieval date/time and effective date when published;
@@ -101,4 +94,4 @@ Community observations remain provenance/examples only. Official sources alone d
 
 ## Permission gate for broader use
 
-Sharing, release with publisher content, packaging or publication of official/derived content, recurring acquisition, all other agent-run acquisition, commercialization, a public/network card API, bulk art, private-CDN access, or any changed operating scope requires written publisher permission and a separate approved plan before implementation. There is no redistribution and no artwork acquisition under this exception; artwork requires its own explicit grant. Until then, the only GUI allowance is separately supplied private local images under the limited boundary above. Written permission is a future expansion trigger, not a claim that any narrow one-shot evidence pair is legally cleared.
+Sharing, release with publisher content, packaging or publication of official/derived content, recurring acquisition, all other acquisition, commercialization, a public/network card API, bulk art, private-CDN access, or any changed operating scope requires written publisher permission and a separate approved plan before implementation. There is no redistribution and no artwork acquisition under this exception; artwork requires its own explicit grant. Until then, the only GUI allowance is separately supplied private local images under the limited boundary above. Written permission is a future expansion trigger, not a claim that any narrow one-shot evidence pair is legally cleared.
