@@ -389,6 +389,181 @@ async function safeReaddir(root: string): Promise<readonly string[]> {
   });
 }
 
+async function createExistingRootsLock(fixture: Fixture): Promise<void> {
+  const sourceBytes: Record<SourcePath, Buffer> = {
+    ...SOURCE_BYTES,
+    'cards/cards.raw.json': Buffer.from(
+      `${JSON.stringify(
+        Array.from({ length: 1_100 }, (_, index) =>
+          syntheticOfficialCard(`Synthetic Card ${String(index)}`, `synthetic-card-${String(index)}`),
+        ),
+      )}\n`,
+    ),
+  };
+
+  for (const root of [fixture.primaryRoot, fixture.backupRoot]) {
+    for (const relativePath of PRIVATE_AUTHORITY_SOURCE_PATHS) {
+      const destination = join(root, ...relativePath.split('/'));
+      await mkdir(dirname(destination), { recursive: true });
+      await writeFile(destination, sourceBytes[relativePath]);
+    }
+  }
+
+  const effectiveDates: Partial<Record<SourcePath, string>> = {
+    'rulebook/rulebook-current.pdf': '2025-12-19',
+    'codex/changelog-current.html': '2026-08-20',
+    'updates/card-updates-2025.html': '2025-11-25',
+  };
+  const entries: PrivateAuthoritySourceEntry[] = PRIVATE_AUTHORITY_SOURCE_PATHS.map(
+    (relativePath) => ({
+      relativePath,
+      url: OFFICIAL_URLS[relativePath],
+      retrievedAt: '2026-08-20T00:00:00.000Z',
+      effectiveDate: effectiveDates[relativePath] ?? null,
+      mediaType: relativePath.endsWith('.pdf')
+        ? 'application/pdf'
+        : relativePath.endsWith('.json')
+          ? 'application/json'
+          : 'text/html',
+      byteLength: sourceBytes[relativePath].byteLength,
+      byteHash: `sha256:${createHash('sha256').update(sourceBytes[relativePath]).digest('hex')}`,
+    }),
+  );
+  const verified = await verifyPrivateSourceSet({
+    primaryRoot: fixture.primaryRoot,
+    backupRoot: fixture.backupRoot,
+    repositoryRoot: fixture.repositoryRoot,
+    entries,
+  });
+  await mkdir(dirname(fixture.lockPath), { recursive: true });
+  await writeFile(
+    fixture.lockPath,
+    `${JSON.stringify({
+      schemaVersion: 1,
+      acquisitionMethod: 'user-authorized-agent-run-one-shot-powershell',
+      authorizationReference: 'quick-260825-mhh-retry-1',
+      primaryRoot: resolve(fixture.primaryRoot),
+      backupRoot: resolve(fixture.backupRoot),
+      entries,
+      sourceSetRootHash: verified.sourceSetRootHash,
+      operatingAcknowledgment: {
+        scope: 'private-local-noncommercial',
+        noRedistributionReleaseHostingUploadOrArtwork: true,
+        apiTermsRobotsConflictAndPrivateUseRiskAccepted: true,
+        establishesLegalPermission: false,
+        stopOnBlockedStatusCaptchaOrPublisherObjection: true,
+        retryOrEvasion: false,
+      },
+      rulebookAcquisitionEvidence: {
+        sourceUrl: OFFICIAL_URLS['rulebook/rulebook-current.pdf'],
+        privateLocator: 'CANARY_PRIVATE_LOCATOR',
+        privateLocatorIsNormative: false,
+        observedFilename: 'SorceryRulebook.pdf',
+      },
+    })}\n`,
+    'utf8',
+  );
+}
+
+async function captureExistingRootBytes(fixture: Fixture): Promise<Readonly<Record<string, Buffer>>> {
+  const captured: Record<string, Buffer> = {};
+  for (const [rootName, root] of [
+    ['primary', fixture.primaryRoot],
+    ['backup', fixture.backupRoot],
+  ] as const) {
+    for (const relativePath of PRIVATE_AUTHORITY_SOURCE_PATHS) {
+      captured[`${rootName}/${relativePath}`] = await readFile(join(root, ...relativePath.split('/')));
+    }
+  }
+  return captured;
+}
+
+test('offline mode verifies complete local roots without transport or publication', async () => {
+  const fixture = await createFixture();
+  try {
+    await createExistingRootsLock(fixture);
+    const script = await readFile(SCRIPT_PATH, 'utf8');
+    const transportAnchor = '$handler = [Net.Http.HttpClientHandler]::new()';
+    assert.ok(script.includes(transportAnchor));
+    const offlineScript = script
+      .replace('-ArgumentList $PSScriptRoot', '-ArgumentList $env:SORCERY_COLLECTOR_SCRIPT_ROOT')
+      .replace(transportAnchor, `throw 'OFFLINE_TRANSPORT_CANARY'\n    ${transportAnchor}`);
+    const offlineScriptPath = join(fixture.sandbox, 'collect-private-authority-offline.ps1');
+    await writeFile(offlineScriptPath, offlineScript, 'utf8');
+    const before = await captureExistingRootBytes(fixture);
+    const lockBefore = await readFile(fixture.lockPath);
+
+    const result = await runPwsh(
+      ['-File', offlineScriptPath, '-VerifyExistingRoots', '-LockPath', fixture.lockPath],
+      { SORCERY_COLLECTOR_SCRIPT_ROOT: dirname(SCRIPT_PATH) },
+    );
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout.trim(), 'Private authority existing roots verified.');
+    assert.equal(result.stderr, '');
+    assert.equal(`${result.stdout}${result.stderr}`.includes('OFFLINE_TRANSPORT_CANARY'), false);
+    assert.deepEqual(await captureExistingRootBytes(fixture), before);
+    assert.deepEqual(await readFile(fixture.lockPath), lockBefore);
+  } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
+test('offline mode rejects incomplete existing roots with fixed sanitized output', async () => {
+  const fixture = await createFixture();
+  try {
+    await createExistingRootsLock(fixture);
+    await rm(join(fixture.backupRoot, 'codex', 'faqs-current.html'));
+
+    const result = await runPwsh([
+      '-File',
+      SCRIPT_PATH,
+      '-VerifyExistingRoots',
+      '-LockPath',
+      fixture.lockPath,
+    ]);
+
+    assert.notEqual(result.code, 0);
+    assert.equal(result.stdout, '');
+    assert.equal(result.stderr.trim(), 'Private authority existing-root verification failed.');
+    const combined = `${result.stdout}${result.stderr}`;
+    for (const secret of [
+      fixture.primaryRoot,
+      fixture.backupRoot,
+      fixture.lockPath,
+      'CANARY_PRIVATE_LOCATOR',
+      'primaryRoot',
+      'backupRoot',
+      'privateLocator',
+    ]) {
+      assert.equal(combined.includes(secret), false, `leaked private failure detail: ${secret}`);
+    }
+  } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
+test('offline mode is mutually exclusive with collection parameters', async () => {
+  const fixture = await createFixture();
+  try {
+    await createExistingRootsLock(fixture);
+    const result = await runPwsh([
+      '-File',
+      SCRIPT_PATH,
+      '-VerifyExistingRoots',
+      '-LockPath',
+      fixture.lockPath,
+      '-BackupRoot',
+      fixture.backupRoot,
+    ]);
+    assert.notEqual(result.code, 0);
+    assert.equal(result.stdout, '');
+    assert.equal(result.stderr.trim(), 'Private authority existing-root verification failed.');
+  } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
 test('dot-sourcing exposes only the closed collector surface and forwards authorization context', async () => {
   const fixture = await createFixture();
   try {
@@ -405,7 +580,13 @@ test('dot-sourcing exposes only the closed collector surface and forwards author
     const result = await runPwsh(['-Command', command], { SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH });
     assert.equal(result.code, 0, result.stderr);
     assert.deepEqual(JSON.parse(result.stdout.trim()), {
-      parameters: ['BackupRoot', 'AcknowledgePrivateUseRisk', 'UserAuthorizationReference'],
+      parameters: [
+        'BackupRoot',
+        'AcknowledgePrivateUseRisk',
+        'UserAuthorizationReference',
+        'VerifyExistingRoots',
+        'LockPath',
+      ],
       functions: [
         'Get-ProductionSourceDescriptors',
         'Invoke-PrivateAuthorityCollection',
