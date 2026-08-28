@@ -36,20 +36,20 @@ Progress: [█████████░] 93%
 
 **Velocity:**
 
-- Total plans completed: 5
-- Average duration: 28 min
-- Total execution time: 2h 20m
+- Total plans completed: 14
+- Average duration: 30 min
+- Total execution time: 6h 56m
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| Phase 1 | 5/8 | 2h 20m | 28 min |
+| Phase 1 | 14/15 | 6h 56m | 30 min |
 
 **Recent Trend:**
 
-- Last 5 plans: 15m, 28m, 21m, 34m, 42m
-- Trend: Increasing with plan scope; all gates green
+- Last 5 plans: 37m, 21m, 13m, 4m, 2h 11m
+- Trend: Latest plan included the user-gated intake and full privacy scan; all gates green
 
 *Updated after each plan completion*
 | Phase 01 P01 | 15min | 2 tasks | 11 files |
@@ -60,6 +60,9 @@ Progress: [█████████░] 93%
 | Phase 01 P06 | 9 min | 2 tasks | 3 files |
 | Phase 01 P07 | 5 min | 2 tasks | 3 files |
 | Phase 01 P08 | 33 min | 3 tasks | 12 files |
+| Phase 01 P09 | 37 min | 3 tasks | 12 files |
+| Phase 01 P10 | 21 min | 3 tasks | 5 files |
+| Phase 01 P11 | 23 min | 2 tasks | 3 files |
 | Phase 01 P12 | 13 min | 3 tasks | 5 files |
 | Phase 01 P14 | 4 min | 1 tasks | 3 files |
 | Phase 01 P15 | 2h 11m | 3 tasks | 8 files |

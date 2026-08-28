@@ -29,6 +29,7 @@ key-files:
     - scripts/verify-private-authority-boundary.ts
     - tests/authority/private-authority-collector.test.ts
     - tests/authority/private-authority-boundary.test.ts
+    - tests/private-authority/repository-boundary.test.ts
     - docs/external-reuse-policy.md
 
 key-decisions:
@@ -84,6 +85,7 @@ completed: 2026-08-27
 - `tests/private-authority/private-source-completeness.test.ts` - Opt-in real-root completeness and no-network proof.
 - `scripts/verify-private-authority-boundary.ts` - Preserves locator detection while allowing the exact generic local-evidence label.
 - `tests/authority/private-authority-boundary.test.ts` - Adds the matching synthetic boundary regression.
+- `tests/private-authority/repository-boundary.test.ts` - Keeps the release assertion on the single production boundary scanner.
 - `docs/external-reuse-policy.md` - Records the manual, private-local reuse boundary.
 - `.planning/phases/01-rules-and-data-authority/01-15-SUMMARY.md` - Records this content-free closeout.
 
