@@ -82,6 +82,7 @@ export type GameCardDefinition =
     diesAtEndOfControllerTurn?: true;
     genesisDrawSpell?: boolean;
     genesisDrawSite?: boolean;
+    genesisHealController?: 2;
     genesisLoseControllerLife?: 2;
     gainsStealthAtEndOfTurn?: boolean;
     immobile?: boolean;
@@ -864,6 +865,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.genesisDrawSpell !== undefined && typeof card.genesisDrawSpell !== 'boolean') {
     throw new RangeError(`${path}.genesisDrawSpell must be boolean`);
   }
+  if (card.genesisHealController !== undefined && card.genesisHealController !== 2) {
+    throw new RangeError(`${path}.genesisHealController must be 2`);
+  }
   if (card.genesisLoseControllerLife !== undefined && card.genesisLoseControllerLife !== 2) {
     throw new RangeError(`${path}.genesisLoseControllerLife must be 2`);
   }
@@ -877,6 +881,11 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.genesisLoseControllerLife !== undefined
     && (card.genesisDrawSite || card.genesisDrawSpell)) {
     throw new RangeError(`${path} simultaneous Genesis life loss and draw are unsupported`);
+  }
+  if (card.genesisHealController !== undefined
+    && (card.genesisDrawSite || card.genesisDrawSpell
+      || card.genesisLoseControllerLife !== undefined)) {
+    throw new RangeError(`${path} simultaneous Genesis healing and another effect are unsupported`);
   }
   if (card.gainsStealthAtEndOfTurn !== undefined && typeof card.gainsStealthAtEndOfTurn !== 'boolean') {
     throw new RangeError(`${path}.gainsStealthAtEndOfTurn must be boolean`);
@@ -950,6 +959,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   }
   if (card.waterbound
     && (card.genesisDrawSite || card.genesisDrawSpell
+      || card.genesisHealController !== undefined
       || card.genesisLoseControllerLife !== undefined)) {
     throw new RangeError(`${path} Waterbound with Genesis is unsupported`);
   }
@@ -1104,6 +1114,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               : {}),
             ...(card.genesisDrawSpell === true ? { genesisDrawSpell: true } : {}),
             ...(card.genesisDrawSite === true ? { genesisDrawSite: true } : {}),
+            ...(card.genesisHealController === 2 ? { genesisHealController: 2 as const } : {}),
             ...(card.genesisLoseControllerLife === 2 ? { genesisLoseControllerLife: 2 as const } : {}),
             ...(card.gainsStealthAtEndOfTurn === true ? { gainsStealthAtEndOfTurn: true } : {}),
             ...(card.immobile === true ? { immobile: true } : {}),
@@ -3898,6 +3909,38 @@ function applyDescriptor(
     const genesisDrawZone = definition.genesisDrawSite
       ? 'atlas'
       : definition.genesisDrawSpell ? 'spellbook' : undefined;
+    if (definition.genesisHealController === 2) {
+      const avatarDefinition = cardDefinition(settlement.state, settledPlayer.avatar.card.cardId);
+      if (avatarDefinition.cardType !== 'avatar') throw new Error('player Avatar lacks Avatar definition');
+      const [healed, amount] = healAvatar(
+        settledPlayer,
+        avatarDefinition.life,
+        definition.genesisHealController,
+      );
+      return [
+        withStateVersion(settlement.state, {
+          players: replacePlayer(settlement.state, seat, healed),
+        }),
+        [
+          ...casterStealthOutcomes,
+          summoned,
+          ...settlement.outcomes,
+          ...(amount > 0
+            ? [{
+              payload: {
+                amount,
+                attemptedAmount: definition.genesisHealController,
+                life: healed.avatar.life,
+                seat,
+                sourceInstanceId: card.instanceId,
+              },
+              type: 'avatar-healed' as const,
+            }]
+            : []),
+        ],
+        [],
+      ];
+    }
     if (definition.genesisLoseControllerLife === 2) {
       const [lifePlayer, amount, reachedDeathsDoor] = loseAvatarLife(
         settledPlayer,

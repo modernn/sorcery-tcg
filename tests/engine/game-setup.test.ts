@@ -44,6 +44,7 @@ type SpellFacts = Readonly<{
   gainsStealthAtEndOfTurn?: boolean;
   genesisDrawSpell?: boolean;
   genesisDrawSite?: boolean;
+  genesisHealController?: 2;
   genesisLoseControllerLife?: 2;
   immobile?: boolean;
   lethal?: boolean;
@@ -139,6 +140,7 @@ function cardsFor(
         gainsStealthAtEndOfTurn: facts.gainsStealthAtEndOfTurn ?? false,
         genesisDrawSpell: facts.genesisDrawSpell ?? false,
         genesisDrawSite: facts.genesisDrawSite ?? false,
+        ...(facts.genesisHealController === 2 ? { genesisHealController: 2 as const } : {}),
         ...(facts.genesisLoseControllerLife === 2 ? { genesisLoseControllerLife: 2 as const } : {}),
         immobile: facts.immobile ?? false,
         lethal: facts.lethal ?? false,
@@ -792,6 +794,50 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as GameCardDefinition,
     },
   }), /simultaneous Genesis life loss and draw/);
+  const grainSparrowManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: { ...cards[firstSpell]!, genesisHealController: 2 } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    grainSparrowManifest.cards[firstSpell]?.cardType === 'minion'
+      && grainSparrowManifest.cards[firstSpell].genesisHealController,
+    2,
+  );
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        genesisHealController: 1,
+      } as unknown as GameCardDefinition,
+    },
+  }), /genesisHealController must be 2/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        genesisDrawSite: true,
+        genesisHealController: 2,
+      } as GameCardDefinition,
+    },
+  }), /simultaneous Genesis healing/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        genesisHealController: 2,
+        waterbound: true,
+      } as GameCardDefinition,
+    },
+  }), /Waterbound with Genesis/);
   const waterboundManifest = createGameManifest({
     ...input,
     cards: {
@@ -4431,6 +4477,70 @@ test("RULE-03 Genesis life loss reaches but cannot cross Death's Door", () => {
   assert.deepEqual(lifeZero.receipt.events.map(({ type }) => type), ['minion-summoned']);
   assert.deepEqual(lifeZero.session.state.terminal, { status: 'active' });
   assert.equal(verifyGameReplay(lifeZero.session), true);
+});
+
+test('RULE-03 Grain Sparrow Genesis gains controller life through shared healing semantics', () => {
+  const decks = { north: deck('grain-north'), south: deck('grain-south') };
+  const cards = cardsFor(decks, {
+    airborne: true,
+    genesisHealController: 2,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  });
+  for (const cardId of decks.south.spellbook) {
+    cards[cardId] = {
+      cardType: 'magic',
+      damageTargetUnit: 1,
+      manaCost: 1,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    };
+  }
+  const gameManifest = createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic',
+      revisionId: 'synthetic-grain-sparrow-v1',
+    },
+    cards,
+    decks,
+    firstSeat: 'north',
+    seed: 229,
+  });
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.target?.kind === 'avatar'
+    && descriptor.target.seat === 'north');
+  assert.equal(session.state.players.north.avatar.life, 19);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const beforeVersion = session.state.stateVersion;
+  const result = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cell === 'C4'));
+  assert.equal(result.accepted, true);
+  assert.equal(result.session.state.stateVersion, beforeVersion + 1);
+  assert.equal(result.session.state.players.north.avatar.life, 20);
+  const sourceInstanceId = result.session.state.realm.units.at(-1)?.instanceId;
+  assert.ok(sourceInstanceId);
+  assert.deepEqual(result.receipt.events.map(({ type }) => type), [
+    'minion-summoned',
+    'avatar-healed',
+  ]);
+  assert.deepEqual(result.receipt.events[1]?.payload, {
+    amount: 1,
+    attemptedAmount: 2,
+    life: 20,
+    seat: 'north',
+    sourceInstanceId,
+  });
+  assert.equal(verifyGameReplay(result.session), true);
 });
 
 test('RULE-03 site Genesis grants temporary mana once, pays a summon, and expires', () => {

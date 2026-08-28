@@ -354,6 +354,30 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthDivineHealing.deck.spellbook
     .find(({ name }) => name === 'Divine Healing')?.copies, 3);
   assert.equal(result.earthDivineHealing.replayVerified, true);
+  assert.equal(result.earthGrainSparrow.grainSparrow, 'Grain Sparrow');
+  assert.equal(result.earthGrainSparrow.lesserBloodDemon, 'Lesser Blood Demon');
+  assert.equal(result.earthGrainSparrow.steppe, 'Steppe');
+  assert.equal(result.earthGrainSparrow.acceptedActionCount, 11);
+  assert.equal(result.earthGrainSparrow.summonedAtC3, true);
+  assert.equal(result.earthGrainSparrow.lifeLostBeforeSummon, true);
+  assert.equal(result.earthGrainSparrow.actualLifeGained, 2);
+  assert.equal(result.earthGrainSparrow.lifeCappedAtMaximum, true);
+  assert.equal(result.earthGrainSparrow.causalEventsVerified, true);
+  assert.equal(result.earthGrainSparrow.otherStatePreserved, true);
+  assert.equal(result.earthGrainSparrow.noDamageDeathTerminalOrRandomEffects, true);
+  assert.equal(result.earthGrainSparrow.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthGrainSparrow.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthGrainSparrow.deck.spellbook
+    .find(({ name }) => name === 'Grain Sparrow')?.copies, 4);
+  assert.equal(result.earthGrainSparrow.deck.spellbook
+    .find(({ name }) => name === 'Lesser Blood Demon')?.copies, 4);
+  assert.equal(result.earthGrainSparrow.deck.atlas
+    .find(({ name }) => name === 'Ghost Town')?.copies, 3);
+  assert.equal(result.earthGrainSparrow.deck.atlas
+    .find(({ name }) => name === 'Steppe')?.copies, 3);
+  assert.equal(result.earthGrainSparrow.replayVerified, true);
   assert.equal(result.earthBurrowing.burrowingMinion, 'Cave Trolls');
   assert.equal(result.earthBurrowing.acceptedActionCount, 28);
   assert.equal(result.earthBurrowing.targetIsLandSite, true);
