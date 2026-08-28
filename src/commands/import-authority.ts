@@ -1,6 +1,7 @@
 import { lstat, mkdir, mkdtemp, open, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { parseArgs } from 'node:util';
 
 import { canonicalJson, type JsonValue } from '../authority/canonical-json.ts';
 import { identityHash, sha256 } from '../authority/hash.ts';
@@ -434,37 +435,38 @@ export async function importAuthority(
   });
 }
 
-type ImportFlag = '--input' | '--input-lock' | '--expected-input-root-hash' | '--output-root' | '--revision-id';
-
-const IMPORT_FLAGS = new Map([
-  ['--input', 'inputRoot'],
-  ['--input-lock', 'inputLockPath'],
-  ['--expected-input-root-hash', 'expectedInputRootHash'],
-  ['--output-root', 'outputRoot'],
-  ['--revision-id', 'revisionId'],
-] as const);
+const IMPORT_OPTIONS = {
+  input: { type: 'string' },
+  'input-lock': { type: 'string' },
+  'expected-input-root-hash': { type: 'string' },
+  'output-root': { type: 'string' },
+  'revision-id': { type: 'string' },
+} as const;
 
 function parseArguments(argv: readonly string[]): ImportAuthorityArguments {
-  if (argv.length !== IMPORT_FLAGS.size * 2) {
-    fail('/arguments', 'invalid_arguments', 'provide each documented import argument exactly once');
-  }
-  const parsed = new Map<string, string>();
-  for (let index = 0; index < argv.length; index += 2) {
-    const flag = argv[index]!;
-    const key = IMPORT_FLAGS.get(flag as ImportFlag);
-    const value = argv[index + 1];
-    if (key === undefined || value === undefined || value.length === 0 || parsed.has(key)) {
+  try {
+    const { values, tokens } = parseArgs({
+      args: [...argv],
+      options: IMPORT_OPTIONS,
+      strict: true,
+      allowPositionals: false,
+      tokens: true,
+    });
+    const parsed = {
+      inputRoot: values.input ?? '',
+      inputLockPath: values['input-lock'] ?? '',
+      expectedInputRootHash: values['expected-input-root-hash'] ?? '',
+      outputRoot: values['output-root'] ?? '',
+      revisionId: values['revision-id'] ?? '',
+    };
+    if (tokens.length !== 5 || Object.values(parsed).some((value) => value.length === 0)) {
       fail('/arguments', 'invalid_arguments', 'provide each documented import argument exactly once');
     }
-    parsed.set(key, value);
+    return { ...parsed, expectedInputRootHash: parsed.expectedInputRootHash as Hash };
+  } catch (error: unknown) {
+    if (error instanceof AuthorityValidationError) throw error;
+    return fail('/arguments', 'invalid_arguments', 'provide each documented import argument exactly once');
   }
-  return {
-    inputRoot: parsed.get('inputRoot')!,
-    inputLockPath: parsed.get('inputLockPath')!,
-    expectedInputRootHash: parsed.get('expectedInputRootHash')! as Hash,
-    outputRoot: parsed.get('outputRoot')!,
-    revisionId: parsed.get('revisionId')!,
-  };
 }
 
 const defaultIo: CommandIo = {

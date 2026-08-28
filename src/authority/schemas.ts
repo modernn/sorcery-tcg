@@ -617,6 +617,13 @@ function raise(diagnostics: readonly Diagnostic[], maxDiagnostics = DEFAULT_AUTH
   throw new AuthorityValidationError(sortDiagnostics(diagnostics).slice(0, maxDiagnostics));
 }
 
+export function raiseZodValidationError(
+  error: z.ZodError,
+  maxDiagnostics = DEFAULT_AUTHORITY_JSON_LIMITS.maxDiagnostics,
+): never {
+  return raise(diagnosticsFromZod(error), maxDiagnostics);
+}
+
 function diagnosticFromCanonical(error: CanonicalJsonError): Diagnostic {
   return {
     path: error.path,
@@ -641,7 +648,7 @@ function validateWithSchema<T>(
 ): T {
   preflight(input, maxDiagnostics);
   const result = schema.safeParse(input);
-  if (!result.success) raise(diagnosticsFromZod(result.error), maxDiagnostics);
+  if (!result.success) raiseZodValidationError(result.error, maxDiagnostics);
   return result.data;
 }
 

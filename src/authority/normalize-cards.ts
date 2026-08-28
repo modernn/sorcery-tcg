@@ -80,15 +80,6 @@ export function normalizeCards(
   cards.sort((left, right) => compareText(left.stableId, right.stableId));
 
   const snapshot = validateNormalizedCardSnapshot({ cards });
-  if (snapshot.cards.length !== rawSnapshot.cards.length) {
-    throw new AuthorityValidationError([
-      {
-        path: '/cards',
-        code: 'cardinality_mismatch',
-        message: 'normalized card count does not match raw card count',
-      },
-    ]);
-  }
 
   return deepFreeze(createCanonicalArtifact({
     artifactKind: 'card-snapshot',

@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { parseArgs } from 'node:util';
 
 import { canonicalJson } from '../authority/canonical-json.ts';
 import {
@@ -29,43 +30,42 @@ function fail(path: string, code: string, message: string): never {
   throw new AuthorityValidationError([{ path, code, message }]);
 }
 
-const VALIDATE_FLAGS = new Map([
-  ['--root', 'root'],
-  ['--bundle', 'bundlePath'],
-  ['--id', 'stableId'],
-  ['--hash', 'contentHash'],
-] as const);
-
-type ValidateFlag = '--root' | '--bundle' | '--id' | '--hash';
+const VALIDATE_OPTIONS = {
+  root: { type: 'string' },
+  bundle: { type: 'string' },
+  id: { type: 'string' },
+  hash: { type: 'string' },
+} as const;
 
 function parseArguments(argv: readonly string[]): ValidateAuthorityArguments {
-  if (argv.length !== VALIDATE_FLAGS.size * 2) {
-    fail('/arguments', 'invalid_arguments', 'provide each documented validation argument exactly once');
-  }
-  const parsed = new Map<string, string>();
-  for (let index = 0; index < argv.length; index += 2) {
-    const flag = argv[index]!;
-    const key = VALIDATE_FLAGS.get(flag as ValidateFlag);
-    const value = argv[index + 1];
-    if (key === undefined || value === undefined || value.length === 0 || parsed.has(key)) {
+  try {
+    const { values, tokens } = parseArgs({
+      args: [...argv],
+      options: VALIDATE_OPTIONS,
+      strict: true,
+      allowPositionals: false,
+      tokens: true,
+    });
+    const parsed = {
+      root: values.root ?? '',
+      bundlePath: values.bundle ?? '',
+      stableId: values.id ?? '',
+      contentHash: values.hash ?? '',
+    };
+    if (tokens.length !== 4 || Object.values(parsed).some((value) => value.length === 0)) {
       fail('/arguments', 'invalid_arguments', 'provide each documented validation argument exactly once');
     }
-    parsed.set(key, value);
+    if (!STABLE_ID_PATTERN.test(parsed.stableId)) {
+      fail('/id', 'invalid_stable_id', 'id must be a documented stable artifact ID');
+    }
+    if (!HASH_PATTERN.test(parsed.contentHash)) {
+      fail('/hash', 'invalid_format', 'hash must be a lowercase SHA-256 digest');
+    }
+    return { ...parsed, contentHash: parsed.contentHash as Hash };
+  } catch (error: unknown) {
+    if (error instanceof AuthorityValidationError) throw error;
+    return fail('/arguments', 'invalid_arguments', 'provide each documented validation argument exactly once');
   }
-  const stableId = parsed.get('stableId')!;
-  const contentHash = parsed.get('contentHash')!;
-  if (!STABLE_ID_PATTERN.test(stableId)) {
-    fail('/id', 'invalid_stable_id', 'id must be a documented stable artifact ID');
-  }
-  if (!HASH_PATTERN.test(contentHash)) {
-    fail('/hash', 'invalid_format', 'hash must be a lowercase SHA-256 digest');
-  }
-  return {
-    root: parsed.get('root')!,
-    bundlePath: parsed.get('bundlePath')!,
-    stableId,
-    contentHash: contentHash as Hash,
-  };
 }
 
 const defaultIo: CommandIo = {

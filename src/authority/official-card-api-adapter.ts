@@ -1,10 +1,8 @@
 import { z } from 'zod';
 
 import {
-  AuthorityValidationError,
-  sortDiagnostics,
+  raiseZodValidationError,
   validateRawCardSnapshot,
-  type Diagnostic,
   type RawCard,
   type RawCardSnapshot,
 } from './schemas.ts';
@@ -94,37 +92,6 @@ const officialCardApiSchema = z.array(officialCardSchema).min(1).max(MAX_OFFICIA
 
 type OfficialCard = z.infer<typeof officialCardSchema>;
 
-function jsonPointer(path: readonly PropertyKey[]): string {
-  return path.reduce<string>(
-    (result, segment) =>
-      result + '/' + String(segment).replaceAll('~', '~0').replaceAll('/', '~1'),
-    '',
-  );
-}
-
-function diagnosticsFromZod(error: z.ZodError): readonly Diagnostic[] {
-  const diagnostics: Diagnostic[] = [];
-  for (const issue of error.issues) {
-    if (issue.code === 'unrecognized_keys') {
-      const keys = (issue as { keys?: readonly string[] }).keys ?? [];
-      for (const key of keys) {
-        diagnostics.push({
-          path: jsonPointer([...issue.path, key]),
-          code: 'unrecognized_key',
-          message: 'Unrecognized key',
-        });
-      }
-      continue;
-    }
-    diagnostics.push({
-      path: jsonPointer(issue.path),
-      code: issue.code,
-      message: issue.message,
-    });
-  }
-  return sortDiagnostics(diagnostics).slice(0, 100);
-}
-
 function printingRows(card: OfficialCard): Array<Readonly<{ releasedAt: string; slug: string }>> {
   return card.sets
     .flatMap((set) => set.variants.map((variant) => ({ releasedAt: set.releasedAt, slug: variant.slug })))
@@ -163,6 +130,6 @@ function adaptCard(card: OfficialCard): RawCard {
 
 export function adaptOfficialCardApiSnapshot(input: unknown): RawCardSnapshot {
   const parsed = officialCardApiSchema.safeParse(input);
-  if (!parsed.success) throw new AuthorityValidationError(diagnosticsFromZod(parsed.error));
+  if (!parsed.success) raiseZodValidationError(parsed.error);
   return validateRawCardSnapshot({ cards: parsed.data.map(adaptCard) });
 }
