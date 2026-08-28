@@ -371,6 +371,21 @@ export type PrivateGameCheck = Readonly<{
     replayVerified: boolean;
     spellEnteredCemetery: boolean;
   }>;
+  earthGrainSparrow: Readonly<{
+    acceptedActionCount: number;
+    actualLifeGained: number;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    grainSparrow: string;
+    lesserBloodDemon: string;
+    lifeCappedAtMaximum: boolean;
+    lifeLostBeforeSummon: boolean;
+    noDamageDeathTerminalOrRandomEffects: boolean;
+    otherStatePreserved: boolean;
+    replayVerified: boolean;
+    steppe: string;
+    summonedAtC3: boolean;
+  }>;
   earthEntombed: Readonly<{
     acceptedActionCount: number;
     boskTroll: string;
@@ -863,6 +878,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   freeze: NormalizedCard;
   genesisSpellMinion: NormalizedCard;
   genesisMinion: NormalizedCard;
+  grainSparrow: NormalizedCard;
   ghostTownSite: NormalizedCard;
   healingMinion: NormalizedCard;
   lethalMinion: NormalizedCard;
@@ -892,6 +908,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   slyFox: NormalizedCard;
   stealthMinion: NormalizedCard;
   stealthTargetMinion: NormalizedCard;
+  steppe: NormalizedCard;
   submergeMinion: NormalizedCard;
   teleport: NormalizedCard;
   voidwalkMinion: NormalizedCard;
@@ -1133,6 +1150,41 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || lesserBloodDemon.thresholds.water !== 0
     || lesserBloodDemon.rarity !== 'ordinary') {
     throw new Error('private Genesis life-loss minion no longer matches its supported facts');
+  }
+  const grainSparrow = snapshot.cards.find(({ name }) => name === 'Grain Sparrow');
+  if (!grainSparrow
+    || grainSparrow.cardType !== 'minion'
+    || ruleTextDigest(grainSparrow.rulesText) !== 'sha256:45d2fdd4855b4fe32c5bfcc65b0d1fc628ada918393327a0fe4cb7a12e154b2d'
+    || grainSparrow.manaCost !== 1
+    || grainSparrow.attack !== 1
+    || grainSparrow.defense !== 1
+    || grainSparrow.life !== null
+    || grainSparrow.elements.length !== 1
+    || grainSparrow.elements[0] !== 'earth'
+    || grainSparrow.thresholds.air !== 0
+    || grainSparrow.thresholds.earth !== 1
+    || grainSparrow.thresholds.fire !== 0
+    || grainSparrow.thresholds.water !== 0
+    || grainSparrow.rarity !== 'ordinary') {
+    throw new Error('private Airborne Genesis-healing minion no longer matches its supported facts');
+  }
+  const steppe = snapshot.cards.find(({ name }) => name === 'Steppe');
+  if (!steppe
+    || steppe.cardType !== 'site'
+    || steppe.rulesText.trim() !== ''
+    || steppe.manaCost !== null
+    || steppe.attack !== null
+    || steppe.defense !== null
+    || steppe.life !== null
+    || steppe.elements.length !== 2
+    || steppe.elements[0] !== 'earth'
+    || steppe.elements[1] !== 'fire'
+    || steppe.thresholds.air !== 0
+    || steppe.thresholds.earth !== 1
+    || steppe.thresholds.fire !== 1
+    || steppe.thresholds.water !== 0
+    || steppe.rarity !== 'exceptional') {
+    throw new Error('private Earth-Fire support site no longer matches its supported facts');
   }
   const ignited = snapshot.cards.find(({ name }) => name === 'Ignited');
   if (!ignited
@@ -1864,6 +1916,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     freeze,
     genesisSpellMinion,
     genesisMinion,
+    grainSparrow,
     ghostTownSite,
     healingMinion,
     lethalMinion,
@@ -1897,6 +1950,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     slyFox,
     stealthMinion,
     stealthTargetMinion,
+    steppe,
     submergeMinion,
     teleport,
     voidwalkMinion,
@@ -1985,6 +2039,7 @@ function gameDefinition(
   damageEachAbovegroundMinion: 0 | 1 = 0,
   grantPowerToAllyThisTurn: 0 | 2 = 0,
   spellcaster = false,
+  genesisHealController: 0 | 2 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -2073,6 +2128,7 @@ function gameDefinition(
       ...(deathriteHeal ? { deathriteHeal } : {}),
       defense: card.defense,
       ...(diesAtEndOfControllerTurn ? { diesAtEndOfControllerTurn: true } : {}),
+      ...(genesisHealController ? { genesisHealController } : {}),
       genesisDrawSpell,
       genesisDrawSite,
       ...(genesisLoseControllerLife ? { genesisLoseControllerLife } : {}),
@@ -2108,7 +2164,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-overpower' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-immobile' | 'earth-overpower' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -2219,6 +2275,11 @@ function buildManifest(
   const earthBuryDeck = elementalDeck('earth', earthMinions, [], [input.bury]);
   const earthRescueDeck = elementalDeck('earth', earthMinions, [], [input.bury, input.rescue]);
   const earthDivineHealingDeck = elementalDeck('earth', earthMinions, [], [input.divineHealing]);
+  const earthGrainSparrowDeck = elementalDeck(
+    'earth',
+    [input.grainSparrow, input.lesserBloodDemon],
+    [input.ghostTownSite, input.steppe],
+  );
   const earthShallowGraveDeck = elementalDeck('earth', earthMinions, [input.shallowGrave]);
   const earthSinkholeDeck = elementalDeck('earth', earthMinions, [input.sinkhole]);
   const earthBurrowingDeck = elementalDeck('earth', [
@@ -2387,6 +2448,8 @@ function buildManifest(
         ? earthRescueDeck
       : scenario === 'earth-divine-healing'
         ? earthDivineHealingDeck
+      : scenario === 'earth-grain-sparrow'
+        ? earthGrainSparrowDeck
       : scenario === 'earth-shallow-grave'
         ? earthShallowGraveDeck
       : scenario === 'earth-sinkhole'
@@ -2476,6 +2539,8 @@ function buildManifest(
         ? earthRescueDeck
       : scenario === 'earth-divine-healing'
         ? earthDivineHealingDeck
+      : scenario === 'earth-grain-sparrow'
+        ? earthGrainSparrowDeck
       : scenario === 'earth-shallow-grave'
         ? earthShallowGraveDeck
       : scenario === 'earth-sinkhole'
@@ -2531,7 +2596,8 @@ function buildManifest(
       card.stableId === input.firstStrikeMinion.stableId,
       card.stableId === input.wardMinion.stableId,
       card.stableId === input.airborneMinion.stableId
-        || card.stableId === input.movementTwoMinion.stableId,
+        || card.stableId === input.movementTwoMinion.stableId
+        || card.stableId === input.grainSparrow.stableId,
       card.stableId === input.stealthMinion.stableId,
       card.stableId === input.slyFox.stableId,
       card.stableId === input.sedgeCrabs.stableId,
@@ -2574,6 +2640,7 @@ function buildManifest(
       card.stableId === input.rainOfArrows.stableId ? 1 : 0,
       card.stableId === input.overpower.stableId ? 2 : 0,
       card.stableId === input.genesisSpellMinion.stableId,
+      card.stableId === input.grainSparrow.stableId ? 2 : 0,
     ),
   ]));
   return {
@@ -3257,6 +3324,59 @@ function findEarthDivineHealingOpening(
     }
   }
   throw new Error('private Earth controller-healing Magic scenario no longer produces its supported opening');
+}
+
+function findEarthGrainSparrowOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  demonInstanceId: string;
+  ghostTownInstanceId: string;
+  grainSparrowInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  session: GameSession;
+  southSiteInstanceId: string;
+  steppeInstanceId: string;
+}> {
+  // ponytail: a bounded deterministic scan is acceptable for private verification; lock a seed only if material.
+  for (let offset = 1; offset <= 4_096; offset += 1) {
+    const built = buildManifest(input, input.config.earthSeed + offset, 'earth-grain-sparrow');
+    const session = createGameSession(built.manifest);
+    const northAtlasHand = session.state.players.north.hand.atlas;
+    const steppeInstanceId = northAtlasHand
+      .find(({ cardId }) => cardId === input.steppe.stableId)?.instanceId;
+    const ghostTownInstanceId = northAtlasHand
+      .find(({ cardId }) => cardId === input.ghostTownSite.stableId)?.instanceId;
+    const demonInstanceId = availableMinionInstance(
+      session,
+      'north',
+      input.lesserBloodDemon.stableId,
+      1,
+    );
+    const grainSparrowInstanceId = availableMinionInstance(
+      session,
+      'north',
+      input.grainSparrow.stableId,
+      1,
+    );
+    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+    if (demonInstanceId
+      && ghostTownInstanceId
+      && grainSparrowInstanceId
+      && southSiteInstanceId
+      && steppeInstanceId) {
+      return {
+        ...built,
+        demonInstanceId,
+        ghostTownInstanceId,
+        grainSparrowInstanceId,
+        session,
+        southSiteInstanceId,
+        steppeInstanceId,
+      };
+    }
+  }
+  throw new Error('private Grain Sparrow Genesis-healing scenario no longer produces its supported opening');
 }
 
 function findEarthBuryOpening(
@@ -5957,6 +6077,151 @@ function runEarthDivineHealing(
     manaPaid,
     replayVerified: verifyGameReplay(session),
     spellEnteredCemetery,
+  });
+}
+
+function runEarthGrainSparrow(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthGrainSparrow'] {
+  const opening = findEarthGrainSparrowOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.steppeInstanceId
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.ghostTownInstanceId
+    && descriptor.cell === 'C3');
+
+  const lifeBeforeDemon = session.state.players.north.avatar.life;
+  const demonResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.demonInstanceId
+      && descriptor.cell === 'C3'
+      && descriptor.region === undefined));
+  if (!demonResult.accepted) throw new Error('private Grain Sparrow setup life-loss summon was rejected');
+  session = demonResult.session;
+  const lifeAfterDemon = session.state.players.north.avatar.life;
+  const demonEvents = demonResult.receipt.events;
+  const demonSummonedPayload = demonEvents[0] && isJsonRecord(demonEvents[0].payload)
+    ? demonEvents[0].payload
+    : undefined;
+  const lifeLostPayload = demonEvents[1] && isJsonRecord(demonEvents[1].payload)
+    ? demonEvents[1].payload
+    : undefined;
+
+  const northBefore = session.state.players.north;
+  const southBefore = session.state.players.south;
+  const sitesBefore = session.state.realm.sites;
+  const unitsBefore = session.state.realm.units;
+  const avatarDefinition = session.state.cards[northBefore.avatar.card.cardId];
+  if (avatarDefinition?.cardType !== 'avatar') {
+    throw new Error('private Grain Sparrow scenario Avatar is unsupported');
+  }
+  const grainResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.grainSparrowInstanceId
+      && descriptor.cell === 'C3'
+      && descriptor.region === undefined));
+  if (!grainResult.accepted) throw new Error('private Grain Sparrow summon was rejected');
+  session = grainResult.session;
+  const northAfter = session.state.players.north;
+  const grain = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.grainSparrowInstanceId);
+  const grainEvents = grainResult.receipt.events;
+  const grainSummonedPayload = grainEvents[0] && isJsonRecord(grainEvents[0].payload)
+    ? grainEvents[0].payload
+    : undefined;
+  const healedPayload = grainEvents[1] && isJsonRecord(grainEvents[1].payload)
+    ? grainEvents[1].payload
+    : undefined;
+  const actualLifeGained = northAfter.avatar.life - northBefore.avatar.life;
+  const unrelatedEvents = [...demonEvents, ...grainEvents];
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    actualLifeGained,
+    causalEventsVerified: demonEvents.map(({ type }) => type).join(',')
+      === 'minion-summoned,avatar-life-lost'
+      && demonSummonedPayload?.instanceId === opening.demonInstanceId
+      && demonSummonedPayload.manaPaid === 2
+      && demonSummonedPayload.seat === 'north'
+      && lifeLostPayload?.amount === 2
+      && lifeLostPayload.life === 18
+      && lifeLostPayload.seat === 'north'
+      && lifeLostPayload.sourceInstanceId === opening.demonInstanceId
+      && grainEvents.map(({ type }) => type).join(',') === 'minion-summoned,avatar-healed'
+      && grainSummonedPayload?.instanceId === opening.grainSparrowInstanceId
+      && grainSummonedPayload.cell === 'C3'
+      && grainSummonedPayload.manaPaid === 1
+      && grainSummonedPayload.seat === 'north'
+      && healedPayload?.amount === 2
+      && healedPayload.attemptedAmount === 2
+      && healedPayload.life === 20
+      && healedPayload.seat === 'north'
+      && healedPayload.sourceInstanceId === opening.grainSparrowInstanceId,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    grainSparrow: input.grainSparrow.name,
+    lesserBloodDemon: input.lesserBloodDemon.name,
+    lifeCappedAtMaximum: northAfter.avatar.life === avatarDefinition.life,
+    lifeLostBeforeSummon: lifeBeforeDemon === avatarDefinition.life
+      && lifeAfterDemon === avatarDefinition.life - 2
+      && northBefore.avatar.life === lifeAfterDemon,
+    noDamageDeathTerminalOrRandomEffects: unrelatedEvents.every(({ type }) =>
+      type !== 'damage-dealt'
+        && type !== 'minion-died'
+        && type !== 'death-blow'
+        && type !== 'avatar-reached-deaths-door'
+        && type !== 'game-ended')
+      && demonResult.receipt.randomDraws.length === 0
+      && grainResult.receipt.randomDraws.length === 0
+      && session.state.terminal.status === 'active',
+    otherStatePreserved:
+      canonicalJson(session.state.players.south as unknown as JsonValue)
+        === canonicalJson(southBefore as unknown as JsonValue)
+      && canonicalJson(session.state.realm.sites as unknown as JsonValue)
+        === canonicalJson(sitesBefore as unknown as JsonValue)
+      && canonicalJson(session.state.realm.units
+        .filter(({ instanceId }) => instanceId !== opening.grainSparrowInstanceId) as unknown as JsonValue)
+        === canonicalJson(unitsBefore as unknown as JsonValue)
+      && canonicalJson(northAfter.atlas as unknown as JsonValue)
+        === canonicalJson(northBefore.atlas as unknown as JsonValue)
+      && canonicalJson(northAfter.spellbook as unknown as JsonValue)
+        === canonicalJson(northBefore.spellbook as unknown as JsonValue)
+      && canonicalJson(northAfter.hand.atlas as unknown as JsonValue)
+        === canonicalJson(northBefore.hand.atlas as unknown as JsonValue)
+      && canonicalJson(northAfter.hand.spellbook as unknown as JsonValue)
+        === canonicalJson(northBefore.hand.spellbook
+          .filter(({ instanceId }) => instanceId !== opening.grainSparrowInstanceId) as unknown as JsonValue)
+      && canonicalJson(northAfter.cemetery as unknown as JsonValue)
+        === canonicalJson(northBefore.cemetery as unknown as JsonValue)
+      && northAfter.avatar.card.instanceId === northBefore.avatar.card.instanceId
+      && northAfter.avatar.location === northBefore.avatar.location
+      && northAfter.avatar.region === northBefore.avatar.region
+      && northAfter.avatar.tapped === northBefore.avatar.tapped
+      && northAfter.mana === northBefore.mana - 1
+      && session.state.phase === 'main',
+    replayVerified: verifyGameReplay(session),
+    steppe: input.steppe.name,
+    summonedAtC3: grain?.cardId === input.grainSparrow.stableId
+      && grain.controller === 'north'
+      && grain.damage === 0
+      && grain.location === 'C3'
+      && grain.owner === 'north'
+      && grain.region === 'surface'
+      && grain.summoningSickness
+      && !grain.tapped,
   });
 }
 
@@ -9451,6 +9716,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthBury = runEarthBury(input);
   const earthRescue = runEarthRescue(input);
   const earthDivineHealing = runEarthDivineHealing(input);
+  const earthGrainSparrow = runEarthGrainSparrow(input);
   const earthShallowGrave = runEarthShallowGrave(input);
   const earthSinkhole = runEarthSinkhole(input);
   const earthEntombed = runEarthEntombed(input);
@@ -9620,6 +9886,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthBury,
     earthRescue,
     earthDivineHealing,
+    earthGrainSparrow,
     earthShallowGrave,
     earthSinkhole,
     earthEntombed,
