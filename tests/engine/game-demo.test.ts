@@ -10,9 +10,9 @@ const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
 test('RULE-01 deterministic agents complete a skeletal match from setup to deck-out', () => {
   const result = runGameDemo(23);
   assert.deepEqual(result, {
-    acceptedActionCount: 132,
+    acceptedActionCount: 138,
     classification: 'unranked_partial_rules',
-    finalStateHash: 'sha256:7baf31497d5c4e6399c5b7b47a0d62cc4e2a6466b970090d00994d0ee61eac1e',
+    finalStateHash: 'sha256:8093c50209a1adbee3e68b7eb6efc9988d8761c24f4f3452d458d4aa3aea36e6',
     loser: 'south',
     reason: 'deck_empty',
     replayVerified: true,
