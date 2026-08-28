@@ -40,6 +40,15 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airMovement.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
   assert.equal(result.airMovement.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
   assert.equal(result.airMovement.replayVerified, true);
+  assert.equal(result.airMovementTwo.movementMinion, 'Cloud Spirit');
+  assert.equal(result.airMovementTwo.threeStepAirbornePath, true);
+  assert.equal(result.airMovementTwo.attackAvailableAfterThreeSteps, true);
+  assert.equal(result.airMovementTwo.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airMovementTwo.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airMovementTwo.deck.spellbook
+    .find(({ name }) => name === 'Cloud Spirit')?.copies, 4);
+  assert.deepEqual(result.airMovementTwo.deck, result.airborne.deck);
+  assert.equal(result.airMovementTwo.replayVerified, true);
   assert.equal(result.airSummoning.roamingMinion, 'Roaming Monster');
   assert.equal(result.airSummoning.ordinaryRestricted, true);
   assert.equal(result.airSummoning.summonedAtEnemySite, true);
