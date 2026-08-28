@@ -47,7 +47,8 @@ export type GameCardDefinition =
   }>
   | Readonly<{
     cardType: 'magic';
-    damageTargetUnit: number;
+    damageTargetUnit?: number;
+    healController?: number;
     manaCost: number;
     targetNearby?: boolean;
     thresholds: GameThresholds;
@@ -299,7 +300,7 @@ type GameActionDescriptor =
     cardInstanceId: string;
     casterInstanceId: StateHash;
     kind: 'cast-magic';
-    target: GameUnitRef;
+    target?: GameUnitRef;
   }>
   | Readonly<{ kind: 'draw'; zone: DeckZone }>
   | Readonly<{
@@ -497,6 +498,13 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
     if (definition.cardType !== 'magic'
       || player.mana < definition.manaCost
       || !meetsThresholds(state, seat, definition.thresholds)) return [];
+    const cast = {
+      cardId,
+      cardInstanceId: instanceId,
+      casterInstanceId: player.avatar.card.instanceId,
+      kind: 'cast-magic' as const,
+    };
+    if (definition.healController !== undefined) return [cast];
     return targets.filter((target) => {
       const status = unitStatus(state, target);
       return status.region === caster.region
@@ -505,13 +513,7 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
           || status.location === caster.location
           || borderingCells(caster.location).includes(status.location)
           || diagonalCells(caster.location).includes(status.location));
-    }).map((target) => ({
-      cardId,
-      cardInstanceId: instanceId,
-      casterInstanceId: player.avatar.card.instanceId,
-      kind: 'cast-magic' as const,
-      target,
-    }));
+    }).map((target) => ({ ...cast, target }));
   });
 }
 
@@ -555,13 +557,26 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     return;
   }
   if (card.cardType === 'magic') {
+    const effectCount = Number(card.damageTargetUnit !== undefined)
+      + Number(card.healController !== undefined);
+    if (effectCount !== 1) {
+      throw new RangeError(`${path} must define exactly one supported Magic effect`);
+    }
     if (card.targetNearby !== undefined && typeof card.targetNearby !== 'boolean') {
       throw new RangeError(`${path}.targetNearby must be boolean`);
     }
-    if (!Number.isSafeInteger(card.damageTargetUnit)
+    if (card.targetNearby !== undefined && card.damageTargetUnit === undefined) {
+      throw new RangeError(`${path}.targetNearby requires damageTargetUnit`);
+    }
+    if (card.damageTargetUnit !== undefined && (!Number.isSafeInteger(card.damageTargetUnit)
       || card.damageTargetUnit < 1
-      || card.damageTargetUnit > MAX_COMBAT_STAT) {
+      || card.damageTargetUnit > MAX_COMBAT_STAT)) {
       throw new RangeError(`${path}.damageTargetUnit must be a safe integer between 1 and ${MAX_COMBAT_STAT}`);
+    }
+    if (card.healController !== undefined && (!Number.isSafeInteger(card.healController)
+      || card.healController < 1
+      || card.healController > MAX_COMBAT_STAT)) {
+      throw new RangeError(`${path}.healController must be a safe integer between 1 and ${MAX_COMBAT_STAT}`);
     }
     if (!Number.isSafeInteger(card.manaCost) || card.manaCost < 0) {
       throw new RangeError(`${path}.manaCost must be a supported nonnegative safe integer`);
@@ -773,7 +788,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
           : card.cardType === 'magic'
             ? {
               cardType: 'magic' as const,
-              damageTargetUnit: card.damageTargetUnit,
+              ...(card.damageTargetUnit !== undefined
+                ? { damageTargetUnit: card.damageTargetUnit }
+                : { healController: card.healController! }),
               manaCost: card.manaCost,
               ...(card.targetNearby === true ? { targetNearby: true } : {}),
               thresholds: { ...card.thresholds },
@@ -1641,7 +1658,9 @@ function actionLabel(descriptor: GameActionDescriptor): string {
     return `Summon ${descriptor.cardId} at ${descriptor.cell}${descriptor.region ? ` ${descriptor.region}` : ''} (${descriptor.manaCost} mana)`;
   }
   if (descriptor.kind === 'cast-magic') {
-    return `Cast ${descriptor.cardId} on ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`;
+    return descriptor.target
+      ? `Cast ${descriptor.cardId} on ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`
+      : `Cast ${descriptor.cardId}`;
   }
   if (descriptor.kind === 'move-and-attack') {
     return descriptor.path.length === 1
@@ -1700,6 +1719,17 @@ function replacePlayer(
   player: PlayerState,
 ): Readonly<Record<GameSeat, PlayerState>> {
   return deepFreeze({ ...state.players, [seat]: player });
+}
+
+function healAvatar(
+  player: PlayerState,
+  maximumLife: number,
+  attemptedAmount: number,
+): readonly [PlayerState, number] {
+  const life = player.avatar.life === 0
+    ? 0
+    : Math.min(maximumLife, player.avatar.life + attemptedAmount);
+  return [deepFreeze({ ...player, avatar: { ...player.avatar, life } }), life - player.avatar.life];
 }
 
 function orderedCards(hand: readonly CardInstance[], ids: readonly string[]): readonly CardInstance[] {
@@ -1925,24 +1955,20 @@ function resolveFightWindow(
       const controller = players[dead.controller];
       const avatarDefinition = cardDefinition(state, controller.avatar.card.cardId);
       if (avatarDefinition.cardType !== 'avatar') throw new Error('player Avatar lacks Avatar definition');
-      const life = controller.avatar.life === 0
-        ? 0
-        : Math.min(avatarDefinition.life, controller.avatar.life + definition.deathriteHeal);
-      const amount = life - controller.avatar.life;
-      players[dead.controller] = deepFreeze({
-        ...controller,
-        avatar: { ...controller.avatar, life },
-      });
-      damageOutcomes.push({
-        payload: {
-          amount,
-          attemptedAmount: definition.deathriteHeal,
-          life,
-          seat: dead.controller,
-          sourceInstanceId: dead.instanceId,
-        },
-        type: 'avatar-healed',
-      });
+      const [healed, amount] = healAvatar(controller, avatarDefinition.life, definition.deathriteHeal);
+      players[dead.controller] = healed;
+      if (amount > 0) {
+        damageOutcomes.push({
+          payload: {
+            amount,
+            attemptedAmount: definition.deathriteHeal,
+            life: healed.avatar.life,
+            seat: dead.controller,
+            sourceInstanceId: dead.instanceId,
+          },
+          type: 'avatar-healed',
+        });
+      }
     }
     if (!definition.deathriteDrawSite) continue;
     const owner = players[dead.owner];
@@ -2282,9 +2308,12 @@ function applyDescriptor(
       candidate.kind === 'cast-magic'
         && candidate.cardInstanceId === descriptor.cardInstanceId
         && candidate.casterInstanceId === descriptor.casterInstanceId
-        && candidate.target.instanceId === descriptor.target.instanceId
-        && candidate.target.kind === descriptor.target.kind
-        && candidate.target.seat === descriptor.target.seat);
+        && (candidate.target === undefined && descriptor.target === undefined
+          || candidate.target !== undefined
+            && descriptor.target !== undefined
+            && candidate.target.instanceId === descriptor.target.instanceId
+            && candidate.target.kind === descriptor.target.kind
+            && candidate.target.seat === descriptor.target.seat));
     if (!card || !definition || definition.cardType !== 'magic' || !legal) {
       throw new Error('unreachable illegal Magic cast');
     }
@@ -2310,6 +2339,59 @@ function applyDescriptor(
         cemetery: [...owner.cemetery, card],
       })),
     });
+    const castOutcome = {
+      payload: {
+        cardId: card.cardId,
+        casterInstanceId: descriptor.casterInstanceId,
+        instanceId: card.instanceId,
+        manaPaid: definition.manaCost,
+        seat,
+        ...(descriptor.target
+          ? {
+            targetInstanceId: descriptor.target.instanceId,
+            targetSeat: descriptor.target.seat,
+          }
+          : {}),
+      },
+      type: 'magic-cast',
+    } as const;
+    const resolved = {
+      payload: { cardId: card.cardId, instanceId: card.instanceId, owner: card.owner },
+      type: 'magic-resolved',
+    } as const;
+    if (definition.healController !== undefined) {
+      const controller = castState.players[seat];
+      const avatarDefinition = cardDefinition(castState, controller.avatar.card.cardId);
+      if (avatarDefinition.cardType !== 'avatar') throw new Error('player Avatar lacks Avatar definition');
+      const [healed, amount] = healAvatar(
+        controller,
+        avatarDefinition.life,
+        definition.healController,
+      );
+      return [
+        withStateVersion(castState, { players: replacePlayer(castState, seat, healed) }),
+        [
+          castOutcome,
+          ...(amount > 0
+            ? [{
+              payload: {
+                amount,
+                attemptedAmount: definition.healController,
+                life: healed.avatar.life,
+                seat,
+                sourceInstanceId: card.instanceId,
+              },
+              type: 'avatar-healed' as const,
+            }]
+            : []),
+          resolved,
+        ],
+        [],
+      ];
+    }
+    if (definition.damageTargetUnit === undefined || descriptor.target === undefined) {
+      throw new Error('unreachable targeted Magic cast');
+    }
     const target = unitStatus(castState, descriptor.target);
     const pending: PendingCombat = deepFreeze({
       allocations: [{ amount: definition.damageTargetUnit, targetInstanceId: descriptor.target.instanceId }],
@@ -2325,18 +2407,7 @@ function applyDescriptor(
     const [damaged, outcomes, randomDraws] = resolveFightWindow(
       castState,
       pending,
-      [{
-        payload: {
-          cardId: card.cardId,
-          casterInstanceId: descriptor.casterInstanceId,
-          instanceId: card.instanceId,
-          manaPaid: definition.manaCost,
-          seat,
-          targetInstanceId: descriptor.target.instanceId,
-          targetSeat: descriptor.target.seat,
-        },
-        type: 'magic-cast',
-      }, {
+      [castOutcome, {
         payload: {
           amount: definition.damageTargetUnit,
           sourceInstanceId: card.instanceId,
@@ -2348,10 +2419,6 @@ function applyDescriptor(
       false,
       [caster],
     );
-    const resolved = {
-      payload: { cardId: card.cardId, instanceId: card.instanceId, owner: card.owner },
-      type: 'magic-resolved',
-    } as const;
     const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
     return [
       withStateVersion(damaged, {}),

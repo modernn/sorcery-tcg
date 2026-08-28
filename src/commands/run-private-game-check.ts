@@ -222,6 +222,18 @@ export type PrivateGameCheck = Readonly<{
     targetIsLandSite: boolean;
     undergroundSummonAvailable: boolean;
   }>;
+  earthDivineHealing: Readonly<{
+    acceptedActionCount: number;
+    actualLifeGained: number;
+    deck: DeckList;
+    divineHealing: string;
+    exactlyOneTargetlessCast: boolean;
+    lifeCappedAtMaximum: boolean;
+    lifeWasDamagedAboveDeathsDoor: boolean;
+    manaPaid: number;
+    replayVerified: boolean;
+    spellEnteredCemetery: boolean;
+  }>;
   earthEntombed: Readonly<{
     acceptedActionCount: number;
     boskTroll: string;
@@ -564,6 +576,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   config: ScenarioConfig;
   deathriteMinion: NormalizedCard;
   dalceanPhalanx: NormalizedCard;
+  divineHealing: NormalizedCard;
   drowned: NormalizedCard;
   earthProviderMinion: NormalizedCard;
   entombed: NormalizedCard;
@@ -611,6 +624,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     throw new Error('private normalized card artifact identity is invalid');
   }
   const snapshot = normalizedCardSnapshotSchema.parse(artifact.identity.payload);
+  const divineHealing = snapshot.cards.find(({ name }) => name === 'Divine Healing');
+  if (!divineHealing
+    || divineHealing.cardType !== 'magic'
+    || ruleTextDigest(divineHealing.rulesText) !== 'sha256:311b949533b21f855420caf5a2a2393f006f8a6abbc35c2d6879a52223db324d'
+    || divineHealing.manaCost !== 1
+    || divineHealing.attack !== null
+    || divineHealing.defense !== null
+    || divineHealing.life !== null
+    || divineHealing.elements.length !== 1
+    || divineHealing.elements[0] !== 'earth'
+    || divineHealing.thresholds.air !== 0
+    || divineHealing.thresholds.earth !== 3
+    || divineHealing.thresholds.fire !== 0
+    || divineHealing.thresholds.water !== 0
+    || divineHealing.rarity !== 'exceptional') {
+    throw new Error('private controller-healing Magic no longer matches its supported facts');
+  }
   const arcLightning = snapshot.cards.find(({ name }) => name === 'Arc Lightning');
   if (!arcLightning
     || arcLightning.cardType !== 'magic'
@@ -1196,6 +1226,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     config,
     dalceanPhalanx,
     deathriteMinion,
+    divineHealing,
     drowned,
     earthProviderMinion,
     entombed,
@@ -1294,6 +1325,7 @@ function gameDefinition(
   immobile = false,
   damageTargetUnit: 0 | 1 | 4 = 0,
   targetNearby = false,
+  healController: 0 | 7 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1318,10 +1350,11 @@ function gameDefinition(
   }
   if (card.cardType === 'magic'
     && card.manaCost !== null
-    && damageTargetUnit !== 0) {
+    && (damageTargetUnit !== 0 || healController !== 0)
+    && !(damageTargetUnit !== 0 && healController !== 0)) {
     return {
       cardType: 'magic',
-      damageTargetUnit,
+      ...(damageTargetUnit !== 0 ? { damageTargetUnit } : { healController }),
       manaCost: card.manaCost,
       ...(targetNearby ? { targetNearby: true } : {}),
       thresholds: card.thresholds,
@@ -1375,7 +1408,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1477,6 +1510,7 @@ function buildManifest(
     input.firstStrikeTargetMinion,
   ] as const;
   const earthDeck = elementalDeck('earth', earthMinions, [input.ghostTownSite]);
+  const earthDivineHealingDeck = elementalDeck('earth', earthMinions, [], [input.divineHealing]);
   const earthBurrowingDeck = elementalDeck('earth', [
     ...earthMinions,
     input.burrowingMinion,
@@ -1561,6 +1595,8 @@ function buildManifest(
       ? airborneDeck
       : scenario === 'earth-entombed'
         ? earthEntombedDeck
+      : scenario === 'earth-divine-healing'
+        ? earthDivineHealingDeck
       : scenario === 'earth-forward'
         ? earthForwardDeck
       : scenario === 'earth-immobile'
@@ -1606,6 +1642,8 @@ function buildManifest(
         ? waterLugbogDeck
       : scenario === 'earth-entombed'
         ? earthEntombedDeck
+      : scenario === 'earth-divine-healing'
+        ? earthDivineHealingDeck
       : scenario === 'earth-forward'
         ? earthForwardDeck
       : scenario === 'earth-immobile'
@@ -1678,6 +1716,7 @@ function buildManifest(
         ? 4
         : card.stableId === input.zap.stableId ? 1 : 0,
       card.stableId === input.arcLightning.stableId,
+      card.stableId === input.divineHealing.stableId ? 7 : 0,
     ),
   ]));
   return {
@@ -2261,6 +2300,61 @@ function findEarthImmobileOpening(
     }
   }
   throw new Error('private Earth Immobile scenario no longer produces its supported opening');
+}
+
+function findEarthDivineHealingOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  attackerInstanceId: string;
+  divineHealingInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string];
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string];
+}> {
+  // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const built = buildManifest(input, input.config.earthSeed + offset, 'earth-divine-healing');
+    const session = createGameSession(built.manifest);
+    const earthSites = (seat: GameSeat) => session.state.players[seat].hand.atlas
+      .filter(({ cardId }) => {
+        const definition = session.state.cards[cardId];
+        return definition?.cardType === 'site' && definition.elements.includes('earth');
+      });
+    const northSites = earthSites('north');
+    const southSites = earthSites('south');
+    const divineHealingInstanceId = availableMinionInstance(
+      session,
+      'north',
+      input.divineHealing.stableId,
+      3,
+    );
+    const attackerInstanceId = availableMinionInstance(
+      session,
+      'south',
+      input.firstStrikeTargetMinion.stableId,
+      2,
+    );
+    if (northSites.length >= 3
+      && southSites.length >= 2
+      && divineHealingInstanceId
+      && attackerInstanceId) {
+      return {
+        ...built,
+        attackerInstanceId,
+        divineHealingInstanceId,
+        northSiteInstanceIds: [
+          northSites[0]!.instanceId,
+          northSites[1]!.instanceId,
+          northSites[2]!.instanceId,
+        ],
+        session,
+        southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
+      };
+    }
+  }
+  throw new Error('private Earth controller-healing Magic scenario no longer produces its supported opening');
 }
 
 function findEarthSecretTunnelOpening(
@@ -3463,6 +3557,93 @@ function runEarthImmobile(
   });
 }
 
+function runEarthDivineHealing(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthDivineHealing'] {
+  const opening = findEarthDivineHealingOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.attackerInstanceId
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+    && descriptor.cell === 'B3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === opening.attackerInstanceId
+    && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3');
+  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+    && descriptor.target.kind === 'site'
+    && descriptor.target.instanceId === session.state.realm.sites.C3?.instanceId);
+  take(({ descriptor }) =>
+    descriptor.kind === 'close-defend' && !descriptor.originalTargetParticipates);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const avatarDefinition = session.state.cards[session.state.players.north.avatar.card.cardId];
+  if (avatarDefinition?.cardType !== 'avatar') {
+    throw new Error('private controller-healing Magic scenario Avatar is unsupported');
+  }
+  const lifeBefore = session.state.players.north.avatar.life;
+  const casts = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.divineHealingInstanceId);
+  const exactlyOneTargetlessCast = casts.length === 1
+    && casts[0]?.descriptor.kind === 'cast-magic'
+    && casts[0].descriptor.target === undefined;
+  const manaBefore = session.state.players.north.mana;
+  take(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.cardInstanceId === opening.divineHealingInstanceId
+    && descriptor.target === undefined);
+  const lifeAfter = session.state.players.north.avatar.life;
+  const actualLifeGained = lifeAfter - lifeBefore;
+  const manaPaid = manaBefore - session.state.players.north.mana;
+  const spellEnteredCemetery = session.state.players.north.hand.spellbook
+    .every(({ instanceId }) => instanceId !== opening.divineHealingInstanceId)
+    && session.state.players.north.cemetery
+      .some(({ instanceId }) => instanceId === opening.divineHealingInstanceId);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    actualLifeGained,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    divineHealing:
+      opening.names.get(input.divineHealing.stableId) ?? input.divineHealing.stableId,
+    exactlyOneTargetlessCast,
+    lifeCappedAtMaximum: lifeAfter === avatarDefinition.life && actualLifeGained < 7,
+    lifeWasDamagedAboveDeathsDoor: lifeBefore > 0 && lifeBefore < avatarDefinition.life,
+    manaPaid,
+    replayVerified: verifyGameReplay(session),
+    spellEnteredCemetery,
+  });
+}
+
 function runEarthSecretTunnel(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['earthSecretTunnel'] {
@@ -4007,6 +4188,7 @@ function runAirZap(
     .some(({ instanceId }) => instanceId === opening.zapInstanceId);
   take(({ descriptor }) => descriptor.kind === 'cast-magic'
     && descriptor.cardInstanceId === opening.zapInstanceId
+    && descriptor.target !== undefined
     && descriptor.target.kind === 'minion'
     && descriptor.target.instanceId === opening.snowLeopardInstanceId);
   const targetAfter = session.state.realm.units
@@ -4096,16 +4278,19 @@ function runAirArcLightning(
   const nearbyTargetAvailable = targets.some(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.arcLightningInstanceId
+      && descriptor.target !== undefined
       && descriptor.target.kind === 'minion'
       && descriptor.target.instanceId === opening.snowLeopardInstanceId);
   const southAvatarInstanceId = session.state.players.south.avatar.card.instanceId;
   const farSameRegionUnitUnavailable = targets.every(({ descriptor }) =>
     descriptor.kind !== 'cast-magic'
       || descriptor.cardInstanceId !== opening.arcLightningInstanceId
+      || descriptor.target === undefined
       || descriptor.target.instanceId !== southAvatarInstanceId);
   const manaBefore = session.state.players.north.mana;
   take(({ descriptor }) => descriptor.kind === 'cast-magic'
     && descriptor.cardInstanceId === opening.arcLightningInstanceId
+    && descriptor.target !== undefined
     && descriptor.target.kind === 'minion'
     && descriptor.target.instanceId === opening.snowLeopardInstanceId);
   const manaPaid = manaBefore - session.state.players.north.mana;
@@ -5387,6 +5572,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airVoidwalk = runAirVoidwalk(input);
   const airZap = runAirZap(input);
   const earthBurrowing = runEarthBurrowing(input);
+  const earthDivineHealing = runEarthDivineHealing(input);
   const earthEntombed = runEarthEntombed(input);
   const earthFirstStrike = runEarthFirstStrike(input);
   const earthForwardMovement = runEarthForwardMovement(input);
@@ -5538,6 +5724,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
       south: deckList(opening.manifest.decks.south, opening.names),
     },
     earthBurrowing,
+    earthDivineHealing,
     earthEntombed,
     earthRamp,
     earthFirstStrike,

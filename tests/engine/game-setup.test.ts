@@ -262,7 +262,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       ...cards,
       [firstSpell]: { cardType: 'magic' } as unknown as GameCardDefinition,
     },
-  }), /damageTargetUnit/);
+  }), /exactly one supported Magic effect/);
   assert.doesNotThrow(() => createGameManifest({
     ...input,
     cards: {
@@ -275,6 +275,43 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   }));
+  assert.doesNotThrow(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        healController: 7,
+        manaCost: 2,
+        thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+      },
+    },
+  }));
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        damageTargetUnit: 1,
+        healController: 7,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        healController: 0,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /healController/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -795,8 +832,10 @@ test('RULE-03/05 targeted Magic pays mana, damages any unit, resolves Deathrite,
   assert.ok(spell);
   const casts = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === spell.instanceId);
-  assert.deepEqual(casts.map(({ descriptor }) => descriptor.kind === 'cast-magic'
-    && `${descriptor.target.kind}:${descriptor.target.seat}:${descriptor.target.instanceId}`).sort(), [
+  assert.deepEqual(casts.flatMap(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.target
+    ? [`${descriptor.target.kind}:${descriptor.target.seat}:${descriptor.target.instanceId}`]
+    : []).sort(), [
     `avatar:north:${session.state.players.north.avatar.card.instanceId}`,
     `avatar:south:${session.state.players.south.avatar.card.instanceId}`,
     `minion:south:${target.instanceId}`,
@@ -805,6 +844,7 @@ test('RULE-03/05 targeted Magic pays mana, damages any unit, resolves Deathrite,
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === spell.instanceId
+      && descriptor.target !== undefined
       && descriptor.target.kind === 'minion'
       && descriptor.target.instanceId === target.instanceId));
 
@@ -836,6 +876,7 @@ test('RULE-03/05 targeted Magic pays mana, damages any unit, resolves Deathrite,
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'cast-magic'
+      && descriptor.target !== undefined
       && descriptor.target.kind === 'avatar'
       && descriptor.target.seat === 'south'));
   assert.equal(session.state.players.south.avatar.life, 0);
@@ -852,6 +893,7 @@ test('RULE-03/05 targeted Magic pays mana, damages any unit, resolves Deathrite,
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === finalSpell.instanceId
+      && descriptor.target !== undefined
       && descriptor.target.kind === 'avatar'
       && descriptor.target.seat === 'south'));
   assert.deepEqual(session.state.terminal, {
@@ -914,11 +956,13 @@ test('RULE-03 Magic targets stay in the caster region and exclude enemy Stealth'
     if (targetNearby) {
       assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
         descriptor.kind === 'cast-magic'
+          && descriptor.target !== undefined
           && descriptor.target.kind === 'avatar'
           && descriptor.target.seat === 'north'), true);
     }
     return legalGameActions(session.state, 'north').some(({ descriptor }) =>
       descriptor.kind === 'cast-magic'
+        && descriptor.target !== undefined
         && descriptor.target.kind === 'minion'
         && descriptor.target.instanceId === target.instanceId);
   };
@@ -938,6 +982,109 @@ test('RULE-03 Magic targets stay in the caster region and exclude enemy Stealth'
     manaCost: 1,
     thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
   }, 'surface', true), false);
+});
+
+test("RULE-03/04 healing Magic is targetless, capped, and cannot leave Death's Door", () => {
+  const healAfterDamage = (maximumLife: number, seed: number): Readonly<{
+    beforeCast: GameSession['state'];
+    session: GameSession;
+    spellInstanceId: string;
+  }> => {
+    const decks = { north: deck('heal-north', 4, 6), south: deck('heal-south', 4, 6) };
+    const cards = cardsFor(
+      decks,
+      { manaCost: 1, thresholds: { air: 1, earth: 0, fire: 0, water: 0 } },
+      { attack: 1, defense: 1, drawSpell: false, life: maximumLife },
+      { elements: ['air'] },
+    );
+    for (const cardId of decks.north.spellbook) {
+      cards[cardId] = {
+        cardType: 'magic',
+        healController: 7,
+        manaCost: 1,
+        thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+      };
+    }
+    for (const cardId of decks.south.spellbook) {
+      cards[cardId] = {
+        cardType: 'magic',
+        damageTargetUnit: 4,
+        manaCost: 1,
+        thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+      };
+    }
+    let session = keep(createGameSession(createGameManifest({
+      authority: {
+        contentHash: SYNTHETIC_AUTHORITY_HASH,
+        mode: 'synthetic',
+        revisionId: `synthetic-healing-magic-${maximumLife}-v1`,
+      },
+      cards,
+      decks,
+      firstSeat: 'north',
+      seed,
+    })));
+    session = keep(session);
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.target !== undefined
+        && descriptor.target.kind === 'avatar'
+        && descriptor.target.seat === 'north'));
+    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    const spell = session.state.players.north.hand.spellbook[0];
+    assert.ok(spell);
+    const casts = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+      descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === spell.instanceId);
+    assert.equal(casts.length, 1);
+    assert.equal(casts[0]?.descriptor.kind === 'cast-magic'
+      && casts[0].descriptor.target === undefined, true);
+    const beforeCast = session.state;
+    session = accept(session, casts[0]!);
+    assert.equal(verifyGameReplay(session), true);
+    return { beforeCast, session, spellInstanceId: spell.instanceId };
+  };
+
+  const capped = healAfterDamage(20, 151);
+  assert.equal(capped.beforeCast.players.north.avatar.life, 16);
+  assert.equal(capped.session.state.players.north.avatar.life, 20);
+  assert.equal(capped.session.state.players.north.mana, capped.beforeCast.players.north.mana - 1);
+  assert.equal(capped.session.state.stateVersion, capped.beforeCast.stateVersion + 1);
+  assert.equal(capped.session.state.players.north.hand.spellbook.length,
+    capped.beforeCast.players.north.hand.spellbook.length - 1);
+  assert.equal(capped.session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === capped.spellInstanceId), true);
+  assert.deepEqual(capped.session.transcript.at(-1)?.events.map(({ type }) => type), [
+    'magic-cast',
+    'avatar-healed',
+    'magic-resolved',
+  ]);
+  assert.deepEqual(capped.session.transcript.at(-1)?.events[1]?.payload, {
+    amount: 4,
+    attemptedAmount: 7,
+    life: 20,
+    seat: 'north',
+    sourceInstanceId: capped.spellInstanceId,
+  });
+
+  const deathDoor = healAfterDamage(4, 152);
+  assert.equal(deathDoor.beforeCast.players.north.avatar.life, 0);
+  assert.equal(deathDoor.session.state.players.north.avatar.life, 0);
+  assert.equal(deathDoor.session.state.players.north.avatar.deathDoorTurn,
+    deathDoor.beforeCast.players.north.avatar.deathDoorTurn);
+  assert.deepEqual(deathDoor.session.state.terminal, { status: 'active' });
+  assert.deepEqual(deathDoor.session.transcript.at(-1)?.events.map(({ type }) => type), [
+    'magic-cast',
+    'magic-resolved',
+  ]);
 });
 
 test('RULE-03 explicit permission allows a minion to be summoned to any site', () => {
@@ -3032,11 +3179,8 @@ test('RULE-05 Deathrite healing caps at maximum, fails at Death\'s Door, and pre
 
   const deathDoor = resolveHealingFight(1, 57);
   assert.equal(deathDoor.state.players.south.avatar.life, 0);
-  assert.equal(deathDoor.transcript.at(-1)?.events.some(({ payload, type }) =>
-    type === 'avatar-healed'
-      && canonicalJson(payload).includes('"amount":0')
-      && canonicalJson(payload).includes('"attemptedAmount":3')
-      && canonicalJson(payload).includes('"seat":"south"')), true);
+  assert.equal(deathDoor.transcript.at(-1)?.events.some(({ type }) =>
+    type === 'avatar-healed'), false);
   assert.equal(verifyGameReplay(deathDoor), true);
 });
 

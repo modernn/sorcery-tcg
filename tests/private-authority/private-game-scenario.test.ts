@@ -155,6 +155,21 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.decks.south.atlas.reduce((total, card) => total + card.copies, 0), 30);
   assert.equal(result.decks.north.spellbook.reduce((total, card) => total + card.copies, 0), 60);
   assert.equal(result.decks.south.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthDivineHealing.divineHealing, 'Divine Healing');
+  assert.equal(result.earthDivineHealing.acceptedActionCount, 24);
+  assert.equal(result.earthDivineHealing.lifeWasDamagedAboveDeathsDoor, true);
+  assert.equal(result.earthDivineHealing.exactlyOneTargetlessCast, true);
+  assert.equal(result.earthDivineHealing.actualLifeGained, 3);
+  assert.equal(result.earthDivineHealing.lifeCappedAtMaximum, true);
+  assert.equal(result.earthDivineHealing.manaPaid, 1);
+  assert.equal(result.earthDivineHealing.spellEnteredCemetery, true);
+  assert.equal(result.earthDivineHealing.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthDivineHealing.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthDivineHealing.deck.spellbook
+    .find(({ name }) => name === 'Divine Healing')?.copies, 3);
+  assert.equal(result.earthDivineHealing.replayVerified, true);
   assert.equal(result.earthBurrowing.burrowingMinion, 'Cave Trolls');
   assert.equal(result.earthBurrowing.acceptedActionCount, 28);
   assert.equal(result.earthBurrowing.targetIsLandSite, true);
