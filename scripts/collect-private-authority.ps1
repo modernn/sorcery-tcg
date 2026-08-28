@@ -33,7 +33,7 @@ function Get-ProductionSourceDescriptors {
             provenanceUrl = 'https://sorcerytcg.com/constructed'
             mediaType = 'text/html'
             sourceMarker = 'Constructed Format'
-            visibleBodyMarkers = @('Constructed Format', 'Deck Construction')
+            visibleBodyMarkers = @('Constructed Format', 'Deckbuilding')
             effectiveDatePolicy = 'none'
             effectiveDate = $null
             minBytes = 512
@@ -44,7 +44,7 @@ function Get-ProductionSourceDescriptors {
             provenanceUrl = 'https://curiosa.io/codex'
             mediaType = 'text/html'
             sourceMarker = 'Welcome to the Codex'
-            visibleBodyMarkers = @('Welcome to the Codex', 'Card Rulings')
+            visibleBodyMarkers = @('Welcome to the Codex', 'Golden Rule')
             effectiveDatePolicy = 'none'
             effectiveDate = $null
             minBytes = 512
@@ -55,7 +55,7 @@ function Get-ProductionSourceDescriptors {
             provenanceUrl = 'https://curiosa.io/faqs'
             mediaType = 'text/html'
             sourceMarker = 'FAQs'
-            visibleBodyMarkers = @('FAQs', 'Frequently Asked Questions')
+            visibleBodyMarkers = @('FAQs')
             effectiveDatePolicy = 'none'
             effectiveDate = $null
             minBytes = 512

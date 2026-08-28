@@ -125,14 +125,12 @@ function syntheticHtml(body: string): Buffer {
 const SOURCE_BYTES: Readonly<Record<SourcePath, Buffer>> = Object.freeze({
   'rulebook/rulebook-current.pdf': syntheticPdf(),
   'formats/constructed-current.html': syntheticHtml(
-    '<h1>Constructed Format</h1><h2>Deck Construction</h2>',
+    '<h1>Constructed Format</h1><h2>Deckbuilding</h2>',
   ),
   'codex/codex-current.html': syntheticHtml(
-    '<h1>Welcome to the Codex</h1><p>Card Rulings</p>',
+    '<h1>Welcome to the Codex</h1><p>Golden Rule</p>',
   ),
-  'codex/faqs-current.html': syntheticHtml(
-    '<h1>FAQs</h1><h2>Frequently Asked Questions</h2>',
-  ),
+  'codex/faqs-current.html': syntheticHtml('<h1>FAQs</h1>'),
   'codex/changelog-current.html': syntheticHtml(
     '<h1>Codex Changelog</h1><article><h2>20 August 2026</h2><p>Rules update</p></article>',
   ),
@@ -147,9 +145,9 @@ const SOURCE_BYTES: Readonly<Record<SourcePath, Buffer>> = Object.freeze({
 
 function descriptors(): readonly Record<string, unknown>[] {
   const markers: Partial<Record<SourcePath, readonly string[]>> = {
-    'formats/constructed-current.html': ['Constructed Format', 'Deck Construction'],
-    'codex/codex-current.html': ['Welcome to the Codex', 'Card Rulings'],
-    'codex/faqs-current.html': ['FAQs', 'Frequently Asked Questions'],
+    'formats/constructed-current.html': ['Constructed Format', 'Deckbuilding'],
+    'codex/codex-current.html': ['Welcome to the Codex', 'Golden Rule'],
+    'codex/faqs-current.html': ['FAQs'],
     'codex/changelog-current.html': ['Codex Changelog'],
     'updates/card-updates-2025.html': [
       'Sorcery: Contested Realm Card Updates 2025',
@@ -577,7 +575,7 @@ test('manual intake rejects missing extra linked and malformed inboxes before pu
         writeFile(
           join(fixture.inboxRoot, 'formats', 'constructed-current.html'),
           '<!doctype html><header><h1>Constructed Format</h1></header>' +
-            '<nav>Deck Construction</nav><script>' +
+            '<nav>Deckbuilding</nav><script>' +
             'x'.repeat(600) +
             '</script>',
         ),
@@ -588,7 +586,7 @@ test('manual intake rejects missing extra linked and malformed inboxes before pu
         writeFile(
           join(fixture.inboxRoot, 'formats', 'constructed-current.html'),
           '<!doctype html><html><body><main><h1>Constructed Format</h1>' +
-            '<h2>Deck Construction</h2><p>' +
+            '<h2>Deckbuilding</h2><p>' +
             'visible content '.repeat(50),
         ),
     },
