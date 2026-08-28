@@ -55,6 +55,7 @@ export type GameCardDefinition =
     summonToAnySite?: boolean;
     tapForMana?: number;
     thresholds: GameThresholds;
+    ward?: boolean;
   }>;
 
 export type GameDeckSpec = Readonly<{
@@ -97,6 +98,7 @@ type UnitInstance = Readonly<CardInstance & {
   region: GameRegion;
   summoningSickness: boolean;
   tapped: boolean;
+  warded: boolean;
 }>;
 
 type GameUnitRef = Readonly<{
@@ -227,6 +229,7 @@ export type GameObservation = Readonly<{
       region: GameRegion;
       summoningSickness: boolean;
       tapped: boolean;
+      warded: boolean;
     }>[];
   }>;
   schemaVersion: 1;
@@ -432,6 +435,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.ranged !== undefined && typeof card.ranged !== 'boolean') {
     throw new RangeError(`${path}.ranged must be boolean`);
   }
+  if (card.ward !== undefined && typeof card.ward !== 'boolean') {
+    throw new RangeError(`${path}.ward must be boolean`);
+  }
   if (card.summonToAnySite !== undefined && typeof card.summonToAnySite !== 'boolean') {
     throw new RangeError(`${path}.summonToAnySite must be boolean`);
   }
@@ -540,6 +546,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.summonToAnySite === true ? { summonToAnySite: true } : {}),
             ...(card.tapForMana ? { tapForMana: card.tapForMana } : {}),
             thresholds: { ...card.thresholds },
+            ...(card.ward === true ? { ward: true } : {}),
           },
     ])),
     decks: {
@@ -792,6 +799,7 @@ export function observeGame(state: GameState, viewer: GameSeat): GameObservation
       region: unit.region,
       summoningSickness: unit.summoningSickness,
       tapped: unit.tapped,
+      warded: unit.warded,
     };
   });
   return deepFreeze({
@@ -1364,6 +1372,24 @@ function finishFight(
     const index = units.findIndex(({ instanceId }) => instanceId === ref.instanceId);
     const unit = units[index];
     if (!unit) throw new Error('unreachable fight minion');
+    if (amount > 0 && unit.warded) {
+      units[index] = deepFreeze({ ...unit, warded: false });
+      damageOutcomes.push(
+        {
+          payload: {
+            amount: 0,
+            attemptedAmount: amount,
+            direct: true,
+            instanceId: ref.instanceId,
+            prevented: true,
+            seat: ref.seat,
+          },
+          type: 'damage-dealt',
+        },
+        { payload: { instanceId: ref.instanceId, seat: ref.seat }, type: 'ward-broken' },
+      );
+      continue;
+    }
     const accumulated = unit.damage + amount;
     units[index] = deepFreeze({ ...unit, damage: accumulated });
     damageOutcomes.push({
@@ -1684,6 +1710,7 @@ function applyDescriptor(
       region: 'surface',
       summoningSickness: true,
       tapped: false,
+      warded: definition.ward === true,
     });
     const updatedPlayer = deepFreeze({
       ...player,
