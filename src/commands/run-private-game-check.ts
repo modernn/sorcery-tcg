@@ -96,6 +96,16 @@ export type PrivateGameCheck = Readonly<{
     replayVerified: boolean;
     seed: number;
   }>;
+  airLeyline: Readonly<{
+    acceptedActionCount: number;
+    deck: DeckList;
+    firstHengeDrewNothing: boolean;
+    genesisDrewOne: boolean;
+    henge: string;
+    hiddenFromOpponent: boolean;
+    replayVerified: boolean;
+    seed: number;
+  }>;
   airborne: Readonly<{
     acceptedActionCount: number;
     airborneCanAttackGround: boolean;
@@ -465,6 +475,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   ghostTownSite: NormalizedCard;
   healingMinion: NormalizedCard;
   lethalMinion: NormalizedCard;
+  leylineHenge: NormalizedCard;
   lumberingMinion: NormalizedCard;
   manaMinion: NormalizedCard;
   monstrousLion: NormalizedCard;
@@ -653,6 +664,22 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || forsaken.thresholds.water !== 0
     || forsaken.rarity !== 'ordinary') {
     throw new Error('private outer-column casting minion no longer matches its supported facts');
+  }
+  const leylineHenge = snapshot.cards.find(({ name }) => name === 'Leyline Henge');
+  if (!leylineHenge
+    || leylineHenge.cardType !== 'site'
+    || ruleTextDigest(leylineHenge.rulesText) !== 'sha256:22cecbc50a25c1867639e979eb4e9cc09d0521c00d27ada13648b0c01dd90cec'
+    || leylineHenge.manaCost !== null
+    || leylineHenge.attack !== null
+    || leylineHenge.defense !== null
+    || leylineHenge.life !== null
+    || leylineHenge.elements.length !== 0
+    || leylineHenge.thresholds.air !== 0
+    || leylineHenge.thresholds.earth !== 0
+    || leylineHenge.thresholds.fire !== 0
+    || leylineHenge.thresholds.water !== 0
+    || leylineHenge.rarity !== 'ordinary') {
+    throw new Error('private adjacent Leyline Genesis site no longer matches its supported facts');
   }
   const genesisSpellMinion = snapshot.cards.find(({ name }) => name === 'Apprentice Wizard');
   if (!genesisSpellMinion
@@ -941,6 +968,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     ghostTownSite,
     healingMinion,
     lethalMinion,
+    leylineHenge,
     lumberingMinion,
     manaMinion,
     monstrousLion,
@@ -1012,6 +1040,7 @@ function gameDefinition(
   genesisDrawSpell = false,
   connectsTopBottom = false,
   mustBeCastToOuterColumn = false,
+  siteGenesisDrawSpellPerAdjacentSameCard = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1029,6 +1058,7 @@ function gameDefinition(
     return {
       cardType: 'site',
       elements: card.elements,
+      genesisDrawSpellPerAdjacentSameCard: siteGenesisDrawSpellPerAdjacentSameCard,
       ...(siteGenesisGainMana ? { genesisGainMana: siteGenesisGainMana } : {}),
     };
   }
@@ -1075,7 +1105,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-genesis-spell' | 'air-voidwalk' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-edge-connection' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-genesis-spell' | 'air-leyline' | 'air-voidwalk' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-edge-connection' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1190,6 +1220,7 @@ function buildManifest(
   ] as const;
   const airborneDeck = elementalDeck('air', airMinions);
   const airGenesisSpellDeck = elementalDeck('air', [...airMinions, input.genesisSpellMinion]);
+  const airLeylineDeck = elementalDeck('air', airMinions, [input.leylineHenge]);
   const airVoidwalkDeck = elementalDeck('air', [
     ...airMinions,
     input.voidwalkMinion,
@@ -1213,7 +1244,9 @@ function buildManifest(
     input.polarBears,
   ]);
   const decks = {
-    north: scenario === 'air-genesis-spell'
+    north: scenario === 'air-leyline'
+      ? airLeylineDeck
+      : scenario === 'air-genesis-spell'
       ? airGenesisSpellDeck
       : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
@@ -1234,7 +1267,9 @@ function buildManifest(
         : scenario === 'water' || scenario === 'water-sideways' || scenario === 'water-stealth'
           ? waterDeck
           : deck(false, true),
-    south: scenario === 'air-genesis-spell'
+    south: scenario === 'air-leyline'
+      ? airLeylineDeck
+      : scenario === 'air-genesis-spell'
       ? airGenesisSpellDeck
       : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
@@ -1294,6 +1329,7 @@ function buildManifest(
       card.stableId === input.genesisSpellMinion.stableId,
       card.stableId === input.polarBears.stableId,
       card.stableId === input.forsaken.stableId,
+      card.stableId === input.leylineHenge.stableId,
     ),
   ]));
   return {
@@ -1938,6 +1974,37 @@ function findAirGenesisSpellOpening(
     }
   }
   throw new Error('private Air Genesis spell-draw scenario no longer produces its supported opening');
+}
+
+function findAirLeylineOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  hengeInstanceIds: readonly [string, string];
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  seed: number;
+  session: GameSession;
+  southSiteInstanceId: string;
+}> {
+  // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const seed = input.config.airSeed + offset;
+    const built = buildManifest(input, seed, 'air-leyline');
+    const session = createGameSession(built.manifest);
+    const henges = session.state.players.north.hand.atlas
+      .filter(({ cardId }) => cardId === input.leylineHenge.stableId);
+    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+    if (henges.length >= 2 && southSiteInstanceId) {
+      return {
+        ...built,
+        hengeInstanceIds: [henges[0]!.instanceId, henges[1]!.instanceId],
+        seed,
+        session,
+        southSiteInstanceId,
+      };
+    }
+  }
+  throw new Error('private Air Leyline Henge scenario no longer produces its supported opening');
 }
 
 function findStealthOpening(
@@ -3141,6 +3208,69 @@ function runAirGenesisSpell(
   });
 }
 
+function runAirLeyline(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airLeyline'] {
+  const opening = findAirLeylineOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  const beforeFirst = session.state.players.north;
+  const first = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.hengeInstanceIds[0]
+      && descriptor.cell === 'C4'));
+  if (!first.accepted) throw new Error('private first Leyline Henge play was rejected');
+  session = first.session;
+  const afterFirst = session.state.players.north;
+  const firstHengeDrewNothing = afterFirst.spellbook.length === beforeFirst.spellbook.length
+    && afterFirst.hand.spellbook.length === beforeFirst.hand.spellbook.length
+    && first.receipt.events.map(({ type }) => type).join(',') === 'site-played';
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const before = session.state.players.north;
+  const drawn = before.spellbook[0];
+  if (!drawn) throw new Error('private Leyline Henge scenario lacks a spell to draw');
+  const second = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.hengeInstanceIds[1]
+      && descriptor.cell === 'C3'));
+  if (!second.accepted) throw new Error('private second Leyline Henge play was rejected');
+  session = second.session;
+  const after = session.state.players.north;
+  const drawEvent = second.receipt.events[1];
+  const genesisDrewOne = after.spellbook.length === before.spellbook.length - 1
+    && after.hand.spellbook.length === before.hand.spellbook.length + 1
+    && after.hand.spellbook.some(({ instanceId }) => instanceId === drawn.instanceId)
+    && second.receipt.events.map(({ type }) => type).join(',') === 'site-played,spell-drawn'
+    && drawEvent?.type === 'spell-drawn'
+    && isJsonRecord(drawEvent.payload)
+    && drawEvent.payload.sourceInstanceId === opening.hengeInstanceIds[1];
+  const opponentHand = observeGame(session.state, 'south').players.north.hand.spellbook;
+  const hiddenFromOpponent = typeof opponentHand === 'number'
+    && !canonicalJson(second.receipt.events as unknown as JsonValue).includes(drawn.instanceId);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    firstHengeDrewNothing,
+    genesisDrewOne,
+    henge: opening.names.get(input.leylineHenge.stableId) ?? input.leylineHenge.stableId,
+    hiddenFromOpponent,
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+  });
+}
+
 function runStealth(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['stealth'] {
@@ -3863,6 +3993,7 @@ function runWaterHealing(
 export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<PrivateGameCheck> {
   const input = await readPrivateInputs(path);
   const airGenesisSpell = runAirGenesisSpell(input);
+  const airLeyline = runAirLeyline(input);
   const airborne = runAirborne(input);
   const airMovement = runAirMovement(input);
   const airMovementTwo = runAirMovementTwo(input);
@@ -3986,6 +4117,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
     airGenesisSpell,
+    airLeyline,
     airborne,
     airMovement,
     airMovementTwo,

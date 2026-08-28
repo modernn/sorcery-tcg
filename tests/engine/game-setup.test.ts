@@ -69,6 +69,7 @@ type AvatarFacts = Readonly<{
 
 type SiteFacts = Readonly<{
   elements?: readonly ('air' | 'earth' | 'fire' | 'water')[];
+  genesisDrawSpellPerAdjacentSameCard?: boolean;
   genesisGainMana?: number;
 }>;
 
@@ -96,6 +97,8 @@ function cardsFor(
       cards[cardId] = {
         cardType: 'site',
         elements: site.elements ?? ['earth'],
+        genesisDrawSpellPerAdjacentSameCard:
+          site.genesisDrawSpellPerAdjacentSameCard ?? false,
         ...(site.genesisGainMana ? { genesisGainMana: site.genesisGainMana } : {}),
       };
     });
@@ -311,6 +314,18 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       [firstSpell]: { ...cards[firstSpell]!, connectsTopBottom: 'yes' } as unknown as GameCardDefinition,
     },
   }), /connectsTopBottom/);
+  const firstSite = decks.north.atlas[0];
+  assert.ok(firstSite);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSite]: {
+        ...cards[firstSite]!,
+        genesisDrawSpellPerAdjacentSameCard: 'yes',
+      } as unknown as GameCardDefinition,
+    },
+  }), /genesisDrawSpellPerAdjacentSameCard/);
 });
 
 test('TEST-03 different opponent hidden cards cannot change an observation or legal actions', () => {
@@ -766,6 +781,125 @@ test('RULE-03 site Genesis grants temporary mana once, pays a summon, and expire
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
   assert.equal(session.state.players.north.mana, 1);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 adjacent matching sites trigger one spell draw apiece and a short deck loses', () => {
+  const base = deck('leyline-north');
+  const north = {
+    ...base,
+    atlas: base.atlas.map(() => 'leyline-site'),
+  };
+  let session = keep(createGameSession(manifest(137, {
+    north,
+    site: { genesisDrawSpellPerAdjacentSameCard: true },
+  })));
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  const firstHandSize = session.state.players.north.hand.spellbook.length;
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  assert.equal(session.state.players.north.hand.spellbook.length, firstHandSize);
+  assert.deepEqual(session.transcript.at(-1)?.events.map(({ type }) => type), ['site-played']);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const beforeOne = session.state.players.north.hand.spellbook.length;
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B4');
+  assert.equal(session.state.players.north.hand.spellbook.length, beforeOne + 1);
+  assert.deepEqual(
+    session.transcript.at(-1)?.events.map(({ type }) => type),
+    ['site-played', 'spell-drawn'],
+  );
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  const beforeTwo = session.state.players.north.hand.spellbook.length;
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B3');
+  assert.equal(session.state.players.north.hand.spellbook.length, beforeTwo + 2);
+  assert.deepEqual(
+    session.transcript.at(-1)?.events.map(({ type }) => type),
+    ['site-played', 'spell-drawn', 'spell-drawn'],
+  );
+  assert.equal(verifyGameReplay(session), true);
+
+  const shortBase = deck('leyline-short', 30, 6);
+  const short = {
+    ...shortBase,
+    atlas: shortBase.atlas.map(() => 'leyline-short-site'),
+  };
+  session = keep(createGameSession(manifest(138, {
+    north: short,
+    site: { genesisDrawSpellPerAdjacentSameCard: true },
+  })));
+  session = keep(session);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'B4'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C3'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
+  const beforePartial = session.state.players.north;
+  assert.equal(beforePartial.spellbook.length, 1);
+  const fourth = action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'B3');
+  const partial = stepGame(session, fourth);
+  assert.equal(partial.accepted, true);
+  session = partial.session;
+  const fourthInstanceId = fourth.descriptor.kind === 'play-site'
+    ? fourth.descriptor.cardInstanceId
+    : '';
+  assert.equal(session.state.players.north.spellbook.length, 0);
+  assert.equal(
+    session.state.players.north.hand.spellbook.length,
+    beforePartial.hand.spellbook.length + 1,
+  );
+  assert.equal(session.state.realm.sites.B3?.instanceId, fourthInstanceId);
+  assert.deepEqual(session.state.terminal, {
+    loser: 'north',
+    reason: 'deck_empty',
+    status: 'finished',
+    winner: 'south',
+  });
+  assert.deepEqual(
+    session.transcript.at(-1)?.events.map(({ type }) => type),
+    ['site-played', 'spell-drawn', 'game-ended'],
+  );
+  assert.equal(
+    canonicalJson(session.transcript.at(-1)?.events[1]?.payload ?? null)
+      .includes(fourthInstanceId),
+    true,
+  );
   assert.equal(verifyGameReplay(session), true);
 });
 
