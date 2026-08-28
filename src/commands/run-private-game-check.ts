@@ -342,6 +342,18 @@ export type PrivateGameCheck = Readonly<{
     slyFoxUnderwaterUnavailable: boolean;
     summonedUnderwater: boolean;
   }>;
+  waterLugbog: Readonly<{
+    acceptedActionCount: number;
+    deck: DeckList;
+    enemyLandUnavailable: boolean;
+    enemyWaterAvailable: boolean;
+    lugbogCat: string;
+    replayVerified: boolean;
+    slyFox: string;
+    slyFoxControlledWaterAvailable: boolean;
+    slyFoxEnemyWaterUnavailable: boolean;
+    summonedToEnemyWater: boolean;
+  }>;
   waterEndTurnStealth: Readonly<{
     acceptedActionCount: number;
     attackSiteAvailable: boolean;
@@ -530,6 +542,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   healingMinion: NormalizedCard;
   lethalMinion: NormalizedCard;
   leylineHenge: NormalizedCard;
+  lugbogCat: NormalizedCard;
   lumberingMinion: NormalizedCard;
   manaMinion: NormalizedCard;
   monstrousLion: NormalizedCard;
@@ -687,6 +700,22 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || drowned.thresholds.water !== 1
     || drowned.rarity !== 'ordinary') {
     throw new Error('private submerged-only casting minion no longer matches its supported facts');
+  }
+  const lugbogCat = snapshot.cards.find(({ name }) => name === 'Lugbog Cat');
+  if (!lugbogCat
+    || lugbogCat.cardType !== 'minion'
+    || ruleTextDigest(lugbogCat.rulesText) !== 'sha256:0f56faf847b03a2a1db0ac505f40fb8f6f2d3cac741f52e9582d5ab5f4f9e5c3'
+    || lugbogCat.manaCost !== 3
+    || lugbogCat.attack !== 4
+    || lugbogCat.defense !== 4
+    || lugbogCat.elements.length !== 1
+    || lugbogCat.elements[0] !== 'water'
+    || lugbogCat.thresholds.air !== 0
+    || lugbogCat.thresholds.earth !== 0
+    || lugbogCat.thresholds.fire !== 0
+    || lugbogCat.thresholds.water !== 2
+    || lugbogCat.rarity !== 'exceptional') {
+    throw new Error('private water-site-only casting minion no longer matches its supported facts');
   }
   const burrowingMinion = snapshot.cards.find(({ name }) => name === 'Cave Trolls');
   if (!burrowingMinion
@@ -1092,6 +1121,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     healingMinion,
     lethalMinion,
     leylineHenge,
+    lugbogCat,
     lumberingMinion,
     manaMinion,
     monstrousLion,
@@ -1167,6 +1197,7 @@ function gameDefinition(
   siteGenesisDrawSpellPerAdjacentSameCard = false,
   mustBeCastBurrowed = false,
   mustBeCastSubmerged = false,
+  mustBeCastToWaterSite = false,
   movesOnlyForward = false,
   connectsBurrowedAllies = false,
 ): GameCardDefinition {
@@ -1217,6 +1248,7 @@ function gameDefinition(
       mustBeCastBurrowed,
       mustBeCastSubmerged,
       mustBeCastToOuterColumn,
+      mustBeCastToWaterSite,
       ...(movementBonus ? { movementBonus } : {}),
       movesOnlySideways,
       ...(provides ? { provides } : {}),
@@ -1237,7 +1269,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-genesis-spell' | 'air-leyline' | 'air-voidwalk' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-genesis-spell' | 'air-leyline' | 'air-voidwalk' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1393,6 +1425,13 @@ function buildManifest(
     input.sedgeCrabs,
     input.polarBears,
   ]);
+  const waterLugbogBase = elementalDeck('water', [
+    input.healingMinion,
+    input.slyFox,
+    input.sedgeCrabs,
+    input.lugbogCat,
+  ]);
+  const waterLugbogDeck: GameDeckSpec = waterLugbogBase;
   const decks = {
     north: scenario === 'air-leyline'
       ? airLeylineDeck
@@ -1420,6 +1459,8 @@ function buildManifest(
           ? waterEdgeConnectionDeck
         : scenario === 'water-drowned'
           ? waterDrownedDeck
+        : scenario === 'water-lugbog'
+          ? waterLugbogDeck
         : scenario === 'water-submerge'
           ? waterSubmergeDeck
         : scenario === 'water' || scenario === 'water-sideways' || scenario === 'water-stealth'
@@ -1437,6 +1478,8 @@ function buildManifest(
         ? waterEdgeConnectionDeck
       : scenario === 'water-drowned'
         ? waterDrownedDeck
+      : scenario === 'water-lugbog'
+        ? waterLugbogDeck
       : scenario === 'earth-entombed'
         ? earthEntombedDeck
       : scenario === 'earth-forward'
@@ -1477,7 +1520,8 @@ function buildManifest(
         : card.stableId === input.movementTwoMinion.stableId ? 2 : 0,
       card.stableId === input.healingMinion.stableId ? 3 : 0,
       card.stableId === input.ghostTownSite.stableId ? 1 : 0,
-      card.stableId === input.roamingMinion.stableId,
+      card.stableId === input.roamingMinion.stableId
+        || card.stableId === input.lugbogCat.stableId,
       card.stableId === input.lumberingMinion.stableId,
       card.stableId === input.monstrousLion.stableId,
       card.stableId === input.rangedMinion.stableId,
@@ -1500,6 +1544,7 @@ function buildManifest(
       card.stableId === input.leylineHenge.stableId,
       card.stableId === input.entombed.stableId,
       card.stableId === input.drowned.stableId,
+      card.stableId === input.lugbogCat.stableId,
       card.stableId === input.dalceanPhalanx.stableId,
       card.stableId === input.secretTunnel.stableId,
     ),
@@ -2700,6 +2745,74 @@ function findWaterDrownedOpening(
     }
   }
   throw new Error('private Water Drowned scenario no longer produces its supported opening');
+}
+
+function findWaterLugbogOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  lugbogInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string];
+  session: GameSession;
+  slyFoxInstanceId: string;
+  southLandSiteInstanceId: string;
+  southSecondDrawZone: 'atlas' | 'spellbook';
+  southWaterSiteInstanceId: string;
+}> {
+  // ponytail: bounded scan keeps the ignored config stable for a small teaching scenario.
+  for (let offset = 1; offset <= 128; offset += 1) {
+    const built = buildManifest(input, input.config.slyFoxSeed + offset, 'water-lugbog');
+    const session = createGameSession(built.manifest);
+    const isWaterSite = (cardId: string): boolean => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('water');
+    };
+    const northWaterSites = session.state.players.north.hand.atlas.filter(({ cardId }) =>
+      isWaterSite(cardId));
+    const northThirdSite = session.state.players.north.hand.atlas.find(({ instanceId }) =>
+      !northWaterSites.slice(0, 2).some((site) => site.instanceId === instanceId));
+    const southLandSite = session.state.players.south.hand.atlas.find(({ cardId }) =>
+      !isWaterSite(cardId));
+    const southHandWaterSite = session.state.players.south.hand.atlas.find(({ cardId }) =>
+      isWaterSite(cardId));
+    const southDrawnWaterSite = !southHandWaterSite
+      && session.state.players.south.atlas[0]
+      && isWaterSite(session.state.players.south.atlas[0].cardId)
+      ? session.state.players.south.atlas[0]
+      : undefined;
+    const southWaterSite = southHandWaterSite ?? southDrawnWaterSite;
+    const available = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 2),
+    ];
+    const lugbogInstanceId = available
+      .find(({ cardId }) => cardId === input.lugbogCat.stableId)?.instanceId;
+    const slyFoxInstanceId = available
+      .find(({ cardId }) => cardId === input.slyFox.stableId)?.instanceId;
+    if (northWaterSites.length >= 2
+      && northThirdSite
+      && southLandSite
+      && southWaterSite
+      && lugbogInstanceId
+      && slyFoxInstanceId) {
+      return {
+        ...built,
+        lugbogInstanceId,
+        northSiteInstanceIds: [
+          northWaterSites[0]!.instanceId,
+          northWaterSites[1]!.instanceId,
+          northThirdSite.instanceId,
+        ],
+        session,
+        slyFoxInstanceId,
+        southLandSiteInstanceId: southLandSite.instanceId,
+        southSecondDrawZone: southHandWaterSite ? 'spellbook' : 'atlas',
+        southWaterSiteInstanceId: southWaterSite.instanceId,
+      };
+    }
+  }
+  throw new Error('private Lugbog Cat scenario no longer produces its supported opening');
 }
 
 function deckList(deck: GameDeckSpec, names: ReadonlyMap<string, string>): DeckList {
@@ -4377,6 +4490,76 @@ function runWaterDrowned(
   });
 }
 
+function runWaterLugbog(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['waterLugbog'] {
+  const opening = findWaterLugbogOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southLandSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw'
+    && descriptor.zone === opening.southSecondDrawZone);
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southWaterSiteInstanceId
+    && descriptor.cell === 'B1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+    && descriptor.cell === 'C2');
+
+  const summons = legalGameActions(session.state, 'north');
+  const matches = (cardInstanceId: string, cell: 'B1' | 'C1' | 'C3'): boolean =>
+    summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === cardInstanceId
+      && descriptor.cell === cell
+      && descriptor.region === undefined);
+  const enemyWaterAvailable = matches(opening.lugbogInstanceId, 'B1');
+  const enemyLandUnavailable = !matches(opening.lugbogInstanceId, 'C1');
+  const slyFoxControlledWaterAvailable = matches(opening.slyFoxInstanceId, 'C3');
+  const slyFoxEnemyWaterUnavailable = !matches(opening.slyFoxInstanceId, 'B1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.lugbogInstanceId
+    && descriptor.cell === 'B1'
+    && descriptor.region === undefined);
+  const summonedToEnemyWater = session.state.realm.units.some((unit) =>
+    unit.instanceId === opening.lugbogInstanceId
+      && unit.controller === 'north'
+      && unit.location === 'B1'
+      && unit.region === 'surface')
+    && session.state.realm.sites.B1?.controller === 'south';
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    enemyLandUnavailable,
+    enemyWaterAvailable,
+    lugbogCat: opening.names.get(input.lugbogCat.stableId) ?? input.lugbogCat.stableId,
+    replayVerified: verifyGameReplay(session),
+    slyFox: opening.names.get(input.slyFox.stableId) ?? input.slyFox.stableId,
+    slyFoxControlledWaterAvailable,
+    slyFoxEnemyWaterUnavailable,
+    summonedToEnemyWater,
+  });
+}
+
 function runWaterEdgeConnection(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['waterEdgeConnection'] {
@@ -4657,6 +4840,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const stealth = runStealth(input);
   const waterDrowned = runWaterDrowned(input);
   const waterEdgeConnection = runWaterEdgeConnection(input);
+  const waterLugbog = runWaterLugbog(input);
   const waterEndTurnStealth = runWaterEndTurnStealth(input);
   const waterHealing = runWaterHealing(input);
   const waterSidewaysMovement = runWaterSidewaysMovement(input);
@@ -4827,6 +5011,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     stealth,
     waterDrowned,
     waterEdgeConnection,
+    waterLugbog,
     waterEndTurnStealth,
     waterHealing,
     waterSidewaysMovement,

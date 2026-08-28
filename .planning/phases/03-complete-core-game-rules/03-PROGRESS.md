@@ -40,6 +40,7 @@
 - A card-specific outer-column casting restriction filters every surface, subsurface, and Voidwalk location offered by the shared hand-cast action without restricting later movement.
 - A card-specific burrowed-only casting restriction suppresses surface, underwater, and void hand-casts while retaining the legal underground cast and later Burrowing movement.
 - A card-specific submerged-only casting restriction suppresses surface, underground, and void hand-casts while retaining the legal underwater cast and later Submerge movement.
+- A card-specific Water-site casting restriction composes with unrestricted site casting so eligible minions can be cast to either player's Water sites while every land and void location remains unavailable.
 - Ranged issues cardinal one-step projectile paths, stops at the first occupied location, lets the controller choose among multiple hit units, never hits sites, and resolves a tapped one-way strike through the normal damage and death pipeline.
 - Minion Ward enters with one public mark, prevents one complete positive damage event through the shared combat/projectile path, then breaks before later damage resolves normally.
 - Attacking-only first strike resolves its attacker's allocations, deaths, Deathrites, and terminal results in an early window; only surviving defenders then make their normal return strikes.
@@ -60,6 +61,7 @@
 - A legal 30/60 Earth teaching-deck variant with three Dalcean Phalanx proves its real C3-to-C2 forward move while real backward and sideways site paths remain unavailable.
 - A legal 30/60 Earth teaching-deck variant with three Secret Tunnels and four Cave Trolls proves a direct nonlocal underground move to another controlled site while ordinary physical movement, opponent exclusion, and surface adjacency remain intact.
 - A legal 30/60 Water teaching-deck variant with four Drowned proves its real Water-site cast exists only underwater while Sly Fox in the same opening can be cast only on the surface.
+- A legal 30/60 Water teaching-deck variant with three Lugbog Cats proves casting to an opponent-controlled Water site while excluding an opponent land site; Sly Fox in the same opening remains restricted to controlled sites.
 - A fifth legal 30/60 Fire teaching deck that proves Monstrous Lion can Charge into an opposing unit but cannot target its site, then proves Lumbering Giant cannot use Defend or Intercept while ready and in range.
 - Observer-safe actions, rejections, causal events, hashes, exact replay, and a deterministic unranked match runner.
 - A no-dependency browser client that renders the authoritative 5x4 realm, scopes hidden information by seat, exposes only engine-issued actions, and verifies replay.
@@ -75,10 +77,10 @@
 - `pnpm game:demo -- 23`: completes in 138 accepted actions over 56 turns with byte-exact replay.
 - `pnpm play`: serves the playable core at `http://127.0.0.1:4174/`.
 - Browser checkpoint: a 22-action match moved a minion, handed Defend to the non-active seat, resolved a simultaneous trade into both cemeteries, and replayed byte-identically.
-- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 28-action Earth Burrowing, 10-action Earth burrowed-only casting, 24-action Earth first strike, 22-action Earth forward movement, 21-action Earth Secret Tunnel, 22-action Earth Ranged, 27-action Earth Ward, 27-action Airborne, 26-action Air Stealth, 26-action Air movement, 24-action Air Movement +2, 25-action Air unrestricted-summon, 17-action Air Voidwalk/outer-column casting, 15-action Air Genesis spell-draw, 9-action Air Leyline Genesis, 43-action Fire targeting/response, 23-action Water end-turn Stealth, 22-action Water sideways movement, 16-action Water edge connection, 16-action Water Submerge, 10-action Water submerged-only casting, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
+- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 28-action Earth Burrowing, 10-action Earth burrowed-only casting, 24-action Earth first strike, 22-action Earth forward movement, 21-action Earth Secret Tunnel, 22-action Earth Ranged, 27-action Earth Ward, 27-action Airborne, 26-action Air Stealth, 26-action Air movement, 24-action Air Movement +2, 25-action Air unrestricted-summon, 17-action Air Voidwalk/outer-column casting, 15-action Air Genesis spell-draw, 9-action Air Leyline Genesis, 43-action Fire targeting/response, 23-action Water end-turn Stealth, 22-action Water sideways movement, 16-action Water edge connection, 16-action Water Submerge, 10-action Water submerged-only casting, 16-action Water any-Water-site casting, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
 - `pnpm game:verify-private`: one passing ignored-authority integration scenario.
 - Death's Door scenarios prove same-turn direct-damage immunity, later death blows, simultaneous-defeat draws, nonlethal site strikes, and exact replay.
-- `pnpm verify`: 239 passing public tests at this checkpoint.
+- `pnpm verify`: 240 passing public tests at this checkpoint.
 
 ## Still required for Phase 3
 
