@@ -54,6 +54,7 @@ type SpellFacts = Readonly<{
   mustBeCastToWaterSite?: boolean;
   provides?: 'air' | 'earth' | 'fire' | 'water';
   ranged?: boolean;
+  shootsDragProjectile?: boolean;
   stealth?: boolean;
   strikesFirstWhileAttacking?: boolean;
   submerge?: boolean;
@@ -139,6 +140,7 @@ function cardsFor(
         mustBeCastToWaterSite: facts.mustBeCastToWaterSite ?? false,
         ...(facts.provides ? { provides: facts.provides } : {}),
         ranged: facts.ranged ?? false,
+        shootsDragProjectile: facts.shootsDragProjectile ?? false,
         stealth: facts.stealth ?? false,
         strikesFirstWhileAttacking: facts.strikesFirstWhileAttacking ?? false,
         submerge: facts.submerge ?? false,
@@ -523,6 +525,25 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       [firstSpell]: { ...cards[firstSpell]!, connectsTopBottom: 'yes' } as unknown as GameCardDefinition,
     },
   }), /connectsTopBottom/);
+  const dragManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: { ...cards[firstSpell]!, shootsDragProjectile: true } as GameCardDefinition,
+    },
+  });
+  const dragDefinition = dragManifest.cards[firstSpell];
+  assert.equal(dragDefinition?.cardType === 'minion' && dragDefinition.shootsDragProjectile, true);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        shootsDragProjectile: 'yes',
+      } as unknown as GameCardDefinition,
+    },
+  }), /shootsDragProjectile/);
   const firstSite = decks.north.atlas[0];
   assert.ok(firstSite);
   const shallowGraveManifest = createGameManifest({
@@ -2065,6 +2086,170 @@ test('RULE-04 Ranged strikes without return damage and Ward prevents the first p
       && descriptor.hit?.instanceId === targetInstanceId));
   assert.equal(session.state.players.south.cemetery.some(({ instanceId }) => instanceId === targetInstanceId), true);
   assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 a drag projectile stops at the first visible unit and may fight after arrival', () => {
+  const pudge = {
+    attack: 5,
+    defense: 5,
+    immobile: true,
+    manaCost: 1,
+    shootsDragProjectile: true,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  } as const;
+  const target = {
+    attack: 3,
+    defense: 6,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    ward: true,
+  } as const;
+  const setup = (seed: number): Readonly<{
+    blockerInstanceId: string;
+    pudgeInstanceId: string;
+    session: GameSession;
+    targetInstanceId: string;
+  }> => {
+    const base = manifest(seed, { northSpell: pudge, southSpell: target });
+    const preview = createGameSession(base);
+    const pudgeCardId = preview.state.players.north.hand.spellbook[0]?.cardId;
+    const blockerCardId = preview.state.players.north.hand.spellbook[1]?.cardId;
+    assert.ok(pudgeCardId);
+    assert.ok(blockerCardId);
+    assert.notEqual(pudgeCardId, blockerCardId);
+    const blockerDefinition = base.cards[blockerCardId];
+    assert.equal(blockerDefinition?.cardType, 'minion');
+    const custom = createGameManifest({
+      authority: base.authority,
+      cards: {
+        ...base.cards,
+        [blockerCardId]: {
+          ...blockerDefinition,
+          immobile: false,
+          shootsDragProjectile: false,
+          stealth: true,
+        } as GameCardDefinition,
+      },
+      decks: base.decks,
+      firstSeat: base.firstSeat,
+      seed: base.seed,
+    });
+    let session = keep(createGameSession(custom));
+    session = keep(session);
+    const pudgeCard = session.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === pudgeCardId);
+    const blockerCard = session.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === blockerCardId);
+    assert.ok(pudgeCard);
+    assert.ok(blockerCard);
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === pudgeCard.instanceId
+        && descriptor.cell === 'C4'));
+    assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+      descriptor.kind === 'shoot-drag-projectile'
+        && descriptor.shooterInstanceId === pudgeCard.instanceId), false);
+    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
+    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C3'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === blockerCard.instanceId
+        && descriptor.cell === 'C3'));
+    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C2'));
+    const targetCard = session.state.players.south.hand.spellbook[0];
+    assert.ok(targetCard);
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === targetCard.instanceId
+        && descriptor.cell === 'C2'));
+    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    return {
+      blockerInstanceId: blockerCard.instanceId,
+      pudgeInstanceId: pudgeCard.instanceId,
+      session,
+      targetInstanceId: targetCard.instanceId,
+    };
+  };
+
+  const checkpoint = setup(142);
+  const choices = legalGameActions(checkpoint.session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'shoot-drag-projectile'
+      && descriptor.shooterInstanceId === checkpoint.pudgeInstanceId
+      && descriptor.direction === 'south'
+      && descriptor.hit?.instanceId === checkpoint.targetInstanceId);
+  assert.deepEqual(choices.map(({ descriptor }) =>
+    descriptor.kind === 'shoot-drag-projectile' && descriptor.fightOnArrival), [false, true]);
+  assert.equal(choices.every(({ descriptor }) =>
+    descriptor.kind === 'shoot-drag-projectile'
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3,C2'), true);
+  assert.equal(choices.some(({ descriptor }) =>
+    descriptor.kind === 'shoot-drag-projectile'
+      && descriptor.hit?.instanceId === checkpoint.blockerInstanceId), false);
+  const noFight = accept(checkpoint.session, choices.find(({ descriptor }) =>
+    descriptor.kind === 'shoot-drag-projectile' && !descriptor.fightOnArrival)!);
+  const dragged = noFight.state.realm.units
+    .find(({ instanceId }) => instanceId === checkpoint.targetInstanceId);
+  assert.deepEqual({ location: dragged?.location, tapped: dragged?.tapped, warded: dragged?.warded }, {
+    location: 'C4',
+    tapped: false,
+    warded: true,
+  });
+  assert.equal(noFight.state.realm.units
+    .find(({ instanceId }) => instanceId === checkpoint.pudgeInstanceId)?.tapped, true);
+  assert.deepEqual(noFight.transcript.at(-1)?.events.map(({ type }) => type), [
+    'projectile-shot',
+    'unit-dragged',
+  ]);
+  const draggedPayload = noFight.transcript.at(-1)?.events[1]?.payload;
+  const draggedJson = canonicalJson(draggedPayload ?? null);
+  assert.equal(draggedJson.includes('"steps":2'), true);
+  assert.match(
+    draggedJson,
+    /"path":\[{"cell":"C2","region":"surface"},{"cell":"C3","region":"surface"},{"cell":"C4","region":"surface"}\]/,
+  );
+  assert.equal(verifyGameReplay(noFight), true);
+
+  const fight = accept(checkpoint.session, choices.find(({ descriptor }) =>
+    descriptor.kind === 'shoot-drag-projectile' && descriptor.fightOnArrival)!);
+  assert.deepEqual(fight.transcript.at(-1)?.events.map(({ type }) => type), [
+    'projectile-shot',
+    'unit-dragged',
+    'fight-started',
+    'strike-damage-allocated',
+    'damage-dealt',
+    'damage-dealt',
+    'ward-broken',
+  ]);
+  const foughtPudge = fight.state.realm.units
+    .find(({ instanceId }) => instanceId === checkpoint.pudgeInstanceId);
+  const foughtTarget = fight.state.realm.units
+    .find(({ instanceId }) => instanceId === checkpoint.targetInstanceId);
+  assert.deepEqual({ damage: foughtPudge?.damage, location: foughtPudge?.location }, {
+    damage: 3,
+    location: 'C4',
+  });
+  assert.deepEqual({ damage: foughtTarget?.damage, location: foughtTarget?.location, warded: foughtTarget?.warded }, {
+    damage: 0,
+    location: 'C4',
+    warded: false,
+  });
+  assert.equal(verifyGameReplay(fight), true);
 });
 
 test('RULE-03 a provider adds affinity until that minion dies', () => {
