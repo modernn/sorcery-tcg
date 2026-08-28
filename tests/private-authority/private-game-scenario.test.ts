@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { runPrivateGameCheck } from '../../src/commands/run-private-game-check.ts';
 
-test('private actual-card decks complete deterministic combat, Earth, Air, and Water scenarios', async () => {
+test('private actual-card decks complete deterministic combat, Earth, Air movement/summoning, and Water scenarios', async () => {
   const result = await runPrivateGameCheck();
   assert.equal(result.classification, 'private-local_actual-cards_unranked-partial-rules');
   assert.equal(result.airMovement.movementMinion, 'Snallygaster');
@@ -12,6 +12,13 @@ test('private actual-card decks complete deterministic combat, Earth, Air, and W
   assert.equal(result.airMovement.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
   assert.equal(result.airMovement.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
   assert.equal(result.airMovement.replayVerified, true);
+  assert.equal(result.airSummoning.roamingMinion, 'Roaming Monster');
+  assert.equal(result.airSummoning.ordinaryRestricted, true);
+  assert.equal(result.airSummoning.summonedAtEnemySite, true);
+  assert.equal(result.airSummoning.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airSummoning.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.deepEqual(result.airSummoning.deck, result.airMovement.deck);
+  assert.equal(result.airSummoning.replayVerified, true);
   assert.equal(result.avatarSpellDrawn, true);
   assert.equal(result.charge.activatedOnSummon, true);
   assert.equal(result.genesis.siteDrawn, true);
