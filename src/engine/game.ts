@@ -51,6 +51,7 @@ export type GameCardDefinition =
     manaCost: number;
     movementPlusOne?: boolean;
     provides?: GameElement;
+    ranged?: boolean;
     summonToAnySite?: boolean;
     tapForMana?: number;
     thresholds: GameThresholds;
@@ -105,6 +106,8 @@ type GameUnitRef = Readonly<{
 }>;
 
 type GameLocation = Readonly<{ cell: RealmCell; region: GameRegion }>;
+
+type ProjectileDirection = 'east' | 'north' | 'south' | 'west';
 
 type CombatTarget = GameUnitRef | Readonly<{
   instanceId: StateHash;
@@ -259,6 +262,13 @@ type GameActionDescriptor =
     path: readonly GameLocation[];
     to: GameLocation;
     unitInstanceId: StateHash;
+  }>
+  | Readonly<{
+    direction: ProjectileDirection;
+    hit: GameUnitRef | null;
+    kind: 'shoot-projectile';
+    path: readonly GameLocation[];
+    shooterInstanceId: StateHash;
   }>
   | Readonly<{ kind: 'decline-attack' }>
   | Readonly<{ kind: 'declare-attack'; target: CombatTarget }>
@@ -419,6 +429,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.movementPlusOne !== undefined && typeof card.movementPlusOne !== 'boolean') {
     throw new RangeError(`${path}.movementPlusOne must be boolean`);
   }
+  if (card.ranged !== undefined && typeof card.ranged !== 'boolean') {
+    throw new RangeError(`${path}.ranged must be boolean`);
+  }
   if (card.summonToAnySite !== undefined && typeof card.summonToAnySite !== 'boolean') {
     throw new RangeError(`${path}.summonToAnySite must be boolean`);
   }
@@ -523,6 +536,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             manaCost: card.manaCost,
             ...(card.movementPlusOne === true ? { movementPlusOne: true } : {}),
             ...(card.provides ? { provides: card.provides } : {}),
+            ...(card.ranged === true ? { ranged: true } : {}),
             ...(card.summonToAnySite === true ? { summonToAnySite: true } : {}),
             ...(card.tapForMana ? { tapForMana: card.tapForMana } : {}),
             thresholds: { ...card.thresholds },
@@ -846,6 +860,7 @@ function unitStatus(
   lethal: boolean;
   location: RealmCell;
   movementSteps: 1 | 2;
+  ranged: boolean;
   summoningSickness: boolean;
   tapped: boolean;
 }> {
@@ -863,6 +878,7 @@ function unitStatus(
       lethal: false,
       location: avatar.location,
       movementSteps: 1,
+      ranged: false,
       summoningSickness: false,
       tapped: avatar.tapped,
     };
@@ -880,6 +896,7 @@ function unitStatus(
     lethal: definition.lethal === true,
     location: unit.location,
     movementSteps: definition.movementPlusOne ? 2 : 1,
+    ranged: definition.ranged === true,
     summoningSickness: unit.summoningSickness,
     tapped: unit.tapped,
   };
@@ -943,6 +960,50 @@ function movementDescriptors(state: GameState, seat: GameSeat): readonly GameAct
       to: { cell: path.at(-1)!, region: 'surface' as const },
       unitInstanceId: ref.instanceId,
     }));
+  });
+}
+
+function projectileStep(cell: RealmCell, direction: ProjectileDirection): RealmCell | undefined {
+  const file = cell.charCodeAt(0) + (direction === 'east' ? 1 : direction === 'west' ? -1 : 0);
+  const rank = Number(cell[1]) + (direction === 'north' ? 1 : direction === 'south' ? -1 : 0);
+  return file >= 65 && file <= 69 && rank >= 1 && rank <= 4
+    ? `${String.fromCharCode(file)}${rank}` as RealmCell
+    : undefined;
+}
+
+function rangedDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
+  const directions = ['east', 'north', 'south', 'west'] as const;
+  const allUnits = [...unitRefs(state, 'north'), ...unitRefs(state, 'south')];
+  return unitRefs(state, seat).flatMap((shooter) => {
+    const status = unitStatus(state, shooter);
+    if (!status.ranged || status.tapped || status.summoningSickness) return [];
+    const startingEnemies = allUnits
+      .filter((ref) => ref.seat !== seat && unitStatus(state, ref).location === status.location)
+      .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+    return directions.flatMap<GameActionDescriptor>((direction) => {
+      if (startingEnemies.length > 0) {
+        return startingEnemies.map((hit) => ({
+          direction,
+          hit,
+          kind: 'shoot-projectile' as const,
+          path: pathLocations([status.location]),
+          shooterInstanceId: shooter.instanceId,
+        }));
+      }
+      const next = projectileStep(status.location, direction);
+      const path = pathLocations([
+        status.location,
+        ...(next && state.realm.sites[next] ? [next] : []),
+      ]);
+      const hits = next && state.realm.sites[next]
+        ? allUnits
+          .filter((ref) => unitStatus(state, ref).location === next)
+          .sort((left, right) => left.instanceId.localeCompare(right.instanceId))
+        : [];
+      return hits.length > 0
+        ? hits.map((hit) => ({ direction, hit, kind: 'shoot-projectile' as const, path, shooterInstanceId: shooter.instanceId }))
+        : [{ direction, hit: null, kind: 'shoot-projectile' as const, path, shooterInstanceId: shooter.instanceId }];
+    });
   });
 }
 
@@ -1078,6 +1139,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     ...summonDescriptors(state, seat),
     ...manaAbilityDescriptors(state, seat),
     ...movementDescriptors(state, seat),
+    ...rangedDescriptors(state, seat),
     { kind: 'end-turn' },
   ];
 }
@@ -1100,6 +1162,12 @@ function actionLabel(descriptor: GameActionDescriptor): string {
     return descriptor.path.length === 1
       ? `Tap ${descriptor.unitInstanceId.slice(0, 15)}… without moving`
       : `Move ${descriptor.unitInstanceId.slice(0, 15)}… ${descriptor.path.map(({ cell }) => cell).join(' → ')}`;
+  }
+  if (descriptor.kind === 'shoot-projectile') {
+    const target = descriptor.hit
+      ? `${descriptor.hit.kind} ${descriptor.hit.instanceId.slice(0, 15)}…`
+      : 'nothing';
+    return `Shoot ${descriptor.direction} at ${target}`;
   }
   if (descriptor.kind === 'decline-attack') return 'Decline attack';
   if (descriptor.kind === 'declare-attack') return `Attack ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`;
@@ -1210,20 +1278,23 @@ function finishFight(
   state: GameState,
   pending: PendingCombat,
   outcomes: readonly GameOutcome[],
+  returnStrikes = true,
 ): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
   const allocations = new Map(pending.allocations.map(({ amount, targetInstanceId }) =>
     [targetInstanceId, amount]));
   const damage = new Map<StateHash, number>();
   const lethalDamage = new Set<StateHash>();
   const attackerStatus = unitStatus(state, pending.attacker);
-  damage.set(
-    pending.attacker.instanceId,
-    pending.combatants.reduce((total, ref) => total + unitStatus(state, ref).attack, 0),
-  );
+  if (returnStrikes) {
+    damage.set(
+      pending.attacker.instanceId,
+      pending.combatants.reduce((total, ref) => total + unitStatus(state, ref).attack, 0),
+    );
+  }
   pending.combatants.forEach((ref) => damage.set(ref.instanceId, allocations.get(ref.instanceId) ?? 0));
   pending.combatants.forEach((ref) => {
     const striker = unitStatus(state, ref);
-    if (striker.lethal && striker.attack > 0) lethalDamage.add(pending.attacker.instanceId);
+    if (returnStrikes && striker.lethal && striker.attack > 0) lethalDamage.add(pending.attacker.instanceId);
     if (attackerStatus.lethal && (allocations.get(ref.instanceId) ?? 0) > 0) {
       lethalDamage.add(ref.instanceId);
     }
@@ -1238,7 +1309,7 @@ function finishFight(
   const deaths: UnitInstance[] = [];
   const damageOutcomes: GameOutcome[] = [];
 
-  for (const ref of [pending.attacker, ...pending.combatants]) {
+  for (const ref of returnStrikes ? [pending.attacker, ...pending.combatants] : pending.combatants) {
     const amount = damage.get(ref.instanceId) ?? 0;
     if (ref.kind === 'avatar') {
       const player = players[ref.seat];
@@ -1703,6 +1774,57 @@ function applyDescriptor(
       }],
       [],
     ];
+  }
+
+  if (descriptor.kind === 'shoot-projectile') {
+    const legal = rangedDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'shoot-projectile'
+        && candidate.shooterInstanceId === descriptor.shooterInstanceId
+        && candidate.direction === descriptor.direction
+        && samePath(candidate.path, descriptor.path)
+        && (candidate.hit === null && descriptor.hit === null
+          || candidate.hit !== null && descriptor.hit !== null
+            && candidate.hit.instanceId === descriptor.hit.instanceId
+            && candidate.hit.kind === descriptor.hit.kind
+            && candidate.hit.seat === descriptor.hit.seat));
+    const shooter = unitRefs(state, seat)
+      .find(({ instanceId }) => instanceId === descriptor.shooterInstanceId);
+    if (!legal || !shooter) throw new Error('unreachable illegal Ranged projectile');
+    const shooterStatus = unitStatus(state, shooter);
+    const tapped = moveAndTapUnit(state, shooter, shooterStatus.location);
+    const shotState = deepFreeze({ ...state, players: tapped.players, realm: tapped.realm });
+    const shot: GameOutcome = {
+      payload: {
+        direction: descriptor.direction,
+        hit: descriptor.hit,
+        path: descriptor.path,
+        seat,
+        shooterInstanceId: shooter.instanceId,
+      },
+      type: 'projectile-shot',
+    };
+    if (!descriptor.hit) {
+      return [withStateVersion(shotState, {}), [shot], []];
+    }
+    const amount = shooterStatus.attack;
+    const strike: GameOutcome = {
+      payload: {
+        amount,
+        strikerInstanceId: shooter.instanceId,
+        targetInstanceId: descriptor.hit.instanceId,
+      },
+      type: 'strike-damage-allocated',
+    };
+    return finishFight(shotState, deepFreeze({
+      allocations: [{ amount, targetInstanceId: descriptor.hit.instanceId }],
+      attacker: shooter,
+      attackingSeat: seat,
+      cell: unitStatus(state, descriptor.hit).location,
+      combatants: [descriptor.hit],
+      defenders: [],
+      originalTarget: descriptor.hit,
+      targetRemoved: false,
+    }), [shot, strike], false);
   }
 
   if (descriptor.kind === 'move-and-attack') {
