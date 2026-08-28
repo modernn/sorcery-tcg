@@ -135,6 +135,19 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.waterEndTurnStealth.deck.spellbook
     .find(({ name }) => name === 'Sly Fox')?.copies, 4);
   assert.equal(result.waterEndTurnStealth.replayVerified, true);
+  assert.equal(result.waterSidewaysMovement.sedgeCrabs, 'Sedge Crabs');
+  assert.equal(result.waterSidewaysMovement.acceptedActionCount, 22);
+  assert.equal(result.waterSidewaysMovement.sidewaysPathAvailable, true);
+  assert.equal(result.waterSidewaysMovement.forwardPathUnavailable, true);
+  assert.equal(result.waterSidewaysMovement.backwardPathUnavailable, true);
+  assert.equal(result.waterSidewaysMovement.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.waterSidewaysMovement.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.waterSidewaysMovement.deck.spellbook
+    .find(({ name }) => name === 'Sedge Crabs')?.copies, 4);
+  assert.deepEqual(result.waterSidewaysMovement.deck, result.waterEndTurnStealth.deck);
+  assert.equal(result.waterSidewaysMovement.replayVerified, true);
   assert.equal(result.waterHealing.healingMinion, 'Muddy Pigs');
   assert.equal(result.waterHealing.healed, 3);
   assert.equal(result.waterHealing.healedBeforeCemetery, true);
