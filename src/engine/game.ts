@@ -40,6 +40,7 @@ export type GameCardDefinition =
     attack: number;
     cardType: 'minion';
     charge?: boolean;
+    cannotDefend?: boolean;
     deathriteDrawSite?: boolean;
     defense: number;
     genesisDrawSite?: boolean;
@@ -375,6 +376,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.charge !== undefined && typeof card.charge !== 'boolean') {
     throw new RangeError(`${path}.charge must be boolean`);
   }
+  if (card.cannotDefend !== undefined && typeof card.cannotDefend !== 'boolean') {
+    throw new RangeError(`${path}.cannotDefend must be boolean`);
+  }
   if (card.deathriteDrawSite !== undefined && typeof card.deathriteDrawSite !== 'boolean') {
     throw new RangeError(`${path}.deathriteDrawSite must be boolean`);
   }
@@ -470,6 +474,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             attack: card.attack,
             cardType: 'minion' as const,
             ...(card.charge === true ? { charge: true } : {}),
+            ...(card.cannotDefend === true ? { cannotDefend: true } : {}),
             ...(card.deathriteDrawSite === true ? { deathriteDrawSite: true } : {}),
             defense: card.defense,
             ...(card.genesisDrawSite === true ? { genesisDrawSite: true } : {}),
@@ -791,6 +796,7 @@ function unitStatus(
   ref: GameUnitRef,
 ): Readonly<{
   attack: number;
+  canMoveToDefend: boolean;
   charge: boolean;
   lethal: boolean;
   location: RealmCell;
@@ -804,6 +810,7 @@ function unitStatus(
     if (definition.cardType !== 'avatar') throw new Error('Avatar lacks Avatar definition');
     return {
       attack: definition.attack,
+      canMoveToDefend: true,
       charge: false,
       lethal: false,
       location: avatar.location,
@@ -817,6 +824,7 @@ function unitStatus(
   if (definition.cardType !== 'minion') throw new Error('minion lacks minion definition');
   return {
     attack: definition.attack,
+    canMoveToDefend: definition.cannotDefend !== true,
     charge: definition.charge === true,
     lethal: definition.lethal === true,
     location: unit.location,
@@ -879,7 +887,9 @@ function responseUnitRefs(
   ].filter((value): value is StateHash => value !== undefined));
   return unitRefs(state, respondingSeat).filter((ref) => {
     if (unavailable.has(ref.instanceId) || !readyUnit(state, ref)) return false;
-    const location = unitStatus(state, ref).location;
+    const unit = unitStatus(state, ref);
+    if (!intercept && !unit.canMoveToDefend && unit.location !== pending.cell) return false;
+    const location = unit.location;
     return intercept
       ? location === pending.cell
       : location === pending.cell || borderingCells(location).includes(pending.cell);

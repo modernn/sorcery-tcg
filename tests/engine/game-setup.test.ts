@@ -30,6 +30,7 @@ function deck(prefix: string, atlasCount = 30, spellbookCount = 50): GameDeckSpe
 
 type SpellFacts = Readonly<{
   attack?: number;
+  cannotDefend?: boolean;
   charge?: boolean;
   deathriteDrawSite?: boolean;
   defense?: number;
@@ -72,6 +73,7 @@ function cardsFor(
       cards[cardId] = {
         attack: spell.attack ?? 1,
         cardType: 'minion',
+        cannotDefend: spell.cannotDefend ?? false,
         charge: spell.charge ?? false,
         deathriteDrawSite: spell.deathriteDrawSite ?? false,
         defense: spell.defense ?? 1,
@@ -725,6 +727,40 @@ test('RULE-04 Lethal kills a tougher minion with positive damage but not zero da
   assert.equal(zero.state.players.north.cemetery.length, 0);
   assert.equal(zero.state.players.south.cemetery.length, 0);
   assert.equal(verifyGameReplay(zero), true);
+});
+
+test('RULE-04 a prohibited minion cannot move to Defend but can still Intercept', () => {
+  const spell = {
+    attack: 2,
+    cannotDefend: true,
+    defense: 2,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  } as const;
+  const defend = northAttacksAtC2(50, spell);
+  let session = accept(defend.session, action(defend.session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === defend.targetInstanceId));
+  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'defend' && descriptor.unitInstanceId === defend.defenderInstanceId), false);
+
+  const stationary = northAttacksAtC2(51, spell);
+  const site = stationary.session.state.realm.sites.C2;
+  assert.ok(site);
+  session = accept(stationary.session, action(stationary.session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'site'
+      && descriptor.target.instanceId === site.instanceId));
+  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'defend' && descriptor.unitInstanceId === stationary.targetInstanceId), true);
+
+  const intercept = northAttacksAtC2(52, spell);
+  session = accept(intercept.session, action(intercept.session, ({ descriptor }) =>
+    descriptor.kind === 'decline-attack'));
+  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'intercept' && descriptor.unitInstanceId === intercept.targetInstanceId), true);
+  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-05 Deathrite draws sites before simultaneous deaths enter their cemeteries', () => {
