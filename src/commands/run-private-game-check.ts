@@ -232,6 +232,23 @@ export type PrivateGameCheck = Readonly<{
     targetEnteredCemetery: boolean;
     targetLeftRealm: boolean;
   }>;
+  earthShallowGrave: Readonly<{
+    acceptedActionCount: number;
+    affinityProvided: boolean;
+    avatarTapped: boolean;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    discardedInDeckOrder: boolean;
+    gameRemainedActive: boolean;
+    hiddenBeforeDiscard: boolean;
+    manaProvided: boolean;
+    publicAfterDiscard: boolean;
+    replayVerified: boolean;
+    shallowGrave: string;
+    siteEstablished: boolean;
+    spellHandUnchanged: boolean;
+    spellbookReducedByTwo: boolean;
+  }>;
   earthDivineHealing: Readonly<{
     acceptedActionCount: number;
     actualLifeGained: number;
@@ -613,6 +630,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   roamingMinion: NormalizedCard;
   secretTunnel: NormalizedCard;
   sedgeCrabs: NormalizedCard;
+  shallowGrave: NormalizedCard;
   slyFox: NormalizedCard;
   stealthMinion: NormalizedCard;
   stealthTargetMinion: NormalizedCard;
@@ -635,6 +653,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     throw new Error('private normalized card artifact identity is invalid');
   }
   const snapshot = normalizedCardSnapshotSchema.parse(artifact.identity.payload);
+  const shallowGrave = snapshot.cards.find(({ name }) => name === 'Shallow Grave');
+  if (!shallowGrave
+    || shallowGrave.cardType !== 'site'
+    || shallowGrave.rulesText.trim() !== 'Genesis → Discard your top two spells.'
+    || shallowGrave.manaCost !== null
+    || shallowGrave.attack !== null
+    || shallowGrave.defense !== null
+    || shallowGrave.life !== null
+    || shallowGrave.elements.length !== 1
+    || shallowGrave.elements[0] !== 'earth'
+    || shallowGrave.thresholds.air !== 0
+    || shallowGrave.thresholds.earth !== 1
+    || shallowGrave.thresholds.fire !== 0
+    || shallowGrave.thresholds.water !== 0
+    || shallowGrave.rarity !== 'exceptional') {
+    throw new Error('private site discard Genesis no longer matches its supported facts');
+  }
   const bury = snapshot.cards.find(({ name }) => name === 'Bury');
   if (!bury
     || bury.cardType !== 'magic'
@@ -1289,6 +1324,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     roamingMinion,
     secretTunnel,
     sedgeCrabs,
+    shallowGrave,
     slyFox,
     stealthMinion,
     stealthTargetMinion,
@@ -1362,6 +1398,7 @@ function gameDefinition(
   targetNearby = false,
   healController: 0 | 7 = 0,
   burrowTargetMinion = false,
+  siteGenesisDiscardTopSpells: 0 | 2 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1380,6 +1417,9 @@ function gameDefinition(
       cardType: 'site',
       ...(connectsBurrowedAllies ? { connectsBurrowedAllies: true } : {}),
       elements: card.elements,
+      ...(siteGenesisDiscardTopSpells
+        ? { genesisDiscardTopSpells: siteGenesisDiscardTopSpells }
+        : {}),
       genesisDrawSpellPerAdjacentSameCard: siteGenesisDrawSpellPerAdjacentSameCard,
       ...(siteGenesisGainMana ? { genesisGainMana: siteGenesisGainMana } : {}),
     };
@@ -1449,7 +1489,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-shallow-grave' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1553,6 +1593,7 @@ function buildManifest(
   const earthDeck = elementalDeck('earth', earthMinions, [input.ghostTownSite]);
   const earthBuryDeck = elementalDeck('earth', earthMinions, [], [input.bury]);
   const earthDivineHealingDeck = elementalDeck('earth', earthMinions, [], [input.divineHealing]);
+  const earthShallowGraveDeck = elementalDeck('earth', earthMinions, [input.shallowGrave]);
   const earthBurrowingDeck = elementalDeck('earth', [
     ...earthMinions,
     input.burrowingMinion,
@@ -1641,6 +1682,8 @@ function buildManifest(
         ? earthBuryDeck
       : scenario === 'earth-divine-healing'
         ? earthDivineHealingDeck
+      : scenario === 'earth-shallow-grave'
+        ? earthShallowGraveDeck
       : scenario === 'earth-forward'
         ? earthForwardDeck
       : scenario === 'earth-immobile'
@@ -1690,6 +1733,8 @@ function buildManifest(
         ? earthBuryDeck
       : scenario === 'earth-divine-healing'
         ? earthDivineHealingDeck
+      : scenario === 'earth-shallow-grave'
+        ? earthShallowGraveDeck
       : scenario === 'earth-forward'
         ? earthForwardDeck
       : scenario === 'earth-immobile'
@@ -1764,6 +1809,7 @@ function buildManifest(
       card.stableId === input.arcLightning.stableId,
       card.stableId === input.divineHealing.stableId ? 7 : 0,
       card.stableId === input.bury.stableId,
+      card.stableId === input.shallowGrave.stableId ? 2 : 0,
     ),
   ]));
   return {
@@ -2452,6 +2498,27 @@ function findEarthBuryOpening(
     }
   }
   throw new Error('private forced-burrow Magic scenario no longer produces its supported opening');
+}
+
+function findEarthShallowGraveOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  session: GameSession;
+  shallowGraveInstanceId: string;
+}> {
+  // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const built = buildManifest(input, input.config.earthSeed + offset, 'earth-shallow-grave');
+    const session = createGameSession(built.manifest);
+    const shallowGraveInstanceId = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.shallowGrave.stableId)?.instanceId;
+    if (shallowGraveInstanceId && session.state.players.north.spellbook.length >= 2) {
+      return { ...built, session, shallowGraveInstanceId };
+    }
+  }
+  throw new Error('private site discard Genesis scenario no longer produces its supported opening');
 }
 
 function findEarthSecretTunnelOpening(
@@ -3740,6 +3807,73 @@ function runEarthBury(
       .some(({ instanceId }) => instanceId === opening.boskTrollInstanceId),
     targetLeftRealm: !session.state.realm.units
       .some(({ instanceId }) => instanceId === opening.boskTrollInstanceId),
+  });
+}
+
+function runEarthShallowGrave(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthShallowGrave'] {
+  const opening = findEarthShallowGraveOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const before = session.state.players.north;
+  const topTwo = before.spellbook.slice(0, 2);
+  if (topTwo.length !== 2) throw new Error('private site discard Genesis lacks two spells');
+  const southViewBefore = canonicalJson(observeGame(session.state, 'south') as unknown as JsonValue);
+  const hiddenBeforeDiscard = topTwo.every(({ cardId, instanceId }) =>
+    !southViewBefore.includes(cardId) && !southViewBefore.includes(instanceId));
+  const spellHandBefore = canonicalJson(before.hand.spellbook as unknown as JsonValue);
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.shallowGraveInstanceId
+      && descriptor.cell === 'C4'));
+
+  const after = session.state.players.north;
+  const discarded = after.cemetery.slice(-2);
+  const southViewAfter = observeGame(session.state, 'south').players.north.cemetery.slice(-2);
+  const events = session.transcript.at(-1)?.events ?? [];
+  const discardEventsMatch = topTwo.every((card, index) => {
+    const event = events[index + 1];
+    return event?.type === 'spell-discarded'
+      && isJsonRecord(event.payload)
+      && event.payload.cardId === card.cardId
+      && event.payload.instanceId === card.instanceId
+      && event.payload.owner === 'north'
+      && event.payload.seat === 'north'
+      && event.payload.sourceInstanceId === opening.shallowGraveInstanceId;
+  });
+  const site = session.state.realm.sites.C4;
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    affinityProvided: observeGame(session.state, 'north').players.north.affinity.earth === 1,
+    avatarTapped: after.avatar.tapped,
+    causalEventsVerified: events.map(({ type }) => type).join(',')
+      === 'site-played,spell-discarded,spell-discarded'
+      && isJsonRecord(events[0]?.payload)
+      && events[0]?.payload.instanceId === opening.shallowGraveInstanceId
+      && discardEventsMatch,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    discardedInDeckOrder: discarded.length === 2
+      && topTwo.every((card, index) =>
+        discarded[index]?.cardId === card.cardId
+          && discarded[index]?.instanceId === card.instanceId),
+    gameRemainedActive: session.state.phase === 'main' && session.state.terminal.status === 'active',
+    hiddenBeforeDiscard,
+    manaProvided: after.mana === 1,
+    publicAfterDiscard: southViewAfter.length === 2
+      && topTwo.every((card, index) =>
+        southViewAfter[index]?.cardId === card.cardId
+          && southViewAfter[index]?.instanceId === card.instanceId),
+    replayVerified: verifyGameReplay(session),
+    shallowGrave:
+      opening.names.get(input.shallowGrave.stableId) ?? input.shallowGrave.stableId,
+    siteEstablished: site?.instanceId === opening.shallowGraveInstanceId
+      && site.controller === 'north',
+    spellHandUnchanged:
+      canonicalJson(after.hand.spellbook as unknown as JsonValue) === spellHandBefore,
+    spellbookReducedByTwo: after.spellbook.length === before.spellbook.length - 2,
   });
 }
 
@@ -5760,6 +5894,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthBurrowing = runEarthBurrowing(input);
   const earthBury = runEarthBury(input);
   const earthDivineHealing = runEarthDivineHealing(input);
+  const earthShallowGrave = runEarthShallowGrave(input);
   const earthEntombed = runEarthEntombed(input);
   const earthFirstStrike = runEarthFirstStrike(input);
   const earthForwardMovement = runEarthForwardMovement(input);
@@ -5913,6 +6048,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthBurrowing,
     earthBury,
     earthDivineHealing,
+    earthShallowGrave,
     earthEntombed,
     earthRamp,
     earthFirstStrike,

@@ -42,6 +42,7 @@ export type GameCardDefinition =
     cardType: 'site';
     connectsBurrowedAllies?: boolean;
     elements: readonly GameElement[];
+    genesisDiscardTopSpells?: 2;
     genesisDrawSpellPerAdjacentSameCard?: boolean;
     genesisGainMana?: number;
   }>
@@ -553,6 +554,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && typeof card.genesisDrawSpellPerAdjacentSameCard !== 'boolean') {
       throw new RangeError(`${path}.genesisDrawSpellPerAdjacentSameCard must be boolean`);
     }
+    if (card.genesisDiscardTopSpells !== undefined && card.genesisDiscardTopSpells !== 2) {
+      throw new RangeError(`${path}.genesisDiscardTopSpells must be 2`);
+    }
+    if (card.genesisDiscardTopSpells !== undefined && card.genesisDrawSpellPerAdjacentSameCard) {
+      throw new RangeError(`${path} simultaneous Genesis spell discard and draw are unsupported`);
+    }
     if (card.connectsBurrowedAllies !== undefined && typeof card.connectsBurrowedAllies !== 'boolean') {
       throw new RangeError(`${path}.connectsBurrowedAllies must be boolean`);
     }
@@ -786,6 +793,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             cardType: 'site' as const,
             ...(card.connectsBurrowedAllies === true ? { connectsBurrowedAllies: true } : {}),
             elements: [...card.elements],
+            ...(card.genesisDiscardTopSpells === 2 ? { genesisDiscardTopSpells: 2 as const } : {}),
             ...(card.genesisDrawSpellPerAdjacentSameCard === true
               ? { genesisDrawSpellPerAdjacentSameCard: true }
               : {}),
@@ -2276,10 +2284,14 @@ function applyDescriptor(
         .filter((cell) => state.realm.sites[cell]?.cardId === card.cardId).length
       : 0;
     const genesisSpellDraws = player.spellbook.slice(0, genesisSpellDrawCount);
+    const genesisSpellDiscards = definition.genesisDiscardTopSpells
+      ? player.spellbook.slice(0, definition.genesisDiscardTopSpells)
+      : [];
     const genesisDrawFailed = genesisSpellDraws.length < genesisSpellDrawCount;
     const updatedPlayer = deepFreeze({
       ...player,
       avatar: { ...player.avatar, tapped: true },
+      cemetery: [...player.cemetery, ...genesisSpellDiscards],
       domainEstablished: true,
       hand: {
         ...player.hand,
@@ -2287,7 +2299,7 @@ function applyDescriptor(
         spellbook: [...player.hand.spellbook, ...genesisSpellDraws],
       },
       mana: player.mana + 1 + (definition.genesisGainMana ?? 0),
-      spellbook: player.spellbook.slice(genesisSpellDraws.length),
+      spellbook: player.spellbook.slice(genesisSpellDraws.length + genesisSpellDiscards.length),
     });
     const winner = otherSeat(seat);
     return [
@@ -2318,6 +2330,16 @@ function applyDescriptor(
         ...genesisSpellDraws.map(() => ({
           payload: { seat, sourceInstanceId: card.instanceId },
           type: 'spell-drawn',
+        })),
+        ...genesisSpellDiscards.map((discarded) => ({
+          payload: {
+            cardId: discarded.cardId,
+            instanceId: discarded.instanceId,
+            owner: discarded.owner,
+            seat,
+            sourceInstanceId: card.instanceId,
+          },
+          type: 'spell-discarded',
         })),
         ...(genesisDrawFailed
           ? [{ payload: { loser: seat, reason: 'deck_empty', winner }, type: 'game-ended' }]
