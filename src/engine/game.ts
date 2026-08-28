@@ -68,6 +68,7 @@ export type GameCardDefinition =
     movesOnlySideways?: boolean;
     mustBeCastBurrowed?: boolean;
     mustBeCastSubmerged?: boolean;
+    mustBeCastToWaterSite?: boolean;
     provides?: GameElement;
     ranged?: boolean;
     stealth?: boolean;
@@ -412,11 +413,11 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     if (definition.cardType !== 'minion'
       || player.mana < definition.manaCost
       || !meetsThresholds(state, seat, definition.thresholds)) return [];
+    const summonCells = (definition.summonToAnySite ? siteCells : controlledCells)
+      .filter((cell) => !definition.mustBeCastToOuterColumn || cell[0] === 'A' || cell[0] === 'E')
+      .filter((cell) => !definition.mustBeCastToWaterSite || isWaterSite(state, cell));
     return [
-      ...(definition.mustBeCastToOuterColumn
-        ? (definition.summonToAnySite ? siteCells : controlledCells)
-          .filter((cell) => cell[0] === 'A' || cell[0] === 'E')
-        : definition.summonToAnySite ? siteCells : controlledCells).flatMap((cell) => [
+      ...summonCells.flatMap((cell) => [
       ...(!definition.mustBeCastBurrowed && !definition.mustBeCastSubmerged
         ? [{
           cardId,
@@ -451,6 +452,7 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
         : []),
       ]),
       ...(definition.voidwalk && !definition.mustBeCastBurrowed && !definition.mustBeCastSubmerged
+        && !definition.mustBeCastToWaterSite
         ? REALM_CELLS.filter((cell) => !state.realm.sites[cell]
           && (!definition.mustBeCastToOuterColumn || cell[0] === 'A' || cell[0] === 'E'))
           .map((cell) => ({
@@ -581,6 +583,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   }
   if (card.mustBeCastBurrowed && card.mustBeCastSubmerged) {
     throw new RangeError(`${path} cannot require both burrowed and submerged casting`);
+  }
+  if (card.mustBeCastToWaterSite !== undefined && typeof card.mustBeCastToWaterSite !== 'boolean') {
+    throw new RangeError(`${path}.mustBeCastToWaterSite must be boolean`);
   }
   if (card.ranged !== undefined && typeof card.ranged !== 'boolean') {
     throw new RangeError(`${path}.ranged must be boolean`);
@@ -720,6 +725,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.movesOnlySideways === true ? { movesOnlySideways: true } : {}),
             ...(card.mustBeCastBurrowed === true ? { mustBeCastBurrowed: true } : {}),
             ...(card.mustBeCastSubmerged === true ? { mustBeCastSubmerged: true } : {}),
+            ...(card.mustBeCastToWaterSite === true ? { mustBeCastToWaterSite: true } : {}),
             ...(card.provides ? { provides: card.provides } : {}),
             ...(card.ranged === true ? { ranged: true } : {}),
             ...(card.stealth === true ? { stealth: true } : {}),

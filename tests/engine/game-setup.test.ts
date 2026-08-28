@@ -50,6 +50,7 @@ type SpellFacts = Readonly<{
   movesOnlySideways?: boolean;
   mustBeCastBurrowed?: boolean;
   mustBeCastSubmerged?: boolean;
+  mustBeCastToWaterSite?: boolean;
   provides?: 'air' | 'earth' | 'fire' | 'water';
   ranged?: boolean;
   stealth?: boolean;
@@ -131,6 +132,7 @@ function cardsFor(
         movesOnlySideways: facts.movesOnlySideways ?? false,
         mustBeCastBurrowed: facts.mustBeCastBurrowed ?? false,
         mustBeCastSubmerged: facts.mustBeCastSubmerged ?? false,
+        mustBeCastToWaterSite: facts.mustBeCastToWaterSite ?? false,
         ...(facts.provides ? { provides: facts.provides } : {}),
         ranged: facts.ranged ?? false,
         stealth: facts.stealth ?? false,
@@ -315,6 +317,16 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /mustBeCastToOuterColumn/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        mustBeCastToWaterSite: 'yes',
+      } as unknown as GameCardDefinition,
+    },
+  }), /mustBeCastToWaterSite/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -738,6 +750,90 @@ test('RULE-03 explicit permission allows a minion to be summoned to any site', (
 
   assert.deepEqual(summonCells(false), ['C4']);
   assert.deepEqual(summonCells(true), ['C1', 'C4']);
+});
+
+test('RULE-03 a Water-site cast restriction filters unrestricted summons by terrain', () => {
+  const decks = {
+    north: deck('water-cast-north', 3, 6),
+    south: deck('water-cast-south', 3, 6),
+  };
+  const cards = cardsFor(decks);
+  const northWaterId = decks.north.atlas[0]!;
+  const northLandId = decks.north.atlas[1]!;
+  const southLandId = decks.south.atlas[0]!;
+  const southWaterId = decks.south.atlas[1]!;
+  decks.north.spellbook.forEach((cardId) => {
+    cards[cardId] = {
+      attack: 4,
+      cardType: 'minion',
+      defense: 4,
+      manaCost: 1,
+      mustBeCastToWaterSite: true,
+      summonToAnySite: true,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 1 },
+    };
+  });
+  cards[northWaterId] = { cardType: 'site', elements: ['water'] };
+  cards[southWaterId] = { cardType: 'site', elements: ['water'] };
+  const restrictedManifest = createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic',
+      revisionId: 'synthetic-water-site-cast-v1',
+    },
+    cards,
+    decks,
+    firstSeat: 'north',
+    seed: 144,
+  });
+  let session = keep(createGameSession(restrictedManifest));
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  const northWater = session.state.players.north.hand.atlas.find(({ cardId }) => cardId === northWaterId);
+  const northLand = session.state.players.north.hand.atlas.find(({ cardId }) => cardId === northLandId);
+  const southLand = session.state.players.south.hand.atlas.find(({ cardId }) => cardId === southLandId);
+  const southWater = session.state.players.south.hand.atlas.find(({ cardId }) => cardId === southWaterId);
+  const featuredId = session.state.players.north.hand.spellbook[0]?.cardId;
+  const ordinaryId = session.state.players.south.hand.spellbook[0]?.cardId;
+  assert.ok(northWater);
+  assert.ok(northLand);
+  assert.ok(southLand);
+  assert.ok(southWater);
+  assert.ok(featuredId);
+  assert.ok(ordinaryId);
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === northWater.instanceId && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === southLand.instanceId && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === northLand.instanceId && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === southWater.instanceId && descriptor.cell === 'B1');
+  const southSummons = legalGameActions(session.state, 'south');
+  assert.equal(southSummons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === ordinaryId && descriptor.cell === 'C4'), false);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const summons = legalGameActions(session.state, 'north');
+  const cellsFor = (cardId: string): readonly string[] => summons.flatMap(({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cardId === cardId ? [descriptor.cell] : []);
+  assert.deepEqual(cellsFor(featuredId), ['B1', 'C4']);
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === featuredId && descriptor.cell === 'B1');
+  assert.equal(session.state.realm.units[0]?.location, 'B1');
+  assert.equal(session.state.realm.units[0]?.controller, 'north');
+  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-04 Charge allows a summoned minion to Move and Attack immediately', () => {
