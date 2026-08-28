@@ -33,6 +33,7 @@ type SpellFacts = Readonly<{
   cannotDefend?: boolean;
   charge?: boolean;
   deathriteDrawSite?: boolean;
+  deathriteHeal?: number;
   defense?: number;
   genesisDrawSite?: boolean;
   lethal?: boolean;
@@ -86,6 +87,7 @@ function cardsFor(
         cannotDefend: spell.cannotDefend ?? false,
         charge: spell.charge ?? false,
         deathriteDrawSite: spell.deathriteDrawSite ?? false,
+        ...(spell.deathriteHeal ? { deathriteHeal: spell.deathriteHeal } : {}),
         defense: spell.defense ?? 1,
         genesisDrawSite: spell.genesisDrawSite ?? false,
         lethal: spell.lethal ?? false,
@@ -938,6 +940,56 @@ test('RULE-05 Deathrite draws sites before simultaneous deaths enter their cemet
     status: 'finished',
   });
   assert.equal(verifyGameReplay(deckOut), true);
+});
+
+test('RULE-05 Deathrite healing caps at maximum, fails at Death\'s Door, and precedes cemetery entry', () => {
+  const resolveHealingFight = (life: number, seed: number): GameSession => {
+    const setup = northAttacksAtC2(seed, {
+      attack: 1,
+      deathriteHeal: 3,
+      defense: 1,
+      manaCost: 1,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    }, { attack: 1, defense: 1, drawSpell: false, life });
+    let { session } = setup;
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'close-defend' && !descriptor.originalTargetParticipates));
+    assert.equal(session.state.players.south.avatar.life, life - 1);
+    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === setup.defenderInstanceId
+        && descriptor.to.cell === 'C2'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === setup.attackerInstanceId));
+    return accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  };
+
+  const capped = resolveHealingFight(5, 56);
+  assert.equal(capped.state.players.south.avatar.life, 5);
+  const cappedEvents = capped.transcript.at(-1)?.events ?? [];
+  assert.equal(cappedEvents.filter(({ type }) => type === 'avatar-healed').some(({ payload }) =>
+    canonicalJson(payload).includes('"amount":1')
+      && canonicalJson(payload).includes('"seat":"south"')), true);
+  assert.ok(Math.max(...cappedEvents.map(({ type }, index) => type === 'avatar-healed' ? index : -1))
+    < cappedEvents.findIndex(({ type }) => type === 'minion-died'));
+  assert.equal(verifyGameReplay(capped), true);
+
+  const deathDoor = resolveHealingFight(1, 57);
+  assert.equal(deathDoor.state.players.south.avatar.life, 0);
+  assert.equal(deathDoor.transcript.at(-1)?.events.some(({ payload, type }) =>
+    type === 'avatar-healed'
+      && canonicalJson(payload).includes('"amount":0')
+      && canonicalJson(payload).includes('"attemptedAmount":3')
+      && canonicalJson(payload).includes('"seat":"south"')), true);
+  assert.equal(verifyGameReplay(deathDoor), true);
 });
 
 test('RULE-04 Move and Attack stages movement before an undefended enemy-site strike', () => {
