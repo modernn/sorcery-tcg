@@ -50,6 +50,7 @@ export type GameCardDefinition =
   | Readonly<{
     burrowTargetMinion?: boolean;
     cardType: 'magic';
+    damageEachAbovegroundMinion?: 1;
     damageEachUnitAtLocationWithinTwoSteps?: number;
     damageRandomUnitAtLocation?: number;
     damageTargetUnit?: number;
@@ -644,6 +645,7 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
         targetSiteInstanceId: site.instanceId,
       })));
     }
+    if (definition.damageEachAbovegroundMinion === 1) return [cast];
     if (definition.damageEachUnitAtLocationWithinTwoSteps !== undefined) {
       const endpoints = movementPaths(
         state,
@@ -753,8 +755,13 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.lureEnemyMinionOneStepCloser !== true) {
       throw new RangeError(`${path}.lureEnemyMinionOneStepCloser must be true when defined`);
     }
+    if (card.damageEachAbovegroundMinion !== undefined
+      && card.damageEachAbovegroundMinion !== 1) {
+      throw new RangeError(`${path}.damageEachAbovegroundMinion must be 1`);
+    }
     const effectCount = Number(card.burrowTargetMinion === true)
       + Number(card.submergeTargetMinion === true)
+      + Number(card.damageEachAbovegroundMinion === 1)
       + Number(card.damageEachUnitAtLocationWithinTwoSteps !== undefined)
       + Number(card.damageRandomUnitAtLocation !== undefined)
       + Number(card.damageTargetUnit !== undefined)
@@ -1039,6 +1046,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                 ? { burrowTargetMinion: true }
                 : card.submergeTargetMinion === true
                   ? { submergeTargetMinion: true as const }
+                : card.damageEachAbovegroundMinion === 1
+                  ? { damageEachAbovegroundMinion: 1 as const }
                 : card.damageEachUnitAtLocationWithinTwoSteps !== undefined
                   ? { damageEachUnitAtLocationWithinTwoSteps: card.damageEachUnitAtLocationWithinTwoSteps }
                 : card.damageRandomUnitAtLocation !== undefined
@@ -3494,6 +3503,53 @@ function applyDescriptor(
           ? [...outcomes, resolved]
           : [...outcomes.slice(0, terminalIndex), resolved, ...outcomes.slice(terminalIndex)],
         [],
+      ];
+    }
+    if (definition.damageEachAbovegroundMinion === 1) {
+      const amount = definition.damageEachAbovegroundMinion;
+      const targets = (['north', 'south'] as const)
+        .flatMap((targetSeat) => unitRefs(castState, targetSeat))
+        .filter((target) => target.kind === 'minion' && unitStatus(castState, target).region === 'surface')
+        .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+      if (targets.length === 0) {
+        return [withStateVersion(castState, {}), [castOutcome, resolved], []];
+      }
+      const pending: PendingCombat = deepFreeze({
+        allocations: targets.map(({ instanceId }) => ({
+          amount,
+          targetInstanceId: instanceId,
+        })),
+        attacker: caster,
+        attackingSeat: seat,
+        cell: unitStatus(castState, caster).location,
+        combatants: targets,
+        defenders: [],
+        originalTarget: null,
+        targetRemoved: false,
+      });
+      const allocationOutcomes: readonly GameOutcome[] = targets.map(({ instanceId }) => ({
+        payload: {
+          amount,
+          sourceInstanceId: card.instanceId,
+          targetInstanceId: instanceId,
+        },
+        type: 'magic-damage-allocated',
+      }));
+      const [damaged, outcomes, randomDraws] = resolveFightWindow(
+        castState,
+        pending,
+        [castOutcome, ...allocationOutcomes],
+        true,
+        false,
+        [caster],
+      );
+      const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
+      return [
+        withStateVersion(damaged, {}),
+        terminalIndex < 0
+          ? [...outcomes, resolved]
+          : [...outcomes.slice(0, terminalIndex), resolved, ...outcomes.slice(terminalIndex)],
+        randomDraws,
       ];
     }
     if (definition.damageEachUnitAtLocationWithinTwoSteps !== undefined) {

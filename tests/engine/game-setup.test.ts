@@ -2062,6 +2062,180 @@ test('RULE-03/04 Minor Explosion damages every unit at a location up to two card
   assert.equal(verifyGameReplay(session), true);
 });
 
+test('RULE-03/04 Rain of Arrows simultaneously damages every aboveground minion', () => {
+  const decks = { north: deck('rain-north', 4, 6), south: deck('rain-south', 4, 6) };
+  const baseCards = cardsFor(decks, {
+    defense: 1,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  }, undefined, { elements: ['air'] });
+  const authority = {
+    contentHash: SYNTHETIC_AUTHORITY_HASH,
+    mode: 'synthetic' as const,
+    revisionId: 'synthetic-rain-of-arrows-v1',
+  };
+  const seed = 263;
+  const preview = createGameSession(createGameManifest({
+    authority,
+    cards: baseCards,
+    decks,
+    firstSeat: 'north',
+    seed,
+  }));
+  const rainCardId = preview.state.players.north.hand.spellbook[0]?.cardId;
+  const deathriteCardId = preview.state.players.north.hand.spellbook[1]?.cardId;
+  const burrowedCardId = preview.state.players.north.hand.spellbook[2]?.cardId;
+  const voidCardId = preview.state.players.north.spellbook[0]?.cardId;
+  const stealthedCardId = preview.state.players.south.hand.spellbook[0]?.cardId;
+  const wardedCardId = preview.state.players.south.hand.spellbook[1]?.cardId;
+  const submergedCardId = preview.state.players.south.hand.spellbook[2]?.cardId;
+  assert.ok(rainCardId);
+  assert.ok(deathriteCardId);
+  assert.ok(burrowedCardId);
+  assert.ok(voidCardId);
+  assert.ok(stealthedCardId);
+  assert.ok(wardedCardId);
+  assert.ok(submergedCardId);
+
+  const cards: Record<string, GameCardDefinition> = { ...baseCards };
+  for (const cardId of decks.south.atlas) {
+    cards[cardId] = { cardType: 'site', elements: ['water', 'air'] };
+  }
+  cards[rainCardId] = {
+    cardType: 'magic',
+    damageEachAbovegroundMinion: 1,
+    manaCost: 1,
+    thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+  };
+  cards[deathriteCardId] = {
+    ...baseCards[deathriteCardId]!,
+    deathriteDrawSite: true,
+  } as GameCardDefinition;
+  cards[burrowedCardId] = {
+    ...baseCards[burrowedCardId]!,
+    burrowing: true,
+  } as GameCardDefinition;
+  cards[voidCardId] = { ...baseCards[voidCardId]!, voidwalk: true } as GameCardDefinition;
+  cards[stealthedCardId] = { ...baseCards[stealthedCardId]!, stealth: true } as GameCardDefinition;
+  cards[wardedCardId] = { ...baseCards[wardedCardId]!, ward: true } as GameCardDefinition;
+  cards[submergedCardId] = { ...baseCards[submergedCardId]!, submerge: true } as GameCardDefinition;
+
+  assert.throws(() => createGameManifest({
+    authority,
+    cards: {
+      ...cards,
+      [rainCardId]: {
+        cardType: 'magic',
+        damageEachAbovegroundMinion: 0,
+        manaCost: 1,
+        thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+    decks,
+    firstSeat: 'north',
+    seed,
+  }), /damageEachAbovegroundMinion/);
+  const gameManifest = createGameManifest({ authority, cards, decks, firstSeat: 'north', seed });
+  assert.deepEqual(gameManifest.cards[rainCardId], {
+    cardType: 'magic',
+    damageEachAbovegroundMinion: 1,
+    manaCost: 1,
+    thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+  });
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === deathriteCardId && descriptor.cell === 'C4' && !descriptor.region);
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === burrowedCardId && descriptor.cell === 'C4'
+    && descriptor.region === 'underground');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === stealthedCardId && descriptor.cell === 'C1' && !descriptor.region);
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === wardedCardId && descriptor.cell === 'C1' && !descriptor.region);
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === submergedCardId && descriptor.cell === 'C1'
+    && descriptor.region === 'underwater');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === voidCardId && descriptor.cell === 'B4' && descriptor.region === 'void');
+
+  const checkpoint = session;
+  const rain = checkpoint.state.players.north.hand.spellbook.find(({ cardId }) => cardId === rainCardId);
+  const deathrite = checkpoint.state.realm.units.find(({ cardId }) => cardId === deathriteCardId);
+  const burrowed = checkpoint.state.realm.units.find(({ cardId }) => cardId === burrowedCardId);
+  const voidwalker = checkpoint.state.realm.units.find(({ cardId }) => cardId === voidCardId);
+  const stealthed = checkpoint.state.realm.units.find(({ cardId }) => cardId === stealthedCardId);
+  const warded = checkpoint.state.realm.units.find(({ cardId }) => cardId === wardedCardId);
+  const submerged = checkpoint.state.realm.units.find(({ cardId }) => cardId === submergedCardId);
+  assert.ok(rain);
+  assert.ok(deathrite);
+  assert.ok(burrowed);
+  assert.ok(voidwalker);
+  assert.ok(stealthed);
+  assert.ok(warded);
+  assert.ok(submerged);
+  const casts = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === rain.instanceId);
+  assert.equal(casts.length, 1);
+  assert.equal(casts[0]?.descriptor.kind === 'cast-magic'
+    && casts[0].descriptor.target === undefined
+    && casts[0].descriptor.targetLocation === undefined, true);
+
+  const beforeMana = checkpoint.state.players.north.mana;
+  const result = stepGame(checkpoint, casts[0]!);
+  assert.equal(result.accepted, true);
+  if (!result.accepted) return;
+  session = result.session;
+  const affected = [deathrite.instanceId, stealthed.instanceId, warded.instanceId].sort();
+  const allocations = result.receipt.events.filter(({ type }) => type === 'magic-damage-allocated');
+  assert.deepEqual(allocations.map(({ payload }) => payload).sort((left, right) =>
+    String((left as { targetInstanceId: string }).targetInstanceId)
+      .localeCompare(String((right as { targetInstanceId: string }).targetInstanceId))),
+  affected.map((targetInstanceId) => ({
+    amount: 1,
+    sourceInstanceId: rain.instanceId,
+    targetInstanceId,
+  })));
+  assert.equal(result.receipt.events[0]?.type, 'magic-cast');
+  assert.equal(result.receipt.events.at(-1)?.type, 'magic-resolved');
+  const firstDeath = result.receipt.events.findIndex(({ type }) => type === 'minion-died');
+  assert.equal(firstDeath > 0, true);
+  assert.equal(result.receipt.events.filter(({ type }) => type === 'damage-dealt').every((event) =>
+    result.receipt.events.indexOf(event) < firstDeath), true);
+  assert.equal(result.receipt.events.findIndex(({ type }) => type === 'site-drawn') < firstDeath, true);
+  assert.equal(result.receipt.events.some(({ type }) => type === 'stealth-lost'), false);
+  assert.equal(result.receipt.randomDraws.length, 0);
+  assert.equal(session.state.stateVersion, checkpoint.state.stateVersion + 1);
+  assert.equal(session.state.players.north.mana, beforeMana - 1);
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === rain.instanceId), true);
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === deathrite.instanceId), true);
+  assert.equal(session.state.players.south.cemetery.some(({ instanceId }) =>
+    instanceId === stealthed.instanceId), true);
+  const survivingWard = session.state.realm.units.find(({ instanceId }) => instanceId === warded.instanceId);
+  assert.deepEqual({ damage: survivingWard?.damage, warded: survivingWard?.warded }, {
+    damage: 0,
+    warded: false,
+  });
+  for (const excluded of [burrowed, voidwalker, submerged]) {
+    assert.deepEqual(session.state.realm.units.find(({ instanceId }) =>
+      instanceId === excluded.instanceId)?.damage, 0);
+  }
+  assert.equal(session.state.players.north.avatar.life, 20);
+  assert.equal(session.state.players.south.avatar.life, 20);
+  assert.equal(verifyGameReplay(session), true);
+});
+
 test('RULE-03 Charge Magic grants an untargeted ally Charge only for the current turn', () => {
   const decks = { north: deck('charge-north', 4, 6), south: deck('charge-south', 4, 6) };
   const baseCards = cardsFor(decks, {
