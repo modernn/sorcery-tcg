@@ -426,6 +426,27 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.fireResponse.replayVerified, true);
   assert.equal(result.combat.northMinionDied, true);
   assert.equal(result.combat.southMinionDied, true);
+  assert.equal(result.waterDrown.drown, 'Drown');
+  assert.equal(result.waterDrown.seravaTownsfolk, 'Serava Townsfolk');
+  assert.equal(result.waterDrown.acceptedActionCount, 11);
+  assert.equal(result.waterDrown.exactTargetAvailable, true);
+  assert.equal(result.waterDrown.manaPaid, 3);
+  assert.equal(result.waterDrown.ghostTownManaConsumed, true);
+  assert.equal(result.waterDrown.transitionBeforeDeath, true);
+  assert.equal(result.waterDrown.targetLeftRealm, true);
+  assert.equal(result.waterDrown.targetEnteredCemetery, true);
+  assert.equal(result.waterDrown.spellEnteredCemetery, true);
+  assert.equal(result.waterDrown.causalEventsVerified, true);
+  assert.equal(result.waterDrown.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.waterDrown.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.waterDrown.deck.spellbook
+    .find(({ name }) => name === 'Drown')?.copies, 4);
+  assert.equal(result.waterDrown.deck.spellbook
+    .find(({ name }) => name === 'Serava Townsfolk')?.copies, 4);
+  assert.equal(result.waterDrown.deck.atlas
+    .find(({ name }) => name === 'Ghost Town')?.copies, 3);
+  assert.equal(result.waterDrown.replayVerified, true);
   assert.equal(result.waterDrowned.drowned, 'Drowned');
   assert.equal(result.waterDrowned.slyFox, 'Sly Fox');
   assert.equal(result.waterDrowned.acceptedActionCount, 10);

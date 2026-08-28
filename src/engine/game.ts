@@ -56,6 +56,7 @@ export type GameCardDefinition =
     healController?: number;
     manaCost: number;
     returnMinionFromOwnCemetery?: true;
+    submergeTargetMinion?: true;
     targetNearby?: boolean;
     teleportAllyToTargetSite?: true;
     thresholds: GameThresholds;
@@ -589,7 +590,7 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
     }
     return targets.filter((target) => {
       const status = unitStatus(state, target);
-      return (!definition.burrowTargetMinion || target.kind === 'minion')
+      return (!definition.burrowTargetMinion && !definition.submergeTargetMinion || target.kind === 'minion')
         && (!definition.disableTargetNearbyMinionUntilNextTurn || target.kind === 'minion')
         && status.region === caster.region
         && (target.seat === seat || !status.stealthed)
@@ -654,6 +655,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     if (card.burrowTargetMinion !== undefined && typeof card.burrowTargetMinion !== 'boolean') {
       throw new RangeError(`${path}.burrowTargetMinion must be boolean`);
     }
+    if (card.submergeTargetMinion !== undefined && card.submergeTargetMinion !== true) {
+      throw new RangeError(`${path}.submergeTargetMinion must be true when defined`);
+    }
     if (card.teleportAllyToTargetSite !== undefined && card.teleportAllyToTargetSite !== true) {
       throw new RangeError(`${path}.teleportAllyToTargetSite must be true when defined`);
     }
@@ -666,6 +670,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       throw new RangeError(`${path}.disableTargetNearbyMinionUntilNextTurn must be true when defined`);
     }
     const effectCount = Number(card.burrowTargetMinion === true)
+      + Number(card.submergeTargetMinion === true)
       + Number(card.damageRandomUnitAtLocation !== undefined)
       + Number(card.damageTargetUnit !== undefined)
       + Number(card.disableTargetNearbyMinionUntilNextTurn === true)
@@ -916,6 +921,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               cardType: 'magic' as const,
               ...(card.burrowTargetMinion === true
                 ? { burrowTargetMinion: true }
+                : card.submergeTargetMinion === true
+                  ? { submergeTargetMinion: true as const }
                 : card.damageRandomUnitAtLocation !== undefined
                   ? { damageRandomUnitAtLocation: card.damageRandomUnitAtLocation }
                 : card.damageTargetUnit !== undefined
@@ -2997,12 +3004,13 @@ function applyDescriptor(
         [],
       ];
     }
-    if (definition.burrowTargetMinion === true) {
-      if (descriptor.target?.kind !== 'minion') throw new Error('unreachable Bury cast');
+    if (definition.burrowTargetMinion === true || definition.submergeTargetMinion === true) {
+      const submerge = definition.submergeTargetMinion === true;
+      if (descriptor.target?.kind !== 'minion') throw new Error('unreachable subsurface Magic cast');
       const targetIndex = castState.realm.units.findIndex(({ instanceId, controller }) =>
         instanceId === descriptor.target!.instanceId && controller === descriptor.target!.seat);
       const target = castState.realm.units[targetIndex];
-      if (!target) throw new Error('unreachable Bury target');
+      if (!target) throw new Error('unreachable subsurface Magic target');
       if (target.warded && target.controller !== seat) {
         const wardedState = deepFreeze({
           ...castState,
@@ -3023,53 +3031,54 @@ function applyDescriptor(
           [],
         ];
       }
-      const canBurrow = target.region === 'surface'
+      const canMove = target.region === 'surface'
         && castState.realm.sites[target.location] !== undefined
-        && !isWaterSite(castState, target.location);
-      if (!canBurrow) {
+        && isWaterSite(castState, target.location) === submerge;
+      if (!canMove) {
         return [withStateVersion(castState, {}), [castOutcome, resolved], []];
       }
-      const burrowedUnit = deepFreeze({ ...target, region: 'underground' as const });
-      const burrowedState = deepFreeze({
+      const movedUnit = deepFreeze({
+        ...target,
+        region: submerge ? 'underwater' as const : 'underground' as const,
+      });
+      const movedState = deepFreeze({
         ...castState,
         realm: {
           ...castState.realm,
-          units: castState.realm.units.map((unit, index) => index === targetIndex ? burrowedUnit : unit),
+          units: castState.realm.units.map((unit, index) => index === targetIndex ? movedUnit : unit),
         },
       });
-      const burrowedOutcome: GameOutcome = {
+      const movedOutcome: GameOutcome = {
         payload: {
           cell: target.location,
           instanceId: target.instanceId,
           seat: target.controller,
           sourceInstanceId: card.instanceId,
         },
-        type: 'minion-burrowed',
+        type: submerge ? 'minion-submerged' : 'minion-burrowed',
       };
-      const targetDefinition = cardDefinition(burrowedState, target.cardId);
-      if (targetDefinition.cardType !== 'minion') throw new Error('Bury target lacks minion definition');
-      if (targetDefinition.burrowing === true) {
+      if (minionSurvivesRegion(movedState, movedUnit)) {
         return [
-          withStateVersion(burrowedState, {}),
-          [castOutcome, burrowedOutcome, resolved],
+          withStateVersion(movedState, {}),
+          [castOutcome, movedOutcome, resolved],
           [],
         ];
       }
       const deathResolution = resolveMinionDeaths(
-        burrowedState,
-        burrowedState.players,
-        burrowedState.realm.units,
-        [burrowedUnit],
+        movedState,
+        movedState.players,
+        movedState.realm.units,
+        [movedUnit],
         new Set<GameSeat>(),
       );
       const deadState = deepFreeze({
-        ...burrowedState,
+        ...movedState,
         phase: deathResolution.terminal.status === 'finished' ? 'terminal' as const : 'main' as const,
         players: deathResolution.players,
-        realm: { ...burrowedState.realm, units: deathResolution.units },
+        realm: { ...movedState.realm, units: deathResolution.units },
         terminal: deathResolution.terminal,
       });
-      const outcomes = [castOutcome, burrowedOutcome, ...deathResolution.outcomes];
+      const outcomes = [castOutcome, movedOutcome, ...deathResolution.outcomes];
       const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
       return [
         withStateVersion(deadState, {}),
