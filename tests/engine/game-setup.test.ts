@@ -31,6 +31,7 @@ function deck(prefix: string, atlasCount = 30, spellbookCount = 50): GameDeckSpe
 type SpellFacts = Readonly<{
   attack?: number;
   cannotDefend?: boolean;
+  cannotDefendOrIntercept?: boolean;
   charge?: boolean;
   deathriteDrawSite?: boolean;
   deathriteHeal?: number;
@@ -86,6 +87,7 @@ function cardsFor(
         attack: spell.attack ?? 1,
         cardType: 'minion',
         cannotDefend: spell.cannotDefend ?? false,
+        cannotDefendOrIntercept: spell.cannotDefendOrIntercept ?? false,
         charge: spell.charge ?? false,
         deathriteDrawSite: spell.deathriteDrawSite ?? false,
         ...(spell.deathriteHeal ? { deathriteHeal: spell.deathriteHeal } : {}),
@@ -844,6 +846,33 @@ test('RULE-04 a prohibited minion cannot move to Defend but can still Intercept'
     descriptor.kind === 'decline-attack'));
   assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
     descriptor.kind === 'intercept' && descriptor.unitInstanceId === intercept.targetInstanceId), true);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 a fully prohibited minion cannot use Defend or Intercept', () => {
+  const spell = {
+    attack: 4,
+    cannotDefendOrIntercept: true,
+    defense: 4,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  } as const;
+  const defend = northAttacksAtC2(112, spell);
+  let session = accept(defend.session, action(defend.session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === defend.targetInstanceId));
+  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'defend' && descriptor.unitInstanceId === defend.defenderInstanceId), false);
+  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates), true);
+
+  const intercept = northAttacksAtC2(113, spell);
+  session = accept(intercept.session, action(intercept.session, ({ descriptor }) =>
+    descriptor.kind === 'decline-attack'));
+  assert.equal(session.state.phase, 'main');
+  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'intercept'), false);
   assert.equal(verifyGameReplay(session), true);
 });
 
