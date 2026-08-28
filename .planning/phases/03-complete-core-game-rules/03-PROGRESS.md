@@ -53,6 +53,7 @@
 - Burrowing-enabled minions enter and traverse the below-ground region beneath Land sites; a minion that also has Submerge can change directly between qualifying neighboring below-ground and underwater spaces.
 - Voidwalk minions can be summoned to any empty void, move between adjacent voids and adjacent site surfaces, and cross directly between void and eligible subsurface regions; playing a site into an occupied void places its units on the new surface without moving them.
 - Waterbound continuously derives Disabled whenever a minion occupies no Water site, suppressing actions, abilities, affinity, strikes, and Deathrites while preserving forced movement; post-destruction survival now uses the new Rubble terrain rather than stale site facts.
+- A central state-based region settlement runs after summons, every declared movement/Defend/drag step, forced movement, and terrain mutation: unsupported underground or underwater occupants die through the shared Deathrite/cemetery pipeline, unsupported void occupants are banished without Deathrite or cemetery entry, and removed movers cannot open later attack, Defend, or optional-fight windows.
 - A card-specific outer-column casting restriction filters every surface, subsurface, and Voidwalk location offered by the shared hand-cast action without restricting later movement.
 - A card-specific burrowed-only casting restriction suppresses surface, underwater, and void hand-casts while retaining the legal underground cast and later Burrowing movement.
 - A card-specific submerged-only casting restriction suppresses surface, underground, and void hand-casts while retaining the legal underwater cast and later Submerge movement.
@@ -115,7 +116,7 @@
 - `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 28-action Earth Burrowing, 17-action Earth Bury, 21-action Earth Rescue, 3-action Earth Shallow Grave, 10-action Earth Sinkhole, 10-action Earth burrowed-only casting, 24-action Earth first strike, 22-action Earth forward movement, 30-action Earth Immobile plus two 22-action Pudge drag branches, 21-action Earth Secret Tunnel, 24-action Earth Divine Healing, 22-action Earth Ranged, 27-action Earth Ward, 27-action Airborne, 26-action Air Stealth, 26-action Air movement, 24-action Air Movement +2, 25-action Air unrestricted-summon, 17-action Air Voidwalk/outer-column casting, 15-action Air Genesis spell-draw, 9-action Air Leyline Genesis, 10-action Air Zap Magic, 26-action Air Arc Lightning Magic, 11-action Air Lightning Bolt Magic, 11-action Air Teleport Magic, 43-action Fire targeting/response, 12-action Fire Charge, 10-action Fire Genesis life loss, 17-action Fire Minor Explosion, 23-action Water end-turn Stealth, 22-action Water sideways movement, 16-action Water edge connection, 16-action Water Submerge, 10-action Water submerged-only casting, 16-action Water any-Water-site casting, 15-action Water Freeze, 11-action Water Drown, 17-action Water Lure, 25-action Water Waterbound, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
 - `pnpm game:verify-private`: one passing ignored-authority integration scenario.
 - Death's Door scenarios prove same-turn direct-damage immunity, later death blows, simultaneous-defeat draws, nonlethal site strikes, and exact replay.
-- `pnpm verify`: 258 passing public tests at this checkpoint.
+- `pnpm verify`: 259 passing public tests at this checkpoint.
 
 ## Still required for Phase 3
 
@@ -123,7 +124,7 @@
 - Full start/main/end phase triggers and duration cleanup beyond the supported narrow Genesis/Deathrite effects, Freeze, Drown, Charge, minion damage, and summoning sickness.
 - Additional costs, broader non-minion spells, movement beyond bounded +1/+2 bonuses and supported static restrictions, further activated abilities, and card-specific targets.
 - Combat tiers beyond attacking-only first strike, projectile ranges and effects beyond Ranged and Pudge drag, additional healing sources, prevention/modification beyond minion Ward, additional card-triggered damage/death behavior, and tournament ending overlays.
-- State-based banishment/death beyond supported forced burrowing/submerging, Waterbound post-terrain survival, and Rubble terrain conversion, including other forced movement into unsupported terrain or regions or a deliberately suicidal step that leaves a unit unable to survive in its region.
+- State-based outcomes beyond the supported single-location region death/void-banishment model, including oversized multi-location occupancy and unsupported continuous ability-loss interactions.
 - Source-linked scenario and invariant coverage for every supported core mechanic.
 
 The runner is intentionally classified `unranked_partial_rules`; it proves the real engine loop and replay contract without claiming complete Sorcery behavior.

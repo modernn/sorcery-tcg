@@ -2327,13 +2327,122 @@ function resolveMinionDeaths(
   };
 }
 
-function minionSurvivesRegion(state: GameState, unit: UnitInstance): boolean {
-  if (unit.region === 'surface') return true;
+type MinionRegionDisposition = 'banished' | 'dies' | 'survives';
+
+function minionRegionDisposition(state: GameState, unit: UnitInstance): MinionRegionDisposition {
+  if (unit.region === 'surface') return 'survives';
   const definition = cardDefinition(state, unit.cardId);
-  if (definition.cardType !== 'minion' || minionDisabled(state, unit)) return false;
-  if (unit.region === 'underground') return definition.burrowing === true;
-  if (unit.region === 'underwater') return definition.submerge === true;
-  return definition.voidwalk === true;
+  if (definition.cardType !== 'minion') throw new Error('realm minion lacks minion definition');
+  const disabled = minionDisabled(state, unit);
+  if (unit.region === 'void') return !disabled && definition.voidwalk === true ? 'survives' : 'banished';
+  if (unit.region === 'underground') return !disabled && definition.burrowing === true ? 'survives' : 'dies';
+  return !disabled && definition.submerge === true ? 'survives' : 'dies';
+}
+
+function settleRegionOccupancy(state: GameState): Readonly<{
+  outcomes: readonly GameOutcome[];
+  removals: readonly Readonly<{
+    disposition: Exclude<MinionRegionDisposition, 'survives'>;
+    instanceId: StateHash;
+  }>[];
+  state: GameState;
+}> {
+  const removals = state.realm.units.flatMap((unit) => {
+    const disposition = minionRegionDisposition(state, unit);
+    return disposition === 'survives' ? [] : [{ disposition, instanceId: unit.instanceId }];
+  });
+  if (removals.length === 0) return { outcomes: [], removals, state };
+  const banishedIds = new Set(removals
+    .filter(({ disposition }) => disposition === 'banished')
+    .map(({ instanceId }) => instanceId));
+  const deathIds = new Set(removals
+    .filter(({ disposition }) => disposition === 'dies')
+    .map(({ instanceId }) => instanceId));
+  const banished = state.realm.units.filter(({ instanceId }) => banishedIds.has(instanceId));
+  const units = state.realm.units.filter(({ instanceId }) => !banishedIds.has(instanceId));
+  const deaths = units.filter(({ instanceId }) => deathIds.has(instanceId));
+  const banishedState = deepFreeze({ ...state, realm: { ...state.realm, units } });
+  const deathResolution = resolveMinionDeaths(
+    banishedState,
+    state.players,
+    units,
+    deaths,
+    new Set<GameSeat>(),
+  );
+  const banishedOutcomes: readonly GameOutcome[] = banished.map((unit) => ({
+    payload: { cardId: unit.cardId, instanceId: unit.instanceId, owner: unit.owner },
+    type: 'minion-banished',
+  }));
+  const terminalIndex = deathResolution.outcomes.findIndex(({ type }) => type === 'game-ended');
+  const outcomes = terminalIndex < 0
+    ? [...deathResolution.outcomes, ...banishedOutcomes]
+    : [
+      ...deathResolution.outcomes.slice(0, terminalIndex),
+      ...banishedOutcomes,
+      ...deathResolution.outcomes.slice(terminalIndex),
+    ];
+  const settledState = deepFreeze({
+    ...state,
+    ...(deathResolution.terminal.status === 'finished'
+      ? { pendingCombat: null, phase: 'terminal' as const }
+      : {}),
+    players: deathResolution.players,
+    realm: { ...state.realm, units: deathResolution.units },
+    terminal: deathResolution.terminal,
+  });
+  return { outcomes, removals, state: settledState };
+}
+
+function resolveDeclaredPath(
+  state: GameState,
+  ref: GameUnitRef,
+  path: readonly GameLocation[],
+  tap: boolean,
+): Readonly<{
+  outcomes: readonly GameOutcome[];
+  path: readonly GameLocation[];
+  removals: readonly Readonly<{
+    disposition: Exclude<MinionRegionDisposition, 'survives'>;
+    instanceId: StateHash;
+  }>[];
+  state: GameState;
+}> {
+  const start = path[0];
+  if (!start) return { outcomes: [], path: [], removals: [], state };
+  const startingStatus = unitStatus(state, ref);
+  if (!sameLocation({ cell: startingStatus.location, region: startingStatus.region }, start)) {
+    return { outcomes: [], path: [], removals: [], state };
+  }
+  const tapped = moveUnit(state, ref, start, tap);
+  let current = deepFreeze({ ...state, players: tapped.players, realm: tapped.realm });
+  const actualPath: GameLocation[] = [start];
+  const outcomes: GameOutcome[] = [];
+  const removals: Array<Readonly<{
+    disposition: Exclude<MinionRegionDisposition, 'survives'>;
+    instanceId: StateHash;
+  }>> = [];
+  for (let index = 1; index < path.length; index += 1) {
+    const expectedFrom = path[index - 1]!;
+    const next = path[index]!;
+    const currentUnit = ref.kind === 'avatar'
+      ? current.players[ref.seat].avatar.card.instanceId === ref.instanceId
+        ? current.players[ref.seat].avatar
+        : undefined
+      : current.realm.units.find(({ instanceId }) => instanceId === ref.instanceId);
+    if (!currentUnit
+      || currentUnit.location !== expectedFrom.cell
+      || currentUnit.region !== expectedFrom.region) break;
+    const moved = moveUnit(current, ref, next, false);
+    current = deepFreeze({ ...current, players: moved.players, realm: moved.realm });
+    actualPath.push(next);
+    const settlement = settleRegionOccupancy(current);
+    current = settlement.state;
+    outcomes.push(...settlement.outcomes);
+    removals.push(...settlement.removals);
+    if (settlement.removals.some(({ instanceId }) => instanceId === ref.instanceId)
+      || current.terminal.status === 'finished') break;
+  }
+  return { outcomes, path: actualPath, removals, state: current };
 }
 
 function resolveSiteDeaths(
@@ -2348,7 +2457,6 @@ function resolveSiteDeaths(
 }> {
   const unique = [...new Map(destroyed.map((entry) => [entry.site.instanceId, entry])).values()]
     .sort((left, right) => left.cell.localeCompare(right.cell));
-  const destroyedCells = new Set(unique.map(({ cell }) => cell));
   const floodedCells = new Set(unique
     .filter(({ site }) => {
       const definition = cardDefinition(state, site.cardId);
@@ -2382,18 +2490,10 @@ function resolveSiteDeaths(
     ...state,
     realm: { sites, units },
   });
-  const deaths = units.filter((unit) =>
-    destroyedCells.has(unit.location) && !minionSurvivesRegion(terrainState, unit));
-  const deathResolution = resolveMinionDeaths(
-    terrainState,
-    state.players,
-    units,
-    deaths,
-    new Set<GameSeat>(),
-  );
+  const settlement = settleRegionOccupancy(terrainState);
   const players: Record<GameSeat, PlayerState> = {
-    north: deathResolution.players.north,
-    south: deathResolution.players.south,
+    north: settlement.state.players.north,
+    south: settlement.state.players.south,
   };
   for (const { site } of unique) {
     const owner = players[site.owner];
@@ -2407,18 +2507,18 @@ function resolveSiteDeaths(
       }],
     });
   }
-  const terminalIndex = deathResolution.outcomes.findIndex(({ type }) => type === 'game-ended');
+  const terminalIndex = settlement.outcomes.findIndex(({ type }) => type === 'game-ended');
   return {
     outcomes: terminalIndex < 0
-      ? [...deathResolution.outcomes, ...rubbleOutcomes]
+      ? [...settlement.outcomes, ...rubbleOutcomes]
       : [
-        ...deathResolution.outcomes.slice(0, terminalIndex),
+        ...settlement.outcomes.slice(0, terminalIndex),
         ...rubbleOutcomes,
-        ...deathResolution.outcomes.slice(terminalIndex),
+        ...settlement.outcomes.slice(terminalIndex),
       ],
     players: deepFreeze(players),
-    realm: deepFreeze({ sites, units: deathResolution.units }),
-    terminal: deathResolution.terminal,
+    realm: deepFreeze({ sites, units: settlement.state.realm.units }),
+    terminal: settlement.state.terminal,
   };
 }
 
@@ -2875,24 +2975,18 @@ function applyDescriptor(
         units: placedUnits,
       },
     });
-    const deaths = replacingRubble && !genesisDrawFailed
-      ? placedUnits.filter((unit) => unit.location === descriptor.cell && !minionSurvivesRegion(placedState, unit))
-      : [];
-    const deathResolution = resolveMinionDeaths(
-      placedState,
-      placedState.players,
-      placedUnits,
-      deaths,
-      new Set<GameSeat>(),
-    );
+    const settlement = settleRegionOccupancy(placedState);
     const terminal = genesisDrawFailed
       ? { loser: seat, reason: 'deck_empty' as const, status: 'finished' as const, winner }
-      : deathResolution.terminal;
+      : settlement.state.terminal;
+    const settlementOutcomes = genesisDrawFailed
+      ? settlement.outcomes.filter(({ type }) => type !== 'game-ended')
+      : settlement.outcomes;
     return [
       withStateVersion(state, {
         ...(terminal.status === 'finished' ? { phase: 'terminal' as const } : {}),
-        players: deathResolution.players,
-        realm: { ...placedState.realm, units: deathResolution.units },
+        players: settlement.state.players,
+        realm: settlement.state.realm,
         terminal,
       }),
       [
@@ -2927,7 +3021,7 @@ function applyDescriptor(
           },
           type: 'spell-discarded',
         })),
-        ...deathResolution.outcomes,
+        ...settlementOutcomes,
         ...(genesisDrawFailed
           ? [{ payload: { loser: seat, reason: 'deck_empty', winner }, type: 'game-ended' }]
           : []),
@@ -3166,27 +3260,28 @@ function applyDescriptor(
       }
       const enemyStatus = unitStatus(castState, descriptor.temptedEnemy);
       const from: GameLocation = { cell: enemyStatus.location, region: enemyStatus.region };
-      const moved = moveUnit(castState, descriptor.temptedEnemy, descriptor.temptedDestination, false);
       const to = descriptor.temptedDestination;
+      const path = resolveDeclaredPath(castState, descriptor.temptedEnemy, [from, to], false);
+      const lured: GameOutcome = {
+        payload: {
+          allyInstanceId: descriptor.ally.instanceId,
+          from,
+          path: path.path,
+          seat: descriptor.temptedEnemy.seat,
+          sourceInstanceId: card.instanceId,
+          steps: path.path.length - 1,
+          targetInstanceId: descriptor.temptedEnemy.instanceId,
+          to,
+        },
+        type: 'unit-lured',
+      };
+      const outcomes = [castOutcome, lured, ...path.outcomes];
+      const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
       return [
-        withStateVersion(castState, { players: moved.players, realm: moved.realm }),
-        [
-          castOutcome,
-          {
-            payload: {
-              allyInstanceId: descriptor.ally.instanceId,
-              from,
-              path: [from, to],
-              seat: descriptor.temptedEnemy.seat,
-              sourceInstanceId: card.instanceId,
-              steps: 1,
-              targetInstanceId: descriptor.temptedEnemy.instanceId,
-              to,
-            },
-            type: 'unit-lured',
-          },
-          resolved,
-        ],
+        withStateVersion(path.state, {}),
+        terminalIndex < 0
+          ? [...outcomes, resolved]
+          : [...outcomes.slice(0, terminalIndex), resolved, ...outcomes.slice(terminalIndex)],
         [],
       ];
     }
@@ -3306,31 +3401,11 @@ function applyDescriptor(
         },
         type: submerge ? 'minion-submerged' : 'minion-burrowed',
       };
-      if (minionSurvivesRegion(movedState, movedUnit)) {
-        return [
-          withStateVersion(movedState, {}),
-          [castOutcome, movedOutcome, resolved],
-          [],
-        ];
-      }
-      const deathResolution = resolveMinionDeaths(
-        movedState,
-        movedState.players,
-        movedState.realm.units,
-        [movedUnit],
-        new Set<GameSeat>(),
-      );
-      const deadState = deepFreeze({
-        ...movedState,
-        phase: deathResolution.terminal.status === 'finished' ? 'terminal' as const : 'main' as const,
-        players: deathResolution.players,
-        realm: { ...movedState.realm, units: deathResolution.units },
-        terminal: deathResolution.terminal,
-      });
-      const outcomes = [castOutcome, movedOutcome, ...deathResolution.outcomes];
+      const settlement = settleRegionOccupancy(movedState);
+      const outcomes = [castOutcome, movedOutcome, ...settlement.outcomes];
       const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
       return [
-        withStateVersion(deadState, {}),
+        withStateVersion(settlement.state, {}),
         terminalIndex < 0
           ? [...outcomes, resolved]
           : [...outcomes.slice(0, terminalIndex), resolved, ...outcomes.slice(terminalIndex)],
@@ -3363,9 +3438,14 @@ function applyDescriptor(
         },
         type: 'unit-teleported',
       };
+      const settlement = settleRegionOccupancy(teleportedState);
+      const outcomes = [castOutcome, teleported, ...settlement.outcomes];
+      const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
       return [
-        withStateVersion(teleportedState, {}),
-        [castOutcome, teleported, resolved],
+        withStateVersion(settlement.state, {}),
+        terminalIndex < 0
+          ? [...outcomes, resolved]
+          : [...outcomes.slice(0, terminalIndex), resolved, ...outcomes.slice(terminalIndex)],
         [],
       ];
     }
@@ -3567,22 +3647,38 @@ function applyDescriptor(
       },
       type: 'minion-summoned',
     };
+    const summonedState = deepFreeze({
+      ...state,
+      players: replacePlayer(state, seat, updatedPlayer),
+      realm,
+    });
+    const settlement = settleRegionOccupancy(summonedState);
+    const summonedUnitSurvived = settlement.state.realm.units
+      .some(({ instanceId }) => instanceId === unit.instanceId);
+    if (!summonedUnitSurvived || settlement.state.terminal.status === 'finished') {
+      return [
+        withStateVersion(settlement.state, {}),
+        [summoned, ...settlement.outcomes],
+        [],
+      ];
+    }
+    const settledPlayer = settlement.state.players[seat];
     const genesisDrawZone = definition.genesisDrawSite
       ? 'atlas'
       : definition.genesisDrawSpell ? 'spellbook' : undefined;
     if (definition.genesisLoseControllerLife === 2) {
       const [lifePlayer, amount, reachedDeathsDoor] = loseAvatarLife(
-        updatedPlayer,
+        settledPlayer,
         definition.genesisLoseControllerLife,
         state.turnNumber,
       );
       return [
-        withStateVersion(state, {
-          players: replacePlayer(state, seat, lifePlayer),
-          realm,
+        withStateVersion(settlement.state, {
+          players: replacePlayer(settlement.state, seat, lifePlayer),
         }),
         [
           summoned,
+          ...settlement.outcomes,
           ...(amount > 0
             ? [{
               payload: {
@@ -3605,35 +3701,38 @@ function applyDescriptor(
       ];
     }
     if (genesisDrawZone) {
-      const [drawn, ...remaining] = updatedPlayer[genesisDrawZone];
+      const [drawn, ...remaining] = settledPlayer[genesisDrawZone];
       if (!drawn) {
         const winner = otherSeat(seat);
         return [
-          withStateVersion(state, {
+          withStateVersion(settlement.state, {
             phase: 'terminal',
-            players: replacePlayer(state, seat, updatedPlayer),
-            realm,
+            pendingCombat: null,
             terminal: { loser: seat, reason: 'deck_empty', status: 'finished', winner },
           }),
-          [summoned, { payload: { loser: seat, reason: 'deck_empty', winner }, type: 'game-ended' }],
+          [
+            summoned,
+            ...settlement.outcomes,
+            { payload: { loser: seat, reason: 'deck_empty', winner }, type: 'game-ended' },
+          ],
           [],
         ];
       }
       const drawingPlayer = deepFreeze({
-        ...updatedPlayer,
+        ...settledPlayer,
         [genesisDrawZone]: remaining,
         hand: {
-          ...updatedPlayer.hand,
-          [genesisDrawZone]: [...updatedPlayer.hand[genesisDrawZone], drawn],
+          ...settledPlayer.hand,
+          [genesisDrawZone]: [...settledPlayer.hand[genesisDrawZone], drawn],
         },
       });
       return [
-        withStateVersion(state, {
-          players: replacePlayer(state, seat, drawingPlayer),
-          realm,
+        withStateVersion(settlement.state, {
+          players: replacePlayer(settlement.state, seat, drawingPlayer),
         }),
         [
           summoned,
+          ...settlement.outcomes,
           {
             payload: { seat, sourceInstanceId: card.instanceId },
             type: genesisDrawZone === 'atlas' ? 'site-drawn' : 'spell-drawn',
@@ -3643,11 +3742,8 @@ function applyDescriptor(
       ];
     }
     return [
-      withStateVersion(state, {
-        players: replacePlayer(state, seat, updatedPlayer),
-        realm,
-      }),
-      [summoned],
+      withStateVersion(settlement.state, {}),
+      [summoned, ...settlement.outcomes],
       [],
     ];
   }
@@ -3790,27 +3886,27 @@ function applyDescriptor(
     const from: GameLocation = { cell: targetStatus.location, region: targetStatus.region };
     const to: GameLocation = { cell: shooterStatus.location, region: shooterStatus.region };
     const dragPath = [...descriptor.path].reverse();
-    const moved = moveUnit(shotState, descriptor.hit, to, false);
-    const draggedState = deepFreeze({
-      ...shotState,
-      players: moved.players,
-      realm: moved.realm,
-    });
+    const path = resolveDeclaredPath(shotState, descriptor.hit, dragPath, false);
+    const actualTo = path.path.at(-1) ?? from;
     const dragged: GameOutcome = {
       payload: {
         from,
-        path: dragPath,
+        path: path.path,
         seat,
         sourceInstanceId: shooter.instanceId,
-        steps: dragPath.length - 1,
+        steps: path.path.length - 1,
         targetInstanceId: descriptor.hit.instanceId,
-        to,
+        to: actualTo,
       },
       type: 'unit-dragged',
     };
-    const outcomes = [shot, ...stealthOutcomes, dragged];
-    if (!descriptor.fightOnArrival) {
-      return [withStateVersion(draggedState, {}), outcomes, []];
+    const outcomes = [shot, ...stealthOutcomes, dragged, ...path.outcomes];
+    const hitArrived = path.state.realm.units.some(({ instanceId, location, region }) =>
+      instanceId === descriptor.hit!.instanceId && location === to.cell && region === to.region);
+    const shooterRemains = path.state.realm.units.some(({ instanceId }) => instanceId === shooter.instanceId);
+    if (!descriptor.fightOnArrival || !hitArrived || !shooterRemains
+      || path.state.terminal.status === 'finished') {
+      return [withStateVersion(path.state, {}), outcomes, []];
     }
     const pending: PendingCombat = deepFreeze({
       allocations: [],
@@ -3823,7 +3919,7 @@ function applyDescriptor(
       ...(to.region === 'surface' ? {} : { region: to.region }),
       targetRemoved: false,
     });
-    return beginFight(draggedState, pending, [descriptor.hit], outcomes);
+    return beginFight(path.state, pending, [descriptor.hit], outcomes);
   }
 
   if (descriptor.kind === 'move-and-attack') {
@@ -3837,7 +3933,28 @@ function applyDescriptor(
         && candidate.to.region === descriptor.to.region);
     const ref = unitRefs(state, seat).find(({ instanceId }) => instanceId === descriptor.unitInstanceId);
     if (!legal || !ref) throw new Error('unreachable illegal Move and Attack');
-    const moved = moveAndTapUnit(state, ref, descriptor.to);
+    const path = resolveDeclaredPath(state, ref, descriptor.path, true);
+    const actualTo = path.path.at(-1) ?? descriptor.from;
+    const activated: GameOutcome = {
+      payload: {
+        from: descriptor.from,
+        path: path.path,
+        seat,
+        steps: path.path.length - 1,
+        to: actualTo,
+        unitInstanceId: descriptor.unitInstanceId,
+      },
+      type: 'move-and-attack-activated',
+    };
+    const moverArrived = ref.kind === 'avatar'
+      ? path.state.players[ref.seat].avatar.card.instanceId === ref.instanceId
+        && path.state.players[ref.seat].avatar.location === descriptor.to.cell
+        && path.state.players[ref.seat].avatar.region === descriptor.to.region
+      : path.state.realm.units.some(({ instanceId, location, region }) =>
+        instanceId === ref.instanceId && location === descriptor.to.cell && region === descriptor.to.region);
+    if (!moverArrived || path.state.terminal.status === 'finished') {
+      return [withStateVersion(path.state, {}), [activated, ...path.outcomes], []];
+    }
     const pending: PendingCombat = deepFreeze({
       allocations: [],
       attacker: ref,
@@ -3850,23 +3967,11 @@ function applyDescriptor(
       targetRemoved: false,
     });
     return [
-      withStateVersion(state, {
+      withStateVersion(path.state, {
         pendingCombat: pending,
         phase: 'attack',
-        players: moved.players,
-        realm: moved.realm,
       }),
-      [{
-        payload: {
-          from: descriptor.from,
-          path: descriptor.path,
-          seat,
-          steps: descriptor.path.length - 1,
-          to: descriptor.to,
-          unitInstanceId: descriptor.unitInstanceId,
-        },
-        type: 'move-and-attack-activated',
-      }],
+      [activated, ...path.outcomes],
       [],
     ];
   }
@@ -3946,30 +4051,52 @@ function applyDescriptor(
       throw new Error('unreachable illegal defender');
     }
     const destination: GameLocation = { cell: pending.cell, region: pending.region ?? 'surface' };
-    const moved = moveAndTapUnit(state, ref, destination);
+    const path = resolveDeclaredPath(state, ref, descriptor.path, true);
+    const defenderArrived = ref.kind === 'avatar'
+      ? path.state.players[ref.seat].avatar.card.instanceId === ref.instanceId
+        && path.state.players[ref.seat].avatar.location === destination.cell
+        && path.state.players[ref.seat].avatar.region === destination.region
+      : path.state.realm.units.some(({ instanceId, location, region }) =>
+        instanceId === ref.instanceId && location === destination.cell && region === destination.region);
+    if (!defenderArrived || path.state.terminal.status === 'finished') {
+      return [
+        withStateVersion(path.state, {}),
+        [{
+          payload: {
+            from: descriptor.from,
+            instanceId: ref.instanceId,
+            path: path.path,
+            seat,
+            steps: path.path.length - 1,
+            to: path.path.at(-1) ?? descriptor.from,
+          },
+          type: 'defender-moved',
+        }, ...path.outcomes],
+        [],
+      ];
+    }
     const removesSite = pending.originalTarget?.kind === 'site' && !pending.targetRemoved;
     return [
-      withStateVersion(state, {
+      withStateVersion(path.state, {
         pendingCombat: deepFreeze({
           ...pending,
           defenders: [...pending.defenders, ref],
           targetRemoved: pending.targetRemoved || removesSite,
         }),
-        players: moved.players,
-        realm: moved.realm,
       }),
       [
         {
           payload: {
             from: descriptor.from,
             instanceId: ref.instanceId,
-            path: descriptor.path,
+            path: path.path,
             seat,
-            steps: descriptor.path.length - 1,
-            to: descriptor.to,
+            steps: path.path.length - 1,
+            to: path.path.at(-1) ?? descriptor.from,
           },
           type: 'defender-joined',
         },
+        ...path.outcomes,
         ...(removesSite
           ? [{
             payload: { instanceId: pending.originalTarget!.instanceId, kind: 'site' },
