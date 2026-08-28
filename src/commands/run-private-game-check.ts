@@ -140,6 +140,10 @@ export type PrivateGameCheck = Readonly<{
   airVoidwalk: Readonly<{
     acceptedActionCount: number;
     deck: DeckList;
+    forsaken: string;
+    forsakenInnerSurfaceUnavailable: boolean;
+    forsakenInnerVoidUnavailable: boolean;
+    forsakenOuterVoidAvailable: boolean;
     nonVoidSurfaceAvailable: boolean;
     nonVoidVoidUnavailable: boolean;
     replayVerified: boolean;
@@ -455,6 +459,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   formatStableId: string;
   firstStrikeMinion: NormalizedCard;
   firstStrikeTargetMinion: NormalizedCard;
+  forsaken: NormalizedCard;
   genesisSpellMinion: NormalizedCard;
   genesisMinion: NormalizedCard;
   ghostTownSite: NormalizedCard;
@@ -632,6 +637,22 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || voidwalkMinion.thresholds.water !== 0
     || voidwalkMinion.rarity !== 'ordinary') {
     throw new Error('private Voidwalk minion no longer matches its supported facts');
+  }
+  const forsaken = snapshot.cards.find(({ name }) => name === 'Forsaken');
+  if (!forsaken
+    || forsaken.cardType !== 'minion'
+    || ruleTextDigest(forsaken.rulesText) !== 'sha256:8107f1a2820900c1c6c1282f983caa0be0e9e7734016fc3789284107b9b27ac4'
+    || forsaken.manaCost !== 2
+    || forsaken.attack !== 3
+    || forsaken.defense !== 3
+    || forsaken.elements.length !== 1
+    || forsaken.elements[0] !== 'air'
+    || forsaken.thresholds.air !== 1
+    || forsaken.thresholds.earth !== 0
+    || forsaken.thresholds.fire !== 0
+    || forsaken.thresholds.water !== 0
+    || forsaken.rarity !== 'ordinary') {
+    throw new Error('private outer-column casting minion no longer matches its supported facts');
   }
   const genesisSpellMinion = snapshot.cards.find(({ name }) => name === 'Apprentice Wizard');
   if (!genesisSpellMinion
@@ -914,6 +935,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     formatStableId: selected.identity.stableId,
     firstStrikeMinion,
     firstStrikeTargetMinion,
+    forsaken,
     genesisSpellMinion,
     genesisMinion,
     ghostTownSite,
@@ -989,6 +1011,7 @@ function gameDefinition(
   voidwalk = false,
   genesisDrawSpell = false,
   connectsTopBottom = false,
+  mustBeCastToOuterColumn = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1031,6 +1054,7 @@ function gameDefinition(
       gainsStealthAtEndOfTurn,
       lethal,
       manaCost: card.manaCost,
+      mustBeCastToOuterColumn,
       ...(movementBonus ? { movementBonus } : {}),
       movesOnlySideways,
       ...(provides ? { provides } : {}),
@@ -1166,7 +1190,11 @@ function buildManifest(
   ] as const;
   const airborneDeck = elementalDeck('air', airMinions);
   const airGenesisSpellDeck = elementalDeck('air', [...airMinions, input.genesisSpellMinion]);
-  const airVoidwalkDeck = elementalDeck('air', [...airMinions, input.voidwalkMinion]);
+  const airVoidwalkDeck = elementalDeck('air', [
+    ...airMinions,
+    input.voidwalkMinion,
+    input.forsaken,
+  ]);
   const waterDeck = elementalDeck('water', [
     input.healingMinion,
     input.slyFox,
@@ -1261,9 +1289,11 @@ function buildManifest(
       card.stableId === input.sedgeCrabs.stableId,
       card.stableId === input.submergeMinion.stableId,
       card.stableId === input.burrowingMinion.stableId,
-      card.stableId === input.voidwalkMinion.stableId,
+      card.stableId === input.voidwalkMinion.stableId
+        || card.stableId === input.forsaken.stableId,
       card.stableId === input.genesisSpellMinion.stableId,
       card.stableId === input.polarBears.stableId,
+      card.stableId === input.forsaken.stableId,
     ),
   ]));
   return {
@@ -1817,9 +1847,10 @@ function findAirVoidwalkOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceIds: readonly [string, string];
+  restrictedInstanceId: string;
 }> {
   // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
-  for (let offset = 1; offset <= 64; offset += 1) {
+  for (let offset = 1; offset <= 256; offset += 1) {
     const seed = input.config.airborneSeed + offset;
     const built = buildManifest(input, seed, 'air-voidwalk');
     const session = createGameSession(built.manifest);
@@ -1834,6 +1865,8 @@ function findAirVoidwalkOpening(
     ];
     const featuredInstanceId = available
       .find(({ cardId }) => cardId === input.voidwalkMinion.stableId)?.instanceId;
+    const restrictedInstanceId = available
+      .find(({ cardId }) => cardId === input.forsaken.stableId)?.instanceId;
     const comparisonInstanceId = available.find(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'minion'
@@ -1847,6 +1880,7 @@ function findAirVoidwalkOpening(
     if (northSites.length >= 2
       && southSites.length >= 2
       && featuredInstanceId
+      && restrictedInstanceId
       && comparisonInstanceId) {
       return {
         ...built,
@@ -1856,6 +1890,7 @@ function findAirVoidwalkOpening(
         seed,
         session,
         southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
+        restrictedInstanceId,
       };
     }
   }
@@ -2987,6 +3022,9 @@ function runAirVoidwalk(
       && (descriptor.region ?? 'surface') === region);
   const surfaceSummonAvailable = matches(opening.featuredInstanceId, 'C3', 'surface');
   const voidSummonAvailable = matches(opening.featuredInstanceId, 'B2', 'void');
+  const forsakenOuterVoidAvailable = matches(opening.restrictedInstanceId, 'A2', 'void');
+  const forsakenInnerVoidUnavailable = !matches(opening.restrictedInstanceId, 'B2', 'void');
+  const forsakenInnerSurfaceUnavailable = !matches(opening.restrictedInstanceId, 'C3', 'surface');
   const nonVoidSurfaceAvailable = matches(opening.comparisonInstanceId, 'C3', 'surface');
   const nonVoidVoidUnavailable = !matches(opening.comparisonInstanceId, 'B2', 'void');
   take(({ descriptor }) => descriptor.kind === 'summon-minion'
@@ -3024,6 +3062,10 @@ function runAirVoidwalk(
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
     deck: deckList(opening.manifest.decks.north, opening.names),
+    forsaken: opening.names.get(input.forsaken.stableId) ?? input.forsaken.stableId,
+    forsakenInnerSurfaceUnavailable,
+    forsakenInnerVoidUnavailable,
+    forsakenOuterVoidAvailable,
     nonVoidSurfaceAvailable,
     nonVoidVoidUnavailable,
     replayVerified: verifyGameReplay(session),

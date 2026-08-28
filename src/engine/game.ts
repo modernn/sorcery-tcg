@@ -65,6 +65,7 @@ export type GameCardDefinition =
     strikesFirstWhileAttacking?: boolean;
     submerge?: boolean;
     summonToAnySite?: boolean;
+    mustBeCastToOuterColumn?: boolean;
     tapForMana?: number;
     thresholds: GameThresholds;
     voidwalk?: boolean;
@@ -403,7 +404,10 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
       || player.mana < definition.manaCost
       || !meetsThresholds(state, seat, definition.thresholds)) return [];
     return [
-      ...(definition.summonToAnySite ? siteCells : controlledCells).flatMap((cell) => [
+      ...(definition.mustBeCastToOuterColumn
+        ? (definition.summonToAnySite ? siteCells : controlledCells)
+          .filter((cell) => cell[0] === 'A' || cell[0] === 'E')
+        : definition.summonToAnySite ? siteCells : controlledCells).flatMap((cell) => [
       {
         cardId,
         cardInstanceId: instanceId,
@@ -436,7 +440,9 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
         : []),
       ]),
       ...(definition.voidwalk
-        ? REALM_CELLS.filter((cell) => !state.realm.sites[cell]).map((cell) => ({
+        ? REALM_CELLS.filter((cell) => !state.realm.sites[cell]
+          && (!definition.mustBeCastToOuterColumn || cell[0] === 'A' || cell[0] === 'E'))
+          .map((cell) => ({
           cardId,
           cardInstanceId: instanceId,
           casterInstanceId: player.avatar.card.instanceId,
@@ -558,6 +564,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.summonToAnySite !== undefined && typeof card.summonToAnySite !== 'boolean') {
     throw new RangeError(`${path}.summonToAnySite must be boolean`);
   }
+  if (card.mustBeCastToOuterColumn !== undefined
+    && typeof card.mustBeCastToOuterColumn !== 'boolean') {
+    throw new RangeError(`${path}.mustBeCastToOuterColumn must be boolean`);
+  }
   if (card.tapForMana !== undefined
     && (!Number.isSafeInteger(card.tapForMana) || card.tapForMana < 1 || card.tapForMana > MAX_COMBAT_STAT)) {
     throw new RangeError(path + '.tapForMana must be a safe integer between 1 and ' + MAX_COMBAT_STAT);
@@ -670,6 +680,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.strikesFirstWhileAttacking === true ? { strikesFirstWhileAttacking: true } : {}),
             ...(card.submerge === true ? { submerge: true } : {}),
             ...(card.summonToAnySite === true ? { summonToAnySite: true } : {}),
+            ...(card.mustBeCastToOuterColumn === true ? { mustBeCastToOuterColumn: true } : {}),
             ...(card.tapForMana ? { tapForMana: card.tapForMana } : {}),
             thresholds: { ...card.thresholds },
             ...(card.voidwalk === true ? { voidwalk: true } : {}),
