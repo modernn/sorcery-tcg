@@ -42,6 +42,7 @@ const DEFAULT_SCENARIO = resolve(
   'vanilla-constructed.json',
 );
 type ScenarioConfig = Readonly<{
+  airSeed: number;
   avatar: Readonly<{ drawSpell: boolean; stableId: string }>;
   cannotDefendMinionStableId: string;
   chargeMinionStableId: string;
@@ -51,6 +52,7 @@ type ScenarioConfig = Readonly<{
   genesisMinionStableId: string;
   lethalMinionStableId: string;
   manaMinionStableId: string;
+  movementMinionStableId: string;
   providerMinionStableId: string;
   revisionId: string;
   seed: number;
@@ -64,6 +66,15 @@ type DeckList = Readonly<{
 
 export type PrivateGameCheck = Readonly<{
   acceptedActionCount: number;
+  airMovement: Readonly<{
+    acceptedActionCount: number;
+    deck: DeckList;
+    movementMinion: string;
+    replayVerified: boolean;
+    seed: number;
+    twoStepDefend: boolean;
+    twoStepMoveAndAttack: boolean;
+  }>;
   authorityHash: Hash;
   avatarSpellDrawn: boolean;
   charge: Readonly<{ activatedOnSummon: boolean; minion: string }>;
@@ -112,6 +123,9 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
   }
   const avatar = value.avatar;
   if (!isJsonRecord(avatar)
+    || !Number.isSafeInteger(value.airSeed)
+    || typeof value.airSeed !== 'number'
+    || value.airSeed < 0
     || typeof avatar.stableId !== 'string'
     || typeof avatar.drawSpell !== 'boolean'
     || typeof value.cannotDefendMinionStableId !== 'string'
@@ -124,16 +138,18 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     || typeof value.genesisMinionStableId !== 'string'
     || typeof value.lethalMinionStableId !== 'string'
     || typeof value.manaMinionStableId !== 'string'
+    || typeof value.movementMinionStableId !== 'string'
     || typeof value.providerMinionStableId !== 'string'
     || typeof value.revisionId !== 'string'
     || !Number.isSafeInteger(value.seed)
     || typeof value.seed !== 'number'
     || value.seed < 0
-    || Object.keys(value).sort().join(',') !== 'avatar,cannotDefendMinionStableId,chargeMinionStableId,deathriteMinionStableId,earthProviderMinionStableId,earthSeed,genesisMinionStableId,lethalMinionStableId,manaMinionStableId,providerMinionStableId,revisionId,seed'
+    || Object.keys(value).sort().join(',') !== 'airSeed,avatar,cannotDefendMinionStableId,chargeMinionStableId,deathriteMinionStableId,earthProviderMinionStableId,earthSeed,genesisMinionStableId,lethalMinionStableId,manaMinionStableId,movementMinionStableId,providerMinionStableId,revisionId,seed'
     || Object.keys(avatar).sort().join(',') !== 'drawSpell,stableId') {
     throw new Error('private game scenario has an unsupported shape');
   }
   return {
+    airSeed: value.airSeed,
     avatar: { drawSpell: avatar.drawSpell, stableId: avatar.stableId },
     cannotDefendMinionStableId: value.cannotDefendMinionStableId,
     chargeMinionStableId: value.chargeMinionStableId,
@@ -143,6 +159,7 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     genesisMinionStableId: value.genesisMinionStableId,
     lethalMinionStableId: value.lethalMinionStableId,
     manaMinionStableId: value.manaMinionStableId,
+    movementMinionStableId: value.movementMinionStableId,
     providerMinionStableId: value.providerMinionStableId,
     revisionId: value.revisionId,
     seed: value.seed,
@@ -162,6 +179,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   genesisMinion: NormalizedCard;
   lethalMinion: NormalizedCard;
   manaMinion: NormalizedCard;
+  movementMinion: NormalizedCard;
   providerMinion: NormalizedCard;
 }>> {
   const config = scenarioConfig(parseJsonWithDuplicateKeyCheck(await readFile(path, 'utf8')));
@@ -258,6 +276,16 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || manaMinion.rarity === null) {
     throw new Error('private mana minion no longer matches its supported facts');
   }
+  const movementMinion = snapshot.cards.find(({ stableId }) => stableId === config.movementMinionStableId);
+  if (!movementMinion
+    || movementMinion.cardType !== 'minion'
+    || ruleTextDigest(movementMinion.rulesText) !== 'sha256:9dc4252080d544e6615711ac7db3bfb97f3b9a549a80485036927d2a444fb17c'
+    || movementMinion.attack === null
+    || movementMinion.defense === null
+    || movementMinion.manaCost === null
+    || movementMinion.rarity === null) {
+    throw new Error('private Movement +1 minion no longer matches its supported facts');
+  }
 
   const formatsValue = parseJsonWithDuplicateKeyCheck(await readFile(resolve(revisionRoot, 'formats.json'), 'utf8'));
   if (!isJsonRecord(formatsValue)
@@ -287,6 +315,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     genesisMinion,
     lethalMinion,
     manaMinion,
+    movementMinion,
     providerMinion,
   };
 }
@@ -324,6 +353,7 @@ function gameDefinition(
   tapForMana?: number,
   deathriteDrawSite = false,
   cannotDefend = false,
+  movementPlusOne = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -352,6 +382,7 @@ function gameDefinition(
       genesisDrawSite,
       lethal,
       manaCost: card.manaCost,
+      movementPlusOne,
       ...(provides ? { provides } : {}),
       ...(tapForMana ? { tapForMana } : {}),
       thresholds: card.thresholds,
@@ -363,7 +394,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'combat' | 'earth' = 'combat',
+  scenario: 'air' | 'combat' | 'earth' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -447,8 +478,33 @@ function buildManifest(
       ],
     };
   };
+  const airDeck = (): GameDeckSpec => {
+    const movementCopies = input.format.copyLimits[input.movementMinion.rarity!];
+    const airSites = sites.filter((card) => card.rarity && card.elements.includes('air'));
+    const airSiteCount = Math.min(
+      input.format.atlasMinimum,
+      airSites.reduce((total, card) => total + input.format.copyLimits[card.rarity!], 0),
+    );
+    const airSiteIds = new Set(airSites.map(({ stableId }) => stableId));
+    return {
+      atlas: [
+        ...fillZone(airSites, airSiteCount, input.format, false),
+        ...fillZone(
+          sites.filter(({ stableId }) => !airSiteIds.has(stableId)),
+          input.format.atlasMinimum - airSiteCount,
+          input.format,
+          false,
+        ),
+      ],
+      avatar: avatar.stableId,
+      spellbook: [
+        ...Array.from({ length: movementCopies }, () => input.movementMinion.stableId),
+        ...fillZone(minions, input.format.spellbookMinimum - movementCopies, input.format, false),
+      ],
+    };
+  };
   const decks = {
-    north: scenario === 'earth' ? earthDeck() : deck(false, true),
+    north: scenario === 'earth' ? earthDeck() : scenario === 'air' ? airDeck() : deck(false, true),
     south: deck(true, false),
   };
   const referenced = new Set([
@@ -475,6 +531,7 @@ function buildManifest(
       card.stableId === input.manaMinion.stableId ? 2 : undefined,
       card.stableId === input.deathriteMinion.stableId,
       card.stableId === input.cannotDefendMinion.stableId,
+      card.stableId === input.movementMinion.stableId,
     ),
   ]));
   return {
@@ -739,6 +796,57 @@ function findEarthOpening(
   throw new Error(`private Earth scenario seed ${seed} no longer produces its supported opening`);
 }
 
+function findAirOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  attackerInstanceId: string;
+  manifest: GameManifest;
+  movementInstanceId: string;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string];
+  seed: number;
+  session: GameSession;
+  southSiteInstanceId: string;
+}> {
+  const seed = input.config.airSeed;
+  const built = buildManifest(input, seed, 'air');
+  const session = createGameSession(built.manifest);
+  const northSites = session.state.players.north.hand.atlas.filter((site) => {
+    const definition = session.state.cards[site.cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('air');
+  });
+  const movementInstanceId = availableMinionInstance(
+    session,
+    'north',
+    input.movementMinion.stableId,
+    2,
+  );
+  const south = openingPair(session, 'south');
+  const southCardId = south && session.state.players.south.hand.spellbook
+    .find(({ instanceId }) => instanceId === south.minionInstanceId)?.cardId;
+  const southDefinition = southCardId ? session.state.cards[southCardId] : undefined;
+  if (northSites.length >= 3
+    && movementInstanceId
+    && south
+    && southDefinition?.cardType === 'minion'
+    && southDefinition.attack <= 2) {
+    return {
+      ...built,
+      attackerInstanceId: south.minionInstanceId,
+      movementInstanceId,
+      northSiteInstanceIds: [
+        northSites[0]!.instanceId,
+        northSites[1]!.instanceId,
+        northSites[2]!.instanceId,
+      ],
+      seed,
+      session,
+      southSiteInstanceId: south.siteInstanceId,
+    };
+  }
+  throw new Error(`private Air scenario seed ${seed} no longer produces its supported opening`);
+}
+
 function keep(session: GameSession): GameSession {
   return accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'mulligan'
@@ -912,8 +1020,94 @@ function runEarthRamp(
   });
 }
 
+function runAirMovement(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airMovement'] {
+  const opening = findAirOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cardInstanceId === opening.southSiteInstanceId));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cardInstanceId === opening.attackerInstanceId));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+      && descriptor.cell === 'C3'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+      && descriptor.cell === 'C2'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.movementInstanceId
+      && descriptor.cell === 'C4'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.attackerInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C1,C2'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'site'
+      && descriptor.target.instanceId === session.state.realm.sites.C2?.instanceId));
+  const defend = action(session, ({ descriptor }) =>
+    descriptor.kind === 'defend'
+      && descriptor.unitInstanceId === opening.movementInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3,C2');
+  const twoStepDefend = defend.descriptor.kind === 'defend' && defend.descriptor.path.length === 3;
+  session = accept(session, defend);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && !descriptor.originalTargetParticipates));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  const move = action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.movementInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3,C4');
+  const twoStepMoveAndAttack = move.descriptor.kind === 'move-and-attack'
+    && move.descriptor.path.length === 3;
+  session = accept(session, move);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    movementMinion:
+      opening.names.get(input.movementMinion.stableId) ?? input.movementMinion.stableId,
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    twoStepDefend,
+    twoStepMoveAndAttack,
+  });
+}
+
 export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<PrivateGameCheck> {
   const input = await readPrivateInputs(path);
+  const airMovement = runAirMovement(input);
   const earthRamp = runEarthRamp(input);
   const opening = findOpening(input);
   let session = keep(opening.session);
@@ -1020,6 +1214,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const southDefinition = opening.session.state.cards[southCardId];
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
+    airMovement,
     authorityHash: input.authorityHash,
     avatarSpellDrawn,
     charge: {
