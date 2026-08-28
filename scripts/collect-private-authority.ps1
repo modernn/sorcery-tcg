@@ -341,15 +341,28 @@ function Get-ChangelogDate {
     $visibleHtml = Get-VisibleHtml $Html
     $markerIndex = $visibleHtml.IndexOf($Marker, [StringComparison]::Ordinal)
     if ($markerIndex -lt 0) { throw "Changelog marker is missing: $Marker" }
-    $entryMatch = [Text.RegularExpressions.Regex]::Match(
+    $datePattern = '\b(?<date>\d{4}-\d{2}-\d{2}|(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4}|\d{1,2} (?:January|February|March|April|May|June|July|August|September|October|November|December) \d{4})\b'
+    $visibleEntry = $null
+    foreach ($headingMatch in [Text.RegularExpressions.Regex]::Matches(
         $visibleHtml.Substring($markerIndex),
-        '(?is)<article\b[^>]*>(?<entry>.*?)</article\s*>'
-    )
-    if (-not $entryMatch.Success) { throw 'The first visible changelog entry is missing' }
-    $visibleEntry = Get-NormalizedVisibleText $entryMatch.Groups['entry'].Value
+        '(?is)<h[1-6]\b[^>]*>(?<entry>.*?)</h[1-6]\s*>'
+    )) {
+        $entryHtml = $headingMatch.Groups['entry'].Value
+        if ([string]::IsNullOrWhiteSpace($entryHtml)) { continue }
+        $candidate = Get-NormalizedVisibleText $entryHtml
+        if ([Text.RegularExpressions.Regex]::IsMatch(
+            $candidate,
+            "^(?:$datePattern)$",
+            [Text.RegularExpressions.RegexOptions]::CultureInvariant
+        )) {
+            $visibleEntry = $candidate
+            break
+        }
+    }
+    if ($null -eq $visibleEntry) { throw 'The first visible changelog date heading is missing' }
     $matches = [Text.RegularExpressions.Regex]::Matches(
         $visibleEntry,
-        '\b(?<date>\d{4}-\d{2}-\d{2}|(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4}|\d{1,2} (?:January|February|March|April|May|June|July|August|September|October|November|December) \d{4})\b',
+        $datePattern,
         [Text.RegularExpressions.RegexOptions]::CultureInvariant
     )
     $dates = [Collections.Generic.List[DateTime]]::new()

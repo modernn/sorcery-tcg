@@ -132,7 +132,7 @@ const SOURCE_BYTES: Readonly<Record<SourcePath, Buffer>> = Object.freeze({
   ),
   'codex/faqs-current.html': syntheticHtml('<h1>FAQs</h1>'),
   'codex/changelog-current.html': syntheticHtml(
-    '<h1>Codex Changelog</h1><article><h2>20 August 2026</h2><p>Rules update</p></article>',
+    '<h1>Codex Changelog</h1><section><h3>20 August 2026</h3><p>Rules update</p></section>',
   ),
   'updates/card-updates-2025.html': syntheticHtml(
     '<h1>Sorcery: Contested Realm Card Updates 2025</h1><h2>Card Updates</h2>',
