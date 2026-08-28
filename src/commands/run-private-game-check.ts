@@ -82,6 +82,16 @@ type DeckList = Readonly<{
 
 export type PrivateGameCheck = Readonly<{
   acceptedActionCount: number;
+  airGenesisSpell: Readonly<{
+    acceptedActionCount: number;
+    deck: DeckList;
+    drewSpell: boolean;
+    genesisMinion: string;
+    handSizePreserved: boolean;
+    hiddenFromOpponent: boolean;
+    replayVerified: boolean;
+    seed: number;
+  }>;
   airborne: Readonly<{
     acceptedActionCount: number;
     airborneCanAttackGround: boolean;
@@ -431,6 +441,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   formatStableId: string;
   firstStrikeMinion: NormalizedCard;
   firstStrikeTargetMinion: NormalizedCard;
+  genesisSpellMinion: NormalizedCard;
   genesisMinion: NormalizedCard;
   ghostTownSite: NormalizedCard;
   healingMinion: NormalizedCard;
@@ -606,6 +617,22 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || voidwalkMinion.thresholds.water !== 0
     || voidwalkMinion.rarity !== 'ordinary') {
     throw new Error('private Voidwalk minion no longer matches its supported facts');
+  }
+  const genesisSpellMinion = snapshot.cards.find(({ name }) => name === 'Apprentice Wizard');
+  if (!genesisSpellMinion
+    || genesisSpellMinion.cardType !== 'minion'
+    || genesisSpellMinion.rulesText.trim().replaceAll('\r\n', '\n') !== 'Spellcaster\nGenesis → Draw a spell.'
+    || genesisSpellMinion.manaCost !== 3
+    || genesisSpellMinion.attack !== 1
+    || genesisSpellMinion.defense !== 1
+    || genesisSpellMinion.elements.length !== 1
+    || genesisSpellMinion.elements[0] !== 'air'
+    || genesisSpellMinion.thresholds.air !== 1
+    || genesisSpellMinion.thresholds.earth !== 0
+    || genesisSpellMinion.thresholds.fire !== 0
+    || genesisSpellMinion.thresholds.water !== 0
+    || genesisSpellMinion.rarity !== 'ordinary') {
+    throw new Error('private Genesis spell-draw minion no longer matches its supported facts');
   }
   const cannotDefendMinion = snapshot.cards
     .find(({ stableId }) => stableId === config.cannotDefendMinionStableId);
@@ -856,6 +883,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     formatStableId: selected.identity.stableId,
     firstStrikeMinion,
     firstStrikeTargetMinion,
+    genesisSpellMinion,
     genesisMinion,
     ghostTownSite,
     healingMinion,
@@ -927,6 +955,7 @@ function gameDefinition(
   submerge = false,
   burrowing = false,
   voidwalk = false,
+  genesisDrawSpell = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -963,6 +992,7 @@ function gameDefinition(
       deathriteDrawSite,
       ...(deathriteHeal ? { deathriteHeal } : {}),
       defense: card.defense,
+      genesisDrawSpell,
       genesisDrawSite,
       gainsStealthAtEndOfTurn,
       lethal,
@@ -987,7 +1017,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-voidwalk' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-genesis-spell' | 'air-voidwalk' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1101,6 +1131,7 @@ function buildManifest(
     input.movementTwoMinion,
   ] as const;
   const airborneDeck = elementalDeck('air', airMinions);
+  const airGenesisSpellDeck = elementalDeck('air', [...airMinions, input.genesisSpellMinion]);
   const airVoidwalkDeck = elementalDeck('air', [...airMinions, input.voidwalkMinion]);
   const waterDeck = elementalDeck('water', [
     input.healingMinion,
@@ -1114,7 +1145,9 @@ function buildManifest(
     input.submergeMinion,
   ]);
   const decks = {
-    north: scenario === 'air-voidwalk'
+    north: scenario === 'air-genesis-spell'
+      ? airGenesisSpellDeck
+      : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
       : scenario === 'airborne' || scenario === 'movement-two' || scenario === 'stealth'
       ? airborneDeck
@@ -1131,7 +1164,9 @@ function buildManifest(
         : scenario === 'water' || scenario === 'water-sideways' || scenario === 'water-stealth'
           ? waterDeck
           : deck(false, true),
-    south: scenario === 'air-voidwalk'
+    south: scenario === 'air-genesis-spell'
+      ? airGenesisSpellDeck
+      : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
       : scenario === 'airborne' || scenario === 'movement-two' || scenario === 'stealth'
       ? airborneDeck
@@ -1183,6 +1218,7 @@ function buildManifest(
       card.stableId === input.submergeMinion.stableId,
       card.stableId === input.burrowingMinion.stableId,
       card.stableId === input.voidwalkMinion.stableId,
+      card.stableId === input.genesisSpellMinion.stableId,
     ),
   ]));
   return {
@@ -1779,6 +1815,49 @@ function findAirVoidwalkOpening(
     }
   }
   throw new Error('private Air Voidwalk scenario no longer produces its supported opening');
+}
+
+function findAirGenesisSpellOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  featuredInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string];
+  seed: number;
+  session: GameSession;
+  southSiteInstanceId: string;
+}> {
+  // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
+  for (let offset = 1; offset <= 64; offset += 1) {
+    const seed = input.config.airSeed + offset;
+    const built = buildManifest(input, seed, 'air-genesis-spell');
+    const session = createGameSession(built.manifest);
+    const northSites = session.state.players.north.hand.atlas;
+    const featuredInstanceId = availableMinionInstance(
+      session,
+      'north',
+      input.genesisSpellMinion.stableId,
+      2,
+    );
+    if (northSites.length === 3
+      && northSites.some(({ cardId }) => {
+        const definition = session.state.cards[cardId];
+        return definition?.cardType === 'site' && definition.elements.includes('air');
+      })
+      && featuredInstanceId
+      && session.state.players.south.hand.atlas[0]) {
+      return {
+        ...built,
+        featuredInstanceId,
+        northSiteInstanceIds: northSites.map(({ instanceId }) => instanceId) as [string, string, string],
+        seed,
+        session,
+        southSiteInstanceId: session.state.players.south.hand.atlas[0].instanceId,
+      };
+    }
+  }
+  throw new Error('private Air Genesis spell-draw scenario no longer produces its supported opening');
 }
 
 function findStealthOpening(
@@ -2875,6 +2954,65 @@ function runAirVoidwalk(
   });
 }
 
+function runAirGenesisSpell(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airGenesisSpell'] {
+  const opening = findAirGenesisSpellOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+    && descriptor.cell === 'B3');
+
+  const before = session.state.players.north;
+  const drawn = before.spellbook[0];
+  if (!drawn) throw new Error('private Air Genesis spell-draw scenario lacks a spell to draw');
+  const summoned = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.featuredInstanceId
+      && descriptor.cell === 'B3'));
+  if (!summoned.accepted) throw new Error('private Air Genesis spell-draw summon was rejected');
+  session = summoned.session;
+  const after = session.state.players.north;
+  const drewSpell = after.spellbook.length === before.spellbook.length - 1
+    && after.hand.spellbook.some(({ instanceId }) => instanceId === drawn.instanceId)
+    && summoned.receipt.events.map(({ type }) => type).join(',') === 'minion-summoned,spell-drawn';
+  const opponentHand = observeGame(session.state, 'south').players.north.hand.spellbook;
+  const hiddenFromOpponent = typeof opponentHand === 'number'
+    && !canonicalJson(summoned.receipt.events as unknown as JsonValue).includes(drawn.instanceId);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    drewSpell,
+    genesisMinion:
+      opening.names.get(input.genesisSpellMinion.stableId) ?? input.genesisSpellMinion.stableId,
+    handSizePreserved: after.hand.spellbook.length === before.hand.spellbook.length,
+    hiddenFromOpponent,
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+  });
+}
+
 function runStealth(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['stealth'] {
@@ -3539,6 +3677,7 @@ function runWaterHealing(
 
 export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<PrivateGameCheck> {
   const input = await readPrivateInputs(path);
+  const airGenesisSpell = runAirGenesisSpell(input);
   const airborne = runAirborne(input);
   const airMovement = runAirMovement(input);
   const airMovementTwo = runAirMovementTwo(input);
@@ -3660,6 +3799,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const southDefinition = opening.session.state.cards[southCardId];
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
+    airGenesisSpell,
     airborne,
     airMovement,
     airMovementTwo,

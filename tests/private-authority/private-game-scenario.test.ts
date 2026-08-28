@@ -6,6 +6,16 @@ import { runPrivateGameCheck } from '../../src/commands/run-private-game-check.t
 test('private actual-card decks complete deterministic combat, Earth, Air, Fire, and Water scenarios', async () => {
   const result = await runPrivateGameCheck();
   assert.equal(result.classification, 'private-local_actual-cards_unranked-partial-rules');
+  assert.equal(result.airGenesisSpell.genesisMinion, 'Apprentice Wizard');
+  assert.equal(result.airGenesisSpell.acceptedActionCount, 15);
+  assert.equal(result.airGenesisSpell.drewSpell, true);
+  assert.equal(result.airGenesisSpell.handSizePreserved, true);
+  assert.equal(result.airGenesisSpell.hiddenFromOpponent, true);
+  assert.equal(result.airGenesisSpell.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airGenesisSpell.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airGenesisSpell.deck.spellbook
+    .find(({ name }) => name === 'Apprentice Wizard')?.copies, 4);
+  assert.equal(result.airGenesisSpell.replayVerified, true);
   assert.equal(result.airborne.airborneMinion, 'Plumed Pegasus');
   assert.equal(result.airborne.groundMinion, 'Ghoul');
   assert.equal(result.airborne.diagonalMove, true);

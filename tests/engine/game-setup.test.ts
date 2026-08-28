@@ -40,6 +40,7 @@ type SpellFacts = Readonly<{
   deathriteHeal?: number;
   defense?: number;
   gainsStealthAtEndOfTurn?: boolean;
+  genesisDrawSpell?: boolean;
   genesisDrawSite?: boolean;
   lethal?: boolean;
   manaCost: number;
@@ -110,6 +111,7 @@ function cardsFor(
         ...(facts.deathriteHeal ? { deathriteHeal: facts.deathriteHeal } : {}),
         defense: facts.defense ?? 1,
         gainsStealthAtEndOfTurn: facts.gainsStealthAtEndOfTurn ?? false,
+        genesisDrawSpell: facts.genesisDrawSpell ?? false,
         genesisDrawSite: facts.genesisDrawSite ?? false,
         lethal: facts.lethal ?? false,
         manaCost: facts.manaCost,
@@ -270,6 +272,24 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       [firstSpell]: { ...cards[firstSpell]!, voidwalk: 'yes' } as unknown as GameCardDefinition,
     },
   }), /voidwalk/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: { ...cards[firstSpell]!, genesisDrawSpell: 'yes' } as unknown as GameCardDefinition,
+    },
+  }), /genesisDrawSpell/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        genesisDrawSite: true,
+        genesisDrawSpell: true,
+      } as GameCardDefinition,
+    },
+  }), /simultaneous Genesis/);
 });
 
 test('TEST-03 different opponent hidden cards cannot change an observation or legal actions', () => {
@@ -640,6 +660,48 @@ test('RULE-03 Genesis draws a hidden site and an empty Atlas loses after summoni
 
   const short = deck('genesis-short', 3, 3);
   session = keep(createGameSession(manifest(40, { north: short, south: short, spell })));
+  session = keep(session);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'summon-minion'));
+  assert.equal(session.state.realm.units.length, 1);
+  assert.deepEqual(session.state.terminal, {
+    loser: 'north',
+    reason: 'deck_empty',
+    status: 'finished',
+    winner: 'south',
+  });
+  assert.deepEqual(
+    session.transcript.at(-1)?.events.map(({ type }) => type),
+    ['minion-summoned', 'game-ended'],
+  );
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 Genesis draws a hidden spell and an empty Spellbook loses after summoning', () => {
+  const spell: SpellFacts = {
+    genesisDrawSpell: true,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  };
+  let session = keep(createGameSession(manifest(127, { spell })));
+  session = keep(session);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  const before = session.state.players.north;
+  const drawn = before.spellbook[0];
+  assert.ok(drawn);
+  const result = stepGame(session, action(session, ({ descriptor }) => descriptor.kind === 'summon-minion'));
+  assert.equal(result.accepted, true);
+  session = result.session;
+  assert.equal(session.state.players.north.spellbook.length, before.spellbook.length - 1);
+  assert.equal(session.state.players.north.hand.spellbook.length, before.hand.spellbook.length);
+  assert.equal(session.state.players.north.hand.spellbook.some(({ instanceId }) => instanceId === drawn.instanceId), true);
+  assert.deepEqual(result.receipt.events.map(({ type }) => type), ['minion-summoned', 'spell-drawn']);
+  assert.doesNotMatch(canonicalJson(result.receipt.events[1]?.payload ?? null), new RegExp(drawn.cardId));
+  assert.doesNotMatch(canonicalJson(observeGame(session.state, 'south')), new RegExp(drawn.cardId));
+  assert.equal(verifyGameReplay(session), true);
+
+  const short = deck('genesis-spell-short', 3, 3);
+  session = keep(createGameSession(manifest(127, { north: short, south: short, spell })));
   session = keep(session);
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'summon-minion'));
