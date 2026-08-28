@@ -44,6 +44,7 @@ type SpellFacts = Readonly<{
   movementPlusOne?: boolean;
   provides?: 'air' | 'earth' | 'fire' | 'water';
   ranged?: boolean;
+  stealth?: boolean;
   strikesFirstWhileAttacking?: boolean;
   summonToAnySite?: boolean;
   tapForMana?: number;
@@ -107,6 +108,7 @@ function cardsFor(
         movementPlusOne: facts.movementPlusOne ?? false,
         ...(facts.provides ? { provides: facts.provides } : {}),
         ranged: facts.ranged ?? false,
+        stealth: facts.stealth ?? false,
         strikesFirstWhileAttacking: facts.strikesFirstWhileAttacking ?? false,
         summonToAnySite: facts.summonToAnySite ?? false,
         ...(facts.tapForMana ? { tapForMana: facts.tapForMana } : {}),
@@ -649,6 +651,7 @@ test('RULE-03 a minion mana ability requires readiness, taps, and expires at End
   let session = keep(createGameSession(manifest(39, {
     spell: {
       manaCost: 1,
+      stealth: true,
       tapForMana: 2,
       thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
     },
@@ -672,6 +675,8 @@ test('RULE-03 a minion mana ability requires readiness, taps, and expires at End
     descriptor.kind === 'activate-mana' && descriptor.unitInstanceId === unit.instanceId));
   assert.equal(session.state.players.north.mana, before + 2);
   assert.equal(session.state.realm.units[0]?.tapped, true);
+  assert.equal(session.state.realm.units[0]?.stealthed, false);
+  assert.equal(session.transcript.at(-1)?.events.some(({ type }) => type === 'stealth-lost'), true);
   assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
     descriptor.kind === 'activate-mana' && descriptor.unitInstanceId === unit.instanceId), false);
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
@@ -1151,6 +1156,99 @@ test('RULE-04 Airborne moves diagonally and restricts attacks and Intercept', ()
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === groundMovement.attackerInstanceId
       && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,B3'), false);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 Stealth blocks attacks, Defend, Intercept, and projectiles until interaction', () => {
+  const ground = {
+    attack: 1,
+    defense: 5,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  } as const;
+  const stealth = { ...ground, attack: 3, stealth: true };
+  const setup = northAttacksAtC2(123, stealth, undefined, false, ground);
+  let session = accept(setup.session, action(setup.session, ({ descriptor }) =>
+    descriptor.kind === 'decline-attack'));
+  assert.equal(session.state.phase, 'main');
+  assert.equal(session.state.realm.units
+    .find(({ instanceId }) => instanceId === setup.attackerInstanceId)?.stealthed, true);
+
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === setup.targetInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2'));
+  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === setup.attackerInstanceId), false);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === setup.attackerInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === setup.targetInstanceId));
+  assert.equal(session.state.phase, 'main');
+  assert.equal(session.transcript.at(-1)?.events.some(({ type }) => type === 'defend-window-closed'), false);
+  assert.equal(session.transcript.at(-1)?.events.some(({ type }) => type === 'stealth-lost'), true);
+  assert.equal(session.state.realm.units
+    .find(({ instanceId }) => instanceId === setup.attackerInstanceId)?.stealthed, false);
+
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === setup.targetInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2'));
+  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === setup.attackerInstanceId), true);
+  assert.equal(verifyGameReplay(session), true);
+
+  const ranged = northAttacksAtC2(
+    124,
+    { ...ground, ranged: true, stealth: true },
+    undefined,
+    false,
+    stealth,
+  );
+  session = ranged.session;
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === ranged.targetInstanceId), false);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  const shots = legalGameActions(session.state, 'north')
+    .filter(({ descriptor }) => descriptor.kind === 'shoot-projectile');
+  assert.equal(shots.some(({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.hit?.instanceId === ranged.targetInstanceId), false);
+  const miss = shots.find(({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile' && descriptor.direction === 'north');
+  assert.ok(miss);
+  session = accept(session, miss);
+  assert.equal(session.state.realm.units
+    .find(({ instanceId }) => instanceId === ranged.attackerInstanceId)?.stealthed, false);
+  assert.equal(session.state.realm.units
+    .find(({ instanceId }) => instanceId === ranged.targetInstanceId)?.stealthed, true);
+  assert.equal(session.transcript.at(-1)?.events.some(({ type }) => type === 'stealth-lost'), true);
   assert.equal(verifyGameReplay(session), true);
 });
 
