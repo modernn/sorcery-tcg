@@ -56,6 +56,7 @@ export type GameCardDefinition =
     disableTargetNearbyMinionUntilNextTurn?: true;
     grantChargeToAllyThisTurn?: true;
     healController?: number;
+    lureEnemyMinionOneStepCloser?: true;
     manaCost: number;
     returnMinionFromOwnCemetery?: true;
     submergeTargetMinion?: true;
@@ -346,6 +347,8 @@ type GameActionDescriptor =
     target?: GameUnitRef;
     targetLocation?: GameLocation;
     targetSiteInstanceId?: StateHash;
+    temptedDestination?: GameLocation;
+    temptedEnemy?: GameUnitRef;
   }>
   | Readonly<{ kind: 'draw'; zone: DeckZone }>
   | Readonly<{
@@ -442,6 +445,11 @@ function diagonalCells(cell: RealmCell, connectsTopBottom = false): readonly Rea
   ].filter(([nextFile, nextRank]) =>
     nextFile! >= 65 && nextFile! <= 69 && nextRank! >= 1 && nextRank! <= 4)
     .map(([nextFile, nextRank]) => `${String.fromCharCode(nextFile!)}${nextRank}` as RealmCell);
+}
+
+function cardinalCellDistance(left: RealmCell, right: RealmCell): number {
+  return Math.abs(left.charCodeAt(0) - right.charCodeAt(0))
+    + Math.abs(Number(left[1]) - Number(right[1]));
 }
 
 function isRubble(site: RealmSiteInstance): site is RubbleInstance {
@@ -564,6 +572,51 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
     if (definition.healController !== undefined) return [cast];
     if (definition.grantChargeToAllyThisTurn === true) {
       return unitRefs(state, seat).map((ally) => ({ ...cast, ally }));
+    }
+    if (definition.lureEnemyMinionOneStepCloser === true) {
+      const choices = unitRefs(state, seat).flatMap((ally) => {
+        const allyStatus = unitStatus(state, ally);
+        const nearbySiteCells = new Set([
+          allyStatus.location,
+          ...borderingCells(allyStatus.location),
+          ...diagonalCells(allyStatus.location),
+        ]);
+        return unitRefs(state, otherSeat(seat)).flatMap((temptedEnemy) => {
+          if (temptedEnemy.kind !== 'minion') return [];
+          const enemyStatus = unitStatus(state, temptedEnemy);
+          if (enemyStatus.disabled
+            || enemyStatus.region === 'void'
+            || !state.realm.sites[enemyStatus.location]
+            || !nearbySiteCells.has(enemyStatus.location)) return [];
+          const from: GameLocation = { cell: enemyStatus.location, region: enemyStatus.region };
+          const startingDistance = cardinalCellDistance(enemyStatus.location, allyStatus.location);
+          const destinations = movementPaths(
+            state,
+            from,
+            1,
+            temptedEnemy.seat,
+            enemyStatus.airborne,
+            enemyStatus.movesOnlySideways,
+            enemyStatus.movesOnlyForward,
+            enemyStatus.burrowing,
+            enemyStatus.submerge,
+            enemyStatus.voidwalk,
+            enemyStatus.connectsTopBottom,
+            enemyStatus.immobile,
+          ).flatMap((path) => path.length === 2 ? [path[1]!] : [])
+            .filter(({ cell }) => cardinalCellDistance(cell, allyStatus.location) < startingDistance);
+          return [...new Map(destinations.map((destination) => [
+            `${destination.cell}:${destination.region}`,
+            destination,
+          ])).values()].map((temptedDestination) => ({
+            ...cast,
+            ally,
+            temptedDestination,
+            temptedEnemy,
+          }));
+        });
+      });
+      return choices.length > 0 ? choices : [cast];
     }
     if (definition.returnMinionFromOwnCemetery === true) {
       const eligible = player.cemetery.filter(({ cardId }) =>
@@ -693,6 +746,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.grantChargeToAllyThisTurn !== true) {
       throw new RangeError(`${path}.grantChargeToAllyThisTurn must be true when defined`);
     }
+    if (card.lureEnemyMinionOneStepCloser !== undefined
+      && card.lureEnemyMinionOneStepCloser !== true) {
+      throw new RangeError(`${path}.lureEnemyMinionOneStepCloser must be true when defined`);
+    }
     const effectCount = Number(card.burrowTargetMinion === true)
       + Number(card.submergeTargetMinion === true)
       + Number(card.damageEachUnitAtLocationWithinTwoSteps !== undefined)
@@ -701,6 +758,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.disableTargetNearbyMinionUntilNextTurn === true)
       + Number(card.grantChargeToAllyThisTurn === true)
       + Number(card.healController !== undefined)
+      + Number(card.lureEnemyMinionOneStepCloser === true)
       + Number(card.returnMinionFromOwnCemetery === true)
       + Number(card.teleportAllyToTargetSite === true);
     if (effectCount !== 1) {
@@ -965,6 +1023,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? { disableTargetNearbyMinionUntilNextTurn: true as const }
                   : card.grantChargeToAllyThisTurn === true
                     ? { grantChargeToAllyThisTurn: true as const }
+                  : card.lureEnemyMinionOneStepCloser === true
+                    ? { lureEnemyMinionOneStepCloser: true as const }
                   : card.healController !== undefined
                     ? { healController: card.healController }
                     : card.returnMinionFromOwnCemetery === true
@@ -1938,6 +1998,8 @@ function actionLabel(descriptor: GameActionDescriptor): string {
   if (descriptor.kind === 'cast-magic') {
     return descriptor.cemeteryMinionInstanceId
       ? `Cast ${descriptor.cardId} to return minion ${descriptor.cemeteryMinionInstanceId.slice(0, 15)}…`
+      : descriptor.ally && descriptor.temptedEnemy && descriptor.temptedDestination
+        ? `Cast ${descriptor.cardId}: ${descriptor.ally.kind} ${descriptor.ally.instanceId.slice(0, 15)}… tempts minion ${descriptor.temptedEnemy.instanceId.slice(0, 15)}… to ${descriptor.temptedDestination.cell}`
       : descriptor.target
       ? `Cast ${descriptor.cardId} on ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`
       : descriptor.ally && descriptor.targetLocation
@@ -2852,7 +2914,17 @@ function applyDescriptor(
           || candidate.targetLocation !== undefined
             && descriptor.targetLocation !== undefined
             && sameLocation(candidate.targetLocation, descriptor.targetLocation))
-        && candidate.targetSiteInstanceId === descriptor.targetSiteInstanceId);
+        && candidate.targetSiteInstanceId === descriptor.targetSiteInstanceId
+        && (candidate.temptedDestination === undefined && descriptor.temptedDestination === undefined
+          || candidate.temptedDestination !== undefined
+            && descriptor.temptedDestination !== undefined
+            && sameLocation(candidate.temptedDestination, descriptor.temptedDestination))
+        && (candidate.temptedEnemy === undefined && descriptor.temptedEnemy === undefined
+          || candidate.temptedEnemy !== undefined
+            && descriptor.temptedEnemy !== undefined
+            && candidate.temptedEnemy.instanceId === descriptor.temptedEnemy.instanceId
+            && candidate.temptedEnemy.kind === descriptor.temptedEnemy.kind
+            && candidate.temptedEnemy.seat === descriptor.temptedEnemy.seat));
     if (!card || !definition || definition.cardType !== 'magic' || !legal) {
       throw new Error('unreachable illegal Magic cast');
     }
@@ -2900,6 +2972,15 @@ function applyDescriptor(
           : {}),
         ...(descriptor.cemeteryMinionInstanceId
           ? { cemeteryMinionInstanceId: descriptor.cemeteryMinionInstanceId }
+          : {}),
+        ...(descriptor.temptedDestination
+          ? { temptedDestination: descriptor.temptedDestination }
+          : {}),
+        ...(descriptor.temptedEnemy
+          ? {
+            temptedEnemyInstanceId: descriptor.temptedEnemy.instanceId,
+            temptedEnemySeat: descriptor.temptedEnemy.seat,
+          }
           : {}),
       },
       type: 'magic-cast',
@@ -3026,6 +3107,36 @@ function applyDescriptor(
               sourceInstanceId: card.instanceId,
             },
             type: 'charge-granted',
+          },
+          resolved,
+        ],
+        [],
+      ];
+    }
+    if (definition.lureEnemyMinionOneStepCloser === true) {
+      if (!descriptor.ally || !descriptor.temptedEnemy || !descriptor.temptedDestination) {
+        return [withStateVersion(castState, {}), [castOutcome, resolved], []];
+      }
+      const enemyStatus = unitStatus(castState, descriptor.temptedEnemy);
+      const from: GameLocation = { cell: enemyStatus.location, region: enemyStatus.region };
+      const moved = moveUnit(castState, descriptor.temptedEnemy, descriptor.temptedDestination, false);
+      const to = descriptor.temptedDestination;
+      return [
+        withStateVersion(castState, { players: moved.players, realm: moved.realm }),
+        [
+          castOutcome,
+          {
+            payload: {
+              allyInstanceId: descriptor.ally.instanceId,
+              from,
+              path: [from, to],
+              seat: descriptor.temptedEnemy.seat,
+              sourceInstanceId: card.instanceId,
+              steps: 1,
+              targetInstanceId: descriptor.temptedEnemy.instanceId,
+              to,
+            },
+            type: 'unit-lured',
           },
           resolved,
         ],
