@@ -31,7 +31,7 @@ function demoDeck(prefix: string): GameDeckSpec {
 function demoCards(decks: Readonly<Record<'north' | 'south', GameDeckSpec>>): Record<string, GameCardDefinition> {
   const cards: Record<string, GameCardDefinition> = {};
   for (const deck of Object.values(decks)) {
-    cards[deck.avatar] = { attack: 1, cardType: 'avatar', defense: 1, life: 20 };
+    cards[deck.avatar] = { attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20 };
     deck.atlas.forEach((cardId) => {
       cards[cardId] = { cardType: 'site', elements: ['earth'] };
     });

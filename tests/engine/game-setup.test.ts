@@ -41,10 +41,17 @@ function cardsFor(
     manaCost: 1,
     thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
   },
+  avatarDrawSpell = false,
 ): Record<string, GameCardDefinition> {
   const cards: Record<string, GameCardDefinition> = {};
   for (const playerDeck of Object.values(decks)) {
-    cards[playerDeck.avatar] = { attack: 1, cardType: 'avatar', defense: 1, life: 20 };
+    cards[playerDeck.avatar] = {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: avatarDrawSpell,
+      life: 20,
+    };
     playerDeck.atlas.forEach((cardId) => {
       cards[cardId] = { cardType: 'site', elements: ['earth'] };
     });
@@ -67,6 +74,7 @@ function manifest(
     north?: GameDeckSpec;
     south?: GameDeckSpec;
     spell?: SpellFacts;
+    avatarDrawSpell?: boolean;
   }> = {},
 ): GameManifest {
   const decks = {
@@ -79,7 +87,7 @@ function manifest(
       mode: 'synthetic',
       revisionId: 'synthetic-setup-fixture-v1',
     },
-    cards: cardsFor(decks, options.spell),
+    cards: cardsFor(decks, options.spell, options.avatarDrawSpell),
     decks,
     firstSeat: 'north',
     seed,
@@ -151,7 +159,10 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
   assert.doesNotThrow(() => createGameManifest({ ...input, cards }));
   assert.throws(() => createGameManifest({
     ...input,
-    cards: { ...cards, unused: { attack: 1, cardType: 'avatar', defense: 1, life: 20 } },
+    cards: {
+      ...cards,
+      unused: { attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20 },
+    },
   }), /exactly the deck-referenced definitions/);
   const firstSpell = decks.north.spellbook[0];
   assert.ok(firstSpell);
@@ -338,6 +349,31 @@ test('RULE-02 the Avatar may draw a private site instead of playing one', () => 
   assert.equal(afterDrawKinds.includes('play-site'), false);
   assert.equal(afterDrawKinds.includes('draw-site'), false);
   assert.equal(afterDrawKinds.includes('end-turn'), true);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 a draw-spell Avatar pays its tap cost and keeps the drawn identity private', () => {
+  let session = keep(createGameSession(manifest(30, { avatarDrawSpell: true })));
+  session = keep(session);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+
+  const before = session.state.players.north;
+  const drawn = before.spellbook[0];
+  assert.ok(drawn);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'draw-spell'));
+  assert.equal(session.state.players.north.avatar.tapped, true);
+  assert.equal(session.state.players.north.spellbook.length, before.spellbook.length - 1);
+  assert.equal(session.state.players.north.hand.spellbook.length, before.hand.spellbook.length + 1);
+  assert.equal(session.transcript.at(-1)?.events[0]?.type, 'spell-drawn');
+  assert.doesNotMatch(canonicalJson(session.transcript.at(-1)?.events[0]?.payload ?? null), /north-spell-/);
+  assert.doesNotMatch(canonicalJson(observeGame(session.state, 'south')), new RegExp(drawn.cardId));
   assert.equal(verifyGameReplay(session), true);
 });
 

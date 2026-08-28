@@ -34,7 +34,7 @@ export type GameThresholds = Readonly<Record<GameElement, number>>;
 export type GameRegion = 'surface';
 
 export type GameCardDefinition =
-  | Readonly<{ attack: number; cardType: 'avatar'; defense: number; life: number }>
+  | Readonly<{ attack: number; cardType: 'avatar'; defense: number; drawSpell: boolean; life: number }>
   | Readonly<{ cardType: 'site'; elements: readonly GameElement[] }>
   | Readonly<{
     attack: number;
@@ -228,6 +228,7 @@ type MulliganDescriptor = Readonly<{
 type GameActionDescriptor =
   | MulliganDescriptor
   | Readonly<{ kind: 'draw-site' }>
+  | Readonly<{ kind: 'draw-spell' }>
   | Readonly<{ cardId: string; cardInstanceId: string; cell: RealmCell; kind: 'play-site' }>
   | Readonly<{
     cardId: string;
@@ -344,6 +345,7 @@ function requireCardId(value: string, path: string): void {
 function validateCardDefinition(card: GameCardDefinition, path: string): void {
   const elements: readonly GameElement[] = ['earth', 'fire', 'water', 'air'];
   if (card.cardType === 'avatar') {
+    if (typeof card.drawSpell !== 'boolean') throw new RangeError(`${path}.drawSpell must be boolean`);
     for (const field of ['attack', 'defense', 'life'] as const) {
       if (!Number.isSafeInteger(card[field])
         || card[field] < (field === 'life' ? 1 : 0)
@@ -433,6 +435,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
           attack: card.attack,
           cardType: 'avatar' as const,
           defense: card.defense,
+          drawSpell: card.drawSpell,
           life: card.life,
         }
         : card.cardType === 'site'
@@ -903,6 +906,8 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     }));
   }
   const cells = player.avatar.tapped ? [] : legalSiteCells(state, seat);
+  const avatarDefinition = cardDefinition(state, player.avatar.card.cardId);
+  if (avatarDefinition.cardType !== 'avatar') throw new Error('player Avatar lacks Avatar definition');
   return [
     ...player.hand.atlas.flatMap(({ cardId, instanceId }) => cells.map((cell) => ({
       cardId,
@@ -911,6 +916,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
       kind: 'play-site' as const,
     }))),
     ...(player.avatar.tapped ? [] : [{ kind: 'draw-site' as const }]),
+    ...(!player.avatar.tapped && avatarDefinition.drawSpell ? [{ kind: 'draw-spell' as const }] : []),
     ...summonDescriptors(state, seat),
     ...movementDescriptors(state, seat),
     { kind: 'end-turn' },
@@ -926,6 +932,7 @@ function actionLabel(descriptor: GameActionDescriptor): string {
   }
   if (descriptor.kind === 'draw') return `Draw from ${descriptor.zone}`;
   if (descriptor.kind === 'draw-site') return 'Draw a site with Avatar';
+  if (descriptor.kind === 'draw-spell') return 'Draw a spell with Avatar';
   if (descriptor.kind === 'play-site') return `Play ${descriptor.cardId} at ${descriptor.cell}`;
   if (descriptor.kind === 'summon-minion') {
     return `Summon ${descriptor.cardId} at ${descriptor.cell} (${descriptor.manaCost} mana)`;
@@ -1641,9 +1648,13 @@ function applyDescriptor(
     ];
   }
 
-  if (descriptor.kind === 'draw' || descriptor.kind === 'draw-site') {
-    const avatarDraw = descriptor.kind === 'draw-site';
-    const zone = avatarDraw ? 'atlas' : descriptor.zone;
+  if (descriptor.kind === 'draw' || descriptor.kind === 'draw-site' || descriptor.kind === 'draw-spell') {
+    const avatarDraw = descriptor.kind !== 'draw';
+    const zone = descriptor.kind === 'draw-site'
+      ? 'atlas'
+      : descriptor.kind === 'draw-spell'
+        ? 'spellbook'
+        : descriptor.zone;
     const deck = player[zone];
     if (deck.length === 0) {
       const winner = otherSeat(seat);
@@ -1675,9 +1686,11 @@ function applyDescriptor(
         phase: 'main',
         players: replacePlayer(state, seat, updatedPlayer),
       }),
-      [avatarDraw
+      [descriptor.kind === 'draw-site'
         ? { payload: { seat }, type: 'site-drawn' }
-        : { payload: { seat, zone }, type: 'card-drawn' }],
+        : descriptor.kind === 'draw-spell'
+          ? { payload: { seat }, type: 'spell-drawn' }
+          : { payload: { seat, zone }, type: 'card-drawn' }],
       [],
     ];
   }

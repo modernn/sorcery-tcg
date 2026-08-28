@@ -17,6 +17,8 @@
 - Enemy-unit and enemy-site attack targets, any-number sequential defenders/interceptors, original-target retention/removal, and deterministic split-strike allocation.
 - Simultaneous minion damage, persistent turn damage, End Phase damage cleanup, immediate lethal checks, and owner cemeteries.
 - Avatar combat facts and life tracking, undefended-site life loss, Death's Door state, direct-damage immunity, death blows, Avatar defeat, and simultaneous-defeat draw state.
+- A catalog-gated Avatar spell-draw ability with tap cost and opponent-safe hidden-card events.
+- A private-local actual-card adapter that verifies the normalized artifact and current Constructed format, builds two different 30/60 textless-card decks under official rarity copy limits, and executes a deterministic real-card combat scenario without committing source data.
 - Observer-safe actions, rejections, causal events, hashes, exact replay, and a deterministic unranked match runner.
 - A no-dependency browser client that renders the authoritative 5x4 realm, scopes hidden information by seat, exposes only engine-issued actions, and verifies replay.
 
@@ -31,7 +33,9 @@
 - `pnpm game:demo -- 23`: completes in 138 accepted actions over 56 turns with byte-exact replay.
 - `pnpm play`: serves the playable core at `http://127.0.0.1:4174/`.
 - Browser checkpoint: a 22-action match moved a minion, handed Defend to the non-active seat, resolved a simultaneous trade into both cemeteries, and replayed byte-identically.
-- `pnpm verify`: 203 passing tests at this checkpoint.
+- `pnpm game:check-private`: a 24-action actual-card match exercises the selected Avatar's spell draw and resolves a real 2/2 minion trade with byte-exact replay.
+- `pnpm game:verify-private`: one passing ignored-authority integration scenario.
+- `pnpm verify`: 204 passing public tests at this checkpoint.
 
 ## Still required for Phase 3
 
