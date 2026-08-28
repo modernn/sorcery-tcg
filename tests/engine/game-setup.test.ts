@@ -279,6 +279,36 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   }));
+  const randomLocationManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        damageRandomUnitAtLocation: 3,
+        manaCost: 2,
+        thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(randomLocationManifest.cards[firstSpell], {
+    cardType: 'magic',
+    damageRandomUnitAtLocation: 3,
+    manaCost: 2,
+    thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        damageRandomUnitAtLocation: 0,
+        manaCost: 2,
+        thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  }), /damageRandomUnitAtLocation/);
   assert.doesNotThrow(() => createGameManifest({
     ...input,
     cards: {
@@ -1081,6 +1111,100 @@ test('RULE-03 Magic targets stay in the caster region and exclude enemy Stealth'
     manaCost: 1,
     thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
   }, 'surface', true), false);
+});
+
+test('RULE-03 Lightning Bolt targets a location and deterministically damages one random unit there', () => {
+  const decks = { north: deck('bolt-north', 4, 6), south: deck('bolt-south', 4, 6) };
+  const cards = cardsFor(decks, {
+    defense: 5,
+    manaCost: 0,
+    stealth: true,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  }, undefined, { elements: ['air'] });
+  for (const cardId of decks.north.spellbook) {
+    cards[cardId] = {
+      cardType: 'magic',
+      damageRandomUnitAtLocation: 3,
+      manaCost: 1,
+      thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+    };
+  }
+  const gameManifest = createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic',
+      revisionId: 'synthetic-lightning-bolt-v1',
+    },
+    cards,
+    decks,
+    firstSeat: 'north',
+    seed: 153,
+  });
+  let session = keep(createGameSession(gameManifest));
+  session = keep(session);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
+  for (let count = 0; count < 2; count += 1) {
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'summon-minion' && descriptor.cell === 'C1'));
+  }
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+
+  const bolt = session.state.players.north.hand.spellbook[0];
+  assert.ok(bolt);
+  const occupants = [
+    session.state.players.south.avatar.card.instanceId,
+    ...session.state.realm.units
+      .filter(({ location, region }) => location === 'C1' && region === 'surface')
+      .map(({ instanceId }) => instanceId),
+  ].sort();
+  assert.equal(occupants.length, 3);
+  assert.equal(session.state.realm.units.every(({ stealthed }) => stealthed), true);
+  const casts = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === bolt.instanceId);
+  assert.deepEqual(casts.flatMap(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.targetLocation
+    ? [`${descriptor.targetLocation.cell}:${descriptor.targetLocation.region}`]
+    : []), ['C1:surface', 'C4:surface']);
+  assert.equal(casts.some(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.target !== undefined), false);
+
+  const before = session.state;
+  const result = stepGame(session, casts.find(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.targetLocation?.cell === 'C1')!);
+  assert.equal(result.accepted, true);
+  if (!result.accepted) return;
+  session = result.session;
+  const random = result.receipt.randomDraws.at(-1);
+  assert.equal(result.receipt.randomDraws.length, 1);
+  assert.equal(random?.purpose, 'magic_random_unit_at_location');
+  assert.deepEqual(random?.domain, {
+    accepted: true,
+    exclusiveMaximum: occupants.length,
+    kind: 'unit_index_candidate',
+  });
+  assert.equal(typeof random?.result, 'number');
+  const selectedId = occupants[(random!.result as number) % occupants.length]!;
+  const allocation = result.receipt.events.find(({ type }) => type === 'magic-damage-allocated');
+  assert.equal(allocation?.payload !== null
+    && typeof allocation?.payload === 'object'
+    && 'targetInstanceId' in allocation.payload
+    && allocation.payload.targetInstanceId === selectedId, true);
+  const selectedDamage = selectedId === session.state.players.south.avatar.card.instanceId
+    ? 20 - session.state.players.south.avatar.life
+    : session.state.realm.units.find(({ instanceId }) => instanceId === selectedId)?.damage;
+  assert.equal(selectedDamage, 3);
+  assert.equal(session.state.stateVersion, before.stateVersion + 1);
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) => instanceId === bolt.instanceId), true);
+  assert.equal(result.receipt.events.at(-1)?.type, 'magic-resolved');
+  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-03/04 Bury forcefully burrows minions if able and immediately resolves survival', () => {
