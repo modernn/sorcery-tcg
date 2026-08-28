@@ -430,6 +430,23 @@ export type PrivateGameCheck = Readonly<{
     wardTargetDiedAfterSecondShot: boolean;
     wardTargetSurvived: boolean;
   }>;
+  fireMinorExplosion: Readonly<{
+    acceptedActionCount: number;
+    avatarTookThreeDamage: boolean;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    exactLocationTargetAvailable: boolean;
+    manaPaid: number;
+    minorExplosion: string;
+    noRandomDraws: boolean;
+    raalDromedary: string;
+    replayVerified: boolean;
+    simultaneousDamageVerified: boolean;
+    spellEnteredCemetery: boolean;
+    targetWithinTwoSteps: boolean;
+    twoMinionsDied: boolean;
+    twoMinionsEnteredCemetery: boolean;
+  }>;
   fireResponse: Readonly<{
     acceptedActionCount: number;
     chargeMoveAndAttack: boolean;
@@ -725,10 +742,12 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   lugbogCat: NormalizedCard;
   lumberingMinion: NormalizedCard;
   manaMinion: NormalizedCard;
+  minorExplosion: NormalizedCard;
   monstrousLion: NormalizedCard;
   movementMinion: NormalizedCard;
   movementTwoMinion: NormalizedCard;
   providerMinion: NormalizedCard;
+  raalDromedary: NormalizedCard;
   rangedMinion: NormalizedCard;
   rescue: NormalizedCard;
   roamingMinion: NormalizedCard;
@@ -878,6 +897,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || lightningBolt.rarity !== 'ordinary') {
     throw new Error('private random location-damage Magic no longer matches its supported facts');
   }
+  const minorExplosion = snapshot.cards.find(({ name }) => name === 'Minor Explosion');
+  if (!minorExplosion
+    || minorExplosion.cardType !== 'magic'
+    || ruleTextDigest(minorExplosion.rulesText) !== 'sha256:b2c87ba1c41baa91df7a8c19997f048760155143f6eed94677176d9e626b6a78'
+    || minorExplosion.manaCost !== 3
+    || minorExplosion.attack !== null
+    || minorExplosion.defense !== null
+    || minorExplosion.life !== null
+    || minorExplosion.elements.length !== 1
+    || minorExplosion.elements[0] !== 'fire'
+    || minorExplosion.thresholds.air !== 0
+    || minorExplosion.thresholds.earth !== 0
+    || minorExplosion.thresholds.fire !== 2
+    || minorExplosion.thresholds.water !== 0
+    || minorExplosion.rarity !== 'ordinary') {
+    throw new Error('private location-wide damage Magic no longer matches its supported facts');
+  }
   const freeze = snapshot.cards.find(({ name }) => name === 'Freeze');
   if (!freeze
     || freeze.cardType !== 'magic'
@@ -911,6 +947,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || seravaTownsfolk.thresholds.water !== 1
     || seravaTownsfolk.rarity !== 'ordinary') {
     throw new Error('private timed-disable target minion no longer matches its supported facts');
+  }
+  const raalDromedary = snapshot.cards.find(({ name }) => name === 'Raal Dromedary');
+  if (!raalDromedary
+    || raalDromedary.cardType !== 'minion'
+    || raalDromedary.rulesText.trim() !== ''
+    || raalDromedary.manaCost !== 1
+    || raalDromedary.attack !== 2
+    || raalDromedary.defense !== 2
+    || raalDromedary.life !== null
+    || raalDromedary.elements.length !== 1
+    || raalDromedary.elements[0] !== 'fire'
+    || raalDromedary.thresholds.air !== 0
+    || raalDromedary.thresholds.earth !== 0
+    || raalDromedary.thresholds.fire !== 1
+    || raalDromedary.thresholds.water !== 0
+    || raalDromedary.rarity !== 'ordinary') {
+    throw new Error('private location-wide damage target minion no longer matches its supported facts');
   }
   const teleport = snapshot.cards.find(({ name }) => name === 'Teleport');
   if (!teleport
@@ -1546,12 +1599,14 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     lugbogCat,
     lumberingMinion,
     manaMinion,
+    minorExplosion,
     monstrousLion,
     movementMinion,
     movementTwoMinion,
     polarBears,
     pudgeButcher,
     providerMinion,
+    raalDromedary,
     rangedMinion,
     rescue,
     roamingMinion,
@@ -1642,6 +1697,7 @@ function gameDefinition(
   disableTargetNearbyMinionUntilNextTurn = false,
   sacrificeToDestroyNearbySite = false,
   submergeTargetMinion = false,
+  damageEachUnitAtLocationWithinTwoSteps: 0 | 3 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1669,6 +1725,7 @@ function gameDefinition(
     };
   }
   const supportedMagicEffects = Number(damageTargetUnit !== 0)
+    + Number(damageEachUnitAtLocationWithinTwoSteps !== 0)
     + Number(damageRandomUnitAtLocation !== 0)
     + Number(teleportAllyToTargetSite)
     + Number(returnMinionFromOwnCemetery)
@@ -1685,7 +1742,9 @@ function gameDefinition(
       ...(submergeTargetMinion ? { submergeTargetMinion: true } : {}),
       ...(damageTargetUnit !== 0
         ? { damageTargetUnit }
-        : damageRandomUnitAtLocation !== 0
+        : damageEachUnitAtLocationWithinTwoSteps !== 0
+          ? { damageEachUnitAtLocationWithinTwoSteps }
+          : damageRandomUnitAtLocation !== 0
           ? { damageRandomUnitAtLocation }
           : teleportAllyToTargetSite
             ? { teleportAllyToTargetSite: true }
@@ -1748,7 +1807,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1896,6 +1955,12 @@ function buildManifest(
     input.voidwalkMinion,
     input.forsaken,
   ]);
+  const fireMinorExplosionDeck = elementalDeck(
+    'fire',
+    [input.raalDromedary],
+    [],
+    [input.minorExplosion],
+  );
   const waterDeck = elementalDeck('water', [
     input.healingMinion,
     input.slyFox,
@@ -1981,6 +2046,8 @@ function buildManifest(
         ? elementalDeck('air', [input.movementMinion, input.roamingMinion])
         : scenario === 'fire'
           ? elementalDeck('fire', [input.lumberingMinion, input.monstrousLion])
+        : scenario === 'fire-minor-explosion'
+          ? fireMinorExplosionDeck
         : scenario === 'water-edge-connection'
           ? waterEdgeConnectionDeck
         : scenario === 'water-drowned'
@@ -2116,6 +2183,7 @@ function buildManifest(
       card.stableId === input.freeze.stableId,
       card.stableId === input.sinkhole.stableId,
       card.stableId === input.drown.stableId,
+      card.stableId === input.minorExplosion.stableId ? 3 : 0,
     ),
   ]));
   return {
@@ -3248,6 +3316,68 @@ function findAirTeleportOpening(
     }
   }
   throw new Error('private ally-to-site Teleport scenario no longer produces its supported opening');
+}
+
+function findFireMinorExplosionOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  firstRaalInstanceId: string;
+  manifest: GameManifest;
+  minorExplosionInstanceId: string;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string];
+  secondRaalInstanceId: string;
+  session: GameSession;
+  southSiteInstanceId: string;
+}> {
+  // ponytail: a bounded opening scan avoids adding another private seed field.
+  for (let offset = 1; offset <= 2048; offset += 1) {
+    const built = buildManifest(input, input.config.fireSeed + offset, 'fire-minor-explosion');
+    const session = createGameSession(built.manifest);
+    const northHandSites = session.state.players.north.hand.atlas;
+    const northFireSites = northHandSites.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('fire');
+    });
+    const thirdNorthSite = northHandSites.find(({ instanceId }) =>
+      instanceId !== northFireSites[0]?.instanceId
+        && instanceId !== northFireSites[1]?.instanceId);
+    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+    const initialRaals = session.state.players.north.hand.spellbook
+      .filter(({ cardId }) => cardId === input.raalDromedary.stableId);
+    const accessibleSpells = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 1),
+    ];
+    const accessibleRaals = accessibleSpells
+      .filter(({ cardId }) => cardId === input.raalDromedary.stableId);
+    const firstRaalInstanceId = initialRaals[0]?.instanceId;
+    const secondRaalInstanceId = accessibleRaals
+      .find(({ instanceId }) => instanceId !== firstRaalInstanceId)?.instanceId;
+    const minorExplosionInstanceId = accessibleSpells
+      .find(({ cardId }) => cardId === input.minorExplosion.stableId)?.instanceId;
+    if (northFireSites.length >= 2
+      && thirdNorthSite
+      && southSiteInstanceId
+      && firstRaalInstanceId
+      && secondRaalInstanceId
+      && minorExplosionInstanceId) {
+      return {
+        ...built,
+        firstRaalInstanceId,
+        minorExplosionInstanceId,
+        northSiteInstanceIds: [
+          northFireSites[0]!.instanceId,
+          northFireSites[1]!.instanceId,
+          thirdNorthSite.instanceId,
+        ],
+        secondRaalInstanceId,
+        session,
+        southSiteInstanceId,
+      };
+    }
+  }
+  throw new Error('private location-wide damage Magic scenario lacks its supported opening');
 }
 
 function findAirborneOpening(
@@ -6306,6 +6436,127 @@ function runAirSummoning(
   });
 }
 
+function runFireMinorExplosion(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['fireMinorExplosion'] {
+  const opening = findFireMinorExplosionOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.firstRaalInstanceId
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.secondRaalInstanceId
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+    && descriptor.cell === 'C2');
+
+  const casts = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.minorExplosionInstanceId);
+  const targetCells = casts.flatMap(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.targetLocation?.region === 'surface'
+      ? [descriptor.targetLocation.cell]
+      : []).sort();
+  const selected = casts.filter(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.targetLocation?.cell === 'C4'
+    && descriptor.targetLocation.region === 'surface');
+  if (selected.length !== 1 || !selected[0]) {
+    throw new Error('private location-wide damage Magic target is unavailable');
+  }
+  const targetIds = [opening.firstRaalInstanceId, opening.secondRaalInstanceId].sort();
+  const occupantsBefore = session.state.realm.units.filter(({ instanceId, location, region }) =>
+    targetIds.includes(instanceId) && location === 'C4' && region === 'surface');
+  const avatarLifeBefore = session.state.players.north.avatar.life;
+  const manaBefore = session.state.players.north.mana;
+  session = accept(session, selected[0]);
+
+  const receipt = session.transcript.at(-1);
+  const events = receipt?.events ?? [];
+  const castPayload = events[0] && isJsonRecord(events[0].payload) ? events[0].payload : undefined;
+  const castTarget = castPayload && isJsonRecord(castPayload.targetLocation)
+    ? castPayload.targetLocation
+    : undefined;
+  const resolvedEvent = events.at(-1);
+  const resolvedPayload = resolvedEvent && isJsonRecord(resolvedEvent.payload)
+    ? resolvedEvent.payload
+    : undefined;
+  const allocations = events.filter(({ payload, type }) => type === 'magic-damage-allocated'
+    && isJsonRecord(payload)
+    && targetIds.includes(String(payload.targetInstanceId)));
+  const damageEvents = events.filter(({ payload, type }) => type === 'damage-dealt'
+    && isJsonRecord(payload)
+    && targetIds.includes(String(payload.instanceId)));
+  const deathEvents = events.filter(({ payload, type }) => type === 'minion-died'
+    && isJsonRecord(payload)
+    && targetIds.includes(String(payload.instanceId)));
+  const lastAllocationIndex = Math.max(...allocations.map((event) => events.indexOf(event)));
+  const firstDamageIndex = Math.min(...damageEvents.map((event) => events.indexOf(event)));
+  const lastDamageIndex = Math.max(...damageEvents.map((event) => events.indexOf(event)));
+  const firstDeathIndex = Math.min(...deathEvents.map((event) => events.indexOf(event)));
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    avatarTookThreeDamage: avatarLifeBefore - session.state.players.north.avatar.life === 3,
+    causalEventsVerified: events[0]?.type === 'magic-cast'
+      && castPayload?.instanceId === opening.minorExplosionInstanceId
+      && castPayload.manaPaid === 3
+      && castPayload.seat === 'north'
+      && castTarget?.cell === 'C4'
+      && castTarget.region === 'surface'
+      && allocations.every(({ payload }) => isJsonRecord(payload)
+        && payload.amount === 3
+        && payload.sourceInstanceId === opening.minorExplosionInstanceId)
+      && damageEvents.every(({ payload }) => isJsonRecord(payload) && payload.amount === 3)
+      && deathEvents.every(({ payload }) => isJsonRecord(payload)
+        && payload.cardId === input.raalDromedary.stableId
+        && payload.owner === 'north')
+      && events.at(-1)?.type === 'magic-resolved'
+      && resolvedPayload?.instanceId === opening.minorExplosionInstanceId,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    exactLocationTargetAvailable: selected.length === 1 && occupantsBefore.length === 2,
+    manaPaid: manaBefore - session.state.players.north.mana,
+    minorExplosion: input.minorExplosion.name,
+    noRandomDraws: receipt?.randomDraws.length === 0,
+    raalDromedary: input.raalDromedary.name,
+    replayVerified: verifyGameReplay(session),
+    simultaneousDamageVerified: allocations.length === 2
+      && damageEvents.length === 2
+      && deathEvents.length === 2
+      && lastAllocationIndex < firstDamageIndex
+      && lastDamageIndex < firstDeathIndex,
+    spellEnteredCemetery: session.state.players.north.cemetery
+      .some(({ instanceId }) => instanceId === opening.minorExplosionInstanceId),
+    targetWithinTwoSteps: targetCells.join(',') === 'C2,C3,C4',
+    twoMinionsDied: session.state.realm.units
+      .every(({ instanceId }) => !targetIds.includes(instanceId)),
+    twoMinionsEnteredCemetery: targetIds.every((instanceId) =>
+      session.state.players.north.cemetery.some((card) => card.instanceId === instanceId)),
+  });
+}
+
 function runFireResponse(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['fireResponse'] {
@@ -7256,6 +7507,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthRanged = runEarthRanged(input);
   const earthSecretTunnel = runEarthSecretTunnel(input);
   const earthWard = runEarthWard(input);
+  const fireMinorExplosion = runFireMinorExplosion(input);
   const fireResponse = runFireResponse(input);
   const stealth = runStealth(input);
   const waterDrowned = runWaterDrowned(input);
@@ -7416,6 +7668,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthRanged,
     earthSecretTunnel,
     earthWard,
+    fireMinorExplosion,
     fireResponse,
     finalStateHash: hashGameState(session.state),
     formatStableId: input.formatStableId,

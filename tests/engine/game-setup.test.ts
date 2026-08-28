@@ -313,6 +313,36 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   }), /damageRandomUnitAtLocation/);
+  const areaLocationManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        damageEachUnitAtLocationWithinTwoSteps: 3,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(areaLocationManifest.cards[firstSpell], {
+    cardType: 'magic',
+    damageEachUnitAtLocationWithinTwoSteps: 3,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        damageEachUnitAtLocationWithinTwoSteps: 0,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      },
+    },
+  }), /damageEachUnitAtLocationWithinTwoSteps/);
   const teleportManifest = createGameManifest({
     ...input,
     cards: {
@@ -1711,6 +1741,160 @@ test('RULE-03 Lightning Bolt targets a location and deterministically damages on
   assert.equal(selectedDamage, 3);
   assert.equal(session.state.stateVersion, before.stateVersion + 1);
   assert.equal(session.state.players.north.cemetery.some(({ instanceId }) => instanceId === bolt.instanceId), true);
+  assert.equal(result.receipt.events.at(-1)?.type, 'magic-resolved');
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03/04 Minor Explosion damages every unit at a location up to two cardinal steps away', () => {
+  const decks = { north: deck('explosion-north', 4, 6), south: deck('explosion-south', 4, 6) };
+  const baseCards = cardsFor(decks, {
+    defense: 1,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  }, undefined, { elements: ['fire'] });
+  const authority = {
+    contentHash: SYNTHETIC_AUTHORITY_HASH,
+    mode: 'synthetic' as const,
+    revisionId: 'synthetic-minor-explosion-v1',
+  };
+  const seed = 249;
+  const preview = createGameSession(createGameManifest({
+    authority,
+    cards: baseCards,
+    decks,
+    firstSeat: 'north',
+    seed,
+  }));
+  const allyCardId = preview.state.players.north.hand.spellbook[0]?.cardId;
+  const explosionCardId = preview.state.players.north.hand.spellbook[1]?.cardId;
+  const deathriteCardId = preview.state.players.south.hand.spellbook[0]?.cardId;
+  const wardedCardId = preview.state.players.south.hand.spellbook[1]?.cardId;
+  const stealthCardId = preview.state.players.south.hand.spellbook[2]?.cardId;
+  assert.ok(allyCardId);
+  assert.ok(explosionCardId);
+  assert.ok(deathriteCardId);
+  assert.ok(wardedCardId);
+  assert.ok(stealthCardId);
+
+  const cards: Record<string, GameCardDefinition> = { ...baseCards };
+  for (const cardId of decks.north.spellbook) {
+    cards[cardId] = {
+      cardType: 'magic',
+      damageEachUnitAtLocationWithinTwoSteps: 3,
+      manaCost: 1,
+      thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+    };
+  }
+  cards[allyCardId] = {
+    ...baseCards[allyCardId]!,
+    summonToAnySite: true,
+  } as GameCardDefinition;
+  cards[deathriteCardId] = {
+    ...baseCards[deathriteCardId]!,
+    deathriteHeal: 3,
+  } as GameCardDefinition;
+  cards[wardedCardId] = { ...baseCards[wardedCardId]!, ward: true } as GameCardDefinition;
+  cards[stealthCardId] = { ...baseCards[stealthCardId]!, stealth: true } as GameCardDefinition;
+  const gameManifest = createGameManifest({ authority, cards, decks, firstSeat: 'north', seed });
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+  for (const cardId of [deathriteCardId, wardedCardId, stealthCardId]) {
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === cardId && descriptor.cell === 'C2');
+  }
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === session.state.players.south.avatar.card.instanceId
+    && descriptor.to.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === allyCardId && descriptor.cell === 'C2');
+
+  const checkpoint = session;
+  const explosion = checkpoint.state.players.north.hand.spellbook.find(({ cardId }) =>
+    cardId === explosionCardId);
+  const ally = checkpoint.state.realm.units.find(({ cardId }) => cardId === allyCardId);
+  const deathrite = checkpoint.state.realm.units.find(({ cardId }) => cardId === deathriteCardId);
+  const warded = checkpoint.state.realm.units.find(({ cardId }) => cardId === wardedCardId);
+  const stealthed = checkpoint.state.realm.units.find(({ cardId }) => cardId === stealthCardId);
+  assert.ok(explosion);
+  assert.ok(ally);
+  assert.ok(deathrite);
+  assert.ok(warded);
+  assert.ok(stealthed);
+  const casts = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === explosion.instanceId);
+  assert.deepEqual(casts.flatMap(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.targetLocation ? [descriptor.targetLocation.cell] : []), ['C2', 'C3', 'C4']);
+  assert.equal(casts.some(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.target !== undefined), false);
+
+  const beforeMana = checkpoint.state.players.north.mana;
+  const result = stepGame(checkpoint, casts.find(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.targetLocation?.cell === 'C2')!);
+  assert.equal(result.accepted, true);
+  if (!result.accepted) return;
+  session = result.session;
+  const affectedIds = [
+    checkpoint.state.players.south.avatar.card.instanceId,
+    ally.instanceId,
+    deathrite.instanceId,
+    warded.instanceId,
+    stealthed.instanceId,
+  ].sort();
+  const allocations = result.receipt.events.filter(({ type }) => type === 'magic-damage-allocated');
+  assert.deepEqual(allocations.map(({ payload }) => payload).sort((left, right) =>
+    String((left as { targetInstanceId: string }).targetInstanceId)
+      .localeCompare(String((right as { targetInstanceId: string }).targetInstanceId))), affectedIds.map((targetInstanceId) => ({
+    amount: 3,
+    sourceInstanceId: explosion.instanceId,
+    targetInstanceId,
+  })));
+  assert.equal(result.receipt.randomDraws.length, 0);
+  assert.equal(session.state.stateVersion, checkpoint.state.stateVersion + 1);
+  assert.equal(session.state.players.north.mana, beforeMana - 1);
+  assert.equal(session.state.players.south.avatar.life, 20);
+  assert.equal(result.receipt.events.some(({ payload, type }) => type === 'avatar-life-lost'
+    && (payload as { amount: number }).amount === 3), true);
+  assert.equal(result.receipt.events.some(({ payload, type }) => type === 'avatar-healed'
+    && (payload as { amount: number }).amount === 3
+    && (payload as { sourceInstanceId: string }).sourceInstanceId === deathrite.instanceId), true);
+  const survivingWard = session.state.realm.units.find(({ instanceId }) => instanceId === warded.instanceId);
+  assert.deepEqual({ damage: survivingWard?.damage, warded: survivingWard?.warded }, {
+    damage: 0,
+    warded: false,
+  });
+  const deadIds = [ally.instanceId, deathrite.instanceId, stealthed.instanceId];
+  assert.equal(deadIds.every((instanceId) => !session.state.realm.units.some((unit) =>
+    unit.instanceId === instanceId)), true);
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === explosion.instanceId), true);
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === ally.instanceId), true);
+  assert.equal([deathrite.instanceId, stealthed.instanceId].every((instanceId) =>
+    session.state.players.south.cemetery.some((card) => card.instanceId === instanceId)), true);
+  const firstDeath = result.receipt.events.findIndex(({ type }) => type === 'minion-died');
+  assert.equal(result.receipt.events.filter(({ type }) => type === 'damage-dealt').every((event) =>
+    result.receipt.events.indexOf(event) < firstDeath), true);
+  assert.equal(result.receipt.events.findIndex(({ type }) => type === 'avatar-healed') < firstDeath, true);
   assert.equal(result.receipt.events.at(-1)?.type, 'magic-resolved');
   assert.equal(verifyGameReplay(session), true);
 });

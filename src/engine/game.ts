@@ -50,6 +50,7 @@ export type GameCardDefinition =
   | Readonly<{
     burrowTargetMinion?: boolean;
     cardType: 'magic';
+    damageEachUnitAtLocationWithinTwoSteps?: number;
     damageRandomUnitAtLocation?: number;
     damageTargetUnit?: number;
     disableTargetNearbyMinionUntilNextTurn?: true;
@@ -582,6 +583,20 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
         targetSiteInstanceId: site.instanceId,
       })));
     }
+    if (definition.damageEachUnitAtLocationWithinTwoSteps !== undefined) {
+      const endpoints = movementPaths(
+        state,
+        { cell: caster.location, region: caster.region },
+        2,
+        seat,
+      ).map((path) => path.at(-1)!);
+      return [...new Map(endpoints.map((location) => [
+        `${location.cell}:${location.region}`,
+        location,
+      ])).values()]
+        .sort((left, right) => left.cell.localeCompare(right.cell))
+        .map((targetLocation) => ({ ...cast, targetLocation }));
+    }
     if (definition.damageRandomUnitAtLocation !== undefined) {
       return REALM_CELLS
         .map((cell): GameLocation => ({ cell, region: caster.region }))
@@ -671,6 +686,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     }
     const effectCount = Number(card.burrowTargetMinion === true)
       + Number(card.submergeTargetMinion === true)
+      + Number(card.damageEachUnitAtLocationWithinTwoSteps !== undefined)
       + Number(card.damageRandomUnitAtLocation !== undefined)
       + Number(card.damageTargetUnit !== undefined)
       + Number(card.disableTargetNearbyMinionUntilNextTurn === true)
@@ -696,6 +712,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         || card.damageRandomUnitAtLocation < 1
         || card.damageRandomUnitAtLocation > MAX_COMBAT_STAT)) {
       throw new RangeError(`${path}.damageRandomUnitAtLocation must be a safe integer between 1 and ${MAX_COMBAT_STAT}`);
+    }
+    if (card.damageEachUnitAtLocationWithinTwoSteps !== undefined
+      && (!Number.isSafeInteger(card.damageEachUnitAtLocationWithinTwoSteps)
+        || card.damageEachUnitAtLocationWithinTwoSteps < 1
+        || card.damageEachUnitAtLocationWithinTwoSteps > MAX_COMBAT_STAT)) {
+      throw new RangeError(`${path}.damageEachUnitAtLocationWithinTwoSteps must be a safe integer between 1 and ${MAX_COMBAT_STAT}`);
     }
     if (card.healController !== undefined && (!Number.isSafeInteger(card.healController)
       || card.healController < 1
@@ -923,6 +945,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                 ? { burrowTargetMinion: true }
                 : card.submergeTargetMinion === true
                   ? { submergeTargetMinion: true as const }
+                : card.damageEachUnitAtLocationWithinTwoSteps !== undefined
+                  ? { damageEachUnitAtLocationWithinTwoSteps: card.damageEachUnitAtLocationWithinTwoSteps }
                 : card.damageRandomUnitAtLocation !== undefined
                   ? { damageRandomUnitAtLocation: card.damageRandomUnitAtLocation }
                 : card.damageTargetUnit !== undefined
@@ -3118,6 +3142,60 @@ function applyDescriptor(
         withStateVersion(teleportedState, {}),
         [castOutcome, teleported, resolved],
         [],
+      ];
+    }
+    if (definition.damageEachUnitAtLocationWithinTwoSteps !== undefined) {
+      if (!descriptor.targetLocation) throw new Error('unreachable area-location Magic cast');
+      const targets = (['north', 'south'] as const)
+        .flatMap((targetSeat) => unitRefs(castState, targetSeat))
+        .filter((target) => {
+          const status = unitStatus(castState, target);
+          return status.location === descriptor.targetLocation!.cell
+            && status.region === descriptor.targetLocation!.region;
+        })
+        .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+      if (targets.length === 0) {
+        return [withStateVersion(castState, {}), [castOutcome, resolved], []];
+      }
+      const pending: PendingCombat = deepFreeze({
+        allocations: targets.map(({ instanceId }) => ({
+          amount: definition.damageEachUnitAtLocationWithinTwoSteps!,
+          targetInstanceId: instanceId,
+        })),
+        attacker: caster,
+        attackingSeat: seat,
+        cell: descriptor.targetLocation.cell,
+        combatants: targets,
+        defenders: [],
+        originalTarget: null,
+        ...(descriptor.targetLocation.region === 'surface'
+          ? {}
+          : { region: descriptor.targetLocation.region }),
+        targetRemoved: false,
+      });
+      const allocationOutcomes: readonly GameOutcome[] = targets.map(({ instanceId }) => ({
+        payload: {
+          amount: definition.damageEachUnitAtLocationWithinTwoSteps!,
+          sourceInstanceId: card.instanceId,
+          targetInstanceId: instanceId,
+        },
+        type: 'magic-damage-allocated',
+      }));
+      const [damaged, outcomes, randomDraws] = resolveFightWindow(
+        castState,
+        pending,
+        [castOutcome, ...allocationOutcomes],
+        true,
+        false,
+        [caster],
+      );
+      const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
+      return [
+        withStateVersion(damaged, {}),
+        terminalIndex < 0
+          ? [...outcomes, resolved]
+          : [...outcomes.slice(0, terminalIndex), resolved, ...outcomes.slice(terminalIndex)],
+        randomDraws,
       ];
     }
     if (definition.damageRandomUnitAtLocation !== undefined) {
