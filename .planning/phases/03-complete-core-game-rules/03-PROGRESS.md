@@ -26,7 +26,7 @@
 - Deathrite site draws resolve before simultaneous dead minions enter their cemeteries, including hidden draws and deck-empty loss.
 - A minion that cannot move to Defend is excluded only when movement is required; stationary Defend and Intercept remain legal.
 - A private-local actual-card adapter that verifies the normalized artifact and current Constructed format, builds legal 30/60 beginner decks under official rarity copy limits, and executes a deterministic real-card Charge and combat scenario without committing source data.
-- A second real-card Earth ramp deck that proves provided Earth affinity, Field Laborers' readiness-gated temporary mana, Land Surveyor's Genesis draw, and Kettletop Leprechaun's Deathrite draw.
+- A second real-card Earth ramp deck that proves provided Earth affinity, Field Laborers' readiness-gated temporary mana, Zombie Horde as a five-mana payoff with restricted Defend, Land Surveyor's Genesis draw, and Kettletop Leprechaun's Deathrite draw.
 - Observer-safe actions, rejections, causal events, hashes, exact replay, and a deterministic unranked match runner.
 - A no-dependency browser client that renders the authoritative 5x4 realm, scopes hidden information by seat, exposes only engine-issued actions, and verifies replay.
 
@@ -41,7 +41,7 @@
 - `pnpm game:demo -- 23`: completes in 138 accepted actions over 56 turns with byte-exact replay.
 - `pnpm play`: serves the playable core at `http://127.0.0.1:4174/`.
 - Browser checkpoint: a 22-action match moved a minion, handed Defend to the non-active seat, resolved a simultaneous trade into both cemeteries, and replayed byte-identically.
-- `pnpm game:check-private`: a 34-action combat match and a 32-action Earth ramp/Deathrite match exercise two concrete real-card beginner decks with byte-exact replay.
+- `pnpm game:check-private`: a 34-action combat match and a 38-action Earth ramp/Deathrite match exercise two concrete real-card beginner decks with byte-exact replay.
 - `pnpm game:verify-private`: one passing ignored-authority integration scenario.
 - Death's Door scenarios prove same-turn direct-damage immunity, later death blows, simultaneous-defeat draws, nonlethal site strikes, and exact replay.
 - `pnpm verify`: 213 passing public tests at this checkpoint.

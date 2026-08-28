@@ -18,6 +18,9 @@ test('private actual-card decks complete deterministic combat and Earth-ramp sce
   assert.equal(result.earthRamp.affinityAdded, true);
   assert.equal(result.earthRamp.manaUnavailableWhileSick, true);
   assert.equal(result.earthRamp.manaGained, 2);
+  assert.equal(result.earthRamp.rampPaidFive, true);
+  assert.equal(result.earthRamp.payoffCanMoveAndAttack, true);
+  assert.equal(result.earthRamp.movingDefendUnavailable, true);
   assert.equal(result.earthRamp.genesisSiteDrawn, true);
   assert.equal(result.earthRamp.deathriteSiteDrawnBeforeCemetery, true);
   assert.equal(result.earthRamp.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);

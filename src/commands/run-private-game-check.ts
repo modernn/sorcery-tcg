@@ -39,6 +39,7 @@ const DEFAULT_SCENARIO = resolve(
 );
 type ScenarioConfig = Readonly<{
   avatar: Readonly<{ drawSpell: boolean; stableId: string }>;
+  cannotDefendMinionStableId: string;
   chargeMinionStableId: string;
   deathriteMinionStableId: string;
   earthProviderMinionStableId: string;
@@ -83,6 +84,10 @@ export type PrivateGameCheck = Readonly<{
     manaGained: number;
     manaMinion: string;
     manaUnavailableWhileSick: boolean;
+    movingDefendUnavailable: boolean;
+    payoffCanMoveAndAttack: boolean;
+    rampPaidFive: boolean;
+    rampPayoffMinion: string;
     replayVerified: boolean;
     seed: number;
   }>;
@@ -105,6 +110,7 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
   if (!isJsonRecord(avatar)
     || typeof avatar.stableId !== 'string'
     || typeof avatar.drawSpell !== 'boolean'
+    || typeof value.cannotDefendMinionStableId !== 'string'
     || typeof value.chargeMinionStableId !== 'string'
     || typeof value.deathriteMinionStableId !== 'string'
     || typeof value.earthProviderMinionStableId !== 'string'
@@ -119,12 +125,13 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     || !Number.isSafeInteger(value.seed)
     || typeof value.seed !== 'number'
     || value.seed < 0
-    || Object.keys(value).sort().join(',') !== 'avatar,chargeMinionStableId,deathriteMinionStableId,earthProviderMinionStableId,earthSeed,genesisMinionStableId,lethalMinionStableId,manaMinionStableId,providerMinionStableId,revisionId,seed'
+    || Object.keys(value).sort().join(',') !== 'avatar,cannotDefendMinionStableId,chargeMinionStableId,deathriteMinionStableId,earthProviderMinionStableId,earthSeed,genesisMinionStableId,lethalMinionStableId,manaMinionStableId,providerMinionStableId,revisionId,seed'
     || Object.keys(avatar).sort().join(',') !== 'drawSpell,stableId') {
     throw new Error('private game scenario has an unsupported shape');
   }
   return {
     avatar: { drawSpell: avatar.drawSpell, stableId: avatar.stableId },
+    cannotDefendMinionStableId: value.cannotDefendMinionStableId,
     chargeMinionStableId: value.chargeMinionStableId,
     deathriteMinionStableId: value.deathriteMinionStableId,
     earthProviderMinionStableId: value.earthProviderMinionStableId,
@@ -141,6 +148,7 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
 async function readPrivateInputs(path: string): Promise<Readonly<{
   authorityHash: Hash;
   cards: readonly NormalizedCard[];
+  cannotDefendMinion: NormalizedCard;
   chargeMinion: NormalizedCard;
   config: ScenarioConfig;
   deathriteMinion: NormalizedCard;
@@ -164,6 +172,17 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     throw new Error('private normalized card artifact identity is invalid');
   }
   const snapshot = normalizedCardSnapshotSchema.parse(artifact.identity.payload);
+  const cannotDefendMinion = snapshot.cards
+    .find(({ stableId }) => stableId === config.cannotDefendMinionStableId);
+  if (!cannotDefendMinion
+    || cannotDefendMinion.cardType !== 'minion'
+    || cannotDefendMinion.rulesText.trim() !== "Can't move to defend."
+    || cannotDefendMinion.attack === null
+    || cannotDefendMinion.defense === null
+    || cannotDefendMinion.manaCost === null
+    || cannotDefendMinion.rarity === null) {
+    throw new Error('private moving-Defend restriction minion no longer matches its supported facts');
+  }
   const chargeMinion = snapshot.cards.find(({ stableId }) => stableId === config.chargeMinionStableId);
   if (!chargeMinion
     || chargeMinion.cardType !== 'minion'
@@ -254,6 +273,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   return {
     authorityHash: artifact.contentHash,
     cards: snapshot.cards,
+    cannotDefendMinion,
     chargeMinion,
     config,
     deathriteMinion,
@@ -299,6 +319,7 @@ function gameDefinition(
   provides?: GameElement,
   tapForMana?: number,
   deathriteDrawSite = false,
+  cannotDefend = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -320,6 +341,7 @@ function gameDefinition(
     return {
       attack: card.attack,
       cardType: 'minion',
+      cannotDefend,
       charge,
       deathriteDrawSite,
       defense: card.defense,
@@ -389,6 +411,7 @@ function buildManifest(
       input.manaMinion,
       input.genesisMinion,
       input.deathriteMinion,
+      input.cannotDefendMinion,
     ];
     const featuredCards = featured.flatMap((card) =>
       Array.from({ length: input.format.copyLimits[card.rarity!] }, () => card.stableId));
@@ -447,6 +470,7 @@ function buildManifest(
           : undefined,
       card.stableId === input.manaMinion.stableId ? 2 : undefined,
       card.stableId === input.deathriteMinion.stableId,
+      card.stableId === input.cannotDefendMinion.stableId,
     ),
   ]));
   return {
@@ -646,6 +670,7 @@ function findEarthOpening(
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   northSiteInstanceIds: readonly [string, string, string];
+  payoffInstanceId: string;
   providerInstanceId: string;
   seed: number;
   session: GameSession;
@@ -667,17 +692,24 @@ function findEarthOpening(
     1,
   );
   const manaInstanceId = availableMinionInstance(session, 'north', input.manaMinion.stableId, 2);
-  const genesisInstanceId = availableMinionInstance(session, 'north', input.genesisMinion.stableId, 3);
+  const payoffInstanceId = availableMinionInstance(
+    session,
+    'north',
+    input.cannotDefendMinion.stableId,
+    3,
+  );
+  const genesisInstanceId = availableMinionInstance(session, 'north', input.genesisMinion.stableId, 4);
   const deathriteInstanceId = availableMinionInstance(
     session,
     'north',
     input.deathriteMinion.stableId,
-    3,
+    4,
   );
   const south = earthOpponentOpening(session);
   if (northSites.length === 3
     && providerInstanceId
     && manaInstanceId
+    && payoffInstanceId
     && genesisInstanceId
     && deathriteInstanceId
     && south) {
@@ -691,6 +723,7 @@ function findEarthOpening(
         northSites[1]!.instanceId,
         northSites[2]!.instanceId,
       ],
+      payoffInstanceId,
       providerInstanceId,
       seed,
       session,
@@ -796,6 +829,24 @@ function runEarthRamp(
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'activate-mana' && descriptor.unitInstanceId === opening.manaInstanceId));
   const manaGained = session.state.players.north.mana - manaBefore;
+  const payoffManaBefore = session.state.players.north.mana;
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.payoffInstanceId
+      && descriptor.cell === 'C3'));
+  const rampPaidFive = payoffManaBefore === 5 && session.state.players.north.mana === 0;
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  const payoffCanMoveAndAttack = legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === opening.payoffInstanceId);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'activate-mana' && descriptor.unitInstanceId === opening.manaInstanceId));
   const beforeGenesis = session.state.players.north;
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
@@ -818,6 +869,8 @@ function runEarthRamp(
     descriptor.kind === 'declare-attack'
       && descriptor.target.kind === 'minion'
       && descriptor.target.instanceId === opening.deathriteInstanceId));
+  const movingDefendUnavailable = !legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'defend' && descriptor.unitInstanceId === opening.payoffInstanceId);
   const beforeDeathrite = session.state.players.north;
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
@@ -845,6 +898,11 @@ function runEarthRamp(
     manaGained,
     manaMinion: opening.names.get(input.manaMinion.stableId) ?? input.manaMinion.stableId,
     manaUnavailableWhileSick,
+    movingDefendUnavailable,
+    payoffCanMoveAndAttack,
+    rampPaidFive,
+    rampPayoffMinion:
+      opening.names.get(input.cannotDefendMinion.stableId) ?? input.cannotDefendMinion.stableId,
     replayVerified: verifyGameReplay(session),
     seed: opening.seed,
   });
