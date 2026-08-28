@@ -36,6 +36,7 @@ type SpellFacts = Readonly<{
   cannotDefend?: boolean;
   cannotDefendOrIntercept?: boolean;
   charge?: boolean;
+  connectsTopBottom?: boolean;
   deathriteDrawSite?: boolean;
   deathriteHeal?: number;
   defense?: number;
@@ -107,6 +108,7 @@ function cardsFor(
         cannotDefend: facts.cannotDefend ?? false,
         cannotDefendOrIntercept: facts.cannotDefendOrIntercept ?? false,
         charge: facts.charge ?? false,
+        connectsTopBottom: facts.connectsTopBottom ?? false,
         deathriteDrawSite: facts.deathriteDrawSite ?? false,
         ...(facts.deathriteHeal ? { deathriteHeal: facts.deathriteHeal } : {}),
         defense: facts.defense ?? 1,
@@ -290,6 +292,13 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as GameCardDefinition,
     },
   }), /simultaneous Genesis/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: { ...cards[firstSpell]!, connectsTopBottom: 'yes' } as unknown as GameCardDefinition,
+    },
+  }), /connectsTopBottom/);
 });
 
 test('TEST-03 different opponent hidden cards cannot change an observation or legal actions', () => {
@@ -1455,6 +1464,46 @@ test('RULE-04 Sedge Crabs can move themselves only sideways', () => {
   session = accept(session, sideways);
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
   assert.equal(session.state.realm.units[0]?.location, 'B3');
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-02/04 a unit can move across connected top and bottom realm edges', () => {
+  let session = keep(createGameSession(manifest(128, {
+    spell: {
+      connectsTopBottom: true,
+      manaCost: 1,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+  })));
+  session = keep(session);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'summon-minion'));
+  const unit = session.state.realm.units[0];
+  assert.ok(unit);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+
+  const actions = legalGameActions(session.state, 'north');
+  const wraps = ({ descriptor }: GameLegalAction): boolean => descriptor.kind === 'move-and-attack'
+    && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C1';
+  assert.equal(actions.some((candidate) =>
+    wraps(candidate) && candidate.descriptor.kind === 'move-and-attack'
+      && candidate.descriptor.unitInstanceId === unit.instanceId), true);
+  assert.equal(actions.some((candidate) =>
+    wraps(candidate) && candidate.descriptor.kind === 'move-and-attack'
+      && candidate.descriptor.unitInstanceId === session.state.players.north.avatar.card.instanceId), false);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === unit.instanceId
+    && descriptor.to.cell === 'C1'));
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site'), true);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
   assert.equal(verifyGameReplay(session), true);
 });
 
