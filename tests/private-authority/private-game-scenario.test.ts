@@ -50,6 +50,16 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthRanged.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
   assert.deepEqual(result.earthRanged.deck, result.earthRamp.deck);
   assert.equal(result.earthRanged.replayVerified, true);
+  assert.equal(result.earthWard.rangedMinion, 'Belmotte Longbowmen');
+  assert.equal(result.earthWard.wardMinion, 'Holy Warrior');
+  assert.equal(result.earthWard.wardBroke, true);
+  assert.equal(result.earthWard.wardPreventedDamage, true);
+  assert.equal(result.earthWard.wardTargetSurvived, true);
+  assert.equal(result.earthWard.wardTargetDiedAfterSecondShot, true);
+  assert.equal(result.earthWard.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthWard.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.deepEqual(result.earthWard.deck, result.earthRamp.deck);
+  assert.equal(result.earthWard.replayVerified, true);
   assert.equal(result.fireResponse.lumberingGiant, 'Lumbering Giant');
   assert.equal(result.fireResponse.monstrousLion, 'Monstrous Lion');
   assert.equal(result.fireResponse.chargeMoveAndAttack, true);

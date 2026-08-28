@@ -46,6 +46,7 @@ type ScenarioConfig = Readonly<{
   earthProviderMinionStableId: string;
   earthRangedSeed: number;
   earthSeed: number;
+  earthWardSeed: number;
   fireSeed: number;
   genesisMinionStableId: string;
   ghostTownSiteStableId: string;
@@ -62,6 +63,7 @@ type ScenarioConfig = Readonly<{
   roamingSeed: number;
   seed: number;
   waterSeed: number;
+  wardMinionStableId: string;
 }>;
 
 type DeckList = Readonly<{
@@ -134,6 +136,18 @@ export type PrivateGameCheck = Readonly<{
     replayVerified: boolean;
     seed: number;
   }>;
+  earthWard: Readonly<{
+    acceptedActionCount: number;
+    deck: DeckList;
+    rangedMinion: string;
+    replayVerified: boolean;
+    seed: number;
+    wardBroke: boolean;
+    wardMinion: string;
+    wardPreventedDamage: boolean;
+    wardTargetDiedAfterSecondShot: boolean;
+    wardTargetSurvived: boolean;
+  }>;
   fireResponse: Readonly<{
     acceptedActionCount: number;
     chargeMoveAndAttack: boolean;
@@ -190,6 +204,9 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     || !Number.isSafeInteger(value.earthSeed)
     || typeof value.earthSeed !== 'number'
     || value.earthSeed < 0
+    || !Number.isSafeInteger(value.earthWardSeed)
+    || typeof value.earthWardSeed !== 'number'
+    || value.earthWardSeed < 0
     || !Number.isSafeInteger(value.fireSeed)
     || typeof value.fireSeed !== 'number'
     || value.fireSeed < 0
@@ -214,7 +231,8 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     || !Number.isSafeInteger(value.waterSeed)
     || typeof value.waterSeed !== 'number'
     || value.waterSeed < 0
-    || Object.keys(value).sort().join(',') !== 'airSeed,avatar,cannotDefendMinionStableId,chargeMinionStableId,deathriteMinionStableId,earthProviderMinionStableId,earthRangedSeed,earthSeed,fireSeed,genesisMinionStableId,ghostTownSiteStableId,healingMinionStableId,lethalMinionStableId,lumberingMinionStableId,manaMinionStableId,monstrousLionStableId,movementMinionStableId,providerMinionStableId,rangedMinionStableId,revisionId,roamingMinionStableId,roamingSeed,seed,waterSeed'
+    || typeof value.wardMinionStableId !== 'string'
+    || Object.keys(value).sort().join(',') !== 'airSeed,avatar,cannotDefendMinionStableId,chargeMinionStableId,deathriteMinionStableId,earthProviderMinionStableId,earthRangedSeed,earthSeed,earthWardSeed,fireSeed,genesisMinionStableId,ghostTownSiteStableId,healingMinionStableId,lethalMinionStableId,lumberingMinionStableId,manaMinionStableId,monstrousLionStableId,movementMinionStableId,providerMinionStableId,rangedMinionStableId,revisionId,roamingMinionStableId,roamingSeed,seed,wardMinionStableId,waterSeed'
     || Object.keys(avatar).sort().join(',') !== 'drawSpell,stableId') {
     throw new Error('private game scenario has an unsupported shape');
   }
@@ -227,6 +245,7 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     earthProviderMinionStableId: value.earthProviderMinionStableId,
     earthRangedSeed: value.earthRangedSeed,
     earthSeed: value.earthSeed,
+    earthWardSeed: value.earthWardSeed,
     fireSeed: value.fireSeed,
     genesisMinionStableId: value.genesisMinionStableId,
     ghostTownSiteStableId: value.ghostTownSiteStableId,
@@ -243,6 +262,7 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     roamingSeed: value.roamingSeed,
     seed: value.seed,
     waterSeed: value.waterSeed,
+    wardMinionStableId: value.wardMinionStableId,
   };
 }
 
@@ -267,6 +287,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   providerMinion: NormalizedCard;
   rangedMinion: NormalizedCard;
   roamingMinion: NormalizedCard;
+  wardMinion: NormalizedCard;
 }>> {
   const config = scenarioConfig(parseJsonWithDuplicateKeyCheck(await readFile(path, 'utf8')));
   const revisionRoot = resolve(REPOSITORY_ROOT, '.local', 'authority', 'revisions', config.revisionId);
@@ -429,6 +450,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || roamingMinion.rarity === null) {
     throw new Error('private unrestricted-site summon minion no longer matches its supported facts');
   }
+  const wardMinion = snapshot.cards.find(({ stableId }) => stableId === config.wardMinionStableId);
+  if (!wardMinion
+    || wardMinion.name !== 'Holy Warrior'
+    || wardMinion.cardType !== 'minion'
+    || wardMinion.rulesText.trim() !== 'Ward'
+    || wardMinion.manaCost !== 2
+    || wardMinion.attack !== 2
+    || wardMinion.defense !== 2
+    || wardMinion.elements.length !== 1
+    || wardMinion.elements[0] !== 'earth'
+    || wardMinion.thresholds.earth !== 1
+    || wardMinion.thresholds.air !== 0
+    || wardMinion.thresholds.fire !== 0
+    || wardMinion.thresholds.water !== 0
+    || wardMinion.rarity !== 'ordinary') {
+    throw new Error('private Ward minion no longer matches its supported facts');
+  }
 
   const formatsValue = parseJsonWithDuplicateKeyCheck(await readFile(resolve(revisionRoot, 'formats.json'), 'utf8'));
   if (!isJsonRecord(formatsValue)
@@ -466,6 +504,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     providerMinion,
     rangedMinion,
     roamingMinion,
+    wardMinion,
   };
 }
 
@@ -509,6 +548,7 @@ function gameDefinition(
   cannotDefendOrIntercept = false,
   cannotAttackSites = false,
   ranged = false,
+  ward = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -552,6 +592,7 @@ function gameDefinition(
       summonToAnySite,
       ...(tapForMana ? { tapForMana } : {}),
       thresholds: card.thresholds,
+      ward,
     };
   }
   throw new Error(`actual card ${card.stableId} lacks required supported facts`);
@@ -560,7 +601,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'combat' | 'earth' | 'fire' | 'water' = 'combat',
+  scenario: 'air' | 'combat' | 'earth' | 'earth-ward' | 'fire' | 'water' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -647,16 +688,18 @@ function buildManifest(
       ],
     };
   };
+  const earthDeck = elementalDeck('earth', [
+    input.earthProviderMinion,
+    input.manaMinion,
+    input.genesisMinion,
+    input.deathriteMinion,
+    input.cannotDefendMinion,
+    input.rangedMinion,
+    input.wardMinion,
+  ], [input.ghostTownSite]);
   const decks = {
-    north: scenario === 'earth'
-      ? elementalDeck('earth', [
-        input.earthProviderMinion,
-        input.manaMinion,
-        input.genesisMinion,
-        input.deathriteMinion,
-        input.cannotDefendMinion,
-        input.rangedMinion,
-      ], [input.ghostTownSite])
+    north: scenario === 'earth' || scenario === 'earth-ward'
+      ? earthDeck
       : scenario === 'air'
         ? elementalDeck('air', [input.movementMinion, input.roamingMinion])
         : scenario === 'fire'
@@ -664,7 +707,7 @@ function buildManifest(
         : scenario === 'water'
           ? elementalDeck('water', [input.healingMinion])
           : deck(false, true),
-    south: deck(true, false),
+    south: scenario === 'earth-ward' ? earthDeck : deck(true, false),
   };
   const referenced = new Set([
     decks.north.avatar,
@@ -698,6 +741,7 @@ function buildManifest(
       card.stableId === input.lumberingMinion.stableId,
       card.stableId === input.monstrousLion.stableId,
       card.stableId === input.rangedMinion.stableId,
+      card.stableId === input.wardMinion.stableId,
     ),
   ]));
   return {
@@ -969,6 +1013,7 @@ function findEarthOpening(
 
 function findEarthRangedOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
+  ward = false,
 ): Readonly<{
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -980,8 +1025,8 @@ function findEarthRangedOpening(
   southSecondSiteInstanceId: string;
   targetInstanceId: string;
 }> {
-  const seed = input.config.earthRangedSeed;
-  const built = buildManifest(input, seed, 'earth');
+  const seed = ward ? input.config.earthWardSeed : input.config.earthRangedSeed;
+  const built = buildManifest(input, seed, ward ? 'earth-ward' : 'earth');
   const session = createGameSession(built.manifest);
   const northSites = session.state.players.north.hand.atlas.filter((site) => {
     const definition = session.state.cards[site.cardId];
@@ -1004,6 +1049,7 @@ function findEarthRangedOpening(
         definition.elements.forEach((element) => { affinity[element] += 1; });
       }
       const target = [...south.hand.spellbook, ...south.spellbook.slice(0, 2)].find((card) => {
+        if (ward && card.cardId !== input.wardMinion.stableId) return false;
         const definition = session.state.cards[card.cardId];
         return definition?.cardType === 'minion'
           && definition.defense <= 3
@@ -1029,7 +1075,7 @@ function findEarthRangedOpening(
       }
     }
   }
-  throw new Error(`private Earth Ranged scenario seed ${seed} no longer produces its supported opening`);
+  throw new Error(`private Earth ${ward ? 'Ward' : 'Ranged'} scenario seed ${seed} no longer produces its supported opening`);
 }
 
 function findAirOpening(
@@ -1445,10 +1491,7 @@ function runEarthRamp(
   });
 }
 
-function runEarthRanged(
-  input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthRanged'] {
-  const opening = findEarthRangedOpening(input);
+function stageEarthRangedShot(opening: ReturnType<typeof findEarthRangedOpening>): GameSession {
   let session = keep(opening.session);
   session = keep(session);
   const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
@@ -1496,6 +1539,15 @@ function runEarthRanged(
   take(({ descriptor }) => descriptor.kind === 'end-turn');
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
+  return session;
+}
+
+function runEarthRanged(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthRanged'] {
+  const opening = findEarthRangedOpening(input);
+  let session = stageEarthRangedShot(opening);
+
   const shot = action(session, ({ descriptor }) =>
     descriptor.kind === 'shoot-projectile'
       && descriptor.shooterInstanceId === opening.rangedInstanceId
@@ -1518,6 +1570,65 @@ function runEarthRanged(
       .some(({ instanceId }) => instanceId === opening.targetInstanceId),
     replayVerified: verifyGameReplay(session),
     seed: opening.seed,
+  });
+}
+
+function runEarthWard(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthWard'] {
+  const opening = findEarthRangedOpening(input, true);
+  let session = stageEarthRangedShot(opening);
+  const targetBefore = session.state.realm.units
+    .find(({ instanceId }) => instanceId === opening.targetInstanceId);
+  const firstShot = action(session, ({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.shooterInstanceId === opening.rangedInstanceId
+      && descriptor.direction === 'south'
+      && descriptor.hit?.instanceId === opening.targetInstanceId);
+  session = accept(session, firstShot);
+  const firstShotEvents = session.transcript.at(-1)?.events ?? [];
+  const targetAfter = session.state.realm.units
+    .find(({ instanceId }) => instanceId === opening.targetInstanceId);
+  const wardBroke = targetBefore?.warded === true
+    && targetAfter?.warded === false
+    && firstShotEvents.some(({ payload, type }) =>
+      type === 'ward-broken'
+        && isJsonRecord(payload)
+        && payload.instanceId === opening.targetInstanceId);
+  const wardPreventedDamage = firstShotEvents.some(({ payload, type }) =>
+    type === 'damage-dealt'
+      && isJsonRecord(payload)
+      && payload.instanceId === opening.targetInstanceId
+      && payload.amount === 0
+      && payload.prevented === true);
+  const wardTargetSurvived = targetAfter?.damage === 0
+    && !session.state.players.south.cemetery
+      .some(({ instanceId }) => instanceId === opening.targetInstanceId);
+
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.shooterInstanceId === opening.rangedInstanceId
+      && descriptor.hit?.instanceId === opening.targetInstanceId);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    rangedMinion: opening.names.get(input.rangedMinion.stableId) ?? input.rangedMinion.stableId,
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    wardBroke,
+    wardMinion: opening.names.get(input.wardMinion.stableId) ?? input.wardMinion.stableId,
+    wardPreventedDamage,
+    wardTargetDiedAfterSecondShot: session.state.players.south.cemetery
+      .some(({ instanceId }) => instanceId === opening.targetInstanceId),
+    wardTargetSurvived,
   });
 }
 
@@ -1904,6 +2015,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airSummoning = runAirSummoning(input);
   const earthRamp = runEarthRamp(input);
   const earthRanged = runEarthRanged(input);
+  const earthWard = runEarthWard(input);
   const fireResponse = runFireResponse(input);
   const waterHealing = runWaterHealing(input);
   const opening = findOpening(input);
@@ -2034,6 +2146,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     },
     earthRamp,
     earthRanged,
+    earthWard,
     fireResponse,
     finalStateHash: hashGameState(session.state),
     formatStableId: input.formatStableId,
