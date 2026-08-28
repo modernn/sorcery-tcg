@@ -157,8 +157,10 @@ test('RULE-01 first player skips its draw, establishes a domain, then second pla
   const siteId = site.descriptor.kind === 'play-site' ? site.descriptor.cardInstanceId : '';
   session = accept(session, site);
   assert.equal(session.state.realm.sites.C4?.instanceId, siteId);
+  assert.equal(session.state.realm.sites.C4?.controller, 'north');
   assert.equal(session.state.players.north.avatar.tapped, true);
   assert.equal(session.state.players.north.domainEstablished, true);
+  assert.equal(session.state.players.north.mana, 1);
   assert.deepEqual(legalGameActions(session.state, 'north').map(({ descriptor }) => descriptor.kind), ['end-turn']);
 
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
@@ -177,6 +179,117 @@ test('RULE-01 first player skips its draw, establishes a domain, then second pla
   assert.deepEqual(session.transcript.at(-1)?.events[0]?.payload, { seat: 'south', zone: 'atlas' });
   assert.doesNotMatch(canonicalJson(session.transcript.at(-1)?.events[0]?.payload ?? null), /south-site-/);
   assert.equal(verifyGameReplay(session), true);
+});
+
+function northSecondMain(seed = 23, shortDecks = false): GameSession {
+  const options = shortDecks
+    ? { north: deck('north', 3, 4), south: deck('south', 3, 4) }
+    : {};
+  let session = keep(createGameSession(manifest(seed, options)));
+  session = keep(session);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  return accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+}
+
+test('RULE-02 sites expand through unoccupied orthogonal cells controlled by their player', () => {
+  let session = northSecondMain();
+  const northCard = session.state.players.north.hand.atlas[0];
+  assert.ok(northCard);
+  const northCells = legalGameActions(session.state, 'north')
+    .filter(({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cardInstanceId === northCard.instanceId)
+    .map(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell);
+  assert.deepEqual(northCells, ['B4', 'C3', 'D4']);
+
+  const playC3 = action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === northCard.instanceId
+      && descriptor.cell === 'C3');
+  const beforeHand = session.state.players.north.hand.atlas.length;
+  const result = stepGame(session, playC3);
+  assert.equal(result.accepted, true);
+  session = result.session;
+  assert.equal(session.state.realm.sites.C3?.instanceId, northCard.instanceId);
+  assert.equal(session.state.realm.sites.C3?.controller, 'north');
+  assert.equal(session.state.players.north.hand.atlas.length, beforeHand - 1);
+  assert.equal(session.state.players.north.avatar.tapped, true);
+  assert.equal(session.state.players.north.mana, 2);
+  assert.equal(result.receipt.events[0]?.type, 'site-played');
+  assert.deepEqual(legalGameActions(session.state, 'north').map(({ descriptor }) => descriptor.kind), ['end-turn']);
+  assert.equal(verifyGameReplay(session), true);
+
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C2'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+
+  const expansion = [...new Set(legalGameActions(session.state, 'north')
+    .filter(({ descriptor }) => descriptor.kind === 'play-site')
+    .map(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell))];
+  assert.deepEqual(expansion, ['B3', 'B4', 'D3', 'D4']);
+  assert.equal(session.state.players.north.avatar.tapped, false);
+  assert.equal(session.state.players.north.mana, 2);
+});
+
+test('RULE-02 the Avatar may draw a private site instead of playing one', () => {
+  let session = northSecondMain(29);
+  const before = session.state.players.north;
+  const drawn = before.atlas[0];
+  assert.ok(drawn);
+  const draw = action(session, ({ descriptor }) => descriptor.kind === 'draw-site');
+  const result = stepGame(session, draw);
+  assert.equal(result.accepted, true);
+  session = result.session;
+
+  assert.equal(session.state.players.north.atlas.length, before.atlas.length - 1);
+  assert.equal(session.state.players.north.hand.atlas.length, before.hand.atlas.length + 1);
+  assert.equal(session.state.players.north.avatar.tapped, true);
+  assert.deepEqual(result.receipt.events[0]?.payload, { seat: 'north' });
+  assert.equal(result.receipt.events[0]?.type, 'site-drawn');
+  assert.equal(canonicalJson(result.receipt.events[0]?.payload ?? null).includes(drawn.cardId), false);
+  assert.equal(canonicalJson(observeGame(session.state, 'south')).includes(drawn.cardId), false);
+  assert.deepEqual(legalGameActions(session.state, 'north').map(({ descriptor }) => descriptor.kind), ['end-turn']);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-02 drawing a site from an empty Atlas pays the tap cost and loses', () => {
+  let session = northSecondMain(31, true);
+  assert.equal(session.state.players.north.atlas.length, 0);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'draw-site'));
+
+  assert.equal(session.state.players.north.avatar.tapped, true);
+  assert.deepEqual(session.state.terminal, {
+    loser: 'north',
+    reason: 'deck_empty',
+    status: 'finished',
+    winner: 'south',
+  });
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-02 forged spatial actions cannot mutate the game', () => {
+  const session = northSecondMain(37);
+  const beforeState = canonicalJson(session.state);
+  const result = stepGame(session, {
+    actionId: 'sha256:2222222222222222222222222222222222222222222222222222222222222222',
+    seat: 'north',
+    stateVersion: session.state.stateVersion,
+  });
+
+  assert.equal(result.accepted, false);
+  assert.equal(result.reason.code, 'unknown_action');
+  assert.equal(canonicalJson(result.session.state), beforeState);
+  assert.equal(result.session.transcript.length, session.transcript.length);
 });
 
 test('shared stale rejection leaves game state, PRNG, and accepted transcript unchanged', () => {

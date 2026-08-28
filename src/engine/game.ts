@@ -59,6 +59,8 @@ type CardInstance = Readonly<{
   source: 'atlas' | 'avatar' | 'spellbook';
 }>;
 
+type SiteInstance = Readonly<CardInstance & { controller: GameSeat }>;
+
 type PlayerState = Readonly<{
   atlas: readonly CardInstance[];
   avatar: Readonly<{
@@ -88,7 +90,7 @@ export type GameState = Readonly<{
   phase: 'draw' | 'main' | 'mulligan' | 'terminal';
   players: Readonly<Record<GameSeat, PlayerState>>;
   realm: Readonly<{
-    sites: Readonly<Partial<Record<RealmCell, CardInstance>>>;
+    sites: Readonly<Partial<Record<RealmCell, SiteInstance>>>;
   }>;
   schemaVersion: 1;
   stateVersion: number;
@@ -121,6 +123,7 @@ export type GameObservation = Readonly<{
   realm: Readonly<{
     sites: Readonly<Partial<Record<RealmCell, Readonly<{
       cardId: string;
+      controller: GameSeat;
       instanceId: StateHash;
       owner: GameSeat;
     }>>>>;
@@ -140,6 +143,7 @@ type MulliganDescriptor = Readonly<{
 
 type GameActionDescriptor =
   | MulliganDescriptor
+  | Readonly<{ kind: 'draw-site' }>
   | Readonly<{ cardId: string; cardInstanceId: string; cell: RealmCell; kind: 'play-site' }>
   | Readonly<{ kind: 'draw'; zone: DeckZone }>
   | Readonly<{ kind: 'end-turn' }>;
@@ -168,6 +172,27 @@ function asJson(value: unknown): JsonValue {
 
 function otherSeat(seat: GameSeat): GameSeat {
   return seat === 'north' ? 'south' : 'north';
+}
+
+function borderingCells(cell: RealmCell): readonly RealmCell[] {
+  const file = cell.charCodeAt(0);
+  const rank = Number(cell[1]);
+  return [
+    [file - 1, rank],
+    [file, rank - 1],
+    [file + 1, rank],
+    [file, rank + 1],
+  ].filter(([nextFile, nextRank]) =>
+    nextFile! >= 65 && nextFile! <= 69 && nextRank! >= 1 && nextRank! <= 4)
+    .map(([nextFile, nextRank]) => `${String.fromCharCode(nextFile!)}${nextRank}` as RealmCell);
+}
+
+function legalSiteCells(state: GameState, seat: GameSeat): readonly RealmCell[] {
+  return [...new Set(Object.entries(state.realm.sites)
+    .filter(([, site]) => site.controller === seat)
+    .flatMap(([cell]) => borderingCells(cell as RealmCell)))]
+    .filter((cell) => !state.realm.sites[cell])
+    .sort();
 }
 
 function requireCardId(value: string, path: string): void {
@@ -370,6 +395,7 @@ export function observeGame(state: GameState, viewer: GameSeat): GameObservation
   const sites = Object.fromEntries(
     Object.entries(state.realm.sites).map(([cell, card]) => [cell, {
       cardId: card.cardId,
+      controller: card.controller,
       instanceId: card.instanceId,
       owner: card.owner,
     }]),
@@ -426,7 +452,18 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
       kind: 'play-site',
     }));
   }
-  return [{ kind: 'end-turn' }];
+  if (player.avatar.tapped) return [{ kind: 'end-turn' }];
+  const cells = legalSiteCells(state, seat);
+  return [
+    ...player.hand.atlas.flatMap(({ cardId, instanceId }) => cells.map((cell) => ({
+      cardId,
+      cardInstanceId: instanceId,
+      cell,
+      kind: 'play-site' as const,
+    }))),
+    { kind: 'draw-site' },
+    { kind: 'end-turn' },
+  ];
 }
 
 function actionLabel(descriptor: GameActionDescriptor): string {
@@ -437,7 +474,8 @@ function actionLabel(descriptor: GameActionDescriptor): string {
       : `Mulligan ${count} (${descriptor.atlasOrder.length} atlas, ${descriptor.spellbookOrder.length} spellbook)`;
   }
   if (descriptor.kind === 'draw') return `Draw from ${descriptor.zone}`;
-  if (descriptor.kind === 'play-site') return `Establish domain with ${descriptor.cardId} at ${descriptor.cell}`;
+  if (descriptor.kind === 'draw-site') return 'Draw a site with Avatar';
+  if (descriptor.kind === 'play-site') return `Play ${descriptor.cardId} at ${descriptor.cell}`;
   return 'End turn';
 }
 
@@ -494,7 +532,7 @@ function resolveMulliganZone(
 }
 
 function siteCount(state: GameState, seat: GameSeat): number {
-  return Object.values(state.realm.sites).filter((site) => site.owner === seat).length;
+  return Object.values(state.realm.sites).filter((site) => site.controller === seat).length;
 }
 
 function applyDescriptor(
@@ -547,6 +585,13 @@ function applyDescriptor(
     const card = player.hand.atlas.find(({ cardId, instanceId }) =>
       instanceId === descriptor.cardInstanceId && cardId === descriptor.cardId);
     if (!card) throw new Error('unreachable site card');
+    const legalCell = !player.domainEstablished
+      ? !player.avatar.tapped
+        && descriptor.cell === player.avatar.location
+        && !state.realm.sites[descriptor.cell]
+      : !player.avatar.tapped && legalSiteCells(state, seat).includes(descriptor.cell);
+    if (!legalCell) throw new Error('unreachable illegal site cell');
+    const site = deepFreeze({ ...card, controller: seat });
     const updatedPlayer = deepFreeze({
       ...player,
       avatar: { ...player.avatar, tapped: true },
@@ -555,24 +600,34 @@ function applyDescriptor(
         ...player.hand,
         atlas: player.hand.atlas.filter(({ instanceId }) => instanceId !== card.instanceId),
       },
+      mana: player.mana + 1,
     });
     return [
       withStateVersion(state, {
         players: replacePlayer(state, seat, updatedPlayer),
-        realm: { sites: { ...state.realm.sites, [descriptor.cell]: card } },
+        realm: { sites: { ...state.realm.sites, [descriptor.cell]: site } },
       }),
       [{ payload: { cardId: card.cardId, cell: descriptor.cell, instanceId: card.instanceId, seat }, type: 'site-played' }],
       [],
     ];
   }
 
-  if (descriptor.kind === 'draw') {
-    const deck = player[descriptor.zone];
+  if (descriptor.kind === 'draw' || descriptor.kind === 'draw-site') {
+    const avatarDraw = descriptor.kind === 'draw-site';
+    const zone = avatarDraw ? 'atlas' : descriptor.zone;
+    const deck = player[zone];
     if (deck.length === 0) {
       const winner = otherSeat(seat);
+      const players = avatarDraw
+        ? replacePlayer(state, seat, deepFreeze({
+          ...player,
+          avatar: { ...player.avatar, tapped: true },
+        }))
+        : state.players;
       return [
         withStateVersion(state, {
           phase: 'terminal',
+          players,
           terminal: { loser: seat, reason: 'deck_empty', status: 'finished', winner },
         }),
         [{ payload: { loser: seat, reason: 'deck_empty', winner }, type: 'game-ended' }],
@@ -582,12 +637,18 @@ function applyDescriptor(
     const [drawn, ...remaining] = deck;
     const updatedPlayer = deepFreeze({
       ...player,
-      [descriptor.zone]: remaining,
-      hand: { ...player.hand, [descriptor.zone]: [...player.hand[descriptor.zone], drawn!] },
+      ...(avatarDraw ? { avatar: { ...player.avatar, tapped: true } } : {}),
+      [zone]: remaining,
+      hand: { ...player.hand, [zone]: [...player.hand[zone], drawn!] },
     });
     return [
-      withStateVersion(state, { phase: 'main', players: replacePlayer(state, seat, updatedPlayer) }),
-      [{ payload: { seat, zone: descriptor.zone }, type: 'card-drawn' }],
+      withStateVersion(state, {
+        phase: 'main',
+        players: replacePlayer(state, seat, updatedPlayer),
+      }),
+      [avatarDraw
+        ? { payload: { seat }, type: 'site-drawn' }
+        : { payload: { seat, zone }, type: 'card-drawn' }],
       [],
     ];
   }
