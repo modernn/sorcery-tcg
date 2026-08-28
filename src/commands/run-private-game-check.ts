@@ -40,6 +40,7 @@ const DEFAULT_SCENARIO = resolve(
 type ScenarioConfig = Readonly<{
   avatar: Readonly<{ drawSpell: boolean; stableId: string }>;
   chargeMinionStableId: string;
+  lethalMinionStableId: string;
   providerMinionStableId: string;
   revisionId: string;
   seed: number;
@@ -66,6 +67,7 @@ export type PrivateGameCheck = Readonly<{
   decks: Readonly<Record<GameSeat, DeckList>>;
   finalStateHash: Hash;
   formatStableId: string;
+  lethal: Readonly<{ minion: string; tougherMinionKilled: boolean }>;
   provider: Readonly<{ affinityAdded: boolean; minion: string }>;
   replayVerified: boolean;
   revisionId: string;
@@ -85,18 +87,20 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     || typeof avatar.stableId !== 'string'
     || typeof avatar.drawSpell !== 'boolean'
     || typeof value.chargeMinionStableId !== 'string'
+    || typeof value.lethalMinionStableId !== 'string'
     || typeof value.providerMinionStableId !== 'string'
     || typeof value.revisionId !== 'string'
     || !Number.isSafeInteger(value.seed)
     || typeof value.seed !== 'number'
     || value.seed < 0
-    || Object.keys(value).sort().join(',') !== 'avatar,chargeMinionStableId,providerMinionStableId,revisionId,seed'
+    || Object.keys(value).sort().join(',') !== 'avatar,chargeMinionStableId,lethalMinionStableId,providerMinionStableId,revisionId,seed'
     || Object.keys(avatar).sort().join(',') !== 'drawSpell,stableId') {
     throw new Error('private game scenario has an unsupported shape');
   }
   return {
     avatar: { drawSpell: avatar.drawSpell, stableId: avatar.stableId },
     chargeMinionStableId: value.chargeMinionStableId,
+    lethalMinionStableId: value.lethalMinionStableId,
     providerMinionStableId: value.providerMinionStableId,
     revisionId: value.revisionId,
     seed: value.seed,
@@ -110,6 +114,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   config: ScenarioConfig;
   format: FormatDefinition;
   formatStableId: string;
+  lethalMinion: NormalizedCard;
   providerMinion: NormalizedCard;
 }>> {
   const config = scenarioConfig(parseJsonWithDuplicateKeyCheck(await readFile(path, 'utf8')));
@@ -144,6 +149,16 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || providerMinion.rarity === null) {
     throw new Error('private affinity provider no longer matches its supported facts');
   }
+  const lethalMinion = snapshot.cards.find(({ stableId }) => stableId === config.lethalMinionStableId);
+  if (!lethalMinion
+    || lethalMinion.cardType !== 'minion'
+    || lethalMinion.rulesText.trim() !== 'Lethal'
+    || lethalMinion.attack === null
+    || lethalMinion.defense === null
+    || lethalMinion.manaCost === null
+    || lethalMinion.rarity === null) {
+    throw new Error('private Lethal minion no longer matches its supported facts');
+  }
 
   const formatsValue = parseJsonWithDuplicateKeyCheck(await readFile(resolve(revisionRoot, 'formats.json'), 'utf8'));
   if (!isJsonRecord(formatsValue)
@@ -167,6 +182,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     config,
     format: selected.identity.payload,
     formatStableId: selected.identity.stableId,
+    lethalMinion,
     providerMinion,
   };
 }
@@ -198,6 +214,7 @@ function gameDefinition(
   card: NormalizedCard,
   drawSpell: boolean,
   charge = false,
+  lethal = false,
   provides?: GameElement,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
@@ -222,6 +239,7 @@ function gameDefinition(
       cardType: 'minion',
       charge,
       defense: card.defense,
+      lethal,
       manaCost: card.manaCost,
       ...(provides ? { provides } : {}),
       thresholds: card.thresholds,
@@ -251,15 +269,19 @@ function buildManifest(
     const providerCopies = includeCharge
       ? input.format.copyLimits[input.providerMinion.rarity!]
       : 0;
+    const lethalCopies = includeCharge
+      ? input.format.copyLimits[input.lethalMinion.rarity!]
+      : 0;
     return {
     atlas: fillZone(sites, input.format.atlasMinimum, input.format, reverse),
     avatar: avatar.stableId,
     spellbook: [
       ...Array.from({ length: chargeCopies }, () => input.chargeMinion.stableId),
       ...Array.from({ length: providerCopies }, () => input.providerMinion.stableId),
+      ...Array.from({ length: lethalCopies }, () => input.lethalMinion.stableId),
       ...fillZone(
         minions,
-        input.format.spellbookMinimum - chargeCopies - providerCopies,
+        input.format.spellbookMinimum - chargeCopies - providerCopies - lethalCopies,
         input.format,
         reverse,
       ),
@@ -281,6 +303,7 @@ function buildManifest(
       card,
       card.stableId === avatar.stableId && input.config.avatar.drawSpell,
       card.stableId === input.chargeMinion.stableId,
+      card.stableId === input.lethalMinion.stableId,
       card.stableId === input.providerMinion.stableId ? 'fire' : undefined,
     ),
   ]));
@@ -357,7 +380,7 @@ function findOpening(
   const seed = input.config.seed;
   const built = buildManifest(input, seed);
   const session = createGameSession(built.manifest);
-  const north = openingPair(session, 'north');
+  const north = openingPair(session, 'north', input.lethalMinion.stableId);
   const northCharge = north && openingPair(
     session,
     'north',
@@ -480,6 +503,8 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     .find(({ instanceId }) => instanceId === opening.north.minionInstanceId)!.cardId;
   const southCardId = opening.session.state.players.south.hand.spellbook
     .find(({ instanceId }) => instanceId === opening.south.minionInstanceId)!.cardId;
+  const northDefinition = opening.session.state.cards[northCardId];
+  const southDefinition = opening.session.state.cards[southCardId];
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
     authorityHash: input.authorityHash,
@@ -503,6 +528,16 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     },
     finalStateHash: hashGameState(session.state),
     formatStableId: input.formatStableId,
+    lethal: {
+      minion: opening.names.get(input.lethalMinion.stableId) ?? input.lethalMinion.stableId,
+      tougherMinionKilled:
+        northDefinition?.cardType === 'minion'
+        && northDefinition.lethal === true
+        && southDefinition?.cardType === 'minion'
+        && northDefinition.attack < southDefinition.defense
+        && session.state.players.south.cemetery
+          .some(({ instanceId }) => instanceId === opening.south.minionInstanceId),
+    },
     provider: {
       affinityAdded: providerAffinityAdded,
       minion: opening.names.get(input.providerMinion.stableId) ?? input.providerMinion.stableId,
