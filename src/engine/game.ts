@@ -53,6 +53,7 @@ export type GameCardDefinition =
     damageTargetUnit?: number;
     healController?: number;
     manaCost: number;
+    returnMinionFromOwnCemetery?: true;
     targetNearby?: boolean;
     teleportAllyToTargetSite?: true;
     thresholds: GameThresholds;
@@ -304,6 +305,7 @@ type GameActionDescriptor =
     cardId: string;
     cardInstanceId: string;
     casterInstanceId: StateHash;
+    cemeteryMinionInstanceId?: StateHash;
     kind: 'cast-magic';
     ally?: GameUnitRef;
     target?: GameUnitRef;
@@ -521,6 +523,16 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
       kind: 'cast-magic' as const,
     };
     if (definition.healController !== undefined) return [cast];
+    if (definition.returnMinionFromOwnCemetery === true) {
+      const eligible = player.cemetery.filter(({ cardId }) =>
+        cardDefinition(state, cardId).cardType === 'minion');
+      return eligible.length > 0
+        ? eligible.map(({ instanceId: cemeteryMinionInstanceId }) => ({
+          ...cast,
+          cemeteryMinionInstanceId,
+        }))
+        : [cast];
+    }
     if (definition.teleportAllyToTargetSite === true) {
       if (caster.region !== 'surface') return [];
       const targetSites = REALM_CELLS.flatMap((cell) => {
@@ -605,10 +617,15 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     if (card.teleportAllyToTargetSite !== undefined && card.teleportAllyToTargetSite !== true) {
       throw new RangeError(`${path}.teleportAllyToTargetSite must be true when defined`);
     }
+    if (card.returnMinionFromOwnCemetery !== undefined
+      && card.returnMinionFromOwnCemetery !== true) {
+      throw new RangeError(`${path}.returnMinionFromOwnCemetery must be true when defined`);
+    }
     const effectCount = Number(card.burrowTargetMinion === true)
       + Number(card.damageRandomUnitAtLocation !== undefined)
       + Number(card.damageTargetUnit !== undefined)
       + Number(card.healController !== undefined)
+      + Number(card.returnMinionFromOwnCemetery === true)
       + Number(card.teleportAllyToTargetSite === true);
     if (effectCount !== 1) {
       throw new RangeError(`${path} must define exactly one supported Magic effect`);
@@ -857,7 +874,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                   ? { damageTargetUnit: card.damageTargetUnit }
                   : card.healController !== undefined
                     ? { healController: card.healController }
-                    : { teleportAllyToTargetSite: true as const }),
+                    : card.returnMinionFromOwnCemetery === true
+                      ? { returnMinionFromOwnCemetery: true as const }
+                      : { teleportAllyToTargetSite: true as const }),
               manaCost: card.manaCost,
               ...(card.targetNearby === true ? { targetNearby: true } : {}),
               thresholds: { ...card.thresholds },
@@ -1779,7 +1798,9 @@ function actionLabel(descriptor: GameActionDescriptor): string {
     return `Summon ${descriptor.cardId} at ${descriptor.cell}${descriptor.region ? ` ${descriptor.region}` : ''} (${descriptor.manaCost} mana)`;
   }
   if (descriptor.kind === 'cast-magic') {
-    return descriptor.target
+    return descriptor.cemeteryMinionInstanceId
+      ? `Cast ${descriptor.cardId} to return minion ${descriptor.cemeteryMinionInstanceId.slice(0, 15)}…`
+      : descriptor.target
       ? `Cast ${descriptor.cardId} on ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`
       : descriptor.ally && descriptor.targetLocation
         ? `Cast ${descriptor.cardId} to teleport ${descriptor.ally.kind} ${descriptor.ally.instanceId.slice(0, 15)}… to ${descriptor.targetLocation.cell}`
@@ -2486,6 +2507,7 @@ function applyDescriptor(
       candidate.kind === 'cast-magic'
         && candidate.cardInstanceId === descriptor.cardInstanceId
         && candidate.casterInstanceId === descriptor.casterInstanceId
+        && candidate.cemeteryMinionInstanceId === descriptor.cemeteryMinionInstanceId
         && (candidate.ally === undefined && descriptor.ally === undefined
           || candidate.ally !== undefined
             && descriptor.ally !== undefined
@@ -2548,6 +2570,9 @@ function applyDescriptor(
         ...(descriptor.targetSiteInstanceId
           ? { targetSiteInstanceId: descriptor.targetSiteInstanceId }
           : {}),
+        ...(descriptor.cemeteryMinionInstanceId
+          ? { cemeteryMinionInstanceId: descriptor.cemeteryMinionInstanceId }
+          : {}),
       },
       type: 'magic-cast',
     } as const;
@@ -2580,6 +2605,48 @@ function applyDescriptor(
               type: 'avatar-healed' as const,
             }]
             : []),
+          resolved,
+        ],
+        [],
+      ];
+    }
+    if (definition.returnMinionFromOwnCemetery === true) {
+      if (!descriptor.cemeteryMinionInstanceId) {
+        return [withStateVersion(castState, {}), [castOutcome, resolved], []];
+      }
+      const returningPlayer = castState.players[seat];
+      const selected = returningPlayer.cemetery.find(({ instanceId }) =>
+        instanceId === descriptor.cemeteryMinionInstanceId);
+      if (!selected
+        || selected.owner !== seat
+        || cardDefinition(castState, selected.cardId).cardType !== 'minion') {
+        throw new Error('unreachable Rescue choice');
+      }
+      const returnedPlayer = deepFreeze({
+        ...returningPlayer,
+        cemetery: returningPlayer.cemetery.filter(({ instanceId }) =>
+          instanceId !== selected.instanceId),
+        hand: {
+          ...returningPlayer.hand,
+          spellbook: [...returningPlayer.hand.spellbook, selected],
+        },
+      });
+      return [
+        withStateVersion(castState, {
+          players: replacePlayer(castState, seat, returnedPlayer),
+        }),
+        [
+          castOutcome,
+          {
+            payload: {
+              cardId: selected.cardId,
+              instanceId: selected.instanceId,
+              owner: selected.owner,
+              seat,
+              sourceInstanceId: card.instanceId,
+            },
+            type: 'minion-returned-to-hand',
+          },
           resolved,
         ],
         [],

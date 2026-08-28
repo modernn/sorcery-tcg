@@ -213,6 +213,27 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthBury.deck.spellbook
     .find(({ name }) => name === 'Bosk Troll')?.copies, 4);
   assert.equal(result.earthBury.replayVerified, true);
+  assert.equal(result.earthRescue.rescue, 'Rescue');
+  assert.equal(result.earthRescue.boskTroll, 'Bosk Troll');
+  assert.equal(result.earthRescue.acceptedActionCount, 21);
+  assert.equal(result.earthRescue.onlyOwnCemeteryMinionChoice, true);
+  assert.equal(result.earthRescue.manaPaid, 3);
+  assert.equal(result.earthRescue.returnedToSouthHand, true);
+  assert.equal(result.earthRescue.hiddenFromNorthAfterReturn, true);
+  assert.equal(result.earthRescue.rescueEnteredSouthCemetery, true);
+  assert.equal(result.earthRescue.buryStayedNorthCemetery, true);
+  assert.equal(result.earthRescue.causalEventsVerified, true);
+  assert.equal(result.earthRescue.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthRescue.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthRescue.deck.spellbook
+    .find(({ name }) => name === 'Rescue')?.copies, 4);
+  assert.equal(result.earthRescue.deck.spellbook
+    .find(({ name }) => name === 'Bury')?.copies, 4);
+  assert.equal(result.earthRescue.deck.spellbook
+    .find(({ name }) => name === 'Bosk Troll')?.copies, 4);
+  assert.equal(result.earthRescue.replayVerified, true);
   assert.equal(result.earthShallowGrave.shallowGrave, 'Shallow Grave');
   assert.equal(result.earthShallowGrave.acceptedActionCount, 3);
   assert.equal(result.earthShallowGrave.hiddenBeforeDiscard, true);
