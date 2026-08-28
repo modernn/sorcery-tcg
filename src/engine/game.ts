@@ -41,6 +41,7 @@ export type GameCardDefinition =
     cardType: 'minion';
     charge?: boolean;
     cannotDefend?: boolean;
+    deathriteHeal?: number;
     deathriteDrawSite?: boolean;
     defense: number;
     genesisDrawSite?: boolean;
@@ -393,6 +394,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.deathriteDrawSite !== undefined && typeof card.deathriteDrawSite !== 'boolean') {
     throw new RangeError(`${path}.deathriteDrawSite must be boolean`);
   }
+  if (card.deathriteHeal !== undefined
+    && (!Number.isSafeInteger(card.deathriteHeal)
+      || card.deathriteHeal < 1
+      || card.deathriteHeal > MAX_COMBAT_STAT)) {
+    throw new RangeError(`${path}.deathriteHeal must be a safe integer between 1 and ${MAX_COMBAT_STAT}`);
+  }
   if (card.lethal !== undefined && typeof card.lethal !== 'boolean') {
     throw new RangeError(`${path}.lethal must be boolean`);
   }
@@ -494,6 +501,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.charge === true ? { charge: true } : {}),
             ...(card.cannotDefend === true ? { cannotDefend: true } : {}),
             ...(card.deathriteDrawSite === true ? { deathriteDrawSite: true } : {}),
+            ...(card.deathriteHeal ? { deathriteHeal: card.deathriteHeal } : {}),
             defense: card.defense,
             ...(card.genesisDrawSite === true ? { genesisDrawSite: true } : {}),
             ...(card.lethal === true ? { lethal: true } : {}),
@@ -1281,7 +1289,31 @@ function finishFight(
   const deckLosers = new Set<GameSeat>();
   for (const dead of deaths) {
     const definition = cardDefinition(state, dead.cardId);
-    if (definition.cardType !== 'minion' || !definition.deathriteDrawSite) continue;
+    if (definition.cardType !== 'minion') continue;
+    if (definition.deathriteHeal) {
+      const controller = players[dead.controller];
+      const avatarDefinition = cardDefinition(state, controller.avatar.card.cardId);
+      if (avatarDefinition.cardType !== 'avatar') throw new Error('player Avatar lacks Avatar definition');
+      const life = controller.avatar.life === 0
+        ? 0
+        : Math.min(avatarDefinition.life, controller.avatar.life + definition.deathriteHeal);
+      const amount = life - controller.avatar.life;
+      players[dead.controller] = deepFreeze({
+        ...controller,
+        avatar: { ...controller.avatar, life },
+      });
+      damageOutcomes.push({
+        payload: {
+          amount,
+          attemptedAmount: definition.deathriteHeal,
+          life,
+          seat: dead.controller,
+          sourceInstanceId: dead.instanceId,
+        },
+        type: 'avatar-healed',
+      });
+    }
+    if (!definition.deathriteDrawSite) continue;
     const owner = players[dead.owner];
     const [drawn, ...atlas] = owner.atlas;
     if (!drawn) {

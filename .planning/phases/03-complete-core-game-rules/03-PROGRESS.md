@@ -25,6 +25,7 @@
 - A narrow minion mana ability that requires readiness, taps for temporary mana, and expires at End Phase.
 - Deathrite site draws resolve before simultaneous dead minions enter their cemeteries, including hidden draws and deck-empty loss.
 - A narrow site Genesis effect grants temporary mana on entry, emits causal gain evidence, and expires through the existing End Phase reset.
+- Numeric Deathrite healing resolves before cemetery entry, caps at printed Avatar life, and cannot change life at Death's Door.
 - A minion that cannot move to Defend is excluded only when movement is required; stationary Defend and Intercept remain legal.
 - Movement +1 uses engine-issued explicit surface paths for both Move and Attack and Defend, including exact two-step and legal returning routes.
 - A private-local actual-card adapter that verifies the normalized artifact and current Constructed format, builds legal 30/60 beginner decks under official rarity copy limits, and executes a deterministic real-card Charge and combat scenario without committing source data.
@@ -47,7 +48,7 @@
 - `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, and 26-action Air movement matches exercise three concrete real-card teaching decks with byte-exact replay.
 - `pnpm game:verify-private`: one passing ignored-authority integration scenario.
 - Death's Door scenarios prove same-turn direct-damage immunity, later death blows, simultaneous-defeat draws, nonlethal site strikes, and exact replay.
-- `pnpm verify`: 216 passing public tests at this checkpoint.
+- `pnpm verify`: 217 passing public tests at this checkpoint.
 
 ## Still required for Phase 3
 
