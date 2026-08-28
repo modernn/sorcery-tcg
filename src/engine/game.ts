@@ -38,7 +38,12 @@ const REALM_CELLS = (['A', 'B', 'C', 'D', 'E'] as const)
 
 export type GameCardDefinition =
   | Readonly<{ attack: number; cardType: 'avatar'; defense: number; drawSpell: boolean; life: number }>
-  | Readonly<{ cardType: 'site'; elements: readonly GameElement[]; genesisGainMana?: number }>
+  | Readonly<{
+    cardType: 'site';
+    elements: readonly GameElement[];
+    genesisDrawSpellPerAdjacentSameCard?: boolean;
+    genesisGainMana?: number;
+  }>
   | Readonly<{
     airborne?: boolean;
     attack: number;
@@ -486,6 +491,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         || card.genesisGainMana > MAX_COMBAT_STAT)) {
       throw new RangeError(`${path}.genesisGainMana must be a safe integer between 1 and ${MAX_COMBAT_STAT}`);
     }
+    if (card.genesisDrawSpellPerAdjacentSameCard !== undefined
+      && typeof card.genesisDrawSpellPerAdjacentSameCard !== 'boolean') {
+      throw new RangeError(`${path}.genesisDrawSpellPerAdjacentSameCard must be boolean`);
+    }
     return;
   }
   if (card.cardType !== 'minion') throw new RangeError(`${path}.cardType is unsupported`);
@@ -652,6 +661,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
           ? {
             cardType: 'site' as const,
             elements: [...card.elements],
+            ...(card.genesisDrawSpellPerAdjacentSameCard === true
+              ? { genesisDrawSpellPerAdjacentSameCard: true }
+              : {}),
             ...(card.genesisGainMana ? { genesisGainMana: card.genesisGainMana } : {}),
           }
           : {
@@ -2029,6 +2041,12 @@ function applyDescriptor(
       : !player.avatar.tapped && legalSiteCells(state, seat).includes(descriptor.cell);
     if (!legalCell) throw new Error('unreachable illegal site cell');
     const site = deepFreeze({ ...card, controller: seat });
+    const genesisSpellDrawCount = definition.genesisDrawSpellPerAdjacentSameCard
+      ? borderingCells(descriptor.cell)
+        .filter((cell) => state.realm.sites[cell]?.cardId === card.cardId).length
+      : 0;
+    const genesisSpellDraws = player.spellbook.slice(0, genesisSpellDrawCount);
+    const genesisDrawFailed = genesisSpellDraws.length < genesisSpellDrawCount;
     const updatedPlayer = deepFreeze({
       ...player,
       avatar: { ...player.avatar, tapped: true },
@@ -2036,11 +2054,20 @@ function applyDescriptor(
       hand: {
         ...player.hand,
         atlas: player.hand.atlas.filter(({ instanceId }) => instanceId !== card.instanceId),
+        spellbook: [...player.hand.spellbook, ...genesisSpellDraws],
       },
       mana: player.mana + 1 + (definition.genesisGainMana ?? 0),
+      spellbook: player.spellbook.slice(genesisSpellDraws.length),
     });
+    const winner = otherSeat(seat);
     return [
       withStateVersion(state, {
+        ...(genesisDrawFailed
+          ? {
+            phase: 'terminal' as const,
+            terminal: { loser: seat, reason: 'deck_empty' as const, status: 'finished' as const, winner },
+          }
+          : {}),
         players: replacePlayer(state, seat, updatedPlayer),
         realm: {
           ...state.realm,
@@ -2057,6 +2084,13 @@ function applyDescriptor(
             payload: { amount: definition.genesisGainMana, seat, sourceInstanceId: card.instanceId },
             type: 'mana-gained',
           }]
+          : []),
+        ...genesisSpellDraws.map(() => ({
+          payload: { seat, sourceInstanceId: card.instanceId },
+          type: 'spell-drawn',
+        })),
+        ...(genesisDrawFailed
+          ? [{ payload: { loser: seat, reason: 'deck_empty', winner }, type: 'game-ended' }]
           : []),
       ],
       [],

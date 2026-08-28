@@ -91,6 +91,17 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airVoidwalk.deck.spellbook
     .find(({ name }) => name === 'Forsaken')?.copies, 4);
   assert.equal(result.airVoidwalk.replayVerified, true);
+  assert.equal(result.airLeyline.henge, 'Leyline Henge');
+  assert.equal(result.airLeyline.acceptedActionCount, 9);
+  assert.equal(result.airLeyline.firstHengeDrewNothing, true);
+  assert.equal(result.airLeyline.genesisDrewOne, true);
+  assert.equal(result.airLeyline.hiddenFromOpponent, true);
+  assert.equal(result.airLeyline.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airLeyline.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airLeyline.deck.atlas
+    .find(({ name }) => name === 'Leyline Henge')?.copies, 4);
+  assert.equal(result.airLeyline.replayVerified, true);
   assert.equal(result.waterEdgeConnection.polarBears, 'Polar Bears');
   assert.equal(result.waterEdgeConnection.acceptedActionCount, 16);
   assert.equal(result.waterEdgeConnection.wrapMoveAvailable, true);
