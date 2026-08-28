@@ -37,6 +37,7 @@ export type GameCardDefinition =
   | Readonly<{ attack: number; cardType: 'avatar'; defense: number; drawSpell: boolean; life: number }>
   | Readonly<{ cardType: 'site'; elements: readonly GameElement[]; genesisGainMana?: number }>
   | Readonly<{
+    airborne?: boolean;
     attack: number;
     cardType: 'minion';
     cannotAttackSites?: boolean;
@@ -329,6 +330,19 @@ function borderingCells(cell: RealmCell): readonly RealmCell[] {
     .map(([nextFile, nextRank]) => `${String.fromCharCode(nextFile!)}${nextRank}` as RealmCell);
 }
 
+function diagonalCells(cell: RealmCell): readonly RealmCell[] {
+  const file = cell.charCodeAt(0);
+  const rank = Number(cell[1]);
+  return [
+    [file - 1, rank - 1],
+    [file - 1, rank + 1],
+    [file + 1, rank - 1],
+    [file + 1, rank + 1],
+  ].filter(([nextFile, nextRank]) =>
+    nextFile! >= 65 && nextFile! <= 69 && nextRank! >= 1 && nextRank! <= 4)
+    .map(([nextFile, nextRank]) => `${String.fromCharCode(nextFile!)}${nextRank}` as RealmCell);
+}
+
 function legalSiteCells(state: GameState, seat: GameSeat): readonly RealmCell[] {
   return [...new Set(Object.entries(state.realm.sites)
     .filter(([, site]) => site.controller === seat)
@@ -403,6 +417,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     return;
   }
   if (card.cardType !== 'minion') throw new RangeError(`${path}.cardType is unsupported`);
+  if (card.airborne !== undefined && typeof card.airborne !== 'boolean') {
+    throw new RangeError(`${path}.airborne must be boolean`);
+  }
   if (card.charge !== undefined && typeof card.charge !== 'boolean') {
     throw new RangeError(`${path}.charge must be boolean`);
   }
@@ -532,6 +549,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.genesisGainMana ? { genesisGainMana: card.genesisGainMana } : {}),
           }
           : {
+            ...(card.airborne === true ? { airborne: true } : {}),
             attack: card.attack,
             cardType: 'minion' as const,
             ...(card.cannotAttackSites === true ? { cannotAttackSites: true } : {}),
@@ -865,6 +883,7 @@ function unitStatus(
   state: GameState,
   ref: GameUnitRef,
 ): Readonly<{
+  airborne: boolean;
   attack: number;
   canAttackSites: boolean;
   canMoveToDefend: boolean;
@@ -884,6 +903,7 @@ function unitStatus(
     const definition = cardDefinition(state, avatar.card.cardId);
     if (definition.cardType !== 'avatar') throw new Error('Avatar lacks Avatar definition');
     return {
+      airborne: false,
       attack: definition.attack,
       canAttackSites: true,
       canMoveToDefend: true,
@@ -903,6 +923,7 @@ function unitStatus(
   const definition = cardDefinition(state, unit.cardId);
   if (definition.cardType !== 'minion') throw new Error('minion lacks minion definition');
   return {
+    airborne: definition.airborne === true,
     attack: definition.attack,
     canAttackSites: definition.cannotAttackSites !== true,
     canMoveToDefend: definition.cannotDefend !== true,
@@ -927,12 +948,16 @@ function surfacePaths(
   state: GameState,
   start: RealmCell,
   maximumSteps: number,
+  airborne = false,
 ): readonly (readonly RealmCell[])[] {
   if (!state.realm.sites[start]) return [];
   const paths: RealmCell[][] = [[start]];
   let frontier: RealmCell[][] = [[start]];
   for (let step = 0; step < maximumSteps; step += 1) {
-    frontier = frontier.flatMap((path) => borderingCells(path.at(-1)!)
+    frontier = frontier.flatMap((path) => [
+      ...borderingCells(path.at(-1)!),
+      ...(airborne ? diagonalCells(path.at(-1)!) : []),
+    ]
       .filter((cell) => state.realm.sites[cell])
       .sort()
       .map((cell) => [...path, cell]));
@@ -962,6 +987,7 @@ function defendPaths(
     state,
     unit.location,
     unit.canMoveToDefend ? unit.movementSteps : 0,
+    unit.airborne,
   ).filter((path) => path.at(-1) === destination);
 }
 
@@ -969,7 +995,7 @@ function movementDescriptors(state: GameState, seat: GameSeat): readonly GameAct
   return unitRefs(state, seat).flatMap((ref) => {
     const unit = unitStatus(state, ref);
     if (!readyUnit(state, ref) || !state.realm.sites[unit.location]) return [];
-    return surfacePaths(state, unit.location, unit.movementSteps).map((path) => ({
+    return surfacePaths(state, unit.location, unit.movementSteps, unit.airborne).map((path) => ({
       from: { cell: unit.location, region: 'surface' as const },
       kind: 'move-and-attack' as const,
       path: pathLocations(path),
@@ -1035,8 +1061,12 @@ function manaAbilityDescriptors(state: GameState, seat: GameSeat): readonly Game
 
 function attackTargets(state: GameState, pending: PendingCombat): readonly CombatTarget[] {
   const defendingSeat = otherSeat(pending.attackingSeat);
+  const attackerAirborne = unitStatus(state, pending.attacker).airborne;
   const targets: CombatTarget[] = unitRefs(state, defendingSeat)
-    .filter((ref) => unitStatus(state, ref).location === pending.cell);
+    .filter((ref) => {
+      const target = unitStatus(state, ref);
+      return target.location === pending.cell && (!target.airborne || attackerAirborne);
+    });
   const site = state.realm.sites[pending.cell];
   if (site?.controller === defendingSeat && unitStatus(state, pending.attacker).canAttackSites) {
     targets.push({ instanceId: site.instanceId, kind: 'site', seat: defendingSeat });
@@ -1058,6 +1088,10 @@ function responseUnitRefs(
     if (unavailable.has(ref.instanceId) || !readyUnit(state, ref)) return false;
     const unit = unitStatus(state, ref);
     if (!unit.canRespondToAttack) return false;
+    if (intercept
+      && unitStatus(state, pending.attacker).airborne
+      && !unit.airborne
+      && !unit.ranged) return false;
     const location = unit.location;
     return intercept
       ? location === pending.cell
