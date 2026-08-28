@@ -50,6 +50,10 @@ type AvatarFacts = Readonly<{
   life: number;
 }>;
 
+type SiteFacts = Readonly<{
+  genesisGainMana?: number;
+}>;
+
 function cardsFor(
   decks: Readonly<Record<'north' | 'south', GameDeckSpec>>,
   spell: SpellFacts = {
@@ -57,6 +61,7 @@ function cardsFor(
     thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
   },
   avatar: AvatarFacts = { attack: 1, defense: 1, drawSpell: false, life: 20 },
+  site: SiteFacts = {},
 ): Record<string, GameCardDefinition> {
   const cards: Record<string, GameCardDefinition> = {};
   for (const playerDeck of Object.values(decks)) {
@@ -68,7 +73,11 @@ function cardsFor(
       life: avatar.life,
     };
     playerDeck.atlas.forEach((cardId) => {
-      cards[cardId] = { cardType: 'site', elements: ['earth'] };
+      cards[cardId] = {
+        cardType: 'site',
+        elements: ['earth'],
+        ...(site.genesisGainMana ? { genesisGainMana: site.genesisGainMana } : {}),
+      };
     });
     playerDeck.spellbook.forEach((cardId) => {
       cards[cardId] = {
@@ -94,10 +103,11 @@ function cardsFor(
 function manifest(
   seed = 1,
   options: Readonly<{
+    avatar?: AvatarFacts;
     north?: GameDeckSpec;
+    site?: SiteFacts;
     south?: GameDeckSpec;
     spell?: SpellFacts;
-    avatar?: AvatarFacts;
   }> = {},
 ): GameManifest {
   const decks = {
@@ -110,7 +120,7 @@ function manifest(
       mode: 'synthetic',
       revisionId: 'synthetic-setup-fixture-v1',
     },
-    cards: cardsFor(decks, options.spell, options.avatar),
+    cards: cardsFor(decks, options.spell, options.avatar, options.site),
     decks,
     firstSeat: 'north',
     seed,
@@ -541,6 +551,35 @@ test('RULE-03 Genesis draws a hidden site and an empty Atlas loses after summoni
     session.transcript.at(-1)?.events.map(({ type }) => type),
     ['minion-summoned', 'game-ended'],
   );
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 site Genesis grants temporary mana once, pays a summon, and expires', () => {
+  let session = keep(createGameSession(manifest(55, {
+    site: { genesisGainMana: 1 },
+    spell: {
+      manaCost: 2,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+  })));
+  session = keep(session);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  assert.equal(session.state.players.north.mana, 2);
+  assert.deepEqual(
+    session.transcript.at(-1)?.events.map(({ type }) => type),
+    ['site-played', 'mana-gained'],
+  );
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'summon-minion'));
+  assert.equal(session.state.players.north.mana, 0);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  assert.equal(session.state.players.north.mana, 0);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  assert.equal(session.state.players.north.mana, 1);
   assert.equal(verifyGameReplay(session), true);
 });
 

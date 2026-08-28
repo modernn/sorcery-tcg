@@ -35,7 +35,7 @@ export type GameRegion = 'surface';
 
 export type GameCardDefinition =
   | Readonly<{ attack: number; cardType: 'avatar'; defense: number; drawSpell: boolean; life: number }>
-  | Readonly<{ cardType: 'site'; elements: readonly GameElement[] }>
+  | Readonly<{ cardType: 'site'; elements: readonly GameElement[]; genesisGainMana?: number }>
   | Readonly<{
     attack: number;
     cardType: 'minion';
@@ -375,6 +375,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.elements.some((element, index) => elements.indexOf(element) <= elements.indexOf(card.elements[index - 1]!))) {
       throw new RangeError(`${path}.elements must contain unique elements in canonical order`);
     }
+    if (card.genesisGainMana !== undefined
+      && (!Number.isSafeInteger(card.genesisGainMana)
+        || card.genesisGainMana < 1
+        || card.genesisGainMana > MAX_COMBAT_STAT)) {
+      throw new RangeError(`${path}.genesisGainMana must be a safe integer between 1 and ${MAX_COMBAT_STAT}`);
+    }
     return;
   }
   if (card.cardType !== 'minion') throw new RangeError(`${path}.cardType is unsupported`);
@@ -477,7 +483,11 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
           life: card.life,
         }
         : card.cardType === 'site'
-          ? { cardType: 'site' as const, elements: [...card.elements] }
+          ? {
+            cardType: 'site' as const,
+            elements: [...card.elements],
+            ...(card.genesisGainMana ? { genesisGainMana: card.genesisGainMana } : {}),
+          }
           : {
             attack: card.attack,
             cardType: 'minion' as const,
@@ -1490,6 +1500,8 @@ function applyDescriptor(
     const card = player.hand.atlas.find(({ cardId, instanceId }) =>
       instanceId === descriptor.cardInstanceId && cardId === descriptor.cardId);
     if (!card) throw new Error('unreachable site card');
+    const definition = cardDefinition(state, card.cardId);
+    if (definition.cardType !== 'site') throw new Error('unreachable non-site card');
     const legalCell = !player.domainEstablished
       ? !player.avatar.tapped
         && descriptor.cell === player.avatar.location
@@ -1505,14 +1517,22 @@ function applyDescriptor(
         ...player.hand,
         atlas: player.hand.atlas.filter(({ instanceId }) => instanceId !== card.instanceId),
       },
-      mana: player.mana + 1,
+      mana: player.mana + 1 + (definition.genesisGainMana ?? 0),
     });
     return [
       withStateVersion(state, {
         players: replacePlayer(state, seat, updatedPlayer),
         realm: { ...state.realm, sites: { ...state.realm.sites, [descriptor.cell]: site } },
       }),
-      [{ payload: { cardId: card.cardId, cell: descriptor.cell, instanceId: card.instanceId, seat }, type: 'site-played' }],
+      [
+        { payload: { cardId: card.cardId, cell: descriptor.cell, instanceId: card.instanceId, seat }, type: 'site-played' },
+        ...(definition.genesisGainMana
+          ? [{
+            payload: { amount: definition.genesisGainMana, seat, sourceInstanceId: card.instanceId },
+            type: 'mana-gained',
+          }]
+          : []),
+      ],
       [],
     ];
   }
