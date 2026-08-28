@@ -442,6 +442,20 @@ export type PrivateGameCheck = Readonly<{
     temporaryChargeRecorded: boolean;
     unitStatePreservedOnGrant: boolean;
   }>;
+  fireGenesisLifeLoss: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    cemeteriesUnchanged: boolean;
+    deck: DeckList;
+    lesserBloodDemon: string;
+    lifeAfter: number;
+    lifeLost: number;
+    noDamageDeathOrTerminalEvents: boolean;
+    noRandomDraws: boolean;
+    otherStatePreserved: boolean;
+    replayVerified: boolean;
+    summonedAtC3: boolean;
+  }>;
   fireMinorExplosion: Readonly<{
     acceptedActionCount: number;
     avatarTookThreeDamage: boolean;
@@ -767,6 +781,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   healingMinion: NormalizedCard;
   lethalMinion: NormalizedCard;
   leylineHenge: NormalizedCard;
+  lesserBloodDemon: NormalizedCard;
   lightningBolt: NormalizedCard;
   lugbogCat: NormalizedCard;
   lure: NormalizedCard;
@@ -961,6 +976,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || chargeMagic.thresholds.water !== 0
     || chargeMagic.rarity !== 'ordinary') {
     throw new Error('private temporary Charge Magic no longer matches its supported facts');
+  }
+  const lesserBloodDemon = snapshot.cards.find(({ name }) => name === 'Lesser Blood Demon');
+  if (!lesserBloodDemon
+    || lesserBloodDemon.cardType !== 'minion'
+    || lesserBloodDemon.rulesText.trim() !== 'Genesis → Lose 2 life.'
+    || lesserBloodDemon.manaCost !== 2
+    || lesserBloodDemon.attack !== 3
+    || lesserBloodDemon.defense !== 3
+    || lesserBloodDemon.life !== null
+    || lesserBloodDemon.elements.length !== 1
+    || lesserBloodDemon.elements[0] !== 'fire'
+    || lesserBloodDemon.thresholds.air !== 0
+    || lesserBloodDemon.thresholds.earth !== 0
+    || lesserBloodDemon.thresholds.fire !== 1
+    || lesserBloodDemon.thresholds.water !== 0
+    || lesserBloodDemon.rarity !== 'ordinary') {
+    throw new Error('private Genesis life-loss minion no longer matches its supported facts');
   }
   const freeze = snapshot.cards.find(({ name }) => name === 'Freeze');
   if (!freeze
@@ -1668,6 +1700,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     healingMinion,
     lethalMinion,
     leylineHenge,
+    lesserBloodDemon,
     lightningBolt,
     lugbogCat,
     lure,
@@ -1774,6 +1807,7 @@ function gameDefinition(
   damageEachUnitAtLocationWithinTwoSteps: 0 | 3 = 0,
   grantChargeToAllyThisTurn = false,
   lureEnemyMinionOneStepCloser = false,
+  genesisLoseControllerLife: 0 | 2 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1859,6 +1893,7 @@ function gameDefinition(
       defense: card.defense,
       genesisDrawSpell,
       genesisDrawSite,
+      ...(genesisLoseControllerLife ? { genesisLoseControllerLife } : {}),
       gainsStealthAtEndOfTurn,
       immobile,
       lethal,
@@ -1889,7 +1924,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-charge' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -2049,6 +2084,7 @@ function buildManifest(
     [],
     [input.chargeMagic],
   );
+  const fireGenesisLifeLossDeck = elementalDeck('fire', [input.lesserBloodDemon]);
   const waterDeck = elementalDeck('water', [
     input.healingMinion,
     input.slyFox,
@@ -2137,6 +2173,8 @@ function buildManifest(
           ? elementalDeck('fire', [input.lumberingMinion, input.monstrousLion])
         : scenario === 'fire-charge'
           ? fireChargeDeck
+        : scenario === 'fire-genesis-life-loss'
+          ? fireGenesisLifeLossDeck
         : scenario === 'fire-minor-explosion'
           ? fireMinorExplosionDeck
         : scenario === 'water-edge-connection'
@@ -2281,6 +2319,7 @@ function buildManifest(
       card.stableId === input.minorExplosion.stableId ? 3 : 0,
       card.stableId === input.chargeMagic.stableId,
       card.stableId === input.lure.stableId,
+      card.stableId === input.lesserBloodDemon.stableId ? 2 : 0,
     ),
   ]));
   return {
@@ -3413,6 +3452,42 @@ function findAirTeleportOpening(
     }
   }
   throw new Error('private ally-to-site Teleport scenario no longer produces its supported opening');
+}
+
+function findFireGenesisLifeLossOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  demonInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string];
+  session: GameSession;
+  southSiteInstanceId: string;
+}> {
+  // ponytail: bounded opening scan avoids adding another private seed field.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const built = buildManifest(input, input.config.fireSeed + offset, 'fire-genesis-life-loss');
+    const session = createGameSession(built.manifest);
+    const northFireSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('fire');
+    });
+    const demonInstanceId = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 1),
+    ].find(({ cardId }) => cardId === input.lesserBloodDemon.stableId)?.instanceId;
+    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+    if (northFireSites.length >= 2 && demonInstanceId && southSiteInstanceId) {
+      return {
+        ...built,
+        demonInstanceId,
+        northSiteInstanceIds: [northFireSites[0]!.instanceId, northFireSites[1]!.instanceId],
+        session,
+        southSiteInstanceId,
+      };
+    }
+  }
+  throw new Error('private Genesis life-loss scenario no longer produces its supported opening');
 }
 
 function findFireChargeOpening(
@@ -6641,6 +6716,99 @@ function runAirSummoning(
   });
 }
 
+function runFireGenesisLifeLoss(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['fireGenesisLifeLoss'] {
+  const opening = findFireGenesisLifeLossOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+
+  const northBefore = session.state.players.north;
+  const southBefore = session.state.players.south;
+  const sitesBefore = session.state.realm.sites;
+  const summoned = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.demonInstanceId
+      && descriptor.cell === 'C3'
+      && descriptor.region === undefined));
+  if (!summoned.accepted) throw new Error('private Lesser Blood Demon summon was rejected');
+  session = summoned.session;
+  const northAfter = session.state.players.north;
+  const demon = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.demonInstanceId);
+  const events = summoned.receipt.events;
+  const summonedPayload = events[0] && isJsonRecord(events[0].payload)
+    ? events[0].payload
+    : undefined;
+  const lifePayload = events[1] && isJsonRecord(events[1].payload)
+    ? events[1].payload
+    : undefined;
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified: events.map(({ type }) => type).join(',')
+      === 'minion-summoned,avatar-life-lost'
+      && summonedPayload?.instanceId === opening.demonInstanceId
+      && lifePayload?.amount === 2
+      && lifePayload.life === 18
+      && lifePayload.seat === 'north'
+      && lifePayload.sourceInstanceId === opening.demonInstanceId,
+    cemeteriesUnchanged: northAfter.cemetery.length === northBefore.cemetery.length
+      && session.state.players.south.cemetery.length === southBefore.cemetery.length
+      && northAfter.cemetery.every(({ instanceId }) => instanceId !== opening.demonInstanceId),
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    lesserBloodDemon: input.lesserBloodDemon.name,
+    lifeAfter: northAfter.avatar.life,
+    lifeLost: northBefore.avatar.life - northAfter.avatar.life,
+    noDamageDeathOrTerminalEvents: events.every(({ type }) =>
+      type !== 'damage-dealt'
+        && type !== 'minion-died'
+        && type !== 'death-blow'
+        && type !== 'avatar-reached-deaths-door'
+        && type !== 'game-ended')
+      && session.state.terminal.status === 'active',
+    noRandomDraws: summoned.receipt.randomDraws.length === 0,
+    otherStatePreserved:
+      canonicalJson(session.state.players.south as unknown as JsonValue)
+        === canonicalJson(southBefore as unknown as JsonValue)
+      && canonicalJson(session.state.realm.sites as unknown as JsonValue)
+        === canonicalJson(sitesBefore as unknown as JsonValue)
+      && canonicalJson(northAfter.atlas as unknown as JsonValue)
+        === canonicalJson(northBefore.atlas as unknown as JsonValue)
+      && canonicalJson(northAfter.spellbook as unknown as JsonValue)
+        === canonicalJson(northBefore.spellbook as unknown as JsonValue)
+      && canonicalJson(northAfter.hand.atlas as unknown as JsonValue)
+        === canonicalJson(northBefore.hand.atlas as unknown as JsonValue)
+      && northAfter.avatar.card.instanceId === northBefore.avatar.card.instanceId
+      && northAfter.avatar.location === northBefore.avatar.location
+      && northAfter.avatar.region === northBefore.avatar.region
+      && northAfter.avatar.tapped === northBefore.avatar.tapped
+      && session.state.phase === 'main',
+    replayVerified: verifyGameReplay(session),
+    summonedAtC3: demon?.controller === 'north'
+      && demon.location === 'C3'
+      && demon.owner === 'north'
+      && demon.region === 'surface',
+  });
+}
+
 function runFireCharge(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['fireCharge'] {
@@ -7999,6 +8167,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthSecretTunnel = runEarthSecretTunnel(input);
   const earthWard = runEarthWard(input);
   const fireCharge = runFireCharge(input);
+  const fireGenesisLifeLoss = runFireGenesisLifeLoss(input);
   const fireMinorExplosion = runFireMinorExplosion(input);
   const fireResponse = runFireResponse(input);
   const stealth = runStealth(input);
@@ -8162,6 +8331,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthSecretTunnel,
     earthWard,
     fireCharge,
+    fireGenesisLifeLoss,
     fireMinorExplosion,
     fireResponse,
     finalStateHash: hashGameState(session.state),

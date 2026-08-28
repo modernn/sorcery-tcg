@@ -43,6 +43,7 @@ type SpellFacts = Readonly<{
   gainsStealthAtEndOfTurn?: boolean;
   genesisDrawSpell?: boolean;
   genesisDrawSite?: boolean;
+  genesisLoseControllerLife?: 2;
   immobile?: boolean;
   lethal?: boolean;
   manaCost: number;
@@ -133,6 +134,7 @@ function cardsFor(
         gainsStealthAtEndOfTurn: facts.gainsStealthAtEndOfTurn ?? false,
         genesisDrawSpell: facts.genesisDrawSpell ?? false,
         genesisDrawSite: facts.genesisDrawSite ?? false,
+        ...(facts.genesisLoseControllerLife === 2 ? { genesisLoseControllerLife: 2 as const } : {}),
         immobile: facts.immobile ?? false,
         lethal: facts.lethal ?? false,
         manaCost: facts.manaCost,
@@ -751,6 +753,39 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as GameCardDefinition,
     },
   }), /simultaneous Genesis/);
+  const bloodDemonManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: { ...cards[firstSpell]!, genesisLoseControllerLife: 2 } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    bloodDemonManifest.cards[firstSpell]?.cardType === 'minion'
+      && bloodDemonManifest.cards[firstSpell].genesisLoseControllerLife,
+    2,
+  );
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        genesisLoseControllerLife: 1,
+      } as unknown as GameCardDefinition,
+    },
+  }), /genesisLoseControllerLife must be 2/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        genesisDrawSite: true,
+        genesisLoseControllerLife: 2,
+      } as GameCardDefinition,
+    },
+  }), /simultaneous Genesis life loss and draw/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -3266,6 +3301,78 @@ test('RULE-03 Genesis draws a hidden spell and an empty Spellbook loses after su
     ['minion-summoned', 'game-ended'],
   );
   assert.equal(verifyGameReplay(session), true);
+});
+
+test("RULE-03 Genesis life loss reaches but cannot cross Death's Door", () => {
+  const readyToSummon = (life: number, seed: number): GameSession => {
+    let session = keep(createGameSession(manifest(seed, {
+      avatar: { attack: 1, defense: 1, drawSpell: false, life },
+      spell: {
+        genesisLoseControllerLife: 2,
+        manaCost: 0,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    })));
+    session = keep(session);
+    return accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  };
+  const summon = (checkpoint: GameSession) => {
+    const result = stepGame(
+      checkpoint,
+      action(checkpoint, ({ descriptor }) => descriptor.kind === 'summon-minion'),
+    );
+    assert.equal(result.accepted, true);
+    assert.equal(result.session.state.stateVersion, checkpoint.state.stateVersion + 1);
+    return result;
+  };
+
+  const lifeThree = summon(readyToSummon(3, 226));
+  const lifeThreeSource = lifeThree.session.state.realm.units.at(-1)?.instanceId;
+  assert.ok(lifeThreeSource);
+  assert.equal(lifeThree.session.state.players.north.avatar.life, 1);
+  assert.deepEqual(lifeThree.receipt.events.map(({ type }) => type), [
+    'minion-summoned',
+    'avatar-life-lost',
+  ]);
+  assert.deepEqual(lifeThree.receipt.events[1]?.payload, {
+    amount: 2,
+    life: 1,
+    seat: 'north',
+    sourceInstanceId: lifeThreeSource,
+  });
+  assert.equal(verifyGameReplay(lifeThree.session), true);
+
+  const lifeTwo = summon(readyToSummon(2, 227));
+  const lifeTwoSource = lifeTwo.session.state.realm.units.at(-1)?.instanceId;
+  assert.ok(lifeTwoSource);
+  assert.equal(lifeTwo.session.state.players.north.avatar.life, 0);
+  assert.deepEqual(lifeTwo.receipt.events.map(({ type }) => type), [
+    'minion-summoned',
+    'avatar-life-lost',
+    'avatar-reached-deaths-door',
+  ]);
+  assert.deepEqual(lifeTwo.receipt.events[1]?.payload, {
+    amount: 2,
+    life: 0,
+    seat: 'north',
+    sourceInstanceId: lifeTwoSource,
+  });
+  assert.deepEqual(lifeTwo.receipt.events[2]?.payload, {
+    seat: 'north',
+    sourceInstanceId: lifeTwoSource,
+    turnNumber: 1,
+  });
+  assert.deepEqual(lifeTwo.session.state.terminal, { status: 'active' });
+  assert.equal(verifyGameReplay(lifeTwo.session), true);
+
+  const atDeathsDoor = lifeTwo.session;
+  const deathDoorTurn = atDeathsDoor.state.players.north.avatar.deathDoorTurn;
+  const lifeZero = summon(atDeathsDoor);
+  assert.equal(lifeZero.session.state.players.north.avatar.life, 0);
+  assert.equal(lifeZero.session.state.players.north.avatar.deathDoorTurn, deathDoorTurn);
+  assert.deepEqual(lifeZero.receipt.events.map(({ type }) => type), ['minion-summoned']);
+  assert.deepEqual(lifeZero.session.state.terminal, { status: 'active' });
+  assert.equal(verifyGameReplay(lifeZero.session), true);
 });
 
 test('RULE-03 site Genesis grants temporary mana once, pays a summon, and expires', () => {

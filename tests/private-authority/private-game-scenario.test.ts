@@ -467,6 +467,23 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.fireCharge.deck.spellbook
     .find(({ name }) => name === 'Raal Dromedary')?.copies, 4);
   assert.equal(result.fireCharge.replayVerified, true);
+  assert.equal(result.fireGenesisLifeLoss.lesserBloodDemon, 'Lesser Blood Demon');
+  assert.equal(result.fireGenesisLifeLoss.acceptedActionCount, 10);
+  assert.equal(result.fireGenesisLifeLoss.summonedAtC3, true);
+  assert.equal(result.fireGenesisLifeLoss.lifeLost, 2);
+  assert.equal(result.fireGenesisLifeLoss.lifeAfter, 18);
+  assert.equal(result.fireGenesisLifeLoss.causalEventsVerified, true);
+  assert.equal(result.fireGenesisLifeLoss.noDamageDeathOrTerminalEvents, true);
+  assert.equal(result.fireGenesisLifeLoss.noRandomDraws, true);
+  assert.equal(result.fireGenesisLifeLoss.otherStatePreserved, true);
+  assert.equal(result.fireGenesisLifeLoss.cemeteriesUnchanged, true);
+  assert.equal(result.fireGenesisLifeLoss.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.fireGenesisLifeLoss.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.fireGenesisLifeLoss.deck.spellbook
+    .find(({ name }) => name === 'Lesser Blood Demon')?.copies, 4);
+  assert.equal(result.fireGenesisLifeLoss.replayVerified, true);
   assert.equal(result.combat.northMinionDied, true);
   assert.equal(result.combat.southMinionDied, true);
   assert.equal(result.waterDrown.drown, 'Drown');

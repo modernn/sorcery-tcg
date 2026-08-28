@@ -79,6 +79,7 @@ export type GameCardDefinition =
     defense: number;
     genesisDrawSpell?: boolean;
     genesisDrawSite?: boolean;
+    genesisLoseControllerLife?: 2;
     gainsStealthAtEndOfTurn?: boolean;
     immobile?: boolean;
     lethal?: boolean;
@@ -842,8 +843,15 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.genesisDrawSpell !== undefined && typeof card.genesisDrawSpell !== 'boolean') {
     throw new RangeError(`${path}.genesisDrawSpell must be boolean`);
   }
+  if (card.genesisLoseControllerLife !== undefined && card.genesisLoseControllerLife !== 2) {
+    throw new RangeError(`${path}.genesisLoseControllerLife must be 2`);
+  }
   if (card.genesisDrawSite && card.genesisDrawSpell) {
     throw new RangeError(`${path} simultaneous Genesis site and spell draws are unsupported`);
+  }
+  if (card.genesisLoseControllerLife !== undefined
+    && (card.genesisDrawSite || card.genesisDrawSpell)) {
+    throw new RangeError(`${path} simultaneous Genesis life loss and draw are unsupported`);
   }
   if (card.gainsStealthAtEndOfTurn !== undefined && typeof card.gainsStealthAtEndOfTurn !== 'boolean') {
     throw new RangeError(`${path}.gainsStealthAtEndOfTurn must be boolean`);
@@ -1049,6 +1057,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             defense: card.defense,
             ...(card.genesisDrawSpell === true ? { genesisDrawSpell: true } : {}),
             ...(card.genesisDrawSite === true ? { genesisDrawSite: true } : {}),
+            ...(card.genesisLoseControllerLife === 2 ? { genesisLoseControllerLife: 2 as const } : {}),
             ...(card.gainsStealthAtEndOfTurn === true ? { gainsStealthAtEndOfTurn: true } : {}),
             ...(card.immobile === true ? { immobile: true } : {}),
             ...(card.lethal === true ? { lethal: true } : {}),
@@ -2086,6 +2095,27 @@ function healAvatar(
   return [deepFreeze({ ...player, avatar: { ...player.avatar, life } }), life - player.avatar.life];
 }
 
+function loseAvatarLife(
+  player: PlayerState,
+  attemptedAmount: number,
+  turnNumber: number,
+): readonly [PlayerState, number, boolean] {
+  const life = Math.max(0, player.avatar.life - attemptedAmount);
+  const reachedDeathsDoor = player.avatar.life > 0 && life === 0;
+  return [
+    deepFreeze({
+      ...player,
+      avatar: {
+        ...player.avatar,
+        ...(reachedDeathsDoor ? { deathDoorTurn: turnNumber } : {}),
+        life,
+      },
+    }),
+    player.avatar.life - life,
+    reachedDeathsDoor,
+  ];
+}
+
 function orderedCards(hand: readonly CardInstance[], ids: readonly string[]): readonly CardInstance[] {
   return ids.map((id) => {
     const card = hand.find(({ instanceId }) => instanceId === id);
@@ -2624,16 +2654,8 @@ function strikeUndefendedSite(
   const amount = unitStatus(state, pending.attacker).attack;
   const [units, stealthOutcomes] = loseStealth(state.realm.units, [pending.attacker]);
   const player = state.players[target.seat];
-  const life = Math.max(0, player.avatar.life - amount);
-  const lost = player.avatar.life - life;
-  const updatedPlayer = deepFreeze({
-    ...player,
-    avatar: {
-      ...player.avatar,
-      ...(player.avatar.life > 0 && life === 0 ? { deathDoorTurn: state.turnNumber } : {}),
-      life,
-    },
-  });
+  const [updatedPlayer, lost, reachedDeathsDoor] = loseAvatarLife(player, amount, state.turnNumber);
+  const life = updatedPlayer.avatar.life;
   return [
     withStateVersion(state, {
       decisionSeat: state.activeSeat,
@@ -2656,7 +2678,7 @@ function strikeUndefendedSite(
       ...(lost > 0
         ? [{ payload: { amount: lost, life, seat: target.seat }, type: 'avatar-life-lost' }]
         : []),
-      ...(player.avatar.life > 0 && life === 0
+      ...(reachedDeathsDoor
         ? [{
           payload: { seat: target.seat, turnNumber: state.turnNumber },
           type: 'avatar-reached-deaths-door',
@@ -3523,6 +3545,40 @@ function applyDescriptor(
     const genesisDrawZone = definition.genesisDrawSite
       ? 'atlas'
       : definition.genesisDrawSpell ? 'spellbook' : undefined;
+    if (definition.genesisLoseControllerLife === 2) {
+      const [lifePlayer, amount, reachedDeathsDoor] = loseAvatarLife(
+        updatedPlayer,
+        definition.genesisLoseControllerLife,
+        state.turnNumber,
+      );
+      return [
+        withStateVersion(state, {
+          players: replacePlayer(state, seat, lifePlayer),
+          realm,
+        }),
+        [
+          summoned,
+          ...(amount > 0
+            ? [{
+              payload: {
+                amount,
+                life: lifePlayer.avatar.life,
+                seat,
+                sourceInstanceId: card.instanceId,
+              },
+              type: 'avatar-life-lost' as const,
+            }]
+            : []),
+          ...(reachedDeathsDoor
+            ? [{
+              payload: { seat, sourceInstanceId: card.instanceId, turnNumber: state.turnNumber },
+              type: 'avatar-reached-deaths-door' as const,
+            }]
+            : []),
+        ],
+        [],
+      ];
+    }
     if (genesisDrawZone) {
       const [drawn, ...remaining] = updatedPlayer[genesisDrawZone];
       if (!drawn) {
