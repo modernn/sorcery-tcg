@@ -619,6 +619,27 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.waterLure.deck.spellbook
     .find(({ name }) => name === 'Serava Townsfolk')?.copies, 4);
   assert.equal(result.waterLure.replayVerified, true);
+  assert.equal(result.waterPirateShip.pirateShip, 'Pirate Ship');
+  assert.equal(result.waterPirateShip.ghostTown, 'Ghost Town');
+  assert.equal(result.waterPirateShip.acceptedActionCount, 25);
+  assert.equal(result.waterPirateShip.enabledAtWater, true);
+  assert.equal(result.waterPirateShip.exactMoveAvailable, true);
+  assert.equal(result.waterPirateShip.disabledAtLand, true);
+  assert.equal(result.waterPirateShip.noSubsequentUnitActions, true);
+  assert.equal(result.waterPirateShip.ghostTownManaUsed, true);
+  assert.equal(result.waterPirateShip.movementEventVerified, true);
+  assert.equal(result.waterPirateShip.unitStatePreserved, true);
+  assert.equal(result.waterPirateShip.sitesUnchanged, true);
+  assert.equal(result.waterPirateShip.noCombatDamageDeathOrRandomness, true);
+  assert.equal(result.waterPirateShip.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.waterPirateShip.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.waterPirateShip.deck.atlas
+    .find(({ name }) => name === 'Ghost Town')?.copies, 3);
+  assert.equal(result.waterPirateShip.deck.spellbook
+    .find(({ name }) => name === 'Pirate Ship')?.copies, 4);
+  assert.equal(result.waterPirateShip.replayVerified, true);
   assert.equal(result.waterHealing.healingMinion, 'Muddy Pigs');
   assert.equal(result.waterHealing.healed, 3);
   assert.equal(result.waterHealing.healedBeforeCemetery, true);

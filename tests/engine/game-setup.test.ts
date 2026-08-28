@@ -64,6 +64,7 @@ type SpellFacts = Readonly<{
   tapForMana?: number;
   thresholds: Readonly<{ air: number; earth: number; fire: number; water: number }>;
   voidwalk?: boolean;
+  waterbound?: boolean;
   ward?: boolean;
 }>;
 
@@ -155,6 +156,7 @@ function cardsFor(
         ...(facts.tapForMana ? { tapForMana: facts.tapForMana } : {}),
         thresholds: { ...facts.thresholds },
         voidwalk: facts.voidwalk ?? false,
+        waterbound: facts.waterbound ?? false,
         ward: facts.ward ?? false,
       };
     });
@@ -786,6 +788,55 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as GameCardDefinition,
     },
   }), /simultaneous Genesis life loss and draw/);
+  const waterboundManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        submerge: true,
+        waterbound: true,
+      } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    waterboundManifest.cards[firstSpell]?.cardType === 'minion'
+      && waterboundManifest.cards[firstSpell].submerge
+      && waterboundManifest.cards[firstSpell].waterbound,
+    true,
+  );
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        waterbound: 'yes',
+      } as unknown as GameCardDefinition,
+    },
+  }), /waterbound must be boolean/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        waterbound: true,
+        ward: true,
+      } as GameCardDefinition,
+    },
+  }), /Waterbound with Ward or Stealth/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        genesisDrawSpell: true,
+        waterbound: true,
+      } as GameCardDefinition,
+    },
+  }), /Waterbound with Genesis/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -3194,6 +3245,182 @@ test('RULE-03 a Water-site cast restriction filters unrestricted summons by terr
     && descriptor.cardId === featuredId && descriptor.cell === 'B1');
   assert.equal(session.state.realm.units[0]?.location, 'B1');
   assert.equal(session.state.realm.units[0]?.controller, 'north');
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03/04 Waterbound derives Disabled from terrain and survives only with active abilities', () => {
+  const base = manifest(228);
+  const preview = createGameSession(base);
+  const waterSiteId = preview.state.players.north.hand.atlas[0]?.cardId;
+  const sinkholeId = preview.state.players.north.hand.atlas[1]?.cardId;
+  const waterboundId = preview.state.players.north.hand.spellbook[0]?.cardId;
+  const teleportId = preview.state.players.north.hand.spellbook[1]?.cardId;
+  assert.ok(waterSiteId);
+  assert.ok(sinkholeId);
+  assert.ok(waterboundId);
+  assert.ok(teleportId);
+  const cards: Record<string, GameCardDefinition> = { ...base.cards };
+  cards[waterSiteId] = { cardType: 'site', elements: ['water', 'air'] };
+  cards[sinkholeId] = {
+    ...cards[sinkholeId]!,
+    sacrificeToDestroyNearbySite: true,
+  } as GameCardDefinition;
+  for (const cardId of base.decks.north.spellbook) {
+    cards[cardId] = {
+      cardType: 'magic',
+      manaCost: 0,
+      teleportAllyToTargetSite: true,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    };
+  }
+  cards[waterboundId] = {
+    attack: 2,
+    cardType: 'minion',
+    deathriteDrawSite: true,
+    defense: 2,
+    manaCost: 0,
+    provides: 'water',
+    submerge: true,
+    tapForMana: 1,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    waterbound: true,
+  };
+  const gameManifest = createGameManifest({
+    authority: base.authority,
+    cards,
+    decks: base.decks,
+    firstSeat: base.firstSeat,
+    seed: base.seed,
+  });
+  let session = keep(keep(createGameSession(gameManifest)));
+  const waterSite = session.state.players.north.hand.atlas.find(({ cardId }) =>
+    cardId === waterSiteId);
+  const sinkhole = session.state.players.north.hand.atlas.find(({ cardId }) =>
+    cardId === sinkholeId);
+  const waterbound = session.state.players.north.hand.spellbook.find(({ cardId }) =>
+    cardId === waterboundId);
+  const teleport = session.state.players.north.hand.spellbook.find(({ cardId }) =>
+    cardId === teleportId);
+  assert.ok(waterSite);
+  assert.ok(sinkhole);
+  assert.ok(waterbound);
+  assert.ok(teleport);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === waterSite.instanceId
+      && descriptor.cell === 'C4'));
+  const summonCheckpoint = session;
+  const summonRegions = legalGameActions(summonCheckpoint.state, 'north').flatMap(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === waterbound.instanceId
+      ? [descriptor.region ?? 'surface']
+      : []);
+  assert.deepEqual(summonRegions, ['underwater', 'surface']);
+  const summoned = (region: 'surface' | 'underwater'): GameSession =>
+    accept(summonCheckpoint, action(summonCheckpoint, ({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === waterbound.instanceId
+        && (descriptor.region ?? 'surface') === region));
+  const underwater = summoned('underwater');
+  assert.equal(observeGame(underwater.state, 'north').realm.units[0]?.disabled, false);
+  assert.equal(observeGame(underwater.state, 'north').players.north.affinity.water, 2);
+  assert.equal(verifyGameReplay(underwater), true);
+
+  const northSecondMain = (start: GameSession): GameSession => {
+    let branch = accept(start, action(start, ({ descriptor }) => descriptor.kind === 'end-turn'));
+    branch = accept(branch, action(branch, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    branch = accept(branch, action(branch, ({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
+    branch = accept(branch, action(branch, ({ descriptor }) => descriptor.kind === 'end-turn'));
+    branch = accept(branch, action(branch, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    return accept(branch, action(branch, ({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardInstanceId === sinkhole.instanceId
+        && descriptor.cell === 'C3'));
+  };
+
+  const underwaterCheckpoint = northSecondMain(underwater);
+  const atlasBefore = underwaterCheckpoint.state.players.north.atlas.length;
+  const atlasHandBefore = underwaterCheckpoint.state.players.north.hand.atlas.length;
+  const destroyed = stepGame(underwaterCheckpoint, action(underwaterCheckpoint, ({ descriptor }) =>
+    descriptor.kind === 'activate-site-destruction'
+      && descriptor.sourceSiteInstanceId === sinkhole.instanceId
+      && descriptor.targetCell === 'C4'));
+  assert.equal(destroyed.accepted, true);
+  assert.deepEqual(destroyed.receipt.events.map(({ type }) => type), [
+    'site-sacrificed',
+    'site-destroyed',
+    'minion-died',
+    'rubble-created',
+    'rubble-created',
+  ]);
+  assert.equal(destroyed.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === waterbound.instanceId), false);
+  assert.equal(destroyed.session.state.players.north.atlas.length, atlasBefore);
+  assert.equal(destroyed.session.state.players.north.hand.atlas.length, atlasHandBefore);
+  assert.equal(destroyed.receipt.events.some(({ type }) => type === 'site-drawn'), false);
+  assert.equal(verifyGameReplay(destroyed.session), true);
+
+  session = northSecondMain(summoned('surface'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === waterbound.instanceId
+      && descriptor.to.cell === 'C3'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  assert.equal(observeGame(session.state, 'north').realm.units[0]?.disabled, true);
+  assert.equal(observeGame(session.state, 'north').players.north.affinity.water, 1);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  const disabledActions = legalGameActions(session.state, 'north');
+  assert.equal(disabledActions.some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === waterbound.instanceId), false);
+  assert.equal(disabledActions.some(({ descriptor }) =>
+    descriptor.kind === 'activate-mana'
+      && descriptor.unitInstanceId === waterbound.instanceId), false);
+  const beforeTeleport = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === waterbound.instanceId);
+  assert.ok(beforeTeleport);
+  assert.deepEqual({
+    damage: beforeTeleport.damage,
+    summoningSickness: beforeTeleport.summoningSickness,
+    tapped: beforeTeleport.tapped,
+  }, { damage: 0, summoningSickness: false, tapped: false });
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === teleport.instanceId
+      && descriptor.ally?.instanceId === waterbound.instanceId
+      && descriptor.targetLocation?.cell === 'C4'));
+  const returned = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === waterbound.instanceId);
+  assert.deepEqual({
+    damage: returned?.damage,
+    location: returned?.location,
+    region: returned?.region,
+    summoningSickness: returned?.summoningSickness,
+    tapped: returned?.tapped,
+  }, {
+    damage: 0,
+    location: 'C4',
+    region: 'surface',
+    summoningSickness: false,
+    tapped: false,
+  });
+  assert.equal(observeGame(session.state, 'north').realm.units[0]?.disabled, false);
+  assert.equal(observeGame(session.state, 'north').players.north.affinity.water, 2);
+  const enabledActions = legalGameActions(session.state, 'north');
+  assert.equal(enabledActions.some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === waterbound.instanceId), true);
+  assert.equal(enabledActions.some(({ descriptor }) =>
+    descriptor.kind === 'activate-mana'
+      && descriptor.unitInstanceId === waterbound.instanceId), true);
   assert.equal(verifyGameReplay(session), true);
 });
 

@@ -551,6 +551,22 @@ export type PrivateGameCheck = Readonly<{
     targetCemeteriesUnchanged: boolean;
     uniqueStepResolved: boolean;
   }>;
+  waterPirateShip: Readonly<{
+    acceptedActionCount: number;
+    deck: DeckList;
+    disabledAtLand: boolean;
+    enabledAtWater: boolean;
+    exactMoveAvailable: boolean;
+    ghostTown: string;
+    ghostTownManaUsed: boolean;
+    movementEventVerified: boolean;
+    noCombatDamageDeathOrRandomness: boolean;
+    noSubsequentUnitActions: boolean;
+    pirateShip: string;
+    replayVerified: boolean;
+    sitesUnchanged: boolean;
+    unitStatePreserved: boolean;
+  }>;
   waterDrown: Readonly<{
     acceptedActionCount: number;
     causalEventsVerified: boolean;
@@ -813,6 +829,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   voidwalkMinion: NormalizedCard;
   wardMinion: NormalizedCard;
   polarBears: NormalizedCard;
+  pirateShip: NormalizedCard;
   pudgeButcher: NormalizedCard;
   zap: NormalizedCard;
 }>> {
@@ -1030,6 +1047,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || lure.thresholds.water !== 1
     || lure.rarity !== 'ordinary') {
     throw new Error('private non-target Lure Magic no longer matches its supported facts');
+  }
+  const pirateShip = snapshot.cards.find(({ name }) => name === 'Pirate Ship');
+  if (!pirateShip
+    || pirateShip.cardType !== 'minion'
+    || ruleTextDigest(pirateShip.rulesText) !== 'sha256:2f24eb05c3948259f5403e749fb681b303bfe08e9113262c8e35a02fb343407d'
+    || pirateShip.manaCost !== 4
+    || pirateShip.attack !== 5
+    || pirateShip.defense !== 5
+    || pirateShip.life !== null
+    || pirateShip.elements.length !== 1
+    || pirateShip.elements[0] !== 'water'
+    || pirateShip.thresholds.air !== 0
+    || pirateShip.thresholds.earth !== 0
+    || pirateShip.thresholds.fire !== 0
+    || pirateShip.thresholds.water !== 1
+    || pirateShip.rarity !== 'ordinary') {
+    throw new Error('private Waterbound minion no longer matches its supported facts');
   }
   const seravaTownsfolk = snapshot.cards.find(({ name }) => name === 'Serava Townsfolk');
   if (!seravaTownsfolk
@@ -1707,6 +1741,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     movementMinion,
     movementTwoMinion,
     polarBears,
+    pirateShip,
     pudgeButcher,
     providerMinion,
     raalDromedary,
@@ -1804,6 +1839,7 @@ function gameDefinition(
   grantChargeToAllyThisTurn = false,
   lureEnemyMinionOneStepCloser = false,
   genesisLoseControllerLife: 0 | 2 = 0,
+  waterbound = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1911,6 +1947,7 @@ function gameDefinition(
       ...(tapForMana ? { tapForMana } : {}),
       thresholds: card.thresholds,
       voidwalk,
+      waterbound,
       ward,
     };
   }
@@ -1920,7 +1957,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -2093,6 +2130,11 @@ function buildManifest(
     input.seravaTownsfolk,
   ], [], [input.freeze]);
   const waterLureDeck = elementalDeck('water', [input.seravaTownsfolk], [], [input.lure]);
+  const waterPirateShipDeck = elementalDeck(
+    'water',
+    [input.pirateShip],
+    [input.ghostTownSite],
+  );
   const waterDrownDeck = elementalDeck('water', [
     input.healingMinion,
     input.slyFox,
@@ -2183,6 +2225,8 @@ function buildManifest(
           ? waterFreezeDeck
         : scenario === 'water-lure'
           ? waterLureDeck
+        : scenario === 'water-pirate-ship'
+          ? waterPirateShipDeck
         : scenario === 'water-lugbog'
           ? waterLugbogDeck
         : scenario === 'water-submerge'
@@ -2216,6 +2260,8 @@ function buildManifest(
         ? waterFreezeDeck
       : scenario === 'water-lure'
         ? waterLureDeck
+      : scenario === 'water-pirate-ship'
+        ? waterPirateShipDeck
       : scenario === 'water-lugbog'
         ? waterLugbogDeck
       : scenario === 'earth-entombed'
@@ -2316,6 +2362,7 @@ function buildManifest(
       card.stableId === input.chargeMagic.stableId,
       card.stableId === input.lure.stableId,
       card.stableId === input.lesserBloodDemon.stableId ? 2 : 0,
+      card.stableId === input.pirateShip.stableId,
     ),
   ]));
   return {
@@ -4177,6 +4224,52 @@ function findWaterLureOpening(
     }
   }
   throw new Error('private non-target Lure scenario no longer produces its supported opening');
+}
+
+function findWaterPirateShipOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  ghostTownInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northWaterSiteInstanceIds: readonly [string, string];
+  pirateShipInstanceId: string;
+  session: GameSession;
+  southSiteInstanceId: string;
+}> {
+  // ponytail: bounded opening scan keeps this private proof seed-free.
+  for (let offset = 1; offset <= 2048; offset += 1) {
+    const built = buildManifest(input, input.config.waterSeed + offset, 'water-pirate-ship');
+    const session = createGameSession(built.manifest);
+    const northWaterSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('water');
+    });
+    const ghostTownInstanceId = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.ghostTownSite.stableId)?.instanceId;
+    const pirateShipInstanceId = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 2),
+    ].find(({ cardId }) => cardId === input.pirateShip.stableId)?.instanceId;
+    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+    if (northWaterSites.length >= 2
+      && ghostTownInstanceId
+      && pirateShipInstanceId
+      && southSiteInstanceId) {
+      return {
+        ...built,
+        ghostTownInstanceId,
+        northWaterSiteInstanceIds: [
+          northWaterSites[0]!.instanceId,
+          northWaterSites[1]!.instanceId,
+        ],
+        pirateShipInstanceId,
+        session,
+        southSiteInstanceId,
+      };
+    }
+  }
+  throw new Error('private Waterbound scenario no longer produces its supported opening');
 }
 
 function findWaterFreezeOpening(
@@ -7883,6 +7976,173 @@ function runWaterLure(
   });
 }
 
+function runWaterPirateShip(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['waterPirateShip'] {
+  const opening = findWaterPirateShipOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northWaterSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northWaterSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const manaBeforeGhostTown = session.state.players.north.mana;
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.ghostTownInstanceId
+    && descriptor.cell === 'C2');
+  const manaBeforeSummon = session.state.players.north.mana;
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.pirateShipInstanceId
+    && descriptor.cell === 'C3'
+    && descriptor.region === undefined);
+  const ghostTownManaUsed = manaBeforeGhostTown === 2
+    && manaBeforeSummon === 4
+    && session.state.players.north.mana === 0;
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const before = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.pirateShipInstanceId);
+  const observedBefore = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
+    instanceId === opening.pirateShipInstanceId);
+  const waterSite = session.state.realm.sites.C3;
+  const waterSiteDefinition = waterSite && 'cardId' in waterSite
+    ? session.state.cards[waterSite.cardId]
+    : undefined;
+  const ghostTownSite = session.state.realm.sites.C2;
+  const ghostTownDefinition = ghostTownSite && 'cardId' in ghostTownSite
+    ? session.state.cards[ghostTownSite.cardId]
+    : undefined;
+  if (!before || !waterSite || !ghostTownSite) {
+    throw new Error('private Waterbound setup lacks its minion or sites');
+  }
+  const moveChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.pirateShipInstanceId
+      && descriptor.from.cell === 'C3'
+      && descriptor.from.region === 'surface'
+      && descriptor.to.cell === 'C2'
+      && descriptor.to.region === 'surface'
+      && descriptor.path.map(({ cell, region }) => `${cell}:${region}`).join(',')
+        === 'C3:surface,C2:surface');
+  const selectedMove = moveChoices[0];
+  if (!selectedMove || moveChoices.length !== 1) {
+    throw new Error('private Waterbound move is not exactly available');
+  }
+  const sitesBefore = canonicalJson(session.state.realm.sites as unknown as JsonValue);
+  const northCemeteryBefore = canonicalJson(
+    session.state.players.north.cemetery as unknown as JsonValue,
+  );
+  const southCemeteryBefore = canonicalJson(
+    session.state.players.south.cemetery as unknown as JsonValue,
+  );
+  const moved = stepGame(session, selectedMove);
+  if (!moved.accepted) throw new Error('private Waterbound move was rejected');
+  session = moved.session;
+
+  const after = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.pirateShipInstanceId);
+  const observedAfter = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
+    instanceId === opening.pirateShipInstanceId);
+  const events = moved.receipt.events;
+  const movementPayload = events[0] && isJsonRecord(events[0].payload)
+    ? events[0].payload
+    : undefined;
+  const movementFrom = movementPayload && isJsonRecord(movementPayload.from)
+    ? movementPayload.from
+    : undefined;
+  const movementTo = movementPayload && isJsonRecord(movementPayload.to)
+    ? movementPayload.to
+    : undefined;
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const subsequentActions = legalGameActions(session.state, 'north');
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    disabledAtLand: observedAfter?.disabled === true
+      && ghostTownDefinition?.cardType === 'site'
+      && !ghostTownDefinition.elements.includes('water'),
+    enabledAtWater: observedBefore?.disabled === false
+      && waterSiteDefinition?.cardType === 'site'
+      && waterSiteDefinition.elements.includes('water'),
+    exactMoveAvailable: moveChoices.length === 1,
+    ghostTown: input.ghostTownSite.name,
+    ghostTownManaUsed,
+    movementEventVerified: events.map(({ type }) => type).join(',')
+      === 'move-and-attack-activated'
+      && movementPayload?.seat === 'north'
+      && movementPayload.steps === 1
+      && movementPayload.unitInstanceId === opening.pirateShipInstanceId
+      && movementFrom?.cell === 'C3'
+      && movementFrom.region === 'surface'
+      && movementTo?.cell === 'C2'
+      && movementTo.region === 'surface',
+    noCombatDamageDeathOrRandomness: moved.receipt.randomDraws.length === 0
+      && events.every(({ type }) => ![
+        'attack-declared',
+        'damage-dealt',
+        'fight-started',
+        'minion-died',
+        'strike-damage-allocated',
+      ].includes(type))
+      && after?.damage === before.damage
+      && northCemeteryBefore === canonicalJson(
+        session.state.players.north.cemetery as unknown as JsonValue,
+      )
+      && southCemeteryBefore === canonicalJson(
+        session.state.players.south.cemetery as unknown as JsonValue,
+      )
+      && session.state.terminal.status === 'active',
+    noSubsequentUnitActions: !subsequentActions.some(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === opening.pirateShipInstanceId),
+    pirateShip: input.pirateShip.name,
+    replayVerified: verifyGameReplay(session),
+    sitesUnchanged: sitesBefore
+      === canonicalJson(session.state.realm.sites as unknown as JsonValue),
+    unitStatePreserved: after !== undefined
+      && before.cardId === after.cardId
+      && before.controller === after.controller
+      && before.damage === after.damage
+      && before.location === 'C3'
+      && after.location === 'C2'
+      && before.owner === after.owner
+      && before.region === 'surface'
+      && after.region === 'surface'
+      && before.stealthed === after.stealthed
+      && before.summoningSickness === false
+      && after.summoningSickness === false
+      && before.tapped === false
+      && after.tapped === true
+      && before.warded === after.warded,
+  });
+}
+
 function runWaterFreeze(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['waterFreeze'] {
@@ -8172,6 +8432,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const waterEdgeConnection = runWaterEdgeConnection(input);
   const waterLugbog = runWaterLugbog(input);
   const waterLure = runWaterLure(input);
+  const waterPirateShip = runWaterPirateShip(input);
   const waterEndTurnStealth = runWaterEndTurnStealth(input);
   const waterFreeze = runWaterFreeze(input);
   const waterHealing = runWaterHealing(input);
@@ -8359,6 +8620,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     waterEdgeConnection,
     waterLugbog,
     waterLure,
+    waterPirateShip,
     waterEndTurnStealth,
     waterFreeze,
     waterHealing,
