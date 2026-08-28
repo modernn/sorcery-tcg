@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { runPrivateGameCheck } from '../../src/commands/run-private-game-check.ts';
 
-test('private actual-card decks complete deterministic combat, Earth-ramp, and Air-movement scenarios', async () => {
+test('private actual-card decks complete deterministic combat, Earth, Air, and Water scenarios', async () => {
   const result = await runPrivateGameCheck();
   assert.equal(result.classification, 'private-local_actual-cards_unranked-partial-rules');
   assert.equal(result.airMovement.movementMinion, 'Snallygaster');
@@ -37,5 +37,13 @@ test('private actual-card decks complete deterministic combat, Earth-ramp, and A
   assert.equal(result.earthRamp.replayVerified, true);
   assert.equal(result.combat.northMinionDied, true);
   assert.equal(result.combat.southMinionDied, true);
+  assert.equal(result.waterHealing.healingMinion, 'Muddy Pigs');
+  assert.equal(result.waterHealing.healed, 3);
+  assert.equal(result.waterHealing.healedBeforeCemetery, true);
+  assert.equal(result.waterHealing.healingMinionDied, true);
+  assert.equal(result.waterHealing.opponentMinionDied, true);
+  assert.equal(result.waterHealing.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.waterHealing.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.waterHealing.replayVerified, true);
   assert.equal(result.replayVerified, true);
 });

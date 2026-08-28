@@ -47,12 +47,14 @@ type ScenarioConfig = Readonly<{
   earthSeed: number;
   genesisMinionStableId: string;
   ghostTownSiteStableId: string;
+  healingMinionStableId: string;
   lethalMinionStableId: string;
   manaMinionStableId: string;
   movementMinionStableId: string;
   providerMinionStableId: string;
   revisionId: string;
   seed: number;
+  waterSeed: number;
 }>;
 
 type DeckList = Readonly<{
@@ -111,6 +113,17 @@ export type PrivateGameCheck = Readonly<{
   replayVerified: boolean;
   revisionId: string;
   seed: number;
+  waterHealing: Readonly<{
+    acceptedActionCount: number;
+    deck: DeckList;
+    healed: number;
+    healedBeforeCemetery: boolean;
+    healingMinionDied: boolean;
+    healingMinion: string;
+    opponentMinionDied: boolean;
+    replayVerified: boolean;
+    seed: number;
+  }>;
 }>;
 
 function isJsonRecord(value: unknown): value is Readonly<Record<string, JsonValue>> {
@@ -137,6 +150,7 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     || value.earthSeed < 0
     || typeof value.genesisMinionStableId !== 'string'
     || typeof value.ghostTownSiteStableId !== 'string'
+    || typeof value.healingMinionStableId !== 'string'
     || typeof value.lethalMinionStableId !== 'string'
     || typeof value.manaMinionStableId !== 'string'
     || typeof value.movementMinionStableId !== 'string'
@@ -145,7 +159,10 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     || !Number.isSafeInteger(value.seed)
     || typeof value.seed !== 'number'
     || value.seed < 0
-    || Object.keys(value).sort().join(',') !== 'airSeed,avatar,cannotDefendMinionStableId,chargeMinionStableId,deathriteMinionStableId,earthProviderMinionStableId,earthSeed,genesisMinionStableId,ghostTownSiteStableId,lethalMinionStableId,manaMinionStableId,movementMinionStableId,providerMinionStableId,revisionId,seed'
+    || !Number.isSafeInteger(value.waterSeed)
+    || typeof value.waterSeed !== 'number'
+    || value.waterSeed < 0
+    || Object.keys(value).sort().join(',') !== 'airSeed,avatar,cannotDefendMinionStableId,chargeMinionStableId,deathriteMinionStableId,earthProviderMinionStableId,earthSeed,genesisMinionStableId,ghostTownSiteStableId,healingMinionStableId,lethalMinionStableId,manaMinionStableId,movementMinionStableId,providerMinionStableId,revisionId,seed,waterSeed'
     || Object.keys(avatar).sort().join(',') !== 'drawSpell,stableId') {
     throw new Error('private game scenario has an unsupported shape');
   }
@@ -159,12 +176,14 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     earthSeed: value.earthSeed,
     genesisMinionStableId: value.genesisMinionStableId,
     ghostTownSiteStableId: value.ghostTownSiteStableId,
+    healingMinionStableId: value.healingMinionStableId,
     lethalMinionStableId: value.lethalMinionStableId,
     manaMinionStableId: value.manaMinionStableId,
     movementMinionStableId: value.movementMinionStableId,
     providerMinionStableId: value.providerMinionStableId,
     revisionId: value.revisionId,
     seed: value.seed,
+    waterSeed: value.waterSeed,
   };
 }
 
@@ -180,6 +199,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   formatStableId: string;
   genesisMinion: NormalizedCard;
   ghostTownSite: NormalizedCard;
+  healingMinion: NormalizedCard;
   lethalMinion: NormalizedCard;
   manaMinion: NormalizedCard;
   movementMinion: NormalizedCard;
@@ -265,6 +285,16 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || ghostTownSite.rarity === null) {
     throw new Error('private site Genesis mana card no longer matches its supported facts');
   }
+  const healingMinion = snapshot.cards.find(({ stableId }) => stableId === config.healingMinionStableId);
+  if (!healingMinion
+    || healingMinion.cardType !== 'minion'
+    || healingMinion.rulesText.trim() !== 'Deathrite → You heal 3.'
+    || healingMinion.attack === null
+    || healingMinion.defense === null
+    || healingMinion.manaCost === null
+    || healingMinion.rarity === null) {
+    throw new Error('private Deathrite healing minion no longer matches its supported facts');
+  }
   const earthProviderMinion = snapshot.cards
     .find(({ stableId }) => stableId === config.earthProviderMinionStableId);
   if (!earthProviderMinion
@@ -324,6 +354,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     formatStableId: selected.identity.stableId,
     genesisMinion,
     ghostTownSite,
+    healingMinion,
     lethalMinion,
     manaMinion,
     movementMinion,
@@ -365,6 +396,7 @@ function gameDefinition(
   deathriteDrawSite = false,
   cannotDefend = false,
   movementPlusOne = false,
+  deathriteHeal = 0,
   siteGenesisGainMana = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
@@ -396,6 +428,7 @@ function gameDefinition(
       cannotDefend,
       charge,
       deathriteDrawSite,
+      ...(deathriteHeal ? { deathriteHeal } : {}),
       defense: card.defense,
       genesisDrawSite,
       lethal,
@@ -412,7 +445,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'combat' | 'earth' = 'combat',
+  scenario: 'air' | 'combat' | 'earth' | 'water' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -458,73 +491,61 @@ function buildManifest(
     ],
     };
   };
-  const earthDeck = (): GameDeckSpec => {
-    const ghostTownCopies = input.format.copyLimits[input.ghostTownSite.rarity!];
-    const featured = [
-      input.earthProviderMinion,
-      input.manaMinion,
-      input.genesisMinion,
-      input.deathriteMinion,
-      input.cannotDefendMinion,
-    ];
-    const featuredCards = featured.flatMap((card) =>
+  const elementalDeck = (
+    element: GameElement,
+    featuredMinions: readonly NormalizedCard[],
+    featuredSites: readonly NormalizedCard[] = [],
+  ): GameDeckSpec => {
+    const featuredSiteCards = featuredSites.flatMap((card) =>
       Array.from({ length: input.format.copyLimits[card.rarity!] }, () => card.stableId));
-    const earthSites = sites.filter((card) => card.rarity && card.elements.includes('earth'));
-    const earthSiteCount = Math.min(
-      input.format.atlasMinimum - ghostTownCopies,
-      earthSites.reduce((total, card) => total + input.format.copyLimits[card.rarity!], 0),
+    const featuredSiteIds = new Set(featuredSites.map(({ stableId }) => stableId));
+    const elementSites = sites.filter((card) =>
+      card.rarity && card.elements.includes(element) && !featuredSiteIds.has(card.stableId));
+    const elementSiteCount = Math.min(
+      input.format.atlasMinimum - featuredSiteCards.length,
+      elementSites.reduce((total, card) => total + input.format.copyLimits[card.rarity!], 0),
     );
-    const earthSiteIds = new Set(earthSites.map(({ stableId }) => stableId));
+    const elementSiteIds = new Set(elementSites.map(({ stableId }) => stableId));
+    const featuredMinionCards = featuredMinions.flatMap((card) =>
+      Array.from({ length: input.format.copyLimits[card.rarity!] }, () => card.stableId));
     return {
       atlas: [
-        ...Array.from({ length: ghostTownCopies }, () => input.ghostTownSite.stableId),
-        ...fillZone(earthSites, earthSiteCount, input.format, false),
+        ...featuredSiteCards,
+        ...fillZone(elementSites, elementSiteCount, input.format, false),
         ...fillZone(
-          sites.filter(({ stableId }) => !earthSiteIds.has(stableId)),
-          input.format.atlasMinimum - ghostTownCopies - earthSiteCount,
+          sites.filter(({ stableId }) =>
+            !featuredSiteIds.has(stableId) && !elementSiteIds.has(stableId)),
+          input.format.atlasMinimum - featuredSiteCards.length - elementSiteCount,
           input.format,
           false,
         ),
       ],
       avatar: avatar.stableId,
       spellbook: [
-        ...featuredCards,
+        ...featuredMinionCards,
         ...fillZone(
           minions,
-          input.format.spellbookMinimum - featuredCards.length,
+          input.format.spellbookMinimum - featuredMinionCards.length,
           input.format,
           false,
         ),
-      ],
-    };
-  };
-  const airDeck = (): GameDeckSpec => {
-    const movementCopies = input.format.copyLimits[input.movementMinion.rarity!];
-    const airSites = sites.filter((card) => card.rarity && card.elements.includes('air'));
-    const airSiteCount = Math.min(
-      input.format.atlasMinimum,
-      airSites.reduce((total, card) => total + input.format.copyLimits[card.rarity!], 0),
-    );
-    const airSiteIds = new Set(airSites.map(({ stableId }) => stableId));
-    return {
-      atlas: [
-        ...fillZone(airSites, airSiteCount, input.format, false),
-        ...fillZone(
-          sites.filter(({ stableId }) => !airSiteIds.has(stableId)),
-          input.format.atlasMinimum - airSiteCount,
-          input.format,
-          false,
-        ),
-      ],
-      avatar: avatar.stableId,
-      spellbook: [
-        ...Array.from({ length: movementCopies }, () => input.movementMinion.stableId),
-        ...fillZone(minions, input.format.spellbookMinimum - movementCopies, input.format, false),
       ],
     };
   };
   const decks = {
-    north: scenario === 'earth' ? earthDeck() : scenario === 'air' ? airDeck() : deck(false, true),
+    north: scenario === 'earth'
+      ? elementalDeck('earth', [
+        input.earthProviderMinion,
+        input.manaMinion,
+        input.genesisMinion,
+        input.deathriteMinion,
+        input.cannotDefendMinion,
+      ], [input.ghostTownSite])
+      : scenario === 'air'
+        ? elementalDeck('air', [input.movementMinion])
+        : scenario === 'water'
+          ? elementalDeck('water', [input.healingMinion])
+          : deck(false, true),
     south: deck(true, false),
   };
   const referenced = new Set([
@@ -552,6 +573,7 @@ function buildManifest(
       card.stableId === input.deathriteMinion.stableId,
       card.stableId === input.cannotDefendMinion.stableId,
       card.stableId === input.movementMinion.stableId,
+      card.stableId === input.healingMinion.stableId ? 3 : 0,
       card.stableId === input.ghostTownSite.stableId ? 1 : 0,
     ),
   ]));
@@ -873,6 +895,62 @@ function findAirOpening(
   throw new Error(`private Air scenario seed ${seed} no longer produces its supported opening`);
 }
 
+function findWaterOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  attackerInstanceId: string;
+  healingInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string];
+  seed: number;
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string];
+}> {
+  const seed = input.config.waterSeed;
+  const built = buildManifest(input, seed, 'water');
+  const session = createGameSession(built.manifest);
+  const northSites = session.state.players.north.hand.atlas.filter((site) => {
+    const definition = session.state.cards[site.cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('water');
+  });
+  const healingInstanceId = availableMinionInstance(
+    session,
+    'north',
+    input.healingMinion.stableId,
+    1,
+  );
+  for (const first of session.state.players.south.hand.atlas) {
+    const siteDefinition = session.state.cards[first.cardId];
+    if (siteDefinition?.cardType !== 'site') continue;
+    const affinity = { air: 0, earth: 0, fire: 0, water: 0 };
+    siteDefinition.elements.forEach((element) => { affinity[element] += 1; });
+    const attacker = session.state.players.south.hand.spellbook.find((card) => {
+      const definition = session.state.cards[card.cardId];
+      return definition?.cardType === 'minion'
+        && definition.manaCost <= 1
+        && definition.attack >= 2
+        && definition.defense <= 2
+        && (['air', 'earth', 'fire', 'water'] as const)
+          .every((element) => affinity[element] >= definition.thresholds[element]);
+    });
+    const second = session.state.players.south.hand.atlas
+      .find(({ instanceId }) => instanceId !== first.instanceId);
+    if (northSites.length >= 2 && healingInstanceId && attacker && second) {
+      return {
+        ...built,
+        attackerInstanceId: attacker.instanceId,
+        healingInstanceId,
+        northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
+        seed,
+        session,
+        southSiteInstanceIds: [first.instanceId, second.instanceId],
+      };
+    }
+  }
+  throw new Error(`private Water scenario seed ${input.config.waterSeed} no longer produces its supported opening`);
+}
+
 function keep(session: GameSession): GameSession {
   return accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'mulligan'
@@ -1138,10 +1216,109 @@ function runAirMovement(
   });
 }
 
+function runWaterHealing(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['waterHealing'] {
+  const opening = findWaterOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]);
+  take(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.attackerInstanceId);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+      && descriptor.cell === 'C3');
+  take(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.healingInstanceId
+      && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+      && descriptor.cell === 'C2');
+  take(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.attackerInstanceId
+      && descriptor.to.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  for (let strike = 0; strike < 2; strike += 1) {
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    take(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === opening.attackerInstanceId
+        && descriptor.to.cell === 'C3');
+    take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'site'
+        && descriptor.target.instanceId === session.state.realm.sites.C3?.instanceId);
+    take(({ descriptor }) =>
+      descriptor.kind === 'close-defend' && !descriptor.originalTargetParticipates);
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    if (strike === 0) take(({ descriptor }) => descriptor.kind === 'end-turn');
+  }
+
+  const lifeBeforeHealing = session.state.players.north.avatar.life;
+  take(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.healingInstanceId
+      && descriptor.to.cell === 'C3');
+  take(({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === opening.attackerInstanceId);
+  take(({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
+  const finalEvents = session.transcript.at(-1)?.events ?? [];
+  const healIndex = finalEvents.findIndex(({ type }) => type === 'avatar-healed');
+  const cemeteryIndex = finalEvents.findIndex(({ payload, type }) =>
+    type === 'minion-died'
+      && isJsonRecord(payload)
+      && payload.instanceId === opening.healingInstanceId);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    healed: session.state.players.north.avatar.life - lifeBeforeHealing,
+    healedBeforeCemetery: healIndex >= 0 && healIndex < cemeteryIndex,
+    healingMinionDied: session.state.players.north.cemetery
+      .some(({ instanceId }) => instanceId === opening.healingInstanceId),
+    healingMinion:
+      opening.names.get(input.healingMinion.stableId) ?? input.healingMinion.stableId,
+    opponentMinionDied: session.state.players.south.cemetery
+      .some(({ instanceId }) => instanceId === opening.attackerInstanceId),
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+  });
+}
+
 export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<PrivateGameCheck> {
   const input = await readPrivateInputs(path);
   const airMovement = runAirMovement(input);
   const earthRamp = runEarthRamp(input);
+  const waterHealing = runWaterHealing(input);
   const opening = findOpening(input);
   let session = keep(opening.session);
   session = keep(session);
@@ -1291,6 +1468,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     replayVerified: verifyGameReplay(session),
     revisionId: input.config.revisionId,
     seed: opening.seed,
+    waterHealing,
   });
 }
 
