@@ -155,6 +155,25 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.decks.south.atlas.reduce((total, card) => total + card.copies, 0), 30);
   assert.equal(result.decks.north.spellbook.reduce((total, card) => total + card.copies, 0), 60);
   assert.equal(result.decks.south.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthBury.bury, 'Bury');
+  assert.equal(result.earthBury.boskTroll, 'Bosk Troll');
+  assert.equal(result.earthBury.acceptedActionCount, 17);
+  assert.equal(result.earthBury.exactlyOneBuryTarget, true);
+  assert.equal(result.earthBury.manaPaid, 3);
+  assert.equal(result.earthBury.buriedBeforeDeath, true);
+  assert.equal(result.earthBury.causalEventsVerified, true);
+  assert.equal(result.earthBury.targetLeftRealm, true);
+  assert.equal(result.earthBury.targetEnteredCemetery, true);
+  assert.equal(result.earthBury.spellEnteredCemetery, true);
+  assert.equal(result.earthBury.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthBury.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthBury.deck.spellbook
+    .find(({ name }) => name === 'Bury')?.copies, 4);
+  assert.equal(result.earthBury.deck.spellbook
+    .find(({ name }) => name === 'Bosk Troll')?.copies, 4);
+  assert.equal(result.earthBury.replayVerified, true);
   assert.equal(result.earthDivineHealing.divineHealing, 'Divine Healing');
   assert.equal(result.earthDivineHealing.acceptedActionCount, 24);
   assert.equal(result.earthDivineHealing.lifeWasDamagedAboveDeathsDoor, true);

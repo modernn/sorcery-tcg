@@ -46,6 +46,7 @@ export type GameCardDefinition =
     genesisGainMana?: number;
   }>
   | Readonly<{
+    burrowTargetMinion?: boolean;
     cardType: 'magic';
     damageTargetUnit?: number;
     healController?: number;
@@ -507,7 +508,8 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
     if (definition.healController !== undefined) return [cast];
     return targets.filter((target) => {
       const status = unitStatus(state, target);
-      return status.region === caster.region
+      return (!definition.burrowTargetMinion || target.kind === 'minion')
+        && status.region === caster.region
         && (target.seat === seat || !status.stealthed)
         && (!definition.targetNearby
           || status.location === caster.location
@@ -557,7 +559,11 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     return;
   }
   if (card.cardType === 'magic') {
-    const effectCount = Number(card.damageTargetUnit !== undefined)
+    if (card.burrowTargetMinion !== undefined && typeof card.burrowTargetMinion !== 'boolean') {
+      throw new RangeError(`${path}.burrowTargetMinion must be boolean`);
+    }
+    const effectCount = Number(card.burrowTargetMinion === true)
+      + Number(card.damageTargetUnit !== undefined)
       + Number(card.healController !== undefined);
     if (effectCount !== 1) {
       throw new RangeError(`${path} must define exactly one supported Magic effect`);
@@ -788,9 +794,11 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
           : card.cardType === 'magic'
             ? {
               cardType: 'magic' as const,
-              ...(card.damageTargetUnit !== undefined
-                ? { damageTargetUnit: card.damageTargetUnit }
-                : { healController: card.healController! }),
+              ...(card.burrowTargetMinion === true
+                ? { burrowTargetMinion: true }
+                : card.damageTargetUnit !== undefined
+                  ? { damageTargetUnit: card.damageTargetUnit }
+                  : { healController: card.healController! }),
               manaCost: card.manaCost,
               ...(card.targetNearby === true ? { targetNearby: true } : {}),
               thresholds: { ...card.thresholds },
@@ -1809,6 +1817,105 @@ function loseStealth(
   ];
 }
 
+function resolveMinionDeaths(
+  state: GameState,
+  startingPlayers: GameState['players'],
+  units: readonly UnitInstance[],
+  deaths: readonly UnitInstance[],
+  defeatedAvatars: ReadonlySet<GameSeat>,
+): Readonly<{
+  outcomes: readonly GameOutcome[];
+  players: GameState['players'];
+  terminal: GameTerminal;
+  units: readonly UnitInstance[];
+}> {
+  const players: Record<GameSeat, PlayerState> = {
+    north: startingPlayers.north,
+    south: startingPlayers.south,
+  };
+  const deathOutcomes: GameOutcome[] = [];
+  const deadIds = new Set(deaths.map(({ instanceId }) => instanceId));
+  const survivingUnits = units.filter(({ instanceId }) => !deadIds.has(instanceId));
+  const deckLosers = new Set<GameSeat>();
+  for (const dead of deaths) {
+    const definition = cardDefinition(state, dead.cardId);
+    if (definition.cardType !== 'minion') continue;
+    if (definition.deathriteHeal) {
+      const controller = players[dead.controller];
+      const avatarDefinition = cardDefinition(state, controller.avatar.card.cardId);
+      if (avatarDefinition.cardType !== 'avatar') throw new Error('player Avatar lacks Avatar definition');
+      const [healed, amount] = healAvatar(controller, avatarDefinition.life, definition.deathriteHeal);
+      players[dead.controller] = healed;
+      if (amount > 0) {
+        deathOutcomes.push({
+          payload: {
+            amount,
+            attemptedAmount: definition.deathriteHeal,
+            life: healed.avatar.life,
+            seat: dead.controller,
+            sourceInstanceId: dead.instanceId,
+          },
+          type: 'avatar-healed',
+        });
+      }
+    }
+    if (!definition.deathriteDrawSite) continue;
+    const owner = players[dead.owner];
+    const [drawn, ...atlas] = owner.atlas;
+    if (!drawn) {
+      deckLosers.add(dead.owner);
+      continue;
+    }
+    players[dead.owner] = deepFreeze({
+      ...owner,
+      atlas,
+      hand: { ...owner.hand, atlas: [...owner.hand.atlas, drawn] },
+    });
+    deathOutcomes.push({
+      payload: { seat: dead.owner, sourceInstanceId: dead.instanceId },
+      type: 'site-drawn',
+    });
+  }
+  for (const dead of deaths) {
+    const owner = players[dead.owner];
+    players[dead.owner] = deepFreeze({
+      ...owner,
+      cemetery: [...owner.cemetery, {
+        cardId: dead.cardId,
+        instanceId: dead.instanceId,
+        owner: dead.owner,
+        source: dead.source,
+      }],
+    });
+    deathOutcomes.push({
+      payload: { cardId: dead.cardId, instanceId: dead.instanceId, owner: dead.owner },
+      type: 'minion-died',
+    });
+  }
+
+  let terminal: GameTerminal = { status: 'active' };
+  const losers = new Set([...defeatedAvatars, ...deckLosers]);
+  if (losers.size === 2) {
+    const reason = defeatedAvatars.size === 2 && deckLosers.size === 0
+      ? 'simultaneous_avatar_defeat'
+      : 'simultaneous_defeat';
+    terminal = { reason, result: 'draw', status: 'finished' };
+    deathOutcomes.push({ payload: { reason, result: 'draw' }, type: 'game-ended' });
+  } else if (losers.size === 1) {
+    const loser = [...losers][0]!;
+    const winner = otherSeat(loser);
+    const reason = defeatedAvatars.has(loser) ? 'avatar_defeated' : 'deck_empty';
+    terminal = { loser, reason, status: 'finished', winner };
+    deathOutcomes.push({ payload: { loser, reason, winner }, type: 'game-ended' });
+  }
+  return {
+    outcomes: deathOutcomes,
+    players: deepFreeze(players),
+    terminal,
+    units: survivingUnits,
+  };
+}
+
 function resolveFightWindow(
   state: GameState,
   pending: PendingCombat,
@@ -1945,99 +2052,19 @@ function resolveFightWindow(
   }
   damageOutcomes.push(...stealthOutcomes);
 
-  const deadIds = new Set(deaths.map(({ instanceId }) => instanceId));
-  units = units.filter(({ instanceId }) => !deadIds.has(instanceId));
-  const deckLosers = new Set<GameSeat>();
-  for (const dead of deaths) {
-    const definition = cardDefinition(state, dead.cardId);
-    if (definition.cardType !== 'minion') continue;
-    if (definition.deathriteHeal) {
-      const controller = players[dead.controller];
-      const avatarDefinition = cardDefinition(state, controller.avatar.card.cardId);
-      if (avatarDefinition.cardType !== 'avatar') throw new Error('player Avatar lacks Avatar definition');
-      const [healed, amount] = healAvatar(controller, avatarDefinition.life, definition.deathriteHeal);
-      players[dead.controller] = healed;
-      if (amount > 0) {
-        damageOutcomes.push({
-          payload: {
-            amount,
-            attemptedAmount: definition.deathriteHeal,
-            life: healed.avatar.life,
-            seat: dead.controller,
-            sourceInstanceId: dead.instanceId,
-          },
-          type: 'avatar-healed',
-        });
-      }
-    }
-    if (!definition.deathriteDrawSite) continue;
-    const owner = players[dead.owner];
-    const [drawn, ...atlas] = owner.atlas;
-    if (!drawn) {
-      deckLosers.add(dead.owner);
-      continue;
-    }
-    players[dead.owner] = deepFreeze({
-      ...owner,
-      atlas,
-      hand: { ...owner.hand, atlas: [...owner.hand.atlas, drawn] },
-    });
-    damageOutcomes.push({
-      payload: { seat: dead.owner, sourceInstanceId: dead.instanceId },
-      type: 'site-drawn',
-    });
-  }
-  for (const dead of deaths) {
-    const owner = players[dead.owner];
-    players[dead.owner] = deepFreeze({
-      ...owner,
-      cemetery: [...owner.cemetery, {
-        cardId: dead.cardId,
-        instanceId: dead.instanceId,
-        owner: dead.owner,
-        source: dead.source,
-      }],
-    });
-    damageOutcomes.push({
-      payload: { cardId: dead.cardId, instanceId: dead.instanceId, owner: dead.owner },
-      type: 'minion-died',
-    });
-  }
-
-  let terminal: GameTerminal = { status: 'active' };
-  const endingOutcomes: GameOutcome[] = [];
-  const losers = new Set([...defeatedAvatars, ...deckLosers]);
-  if (losers.size === 2) {
-    const reason = defeatedAvatars.size === 2 && deckLosers.size === 0
-      ? 'simultaneous_avatar_defeat'
-      : 'simultaneous_defeat';
-    terminal = { reason, result: 'draw', status: 'finished' };
-    endingOutcomes.push({
-      payload: { reason, result: 'draw' },
-      type: 'game-ended',
-    });
-  } else if (losers.size === 1) {
-    const loser = [...losers][0]!;
-    const winner = otherSeat(loser);
-    const reason = defeatedAvatars.has(loser) ? 'avatar_defeated' : 'deck_empty';
-    terminal = { loser, reason, status: 'finished', winner };
-    endingOutcomes.push({
-      payload: { loser, reason, winner },
-      type: 'game-ended',
-    });
-  }
+  const deathResolution = resolveMinionDeaths(state, players, units, deaths, defeatedAvatars);
 
   return [
     deepFreeze({
       ...state,
       decisionSeat: state.activeSeat,
       pendingCombat: null,
-      phase: terminal.status === 'finished' ? 'terminal' : 'main',
-      players: deepFreeze(players),
-      realm: { ...state.realm, units },
-      terminal,
+      phase: deathResolution.terminal.status === 'finished' ? 'terminal' : 'main',
+      players: deathResolution.players,
+      realm: { ...state.realm, units: deathResolution.units },
+      terminal: deathResolution.terminal,
     }),
-    [...outcomes, ...damageOutcomes, ...endingOutcomes],
+    [...outcomes, ...damageOutcomes, ...deathResolution.outcomes],
     [],
   ];
 }
@@ -2386,6 +2413,88 @@ function applyDescriptor(
             : []),
           resolved,
         ],
+        [],
+      ];
+    }
+    if (definition.burrowTargetMinion === true) {
+      if (descriptor.target?.kind !== 'minion') throw new Error('unreachable Bury cast');
+      const targetIndex = castState.realm.units.findIndex(({ instanceId, controller }) =>
+        instanceId === descriptor.target!.instanceId && controller === descriptor.target!.seat);
+      const target = castState.realm.units[targetIndex];
+      if (!target) throw new Error('unreachable Bury target');
+      if (target.warded && target.controller !== seat) {
+        const wardedState = deepFreeze({
+          ...castState,
+          realm: {
+            ...castState.realm,
+            units: castState.realm.units.map((unit, index) => index === targetIndex
+              ? deepFreeze({ ...unit, warded: false })
+              : unit),
+          },
+        });
+        return [
+          withStateVersion(wardedState, {}),
+          [
+            castOutcome,
+            { payload: { instanceId: target.instanceId, seat: target.controller }, type: 'ward-broken' },
+            resolved,
+          ],
+          [],
+        ];
+      }
+      const canBurrow = target.region === 'surface'
+        && castState.realm.sites[target.location] !== undefined
+        && !isWaterSite(castState, target.location);
+      if (!canBurrow) {
+        return [withStateVersion(castState, {}), [castOutcome, resolved], []];
+      }
+      const burrowedUnit = deepFreeze({ ...target, region: 'underground' as const });
+      const burrowedState = deepFreeze({
+        ...castState,
+        realm: {
+          ...castState.realm,
+          units: castState.realm.units.map((unit, index) => index === targetIndex ? burrowedUnit : unit),
+        },
+      });
+      const burrowedOutcome: GameOutcome = {
+        payload: {
+          cell: target.location,
+          instanceId: target.instanceId,
+          seat: target.controller,
+          sourceInstanceId: card.instanceId,
+        },
+        type: 'minion-burrowed',
+      };
+      const targetDefinition = cardDefinition(burrowedState, target.cardId);
+      if (targetDefinition.cardType !== 'minion') throw new Error('Bury target lacks minion definition');
+      if (targetDefinition.burrowing === true) {
+        return [
+          withStateVersion(burrowedState, {}),
+          [castOutcome, burrowedOutcome, resolved],
+          [],
+        ];
+      }
+      const deathResolution = resolveMinionDeaths(
+        burrowedState,
+        burrowedState.players,
+        burrowedState.realm.units,
+        [burrowedUnit],
+        new Set<GameSeat>(),
+      );
+      const deadState = deepFreeze({
+        ...burrowedState,
+        phase: deathResolution.terminal.status === 'finished' ? 'terminal' as const : 'main' as const,
+        players: deathResolution.players,
+        realm: { ...burrowedState.realm, units: deathResolution.units },
+        terminal: deathResolution.terminal,
+      });
+      const outcomes = [castOutcome, burrowedOutcome, ...deathResolution.outcomes];
+      const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
+      return [
+        withStateVersion(deadState, {}),
+        terminalIndex < 0
+          ? [...outcomes, resolved]
+          : [...outcomes.slice(0, terminalIndex), resolved, ...outcomes.slice(terminalIndex)],
         [],
       ];
     }

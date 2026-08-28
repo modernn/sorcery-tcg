@@ -287,6 +287,49 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   }));
+  const buryManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        burrowTargetMinion: true,
+        cardType: 'magic',
+        manaCost: 3,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(buryManifest.cards[firstSpell], {
+    burrowTargetMinion: true,
+    cardType: 'magic',
+    manaCost: 3,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        burrowTargetMinion: 'yes',
+        cardType: 'magic',
+        manaCost: 3,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /burrowTargetMinion/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        burrowTargetMinion: true,
+        cardType: 'magic',
+        damageTargetUnit: 1,
+        manaCost: 3,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -982,6 +1025,128 @@ test('RULE-03 Magic targets stay in the caster region and exclude enemy Stealth'
     manaCost: 1,
     thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
   }, 'surface', true), false);
+});
+
+test('RULE-03/04 Bury forcefully burrows minions if able and immediately resolves survival', () => {
+  const castBury = (
+    targetFacts: Pick<SpellFacts, 'burrowing' | 'ward'>,
+    waterTarget: boolean,
+    seed: number,
+  ): Readonly<{
+    beforeCast: GameSession['state'];
+    session: GameSession;
+    targetInstanceId: string;
+  }> => {
+    const decks = { north: deck(`bury-north-${seed}`, 4, 6), south: deck(`bury-south-${seed}`, 4, 6) };
+    const cards = cardsFor(decks, {
+      ...targetFacts,
+      defense: 2,
+      manaCost: 1,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    });
+    for (const cardId of decks.north.spellbook) {
+      cards[cardId] = {
+        burrowTargetMinion: true,
+        cardType: 'magic',
+        manaCost: 1,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      };
+    }
+    if (waterTarget) {
+      for (const cardId of decks.south.atlas) {
+        cards[cardId] = { cardType: 'site', elements: ['water'] };
+      }
+    }
+    let session = keep(createGameSession(createGameManifest({
+      authority: {
+        contentHash: SYNTHETIC_AUTHORITY_HASH,
+        mode: 'synthetic',
+        revisionId: `synthetic-bury-${seed}-v1`,
+      },
+      cards,
+      decks,
+      firstSeat: 'north',
+      seed,
+    })));
+    session = keep(session);
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cell === 'C1'
+        && descriptor.region === undefined));
+    const target = session.state.realm.units.find(({ controller }) => controller === 'south');
+    assert.ok(target);
+    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    const spell = session.state.players.north.hand.spellbook[0];
+    assert.ok(spell);
+    const casts = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+      descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === spell.instanceId);
+    assert.deepEqual(casts.flatMap(({ descriptor }) => descriptor.kind === 'cast-magic'
+      && descriptor.target
+      ? [`${descriptor.target.kind}:${descriptor.target.instanceId}`]
+      : []), [`minion:${target.instanceId}`]);
+    const beforeCast = session.state;
+    session = accept(session, casts[0]!);
+    assert.equal(session.state.stateVersion, beforeCast.stateVersion + 1);
+    assert.equal(session.state.players.north.mana, beforeCast.players.north.mana - 1);
+    assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+      instanceId === spell.instanceId), true);
+    assert.equal(verifyGameReplay(session), true);
+    return { beforeCast, session, targetInstanceId: target.instanceId };
+  };
+
+  const survivor = castBury({ burrowing: true }, false, 152);
+  assert.deepEqual(survivor.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === survivor.targetInstanceId), {
+    ...survivor.beforeCast.realm.units.find(({ instanceId }) => instanceId === survivor.targetInstanceId),
+    region: 'underground',
+  });
+  assert.deepEqual(survivor.session.transcript.at(-1)?.events.map(({ type }) => type), [
+    'magic-cast',
+    'minion-burrowed',
+    'magic-resolved',
+  ]);
+
+  const dead = castBury({}, false, 153);
+  assert.equal(dead.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === dead.targetInstanceId), false);
+  assert.equal(dead.session.state.players.south.cemetery.some(({ instanceId }) =>
+    instanceId === dead.targetInstanceId), true);
+  assert.deepEqual(dead.session.transcript.at(-1)?.events.map(({ type }) => type), [
+    'magic-cast',
+    'minion-burrowed',
+    'minion-died',
+    'magic-resolved',
+  ]);
+
+  const warded = castBury({ ward: true }, false, 154);
+  assert.deepEqual(warded.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === warded.targetInstanceId), {
+    ...warded.beforeCast.realm.units.find(({ instanceId }) => instanceId === warded.targetInstanceId),
+    warded: false,
+  });
+  assert.deepEqual(warded.session.transcript.at(-1)?.events.map(({ type }) => type), [
+    'magic-cast',
+    'ward-broken',
+    'magic-resolved',
+  ]);
+
+  const water = castBury({}, true, 155);
+  assert.deepEqual(water.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === water.targetInstanceId), water.beforeCast.realm.units.find(({ instanceId }) =>
+    instanceId === water.targetInstanceId));
+  assert.deepEqual(water.session.transcript.at(-1)?.events.map(({ type }) => type), [
+    'magic-cast',
+    'magic-resolved',
+  ]);
 });
 
 test("RULE-03/04 healing Magic is targetless, capped, and cannot leave Death's Door", () => {
