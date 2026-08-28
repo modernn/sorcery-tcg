@@ -35,8 +35,12 @@ const RECEIPT_PATH = `data/authority/receipts/${REVISION_ID}.json`;
 const SUMMARY_PATH = '.planning/phases/01-rules-and-data-authority/01-07-SUMMARY.md';
 const ZERO_HASH = `sha256:${'0'.repeat(64)}` as Hash;
 const FINAL_REVISION_ID = 'official-2026-08-27-v3';
+const FINAL_STABLE_ID = `bundle:${FINAL_REVISION_ID}`;
 const FINAL_LOCK_PATH = `${LOCAL_ROOT}/locks/${FINAL_REVISION_ID}/source-set-lock.json`;
 const FINAL_SUMMARY_PATH = '.planning/phases/01-rules-and-data-authority/01-15-SUMMARY.md';
+const FINAL_METHOD = 'user-provided-manual-download';
+const FINAL_REFERENCE = 'phase-01-20260827-manual-provision-1';
+const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
 
 type Evidence = Record<string, unknown>;
 type Receipt = Readonly<{
@@ -71,6 +75,7 @@ type InputLock = Readonly<{
 }>;
 
 type TreeEntry = Readonly<{ relativePath: string; byteLength: number; byteHash: Hash }>;
+type FileEvidence = Readonly<{ byteLength: number; byteHash: Hash }>;
 
 function exactKeys(value: Evidence, keys: readonly string[]): boolean {
   return JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort());
@@ -116,6 +121,22 @@ function consumedFor(reference = CURRENT_REFERENCE): Evidence {
     authorizationReference: reference,
     consumedAt: '2026-08-25T00:00:00.000Z',
   };
+}
+
+function validFinalEvidence(lock: Evidence, summary: string): lock is LiveLock {
+  if (
+    lock.acquisitionMethod !== FINAL_METHOD ||
+    lock.authorizationReference !== FINAL_REFERENCE ||
+    typeof lock.primaryRoot !== 'string' ||
+    typeof lock.backupRoot !== 'string' ||
+    !Array.isArray(lock.entries)
+  ) return false;
+  const expectedPrimary = resolve(REPOSITORY_ROOT, LOCAL_ROOT, 'inputs', FINAL_REVISION_ID, 'primary');
+  const expectedBackup = resolve(REPOSITORY_ROOT, '..', `sorcery-tcg-authority-backup-${FINAL_REVISION_ID}`);
+  return resolve(lock.primaryRoot) === expectedPrimary &&
+    resolve(lock.backupRoot) === expectedBackup &&
+    summary.includes('plan: "15"') &&
+    summary.includes('## Self-Check: PASSED');
 }
 
 function sourceId(relativePath: string): string {
@@ -252,6 +273,54 @@ async function treeMap(root: string): Promise<readonly TreeEntry[]> {
     left.relativePath < right.relativePath ? -1 : left.relativePath > right.relativePath ? 1 : 0);
 }
 
+async function fileEvidence(path: string): Promise<FileEvidence> {
+  const bytes = await readFile(path);
+  return { byteLength: bytes.byteLength, byteHash: sha256(bytes) };
+}
+
+function installNetworkSentinels(
+  http: typeof import('node:http'),
+  https: typeof import('node:https'),
+  net: typeof import('node:net'),
+): Readonly<{ calls: () => number; restore: () => void }> {
+  let count = 0;
+  const blocked = (): never => {
+    count += 1;
+    throw new Error('network access is forbidden in final authority construction');
+  };
+  const originalFetch = globalThis.fetch;
+  const httpDefault = ((http as unknown as { default?: Record<string, unknown> }).default ?? http) as unknown as Record<string, unknown>;
+  const httpsDefault = ((https as unknown as { default?: Record<string, unknown> }).default ?? https) as unknown as Record<string, unknown>;
+  const netDefault = ((net as unknown as { default?: Record<string, unknown> }).default ?? net) as unknown as Record<string, unknown>;
+  const originals = {
+    httpRequest: httpDefault.request,
+    httpGet: httpDefault.get,
+    httpsRequest: httpsDefault.request,
+    httpsGet: httpsDefault.get,
+    netConnect: netDefault.connect,
+    netCreateConnection: netDefault.createConnection,
+  };
+  globalThis.fetch = blocked as typeof fetch;
+  httpDefault.request = blocked;
+  httpDefault.get = blocked;
+  httpsDefault.request = blocked;
+  httpsDefault.get = blocked;
+  netDefault.connect = blocked;
+  netDefault.createConnection = blocked;
+  return {
+    calls: () => count,
+    restore: () => {
+      globalThis.fetch = originalFetch;
+      httpDefault.request = originals.httpRequest;
+      httpDefault.get = originals.httpGet;
+      httpsDefault.request = originals.httpsRequest;
+      httpsDefault.get = originals.httpsGet;
+      netDefault.connect = originals.netConnect;
+      netDefault.createConnection = originals.netCreateConnection;
+    },
+  };
+}
+
 async function cleanTemp(root: string): Promise<void> {
   const resolved = resolve(root);
   assert.equal(dirname(resolved), resolve(tmpdir()), 'cleanup root must be directly under the system temp directory');
@@ -330,9 +399,101 @@ test('publication evidence accepts only the two closed structures and exact curr
 });
 
 test('fresh v3 roots build final v3 candidates while historical evidence remains immutable', async () => {
-  await readFile(FINAL_LOCK_PATH, 'utf8');
-  await readFile(FINAL_SUMMARY_PATH, 'utf8');
-  assert.fail('final v3 candidate build is not implemented');
+  const sandbox = await mkdtemp(join(tmpdir(), 'sorcery-private-revision-'));
+  const summary = await readFile(FINAL_SUMMARY_PATH, 'utf8');
+  const lock = JSON.parse(await readFile(FINAL_LOCK_PATH, 'utf8')) as Evidence;
+  assert.ok(validFinalEvidence(lock, summary), 'Fresh v3 publication evidence is invalid.');
+  for (const invalid of [
+    { ...lock, acquisitionMethod: AGENT_METHOD },
+    { ...lock, authorizationReference: CURRENT_REFERENCE },
+    { ...lock, primaryRoot: `${lock.primaryRoot}-stale` },
+    { ...lock, backupRoot: lock.primaryRoot },
+  ]) {
+    assert.equal(validFinalEvidence(invalid, summary), false);
+  }
+  assert.equal(validFinalEvidence(lock, summary.replace('## Self-Check: PASSED', '')), false);
+
+  const historicalLock = JSON.parse(await readFile(LOCK_PATH, 'utf8')) as LiveLock;
+  const freshBefore = {
+    primary: await treeMap(lock.primaryRoot),
+    backup: await treeMap(lock.backupRoot),
+    lock: await fileEvidence(FINAL_LOCK_PATH),
+  };
+  const historicalBefore = {
+    primary: await treeMap(historicalLock.primaryRoot),
+    backup: await treeMap(historicalLock.backupRoot),
+    lock: await fileEvidence(LOCK_PATH),
+    authorizations: await treeMap(`${LOCAL_ROOT}/authorizations`),
+    revision: await treeMap(SELECTED_REVISION),
+    receipt: await fileEvidence(RECEIPT_PATH),
+  };
+  assert.deepEqual(freshBefore.primary, freshBefore.backup);
+
+  const http = await import('node:http');
+  const https = await import('node:https');
+  const net = await import('node:net');
+  const sentinel = installNetworkSentinels(http, https, net);
+  try {
+    const verified = await verifyPrivateSourceSet({
+      primaryRoot: lock.primaryRoot,
+      backupRoot: lock.backupRoot,
+      repositoryRoot: REPOSITORY_ROOT,
+      entries: lock.entries,
+    });
+    assert.equal(verified.sourceSetRootHash, lock.sourceSetRootHash);
+    assert.equal(verified.entries.length, PRIVATE_AUTHORITY_SOURCE_PATHS.length);
+
+    const primaryInput = join(sandbox, 'primary-input');
+    const backupInput = join(sandbox, 'backup-input');
+    const primaryLock = await writeDerivedInput(primaryInput, lock.primaryRoot, verified.entries);
+    const backupLock = await writeDerivedInput(backupInput, lock.backupRoot, verified.entries);
+    assert.deepEqual(await treeMap(primaryInput), await treeMap(backupInput));
+
+    const primary = await importAuthority(importArgs(
+      primaryInput,
+      primaryLock,
+      join(sandbox, 'primary-output'),
+      FINAL_REVISION_ID,
+    ));
+    const backup = await importAuthority(importArgs(
+      backupInput,
+      backupLock,
+      join(sandbox, 'backup-output'),
+      FINAL_REVISION_ID,
+    ));
+    assert.equal(primary.bundleId, FINAL_STABLE_ID);
+    assert.equal(backup.bundleId, FINAL_STABLE_ID);
+    assert.equal(primary.verifiedInputRootHash, backup.verifiedInputRootHash);
+    assert.equal(primary.bundleRootHash, backup.bundleRootHash);
+    assert.deepEqual(await treeMap(primary.revisionPath), await treeMap(backup.revisionPath));
+
+    const primaryBundle = JSON.parse(await readFile(join(primary.revisionPath, 'bundle.json'), 'utf8')) as AuthorityBundle;
+    const backupBundle = JSON.parse(await readFile(join(backup.revisionPath, 'bundle.json'), 'utf8')) as AuthorityBundle;
+    const independentlyRecomputedRoot = identityHash(primaryBundle.identity as unknown as JsonValue);
+    assert.equal(primary.bundleRootHash, independentlyRecomputedRoot);
+    assert.equal(identityHash(backupBundle.identity as unknown as JsonValue), independentlyRecomputedRoot);
+    await validateAuthorityBundle(dirname(primary.revisionPath), `${FINAL_REVISION_ID}/bundle.json`, {
+      stableId: FINAL_STABLE_ID,
+      contentHash: independentlyRecomputedRoot,
+    });
+    await validateAuthorityBundle(dirname(backup.revisionPath), `${FINAL_REVISION_ID}/bundle.json`, {
+      stableId: FINAL_STABLE_ID,
+      contentHash: independentlyRecomputedRoot,
+    });
+    assert.equal(sentinel.calls(), 0, 'Final v3 candidate construction attempted network access.');
+  } finally {
+    sentinel.restore();
+    assert.deepEqual(await treeMap(lock.primaryRoot), freshBefore.primary);
+    assert.deepEqual(await treeMap(lock.backupRoot), freshBefore.backup);
+    assert.deepEqual(await fileEvidence(FINAL_LOCK_PATH), freshBefore.lock);
+    assert.deepEqual(await treeMap(historicalLock.primaryRoot), historicalBefore.primary);
+    assert.deepEqual(await treeMap(historicalLock.backupRoot), historicalBefore.backup);
+    assert.deepEqual(await fileEvidence(LOCK_PATH), historicalBefore.lock);
+    assert.deepEqual(await treeMap(`${LOCAL_ROOT}/authorizations`), historicalBefore.authorizations);
+    assert.deepEqual(await treeMap(SELECTED_REVISION), historicalBefore.revision);
+    assert.deepEqual(await fileEvidence(RECEIPT_PATH), historicalBefore.receipt);
+    await cleanTemp(sandbox);
+  }
 });
 
 test('live private roots independently reproduce the exact selected revision without mutation', async () => {
