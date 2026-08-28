@@ -53,6 +53,7 @@ export type GameCardDefinition =
     movementPlusOne?: boolean;
     provides?: GameElement;
     ranged?: boolean;
+    stealth?: boolean;
     strikesFirstWhileAttacking?: boolean;
     summonToAnySite?: boolean;
     tapForMana?: number;
@@ -98,6 +99,7 @@ type UnitInstance = Readonly<CardInstance & {
   damage: number;
   location: RealmCell;
   region: GameRegion;
+  stealthed: boolean;
   summoningSickness: boolean;
   tapped: boolean;
   warded: boolean;
@@ -229,6 +231,7 @@ export type GameObservation = Readonly<{
       location: RealmCell;
       owner: GameSeat;
       region: GameRegion;
+      stealthed: boolean;
       summoningSickness: boolean;
       tapped: boolean;
       warded: boolean;
@@ -453,6 +456,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.ranged !== undefined && typeof card.ranged !== 'boolean') {
     throw new RangeError(`${path}.ranged must be boolean`);
   }
+  if (card.stealth !== undefined && typeof card.stealth !== 'boolean') {
+    throw new RangeError(`${path}.stealth must be boolean`);
+  }
   if (card.strikesFirstWhileAttacking !== undefined && typeof card.strikesFirstWhileAttacking !== 'boolean') {
     throw new RangeError(`${path}.strikesFirstWhileAttacking must be boolean`);
   }
@@ -565,6 +571,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.movementPlusOne === true ? { movementPlusOne: true } : {}),
             ...(card.provides ? { provides: card.provides } : {}),
             ...(card.ranged === true ? { ranged: true } : {}),
+            ...(card.stealth === true ? { stealth: true } : {}),
             ...(card.strikesFirstWhileAttacking === true ? { strikesFirstWhileAttacking: true } : {}),
             ...(card.summonToAnySite === true ? { summonToAnySite: true } : {}),
             ...(card.tapForMana ? { tapForMana: card.tapForMana } : {}),
@@ -820,6 +827,7 @@ export function observeGame(state: GameState, viewer: GameSeat): GameObservation
       location: unit.location,
       owner: unit.owner,
       region: unit.region,
+      stealthed: unit.stealthed,
       summoningSickness: unit.summoningSickness,
       tapped: unit.tapped,
       warded: unit.warded,
@@ -893,6 +901,7 @@ function unitStatus(
   location: RealmCell;
   movementSteps: 1 | 2;
   ranged: boolean;
+  stealthed: boolean;
   strikesFirstWhileAttacking: boolean;
   summoningSickness: boolean;
   tapped: boolean;
@@ -913,6 +922,7 @@ function unitStatus(
       location: avatar.location,
       movementSteps: 1,
       ranged: false,
+      stealthed: false,
       strikesFirstWhileAttacking: false,
       summoningSickness: false,
       tapped: avatar.tapped,
@@ -933,6 +943,7 @@ function unitStatus(
     location: unit.location,
     movementSteps: definition.movementPlusOne ? 2 : 1,
     ranged: definition.ranged === true,
+    stealthed: unit.stealthed,
     strikesFirstWhileAttacking: definition.strikesFirstWhileAttacking === true,
     summoningSickness: unit.summoningSickness,
     tapped: unit.tapped,
@@ -1020,7 +1031,10 @@ function rangedDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     const status = unitStatus(state, shooter);
     if (!status.ranged || status.tapped || status.summoningSickness) return [];
     const startingEnemies = allUnits
-      .filter((ref) => ref.seat !== seat && unitStatus(state, ref).location === status.location)
+      .filter((ref) => {
+        const target = unitStatus(state, ref);
+        return ref.seat !== seat && !target.stealthed && target.location === status.location;
+      })
       .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
     return directions.flatMap<GameActionDescriptor>((direction) => {
       if (startingEnemies.length > 0) {
@@ -1039,7 +1053,10 @@ function rangedDescriptors(state: GameState, seat: GameSeat): readonly GameActio
       ]);
       const hits = next && state.realm.sites[next]
         ? allUnits
-          .filter((ref) => unitStatus(state, ref).location === next)
+          .filter((ref) => {
+            const target = unitStatus(state, ref);
+            return !target.stealthed && target.location === next;
+          })
           .sort((left, right) => left.instanceId.localeCompare(right.instanceId))
         : [];
       return hits.length > 0
@@ -1065,7 +1082,9 @@ function attackTargets(state: GameState, pending: PendingCombat): readonly Comba
   const targets: CombatTarget[] = unitRefs(state, defendingSeat)
     .filter((ref) => {
       const target = unitStatus(state, ref);
-      return target.location === pending.cell && (!target.airborne || attackerAirborne);
+      return target.location === pending.cell
+        && !target.stealthed
+        && (!target.airborne || attackerAirborne);
     });
   const site = state.realm.sites[pending.cell];
   if (site?.controller === defendingSeat && unitStatus(state, pending.attacker).canAttackSites) {
@@ -1088,6 +1107,7 @@ function responseUnitRefs(
     if (unavailable.has(ref.instanceId) || !readyUnit(state, ref)) return false;
     const unit = unitStatus(state, ref);
     if (!unit.canRespondToAttack) return false;
+    if (intercept && unitStatus(state, pending.attacker).stealthed) return false;
     if (intercept
       && unitStatus(state, pending.attacker).airborne
       && !unit.airborne
@@ -1324,6 +1344,26 @@ function moveAndTapUnit(
   };
 }
 
+function loseStealth(
+  units: readonly UnitInstance[],
+  refs: readonly GameUnitRef[],
+): readonly [readonly UnitInstance[], readonly GameOutcome[]] {
+  const interacting = new Set(refs
+    .filter(({ kind }) => kind === 'minion')
+    .map(({ instanceId }) => instanceId));
+  const revealed = units.filter(({ instanceId, stealthed }) =>
+    stealthed && interacting.has(instanceId));
+  return [
+    units.map((unit) => revealed.some(({ instanceId }) => instanceId === unit.instanceId)
+      ? deepFreeze({ ...unit, stealthed: false })
+      : unit),
+    revealed.map(({ controller, instanceId }) => ({
+      payload: { instanceId, seat: controller },
+      type: 'stealth-lost',
+    })),
+  ];
+}
+
 function resolveFightWindow(
   state: GameState,
   pending: PendingCombat,
@@ -1358,6 +1398,11 @@ function resolveFightWindow(
     south: state.players.south,
   };
   let units = [...state.realm.units];
+  const [interactedUnits, stealthOutcomes] = loseStealth(units, [
+    ...(attackerStrikes ? [pending.attacker] : []),
+    ...(combatantsStrike ? pending.combatants : []),
+  ]);
+  units = [...interactedUnits];
   const defeatedAvatars = new Set<GameSeat>();
   const deaths: UnitInstance[] = [];
   const damageOutcomes: GameOutcome[] = [];
@@ -1452,6 +1497,7 @@ function resolveFightWindow(
       deaths.push(units[index]!);
     }
   }
+  damageOutcomes.push(...stealthOutcomes);
 
   const deadIds = new Set(deaths.map(({ instanceId }) => instanceId));
   units = units.filter(({ instanceId }) => !deadIds.has(instanceId));
@@ -1648,6 +1694,7 @@ function strikeUndefendedSite(
     throw new Error('unreachable missing site strike target');
   }
   const amount = unitStatus(state, pending.attacker).attack;
+  const [units, stealthOutcomes] = loseStealth(state.realm.units, [pending.attacker]);
   const player = state.players[target.seat];
   const life = Math.max(0, player.avatar.life - amount);
   const lost = player.avatar.life - life;
@@ -1665,6 +1712,7 @@ function strikeUndefendedSite(
       pendingCombat: null,
       phase: 'main',
       players: replacePlayer(state, target.seat, updatedPlayer),
+      realm: { ...state.realm, units },
     }),
     [
       ...outcomes,
@@ -1686,6 +1734,7 @@ function strikeUndefendedSite(
           type: 'avatar-reached-deaths-door',
         }]
         : []),
+      ...stealthOutcomes,
     ],
     [],
   ];
@@ -1798,6 +1847,7 @@ function applyDescriptor(
       damage: 0,
       location: descriptor.cell,
       region: 'surface',
+      stealthed: definition.stealth === true,
       summoningSickness: true,
       tapped: false,
       warded: definition.ward === true,
@@ -1871,24 +1921,28 @@ function applyDescriptor(
         && candidate.unitInstanceId === descriptor.unitInstanceId);
     const unit = state.realm.units.find(({ instanceId }) => instanceId === descriptor.unitInstanceId);
     if (!legal || !unit) throw new Error('unreachable illegal mana activation');
+    const [units, stealthOutcomes] = loseStealth(
+      state.realm.units.map((candidate) => candidate.instanceId === unit.instanceId
+        ? deepFreeze({ ...candidate, tapped: true })
+        : candidate),
+      [{ instanceId: unit.instanceId, kind: 'minion', seat }],
+    );
     return [
       withStateVersion(state, {
         players: replacePlayer(state, seat, deepFreeze({ ...player, mana: player.mana + descriptor.amount })),
-        realm: {
-          ...state.realm,
-          units: state.realm.units.map((candidate) => candidate.instanceId === unit.instanceId
-            ? deepFreeze({ ...candidate, tapped: true })
-            : candidate),
-        },
+        realm: { ...state.realm, units },
       }),
-      [{
-        payload: {
-          amount: descriptor.amount,
-          seat,
-          unitInstanceId: descriptor.unitInstanceId,
+      [
+        {
+          payload: {
+            amount: descriptor.amount,
+            seat,
+            unitInstanceId: descriptor.unitInstanceId,
+          },
+          type: 'mana-activated',
         },
-        type: 'mana-activated',
-      }],
+        ...stealthOutcomes,
+      ],
       [],
     ];
   }
@@ -1909,7 +1963,12 @@ function applyDescriptor(
     if (!legal || !shooter) throw new Error('unreachable illegal Ranged projectile');
     const shooterStatus = unitStatus(state, shooter);
     const tapped = moveAndTapUnit(state, shooter, shooterStatus.location);
-    const shotState = deepFreeze({ ...state, players: tapped.players, realm: tapped.realm });
+    const [units, stealthOutcomes] = loseStealth(tapped.realm.units, [shooter]);
+    const shotState = deepFreeze({
+      ...state,
+      players: tapped.players,
+      realm: { ...tapped.realm, units },
+    });
     const shot: GameOutcome = {
       payload: {
         direction: descriptor.direction,
@@ -1921,7 +1980,7 @@ function applyDescriptor(
       type: 'projectile-shot',
     };
     if (!descriptor.hit) {
-      return [withStateVersion(shotState, {}), [shot], []];
+      return [withStateVersion(shotState, {}), [shot, ...stealthOutcomes], []];
     }
     const amount = shooterStatus.attack;
     const strike: GameOutcome = {
@@ -1941,7 +2000,7 @@ function applyDescriptor(
       defenders: [],
       originalTarget: descriptor.hit,
       targetRemoved: false,
-    }), [shot, strike], false);
+    }), [shot, ...stealthOutcomes, strike], false);
   }
 
   if (descriptor.kind === 'move-and-attack') {
@@ -2021,21 +2080,28 @@ function applyDescriptor(
         && target.kind === descriptor.target.kind
         && target.seat === descriptor.target.seat);
     if (!legal) throw new Error('unreachable illegal attack target');
+    const declaredPending = deepFreeze({ ...pending, originalTarget: descriptor.target });
+    const declared: GameOutcome = {
+      payload: {
+        attackerInstanceId: pending.attacker.instanceId,
+        cell: pending.cell,
+        seat: pending.attackingSeat,
+        target: descriptor.target,
+      },
+      type: 'attack-declared',
+    };
+    if (unitStatus(state, pending.attacker).stealthed) {
+      return descriptor.target.kind === 'site'
+        ? strikeUndefendedSite(state, declaredPending, [declared])
+        : beginFight(state, declaredPending, [descriptor.target], [declared]);
+    }
     return [
       withStateVersion(state, {
         decisionSeat: otherSeat(pending.attackingSeat),
-        pendingCombat: deepFreeze({ ...pending, originalTarget: descriptor.target }),
+        pendingCombat: declaredPending,
         phase: 'defend',
       }),
-      [{
-        payload: {
-          attackerInstanceId: pending.attacker.instanceId,
-          cell: pending.cell,
-          seat: pending.attackingSeat,
-          target: descriptor.target,
-        },
-        type: 'attack-declared',
-      }],
+      [declared],
       [],
     ];
   }

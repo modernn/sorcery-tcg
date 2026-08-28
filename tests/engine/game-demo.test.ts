@@ -12,7 +12,7 @@ test('RULE-01 deterministic agents complete a skeletal match from setup to deck-
   assert.deepEqual(result, {
     acceptedActionCount: 138,
     classification: 'unranked_partial_rules',
-    finalStateHash: 'sha256:b58172d653d61d82e9dd98b45e94eeace4797cfd5881570408b771d3c8cbbf6e',
+    finalStateHash: 'sha256:917efe0e8caae5f779e2167d86034831496aa827cfe05d6f90d961a3b5f2f9d6',
     loser: 'south',
     reason: 'deck_empty',
     replayVerified: true,
