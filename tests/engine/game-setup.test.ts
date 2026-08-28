@@ -343,6 +343,36 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   }), /damageEachUnitAtLocationWithinTwoSteps/);
+  const chargeManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        grantChargeToAllyThisTurn: true,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(chargeManifest.cards[firstSpell], {
+    cardType: 'magic',
+    grantChargeToAllyThisTurn: true,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        grantChargeToAllyThisTurn: false,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /grantChargeToAllyThisTurn/);
   const teleportManifest = createGameManifest({
     ...input,
     cards: {
@@ -1896,6 +1926,195 @@ test('RULE-03/04 Minor Explosion damages every unit at a location up to two card
     result.receipt.events.indexOf(event) < firstDeath), true);
   assert.equal(result.receipt.events.findIndex(({ type }) => type === 'avatar-healed') < firstDeath, true);
   assert.equal(result.receipt.events.at(-1)?.type, 'magic-resolved');
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 Charge Magic grants an untargeted ally Charge only for the current turn', () => {
+  const decks = { north: deck('charge-north', 4, 6), south: deck('charge-south', 4, 6) };
+  const baseCards = cardsFor(decks, {
+    defense: 3,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  }, undefined, { elements: ['fire'] });
+  const authority = {
+    contentHash: SYNTHETIC_AUTHORITY_HASH,
+    mode: 'synthetic' as const,
+    revisionId: 'synthetic-charge-magic-v1',
+  };
+  const seed = 250;
+  const preview = createGameSession(createGameManifest({
+    authority,
+    cards: baseCards,
+    decks,
+    firstSeat: 'north',
+    seed,
+  }));
+  const printedChargeCardId = preview.state.players.north.hand.spellbook[0]?.cardId;
+  const chargeCardIds = preview.state.players.north.hand.spellbook.slice(1).map(({ cardId }) => cardId);
+  const summonedCardId = preview.state.players.north.spellbook[0]?.cardId;
+  const enemyCardId = preview.state.players.south.hand.spellbook[0]?.cardId;
+  assert.ok(printedChargeCardId);
+  assert.equal(chargeCardIds.length, 2);
+  assert.ok(summonedCardId);
+  assert.ok(enemyCardId);
+
+  const cards: Record<string, GameCardDefinition> = { ...baseCards };
+  for (const cardId of decks.north.spellbook) {
+    cards[cardId] = {
+      cardType: 'magic',
+      grantChargeToAllyThisTurn: true,
+      manaCost: 1,
+      thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+    };
+  }
+  cards[printedChargeCardId] = {
+    ...baseCards[printedChargeCardId]!,
+    burrowing: true,
+    charge: true,
+    stealth: true,
+    ward: true,
+  } as GameCardDefinition;
+  cards[summonedCardId] = { ...baseCards[summonedCardId]! } as GameCardDefinition;
+  cards[enemyCardId] = {
+    ...baseCards[enemyCardId]!,
+    stealth: true,
+    ward: true,
+  } as GameCardDefinition;
+  const gameManifest = createGameManifest({ authority, cards, decks, firstSeat: 'north', seed });
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === printedChargeCardId
+    && descriptor.cell === 'C4'
+    && descriptor.region === 'underground');
+  const printedCharge = session.state.realm.units.find(({ cardId }) => cardId === printedChargeCardId);
+  assert.ok(printedCharge);
+  assert.equal(printedCharge.summoningSickness, true);
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === printedCharge.instanceId), true);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === enemyCardId && descriptor.cell === 'C1');
+  const enemy = session.state.realm.units.find(({ cardId }) => cardId === enemyCardId);
+  assert.ok(enemy);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === summonedCardId && descriptor.cell === 'C4');
+
+  const checkpoint = session;
+  const summoned = checkpoint.state.realm.units.find(({ cardId }) => cardId === summonedCardId);
+  const chargeCards = checkpoint.state.players.north.hand.spellbook.filter(({ cardId }) =>
+    chargeCardIds.includes(cardId));
+  assert.ok(summoned);
+  assert.equal(chargeCards.length, 2);
+  assert.deepEqual({
+    region: checkpoint.state.realm.units.find(({ instanceId }) =>
+      instanceId === printedCharge.instanceId)?.region,
+    stealthed: checkpoint.state.realm.units.find(({ instanceId }) =>
+      instanceId === printedCharge.instanceId)?.stealthed,
+    warded: checkpoint.state.realm.units.find(({ instanceId }) =>
+      instanceId === printedCharge.instanceId)?.warded,
+  }, { region: 'underground', stealthed: true, warded: true });
+  const casts = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === chargeCards[0]?.instanceId);
+  const allyIds = casts.flatMap(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.ally ? [descriptor.ally.instanceId] : []).sort();
+  assert.deepEqual(allyIds, [
+    checkpoint.state.players.north.avatar.card.instanceId,
+    printedCharge.instanceId,
+    summoned.instanceId,
+  ].sort());
+  assert.equal(allyIds.includes(enemy.instanceId), false);
+  assert.equal(casts.every(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.target === undefined), true);
+  assert.equal(casts.find(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.ally?.instanceId === summoned.instanceId)?.label.includes('grant Charge'), true);
+  assert.equal(legalGameActions(checkpoint.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === summoned.instanceId), false);
+
+  const avatarGrant = accept(checkpoint, action(checkpoint, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === chargeCards[0]?.instanceId
+      && descriptor.ally?.kind === 'avatar'));
+  assert.deepEqual(avatarGrant.transcript.at(-1)?.events.map(({ type }) => type), [
+    'magic-cast',
+    'charge-granted',
+    'magic-resolved',
+  ]);
+  assert.equal(avatarGrant.state.realm.units.every(({ temporaryChargeSources }) =>
+    temporaryChargeSources === undefined), true);
+  assert.equal(verifyGameReplay(avatarGrant), true);
+
+  const first = stepGame(checkpoint, action(checkpoint, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === chargeCards[0]?.instanceId
+      && descriptor.ally?.instanceId === summoned.instanceId));
+  assert.equal(first.accepted, true);
+  if (!first.accepted) return;
+  session = first.session;
+  assert.deepEqual(first.receipt.events.map(({ type }) => type), [
+    'magic-cast',
+    'charge-granted',
+    'magic-resolved',
+  ]);
+  assert.deepEqual(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === summoned.instanceId)?.temporaryChargeSources, [chargeCards[0]!.instanceId]);
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === summoned.instanceId), true);
+
+  const second = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === chargeCards[1]?.instanceId
+      && descriptor.ally?.instanceId === summoned.instanceId));
+  assert.equal(second.accepted, true);
+  if (!second.accepted) return;
+  session = second.session;
+  assert.deepEqual(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === summoned.instanceId)?.temporaryChargeSources, chargeCards.map(({ instanceId }) => instanceId));
+  assert.equal(session.state.players.north.mana, 0);
+  assert.equal(session.state.players.north.cemetery.filter(({ instanceId }) =>
+    chargeCards.some((card) => card.instanceId === instanceId)).length, 2);
+  assert.equal(session.state.stateVersion, checkpoint.state.stateVersion + 2);
+  assert.equal(first.receipt.randomDraws.length + second.receipt.randomDraws.length, 0);
+
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === summoned.instanceId
+    && descriptor.to.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  const ended = stepGame(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  assert.equal(ended.accepted, true);
+  if (!ended.accepted) return;
+  session = ended.session;
+  assert.deepEqual(ended.receipt.events.map(({ type }) => type), [
+    'charge-expired',
+    'charge-expired',
+    'turn-ended',
+    'turn-started',
+  ]);
+  assert.deepEqual(ended.receipt.events.slice(0, 2).map(({ payload }) => payload), chargeCards.map((card) => ({
+    instanceId: summoned.instanceId,
+    seat: 'north',
+    sourceInstanceId: card.instanceId,
+  })));
+  const expired = session.state.realm.units.find(({ instanceId }) => instanceId === summoned.instanceId);
+  assert.equal(expired?.temporaryChargeSources, undefined);
+  assert.equal(expired?.tapped, true);
+  assert.equal(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === printedCharge.instanceId)?.temporaryChargeSources, undefined);
+  assert.equal(gameManifest.cards[printedChargeCardId]?.cardType === 'minion'
+    && gameManifest.cards[printedChargeCardId].charge, true);
   assert.equal(verifyGameReplay(session), true);
 });
 
