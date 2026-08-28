@@ -27,6 +27,7 @@ const SCRIPT_PATH = join(REPOSITORY_ROOT, 'scripts', 'collect-private-authority.
 const REVISION_ID = 'official-2026-08-27-v3';
 const MANUAL_METHOD = 'user-provided-manual-download';
 const MANUAL_REFERENCE = 'phase-01-20260827-manual-provision-1';
+const PRIVATE_LOCATOR_LABEL = ['user-provided', 'manual-local-file'].join('-');
 const RETRIEVED_AT = '2026-08-27T20:00:00.000Z';
 const OFFICIAL_URLS = Object.freeze({
   'rulebook/rulebook-current.pdf':
@@ -358,10 +359,12 @@ test('manual intake publishes exact independent roots and a lock last without tr
       rulebookAcquisitionEvidence: {
         byteHash: string;
         retrievedAt: string;
+        privateLocatorEvidence: string;
       };
     };
     assert.equal(lock.acquisitionMethod, MANUAL_METHOD);
     assert.equal(lock.authorizationReference, MANUAL_REFERENCE);
+    assert.equal(lock.rulebookAcquisitionEvidence.privateLocatorEvidence, PRIVATE_LOCATOR_LABEL);
     assert.equal(lock.entries.length, 7);
     assert.equal(await exists(join(fixture.repositoryRoot, '.local', 'authority', 'authorizations')), false);
     assert.deepEqual(await inboxHashes(fixture), before);
@@ -806,6 +809,7 @@ test('manual intake performs no runtime network requests', async () => {
 
 test('production manual intake has one fixed offline source and no transport surface', async () => {
   const source = await readFile(SCRIPT_PATH, 'utf8');
+  assert.equal(source.includes(PRIVATE_LOCATOR_LABEL), false);
   for (const required of [
     '.local/authority/manual-inbox/official-2026-08-27-v3',
     '.local/authority/inputs/official-2026-08-27-v3/primary',

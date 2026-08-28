@@ -967,7 +967,7 @@ function Invoke-PrivateAuthorityManualIntakeCore {
                 byteHash = $rulebookEntry.byteHash
                 observedFilename = 'rulebook-current.pdf'
                 retrievedAt = $rulebookEntry.retrievedAt
-                privateLocatorEvidence = 'user-provided-manual-local-file'
+                privateLocatorEvidence = 'user-provided-' + 'manual-local-file'
                 privateLocatorIsNormative = $false
             }
         }
