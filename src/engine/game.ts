@@ -101,6 +101,7 @@ export type GameCardDefinition =
     tapForMana?: number;
     thresholds: GameThresholds;
     voidwalk?: boolean;
+    waterbound?: boolean;
     ward?: boolean;
   }>;
 
@@ -913,6 +914,18 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.voidwalk !== undefined && typeof card.voidwalk !== 'boolean') {
     throw new RangeError(`${path}.voidwalk must be boolean`);
   }
+  if (card.waterbound !== undefined && typeof card.waterbound !== 'boolean') {
+    throw new RangeError(`${path}.waterbound must be boolean`);
+  }
+  if (card.waterbound
+    && (card.ward || card.stealth || card.gainsStealthAtEndOfTurn)) {
+    throw new RangeError(`${path} Waterbound with Ward or Stealth is unsupported`);
+  }
+  if (card.waterbound
+    && (card.genesisDrawSite || card.genesisDrawSpell
+      || card.genesisLoseControllerLife !== undefined)) {
+    throw new RangeError(`${path} Waterbound with Genesis is unsupported`);
+  }
   if (card.summonToAnySite !== undefined && typeof card.summonToAnySite !== 'boolean') {
     throw new RangeError(`${path}.summonToAnySite must be boolean`);
   }
@@ -1079,6 +1092,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.tapForMana ? { tapForMana: card.tapForMana } : {}),
             thresholds: { ...card.thresholds },
             ...(card.voidwalk === true ? { voidwalk: true } : {}),
+            ...(card.waterbound === true ? { waterbound: true } : {}),
             ...(card.ward === true ? { ward: true } : {}),
           },
     ])),
@@ -1249,6 +1263,13 @@ function cardDefinition(state: GameState, cardId: string): GameCardDefinition {
   return card;
 }
 
+function minionDisabled(state: GameState, unit: UnitInstance): boolean {
+  const definition = cardDefinition(state, unit.cardId);
+  if (definition.cardType !== 'minion') throw new Error('realm minion lacks minion definition');
+  return Boolean(unit.disableEffects?.length)
+    || definition.waterbound === true && !isWaterSite(state, unit.location);
+}
+
 function affinity(state: GameState, seat: GameSeat): GameThresholds {
   const total: Record<GameElement, number> = { air: 0, earth: 0, fire: 0, water: 0 };
   Object.values(state.realm.sites)
@@ -1262,7 +1283,7 @@ function affinity(state: GameState, seat: GameSeat): GameThresholds {
       });
     });
   state.realm.units
-    .filter((unit) => unit.controller === seat && !unit.disableEffects?.length)
+    .filter((unit) => unit.controller === seat && !minionDisabled(state, unit))
     .forEach((unit) => {
       const definition = cardDefinition(state, unit.cardId);
       if (definition.cardType !== 'minion') throw new Error('realm minion lacks minion definition');
@@ -1337,7 +1358,7 @@ export function observeGame(state: GameState, viewer: GameSeat): GameObservation
       controller: unit.controller,
       damage: unit.damage,
       defense: definition.defense,
-      disabled: Boolean(unit.disableEffects?.length),
+      disabled: minionDisabled(state, unit),
       instanceId: unit.instanceId,
       location: unit.location,
       owner: unit.owner,
@@ -1465,7 +1486,7 @@ function unitStatus(
   if (!unit || unit.controller !== ref.seat) throw new Error('unreachable minion reference');
   const definition = cardDefinition(state, unit.cardId);
   if (definition.cardType !== 'minion') throw new Error('minion lacks minion definition');
-  const disabled = Boolean(unit.disableEffects?.length);
+  const disabled = minionDisabled(state, unit);
   return {
     airborne: !disabled && definition.airborne === true && unit.region === 'surface',
     attack: definition.attack,
@@ -1810,7 +1831,7 @@ function dragProjectileDescriptors(state: GameState, seat: GameSeat): readonly G
 function manaAbilityDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   return state.realm.units.flatMap((unit) => {
     if (unit.controller !== seat
-      || unit.disableEffects?.length
+      || minionDisabled(state, unit)
       || unit.tapped
       || unit.summoningSickness) return [];
     const definition = cardDefinition(state, unit.cardId);
@@ -2229,7 +2250,7 @@ function resolveMinionDeaths(
   const deckLosers = new Set<GameSeat>();
   for (const dead of deaths) {
     const definition = cardDefinition(state, dead.cardId);
-    if (definition.cardType !== 'minion' || dead.disableEffects?.length) continue;
+    if (definition.cardType !== 'minion' || minionDisabled(state, dead)) continue;
     if (definition.deathriteHeal) {
       const controller = players[dead.controller];
       const avatarDefinition = cardDefinition(state, controller.avatar.card.cardId);
@@ -2309,7 +2330,7 @@ function resolveMinionDeaths(
 function minionSurvivesRegion(state: GameState, unit: UnitInstance): boolean {
   if (unit.region === 'surface') return true;
   const definition = cardDefinition(state, unit.cardId);
-  if (definition.cardType !== 'minion' || unit.disableEffects?.length) return false;
+  if (definition.cardType !== 'minion' || minionDisabled(state, unit)) return false;
   if (unit.region === 'underground') return definition.burrowing === true;
   if (unit.region === 'underwater') return definition.submerge === true;
   return definition.voidwalk === true;
@@ -2357,10 +2378,14 @@ function resolveSiteDeaths(
     floodedCells.has(unit.location) && unit.region === 'underwater'
       ? deepFreeze({ ...unit, region: 'underground' as const })
       : unit);
+  const terrainState = deepFreeze({
+    ...state,
+    realm: { sites, units },
+  });
   const deaths = units.filter((unit) =>
-    destroyedCells.has(unit.location) && !minionSurvivesRegion(state, unit));
+    destroyedCells.has(unit.location) && !minionSurvivesRegion(terrainState, unit));
   const deathResolution = resolveMinionDeaths(
-    state,
+    terrainState,
     state.players,
     units,
     deaths,
@@ -4127,7 +4152,7 @@ function applyDescriptor(
   });
   const players = deepFreeze({ ...state.players, [seat]: endingPlayer, [nextSeat]: startingPlayer });
   const stealthGained = state.realm.units.filter((unit) => {
-    if (unit.controller !== seat || unit.disableEffects?.length || unit.stealthed) return false;
+    if (unit.controller !== seat || minionDisabled(state, unit) || unit.stealthed) return false;
     const definition = cardDefinition(state, unit.cardId);
     return definition.cardType === 'minion' && definition.gainsStealthAtEndOfTurn === true;
   });
