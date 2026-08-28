@@ -207,6 +207,17 @@ export type PrivateGameCheck = Readonly<{
     seed: number;
     summonedUnderground: boolean;
   }>;
+  earthForwardMovement: Readonly<{
+    acceptedActionCount: number;
+    backwardPathUnavailable: boolean;
+    deck: DeckList;
+    forwardPathAvailable: boolean;
+    phalanx: string;
+    replayVerified: boolean;
+    seed: number;
+    sidewaysPathUnavailable: boolean;
+    siteTargetAvailable: boolean;
+  }>;
   earthRamp: Readonly<{
     acceptedActionCount: number;
     affinityAdded: boolean;
@@ -486,6 +497,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   chargeMinion: NormalizedCard;
   config: ScenarioConfig;
   deathriteMinion: NormalizedCard;
+  dalceanPhalanx: NormalizedCard;
   drowned: NormalizedCard;
   earthProviderMinion: NormalizedCard;
   entombed: NormalizedCard;
@@ -690,6 +702,22 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || entombed.thresholds.water !== 0
     || entombed.rarity !== 'ordinary') {
     throw new Error('private burrowed-only casting minion no longer matches its supported facts');
+  }
+  const dalceanPhalanx = snapshot.cards.find(({ name }) => name === 'Dalcean Phalanx');
+  if (!dalceanPhalanx
+    || dalceanPhalanx.cardType !== 'minion'
+    || dalceanPhalanx.rulesText.trim() !== 'Can only move themselves forward.'
+    || dalceanPhalanx.manaCost !== 4
+    || dalceanPhalanx.attack !== 5
+    || dalceanPhalanx.defense !== 5
+    || dalceanPhalanx.elements.length !== 1
+    || dalceanPhalanx.elements[0] !== 'earth'
+    || dalceanPhalanx.thresholds.air !== 0
+    || dalceanPhalanx.thresholds.earth !== 2
+    || dalceanPhalanx.thresholds.fire !== 0
+    || dalceanPhalanx.thresholds.water !== 0
+    || dalceanPhalanx.rarity !== 'exceptional') {
+    throw new Error('private forward-only minion no longer matches its supported facts');
   }
   const voidwalkMinion = snapshot.cards.find(({ name }) => name === 'Spectral Stalker');
   if (!voidwalkMinion
@@ -1016,6 +1044,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     cannotDefendMinion,
     chargeMinion,
     config,
+    dalceanPhalanx,
     deathriteMinion,
     drowned,
     earthProviderMinion,
@@ -1105,6 +1134,7 @@ function gameDefinition(
   siteGenesisDrawSpellPerAdjacentSameCard = false,
   mustBeCastBurrowed = false,
   mustBeCastSubmerged = false,
+  movesOnlyForward = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1148,6 +1178,7 @@ function gameDefinition(
       gainsStealthAtEndOfTurn,
       lethal,
       manaCost: card.manaCost,
+      movesOnlyForward,
       mustBeCastBurrowed,
       mustBeCastSubmerged,
       mustBeCastToOuterColumn,
@@ -1171,7 +1202,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-genesis-spell' | 'air-leyline' | 'air-voidwalk' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-entombed' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-genesis-spell' | 'air-leyline' | 'air-voidwalk' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1279,6 +1310,10 @@ function buildManifest(
     ...earthMinions,
     input.entombed,
   ], [input.ghostTownSite]);
+  const earthForwardDeck = elementalDeck('earth', [
+    ...earthMinions,
+    input.dalceanPhalanx,
+  ], [input.ghostTownSite]);
   const airMinions = [
     input.movementMinion,
     input.roamingMinion,
@@ -1330,6 +1365,8 @@ function buildManifest(
       ? airborneDeck
       : scenario === 'earth-entombed'
         ? earthEntombedDeck
+      : scenario === 'earth-forward'
+        ? earthForwardDeck
       : scenario === 'earth-burrowing'
         ? earthBurrowingDeck
       : scenario === 'earth' || scenario === 'earth-first-strike' || scenario === 'earth-ward'
@@ -1361,6 +1398,8 @@ function buildManifest(
         ? waterDrownedDeck
       : scenario === 'earth-entombed'
         ? earthEntombedDeck
+      : scenario === 'earth-forward'
+        ? earthForwardDeck
       : scenario === 'earth-burrowing'
         ? earthBurrowingDeck
       : scenario === 'earth-first-strike' || scenario === 'earth-ward' ? earthDeck : deck(true, false),
@@ -1418,6 +1457,7 @@ function buildManifest(
       card.stableId === input.leylineHenge.stableId,
       card.stableId === input.entombed.stableId,
       card.stableId === input.drowned.stableId,
+      card.stableId === input.dalceanPhalanx.stableId,
     ),
   ]));
   return {
@@ -1894,6 +1934,54 @@ function findEarthEntombedOpening(
     }
   }
   throw new Error('private Earth Entombed scenario no longer produces its supported opening');
+}
+
+function findEarthForwardOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  ghostTownSiteInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string];
+  phalanxInstanceId: string;
+  seed: number;
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string];
+}> {
+  // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const seed = input.config.earthSeed + offset;
+    const built = buildManifest(input, seed, 'earth-forward');
+    const session = createGameSession(built.manifest);
+    const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return cardId !== input.ghostTownSite.stableId
+        && definition?.cardType === 'site'
+        && definition.elements.includes('earth');
+    });
+    const ghostTownSiteInstanceId = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.ghostTownSite.stableId)?.instanceId;
+    const phalanxInstanceId = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 2),
+    ].find(({ cardId }) => cardId === input.dalceanPhalanx.stableId)?.instanceId;
+    const southSites = session.state.players.south.hand.atlas;
+    if (northSites.length >= 2
+      && ghostTownSiteInstanceId
+      && phalanxInstanceId
+      && southSites.length >= 2) {
+      return {
+        ...built,
+        ghostTownSiteInstanceId,
+        northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
+        phalanxInstanceId,
+        seed,
+        session,
+        southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
+      };
+    }
+  }
+  throw new Error('private Earth forward-only scenario no longer produces its supported opening');
 }
 
 function findAirOpening(
@@ -2688,6 +2776,82 @@ function runEarthEntombed(
     replayVerified: verifyGameReplay(session),
     seed: opening.seed,
     summonedUnderground,
+  });
+}
+
+function runEarthForwardMovement(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthForwardMovement'] {
+  const opening = findEarthForwardOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.ghostTownSiteInstanceId
+    && descriptor.cell === 'B3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.phalanxInstanceId
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const moves = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.phalanxInstanceId);
+  const hasPath = (cells: string): boolean => moves.some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.path.map(({ cell }) => cell).join(',') === cells);
+  const forwardPathAvailable = session.state.realm.sites.C2 !== undefined
+    && hasPath('C3,C2');
+  const backwardPathUnavailable = session.state.realm.sites.C4 !== undefined
+    && !hasPath('C3,C4');
+  const sidewaysPathUnavailable = session.state.realm.sites.B3 !== undefined
+    && !hasPath('C3,B3');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === opening.phalanxInstanceId
+    && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C2');
+  const siteTargetAvailable = legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'site'
+      && descriptor.target.instanceId === session.state.realm.sites.C2?.instanceId);
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    backwardPathUnavailable,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    forwardPathAvailable,
+    phalanx:
+      opening.names.get(input.dalceanPhalanx.stableId) ?? input.dalceanPhalanx.stableId,
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    sidewaysPathUnavailable,
+    siteTargetAvailable,
   });
 }
 
@@ -4302,6 +4466,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthBurrowing = runEarthBurrowing(input);
   const earthEntombed = runEarthEntombed(input);
   const earthFirstStrike = runEarthFirstStrike(input);
+  const earthForwardMovement = runEarthForwardMovement(input);
   const earthRamp = runEarthRamp(input);
   const earthRanged = runEarthRanged(input);
   const earthWard = runEarthWard(input);
@@ -4448,6 +4613,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthEntombed,
     earthRamp,
     earthFirstStrike,
+    earthForwardMovement,
     earthRanged,
     earthWard,
     fireResponse,

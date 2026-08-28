@@ -152,6 +152,19 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthEntombed.deck.spellbook
     .find(({ name }) => name === 'Entombed')?.copies, 4);
   assert.equal(result.earthEntombed.replayVerified, true);
+  assert.equal(result.earthForwardMovement.phalanx, 'Dalcean Phalanx');
+  assert.equal(result.earthForwardMovement.acceptedActionCount, 22);
+  assert.equal(result.earthForwardMovement.forwardPathAvailable, true);
+  assert.equal(result.earthForwardMovement.backwardPathUnavailable, true);
+  assert.equal(result.earthForwardMovement.sidewaysPathUnavailable, true);
+  assert.equal(result.earthForwardMovement.siteTargetAvailable, true);
+  assert.equal(result.earthForwardMovement.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthForwardMovement.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthForwardMovement.deck.spellbook
+    .find(({ name }) => name === 'Dalcean Phalanx')?.copies, 3);
+  assert.equal(result.earthForwardMovement.replayVerified, true);
   assert.equal(result.earthRamp.affinityAdded, true);
   assert.equal(result.earthRamp.manaUnavailableWhileSick, true);
   assert.equal(result.earthRamp.manaGained, 2);

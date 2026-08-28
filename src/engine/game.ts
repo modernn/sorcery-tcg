@@ -63,6 +63,7 @@ export type GameCardDefinition =
     lethal?: boolean;
     manaCost: number;
     movementBonus?: 1 | 2;
+    movesOnlyForward?: boolean;
     movesOnlySideways?: boolean;
     mustBeCastBurrowed?: boolean;
     mustBeCastSubmerged?: boolean;
@@ -556,6 +557,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.movesOnlySideways !== undefined && typeof card.movesOnlySideways !== 'boolean') {
     throw new RangeError(`${path}.movesOnlySideways must be boolean`);
   }
+  if (card.movesOnlyForward !== undefined && typeof card.movesOnlyForward !== 'boolean') {
+    throw new RangeError(`${path}.movesOnlyForward must be boolean`);
+  }
   if (card.mustBeCastBurrowed !== undefined && typeof card.mustBeCastBurrowed !== 'boolean') {
     throw new RangeError(`${path}.mustBeCastBurrowed must be boolean`);
   }
@@ -704,6 +708,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.lethal === true ? { lethal: true } : {}),
             manaCost: card.manaCost,
             ...(card.movementBonus ? { movementBonus: card.movementBonus } : {}),
+            ...(card.movesOnlyForward === true ? { movesOnlyForward: true } : {}),
             ...(card.movesOnlySideways === true ? { movesOnlySideways: true } : {}),
             ...(card.mustBeCastBurrowed === true ? { mustBeCastBurrowed: true } : {}),
             ...(card.mustBeCastSubmerged === true ? { mustBeCastSubmerged: true } : {}),
@@ -1043,6 +1048,7 @@ function unitStatus(
   lethal: boolean;
   location: RealmCell;
   movementSteps: number;
+  movesOnlyForward: boolean;
   movesOnlySideways: boolean;
   ranged: boolean;
   region: GameRegion;
@@ -1070,6 +1076,7 @@ function unitStatus(
       lethal: false,
       location: avatar.location,
       movementSteps: 1,
+      movesOnlyForward: false,
       movesOnlySideways: false,
       ranged: false,
       region: avatar.region,
@@ -1097,6 +1104,7 @@ function unitStatus(
     lethal: definition.lethal === true,
     location: unit.location,
     movementSteps: 1 + (definition.movementBonus ?? 0),
+    movesOnlyForward: definition.movesOnlyForward === true,
     movesOnlySideways: definition.movesOnlySideways === true,
     ranged: definition.ranged === true,
     region: unit.region,
@@ -1131,6 +1139,7 @@ function movementPaths(
   maximumSteps: number,
   airborne = false,
   movesOnlySideways = false,
+  movesOnlyForwardFor: GameSeat | null = null,
   burrowing = false,
   submerge = false,
   voidwalk = false,
@@ -1196,6 +1205,14 @@ function movementPaths(
         .filter((candidate) => locationExists(state, candidate)
           && (!movesOnlySideways
             || candidate.region === current.region && candidate.cell[1] === current.cell[1])
+          && (!movesOnlyForwardFor
+            || candidate.region === current.region
+              && candidate.cell[0] === current.cell[0]
+              && (Number(candidate.cell[1]) - Number(current.cell[1])
+                === (movesOnlyForwardFor === 'north' ? -1 : 1)
+                || connectsTopBottom && (movesOnlyForwardFor === 'north'
+                  ? current.cell[1] === '1' && candidate.cell[1] === '4'
+                  : current.cell[1] === '4' && candidate.cell[1] === '1')))
           && !path.some((from, index) =>
             sameLocation(from, current) && path[index + 1] !== undefined
               && sameLocation(path[index + 1]!, candidate)))
@@ -1232,6 +1249,7 @@ function defendPaths(
     unit.canMoveToDefend ? unit.movementSteps : 0,
     unit.airborne,
     unit.movesOnlySideways,
+    unit.movesOnlyForward ? ref.seat : null,
     unit.burrowing,
     unit.submerge,
     unit.voidwalk,
@@ -1250,6 +1268,7 @@ function movementDescriptors(state: GameState, seat: GameSeat): readonly GameAct
       unit.movementSteps,
       unit.airborne,
       unit.movesOnlySideways,
+      unit.movesOnlyForward ? ref.seat : null,
       unit.burrowing,
       unit.submerge,
       unit.voidwalk,

@@ -46,6 +46,7 @@ type SpellFacts = Readonly<{
   lethal?: boolean;
   manaCost: number;
   movementBonus?: 1 | 2;
+  movesOnlyForward?: boolean;
   movesOnlySideways?: boolean;
   mustBeCastBurrowed?: boolean;
   mustBeCastSubmerged?: boolean;
@@ -124,6 +125,7 @@ function cardsFor(
         lethal: facts.lethal ?? false,
         manaCost: facts.manaCost,
         ...(facts.movementBonus ? { movementBonus: facts.movementBonus } : {}),
+        movesOnlyForward: facts.movesOnlyForward ?? false,
         movesOnlySideways: facts.movesOnlySideways ?? false,
         mustBeCastBurrowed: facts.mustBeCastBurrowed ?? false,
         mustBeCastSubmerged: facts.mustBeCastSubmerged ?? false,
@@ -262,6 +264,13 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       [firstSpell]: { ...cards[firstSpell]!, movementBonus: 3 } as unknown as GameCardDefinition,
     },
   }), /movementBonus/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: { ...cards[firstSpell]!, movesOnlyForward: 'yes' } as unknown as GameCardDefinition,
+    },
+  }), /movesOnlyForward/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -1669,6 +1678,85 @@ test('RULE-04 Sedge Crabs can move themselves only sideways', () => {
   session = accept(session, sideways);
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
   assert.equal(session.state.realm.units[0]?.location, 'B3');
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 Dalcean Phalanx can move itself only forward for its seat', () => {
+  const phalanx = {
+    attack: 5,
+    connectsTopBottom: true,
+    defense: 5,
+    manaCost: 1,
+    movementBonus: 1 as const,
+    movesOnlyForward: true,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  };
+  const defendSetup = northAttacksAtC2(141, undefined, undefined, false, phalanx);
+  const defendSession = accept(defendSetup.session, action(defendSetup.session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site'));
+  assert.equal(legalGameActions(defendSession.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'defend'
+      && descriptor.unitInstanceId === defendSetup.defenderInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C1,C2'), true);
+  assert.equal(verifyGameReplay(defendSession), true);
+
+  let session = keep(createGameSession(manifest(142, { spell: phalanx })));
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C3');
+  const instanceId = session.state.realm.units[0]?.instanceId;
+  assert.ok(instanceId);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const paths = legalGameActions(session.state, 'north').flatMap(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === instanceId
+      ? [descriptor.path.map(({ cell }) => cell).join(',')]
+      : []);
+  assert.equal(paths.includes('C3'), true);
+  assert.equal(paths.includes('C3,C2'), true);
+  assert.equal(paths.includes('C3,C2,C1'), true);
+  assert.equal(paths.includes('C3,C4'), false);
+  assert.equal(paths.includes('C3,B3'), false);
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === instanceId
+    && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C2,C1');
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site'), true);
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'close-intercept');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const edgePaths = legalGameActions(session.state, 'north').flatMap(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === instanceId
+      ? [descriptor.path.map(({ cell }) => cell).join(',')]
+      : []);
+  assert.equal(edgePaths.includes('C1,C4'), true);
+  assert.equal(edgePaths.includes('C1,C2'), false);
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === instanceId
+    && descriptor.path.map(({ cell }) => cell).join(',') === 'C1,C4');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  assert.equal(session.state.realm.units[0]?.location, 'C4');
   assert.equal(verifyGameReplay(session), true);
 });
 
