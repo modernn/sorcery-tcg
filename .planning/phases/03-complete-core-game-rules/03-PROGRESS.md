@@ -24,6 +24,7 @@
 - A narrow Genesis effect draws a hidden site after summoning and loses on an empty Atlas.
 - A sibling Genesis effect draws a hidden spell after summoning and loses on an empty Spellbook, preserving summon-before-draw event order.
 - Leyline Henge draws one hidden spell for each other orthogonally adjacent copy on entry, emits one source-linked event per successful draw, and loses after any required draw reaches an empty Spellbook.
+- Shallow Grave discards up to two top Spellbook cards on entry in deck order, makes only those discarded identities public through the owner's cemetery and source-linked events, and never causes deck-out when fewer than two remain.
 - A narrow minion mana ability that requires readiness, taps for temporary mana, and expires at End Phase.
 - Deathrite site draws resolve before simultaneous dead minions enter their cemeteries, including hidden draws and deck-empty loss.
 - A narrow site Genesis effect grants temporary mana on entry, emits causal gain evidence, and expires through the existing End Phase reset.
@@ -70,6 +71,7 @@
 - A legal 30/60 Earth teaching-deck variant with three Secret Tunnels and four Cave Trolls proves a direct nonlocal underground move to another controlled site while ordinary physical movement, opponent exclusion, and surface adjacency remain intact.
 - A legal 30/60 Earth teaching-deck variant with three Divine Healings takes an undefended real site strike, then proves exactly one targetless cast, one mana payment, capped 17-to-20 healing, cemetery entry, and exact replay.
 - A legal 30/60 Earth teaching-deck variant with four Burys and four Bosk Trolls proves one real targeted cast, three mana payment, forced underground movement, immediate region-survival death, both owner cemeteries, and exact replay in 17 accepted actions.
+- A legal 30/60 Earth teaching-deck variant with three Shallow Graves proves the real site's first-domain Genesis in three accepted actions, including pre-discard redaction, ordered public cemetery entry, Avatar tap, mana and affinity, active game state, and exact replay.
 - A legal 30/60 Water teaching-deck variant with four Drowned proves its real Water-site cast exists only underwater while Sly Fox in the same opening can be cast only on the surface.
 - A legal 30/60 Water teaching-deck variant with three Lugbog Cats proves casting to an opponent-controlled Water site while excluding an opponent land site; Sly Fox in the same opening remains restricted to controlled sites.
 - A fifth legal 30/60 Fire teaching deck that proves Monstrous Lion can Charge into an opposing unit but cannot target its site, then proves Lumbering Giant cannot use Defend or Intercept while ready and in range.
@@ -87,10 +89,10 @@
 - `pnpm game:demo -- 23`: completes in 138 accepted actions over 56 turns with byte-exact replay.
 - `pnpm play`: serves the playable core at `http://127.0.0.1:4174/`.
 - Browser checkpoint: a 22-action match moved a minion, handed Defend to the non-active seat, resolved a simultaneous trade into both cemeteries, and replayed byte-identically.
-- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 28-action Earth Burrowing, 17-action Earth Bury, 10-action Earth burrowed-only casting, 24-action Earth first strike, 22-action Earth forward movement, 30-action Earth Immobile, 21-action Earth Secret Tunnel, 24-action Earth Divine Healing, 22-action Earth Ranged, 27-action Earth Ward, 27-action Airborne, 26-action Air Stealth, 26-action Air movement, 24-action Air Movement +2, 25-action Air unrestricted-summon, 17-action Air Voidwalk/outer-column casting, 15-action Air Genesis spell-draw, 9-action Air Leyline Genesis, 10-action Air Zap Magic, 26-action Air Arc Lightning Magic, 43-action Fire targeting/response, 23-action Water end-turn Stealth, 22-action Water sideways movement, 16-action Water edge connection, 16-action Water Submerge, 10-action Water submerged-only casting, 16-action Water any-Water-site casting, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
+- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 28-action Earth Burrowing, 17-action Earth Bury, 3-action Earth Shallow Grave, 10-action Earth burrowed-only casting, 24-action Earth first strike, 22-action Earth forward movement, 30-action Earth Immobile, 21-action Earth Secret Tunnel, 24-action Earth Divine Healing, 22-action Earth Ranged, 27-action Earth Ward, 27-action Airborne, 26-action Air Stealth, 26-action Air movement, 24-action Air Movement +2, 25-action Air unrestricted-summon, 17-action Air Voidwalk/outer-column casting, 15-action Air Genesis spell-draw, 9-action Air Leyline Genesis, 10-action Air Zap Magic, 26-action Air Arc Lightning Magic, 43-action Fire targeting/response, 23-action Water end-turn Stealth, 22-action Water sideways movement, 16-action Water edge connection, 16-action Water Submerge, 10-action Water submerged-only casting, 16-action Water any-Water-site casting, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
 - `pnpm game:verify-private`: one passing ignored-authority integration scenario.
 - Death's Door scenarios prove same-turn direct-damage immunity, later death blows, simultaneous-defeat draws, nonlethal site strikes, and exact replay.
-- `pnpm verify`: 245 passing public tests at this checkpoint.
+- `pnpm verify`: 246 passing public tests at this checkpoint.
 
 ## Still required for Phase 3
 

@@ -174,6 +174,26 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthBury.deck.spellbook
     .find(({ name }) => name === 'Bosk Troll')?.copies, 4);
   assert.equal(result.earthBury.replayVerified, true);
+  assert.equal(result.earthShallowGrave.shallowGrave, 'Shallow Grave');
+  assert.equal(result.earthShallowGrave.acceptedActionCount, 3);
+  assert.equal(result.earthShallowGrave.hiddenBeforeDiscard, true);
+  assert.equal(result.earthShallowGrave.publicAfterDiscard, true);
+  assert.equal(result.earthShallowGrave.discardedInDeckOrder, true);
+  assert.equal(result.earthShallowGrave.spellHandUnchanged, true);
+  assert.equal(result.earthShallowGrave.spellbookReducedByTwo, true);
+  assert.equal(result.earthShallowGrave.siteEstablished, true);
+  assert.equal(result.earthShallowGrave.avatarTapped, true);
+  assert.equal(result.earthShallowGrave.manaProvided, true);
+  assert.equal(result.earthShallowGrave.affinityProvided, true);
+  assert.equal(result.earthShallowGrave.causalEventsVerified, true);
+  assert.equal(result.earthShallowGrave.gameRemainedActive, true);
+  assert.equal(result.earthShallowGrave.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthShallowGrave.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthShallowGrave.deck.atlas
+    .find(({ name }) => name === 'Shallow Grave')?.copies, 3);
+  assert.equal(result.earthShallowGrave.replayVerified, true);
   assert.equal(result.earthDivineHealing.divineHealing, 'Divine Healing');
   assert.equal(result.earthDivineHealing.acceptedActionCount, 24);
   assert.equal(result.earthDivineHealing.lifeWasDamagedAboveDeathsDoor, true);

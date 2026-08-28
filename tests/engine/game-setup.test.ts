@@ -75,6 +75,7 @@ type AvatarFacts = Readonly<{
 type SiteFacts = Readonly<{
   connectsBurrowedAllies?: boolean;
   elements?: readonly ('air' | 'earth' | 'fire' | 'water')[];
+  genesisDiscardTopSpells?: 2;
   genesisDrawSpellPerAdjacentSameCard?: boolean;
   genesisGainMana?: number;
 }>;
@@ -104,6 +105,7 @@ function cardsFor(
         cardType: 'site',
         connectsBurrowedAllies: site.connectsBurrowedAllies ?? false,
         elements: site.elements ?? ['earth'],
+        ...(site.genesisDiscardTopSpells === 2 ? { genesisDiscardTopSpells: 2 as const } : {}),
         genesisDrawSpellPerAdjacentSameCard:
           site.genesisDrawSpellPerAdjacentSameCard ?? false,
         ...(site.genesisGainMana ? { genesisGainMana: site.genesisGainMana } : {}),
@@ -523,6 +525,39 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
   }), /connectsTopBottom/);
   const firstSite = decks.north.atlas[0];
   assert.ok(firstSite);
+  const shallowGraveManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSite]: { ...cards[firstSite]!, genesisDiscardTopSpells: 2 } as GameCardDefinition,
+    },
+  });
+  assert.deepEqual(shallowGraveManifest.cards[firstSite], {
+    cardType: 'site',
+    elements: ['earth'],
+    genesisDiscardTopSpells: 2,
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSite]: {
+        ...cards[firstSite]!,
+        genesisDiscardTopSpells: 1,
+      } as unknown as GameCardDefinition,
+    },
+  }), /genesisDiscardTopSpells must be 2/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSite]: {
+        ...cards[firstSite]!,
+        genesisDiscardTopSpells: 2,
+        genesisDrawSpellPerAdjacentSameCard: true,
+      } as GameCardDefinition,
+    },
+  }), /simultaneous Genesis spell discard and draw/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -1626,6 +1661,86 @@ test('RULE-03 adjacent matching sites trigger one spell draw apiece and a short 
       .includes(fourthInstanceId),
     true,
   );
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 site Genesis discards up to two top spells publicly without deck-out', () => {
+  let session = keep(createGameSession(manifest(139, {
+    site: { genesisDiscardTopSpells: 2 },
+  })));
+  session = keep(session);
+  const beforeVersion = session.state.stateVersion;
+  const [first, second, next] = session.state.players.north.spellbook;
+  assert.ok(first);
+  assert.ok(second);
+  assert.ok(next);
+  const southBefore = canonicalJson(observeGame(session.state, 'south'));
+  for (const hidden of [first, second, next]) {
+    assert.equal(southBefore.includes(hidden.cardId), false);
+    assert.equal(southBefore.includes(hidden.instanceId), false);
+  }
+  const play = action(session, ({ descriptor }) => descriptor.kind === 'play-site');
+  if (play.descriptor.kind !== 'play-site') throw new Error('expected site play');
+  const sourceInstanceId = play.descriptor.cardInstanceId;
+  const result = stepGame(session, play);
+  assert.equal(result.accepted, true);
+  session = result.session;
+
+  assert.equal(session.state.stateVersion, beforeVersion + 1);
+  assert.deepEqual(session.state.players.north.cemetery, [first, second]);
+  assert.equal(session.state.players.north.spellbook[0]?.instanceId, next.instanceId);
+  assert.deepEqual(result.receipt.events.map(({ payload, type }) => ({ payload, type })), [
+    {
+      payload: {
+        cardId: play.descriptor.cardId,
+        cell: play.descriptor.cell,
+        instanceId: sourceInstanceId,
+        seat: 'north',
+      },
+      type: 'site-played',
+    },
+    {
+      payload: {
+        cardId: first.cardId,
+        instanceId: first.instanceId,
+        owner: 'north',
+        seat: 'north',
+        sourceInstanceId,
+      },
+      type: 'spell-discarded',
+    },
+    {
+      payload: {
+        cardId: second.cardId,
+        instanceId: second.instanceId,
+        owner: 'north',
+        seat: 'north',
+        sourceInstanceId,
+      },
+      type: 'spell-discarded',
+    },
+  ]);
+  const southAfter = canonicalJson(observeGame(session.state, 'south'));
+  assert.equal(southAfter.includes(first.instanceId), true);
+  assert.equal(southAfter.includes(second.instanceId), true);
+  assert.equal(southAfter.includes(next.instanceId), false);
+  assert.deepEqual(session.state.terminal, { status: 'active' });
+  assert.equal(verifyGameReplay(session), true);
+
+  session = keep(createGameSession(manifest(140, {
+    north: deck('shallow-short', 30, 4),
+    site: { genesisDiscardTopSpells: 2 },
+  })));
+  session = keep(session);
+  const only = session.state.players.north.spellbook[0];
+  assert.ok(only);
+  const partial = stepGame(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  assert.equal(partial.accepted, true);
+  session = partial.session;
+  assert.deepEqual(session.state.players.north.cemetery, [only]);
+  assert.equal(session.state.players.north.spellbook.length, 0);
+  assert.deepEqual(partial.receipt.events.map(({ type }) => type), ['site-played', 'spell-discarded']);
+  assert.deepEqual(session.state.terminal, { status: 'active' });
   assert.equal(verifyGameReplay(session), true);
 });
 
