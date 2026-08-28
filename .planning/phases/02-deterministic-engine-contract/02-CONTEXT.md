@@ -54,9 +54,9 @@ Define the authoritative, deterministic game-state contract shared by every futu
 - `.planning/ROADMAP.md` § Phase 2 — Phase goal, dependency, and success criteria.
 
 ### Upstream authority and identity decisions
-- `.planning/phases/01-rules-and-data-authority/01-CONTEXT.md` — Locked canonical identity, provenance, immutability, offline selection, and reuse-boundary decisions consumed by the engine contract.
-- `.planning/research/STACK.md` — Native TypeScript, canonical hashing, deterministic PRNG, testing, and later worker strategy.
-- `.planning/research/ARCHITECTURE.md` — Authoritative engine, observation/action boundary, replay, and clean-room architecture recommendations.
+- `.planning/phases/01-rules-and-data-authority/01-SUMMARY.md` — Canonical identity, provenance, immutability, offline selection, and reuse-boundary decisions consumed by the engine contract.
+- `.planning/phases/01-rules-and-data-authority/01-REVIEW.md` — Current open findings at the Phase 1/Phase 2 boundary.
+- `.planning/research/SUMMARY.md` — Native TypeScript, hashing, deterministic PRNG, engine boundaries, testing, and later worker guidance.
 
 </canonical_refs>
 
