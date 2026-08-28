@@ -46,6 +46,12 @@ export type GameCardDefinition =
     genesisGainMana?: number;
   }>
   | Readonly<{
+    cardType: 'magic';
+    damageTargetUnit: number;
+    manaCost: number;
+    thresholds: GameThresholds;
+  }>
+  | Readonly<{
     airborne?: boolean;
     attack: number;
     burrowing?: boolean;
@@ -287,6 +293,13 @@ type GameActionDescriptor =
     manaCost: number;
     region?: 'underground' | 'underwater' | 'void';
   }>
+  | Readonly<{
+    cardId: string;
+    cardInstanceId: string;
+    casterInstanceId: StateHash;
+    kind: 'cast-magic';
+    target: GameUnitRef;
+  }>
   | Readonly<{ kind: 'draw'; zone: DeckZone }>
   | Readonly<{
     from: GameLocation;
@@ -470,6 +483,34 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
   });
 }
 
+function magicDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
+  const player = state.players[seat];
+  const casterRegion = unitStatus(state, {
+    instanceId: player.avatar.card.instanceId,
+    kind: 'avatar',
+    seat,
+  }).region;
+  const targets = (['north', 'south'] as const)
+    .flatMap((targetSeat) => unitRefs(state, targetSeat))
+    .filter((target) => {
+      const status = unitStatus(state, target);
+      return status.region === casterRegion && (target.seat === seat || !status.stealthed);
+    });
+  return player.hand.spellbook.flatMap(({ cardId, instanceId }) => {
+    const definition = cardDefinition(state, cardId);
+    if (definition.cardType !== 'magic'
+      || player.mana < definition.manaCost
+      || !meetsThresholds(state, seat, definition.thresholds)) return [];
+    return targets.map((target) => ({
+      cardId,
+      cardInstanceId: instanceId,
+      casterInstanceId: player.avatar.card.instanceId,
+      kind: 'cast-magic' as const,
+      target,
+    }));
+  });
+}
+
 function requireCardId(value: string, path: string): void {
   if (!value.trim() || value.length > 256) throw new RangeError(`${path} must be 1-256 characters`);
 }
@@ -506,6 +547,22 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     }
     if (card.connectsBurrowedAllies !== undefined && typeof card.connectsBurrowedAllies !== 'boolean') {
       throw new RangeError(`${path}.connectsBurrowedAllies must be boolean`);
+    }
+    return;
+  }
+  if (card.cardType === 'magic') {
+    if (!Number.isSafeInteger(card.damageTargetUnit)
+      || card.damageTargetUnit < 1
+      || card.damageTargetUnit > MAX_COMBAT_STAT) {
+      throw new RangeError(`${path}.damageTargetUnit must be a safe integer between 1 and ${MAX_COMBAT_STAT}`);
+    }
+    if (!Number.isSafeInteger(card.manaCost) || card.manaCost < 0) {
+      throw new RangeError(`${path}.manaCost must be a supported nonnegative safe integer`);
+    }
+    for (const element of elements) {
+      if (!Number.isSafeInteger(card.thresholds[element]) || card.thresholds[element] < 0) {
+        throw new RangeError(`${path}.thresholds.${element} must be a nonnegative safe integer`);
+      }
     }
     return;
   }
@@ -654,7 +711,7 @@ function validateDeck(
     if (cards[cardId]?.cardType !== 'site') throw new RangeError(`${path}.atlas[${index}] must reference a site`);
   });
   deck.spellbook.forEach((cardId, index) => {
-    if (cards[cardId]?.cardType !== 'minion') {
+    if (cards[cardId]?.cardType !== 'minion' && cards[cardId]?.cardType !== 'magic') {
       throw new RangeError(`${path}.spellbook[${index}] references an unsupported spell`);
     }
   });
@@ -706,6 +763,13 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               : {}),
             ...(card.genesisGainMana ? { genesisGainMana: card.genesisGainMana } : {}),
           }
+          : card.cardType === 'magic'
+            ? {
+              cardType: 'magic' as const,
+              damageTargetUnit: card.damageTargetUnit,
+              manaCost: card.manaCost,
+              thresholds: { ...card.thresholds },
+            }
           : {
             ...(card.airborne === true ? { airborne: true } : {}),
             attack: card.attack,
@@ -1546,6 +1610,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     ...(player.avatar.tapped ? [] : [{ kind: 'draw-site' as const }]),
     ...(!player.avatar.tapped && avatarDefinition.drawSpell ? [{ kind: 'draw-spell' as const }] : []),
     ...summonDescriptors(state, seat),
+    ...magicDescriptors(state, seat),
     ...manaAbilityDescriptors(state, seat),
     ...movementDescriptors(state, seat),
     ...rangedDescriptors(state, seat),
@@ -1566,6 +1631,9 @@ function actionLabel(descriptor: GameActionDescriptor): string {
   if (descriptor.kind === 'play-site') return `Play ${descriptor.cardId} at ${descriptor.cell}`;
   if (descriptor.kind === 'summon-minion') {
     return `Summon ${descriptor.cardId} at ${descriptor.cell}${descriptor.region ? ` ${descriptor.region}` : ''} (${descriptor.manaCost} mana)`;
+  }
+  if (descriptor.kind === 'cast-magic') {
+    return `Cast ${descriptor.cardId} on ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`;
   }
   if (descriptor.kind === 'move-and-attack') {
     return descriptor.path.length === 1
@@ -1709,6 +1777,7 @@ function resolveFightWindow(
   outcomes: readonly GameOutcome[],
   attackerStrikes: boolean,
   combatantsStrike: boolean,
+  interactingRefs?: readonly GameUnitRef[],
 ): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
   const allocations = new Map(pending.allocations.map(({ amount, targetInstanceId }) =>
     [targetInstanceId, amount]));
@@ -1737,7 +1806,7 @@ function resolveFightWindow(
     south: state.players.south,
   };
   let units = [...state.realm.units];
-  const [interactedUnits, stealthOutcomes] = loseStealth(units, [
+  const [interactedUnits, stealthOutcomes] = loseStealth(units, interactingRefs ?? [
     ...(attackerStrikes ? [pending.attacker] : []),
     ...(combatantsStrike ? pending.combatants : []),
   ]);
@@ -2194,6 +2263,94 @@ function applyDescriptor(
           : []),
       ],
       [],
+    ];
+  }
+
+  if (descriptor.kind === 'cast-magic') {
+    const card = player.hand.spellbook.find(({ cardId, instanceId }) =>
+      instanceId === descriptor.cardInstanceId && cardId === descriptor.cardId);
+    const definition = card && cardDefinition(state, card.cardId);
+    const legal = magicDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'cast-magic'
+        && candidate.cardInstanceId === descriptor.cardInstanceId
+        && candidate.casterInstanceId === descriptor.casterInstanceId
+        && candidate.target.instanceId === descriptor.target.instanceId
+        && candidate.target.kind === descriptor.target.kind
+        && candidate.target.seat === descriptor.target.seat);
+    if (!card || !definition || definition.cardType !== 'magic' || !legal) {
+      throw new Error('unreachable illegal Magic cast');
+    }
+    const caster: GameUnitRef = {
+      instanceId: descriptor.casterInstanceId,
+      kind: 'avatar',
+      seat,
+    };
+    const paidPlayer = deepFreeze({
+      ...player,
+      hand: {
+        ...player.hand,
+        spellbook: player.hand.spellbook.filter(({ instanceId }) => instanceId !== card.instanceId),
+      },
+      mana: player.mana - definition.manaCost,
+    });
+    const paidState = deepFreeze({ ...state, players: replacePlayer(state, seat, paidPlayer) });
+    const owner = paidState.players[card.owner];
+    const castState = deepFreeze({
+      ...paidState,
+      players: replacePlayer(paidState, card.owner, deepFreeze({
+        ...owner,
+        cemetery: [...owner.cemetery, card],
+      })),
+    });
+    const target = unitStatus(castState, descriptor.target);
+    const pending: PendingCombat = deepFreeze({
+      allocations: [{ amount: definition.damageTargetUnit, targetInstanceId: descriptor.target.instanceId }],
+      attacker: caster,
+      attackingSeat: seat,
+      cell: target.location,
+      combatants: [descriptor.target],
+      defenders: [],
+      originalTarget: descriptor.target,
+      ...(target.region === 'surface' ? {} : { region: target.region as 'underground' | 'underwater' | 'void' }),
+      targetRemoved: false,
+    });
+    const [damaged, outcomes, randomDraws] = resolveFightWindow(
+      castState,
+      pending,
+      [{
+        payload: {
+          cardId: card.cardId,
+          casterInstanceId: descriptor.casterInstanceId,
+          instanceId: card.instanceId,
+          manaPaid: definition.manaCost,
+          seat,
+          targetInstanceId: descriptor.target.instanceId,
+          targetSeat: descriptor.target.seat,
+        },
+        type: 'magic-cast',
+      }, {
+        payload: {
+          amount: definition.damageTargetUnit,
+          sourceInstanceId: card.instanceId,
+          targetInstanceId: descriptor.target.instanceId,
+        },
+        type: 'magic-damage-allocated',
+      }],
+      true,
+      false,
+      [caster],
+    );
+    const resolved = {
+      payload: { cardId: card.cardId, instanceId: card.instanceId, owner: card.owner },
+      type: 'magic-resolved',
+    } as const;
+    const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
+    return [
+      withStateVersion(damaged, {}),
+      terminalIndex < 0
+        ? [...outcomes, resolved]
+        : [...outcomes.slice(0, terminalIndex), resolved, ...outcomes.slice(terminalIndex)],
+      randomDraws,
     ];
   }
 

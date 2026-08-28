@@ -91,6 +91,22 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airVoidwalk.deck.spellbook
     .find(({ name }) => name === 'Forsaken')?.copies, 4);
   assert.equal(result.airVoidwalk.replayVerified, true);
+  assert.equal(result.airZap.zap, 'Zap!');
+  assert.equal(result.airZap.snowLeopard, 'Snow Leopard');
+  assert.equal(result.airZap.acceptedActionCount, 10);
+  assert.equal(result.airZap.damageDealt, 1);
+  assert.equal(result.airZap.manaPaid, 1);
+  assert.equal(result.airZap.snowLeopardSurvived, true);
+  assert.equal(result.airZap.spellLeftHand, true);
+  assert.equal(result.airZap.spellEnteredCemetery, true);
+  assert.equal(result.airZap.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airZap.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airZap.deck.spellbook
+    .find(({ name }) => name === 'Zap!')?.copies, 4);
+  assert.equal(result.airZap.deck.spellbook
+    .find(({ name }) => name === 'Snow Leopard')?.copies, 4);
+  assert.equal(result.airZap.replayVerified, true);
   assert.equal(result.airLeyline.henge, 'Leyline Henge');
   assert.equal(result.airLeyline.acceptedActionCount, 9);
   assert.equal(result.airLeyline.firstHengeDrewNothing, true);
