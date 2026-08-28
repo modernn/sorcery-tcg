@@ -67,6 +67,22 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.decks.south.atlas.reduce((total, card) => total + card.copies, 0), 30);
   assert.equal(result.decks.north.spellbook.reduce((total, card) => total + card.copies, 0), 60);
   assert.equal(result.decks.south.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthBurrowing.burrowingMinion, 'Cave Trolls');
+  assert.equal(result.earthBurrowing.acceptedActionCount, 28);
+  assert.equal(result.earthBurrowing.targetIsLandSite, true);
+  assert.equal(result.earthBurrowing.surfaceSummonAvailable, true);
+  assert.equal(result.earthBurrowing.undergroundSummonAvailable, true);
+  assert.equal(result.earthBurrowing.nonBurrowingSurfaceAvailable, true);
+  assert.equal(result.earthBurrowing.nonBurrowingUndergroundUnavailable, true);
+  assert.equal(result.earthBurrowing.movedUnderground, true);
+  assert.equal(result.earthBurrowing.siteTargetUnavailableUnderground, true);
+  assert.equal(result.earthBurrowing.surfaced, true);
+  assert.equal(result.earthBurrowing.siteTargetAvailableAfterSurfacing, true);
+  assert.equal(result.earthBurrowing.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthBurrowing.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthBurrowing.deck.spellbook
+    .find(({ name }) => name === 'Cave Trolls')?.copies, 4);
+  assert.equal(result.earthBurrowing.replayVerified, true);
   assert.equal(result.earthRamp.affinityAdded, true);
   assert.equal(result.earthRamp.manaUnavailableWhileSick, true);
   assert.equal(result.earthRamp.manaGained, 2);
