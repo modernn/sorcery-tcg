@@ -96,6 +96,7 @@ export type GameCardDefinition =
     provides?: GameElement;
     ranged?: boolean;
     shootsDragProjectile?: boolean;
+    spellcaster?: boolean;
     stealth?: boolean;
     strikesFirstWhileAttacking?: boolean;
     submerge?: boolean;
@@ -494,6 +495,7 @@ function meetsThresholds(state: GameState, seat: GameSeat, required: GameThresho
 
 function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   const player = state.players[seat];
+  const casters = spellcasterRefs(state, seat);
   const controlledCells = controlledSiteCells(state, seat);
   const siteCells = Object.keys(state.realm.sites).sort() as RealmCell[];
   return player.hand.spellbook.flatMap(({ cardId, instanceId }) => {
@@ -504,13 +506,13 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     const summonCells = (definition.summonToAnySite ? siteCells : controlledCells)
       .filter((cell) => !definition.mustBeCastToOuterColumn || cell[0] === 'A' || cell[0] === 'E')
       .filter((cell) => !definition.mustBeCastToWaterSite || isWaterSite(state, cell));
-    return [
+    return casters.flatMap(({ instanceId: casterInstanceId }) => [
       ...summonCells.flatMap((cell) => [
       ...(!definition.mustBeCastBurrowed && !definition.mustBeCastSubmerged
         ? [{
           cardId,
           cardInstanceId: instanceId,
-          casterInstanceId: player.avatar.card.instanceId,
+          casterInstanceId,
           cell,
           kind: 'summon-minion' as const,
           manaCost: definition.manaCost,
@@ -520,7 +522,7 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
         ? [{
           cardId,
           cardInstanceId: instanceId,
-          casterInstanceId: player.avatar.card.instanceId,
+          casterInstanceId,
           cell,
           kind: 'summon-minion' as const,
           manaCost: definition.manaCost,
@@ -531,7 +533,7 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
         ? [{
           cardId,
           cardInstanceId: instanceId,
-          casterInstanceId: player.avatar.card.instanceId,
+          casterInstanceId,
           cell,
           kind: 'summon-minion' as const,
           manaCost: definition.manaCost,
@@ -546,36 +548,34 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
           .map((cell) => ({
           cardId,
           cardInstanceId: instanceId,
-          casterInstanceId: player.avatar.card.instanceId,
+          casterInstanceId,
           cell,
           kind: 'summon-minion' as const,
           manaCost: definition.manaCost,
           region: 'void' as const,
         }))
         : []),
-    ];
+    ]);
   });
 }
 
 function magicDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   const player = state.players[seat];
-  const caster = unitStatus(state, {
-    instanceId: player.avatar.card.instanceId,
-    kind: 'avatar',
-    seat,
-  });
+  const casters = spellcasterRefs(state, seat);
   const targets = (['north', 'south'] as const).flatMap((targetSeat) => unitRefs(state, targetSeat));
   return player.hand.spellbook.flatMap(({ cardId, instanceId }) => {
     const definition = cardDefinition(state, cardId);
     if (definition.cardType !== 'magic'
       || player.mana < definition.manaCost
       || !meetsThresholds(state, seat, definition.thresholds)) return [];
-    const cast = {
-      cardId,
-      cardInstanceId: instanceId,
-      casterInstanceId: player.avatar.card.instanceId,
-      kind: 'cast-magic' as const,
-    };
+    return casters.flatMap((casterRef) => {
+      const caster = unitStatus(state, casterRef);
+      const cast = {
+        cardId,
+        cardInstanceId: instanceId,
+        casterInstanceId: casterRef.instanceId,
+        kind: 'cast-magic' as const,
+      };
     if (definition.healController !== undefined) return [cast];
     if (definition.grantChargeToAllyThisTurn === true) {
       return unitRefs(state, seat).map((ally) => ({ ...cast, ally }));
@@ -682,7 +682,8 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
           || status.location === caster.location
           || borderingCells(caster.location).includes(status.location)
           || diagonalCells(caster.location).includes(status.location));
-    }).map((target) => ({ ...cast, target }));
+      }).map((target) => ({ ...cast, target }));
+    });
   });
 }
 
@@ -922,6 +923,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.shootsDragProjectile !== undefined && typeof card.shootsDragProjectile !== 'boolean') {
     throw new RangeError(`${path}.shootsDragProjectile must be boolean`);
   }
+  if (card.spellcaster !== undefined && typeof card.spellcaster !== 'boolean') {
+    throw new RangeError(`${path}.spellcaster must be boolean`);
+  }
   if (card.stealth !== undefined && typeof card.stealth !== 'boolean') {
     throw new RangeError(`${path}.stealth must be boolean`);
   }
@@ -1114,6 +1118,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.provides ? { provides: card.provides } : {}),
             ...(card.ranged === true ? { ranged: true } : {}),
             ...(card.shootsDragProjectile === true ? { shootsDragProjectile: true } : {}),
+            ...(card.spellcaster === true ? { spellcaster: true } : {}),
             ...(card.stealth === true ? { stealth: true } : {}),
             ...(card.strikesFirstWhileAttacking === true ? { strikesFirstWhileAttacking: true } : {}),
             ...(card.submerge === true ? { submerge: true } : {}),
@@ -1465,6 +1470,16 @@ function unitRefs(state: GameState, seat: GameSeat): readonly GameUnitRef[] {
       .filter((unit) => unit.controller === seat)
       .map((unit) => ({ instanceId: unit.instanceId, kind: 'minion' as const, seat })),
   ];
+}
+
+function spellcasterRefs(state: GameState, seat: GameSeat): readonly GameUnitRef[] {
+  return unitRefs(state, seat).filter((ref) => {
+    if (ref.kind === 'avatar') return true;
+    const unit = state.realm.units.find(({ instanceId }) => instanceId === ref.instanceId);
+    if (!unit || minionDisabled(state, unit)) return false;
+    const definition = cardDefinition(state, unit.cardId);
+    return definition.cardType === 'minion' && definition.spellcaster === true;
+  });
 }
 
 function unitStatus(
@@ -2072,20 +2087,35 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
     return `Sacrifice site to destroy ${descriptor.targetCell}`;
   }
   if (descriptor.kind === 'summon-minion') {
-    return `Summon ${descriptor.cardId} at ${descriptor.cell}${descriptor.region ? ` ${descriptor.region}` : ''} (${descriptor.manaCost} mana)`;
+    const caster = state.realm.units.find(({ instanceId }) =>
+      instanceId === descriptor.casterInstanceId);
+    return `Summon ${descriptor.cardId} at ${descriptor.cell}${descriptor.region ? ` ${descriptor.region}` : ''} (${descriptor.manaCost} mana)`
+      + (caster ? ` with minion ${caster.instanceId.slice(0, 15)}…` : '');
   }
   if (descriptor.kind === 'cast-magic') {
+    const caster = state.realm.units.find(({ instanceId }) =>
+      instanceId === descriptor.casterInstanceId);
+    const withCaster = (label: string): string =>
+      label + (caster ? ` with minion ${caster.instanceId.slice(0, 15)}…` : '');
     if (descriptor.cemeteryMinionInstanceId) {
-      return `Cast ${descriptor.cardId} to return minion ${descriptor.cemeteryMinionInstanceId.slice(0, 15)}…`;
+      return withCaster(
+        `Cast ${descriptor.cardId} to return minion ${descriptor.cemeteryMinionInstanceId.slice(0, 15)}…`,
+      );
     }
     if (descriptor.ally && descriptor.temptedEnemy && descriptor.temptedDestination) {
-      return `Cast ${descriptor.cardId}: ${descriptor.ally.kind} ${descriptor.ally.instanceId.slice(0, 15)}… tempts minion ${descriptor.temptedEnemy.instanceId.slice(0, 15)}… to ${descriptor.temptedDestination.cell}`;
+      return withCaster(
+        `Cast ${descriptor.cardId}: ${descriptor.ally.kind} ${descriptor.ally.instanceId.slice(0, 15)}… tempts minion ${descriptor.temptedEnemy.instanceId.slice(0, 15)}… to ${descriptor.temptedDestination.cell}`,
+      );
     }
     if (descriptor.target) {
-      return `Cast ${descriptor.cardId} on ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`;
+      return withCaster(
+        `Cast ${descriptor.cardId} on ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`,
+      );
     }
     if (descriptor.ally && descriptor.targetLocation) {
-      return `Cast ${descriptor.cardId} to teleport ${descriptor.ally.kind} ${descriptor.ally.instanceId.slice(0, 15)}… to ${descriptor.targetLocation.cell}`;
+      return withCaster(
+        `Cast ${descriptor.cardId} to teleport ${descriptor.ally.kind} ${descriptor.ally.instanceId.slice(0, 15)}… to ${descriptor.targetLocation.cell}`,
+      );
     }
     if (descriptor.ally) {
       const definition = cardDefinition(state, descriptor.cardId);
@@ -2093,11 +2123,13 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
         && definition.grantPowerToAllyThisTurn === 2
         ? 'grant +2 power'
         : 'grant Charge';
-      return `Cast ${descriptor.cardId} to ${effect} to ${descriptor.ally.kind} ${descriptor.ally.instanceId.slice(0, 15)}…`;
+      return withCaster(
+        `Cast ${descriptor.cardId} to ${effect} to ${descriptor.ally.kind} ${descriptor.ally.instanceId.slice(0, 15)}…`,
+      );
     }
-    return descriptor.targetLocation
+    return withCaster(descriptor.targetLocation
       ? `Cast ${descriptor.cardId} at ${descriptor.targetLocation.cell} ${descriptor.targetLocation.region}`
-      : `Cast ${descriptor.cardId}`;
+      : `Cast ${descriptor.cardId}`);
   }
   if (descriptor.kind === 'move-and-attack') {
     return descriptor.path.length === 1
@@ -3162,14 +3194,11 @@ function applyDescriptor(
             && candidate.temptedEnemy.instanceId === descriptor.temptedEnemy.instanceId
             && candidate.temptedEnemy.kind === descriptor.temptedEnemy.kind
             && candidate.temptedEnemy.seat === descriptor.temptedEnemy.seat));
-    if (!card || !definition || definition.cardType !== 'magic' || !legal) {
+    const caster = spellcasterRefs(state, seat).find(({ instanceId }) =>
+      instanceId === descriptor.casterInstanceId);
+    if (!card || !definition || definition.cardType !== 'magic' || !legal || !caster) {
       throw new Error('unreachable illegal Magic cast');
     }
-    const caster: GameUnitRef = {
-      instanceId: descriptor.casterInstanceId,
-      kind: 'avatar',
-      seat,
-    };
     const paidPlayer = deepFreeze({
       ...player,
       hand: {
@@ -3180,12 +3209,14 @@ function applyDescriptor(
     });
     const paidState = deepFreeze({ ...state, players: replacePlayer(state, seat, paidPlayer) });
     const owner = paidState.players[card.owner];
+    const [castingUnits, casterStealthOutcomes] = loseStealth(paidState.realm.units, [caster]);
     const castState = deepFreeze({
       ...paidState,
       players: replacePlayer(paidState, card.owner, deepFreeze({
         ...owner,
         cemetery: [...owner.cemetery, card],
       })),
+      realm: { ...paidState.realm, units: castingUnits },
     });
     const castOutcome = {
       payload: {
@@ -3222,6 +3253,7 @@ function applyDescriptor(
       },
       type: 'magic-cast',
     } as const;
+    const castOutcomes: readonly GameOutcome[] = [castOutcome, ...casterStealthOutcomes];
     const resolved = {
       payload: { cardId: card.cardId, instanceId: card.instanceId, owner: card.owner },
       type: 'magic-resolved',
@@ -3238,7 +3270,7 @@ function applyDescriptor(
       return [
         withStateVersion(castState, { players: replacePlayer(castState, seat, healed) }),
         [
-          castOutcome,
+          ...castOutcomes,
           ...(amount > 0
             ? [{
               payload: {
@@ -3258,7 +3290,7 @@ function applyDescriptor(
     }
     if (definition.returnMinionFromOwnCemetery === true) {
       if (!descriptor.cemeteryMinionInstanceId) {
-        return [withStateVersion(castState, {}), [castOutcome, resolved], []];
+        return [withStateVersion(castState, {}), [...castOutcomes, resolved], []];
       }
       const returningPlayer = castState.players[seat];
       const selected = returningPlayer.cemetery.find(({ instanceId }) =>
@@ -3282,7 +3314,7 @@ function applyDescriptor(
           players: replacePlayer(castState, seat, returnedPlayer),
         }),
         [
-          castOutcome,
+          ...castOutcomes,
           {
             payload: {
               cardId: selected.cardId,
@@ -3304,7 +3336,7 @@ function applyDescriptor(
         return [
           withStateVersion(castState, {}),
           [
-            castOutcome,
+            ...castOutcomes,
             {
               payload: {
                 instanceId: descriptor.ally.instanceId,
@@ -3336,7 +3368,7 @@ function applyDescriptor(
       return [
         withStateVersion(chargedState, {}),
         [
-          castOutcome,
+          ...castOutcomes,
           {
             payload: {
               instanceId: ally.instanceId,
@@ -3378,7 +3410,7 @@ function applyDescriptor(
         });
         return [
           withStateVersion(poweredState, {}),
-          [castOutcome, grantOutcome, resolved],
+          [...castOutcomes, grantOutcome, resolved],
           [],
         ];
       }
@@ -3400,13 +3432,13 @@ function applyDescriptor(
       });
       return [
         withStateVersion(poweredState, {}),
-        [castOutcome, grantOutcome, resolved],
+        [...castOutcomes, grantOutcome, resolved],
         [],
       ];
     }
     if (definition.lureEnemyMinionOneStepCloser === true) {
       if (!descriptor.ally || !descriptor.temptedEnemy || !descriptor.temptedDestination) {
-        return [withStateVersion(castState, {}), [castOutcome, resolved], []];
+        return [withStateVersion(castState, {}), [...castOutcomes, resolved], []];
       }
       const enemyStatus = unitStatus(castState, descriptor.temptedEnemy);
       const from: GameLocation = { cell: enemyStatus.location, region: enemyStatus.region };
@@ -3425,7 +3457,7 @@ function applyDescriptor(
         },
         type: 'unit-lured',
       };
-      const outcomes = [castOutcome, lured, ...path.outcomes];
+      const outcomes = [...castOutcomes, lured, ...path.outcomes];
       const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
       return [
         withStateVersion(path.state, {}),
@@ -3454,7 +3486,7 @@ function applyDescriptor(
         return [
           withStateVersion(wardedState, {}),
           [
-            castOutcome,
+            ...castOutcomes,
             { payload: { instanceId: target.instanceId, seat: target.controller }, type: 'ward-broken' },
             resolved,
           ],
@@ -3481,7 +3513,7 @@ function applyDescriptor(
       return [
         withStateVersion(disabledState, {}),
         [
-          castOutcome,
+          ...castOutcomes,
           {
             payload: {
               expiresAtSeat: seat,
@@ -3518,7 +3550,7 @@ function applyDescriptor(
         return [
           withStateVersion(wardedState, {}),
           [
-            castOutcome,
+            ...castOutcomes,
             { payload: { instanceId: target.instanceId, seat: target.controller }, type: 'ward-broken' },
             resolved,
           ],
@@ -3529,7 +3561,7 @@ function applyDescriptor(
         && castState.realm.sites[target.location] !== undefined
         && isWaterSite(castState, target.location) === submerge;
       if (!canMove) {
-        return [withStateVersion(castState, {}), [castOutcome, resolved], []];
+        return [withStateVersion(castState, {}), [...castOutcomes, resolved], []];
       }
       const movedUnit = deepFreeze({
         ...target,
@@ -3552,7 +3584,7 @@ function applyDescriptor(
         type: submerge ? 'minion-submerged' : 'minion-burrowed',
       };
       const settlement = settleRegionOccupancy(movedState);
-      const outcomes = [castOutcome, movedOutcome, ...settlement.outcomes];
+      const outcomes = [...castOutcomes, movedOutcome, ...settlement.outcomes];
       const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
       return [
         withStateVersion(settlement.state, {}),
@@ -3569,7 +3601,7 @@ function applyDescriptor(
       const status = unitStatus(castState, descriptor.ally);
       const from: GameLocation = { cell: status.location, region: status.region };
       if (sameLocation(from, descriptor.targetLocation)) {
-        return [withStateVersion(castState, {}), [castOutcome, resolved], []];
+        return [withStateVersion(castState, {}), [...castOutcomes, resolved], []];
       }
       const moved = moveUnit(castState, descriptor.ally, descriptor.targetLocation, false);
       const teleportedState = deepFreeze({
@@ -3589,7 +3621,7 @@ function applyDescriptor(
         type: 'unit-teleported',
       };
       const settlement = settleRegionOccupancy(teleportedState);
-      const outcomes = [castOutcome, teleported, ...settlement.outcomes];
+      const outcomes = [...castOutcomes, teleported, ...settlement.outcomes];
       const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
       return [
         withStateVersion(settlement.state, {}),
@@ -3606,7 +3638,7 @@ function applyDescriptor(
         .filter((target) => target.kind === 'minion' && unitStatus(castState, target).region === 'surface')
         .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
       if (targets.length === 0) {
-        return [withStateVersion(castState, {}), [castOutcome, resolved], []];
+        return [withStateVersion(castState, {}), [...castOutcomes, resolved], []];
       }
       const pending: PendingCombat = deepFreeze({
         allocations: targets.map(({ instanceId }) => ({
@@ -3632,7 +3664,7 @@ function applyDescriptor(
       const [damaged, outcomes, randomDraws] = resolveFightWindow(
         castState,
         pending,
-        [castOutcome, ...allocationOutcomes],
+        [...castOutcomes, ...allocationOutcomes],
         true,
         false,
         [caster],
@@ -3657,7 +3689,7 @@ function applyDescriptor(
         })
         .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
       if (targets.length === 0) {
-        return [withStateVersion(castState, {}), [castOutcome, resolved], []];
+        return [withStateVersion(castState, {}), [...castOutcomes, resolved], []];
       }
       const pending: PendingCombat = deepFreeze({
         allocations: targets.map(({ instanceId }) => ({
@@ -3686,7 +3718,7 @@ function applyDescriptor(
       const [damaged, outcomes, randomDraws] = resolveFightWindow(
         castState,
         pending,
-        [castOutcome, ...allocationOutcomes],
+        [...castOutcomes, ...allocationOutcomes],
         true,
         false,
         [caster],
@@ -3711,7 +3743,7 @@ function applyDescriptor(
         })
         .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
       if (candidates.length === 0) {
-        return [withStateVersion(castState, {}), [castOutcome, resolved], []];
+        return [withStateVersion(castState, {}), [...castOutcomes, resolved], []];
       }
       const selected = drawCandidate(
         castState.engine,
@@ -3737,7 +3769,7 @@ function applyDescriptor(
       const [damaged, outcomes, randomDraws] = resolveFightWindow(
         randomizedState,
         pending,
-        [castOutcome, {
+        [...castOutcomes, {
           payload: {
             amount: definition.damageRandomUnitAtLocation,
             sourceInstanceId: card.instanceId,
@@ -3776,7 +3808,7 @@ function applyDescriptor(
     const [damaged, outcomes, randomDraws] = resolveFightWindow(
       castState,
       pending,
-      [castOutcome, {
+      [...castOutcomes, {
         payload: {
           amount: definition.damageTargetUnit,
           sourceInstanceId: card.instanceId,
@@ -3809,7 +3841,9 @@ function applyDescriptor(
         && candidate.cell === descriptor.cell
         && candidate.manaCost === descriptor.manaCost
         && (candidate.region ?? 'surface') === (descriptor.region ?? 'surface'));
-    if (!card || !definition || definition.cardType !== 'minion' || !legal) {
+    const caster = spellcasterRefs(state, seat).find(({ instanceId }) =>
+      instanceId === descriptor.casterInstanceId);
+    if (!card || !definition || definition.cardType !== 'minion' || !legal || !caster) {
       throw new Error('unreachable illegal minion summon');
     }
     const unit: UnitInstance = deepFreeze({
@@ -3831,7 +3865,8 @@ function applyDescriptor(
       },
       mana: player.mana - definition.manaCost,
     });
-    const realm = { ...state.realm, units: [...state.realm.units, unit] };
+    const [castingUnits, casterStealthOutcomes] = loseStealth(state.realm.units, [caster]);
+    const realm = { ...state.realm, units: [...castingUnits, unit] };
     const summoned: GameOutcome = {
       payload: {
         cardId: card.cardId,
@@ -3855,7 +3890,7 @@ function applyDescriptor(
     if (!summonedUnitSurvived || settlement.state.terminal.status === 'finished') {
       return [
         withStateVersion(settlement.state, {}),
-        [summoned, ...settlement.outcomes],
+        [...casterStealthOutcomes, summoned, ...settlement.outcomes],
         [],
       ];
     }
@@ -3874,6 +3909,7 @@ function applyDescriptor(
           players: replacePlayer(settlement.state, seat, lifePlayer),
         }),
         [
+          ...casterStealthOutcomes,
           summoned,
           ...settlement.outcomes,
           ...(amount > 0
@@ -3908,6 +3944,7 @@ function applyDescriptor(
             terminal: { loser: seat, reason: 'deck_empty', status: 'finished', winner },
           }),
           [
+            ...casterStealthOutcomes,
             summoned,
             ...settlement.outcomes,
             { payload: { loser: seat, reason: 'deck_empty', winner }, type: 'game-ended' },
@@ -3928,6 +3965,7 @@ function applyDescriptor(
           players: replacePlayer(settlement.state, seat, drawingPlayer),
         }),
         [
+          ...casterStealthOutcomes,
           summoned,
           ...settlement.outcomes,
           {
@@ -3940,7 +3978,7 @@ function applyDescriptor(
     }
     return [
       withStateVersion(settlement.state, {}),
-      [summoned, ...settlement.outcomes],
+      [...casterStealthOutcomes, summoned, ...settlement.outcomes],
       [],
     ];
   }
