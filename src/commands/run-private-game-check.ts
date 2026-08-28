@@ -112,6 +112,21 @@ export type PrivateGameCheck = Readonly<{
     snowLeopardDied: boolean;
     spellEnteredCemetery: boolean;
   }>;
+  airTeleport: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    exactAllySitePair: boolean;
+    manaPaid: number;
+    noPathTeleport: boolean;
+    replayVerified: boolean;
+    siteUnchanged: boolean;
+    snowLeopard: string;
+    spellEnteredCemetery: boolean;
+    teleportedToOpponentSiteSurface: boolean;
+    teleport: string;
+    unitStatePreserved: boolean;
+  }>;
   airGenesisSpell: Readonly<{
     acceptedActionCount: number;
     deck: DeckList;
@@ -663,6 +678,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   stealthMinion: NormalizedCard;
   stealthTargetMinion: NormalizedCard;
   submergeMinion: NormalizedCard;
+  teleport: NormalizedCard;
   voidwalkMinion: NormalizedCard;
   wardMinion: NormalizedCard;
   polarBears: NormalizedCard;
@@ -765,6 +781,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || lightningBolt.thresholds.water !== 0
     || lightningBolt.rarity !== 'ordinary') {
     throw new Error('private random location-damage Magic no longer matches its supported facts');
+  }
+  const teleport = snapshot.cards.find(({ name }) => name === 'Teleport');
+  if (!teleport
+    || teleport.cardType !== 'magic'
+    || ruleTextDigest(teleport.rulesText) !== 'sha256:bb3c4d367cee9352f178cd72cbbb51bdd3bc07b68b4145d82e0af57bc153c07f'
+    || teleport.manaCost !== 2
+    || teleport.attack !== null
+    || teleport.defense !== null
+    || teleport.life !== null
+    || teleport.elements.length !== 1
+    || teleport.elements[0] !== 'air'
+    || teleport.thresholds.air !== 2
+    || teleport.thresholds.earth !== 0
+    || teleport.thresholds.fire !== 0
+    || teleport.thresholds.water !== 0
+    || teleport.rarity !== 'ordinary') {
+    throw new Error('private ally-to-site Teleport no longer matches its supported facts');
   }
   const airborneMinion = snapshot.cards.find(({ name }) => name === 'Plumed Pegasus');
   if (!airborneMinion
@@ -1369,6 +1402,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     stealthMinion,
     stealthTargetMinion,
     submergeMinion,
+    teleport,
     voidwalkMinion,
     wardMinion,
     zap,
@@ -1441,6 +1475,7 @@ function gameDefinition(
   siteGenesisDiscardTopSpells: 0 | 2 = 0,
   shootsDragProjectile = false,
   damageRandomUnitAtLocation: 0 | 3 = 0,
+  teleportAllyToTargetSite = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1468,6 +1503,7 @@ function gameDefinition(
   }
   const supportedMagicEffects = Number(damageTargetUnit !== 0)
     + Number(damageRandomUnitAtLocation !== 0)
+    + Number(teleportAllyToTargetSite)
     + Number(healController !== 0)
     + Number(burrowTargetMinion);
   if (card.cardType === 'magic'
@@ -1480,6 +1516,8 @@ function gameDefinition(
         ? { damageTargetUnit }
         : damageRandomUnitAtLocation !== 0
           ? { damageRandomUnitAtLocation }
+          : teleportAllyToTargetSite
+            ? { teleportAllyToTargetSite: true }
         : healController !== 0 ? { healController } : {}),
       manaCost: card.manaCost,
       ...(targetNearby ? { targetNearby: true } : {}),
@@ -1535,7 +1573,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-shallow-grave' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-shallow-grave' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1672,6 +1710,7 @@ function buildManifest(
   const airborneDeck = elementalDeck('air', airMinions);
   const airArcLightningDeck = elementalDeck('air', airMinions, [], [input.arcLightning]);
   const airLightningBoltDeck = elementalDeck('air', airMinions, [], [input.lightningBolt]);
+  const airTeleportDeck = elementalDeck('air', airMinions, [], [input.teleport]);
   const airZapDeck = elementalDeck('air', airMinions, [], [input.zap]);
   const airGenesisSpellDeck = elementalDeck('air', [...airMinions, input.genesisSpellMinion]);
   const airLeylineDeck = elementalDeck('air', airMinions, [input.leylineHenge]);
@@ -1717,6 +1756,8 @@ function buildManifest(
       ? airArcLightningDeck
       : scenario === 'air-lightning-bolt'
       ? airLightningBoltDeck
+      : scenario === 'air-teleport'
+      ? airTeleportDeck
       : scenario === 'air-genesis-spell'
       ? airGenesisSpellDeck
       : scenario === 'air-voidwalk'
@@ -1764,6 +1805,8 @@ function buildManifest(
       ? airArcLightningDeck
       : scenario === 'air-lightning-bolt'
       ? airLightningBoltDeck
+      : scenario === 'air-teleport'
+      ? airTeleportDeck
       : scenario === 'air-genesis-spell'
       ? airGenesisSpellDeck
       : scenario === 'air-voidwalk'
@@ -1863,6 +1906,7 @@ function buildManifest(
       card.stableId === input.shallowGrave.stableId ? 2 : 0,
       card.stableId === input.pudgeButcher.stableId,
       card.stableId === input.lightningBolt.stableId ? 3 : 0,
+      card.stableId === input.teleport.stableId,
     ),
   ]));
   return {
@@ -2858,6 +2902,47 @@ function findAirLightningBoltOpening(
     }
   }
   throw new Error('private random location-damage Magic scenario no longer produces its supported opening');
+}
+
+function findAirTeleportOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string];
+  session: GameSession;
+  snowLeopardInstanceId: string;
+  southSiteInstanceId: string;
+  teleportInstanceId: string;
+}> {
+  // ponytail: bounded opening scan avoids another private config field.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const built = buildManifest(input, input.config.airSeed + offset, 'air-teleport');
+    const session = createGameSession(built.manifest);
+    const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('air');
+    });
+    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+    const snowLeopardInstanceId = session.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === input.stealthTargetMinion.stableId)?.instanceId;
+    const teleportInstanceId = session.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === input.teleport.stableId)?.instanceId;
+    if (northSites.length >= 2
+      && southSiteInstanceId
+      && snowLeopardInstanceId
+      && teleportInstanceId) {
+      return {
+        ...built,
+        northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
+        session,
+        snowLeopardInstanceId,
+        southSiteInstanceId,
+        teleportInstanceId,
+      };
+    }
+  }
+  throw new Error('private ally-to-site Teleport scenario no longer produces its supported opening');
 }
 
 function findAirborneOpening(
@@ -4938,6 +5023,114 @@ function runAirLightningBolt(
   });
 }
 
+function runAirTeleport(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airTeleport'] {
+  const opening = findAirTeleportOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.snowLeopardInstanceId
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+
+  const before = session.state.realm.units
+    .find(({ instanceId }) => instanceId === opening.snowLeopardInstanceId);
+  const sourceSiteBefore = session.state.realm.sites.C4;
+  const targetSiteBefore = session.state.realm.sites.C1;
+  if (!before || !sourceSiteBefore || !targetSiteBefore) {
+    throw new Error('private Teleport setup lacks its unit or sites');
+  }
+  const pairs = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.teleportInstanceId
+      && descriptor.ally?.kind === 'minion'
+      && descriptor.ally.instanceId === opening.snowLeopardInstanceId
+      && descriptor.targetLocation?.cell === 'C1'
+      && descriptor.targetLocation.region === 'surface'
+      && descriptor.targetSiteInstanceId === opening.southSiteInstanceId);
+  const chosen = pairs[0];
+  if (!chosen) throw new Error('private Teleport ally/site pair is unavailable');
+  const manaBefore = session.state.players.north.mana;
+  const noPathTeleport = !('path' in chosen.descriptor);
+  session = accept(session, chosen);
+
+  const after = session.state.realm.units
+    .find(({ instanceId }) => instanceId === opening.snowLeopardInstanceId);
+  const receipt = session.transcript.at(-1);
+  const events = receipt?.events ?? [];
+  const castPayload = events[0] && isJsonRecord(events[0].payload) ? events[0].payload : undefined;
+  const teleportedPayload = events[1] && isJsonRecord(events[1].payload)
+    ? events[1].payload
+    : undefined;
+  const from = teleportedPayload && isJsonRecord(teleportedPayload.from)
+    ? teleportedPayload.from
+    : undefined;
+  const to = teleportedPayload && isJsonRecord(teleportedPayload.to)
+    ? teleportedPayload.to
+    : undefined;
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified: events.map(({ type }) => type).join(',')
+      === 'magic-cast,unit-teleported,magic-resolved'
+      && castPayload?.allyInstanceId === opening.snowLeopardInstanceId
+      && castPayload.targetSiteInstanceId === opening.southSiteInstanceId
+      && teleportedPayload?.seat === 'north'
+      && teleportedPayload.sourceInstanceId === opening.teleportInstanceId
+      && teleportedPayload.targetInstanceId === opening.snowLeopardInstanceId
+      && teleportedPayload.targetSiteInstanceId === opening.southSiteInstanceId
+      && from?.cell === 'C4'
+      && from.region === 'surface'
+      && to?.cell === 'C1'
+      && to.region === 'surface',
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    exactAllySitePair: pairs.length === 1,
+    manaPaid: manaBefore - session.state.players.north.mana,
+    noPathTeleport,
+    replayVerified: verifyGameReplay(session),
+    siteUnchanged: canonicalJson(session.state.realm.sites.C4 as unknown as JsonValue)
+      === canonicalJson(sourceSiteBefore as unknown as JsonValue)
+      && canonicalJson(session.state.realm.sites.C1 as unknown as JsonValue)
+        === canonicalJson(targetSiteBefore as unknown as JsonValue),
+    snowLeopard: input.stealthTargetMinion.name,
+    spellEnteredCemetery: session.state.players.north.hand.spellbook
+      .every(({ instanceId }) => instanceId !== opening.teleportInstanceId)
+      && session.state.players.north.cemetery
+        .some(({ instanceId }) => instanceId === opening.teleportInstanceId),
+    teleportedToOpponentSiteSurface: before.location === 'C4'
+      && before.region === 'surface'
+      && after?.location === 'C1'
+      && after.region === 'surface'
+      && targetSiteBefore.controller === 'south',
+    teleport: input.teleport.name,
+    unitStatePreserved: after !== undefined
+      && after.controller === before.controller
+      && after.damage === before.damage
+      && after.owner === before.owner
+      && after.stealthed === before.stealthed
+      && after.summoningSickness === before.summoningSickness
+      && after.tapped === before.tapped
+      && after.warded === before.warded,
+  });
+}
+
 function runAirborne(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['airborne'] {
@@ -6183,6 +6376,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airGenesisSpell = runAirGenesisSpell(input);
   const airArcLightning = runAirArcLightning(input);
   const airLightningBolt = runAirLightningBolt(input);
+  const airTeleport = runAirTeleport(input);
   const airLeyline = runAirLeyline(input);
   const airborne = runAirborne(input);
   const airMovement = runAirMovement(input);
@@ -6319,6 +6513,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     airGenesisSpell,
     airArcLightning,
     airLightningBolt,
+    airTeleport,
     airLeyline,
     airborne,
     airMovement,

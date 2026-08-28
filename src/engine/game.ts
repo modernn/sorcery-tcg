@@ -54,6 +54,7 @@ export type GameCardDefinition =
     healController?: number;
     manaCost: number;
     targetNearby?: boolean;
+    teleportAllyToTargetSite?: true;
     thresholds: GameThresholds;
   }>
   | Readonly<{
@@ -304,8 +305,10 @@ type GameActionDescriptor =
     cardInstanceId: string;
     casterInstanceId: StateHash;
     kind: 'cast-magic';
+    ally?: GameUnitRef;
     target?: GameUnitRef;
     targetLocation?: GameLocation;
+    targetSiteInstanceId?: StateHash;
   }>
   | Readonly<{ kind: 'draw'; zone: DeckZone }>
   | Readonly<{
@@ -518,6 +521,19 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
       kind: 'cast-magic' as const,
     };
     if (definition.healController !== undefined) return [cast];
+    if (definition.teleportAllyToTargetSite === true) {
+      if (caster.region !== 'surface') return [];
+      const targetSites = REALM_CELLS.flatMap((cell) => {
+        const site = state.realm.sites[cell];
+        return site ? [{ site, targetLocation: { cell, region: 'surface' as const } }] : [];
+      });
+      return unitRefs(state, seat).flatMap((ally) => targetSites.map(({ site, targetLocation }) => ({
+        ...cast,
+        ally,
+        targetLocation,
+        targetSiteInstanceId: site.instanceId,
+      })));
+    }
     if (definition.damageRandomUnitAtLocation !== undefined) {
       return REALM_CELLS
         .map((cell): GameLocation => ({ cell, region: caster.region }))
@@ -586,10 +602,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     if (card.burrowTargetMinion !== undefined && typeof card.burrowTargetMinion !== 'boolean') {
       throw new RangeError(`${path}.burrowTargetMinion must be boolean`);
     }
+    if (card.teleportAllyToTargetSite !== undefined && card.teleportAllyToTargetSite !== true) {
+      throw new RangeError(`${path}.teleportAllyToTargetSite must be true when defined`);
+    }
     const effectCount = Number(card.burrowTargetMinion === true)
       + Number(card.damageRandomUnitAtLocation !== undefined)
       + Number(card.damageTargetUnit !== undefined)
-      + Number(card.healController !== undefined);
+      + Number(card.healController !== undefined)
+      + Number(card.teleportAllyToTargetSite === true);
     if (effectCount !== 1) {
       throw new RangeError(`${path} must define exactly one supported Magic effect`);
     }
@@ -835,7 +855,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                   ? { damageRandomUnitAtLocation: card.damageRandomUnitAtLocation }
                 : card.damageTargetUnit !== undefined
                   ? { damageTargetUnit: card.damageTargetUnit }
-                  : { healController: card.healController! }),
+                  : card.healController !== undefined
+                    ? { healController: card.healController }
+                    : { teleportAllyToTargetSite: true as const }),
               manaCost: card.manaCost,
               ...(card.targetNearby === true ? { targetNearby: true } : {}),
               thresholds: { ...card.thresholds },
@@ -1759,6 +1781,8 @@ function actionLabel(descriptor: GameActionDescriptor): string {
   if (descriptor.kind === 'cast-magic') {
     return descriptor.target
       ? `Cast ${descriptor.cardId} on ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`
+      : descriptor.ally && descriptor.targetLocation
+        ? `Cast ${descriptor.cardId} to teleport ${descriptor.ally.kind} ${descriptor.ally.instanceId.slice(0, 15)}… to ${descriptor.targetLocation.cell}`
       : descriptor.targetLocation
         ? `Cast ${descriptor.cardId} at ${descriptor.targetLocation.cell} ${descriptor.targetLocation.region}`
       : `Cast ${descriptor.cardId}`;
@@ -2462,6 +2486,12 @@ function applyDescriptor(
       candidate.kind === 'cast-magic'
         && candidate.cardInstanceId === descriptor.cardInstanceId
         && candidate.casterInstanceId === descriptor.casterInstanceId
+        && (candidate.ally === undefined && descriptor.ally === undefined
+          || candidate.ally !== undefined
+            && descriptor.ally !== undefined
+            && candidate.ally.instanceId === descriptor.ally.instanceId
+            && candidate.ally.kind === descriptor.ally.kind
+            && candidate.ally.seat === descriptor.ally.seat)
         && (candidate.target === undefined && descriptor.target === undefined
           || candidate.target !== undefined
             && descriptor.target !== undefined
@@ -2471,7 +2501,8 @@ function applyDescriptor(
         && (candidate.targetLocation === undefined && descriptor.targetLocation === undefined
           || candidate.targetLocation !== undefined
             && descriptor.targetLocation !== undefined
-            && sameLocation(candidate.targetLocation, descriptor.targetLocation)));
+            && sameLocation(candidate.targetLocation, descriptor.targetLocation))
+        && candidate.targetSiteInstanceId === descriptor.targetSiteInstanceId);
     if (!card || !definition || definition.cardType !== 'magic' || !legal) {
       throw new Error('unreachable illegal Magic cast');
     }
@@ -2511,6 +2542,12 @@ function applyDescriptor(
           }
           : {}),
         ...(descriptor.targetLocation ? { targetLocation: descriptor.targetLocation } : {}),
+        ...(descriptor.ally
+          ? { allyInstanceId: descriptor.ally.instanceId, allySeat: descriptor.ally.seat }
+          : {}),
+        ...(descriptor.targetSiteInstanceId
+          ? { targetSiteInstanceId: descriptor.targetSiteInstanceId }
+          : {}),
       },
       type: 'magic-cast',
     } as const;
@@ -2627,6 +2664,38 @@ function applyDescriptor(
         terminalIndex < 0
           ? [...outcomes, resolved]
           : [...outcomes.slice(0, terminalIndex), resolved, ...outcomes.slice(terminalIndex)],
+        [],
+      ];
+    }
+    if (definition.teleportAllyToTargetSite === true) {
+      if (!descriptor.ally || !descriptor.targetLocation || !descriptor.targetSiteInstanceId) {
+        throw new Error('unreachable Teleport cast');
+      }
+      const status = unitStatus(castState, descriptor.ally);
+      const from: GameLocation = { cell: status.location, region: status.region };
+      if (sameLocation(from, descriptor.targetLocation)) {
+        return [withStateVersion(castState, {}), [castOutcome, resolved], []];
+      }
+      const moved = moveUnit(castState, descriptor.ally, descriptor.targetLocation, false);
+      const teleportedState = deepFreeze({
+        ...castState,
+        players: moved.players,
+        realm: moved.realm,
+      });
+      const teleported: GameOutcome = {
+        payload: {
+          from,
+          seat: descriptor.ally.seat,
+          sourceInstanceId: card.instanceId,
+          targetInstanceId: descriptor.ally.instanceId,
+          targetSiteInstanceId: descriptor.targetSiteInstanceId,
+          to: descriptor.targetLocation,
+        },
+        type: 'unit-teleported',
+      };
+      return [
+        withStateVersion(teleportedState, {}),
+        [castOutcome, teleported, resolved],
         [],
       ];
     }
