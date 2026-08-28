@@ -102,7 +102,7 @@ test('rejections are typed and leave state, hash, PRNG, events, and transcript u
   const beforePrng = canonicalJson(session.state.engine.prng);
 
   const stale = stepDemo(session, draw);
-  assert.deepEqual(stale, { accepted: false, reason: 'stale', session });
+  assert.deepEqual(stale, { accepted: false, reason: 'stale_version', session });
   const wrongSeat = stepDemo(session, { ...requestByLabel(session, 'Reveal marker'), seat: 'south' });
   assert.deepEqual(wrongSeat, { accepted: false, reason: 'wrong_seat', session });
   const unknown = stepDemo(session, {
@@ -123,7 +123,7 @@ test('rejections are typed and leave state, hash, PRNG, events, and transcript u
     seat: finished.state.activeSeat,
     stateVersion: finished.state.stateVersion,
   });
-  assert.deepEqual(terminal, { accepted: false, reason: 'terminal', session: finished });
+  assert.deepEqual(terminal, { accepted: false, reason: 'terminal_state', session: finished });
 });
 
 test('authoritative state, observations, sessions, receipts, and legal actions are deeply frozen', () => {

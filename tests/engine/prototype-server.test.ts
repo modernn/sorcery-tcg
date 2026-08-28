@@ -113,7 +113,7 @@ test('resubmitting a stale command rejects without changing state hash', async (
 
   assert.equal(stale.accepted, false);
   assert.equal('session' in stale, false);
-  assert.equal(stale.reason, 'stale');
+  assert.equal(stale.reason, 'stale_version');
   assert.equal(stale.stateHash, accepted.stateHash);
   assert.deepEqual(stale.view, accepted.view);
 });
