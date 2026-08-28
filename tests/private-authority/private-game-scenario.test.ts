@@ -424,6 +424,28 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.fireResponse.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
   assert.equal(result.fireResponse.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
   assert.equal(result.fireResponse.replayVerified, true);
+  assert.equal(result.fireMinorExplosion.minorExplosion, 'Minor Explosion');
+  assert.equal(result.fireMinorExplosion.raalDromedary, 'Raal Dromedary');
+  assert.equal(result.fireMinorExplosion.acceptedActionCount, 17);
+  assert.equal(result.fireMinorExplosion.exactLocationTargetAvailable, true);
+  assert.equal(result.fireMinorExplosion.targetWithinTwoSteps, true);
+  assert.equal(result.fireMinorExplosion.manaPaid, 3);
+  assert.equal(result.fireMinorExplosion.avatarTookThreeDamage, true);
+  assert.equal(result.fireMinorExplosion.simultaneousDamageVerified, true);
+  assert.equal(result.fireMinorExplosion.twoMinionsDied, true);
+  assert.equal(result.fireMinorExplosion.twoMinionsEnteredCemetery, true);
+  assert.equal(result.fireMinorExplosion.spellEnteredCemetery, true);
+  assert.equal(result.fireMinorExplosion.causalEventsVerified, true);
+  assert.equal(result.fireMinorExplosion.noRandomDraws, true);
+  assert.equal(result.fireMinorExplosion.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.fireMinorExplosion.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.fireMinorExplosion.deck.spellbook
+    .find(({ name }) => name === 'Minor Explosion')?.copies, 4);
+  assert.equal(result.fireMinorExplosion.deck.spellbook
+    .find(({ name }) => name === 'Raal Dromedary')?.copies, 4);
+  assert.equal(result.fireMinorExplosion.replayVerified, true);
   assert.equal(result.combat.northMinionDied, true);
   assert.equal(result.combat.southMinionDied, true);
   assert.equal(result.waterDrown.drown, 'Drown');
