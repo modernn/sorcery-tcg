@@ -40,6 +40,7 @@ type SpellFacts = Readonly<{
   manaCost: number;
   movementPlusOne?: boolean;
   provides?: 'air' | 'earth' | 'fire' | 'water';
+  summonToAnySite?: boolean;
   tapForMana?: number;
   thresholds: Readonly<{ air: number; earth: number; fire: number; water: number }>;
 }>;
@@ -94,6 +95,7 @@ function cardsFor(
         manaCost: spell.manaCost,
         movementPlusOne: spell.movementPlusOne ?? false,
         ...(spell.provides ? { provides: spell.provides } : {}),
+        summonToAnySite: spell.summonToAnySite ?? false,
         ...(spell.tapForMana ? { tapForMana: spell.tapForMana } : {}),
         thresholds: { ...spell.thresholds },
       };
@@ -490,6 +492,45 @@ test('RULE-03/04 a Spellcaster pays mana and summons a minion atop a controlled 
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
   assert.equal(session.state.realm.units[0]?.summoningSickness, false);
   assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 explicit permission allows a minion to be summoned to any site', () => {
+  const summonCells = (summonToAnySite: boolean): readonly string[] => {
+    let session = keep(createGameSession(manifest(111, {
+      spell: {
+        manaCost: 1,
+        summonToAnySite,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    })));
+    session = keep(session);
+    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    const cardInstanceId = session.state.players.north.hand.spellbook[0]?.instanceId;
+    assert.ok(cardInstanceId);
+    const cells = legalGameActions(session.state, 'north').flatMap(({ descriptor }) =>
+      descriptor.kind === 'summon-minion' && descriptor.cardInstanceId === cardInstanceId
+        ? [descriptor.cell]
+        : []);
+    if (summonToAnySite) {
+      session = accept(session, action(session, ({ descriptor }) =>
+        descriptor.kind === 'summon-minion'
+          && descriptor.cardInstanceId === cardInstanceId
+          && descriptor.cell === 'C1'));
+      assert.equal(session.state.realm.units[0]?.location, 'C1');
+      assert.equal(verifyGameReplay(session), true);
+    }
+    return cells;
+  };
+
+  assert.deepEqual(summonCells(false), ['C4']);
+  assert.deepEqual(summonCells(true), ['C1', 'C4']);
 });
 
 test('RULE-04 Charge allows a summoned minion to Move and Attack immediately', () => {

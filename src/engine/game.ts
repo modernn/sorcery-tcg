@@ -49,6 +49,7 @@ export type GameCardDefinition =
     manaCost: number;
     movementPlusOne?: boolean;
     provides?: GameElement;
+    summonToAnySite?: boolean;
     tapForMana?: number;
     thresholds: GameThresholds;
   }>;
@@ -335,13 +336,14 @@ function meetsThresholds(state: GameState, seat: GameSeat, required: GameThresho
 
 function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   const player = state.players[seat];
-  const cells = controlledSiteCells(state, seat);
+  const controlledCells = controlledSiteCells(state, seat);
+  const siteCells = Object.keys(state.realm.sites).sort() as RealmCell[];
   return player.hand.spellbook.flatMap(({ cardId, instanceId }) => {
     const definition = cardDefinition(state, cardId);
     if (definition.cardType !== 'minion'
       || player.mana < definition.manaCost
       || !meetsThresholds(state, seat, definition.thresholds)) return [];
-    return cells.map((cell) => ({
+    return (definition.summonToAnySite ? siteCells : controlledCells).map((cell) => ({
       cardId,
       cardInstanceId: instanceId,
       casterInstanceId: player.avatar.card.instanceId,
@@ -408,6 +410,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   }
   if (card.movementPlusOne !== undefined && typeof card.movementPlusOne !== 'boolean') {
     throw new RangeError(`${path}.movementPlusOne must be boolean`);
+  }
+  if (card.summonToAnySite !== undefined && typeof card.summonToAnySite !== 'boolean') {
+    throw new RangeError(`${path}.summonToAnySite must be boolean`);
   }
   if (card.tapForMana !== undefined
     && (!Number.isSafeInteger(card.tapForMana) || card.tapForMana < 1 || card.tapForMana > MAX_COMBAT_STAT)) {
@@ -508,6 +513,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             manaCost: card.manaCost,
             ...(card.movementPlusOne === true ? { movementPlusOne: true } : {}),
             ...(card.provides ? { provides: card.provides } : {}),
+            ...(card.summonToAnySite === true ? { summonToAnySite: true } : {}),
             ...(card.tapForMana ? { tapForMana: card.tapForMana } : {}),
             thresholds: { ...card.thresholds },
           },
