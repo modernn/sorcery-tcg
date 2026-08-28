@@ -11,6 +11,7 @@ import {
   verifyGameReplay,
   type GameDeckSpec,
   type GameLegalAction,
+  type GameManifest,
   type GameSession,
 } from '../engine/game.ts';
 
@@ -24,6 +25,19 @@ function demoDeck(prefix: string): GameDeckSpec {
     avatar: `${prefix}-avatar`,
     spellbook: Array.from({ length: 50 }, (_, index) => `${prefix}-spell-${index + 1}`),
   };
+}
+
+export function createSyntheticDemoManifest(seed = 1): GameManifest {
+  return createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic',
+      revisionId: 'synthetic-setup-fixture-v1',
+    },
+    decks: { north: demoDeck('north'), south: demoDeck('south') },
+    firstSeat: 'north',
+    seed,
+  });
 }
 
 function selectAction(session: GameSession): GameLegalAction {
@@ -49,16 +63,7 @@ export function runGameDemo(seed = 1): Readonly<{
   turnCount: number;
   winner: 'north' | 'south';
 }> {
-  const manifest = createGameManifest({
-    authority: {
-      contentHash: SYNTHETIC_AUTHORITY_HASH,
-      mode: 'synthetic',
-      revisionId: 'synthetic-setup-fixture-v1',
-    },
-    decks: { north: demoDeck('north'), south: demoDeck('south') },
-    firstSeat: 'north',
-    seed,
-  });
+  const manifest = createSyntheticDemoManifest(seed);
   let session = createGameSession(manifest);
   while (session.state.terminal.status === 'active' && session.transcript.length < MAX_ACTIONS) {
     const result = stepGame(session, selectAction(session));

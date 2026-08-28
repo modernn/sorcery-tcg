@@ -140,7 +140,7 @@ type MulliganDescriptor = Readonly<{
 
 type GameActionDescriptor =
   | MulliganDescriptor
-  | Readonly<{ cardInstanceId: string; cell: RealmCell; kind: 'play-site' }>
+  | Readonly<{ cardId: string; cardInstanceId: string; cell: RealmCell; kind: 'play-site' }>
   | Readonly<{ kind: 'draw'; zone: DeckZone }>
   | Readonly<{ kind: 'end-turn' }>;
 
@@ -419,7 +419,8 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
   if (state.phase === 'mulligan') return mulliganDescriptors(player);
   if (state.phase === 'draw') return [{ kind: 'draw', zone: 'atlas' }, { kind: 'draw', zone: 'spellbook' }];
   if (!player.domainEstablished) {
-    return player.hand.atlas.map(({ instanceId }) => ({
+    return player.hand.atlas.map(({ cardId, instanceId }) => ({
+      cardId,
       cardInstanceId: instanceId,
       cell: player.avatar.location,
       kind: 'play-site',
@@ -436,7 +437,7 @@ function actionLabel(descriptor: GameActionDescriptor): string {
       : `Mulligan ${count} (${descriptor.atlasOrder.length} atlas, ${descriptor.spellbookOrder.length} spellbook)`;
   }
   if (descriptor.kind === 'draw') return `Draw from ${descriptor.zone}`;
-  if (descriptor.kind === 'play-site') return `Establish domain at ${descriptor.cell}`;
+  if (descriptor.kind === 'play-site') return `Establish domain with ${descriptor.cardId} at ${descriptor.cell}`;
   return 'End turn';
 }
 
@@ -543,7 +544,8 @@ function applyDescriptor(
   }
 
   if (descriptor.kind === 'play-site') {
-    const card = player.hand.atlas.find(({ instanceId }) => instanceId === descriptor.cardInstanceId);
+    const card = player.hand.atlas.find(({ cardId, instanceId }) =>
+      instanceId === descriptor.cardInstanceId && cardId === descriptor.cardId);
     if (!card) throw new Error('unreachable site card');
     const updatedPlayer = deepFreeze({
       ...player,
