@@ -48,6 +48,7 @@ type SpellFacts = Readonly<{
   ranged?: boolean;
   stealth?: boolean;
   strikesFirstWhileAttacking?: boolean;
+  submerge?: boolean;
   summonToAnySite?: boolean;
   tapForMana?: number;
   thresholds: Readonly<{ air: number; earth: number; fire: number; water: number }>;
@@ -62,6 +63,7 @@ type AvatarFacts = Readonly<{
 }>;
 
 type SiteFacts = Readonly<{
+  elements?: readonly ('air' | 'earth' | 'fire' | 'water')[];
   genesisGainMana?: number;
 }>;
 
@@ -88,7 +90,7 @@ function cardsFor(
     playerDeck.atlas.forEach((cardId) => {
       cards[cardId] = {
         cardType: 'site',
-        elements: ['earth'],
+        elements: site.elements ?? ['earth'],
         ...(site.genesisGainMana ? { genesisGainMana: site.genesisGainMana } : {}),
       };
     });
@@ -114,6 +116,7 @@ function cardsFor(
         ranged: facts.ranged ?? false,
         stealth: facts.stealth ?? false,
         strikesFirstWhileAttacking: facts.strikesFirstWhileAttacking ?? false,
+        submerge: facts.submerge ?? false,
         summonToAnySite: facts.summonToAnySite ?? false,
         ...(facts.tapForMana ? { tapForMana: facts.tapForMana } : {}),
         thresholds: { ...facts.thresholds },
@@ -242,6 +245,13 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       [firstSpell]: { ...cards[firstSpell]!, movementBonus: 3 } as unknown as GameCardDefinition,
     },
   }), /movementBonus/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: { ...cards[firstSpell]!, submerge: 'yes' } as unknown as GameCardDefinition,
+    },
+  }), /submerge/);
 });
 
 test('TEST-03 different opponent hidden cards cannot change an observation or legal actions', () => {
@@ -1366,6 +1376,119 @@ test('RULE-04 Sedge Crabs can move themselves only sideways', () => {
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
   assert.equal(session.state.realm.units[0]?.location, 'B3');
   assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 Submerge uses underwater summons, movement, and region-isolated combat', () => {
+  const submerge = {
+    attack: 2,
+    defense: 2,
+    manaCost: 1,
+    submerge: true,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 1 },
+  } as const;
+  const ordinary = { ...submerge, submerge: false };
+  let session = keep(createGameSession(manifest(129, {
+    northSpell: submerge,
+    site: { elements: ['water'] },
+    southSpell: ordinary,
+  })));
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site');
+  const northSummons = legalGameActions(session.state, 'north');
+  assert.equal(northSummons.some(({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.region === undefined), true);
+  assert.equal(northSummons.some(({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.region === 'underwater'), true);
+  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.region === 'underwater');
+  const northUnitId = session.state.realm.units[0]?.instanceId;
+  assert.ok(northUnitId);
+  assert.equal(observeGame(session.state, 'north').realm.units[0]?.region, 'underwater');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site');
+  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.region === 'underwater'), false);
+  take(({ descriptor }) => descriptor.kind === 'summon-minion');
+  const southUnitId = session.state.realm.units.find(({ controller }) => controller === 'south')?.instanceId;
+  assert.ok(southUnitId);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  const underwaterMoves = legalGameActions(session.state, 'north');
+  const surfaces = underwaterMoves.find(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === northUnitId
+      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+        === 'C4/underwater,C4/surface');
+  const swims = underwaterMoves.find(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === northUnitId
+      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+        === 'C4/underwater,C3/underwater');
+  assert.ok(surfaces);
+  assert.ok(swims);
+  let surfaced = accept(session, surfaces);
+  surfaced = accept(surfaced, action(surfaced, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  assert.equal(surfaced.state.realm.units.find(({ instanceId }) => instanceId === northUnitId)?.region, 'surface');
+  assert.equal(verifyGameReplay(surfaced), true);
+
+  session = accept(session, swims);
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site'), false);
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+  take(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === southUnitId
+      && descriptor.to.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === northUnitId
+      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+        === 'C3/underwater,C2/underwater');
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === southUnitId), false);
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  assert.equal(session.state.phase, 'main');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === northUnitId
+      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+        === 'C2/underwater,C2/surface');
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === southUnitId), true);
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'close-intercept');
+  assert.equal(verifyGameReplay(session), true);
+
+  let land = keep(createGameSession(manifest(130, { northSpell: submerge })));
+  land = keep(land);
+  land = accept(land, action(land, ({ descriptor }) => descriptor.kind === 'play-site'));
+  assert.equal(legalGameActions(land.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.region === 'underwater'), false);
+  assert.equal(verifyGameReplay(land), true);
 });
 
 test('RULE-04 Movement +1 issues exact two-step and returning Move and Attack paths', () => {
