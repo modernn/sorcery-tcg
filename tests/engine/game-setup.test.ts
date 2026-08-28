@@ -2122,6 +2122,190 @@ test('RULE-03/04 Bury forcefully burrows minions if able and immediately resolve
   ]);
 });
 
+test('RULE-03/04 Drown forcefully submerges a target minion if able', () => {
+  const decks = { north: deck('drown-north', 4, 8), south: deck('drown-south', 4, 8) };
+  const baseCards = cardsFor(decks, {
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  }, undefined, { elements: ['water'] });
+  const authority = {
+    contentHash: SYNTHETIC_AUTHORITY_HASH,
+    mode: 'synthetic' as const,
+    revisionId: 'synthetic-drown-v1',
+  };
+  const preview = createGameSession(createGameManifest({
+    authority,
+    cards: baseCards,
+    decks,
+    firstSeat: 'north',
+    seed: 246,
+  }));
+  const waterSiteId = preview.state.players.south.hand.atlas[0]?.cardId;
+  const landSiteId = preview.state.players.south.hand.atlas[1]?.cardId;
+  const ordinaryId = preview.state.players.south.hand.spellbook[0]?.cardId;
+  const survivorId = preview.state.players.south.hand.spellbook[1]?.cardId;
+  const wardedId = preview.state.players.south.hand.spellbook[2]?.cardId;
+  const landTargetId = preview.state.players.south.spellbook[0]?.cardId;
+  const stealthId = preview.state.players.south.spellbook[1]?.cardId;
+  assert.ok(waterSiteId);
+  assert.ok(landSiteId);
+  assert.ok(ordinaryId);
+  assert.ok(survivorId);
+  assert.ok(wardedId);
+  assert.ok(landTargetId);
+  assert.ok(stealthId);
+  const cards: Record<string, GameCardDefinition> = { ...baseCards };
+  for (const cardId of decks.north.spellbook) {
+    cards[cardId] = {
+      cardType: 'magic',
+      manaCost: 1,
+      submergeTargetMinion: true,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 1 },
+    };
+  }
+  cards[landSiteId] = { cardType: 'site', elements: ['earth'] };
+  cards[survivorId] = { ...cards[survivorId]!, submerge: true } as GameCardDefinition;
+  cards[wardedId] = { ...cards[wardedId]!, ward: true } as GameCardDefinition;
+  cards[stealthId] = { ...cards[stealthId]!, stealth: true } as GameCardDefinition;
+  const drownCardId = decks.north.spellbook[0]!;
+  assert.throws(() => createGameManifest({
+    authority,
+    cards: {
+      ...cards,
+      [drownCardId]: {
+        ...cards[drownCardId]!,
+        submergeTargetMinion: false,
+      } as unknown as GameCardDefinition,
+    },
+    decks,
+    firstSeat: 'north',
+    seed: 246,
+  }), /submergeTargetMinion/);
+  const gameManifest = createGameManifest({
+    authority,
+    cards,
+    decks,
+    firstSeat: 'north',
+    seed: 246,
+  });
+  assert.equal(gameManifest.cards[drownCardId]?.cardType === 'magic'
+    && gameManifest.cards[drownCardId].submergeTargetMinion, true);
+  let session = keep(keep(createGameSession(gameManifest)));
+  const instance = (cardId: string) => [
+    ...session.state.players.south.hand.atlas,
+    ...session.state.players.south.hand.spellbook,
+    ...session.state.players.south.atlas,
+    ...session.state.players.south.spellbook,
+  ].find((card) => card.cardId === cardId)!;
+  const waterSite = instance(waterSiteId);
+  const landSite = instance(landSiteId);
+  const ordinary = instance(ordinaryId);
+  const survivor = instance(survivorId);
+  const warded = instance(wardedId);
+  const landTarget = instance(landTargetId);
+  const stealth = instance(stealthId);
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === waterSite.instanceId
+      && descriptor.cell === 'C1'));
+  for (const target of [ordinary, survivor, warded]) {
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === target.instanceId
+        && descriptor.cell === 'C1'
+        && descriptor.region === undefined));
+  }
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === landSite.instanceId
+      && descriptor.cell === 'C2'));
+  for (const target of [landTarget, stealth]) {
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === target.instanceId
+        && descriptor.cell === 'C2'
+        && descriptor.region === undefined));
+  }
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+
+  const checkpoint = session;
+  const drown = checkpoint.state.players.north.hand.spellbook.find(({ cardId }) => cardId === drownCardId);
+  assert.ok(drown);
+  const casts = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === drown.instanceId);
+  const targetIds = casts.flatMap(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.target?.kind === 'minion' ? [descriptor.target.instanceId] : []);
+  assert.deepEqual([...targetIds].sort(), [ordinary, survivor, warded, landTarget]
+    .map(({ instanceId }) => instanceId).sort());
+  assert.equal(targetIds.includes(stealth.instanceId), false);
+  assert.equal(checkpoint.state.realm.units.find(({ instanceId }) =>
+    instanceId === ordinary.instanceId)?.location, 'C1');
+  assert.equal(checkpoint.state.players.north.avatar.location, 'C4');
+  const castAt = (targetInstanceId: string): GameSession => accept(checkpoint, casts.find(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.target?.instanceId === targetInstanceId)!);
+  const verifyCast = (cast: GameSession): void => {
+    assert.equal(cast.state.stateVersion, checkpoint.state.stateVersion + 1);
+    assert.equal(cast.state.players.north.mana, checkpoint.state.players.north.mana - 1);
+    assert.equal(cast.state.players.north.cemetery.some(({ instanceId }) => instanceId === drown.instanceId), true);
+    assert.equal(verifyGameReplay(cast), true);
+  };
+
+  const dead = castAt(ordinary.instanceId);
+  verifyCast(dead);
+  assert.equal(dead.state.realm.units.some(({ instanceId }) => instanceId === ordinary.instanceId), false);
+  assert.equal(dead.state.players.south.cemetery.some(({ instanceId }) => instanceId === ordinary.instanceId), true);
+  assert.deepEqual(dead.transcript.at(-1)?.events.map(({ type }) => type), [
+    'magic-cast',
+    'minion-submerged',
+    'minion-died',
+    'magic-resolved',
+  ]);
+
+  const submerged = castAt(survivor.instanceId);
+  verifyCast(submerged);
+  assert.equal(submerged.state.realm.units.find(({ instanceId }) => instanceId === survivor.instanceId)?.region,
+    'underwater');
+  assert.deepEqual(submerged.transcript.at(-1)?.events.map(({ type }) => type), [
+    'magic-cast',
+    'minion-submerged',
+    'magic-resolved',
+  ]);
+
+  const protectedByWard = castAt(warded.instanceId);
+  verifyCast(protectedByWard);
+  const wardedUnit = protectedByWard.state.realm.units.find(({ instanceId }) => instanceId === warded.instanceId);
+  assert.equal(wardedUnit?.region, 'surface');
+  assert.equal(wardedUnit?.warded, false);
+  assert.deepEqual(protectedByWard.transcript.at(-1)?.events.map(({ type }) => type), [
+    'magic-cast',
+    'ward-broken',
+    'magic-resolved',
+  ]);
+
+  const unable = castAt(landTarget.instanceId);
+  verifyCast(unable);
+  assert.equal(unable.state.realm.units.find(({ instanceId }) => instanceId === landTarget.instanceId)?.region,
+    'surface');
+  assert.deepEqual(unable.transcript.at(-1)?.events.map(({ type }) => type), [
+    'magic-cast',
+    'magic-resolved',
+  ]);
+});
+
 test("RULE-03/04 healing Magic is targetless, capped, and cannot leave Death's Door", () => {
   const healAfterDamage = (maximumLife: number, seed: number): Readonly<{
     beforeCast: GameSession['state'];

@@ -488,6 +488,21 @@ export type PrivateGameCheck = Readonly<{
     spellEnteredCemetery: boolean;
     unitStatePreserved: boolean;
   }>;
+  waterDrown: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    drown: string;
+    exactTargetAvailable: boolean;
+    ghostTownManaConsumed: boolean;
+    manaPaid: number;
+    replayVerified: boolean;
+    seravaTownsfolk: string;
+    spellEnteredCemetery: boolean;
+    targetEnteredCemetery: boolean;
+    targetLeftRealm: boolean;
+    transitionBeforeDeath: boolean;
+  }>;
   waterDrowned: Readonly<{
     acceptedActionCount: number;
     deck: DeckList;
@@ -690,6 +705,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   deathriteMinion: NormalizedCard;
   dalceanPhalanx: NormalizedCard;
   divineHealing: NormalizedCard;
+  drown: NormalizedCard;
   drowned: NormalizedCard;
   earthProviderMinion: NormalizedCard;
   entombed: NormalizedCard;
@@ -1041,6 +1057,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || drowned.rarity !== 'ordinary') {
     throw new Error('private submerged-only casting minion no longer matches its supported facts');
   }
+  const drown = snapshot.cards.find(({ name }) => name === 'Drown');
+  if (!drown
+    || drown.cardType !== 'magic'
+    || ruleTextDigest(drown.rulesText) !== 'sha256:a654a3b82435dadaa85029e61b6de4bfbc5267d95129937996a1afa63ac4fd14'
+    || drown.manaCost !== 3
+    || drown.attack !== null
+    || drown.defense !== null
+    || drown.life !== null
+    || drown.elements.length !== 1
+    || drown.elements[0] !== 'water'
+    || drown.thresholds.air !== 0
+    || drown.thresholds.earth !== 0
+    || drown.thresholds.fire !== 0
+    || drown.thresholds.water !== 1
+    || drown.rarity !== 'ordinary') {
+    throw new Error('private forced-submerge Magic no longer matches its supported facts');
+  }
   const lugbogCat = snapshot.cards.find(({ name }) => name === 'Lugbog Cat');
   if (!lugbogCat
     || lugbogCat.cardType !== 'minion'
@@ -1328,9 +1361,19 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   }
   const ghostTownSite = snapshot.cards.find(({ stableId }) => stableId === config.ghostTownSiteStableId);
   if (!ghostTownSite
+    || ghostTownSite.name !== 'Ghost Town'
     || ghostTownSite.cardType !== 'site'
     || ruleTextDigest(ghostTownSite.rulesText) !== 'sha256:88d7d0059b0cb0b591affdaf84626949782c50f2fdd0d332a4424662f4fef791'
-    || ghostTownSite.rarity === null) {
+    || ghostTownSite.manaCost !== null
+    || ghostTownSite.attack !== null
+    || ghostTownSite.defense !== null
+    || ghostTownSite.life !== null
+    || ghostTownSite.elements.length !== 0
+    || ghostTownSite.thresholds.air !== 0
+    || ghostTownSite.thresholds.earth !== 0
+    || ghostTownSite.thresholds.fire !== 0
+    || ghostTownSite.thresholds.water !== 0
+    || ghostTownSite.rarity !== 'exceptional') {
     throw new Error('private site Genesis mana card no longer matches its supported facts');
   }
   const healingMinion = snapshot.cards.find(({ stableId }) => stableId === config.healingMinionStableId);
@@ -1483,6 +1526,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     dalceanPhalanx,
     deathriteMinion,
     divineHealing,
+    drown,
     drowned,
     earthProviderMinion,
     entombed,
@@ -1597,6 +1641,7 @@ function gameDefinition(
   returnMinionFromOwnCemetery = false,
   disableTargetNearbyMinionUntilNextTurn = false,
   sacrificeToDestroyNearbySite = false,
+  submergeTargetMinion = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1628,6 +1673,7 @@ function gameDefinition(
     + Number(teleportAllyToTargetSite)
     + Number(returnMinionFromOwnCemetery)
     + Number(disableTargetNearbyMinionUntilNextTurn)
+    + Number(submergeTargetMinion)
     + Number(healController !== 0)
     + Number(burrowTargetMinion);
   if (card.cardType === 'magic'
@@ -1636,6 +1682,7 @@ function gameDefinition(
     return {
       ...(burrowTargetMinion ? { burrowTargetMinion: true } : {}),
       cardType: 'magic',
+      ...(submergeTargetMinion ? { submergeTargetMinion: true } : {}),
       ...(damageTargetUnit !== 0
         ? { damageTargetUnit }
         : damageRandomUnitAtLocation !== 0
@@ -1701,7 +1748,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1860,6 +1907,12 @@ function buildManifest(
     input.sedgeCrabs,
     input.seravaTownsfolk,
   ], [], [input.freeze]);
+  const waterDrownDeck = elementalDeck('water', [
+    input.healingMinion,
+    input.slyFox,
+    input.sedgeCrabs,
+    input.seravaTownsfolk,
+  ], [input.ghostTownSite], [input.drown]);
   const waterSubmergeDeck = elementalDeck('water', [
     input.healingMinion,
     input.slyFox,
@@ -1932,6 +1985,8 @@ function buildManifest(
           ? waterEdgeConnectionDeck
         : scenario === 'water-drowned'
           ? waterDrownedDeck
+        : scenario === 'water-drown'
+          ? waterDrownDeck
         : scenario === 'water-freeze'
           ? waterFreezeDeck
         : scenario === 'water-lugbog'
@@ -1961,6 +2016,8 @@ function buildManifest(
         ? waterEdgeConnectionDeck
       : scenario === 'water-drowned'
         ? waterDrownedDeck
+      : scenario === 'water-drown'
+        ? waterDrownDeck
       : scenario === 'water-freeze'
         ? waterFreezeDeck
       : scenario === 'water-lugbog'
@@ -2058,6 +2115,7 @@ function buildManifest(
       card.stableId === input.rescue.stableId,
       card.stableId === input.freeze.stableId,
       card.stableId === input.sinkhole.stableId,
+      card.stableId === input.drown.stableId,
     ),
   ]));
   return {
@@ -3666,6 +3724,53 @@ function findWaterOpening(
     ? 'end-turn Stealth'
     : sideways ? 'sideways movement' : submerge ? 'Submerge' : 'healing';
   throw new Error(`private Water ${scenarioName} scenario no longer produces its supported opening`);
+}
+
+function findWaterDrownOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  drownInstanceId: string;
+  ghostTownInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  seravaInstanceId: string;
+  session: GameSession;
+  southSiteInstanceId: string;
+  waterSiteInstanceId: string;
+}> {
+  // ponytail: bounded opening scan avoids another private config field.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const built = buildManifest(input, input.config.waterSeed + offset, 'water-drown');
+    const session = createGameSession(built.manifest);
+    const waterSiteInstanceId = session.state.players.north.hand.atlas.find(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('water');
+    })?.instanceId;
+    const ghostTownInstanceId = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.ghostTownSite.stableId)?.instanceId;
+    const drownInstanceId = session.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === input.drown.stableId)?.instanceId;
+    const seravaInstanceId = session.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === input.seravaTownsfolk.stableId)?.instanceId;
+    const southSiteInstanceId = session.state.players.south.hand.atlas
+      .find(({ cardId }) => cardId !== input.ghostTownSite.stableId)?.instanceId;
+    if (waterSiteInstanceId
+      && ghostTownInstanceId
+      && drownInstanceId
+      && seravaInstanceId
+      && southSiteInstanceId) {
+      return {
+        ...built,
+        drownInstanceId,
+        ghostTownInstanceId,
+        seravaInstanceId,
+        session,
+        southSiteInstanceId,
+        waterSiteInstanceId,
+      };
+    }
+  }
+  throw new Error('private forced-submerge Magic scenario no longer produces its supported opening');
 }
 
 function findWaterFreezeOpening(
@@ -6491,6 +6596,100 @@ function runWaterSubmerge(
   });
 }
 
+function runWaterDrown(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['waterDrown'] {
+  const opening = findWaterDrownOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.waterSiteInstanceId
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.seravaInstanceId
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const manaBeforeGhostTown = session.state.players.north.mana;
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.ghostTownInstanceId
+    && descriptor.cell === 'C3');
+  const ghostTownEvents = session.transcript.at(-1)?.events ?? [];
+  const ghostTownManaPayload = ghostTownEvents[1] && isJsonRecord(ghostTownEvents[1].payload)
+    ? ghostTownEvents[1].payload
+    : undefined;
+  const manaBeforeCast = session.state.players.north.mana;
+  const drownActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === opening.drownInstanceId);
+  const selected = drownActions.find(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.target?.kind === 'minion'
+    && descriptor.target.instanceId === opening.seravaInstanceId);
+  if (!selected) throw new Error('private forced-submerge Magic target is unavailable');
+  const exactTargetAvailable = drownActions.length === 1;
+  session = accept(session, selected);
+
+  const events = session.transcript.at(-1)?.events ?? [];
+  const castPayload = events[0] && isJsonRecord(events[0].payload) ? events[0].payload : undefined;
+  const submergedPayload = events[1] && isJsonRecord(events[1].payload)
+    ? events[1].payload
+    : undefined;
+  const deathPayload = events[2] && isJsonRecord(events[2].payload) ? events[2].payload : undefined;
+  const resolvedPayload = events[3] && isJsonRecord(events[3].payload)
+    ? events[3].payload
+    : undefined;
+  const submergedIndex = events.findIndex(({ type }) => type === 'minion-submerged');
+  const deathIndex = events.findIndex(({ type }) => type === 'minion-died');
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified: events.map(({ type }) => type).join(',')
+      === 'magic-cast,minion-submerged,minion-died,magic-resolved'
+      && castPayload?.instanceId === opening.drownInstanceId
+      && castPayload.manaPaid === 3
+      && castPayload.seat === 'north'
+      && castPayload.targetInstanceId === opening.seravaInstanceId
+      && castPayload.targetSeat === 'north'
+      && submergedPayload?.cell === 'C4'
+      && submergedPayload.instanceId === opening.seravaInstanceId
+      && submergedPayload.seat === 'north'
+      && submergedPayload.sourceInstanceId === opening.drownInstanceId
+      && deathPayload?.cardId === input.seravaTownsfolk.stableId
+      && deathPayload.instanceId === opening.seravaInstanceId
+      && deathPayload.owner === 'north'
+      && resolvedPayload?.instanceId === opening.drownInstanceId,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    drown: input.drown.name,
+    exactTargetAvailable,
+    ghostTownManaConsumed: manaBeforeGhostTown === 1
+      && manaBeforeCast === 3
+      && session.state.players.north.mana === 0
+      && ghostTownEvents.map(({ type }) => type).join(',') === 'site-played,mana-gained'
+      && ghostTownManaPayload?.amount === 1
+      && ghostTownManaPayload.seat === 'north'
+      && ghostTownManaPayload.sourceInstanceId === opening.ghostTownInstanceId,
+    manaPaid: manaBeforeCast - session.state.players.north.mana,
+    replayVerified: verifyGameReplay(session),
+    seravaTownsfolk: input.seravaTownsfolk.name,
+    spellEnteredCemetery: session.state.players.north.cemetery
+      .some(({ instanceId }) => instanceId === opening.drownInstanceId),
+    targetEnteredCemetery: session.state.players.north.cemetery
+      .some(({ instanceId }) => instanceId === opening.seravaInstanceId),
+    targetLeftRealm: session.state.realm.units
+      .every(({ instanceId }) => instanceId !== opening.seravaInstanceId),
+    transitionBeforeDeath: submergedIndex >= 0 && deathIndex === submergedIndex + 1,
+  });
+}
+
 function runWaterDrowned(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['waterDrowned'] {
@@ -7060,6 +7259,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const fireResponse = runFireResponse(input);
   const stealth = runStealth(input);
   const waterDrowned = runWaterDrowned(input);
+  const waterDrown = runWaterDrown(input);
   const waterEdgeConnection = runWaterEdgeConnection(input);
   const waterLugbog = runWaterLugbog(input);
   const waterEndTurnStealth = runWaterEndTurnStealth(input);
@@ -7242,6 +7442,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     seed: opening.seed,
     stealth,
     waterDrowned,
+    waterDrown,
     waterEdgeConnection,
     waterLugbog,
     waterEndTurnStealth,
