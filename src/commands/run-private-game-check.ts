@@ -125,6 +125,23 @@ export type PrivateGameCheck = Readonly<{
     spellEnteredCemetery: boolean;
     surfaceLeopardsDamagedAndSurvived: boolean;
   }>;
+  airSpellcasterFreeze: Readonly<{
+    acceptedActionCount: number;
+    apprenticeWizard: string;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    exactCasterRelativeAction: boolean;
+    freeze: string;
+    genesisDrewSpell: boolean;
+    manaPaid: number;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    seravaDisabled: boolean;
+    seravaTownsfolk: string;
+    spellEnteredCemetery: boolean;
+    wizardCastWhileSummoningSick: boolean;
+    wizardStatePreserved: boolean;
+  }>;
   airTeleport: Readonly<{
     acceptedActionCount: number;
     causalEventsVerified: boolean;
@@ -1971,6 +1988,7 @@ function gameDefinition(
   diesAtEndOfControllerTurn = false,
   damageEachAbovegroundMinion: 0 | 1 = 0,
   grantPowerToAllyThisTurn: 0 | 2 = 0,
+  spellcaster = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -2076,6 +2094,7 @@ function gameDefinition(
       ...(provides ? { provides } : {}),
       ranged,
       shootsDragProjectile,
+      spellcaster,
       stealth,
       strikesFirstWhileAttacking,
       submerge,
@@ -2093,7 +2112,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-overpower' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-overpower' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -2248,6 +2267,39 @@ function buildManifest(
     input.voidwalkMinion,
     input.forsaken,
   ]);
+  const spellcasterAirSite = ordered(sites.filter((card) =>
+    card.rarity === 'ordinary' && card.elements.includes('air')), false)[0];
+  const spellcasterWaterSite = ordered(sites.filter((card) =>
+    card.rarity === 'ordinary'
+      && card.elements.includes('water')
+      && card.stableId !== spellcasterAirSite?.stableId), false)[0];
+  if (!spellcasterAirSite || !spellcasterWaterSite) {
+    throw new Error('private Spellcaster deck lacks supported Air and Water sites');
+  }
+  const spellcasterFixedSites = [input.ghostTownSite, spellcasterAirSite, spellcasterWaterSite];
+  const spellcasterFixedSiteCards = spellcasterFixedSites.flatMap((card) =>
+    Array.from({ length: input.format.copyLimits[card.rarity!] }, () => card.stableId));
+  const spellcasterFixedSiteIds = new Set(spellcasterFixedSites.map(({ stableId }) => stableId));
+  const airSpellcasterFreezeBase = elementalDeck(
+    'air',
+    [...airMinions, input.genesisSpellMinion, input.seravaTownsfolk],
+    [],
+    [input.freeze],
+  );
+  const airSpellcasterFreezeDeck: GameDeckSpec = {
+    ...airSpellcasterFreezeBase,
+    atlas: [
+      ...spellcasterFixedSiteCards,
+      ...fillZone(
+        sites.filter((card) => card.rarity
+          && !spellcasterFixedSiteIds.has(card.stableId)
+          && (card.elements.includes('air') || card.elements.includes('water'))),
+        input.format.atlasMinimum - spellcasterFixedSiteCards.length,
+        input.format,
+        false,
+      ),
+    ],
+  };
   const fireMinorExplosionDeck = elementalDeck(
     'fire',
     [input.raalDromedary],
@@ -2319,6 +2371,8 @@ function buildManifest(
       ? airLightningBoltDeck
       : scenario === 'air-rain-of-arrows'
       ? airRainOfArrowsDeck
+      : scenario === 'air-spellcaster-freeze'
+      ? airSpellcasterFreezeDeck
       : scenario === 'air-teleport'
       ? airTeleportDeck
       : scenario === 'air-genesis-spell'
@@ -2392,6 +2446,8 @@ function buildManifest(
       ? airLightningBoltDeck
       : scenario === 'air-rain-of-arrows'
       ? airRainOfArrowsDeck
+      : scenario === 'air-spellcaster-freeze'
+      ? airSpellcasterFreezeDeck
       : scenario === 'air-teleport'
       ? airTeleportDeck
       : scenario === 'air-genesis-spell'
@@ -2521,6 +2577,7 @@ function buildManifest(
       card.stableId === input.ignited.stableId,
       card.stableId === input.rainOfArrows.stableId ? 1 : 0,
       card.stableId === input.overpower.stableId ? 2 : 0,
+      card.stableId === input.genesisSpellMinion.stableId,
     ),
   ]));
   return {
@@ -4104,6 +4161,79 @@ function findAirGenesisSpellOpening(
     }
   }
   throw new Error('private Air Genesis spell-draw scenario no longer produces its supported opening');
+}
+
+function findAirSpellcasterFreezeOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  apprenticeWizardInstanceId: string;
+  freezeInstanceId: string;
+  ghostTownInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northAirSiteInstanceId: string;
+  northWaterSiteInstanceId: string;
+  seravaInstanceId: string;
+  session: GameSession;
+  southWaterSiteInstanceId: string;
+}> {
+  // ponytail: bounded opening scan avoids another private config field.
+  for (let offset = 1; offset <= 2_048; offset += 1) {
+    const built = buildManifest(input, input.config.airSeed + offset, 'air-spellcaster-freeze');
+    const session = createGameSession(built.manifest);
+    const northAirSiteInstanceId = session.state.players.north.hand.atlas.find(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('air');
+    })?.instanceId;
+    const northWaterSiteInstanceId = session.state.players.north.hand.atlas.find(({
+      cardId,
+      instanceId,
+    }) => {
+      const definition = session.state.cards[cardId];
+      return instanceId !== northAirSiteInstanceId
+        && definition?.cardType === 'site'
+        && definition.elements.includes('water');
+    })?.instanceId;
+    const ghostTownInstanceId = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.ghostTownSite.stableId)?.instanceId;
+    const southWaterSiteInstanceId = session.state.players.south.hand.atlas.find(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('water');
+    })?.instanceId;
+    const apprenticeWizardInstanceId = availableMinionInstance(
+      session,
+      'north',
+      input.genesisSpellMinion.stableId,
+      2,
+    );
+    const freezeInstanceId = availableMinionInstance(session, 'north', input.freeze.stableId, 3);
+    const seravaInstanceId = availableMinionInstance(
+      session,
+      'south',
+      input.seravaTownsfolk.stableId,
+      1,
+    );
+    if (apprenticeWizardInstanceId
+      && freezeInstanceId
+      && ghostTownInstanceId
+      && northAirSiteInstanceId
+      && northWaterSiteInstanceId
+      && seravaInstanceId
+      && southWaterSiteInstanceId) {
+      return {
+        ...built,
+        apprenticeWizardInstanceId,
+        freezeInstanceId,
+        ghostTownInstanceId,
+        northAirSiteInstanceId,
+        northWaterSiteInstanceId,
+        seravaInstanceId,
+        session,
+        southWaterSiteInstanceId,
+      };
+    }
+  }
+  throw new Error('private Spellcaster Freeze scenario no longer produces its supported opening');
 }
 
 function findAirLeylineOpening(
@@ -7189,6 +7319,158 @@ function runAirGenesisSpell(
   });
 }
 
+function runAirSpellcasterFreeze(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airSpellcasterFreeze'] {
+  const opening = findAirSpellcasterFreezeOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northAirSiteInstanceId
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southWaterSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.seravaInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northWaterSiteInstanceId
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.ghostTownInstanceId
+    && descriptor.cell === 'C2');
+
+  const beforeGenesis = session.state.players.north;
+  const genesisCard = beforeGenesis.spellbook[0];
+  if (!genesisCard) throw new Error('private Spellcaster scenario lacks its Genesis spell draw');
+  const summon = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.apprenticeWizardInstanceId
+      && descriptor.cell === 'C2'));
+  if (!summon.accepted) throw new Error('private Spellcaster summon was rejected');
+  session = summon.session;
+  const afterGenesis = session.state.players.north;
+  const genesisDrewSpell = summon.receipt.events.map(({ type }) => type).join(',')
+      === 'minion-summoned,spell-drawn'
+    && afterGenesis.spellbook.length === beforeGenesis.spellbook.length - 1
+    && afterGenesis.hand.spellbook.length === beforeGenesis.hand.spellbook.length
+    && afterGenesis.hand.spellbook.some(({ instanceId }) => instanceId === genesisCard.instanceId);
+
+  const wizardBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.apprenticeWizardInstanceId);
+  const seravaBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.seravaInstanceId);
+  if (!wizardBefore || !seravaBefore) {
+    throw new Error('private Spellcaster Freeze setup lacks its Wizard or target');
+  }
+  const avatarInstanceId = session.state.players.north.avatar.card.instanceId;
+  const targetActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.freezeInstanceId
+      && descriptor.target?.kind === 'minion'
+      && descriptor.target.instanceId === opening.seravaInstanceId
+      && descriptor.target.seat === 'south');
+  const selected = targetActions[0];
+  if (!selected || selected.descriptor.kind !== 'cast-magic' || targetActions.length !== 1) {
+    throw new Error('private caster-relative Freeze action is not exactly available');
+  }
+  const exactCasterRelativeAction = selected.descriptor.casterInstanceId
+      === opening.apprenticeWizardInstanceId
+    && targetActions.every(({ descriptor }) => descriptor.kind === 'cast-magic'
+      && descriptor.casterInstanceId !== avatarInstanceId)
+    && wizardBefore.location === 'C2'
+    && wizardBefore.region === 'surface'
+    && seravaBefore.location === 'C1'
+    && seravaBefore.region === 'surface'
+    && session.state.players.north.avatar.location === 'C4'
+    && session.state.players.north.avatar.region === 'surface';
+  const wizardCastWhileSummoningSick = wizardBefore.summoningSickness
+    && !wizardBefore.tapped;
+  const manaBefore = session.state.players.north.mana;
+  session = accept(session, selected);
+  const manaAfter = session.state.players.north.mana;
+
+  const wizardAfter = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.apprenticeWizardInstanceId);
+  const seravaAfter = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.seravaInstanceId);
+  const observedSerava = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
+    instanceId === opening.seravaInstanceId);
+  const receipt = session.transcript.at(-1);
+  const events = receipt?.events ?? [];
+  const castPayload = events[0] && isJsonRecord(events[0].payload)
+    ? events[0].payload
+    : undefined;
+  const disabledPayload = events[1] && isJsonRecord(events[1].payload)
+    ? events[1].payload
+    : undefined;
+  const resolvedPayload = events[2] && isJsonRecord(events[2].payload)
+    ? events[2].payload
+    : undefined;
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    apprenticeWizard: input.genesisSpellMinion.name,
+    causalEventsVerified: events.map(({ type }) => type).join(',')
+      === 'magic-cast,minion-disabled,magic-resolved'
+      && castPayload?.casterInstanceId === opening.apprenticeWizardInstanceId
+      && castPayload.instanceId === opening.freezeInstanceId
+      && castPayload.manaPaid === 1
+      && castPayload.seat === 'north'
+      && castPayload.targetInstanceId === opening.seravaInstanceId
+      && castPayload.targetSeat === 'south'
+      && disabledPayload?.expiresAtSeat === 'north'
+      && disabledPayload.instanceId === opening.seravaInstanceId
+      && disabledPayload.seat === 'south'
+      && disabledPayload.sourceInstanceId === opening.freezeInstanceId
+      && disabledPayload.stealthRemoved === false
+      && disabledPayload.wardRemoved === false
+      && resolvedPayload?.instanceId === opening.freezeInstanceId,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    exactCasterRelativeAction,
+    freeze: input.freeze.name,
+    genesisDrewSpell,
+    manaPaid: manaBefore - manaAfter,
+    noRandomDraws: summon.receipt.randomDraws.length === 0
+      && receipt?.randomDraws.length === 0,
+    replayVerified: verifyGameReplay(session),
+    seravaDisabled: observedSerava?.disabled === true
+      && seravaAfter?.disableEffects?.length === 1
+      && seravaAfter.disableEffects[0]?.expiresAtSeat === 'north'
+      && seravaAfter.disableEffects[0].sourceInstanceId === opening.freezeInstanceId,
+    seravaTownsfolk: input.seravaTownsfolk.name,
+    spellEnteredCemetery: session.state.players.north.hand.spellbook
+      .every(({ instanceId }) => instanceId !== opening.freezeInstanceId)
+      && session.state.players.north.cemetery
+        .some(({ instanceId }) => instanceId === opening.freezeInstanceId),
+    wizardCastWhileSummoningSick,
+    wizardStatePreserved: wizardAfter !== undefined
+      && wizardAfter.cardId === wizardBefore.cardId
+      && wizardAfter.controller === wizardBefore.controller
+      && wizardAfter.damage === 0
+      && wizardAfter.location === 'C2'
+      && wizardAfter.owner === wizardBefore.owner
+      && wizardAfter.region === 'surface'
+      && wizardAfter.stealthed === wizardBefore.stealthed
+      && wizardAfter.summoningSickness
+      && !wizardAfter.tapped
+      && wizardAfter.warded === wizardBefore.warded,
+  });
+}
+
 function runAirLeyline(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['airLeyline'] {
@@ -9156,6 +9438,7 @@ function runWaterHealing(
 export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<PrivateGameCheck> {
   const input = await readPrivateInputs(path);
   const airGenesisSpell = runAirGenesisSpell(input);
+  const airSpellcasterFreeze = runAirSpellcasterFreeze(input);
   const airArcLightning = runAirArcLightning(input);
   const airLightningBolt = runAirLightningBolt(input);
   const airRainOfArrows = runAirRainOfArrows(input);
@@ -9305,6 +9588,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
     airGenesisSpell,
+    airSpellcasterFreeze,
     airArcLightning,
     airLightningBolt,
     airRainOfArrows,

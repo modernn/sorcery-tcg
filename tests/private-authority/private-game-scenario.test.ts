@@ -16,6 +16,32 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airGenesisSpell.deck.spellbook
     .find(({ name }) => name === 'Apprentice Wizard')?.copies, 4);
   assert.equal(result.airGenesisSpell.replayVerified, true);
+  assert.equal(result.airSpellcasterFreeze.apprenticeWizard, 'Apprentice Wizard');
+  assert.equal(result.airSpellcasterFreeze.freeze, 'Freeze');
+  assert.equal(result.airSpellcasterFreeze.seravaTownsfolk, 'Serava Townsfolk');
+  assert.equal(result.airSpellcasterFreeze.acceptedActionCount, 17);
+  assert.equal(result.airSpellcasterFreeze.exactCasterRelativeAction, true);
+  assert.equal(result.airSpellcasterFreeze.wizardCastWhileSummoningSick, true);
+  assert.equal(result.airSpellcasterFreeze.wizardStatePreserved, true);
+  assert.equal(result.airSpellcasterFreeze.genesisDrewSpell, true);
+  assert.equal(result.airSpellcasterFreeze.seravaDisabled, true);
+  assert.equal(result.airSpellcasterFreeze.manaPaid, 1);
+  assert.equal(result.airSpellcasterFreeze.spellEnteredCemetery, true);
+  assert.equal(result.airSpellcasterFreeze.causalEventsVerified, true);
+  assert.equal(result.airSpellcasterFreeze.noRandomDraws, true);
+  assert.equal(result.airSpellcasterFreeze.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airSpellcasterFreeze.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airSpellcasterFreeze.deck.spellbook
+    .find(({ name }) => name === 'Apprentice Wizard')?.copies, 4);
+  assert.equal(result.airSpellcasterFreeze.deck.spellbook
+    .find(({ name }) => name === 'Freeze')?.copies, 4);
+  assert.equal(result.airSpellcasterFreeze.deck.spellbook
+    .find(({ name }) => name === 'Serava Townsfolk')?.copies, 4);
+  assert.equal(result.airSpellcasterFreeze.deck.atlas
+    .find(({ name }) => name === 'Ghost Town')?.copies, 3);
+  assert.equal(result.airSpellcasterFreeze.replayVerified, true);
   assert.equal(result.airborne.airborneMinion, 'Plumed Pegasus');
   assert.equal(result.airborne.groundMinion, 'Ghoul');
   assert.equal(result.airborne.diagonalMove, true);

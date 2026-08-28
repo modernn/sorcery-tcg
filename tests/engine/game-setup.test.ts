@@ -1371,6 +1371,229 @@ test('RULE-03/04 a Spellcaster pays mana and summons a minion atop a controlled 
   assert.equal(verifyGameReplay(session), true);
 });
 
+test('RULE-03 printed Spellcasters cast while tapped or summoning sick from their own location', () => {
+  const decks = {
+    north: deck('spellcaster-north', 6, 8),
+    south: deck('spellcaster-south', 6, 8),
+  };
+  const cards = cardsFor(decks, {
+    defense: 3,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  });
+  const activeCasterId = decks.north.spellbook[0]!;
+  const disabledCasterId = decks.north.spellbook[1]!;
+  const freezeId = decks.north.spellbook[2]!;
+  const summonId = decks.north.spellbook[3]!;
+  const tappedCasterId = decks.north.spellbook[4]!;
+  const targetId = decks.south.spellbook[0]!;
+  const stealthedTargetId = decks.south.spellbook[1]!;
+  cards[activeCasterId] = {
+    ...cards[activeCasterId]!,
+    spellcaster: true,
+    stealth: true,
+  } as unknown as GameCardDefinition;
+  cards[disabledCasterId] = {
+    ...cards[disabledCasterId]!,
+    spellcaster: true,
+    waterbound: true,
+  } as unknown as GameCardDefinition;
+  cards[freezeId] = {
+    cardType: 'magic',
+    disableTargetNearbyMinionUntilNextTurn: true,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  };
+  cards[summonId] = {
+    ...cards[summonId]!,
+    spellcaster: false,
+  } as unknown as GameCardDefinition;
+  cards[tappedCasterId] = {
+    ...cards[tappedCasterId]!,
+    spellcaster: true,
+    tapForMana: 1,
+  } as unknown as GameCardDefinition;
+  cards[stealthedTargetId] = {
+    ...cards[stealthedTargetId]!,
+    stealth: true,
+  } as GameCardDefinition;
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-printed-spellcaster-v1',
+    },
+    cards,
+    decks,
+    firstSeat: 'north' as const,
+  };
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [activeCasterId]: {
+        ...cards[activeCasterId]!,
+        spellcaster: 'yes',
+      } as unknown as GameCardDefinition,
+    },
+    seed: 980,
+  }), /spellcaster must be boolean/);
+
+  let gameManifest: GameManifest | undefined;
+  for (let seed = 980; seed < 2_980; seed += 1) {
+    const candidate = createGameManifest({ ...input, seed });
+    const preview = createGameSession(candidate).state.players;
+    const northAvailable = [
+      ...preview.north.hand.spellbook,
+      ...preview.north.spellbook.slice(0, 2),
+    ].map(({ cardId }) => cardId);
+    const southOpening = preview.south.hand.spellbook.map(({ cardId }) => cardId);
+    if ([activeCasterId, disabledCasterId, freezeId, summonId, tappedCasterId]
+      .every((cardId) => northAvailable.includes(cardId))
+      && preview.north.hand.spellbook.some(({ cardId }) => cardId === tappedCasterId)
+      && southOpening.includes(targetId)
+      && southOpening.includes(stealthedTargetId)) {
+      gameManifest = candidate;
+      break;
+    }
+  }
+  assert.ok(gameManifest);
+  assert.equal(
+    gameManifest.cards[activeCasterId]?.cardType === 'minion'
+      && (gameManifest.cards[activeCasterId] as unknown as { spellcaster?: boolean }).spellcaster,
+    true,
+  );
+  assert.equal('spellcaster' in gameManifest.cards[summonId]!, false);
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === tappedCasterId && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === targetId && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === stealthedTargetId && descriptor.cell === 'C1');
+  const target = session.state.realm.units.find(({ cardId }) => cardId === targetId);
+  const stealthedTarget = session.state.realm.units.find(({ cardId }) =>
+    cardId === stealthedTargetId);
+  assert.ok(target);
+  assert.ok(stealthedTarget);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  const tappedCaster = session.state.realm.units.find(({ cardId }) => cardId === tappedCasterId);
+  assert.ok(tappedCaster);
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === tappedCaster.instanceId
+    && descriptor.from.cell === 'C4'
+    && descriptor.to.cell === 'C3'
+    && descriptor.path.length === 2);
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === activeCasterId
+    && descriptor.casterInstanceId === session.state.players.north.avatar.card.instanceId
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === disabledCasterId
+    && descriptor.casterInstanceId === session.state.players.north.avatar.card.instanceId
+    && descriptor.cell === 'C3');
+  const activeCaster = session.state.realm.units.find(({ cardId }) => cardId === activeCasterId);
+  const disabledCaster = session.state.realm.units.find(({ cardId }) => cardId === disabledCasterId);
+  const freeze = session.state.players.north.hand.spellbook.find(({ cardId }) => cardId === freezeId);
+  const summonedCard = session.state.players.north.hand.spellbook.find(({ cardId }) =>
+    cardId === summonId);
+  assert.ok(activeCaster);
+  assert.ok(disabledCaster);
+  assert.ok(freeze);
+  assert.ok(summonedCard);
+  take(({ descriptor }) => descriptor.kind === 'activate-mana'
+    && descriptor.unitInstanceId === tappedCaster.instanceId);
+  const checkpoint = session;
+  assert.deepEqual({
+    stealthed: activeCaster.stealthed,
+    summoningSickness: activeCaster.summoningSickness,
+    tapped: checkpoint.state.realm.units.find(({ instanceId }) =>
+      instanceId === activeCaster.instanceId)?.tapped,
+  }, { stealthed: true, summoningSickness: true, tapped: false });
+  assert.equal(checkpoint.state.realm.units.find(({ instanceId }) =>
+    instanceId === tappedCaster.instanceId)?.tapped, true);
+  assert.equal(observeGame(checkpoint.state, 'north').realm.units.find(({ instanceId }) =>
+    instanceId === disabledCaster.instanceId)?.disabled, true);
+
+  const actions = legalGameActions(checkpoint.state, 'north');
+  const targetFreezes = actions.filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === freeze.instanceId
+      && descriptor.target?.instanceId === target.instanceId);
+  assert.deepEqual(targetFreezes.map(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' ? descriptor.casterInstanceId : '').sort(), [
+    activeCaster.instanceId,
+  ]);
+  assert.equal(actions.some(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.cardInstanceId === freeze.instanceId
+    && descriptor.target?.instanceId === stealthedTarget.instanceId), false);
+  assert.match(targetFreezes[0]?.label ?? '', new RegExp(activeCaster.instanceId.slice(0, 15)));
+  const summonCasters = new Set(actions.flatMap(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === summonedCard.instanceId
+      ? [descriptor.casterInstanceId]
+      : []));
+  assert.deepEqual([...summonCasters].sort(), [
+    activeCaster.instanceId,
+    checkpoint.state.players.north.avatar.card.instanceId,
+    tappedCaster.instanceId,
+  ].sort());
+  assert.equal(summonCasters.has(disabledCaster.instanceId), false);
+
+  const frozen = accept(checkpoint, targetFreezes[0]!);
+  assert.deepEqual(frozen.transcript.at(-1)?.events.map(({ type }) => type), [
+    'magic-cast',
+    'stealth-lost',
+    'minion-disabled',
+    'magic-resolved',
+  ]);
+  assert.equal((frozen.transcript.at(-1)?.events[0]?.payload as unknown as
+    Readonly<Record<string, unknown>>).casterInstanceId,
+    activeCaster.instanceId);
+  assert.equal((frozen.transcript.at(-1)?.events[2]?.payload as unknown as
+    Readonly<Record<string, unknown>>).sourceInstanceId, freeze.instanceId);
+  const casterAfterMagic = frozen.state.realm.units.find(({ instanceId }) =>
+    instanceId === activeCaster.instanceId);
+  assert.deepEqual({
+    stealthed: casterAfterMagic?.stealthed,
+    summoningSickness: casterAfterMagic?.summoningSickness,
+    tapped: casterAfterMagic?.tapped,
+  }, { stealthed: false, summoningSickness: true, tapped: false });
+  assert.equal(verifyGameReplay(frozen), true);
+
+  const summoned = accept(checkpoint, action(checkpoint, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === summonedCard.instanceId
+      && descriptor.casterInstanceId === activeCaster.instanceId
+      && descriptor.cell === 'C2'));
+  assert.deepEqual(summoned.transcript.at(-1)?.events.map(({ type }) => type), [
+    'stealth-lost',
+    'minion-summoned',
+  ]);
+  assert.equal((summoned.transcript.at(-1)?.events[1]?.payload as unknown as
+    Readonly<Record<string, unknown>>).casterInstanceId,
+    activeCaster.instanceId);
+  assert.equal(summoned.state.realm.units.find(({ instanceId }) =>
+    instanceId === summonedCard.instanceId)?.location, 'C2');
+  assert.equal(verifyGameReplay(summoned), true);
+});
+
 test('RULE-03/05 targeted Magic pays mana, damages any unit, resolves Deathrite, and enters the cemetery', () => {
   const decks = { north: deck('magic-north', 4, 6), south: deck('magic-south', 4, 6) };
   const cards = cardsFor(decks, {
