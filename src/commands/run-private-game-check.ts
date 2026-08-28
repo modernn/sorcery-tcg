@@ -194,6 +194,19 @@ export type PrivateGameCheck = Readonly<{
     targetIsLandSite: boolean;
     undergroundSummonAvailable: boolean;
   }>;
+  earthEntombed: Readonly<{
+    acceptedActionCount: number;
+    boskTroll: string;
+    boskTrollSurfaceAvailable: boolean;
+    boskTrollUndergroundUnavailable: boolean;
+    deck: DeckList;
+    entombed: string;
+    entombedSurfaceUnavailable: boolean;
+    entombedUndergroundAvailable: boolean;
+    replayVerified: boolean;
+    seed: number;
+    summonedUnderground: boolean;
+  }>;
   earthRamp: Readonly<{
     acceptedActionCount: number;
     affinityAdded: boolean;
@@ -461,6 +474,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   config: ScenarioConfig;
   deathriteMinion: NormalizedCard;
   earthProviderMinion: NormalizedCard;
+  entombed: NormalizedCard;
   format: FormatDefinition;
   formatStableId: string;
   firstStrikeMinion: NormalizedCard;
@@ -628,6 +642,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || burrowingMinion.thresholds.water !== 0
     || burrowingMinion.rarity !== 'ordinary') {
     throw new Error('private Burrowing minion no longer matches its supported facts');
+  }
+  const entombed = snapshot.cards.find(({ name }) => name === 'Entombed');
+  if (!entombed
+    || entombed.cardType !== 'minion'
+    || entombed.rulesText.trim().replaceAll('\r\n', '\n')
+      !== 'Burrowing\n\nMust be cast burrowed.'
+    || entombed.manaCost !== 2
+    || entombed.attack !== 3
+    || entombed.defense !== 3
+    || entombed.elements.length !== 1
+    || entombed.elements[0] !== 'earth'
+    || entombed.thresholds.air !== 0
+    || entombed.thresholds.earth !== 1
+    || entombed.thresholds.fire !== 0
+    || entombed.thresholds.water !== 0
+    || entombed.rarity !== 'ordinary') {
+    throw new Error('private burrowed-only casting minion no longer matches its supported facts');
   }
   const voidwalkMinion = snapshot.cards.find(({ name }) => name === 'Spectral Stalker');
   if (!voidwalkMinion
@@ -956,6 +987,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     config,
     deathriteMinion,
     earthProviderMinion,
+    entombed,
     format: selected.identity.payload,
     formatStableId: selected.identity.stableId,
     firstStrikeMinion,
@@ -1039,6 +1071,7 @@ function gameDefinition(
   connectsTopBottom = false,
   mustBeCastToOuterColumn = false,
   siteGenesisDrawSpellPerAdjacentSameCard = false,
+  mustBeCastBurrowed = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1082,6 +1115,7 @@ function gameDefinition(
       gainsStealthAtEndOfTurn,
       lethal,
       manaCost: card.manaCost,
+      mustBeCastBurrowed,
       mustBeCastToOuterColumn,
       ...(movementBonus ? { movementBonus } : {}),
       movesOnlySideways,
@@ -1103,7 +1137,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-genesis-spell' | 'air-leyline' | 'air-voidwalk' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-edge-connection' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-genesis-spell' | 'air-leyline' | 'air-voidwalk' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-entombed' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-edge-connection' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1207,6 +1241,10 @@ function buildManifest(
     ...earthMinions,
     input.burrowingMinion,
   ], [input.ghostTownSite]);
+  const earthEntombedDeck = elementalDeck('earth', [
+    ...earthMinions,
+    input.entombed,
+  ], [input.ghostTownSite]);
   const airMinions = [
     input.movementMinion,
     input.roamingMinion,
@@ -1250,6 +1288,8 @@ function buildManifest(
       ? airVoidwalkDeck
       : scenario === 'airborne' || scenario === 'movement-two' || scenario === 'stealth'
       ? airborneDeck
+      : scenario === 'earth-entombed'
+        ? earthEntombedDeck
       : scenario === 'earth-burrowing'
         ? earthBurrowingDeck
       : scenario === 'earth' || scenario === 'earth-first-strike' || scenario === 'earth-ward'
@@ -1275,6 +1315,8 @@ function buildManifest(
       ? airborneDeck
       : scenario === 'water-edge-connection'
         ? waterEdgeConnectionDeck
+      : scenario === 'earth-entombed'
+        ? earthEntombedDeck
       : scenario === 'earth-burrowing'
         ? earthBurrowingDeck
       : scenario === 'earth-first-strike' || scenario === 'earth-ward' ? earthDeck : deck(true, false),
@@ -1321,13 +1363,15 @@ function buildManifest(
       card.stableId === input.slyFox.stableId,
       card.stableId === input.sedgeCrabs.stableId,
       card.stableId === input.submergeMinion.stableId,
-      card.stableId === input.burrowingMinion.stableId,
+      card.stableId === input.burrowingMinion.stableId
+        || card.stableId === input.entombed.stableId,
       card.stableId === input.voidwalkMinion.stableId
         || card.stableId === input.forsaken.stableId,
       card.stableId === input.genesisSpellMinion.stableId,
       card.stableId === input.polarBears.stableId,
       card.stableId === input.forsaken.stableId,
       card.stableId === input.leylineHenge.stableId,
+      card.stableId === input.entombed.stableId,
     ),
   ]));
   return {
@@ -1754,6 +1798,56 @@ function findEarthBurrowingOpening(
     }
   }
   throw new Error('private Earth Burrowing scenario no longer produces its supported opening');
+}
+
+function findEarthEntombedOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  boskTrollInstanceId: string;
+  entombedInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string];
+  seed: number;
+  session: GameSession;
+  southSiteInstanceId: string;
+}> {
+  // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const seed = input.config.earthSeed + offset;
+    const built = buildManifest(input, seed, 'earth-entombed');
+    const session = createGameSession(built.manifest);
+    const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site'
+        && definition.elements.includes('earth')
+        && !definition.genesisGainMana;
+    });
+    const available = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 1),
+    ];
+    const entombedInstanceId = available
+      .find(({ cardId }) => cardId === input.entombed.stableId)?.instanceId;
+    const boskTrollInstanceId = available
+      .find(({ cardId }) => cardId === input.firstStrikeTargetMinion.stableId)?.instanceId;
+    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+    if (northSites.length >= 2
+      && entombedInstanceId
+      && boskTrollInstanceId
+      && southSiteInstanceId) {
+      return {
+        ...built,
+        boskTrollInstanceId,
+        entombedInstanceId,
+        northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
+        seed,
+        session,
+        southSiteInstanceId,
+      };
+    }
+  }
+  throw new Error('private Earth Entombed scenario no longer produces its supported opening');
 }
 
 function findAirOpening(
@@ -2442,6 +2536,64 @@ function runEarthBurrowing(
     surfaced,
     targetIsLandSite,
     undergroundSummonAvailable,
+  });
+}
+
+function runEarthEntombed(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthEntombed'] {
+  const opening = findEarthEntombedOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+
+  const summons = legalGameActions(session.state, 'north');
+  const matches = (cardInstanceId: string, region: 'surface' | 'underground'): boolean =>
+    summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === cardInstanceId
+      && descriptor.cell === 'C3'
+      && (descriptor.region ?? 'surface') === region);
+  const entombedSurfaceUnavailable = !matches(opening.entombedInstanceId, 'surface');
+  const entombedUndergroundAvailable = matches(opening.entombedInstanceId, 'underground');
+  const boskTrollSurfaceAvailable = matches(opening.boskTrollInstanceId, 'surface');
+  const boskTrollUndergroundUnavailable = !matches(opening.boskTrollInstanceId, 'underground');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.entombedInstanceId
+    && descriptor.cell === 'C3'
+    && descriptor.region === 'underground');
+  const summonedUnderground = session.state.realm.units.some(({ instanceId, location, region }) =>
+    instanceId === opening.entombedInstanceId && location === 'C3' && region === 'underground');
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    boskTroll:
+      opening.names.get(input.firstStrikeTargetMinion.stableId)
+        ?? input.firstStrikeTargetMinion.stableId,
+    boskTrollSurfaceAvailable,
+    boskTrollUndergroundUnavailable,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    entombed: opening.names.get(input.entombed.stableId) ?? input.entombed.stableId,
+    entombedSurfaceUnavailable,
+    entombedUndergroundAvailable,
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    summonedUnderground,
   });
 }
 
@@ -3998,6 +4150,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airSummoning = runAirSummoning(input);
   const airVoidwalk = runAirVoidwalk(input);
   const earthBurrowing = runEarthBurrowing(input);
+  const earthEntombed = runEarthEntombed(input);
   const earthFirstStrike = runEarthFirstStrike(input);
   const earthRamp = runEarthRamp(input);
   const earthRanged = runEarthRanged(input);
@@ -4141,6 +4294,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
       south: deckList(opening.manifest.decks.south, opening.names),
     },
     earthBurrowing,
+    earthEntombed,
     earthRamp,
     earthFirstStrike,
     earthRanged,

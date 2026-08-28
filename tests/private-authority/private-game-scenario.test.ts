@@ -138,6 +138,20 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthBurrowing.deck.spellbook
     .find(({ name }) => name === 'Cave Trolls')?.copies, 4);
   assert.equal(result.earthBurrowing.replayVerified, true);
+  assert.equal(result.earthEntombed.entombed, 'Entombed');
+  assert.equal(result.earthEntombed.boskTroll, 'Bosk Troll');
+  assert.equal(result.earthEntombed.acceptedActionCount, 10);
+  assert.equal(result.earthEntombed.entombedSurfaceUnavailable, true);
+  assert.equal(result.earthEntombed.entombedUndergroundAvailable, true);
+  assert.equal(result.earthEntombed.boskTrollSurfaceAvailable, true);
+  assert.equal(result.earthEntombed.boskTrollUndergroundUnavailable, true);
+  assert.equal(result.earthEntombed.summonedUnderground, true);
+  assert.equal(result.earthEntombed.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthEntombed.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthEntombed.deck.spellbook
+    .find(({ name }) => name === 'Entombed')?.copies, 4);
+  assert.equal(result.earthEntombed.replayVerified, true);
   assert.equal(result.earthRamp.affinityAdded, true);
   assert.equal(result.earthRamp.manaUnavailableWhileSick, true);
   assert.equal(result.earthRamp.manaGained, 2);
