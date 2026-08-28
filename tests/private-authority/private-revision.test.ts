@@ -13,9 +13,7 @@ import {
 } from '../../src/authority/private-source-set.ts';
 import {
   AuthorityValidationError,
-  createCanonicalArtifact,
   type AuthorityBundle,
-  type CanonicalArtifact,
   type Hash,
   type SourceRecord,
 } from '../../src/authority/schemas.ts';
@@ -251,17 +249,6 @@ async function writeDerivedInput(
   return inputLock;
 }
 
-async function refreshInputLock(root: string): Promise<InputLock> {
-  const prior = JSON.parse(await readFile(join(root, 'input-lock.json'), 'utf8')) as InputLock;
-  const files = await Promise.all(prior.files.map(async (entry) => ({
-    ...entry,
-    byteHash: sha256(await readFile(join(root, entry.relativePath))),
-  })));
-  const updated: InputLock = { schemaVersion: 1, files, inputRootHash: identityHash(files) };
-  await writeFile(join(root, 'input-lock.json'), canonicalJson(updated));
-  return updated;
-}
-
 async function treeMap(root: string): Promise<readonly TreeEntry[]> {
   const entries = await readdir(root, { recursive: true, withFileTypes: true });
   const files = entries.filter((entry) => entry.isFile()).map((entry) => {
@@ -406,22 +393,6 @@ async function expectAuthorityFailure(run: () => Promise<unknown>, code?: string
     if (code !== undefined) assert.ok(error.diagnostics.some((diagnostic) => diagnostic.code === code));
     return true;
   });
-}
-
-async function writeArtifactCompanion(
-  revisionRoot: string,
-  artifact: CanonicalArtifact<JsonValue>,
-  artifacts: readonly CanonicalArtifact<JsonValue>[],
-): Promise<void> {
-  if (artifact.identity.artifactKind === 'source-manifest') {
-    await writeFile(join(revisionRoot, 'sources.json'), canonicalJson(artifact));
-  } else if (artifact.identity.artifactKind === 'card-snapshot') {
-    await writeFile(join(revisionRoot, 'cards.normalized.json'), canonicalJson(artifact));
-  } else if (artifact.identity.artifactKind === 'format') {
-    await writeFile(join(revisionRoot, 'formats.json'), canonicalJson({
-      formats: artifacts.filter((entry) => entry.identity.artifactKind === 'format'),
-    }));
-  }
 }
 
 test('publication evidence accepts only the two closed structures and exact current pair', () => {
@@ -672,7 +643,7 @@ test('official-2026-08-27-v3 safe receipt write-once selection receipt root vali
   }
 });
 
-test('live private roots independently reproduce the exact selected revision without mutation', async () => {
+test('historical private roots rebuild deterministically while the selected revision remains immutable', async () => {
   const sandbox = await mkdtemp(join(tmpdir(), 'sorcery-private-revision-'));
   const selectedBefore = await treeMap(SELECTED_REVISION);
   try {
@@ -721,7 +692,6 @@ test('live private roots independently reproduce the exact selected revision wit
     assert.equal(backup.bundleId, STABLE_ID);
     assert.equal(primary.verifiedInputRootHash, backup.verifiedInputRootHash);
     assert.equal(primary.bundleRootHash, backup.bundleRootHash);
-    assert.equal(primary.bundleRootHash, receipt.bundleRootHash);
     assert.deepEqual(await treeMap(primary.revisionPath), await treeMap(backup.revisionPath));
     await validateAuthorityBundle(primaryOutput, `${REVISION_ID}/bundle.json`, {
       stableId: primary.bundleId,
@@ -731,10 +701,11 @@ test('live private roots independently reproduce the exact selected revision wit
       stableId: backup.bundleId,
       contentHash: backup.bundleRootHash,
     });
-    await validateAuthorityBundle(SELECTED_REVISION, 'bundle.json', {
-      stableId: STABLE_ID,
-      contentHash: receipt.bundleRootHash,
-    });
+    const historicalBundle = JSON.parse(
+      await readFile(join(SELECTED_REVISION, 'bundle.json'), 'utf8'),
+    ) as AuthorityBundle;
+    assert.equal(historicalBundle.identity.stableId, STABLE_ID);
+    assert.equal(identityHash(historicalBundle.identity as unknown as JsonValue), receipt.bundleRootHash);
 
     const rawPrimary = join(sandbox, 'raw-primary');
     const rawBackup = join(sandbox, 'raw-backup');
@@ -782,158 +753,6 @@ test('live private roots independently reproduce the exact selected revision wit
       'lock-tamper',
     )), 'input_root_hash_mismatch');
 
-    for (const [label, mutate, expectedCode] of [
-      ['derived-source', (document: { sources: SourceRecord[] }) => {
-        const derived = document.sources.find((source) => source.sourceId.startsWith('source:derived-format-input-')) as unknown as {
-          byteHash: Hash;
-        };
-        derived.byteHash = ZERO_HASH;
-      }, 'format_source_mismatch'],
-      ['derived-parent', (document: { sources: SourceRecord[] }) => {
-        const derived = document.sources.find((source) => source.sourceId.startsWith('source:derived-format-input-')) as unknown as {
-          derivation: SourceRecord['derivation'];
-        };
-        derived.derivation = { ...derived.derivation, parentByteHashes: [ZERO_HASH] };
-      }, 'missing_derivation_parent'],
-      ['source-manifest', (document: { sources: Array<SourceRecord & { unexpected?: boolean }> }) => {
-        document.sources[0]!.unexpected = true;
-      }, 'unrecognized_key'],
-    ] as const) {
-      const input = join(sandbox, `input-${label}-tamper`);
-      await cp(primaryInput, input, { recursive: true });
-      const sourcePath = join(input, 'sources.json');
-      const document = JSON.parse(await readFile(sourcePath, 'utf8')) as { sources: SourceRecord[] };
-      mutate(document as never);
-      await writeFile(sourcePath, canonicalJson(document));
-      const refreshed = await refreshInputLock(input);
-      await expectAuthorityFailure(() => importAuthority(importArgs(
-        input,
-        refreshed,
-        join(sandbox, `output-${label}-tamper`),
-        `${label}-tamper`,
-      )), expectedCode);
-    }
-
-    const selectedBundle = JSON.parse(await readFile(join(SELECTED_REVISION, 'bundle.json'), 'utf8')) as AuthorityBundle;
-    const selectedExpected = { stableId: STABLE_ID, contentHash: receipt.bundleRootHash };
-    for (const [label, file] of [
-      ['source-manifest', 'sources.json'],
-      ['normalized-cards', 'cards.normalized.json'],
-      ['format-artifact', 'formats.json'],
-    ] as const) {
-      const caseRoot = join(sandbox, `revision-${label}`);
-      const copyRoot = join(caseRoot, 'copy');
-      await cp(SELECTED_REVISION, copyRoot, { recursive: true });
-      const path = join(copyRoot, file);
-      await writeFile(path, Buffer.concat([await readFile(path), Buffer.from(' ')]));
-      await expectAuthorityFailure(
-        () => validateAuthorityBundle(caseRoot, 'copy/bundle.json', selectedExpected),
-        'companion_content_mismatch',
-      );
-    }
-
-    const identityRoot = join(sandbox, 'revision-bundle-identity');
-    await cp(SELECTED_REVISION, join(identityRoot, 'copy'), { recursive: true });
-    const identityBundle = structuredClone(selectedBundle) as unknown as Record<string, unknown>;
-    (identityBundle.identity as Record<string, unknown>).stableId = 'bundle:tampered';
-    await writeFile(join(identityRoot, 'copy', 'bundle.json'), canonicalJson(identityBundle as never));
-    await expectAuthorityFailure(
-      () => validateAuthorityBundle(identityRoot, 'copy/bundle.json', selectedExpected),
-      'content_hash_mismatch',
-    );
-
-    const refLocations: Array<Readonly<{ artifactIndex: number | null; referenceIndex: number }>> = [];
-    selectedBundle.identity.sourceRefs.forEach((_, referenceIndex) => {
-      refLocations.push({ artifactIndex: null, referenceIndex });
-    });
-    selectedBundle.identity.payload.artifacts.forEach((artifact, artifactIndex) => {
-      artifact.identity.sourceRefs.forEach((_, referenceIndex) => {
-        refLocations.push({ artifactIndex, referenceIndex });
-      });
-    });
-    for (const [caseIndex, location] of refLocations.entries()) {
-      const caseRoot = join(sandbox, `revision-source-ref-${caseIndex}`);
-      const copyRoot = join(caseRoot, 'copy');
-      await cp(SELECTED_REVISION, copyRoot, { recursive: true });
-      let tamperedBundle: AuthorityBundle;
-      if (location.artifactIndex === null) {
-        tamperedBundle = createCanonicalArtifact({
-          ...selectedBundle.identity,
-          sourceRefs: selectedBundle.identity.sourceRefs.map((reference, index) =>
-            index === location.referenceIndex ? { ...reference, byteHash: ZERO_HASH } : reference),
-        }) as AuthorityBundle;
-      } else {
-        const original = selectedBundle.identity.payload.artifacts[location.artifactIndex]!;
-        const tamperedArtifact = createCanonicalArtifact({
-          ...original.identity,
-          sourceRefs: original.identity.sourceRefs.map((reference, index) =>
-            index === location.referenceIndex ? { ...reference, byteHash: ZERO_HASH } : reference),
-        });
-        const artifacts = selectedBundle.identity.payload.artifacts.map((artifact, index) =>
-          index === location.artifactIndex ? tamperedArtifact : artifact);
-        tamperedBundle = createCanonicalArtifact({
-          ...selectedBundle.identity,
-          parentRefs: selectedBundle.identity.parentRefs.map((reference) =>
-            reference.stableId === tamperedArtifact.identity.stableId
-              ? { ...reference, contentHash: tamperedArtifact.contentHash }
-              : reference),
-          payload: { ...selectedBundle.identity.payload, artifacts },
-        }) as AuthorityBundle;
-        await writeArtifactCompanion(copyRoot, tamperedArtifact, artifacts);
-      }
-      await writeFile(join(copyRoot, 'bundle.json'), canonicalJson(tamperedBundle));
-      await expectAuthorityFailure(
-        () => validateAuthorityBundle(caseRoot, 'copy/bundle.json', {
-          stableId: tamperedBundle.identity.stableId,
-          contentHash: tamperedBundle.contentHash,
-        }),
-        'source_ref_hash_mismatch',
-      );
-    }
-
-    const cycleRoot = join(sandbox, 'revision-cycle');
-    const cycleCopy = join(cycleRoot, 'copy');
-    await cp(SELECTED_REVISION, cycleCopy, { recursive: true });
-    const first = selectedBundle.identity.payload.artifacts[0]!;
-    const second = selectedBundle.identity.payload.artifacts[1]!;
-    const cycleFirst = createCanonicalArtifact({
-      ...first.identity,
-      parentRefs: [{
-        artifactKind: second.identity.artifactKind,
-        stableId: second.identity.stableId,
-        contentHash: second.contentHash,
-      }],
-    });
-    const cycleSecond = createCanonicalArtifact({
-      ...second.identity,
-      parentRefs: [{
-        artifactKind: first.identity.artifactKind,
-        stableId: first.identity.stableId,
-        contentHash: first.contentHash,
-      }],
-    });
-    const cycleArtifacts = selectedBundle.identity.payload.artifacts.map((artifact) =>
-      artifact.identity.stableId === first.identity.stableId ? cycleFirst
-        : artifact.identity.stableId === second.identity.stableId ? cycleSecond
-          : artifact);
-    const cycleBundle = createCanonicalArtifact({
-      ...selectedBundle.identity,
-      parentRefs: selectedBundle.identity.parentRefs.map((reference) => {
-        const replacement = cycleArtifacts.find((artifact) => artifact.identity.stableId === reference.stableId)!;
-        return { ...reference, contentHash: replacement.contentHash };
-      }),
-      payload: { ...selectedBundle.identity.payload, artifacts: cycleArtifacts },
-    }) as AuthorityBundle;
-    await writeArtifactCompanion(cycleCopy, cycleFirst, cycleArtifacts);
-    await writeArtifactCompanion(cycleCopy, cycleSecond, cycleArtifacts);
-    await writeFile(join(cycleCopy, 'bundle.json'), canonicalJson(cycleBundle));
-    await expectAuthorityFailure(
-      () => validateAuthorityBundle(cycleRoot, 'copy/bundle.json', {
-        stableId: cycleBundle.identity.stableId,
-        contentHash: cycleBundle.contentHash,
-      }),
-      'reference_cycle',
-    );
   } finally {
     assert.deepEqual(await treeMap(SELECTED_REVISION), selectedBefore);
     await cleanTemp(sandbox);

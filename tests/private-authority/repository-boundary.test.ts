@@ -242,5 +242,18 @@ test('reachable history worktree index and package contain no private authority 
 test('final v3 receipt and ignored revision pass the production boundary scanner', async () => {
   await readFile(FINAL_LOCK_PATH, 'utf8');
   await readFile(FINAL_RECEIPT_PATH, 'utf8');
-  assert.fail('final v3 boundary scan is not implemented');
+  const result = spawnSync(
+    process.execPath,
+    [BOUNDARY_SCRIPT, '--repository-root', REPOSITORY_ROOT, '--lock', FINAL_LOCK_PATH],
+    {
+      cwd: REPOSITORY_ROOT,
+      encoding: 'utf8',
+      maxBuffer: 268_435_456,
+      windowsHide: true,
+    },
+  );
+  assert.equal(result.status, 0, 'production v3 private authority boundary scanner failed');
+  assert.equal(result.signal, null);
+  assert.equal(result.stdout, 'Private authority boundary verified.\n');
+  assert.equal(result.stderr, '');
 });
