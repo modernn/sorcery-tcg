@@ -243,11 +243,30 @@ export const sourceRefSchema = z.strictObject({
   byteHash: hashSchema,
 });
 
-const derivationSchema = z.strictObject({
-  method: z.enum(['verbatim', 'normalized', 'manual-transcription']),
-  parentByteHashes: z.array(hashSchema).max(100),
-  notes: z.string().max(2_000).nullable(),
-});
+const derivationSchema = z
+  .strictObject({
+    method: z.enum(['verbatim', 'normalized', 'manual-transcription']),
+    parentByteHashes: z.array(hashSchema).max(100),
+    notes: z.string().max(2_000).nullable(),
+  })
+  .superRefine((derivation, context) => {
+    if (derivation.method === 'verbatim' && derivation.parentByteHashes.length > 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['parentByteHashes'],
+        message: 'verbatim source bytes must not claim derivation parents',
+        params: { diagnosticCode: 'verbatim_source_has_parents' },
+      });
+    }
+    if (derivation.method !== 'verbatim' && derivation.parentByteHashes.length === 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['parentByteHashes'],
+        message: 'derived source bytes require at least one parent',
+        params: { diagnosticCode: 'unrooted_derivation' },
+      });
+    }
+  });
 
 const sourceFields = {
   sourceId: sourceIdSchema,
@@ -424,6 +443,32 @@ function addPrintingSlugIssues(
   });
 }
 
+function addElementIssues(
+  card: { elements: readonly string[] },
+  context: z.RefinementCtx,
+): void {
+  const found = new Set<string>();
+  card.elements.forEach((element, index) => {
+    if (found.has(element)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['elements', index],
+        message: 'duplicate element',
+        params: { diagnosticCode: 'duplicate_element' },
+      });
+    }
+    found.add(element);
+  });
+}
+
+function addCardIssues(
+  card: { elements: readonly string[]; printingSlugs: readonly string[] },
+  context: z.RefinementCtx,
+): void {
+  addElementIssues(card, context);
+  addPrintingSlugIssues(card, context);
+}
+
 function addSnapshotPrintingSlugIssues(
   snapshot: { cards: readonly { printingSlugs: readonly string[] }[] },
   context: z.RefinementCtx,
@@ -450,7 +495,7 @@ export const rawCardSchema = z
     ...cardFields,
     releasedAt: z.iso.date().nullable(),
   })
-  .superRefine(addPrintingSlugIssues);
+  .superRefine(addCardIssues);
 
 export const rawCardSnapshotSchema = z
   .strictObject({
@@ -464,7 +509,7 @@ export const normalizedCardSchema = z
     officialSourceId: z.string().min(1).max(200).nullable(),
     ...cardFields,
   })
-  .superRefine(addPrintingSlugIssues);
+  .superRefine(addCardIssues);
 
 export const normalizedCardSnapshotSchema = z
   .strictObject({
@@ -525,6 +570,7 @@ export const authorityBundlePayloadSchema = z
   })
   .superRefine((bundle, context) => {
     const sourceIds = new Set<string>();
+    const sourceHashes = new Set<string>();
     bundle.sources.forEach((source, index) => {
       if (sourceIds.has(source.sourceId)) {
         context.addIssue({
@@ -535,6 +581,15 @@ export const authorityBundlePayloadSchema = z
         });
       }
       sourceIds.add(source.sourceId);
+      if (sourceHashes.has(source.byteHash)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['sources', index, 'byteHash'],
+          message: 'duplicate source byte hash',
+          params: { diagnosticCode: 'duplicate_source_byte_hash' },
+        });
+      }
+      sourceHashes.add(source.byteHash);
     });
 
     const stableIds = new Set<string>();
@@ -652,11 +707,17 @@ function validateWithSchema<T>(
   return result.data;
 }
 
+function deepFreeze<T>(value: T): T {
+  if (value === null || typeof value !== 'object') return value;
+  for (const child of Object.values(value)) deepFreeze(child);
+  return Object.freeze(value);
+}
+
 function validateArtifactWithSchema<T extends { identity: unknown; contentHash: string }>(
   input: unknown,
   schema: z.ZodType<T>,
 ): T {
-  const artifact = validateWithSchema(input, schema);
+  const artifact = deepFreeze(validateWithSchema(input, schema));
   const expected = identityHash(artifact.identity as JsonValue);
   if (artifact.contentHash !== expected) {
     raise([
@@ -701,8 +762,10 @@ export function validateIdentityDocument(input: unknown): IdentityDocument<JsonV
 export function createCanonicalArtifact<T extends JsonValue>(
   identity: IdentityDocument<T>,
 ): CanonicalArtifact<T> {
-  const validated = validateWithSchema(identity, identityDocumentSchema) as unknown as IdentityDocument<T>;
-  return Object.freeze({
+  const validated = deepFreeze(
+    validateWithSchema(identity, identityDocumentSchema) as unknown as IdentityDocument<T>,
+  );
+  return deepFreeze({
     identity: validated,
     contentHash: identityHash(validated as JsonValue),
   });

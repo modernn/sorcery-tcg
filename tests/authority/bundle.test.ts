@@ -5,12 +5,13 @@ import { join, relative } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { canonicalJson } from '../../src/authority/canonical-json.ts';
+import { canonicalJson, type JsonValue } from '../../src/authority/canonical-json.ts';
 import { identityHash, sha256 } from '../../src/authority/hash.ts';
 import {
   AuthorityValidationError,
   createCanonicalArtifact,
   validateSourceRecord,
+  type CanonicalArtifact,
   type Diagnostic,
   type SourceRecord,
   type SourceRef,
@@ -120,7 +121,7 @@ async function captureDiagnostics(run: () => Promise<unknown>): Promise<readonly
   return assert.fail('expected AuthorityValidationError');
 }
 
-async function materialize(bundle: ReturnType<typeof bundleOf>) {
+async function materialize(bundle: CanonicalArtifact<JsonValue>) {
   const root = await mkdtemp(join(tmpdir(), 'sorcery-bundle-'));
   await writeFile(join(root, 'bundle.json'), canonicalJson(bundle));
   return {
@@ -286,6 +287,26 @@ test('DATA-01 resolves explicit official superseded authority by effective date'
   assert.deepEqual(resolution.superseded, [ref(oldFaq)]);
 });
 
+test('DATA-01 rejects reverse-date and equal-date supersession', () => {
+  const old = manifestSource('source:supersession-old', { effectiveDate: '2026-01-01' });
+  const current = manifestSource('source:supersession-current', { effectiveDate: '2026-07-15' });
+  const peer = manifestSource('source:supersession-peer', { effectiveDate: '2026-07-15' });
+  for (const records of [
+    [
+      record(old, 'faq', { supersedes: [current.sourceId] }),
+      record(current, 'faq'),
+    ],
+    [
+      record(current, 'faq', { supersedes: [peer.sourceId] }),
+      record(peer, 'faq'),
+    ],
+  ]) {
+    const resolution = resolveAuthorityPrecedence(records, null, '2026-08-20');
+    assert.equal(resolution.status, 'unsupported');
+    assert.equal(resolution.reason, 'invalid-supersession-order');
+  }
+});
+
 test('DATA-01 partial supersession remains unsupported beside an unrelated viable peer', () => {
   const superseded = manifestSource('source:partial-superseded', { effectiveDate: '2026-01-01' });
   const superseder = manifestSource('source:partial-superseder', { effectiveDate: '2026-07-15' });
@@ -356,6 +377,71 @@ test('DATA-01 rejects a supersession cycle even when an unrelated record is viab
   assert.equal(resolution.reason, 'ambiguous-supersession');
   assert.deepEqual(resolution.contending, [ref(first), ref(second), ref(unrelated)]);
   assert.deepEqual(resolution.superseded, []);
+});
+
+test('DATA-01 validates specialized artifacts in generic bundles', async () => {
+  const source = manifestSource('source:specialized-artifacts');
+  const cases = [
+    {
+      artifactKind: 'format',
+      stableId: 'format:invalid-generic',
+      payload: {
+        name: '',
+        effectiveDate: '2026-08-20',
+        scope: null,
+        parentFormatStableId: null,
+        avatarCount: 1,
+        spellbookMinimum: 40,
+        atlasMinimum: 20,
+        copyLimits: { ordinary: 4, exceptional: 3, elite: 2, unique: 1 },
+      },
+      expectedPath: '/identity/payload/artifacts/0/identity/payload/name',
+      expectedCode: 'too_small',
+    },
+    {
+      artifactKind: 'card-snapshot',
+      stableId: 'card-snapshot:invalid-generic',
+      payload: { cards: [], unexpected: true },
+      expectedPath: '/identity/payload/artifacts/0/identity/payload/unexpected',
+      expectedCode: 'unrecognized_key',
+    },
+  ] as const;
+
+  for (const entry of cases) {
+    const artifact = createCanonicalArtifact({
+      artifactKind: entry.artifactKind,
+      stableId: entry.stableId,
+      schemaVersion: 1,
+      parentRefs: [],
+      sourceRefs: [ref(source)],
+      payload: entry.payload,
+    });
+    const bundle = createCanonicalArtifact({
+      artifactKind: 'bundle',
+      stableId: `bundle:${entry.artifactKind}-invalid-generic`,
+      schemaVersion: 1,
+      parentRefs: [],
+      sourceRefs: [ref(source)],
+      payload: {
+        effectiveDate: '2026-08-20',
+        precedencePolicyVersion: 1,
+        inputRootHash: null,
+        sources: [source],
+        artifacts: [artifact],
+      },
+    });
+    const materialized = await materialize(bundle);
+    try {
+      assert.deepEqual(
+        (await captureDiagnostics(() =>
+          validateAuthorityBundle(materialized.root, 'bundle.json', materialized.expected),
+        )).map(({ path, code }) => ({ path, code })),
+        [{ path: entry.expectedPath, code: entry.expectedCode }],
+      );
+    } finally {
+      await rm(materialized.root, { recursive: true, force: true });
+    }
+  }
 });
 
 test('DATA-01 rejects impossible dates and accepts a real leap day', () => {
@@ -491,6 +577,7 @@ test('DATA-01 rehashes stored source bytes and rejects one-byte tampering', asyn
       success.evidence.map(({ sourceId, verification }) => ({ sourceId, verification })),
       [
         { sourceId: 'source:cards-synthetic', verification: 'stored-bytes-rehashed' },
+        { sourceId: 'source:formats-page-synthetic', verification: 'manifest-byte-binding-verified' },
         { sourceId: 'source:formats-synthetic', verification: 'manifest-byte-binding-verified' },
       ],
     );
@@ -535,6 +622,7 @@ test('DATA-01 validates manifest-only locator hash procedure and SourceRef bindi
       success.evidence.map(({ sourceId, verification }) => ({ sourceId, verification })),
       [
         { sourceId: 'source:cards-synthetic', verification: 'manifest-byte-binding-verified' },
+        { sourceId: 'source:formats-page-synthetic', verification: 'manifest-byte-binding-verified' },
         { sourceId: 'source:formats-synthetic', verification: 'manifest-byte-binding-verified' },
       ],
     );
@@ -615,6 +703,30 @@ test('DATA-01 rejects changed expected input-root hashes before parsing inputs',
     assert.deepEqual(
       diagnostics.map(({ path, code }) => ({ path, code })),
       [{ path: '/expectedInputRootHash', code: 'unexpected_input_root_hash' }],
+    );
+  } finally {
+    await rm(workspace.root, { recursive: true, force: true });
+  }
+});
+
+test('DATA-01 requires locked card bytes to bind the audited official API source', async () => {
+  const workspace = await createBuildWorkspace('fixture-card-source-contract');
+  try {
+    const path = join(workspace.inputRoot, 'sources.json');
+    const document = JSON.parse(await readFile(path, 'utf8')) as {
+      sources: Array<Record<string, unknown>>;
+    };
+    const source = document.sources.find((entry) => entry.sourceId === 'source:cards-synthetic');
+    assert.ok(source);
+    source.authorityClass = 'community-provenance';
+    await writeFile(path, canonicalJson(document as never));
+    const lock = await refreshInputLock(workspace.inputRoot);
+    const diagnostics = await captureDiagnostics(() =>
+      importAuthority({ ...workspace.args, expectedInputRootHash: lock.inputRootHash }),
+    );
+    assert.deepEqual(
+      diagnostics.map(({ path, code }) => ({ path, code })),
+      [{ path: '/sources', code: 'card_source_mismatch' }],
     );
   } finally {
     await rm(workspace.root, { recursive: true, force: true });

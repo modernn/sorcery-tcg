@@ -1,4 +1,4 @@
-import { open, readdir, realpath } from 'node:fs/promises';
+import { lstat, open, readdir, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep, win32 } from 'node:path';
 
 import { canonicalJson, type JsonValue } from './canonical-json.ts';
@@ -56,6 +56,7 @@ export type ResolutionResult =
         | 'unclear-scope'
         | 'mixed-topic'
         | 'broken-supersession'
+        | 'invalid-supersession-order'
         | 'ambiguous-supersession'
         | 'equal-rank';
       winning: null;
@@ -105,48 +106,25 @@ function pathError(code: string, message: string): AuthorityValidationError {
 }
 
 type BoundedReadResult =
-  | Readonly<{ status: 'ok'; bytes: Uint8Array }>
+  | Readonly<{ status: 'ok'; bytes: Uint8Array; resolvedPath: string }>
   | Readonly<{ status: 'not-file' }>
   | Readonly<{ status: 'too-large' }>
   | Readonly<{ status: 'unreadable' }>;
 
-async function readBoundedFile(path: string, maxBytes: number): Promise<BoundedReadResult> {
-  let handle: Awaited<ReturnType<typeof open>>;
-  try {
-    handle = await open(path, 'r');
-  } catch {
-    return { status: 'unreadable' };
-  }
-
-  try {
-    const metadata = await handle.stat();
-    if (!metadata.isFile()) return { status: 'not-file' };
-    if (metadata.size > maxBytes) return { status: 'too-large' };
-
-    const chunks: Uint8Array[] = [];
-    const buffer = Buffer.allocUnsafe(Math.min(65_536, maxBytes + 1));
-    let total = 0;
-    while (true) {
-      const allowance = Math.min(buffer.byteLength, maxBytes + 1 - total);
-      const { bytesRead } = await handle.read(buffer, 0, allowance, null);
-      if (bytesRead === 0) return { status: 'ok', bytes: Buffer.concat(chunks, total) };
-      total += bytesRead;
-      if (total > maxBytes) return { status: 'too-large' };
-      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
-    }
-  } catch {
-    return { status: 'unreadable' };
-  } finally {
-    await handle.close().catch(() => undefined);
-  }
+function normalizedFilesystemPath(value: string): string {
+  const normalized = resolve(value);
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
 }
 
 function isWithin(root: string, candidate: string): boolean {
-  const fromRoot = relative(root, candidate);
+  const fromRoot = relative(normalizedFilesystemPath(root), normalizedFilesystemPath(candidate));
   return fromRoot === '' || (fromRoot !== '..' && !fromRoot.startsWith('..' + sep) && !isAbsolute(fromRoot));
 }
 
-export async function resolveWithinAuthorityRoot(root: string, candidate: string): Promise<string> {
+async function lexicalAuthorityPath(
+  root: string,
+  candidate: string,
+): Promise<Readonly<{ resolvedRoot: string; lexicalCandidate: string }>> {
   const segments = candidate.split('/');
   if (
     candidate.length === 0 ||
@@ -171,7 +149,11 @@ export async function resolveWithinAuthorityRoot(root: string, candidate: string
   if (!isWithin(resolvedRoot, lexicalCandidate)) {
     throw pathError('path_escape', 'path escapes the configured authority root');
   }
+  return { resolvedRoot, lexicalCandidate };
+}
 
+export async function resolveWithinAuthorityRoot(root: string, candidate: string): Promise<string> {
+  const { resolvedRoot, lexicalCandidate } = await lexicalAuthorityPath(root, candidate);
   let resolvedCandidate: string;
   try {
     resolvedCandidate = await realpath(lexicalCandidate);
@@ -184,6 +166,111 @@ export async function resolveWithinAuthorityRoot(root: string, candidate: string
     throw pathError('path_escape', 'resolved path escapes the configured authority root');
   }
   return resolvedCandidate;
+}
+
+function sameIdentity(
+  left: Readonly<{ dev: bigint; ino: bigint }>,
+  right: Readonly<{ dev: bigint; ino: bigint }>,
+): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function requireIdentity(value: Readonly<{ dev: bigint; ino: bigint }>): void {
+  if (value.dev === 0n || value.ino === 0n) {
+    throw pathError('filesystem_identity_unavailable', 'file identity is unavailable');
+  }
+}
+
+export async function readBoundedWithinAuthorityRoot(
+  root: string,
+  candidate: string,
+  maxBytes: number,
+): Promise<BoundedReadResult> {
+  const { resolvedRoot, lexicalCandidate } = await lexicalAuthorityPath(root, candidate);
+  let linkMetadata: Awaited<ReturnType<typeof lstat>>;
+  try {
+    linkMetadata = await lstat(lexicalCandidate, { bigint: true });
+  } catch (error: unknown) {
+    if (isErrno(error, 'ENOENT')) throw pathError('path_not_found', 'authority path does not exist');
+    throw pathError('path_unreadable', 'authority path cannot be inspected');
+  }
+  requireIdentity(linkMetadata);
+  if (linkMetadata.isSymbolicLink()) {
+    throw pathError('filesystem_alias', 'authority file may not be a symlink or junction');
+  }
+  if (!linkMetadata.isFile()) return { status: 'not-file' };
+
+  let resolvedCandidate: string;
+  let pathMetadata: Awaited<ReturnType<typeof stat>>;
+  try {
+    resolvedCandidate = await realpath(lexicalCandidate);
+    pathMetadata = await stat(lexicalCandidate, { bigint: true });
+  } catch {
+    throw pathError('path_unreadable', 'authority path cannot be resolved');
+  }
+  requireIdentity(pathMetadata);
+  if (!isWithin(resolvedRoot, resolvedCandidate)) {
+    throw pathError('path_escape', 'resolved path escapes the configured authority root');
+  }
+  if (
+    normalizedFilesystemPath(lexicalCandidate) !== normalizedFilesystemPath(resolvedCandidate) ||
+    !sameIdentity(linkMetadata, pathMetadata)
+  ) {
+    throw pathError('filesystem_alias', 'authority file must equal its verified real path');
+  }
+
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    handle = await open(lexicalCandidate, 'r');
+  } catch {
+    return { status: 'unreadable' };
+  }
+  try {
+    const openedMetadata = await handle.stat({ bigint: true });
+    requireIdentity(openedMetadata);
+    if (!openedMetadata.isFile() || !sameIdentity(pathMetadata, openedMetadata)) {
+      throw pathError('filesystem_alias', 'opened authority file differs from the verified path');
+    }
+    if (openedMetadata.size > BigInt(maxBytes)) return { status: 'too-large' };
+
+    const chunks: Uint8Array[] = [];
+    const buffer = Buffer.allocUnsafe(Math.min(65_536, maxBytes + 1));
+    let total = 0;
+    while (true) {
+      const allowance = Math.min(buffer.byteLength, maxBytes + 1 - total);
+      const { bytesRead } = await handle.read(buffer, 0, allowance, null);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+      if (total > maxBytes) return { status: 'too-large' };
+      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
+    }
+
+    let afterOpenMetadata: Awaited<ReturnType<typeof handle.stat>>;
+    let afterPathMetadata: Awaited<ReturnType<typeof lstat>>;
+    try {
+      afterOpenMetadata = await handle.stat({ bigint: true });
+      afterPathMetadata = await lstat(lexicalCandidate, { bigint: true });
+    } catch {
+      throw pathError('file_changed', 'authority file changed during verification');
+    }
+    requireIdentity(afterOpenMetadata);
+    requireIdentity(afterPathMetadata);
+    if (
+      afterPathMetadata.isSymbolicLink() ||
+      !sameIdentity(openedMetadata, afterOpenMetadata) ||
+      !sameIdentity(openedMetadata, afterPathMetadata) ||
+      openedMetadata.size !== afterOpenMetadata.size ||
+      openedMetadata.size !== BigInt(total)
+    ) {
+      throw pathError('file_changed', 'authority file changed during verification');
+    }
+    return { status: 'ok', bytes: Buffer.concat(chunks, total), resolvedPath: resolvedCandidate };
+  } catch (error: unknown) {
+    if (error instanceof AuthorityValidationError) throw error;
+    return { status: 'unreadable' };
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
 }
 
 function toSourceRef(entry: AuthorityPrecedenceRecord): SourceRef {
@@ -295,6 +382,15 @@ export function resolveAuthorityPrecedence(
   if (invalidSupersessionGraph) {
     return unsupportedResolution('ambiguous-supersession', applicable, [], provenance);
   }
+  if (
+    applicable.some((entry) =>
+      entry.supersedes.some((sourceId) =>
+        entry.source.effectiveDate! <= applicableById.get(sourceId)!.source.effectiveDate!
+      )
+    )
+  ) {
+    return unsupportedResolution('invalid-supersession-order', applicable, [], provenance);
+  }
 
   const supersededIds = new Set(applicable.flatMap((entry) => entry.supersedes));
   const viable = applicable.filter((entry) => !supersededIds.has(entry.source.sourceId));
@@ -359,9 +455,17 @@ function validateGraph(bundle: AuthorityBundle): void {
   bundle.identity.payload.artifacts.forEach((artifact, index) => {
     const path = `/identity/payload/artifacts/${index}`;
     try {
-      validateCanonicalArtifact(artifact);
+      if (artifact.identity.artifactKind === 'format') validateFormatArtifact(artifact);
+      else validateCanonicalArtifact(artifact);
     } catch (error: unknown) {
       appendValidationDiagnostics(diagnostics, error, path);
+    }
+    if (artifact.identity.artifactKind === 'card-snapshot') {
+      try {
+        validateNormalizedCardSnapshot(artifact.identity.payload);
+      } catch (error: unknown) {
+        appendValidationDiagnostics(diagnostics, error, path + '/identity/payload');
+      }
     }
 
     const node = asGraphNode(artifact.identity, artifact.contentHash, path + '/identity');
@@ -394,13 +498,6 @@ function validateGraph(bundle: AuthorityBundle): void {
   bundle.identity.payload.sources.forEach((source, sourceIndex) => {
     const path = `/identity/payload/sources/${sourceIndex}/derivation/parentByteHashes`;
     const parents = source.derivation.parentByteHashes;
-    if (source.derivation.method === 'verbatim' && parents.length > 0) {
-      diagnostics.push({
-        path,
-        code: 'verbatim_source_has_parents',
-        message: 'verbatim source bytes must not claim derivation parents',
-      });
-    }
     const foundParents = new Set<Hash>();
     parents.forEach((parentHash, parentIndex) => {
       const parentPath = `${path}/${parentIndex}`;
@@ -782,8 +879,17 @@ async function validateImportedRevisionFiles(
   ] as const;
   let totalBytes = bundleBytes.byteLength;
   for (const [relativePath, expected] of expectedCompanions) {
-    const resolvedPath = await resolveWithinAuthorityRoot(revisionRoot, relativePath);
-    const read = await readBoundedFile(resolvedPath, MAX_AUTHORITY_BYTES - totalBytes);
+    let read: BoundedReadResult;
+    try {
+      read = await readBoundedWithinAuthorityRoot(
+        revisionRoot,
+        relativePath,
+        MAX_AUTHORITY_BYTES - totalBytes,
+      );
+    } catch (error: unknown) {
+      appendValidationDiagnostics(diagnostics, error, `/files/${relativePath}`);
+      continue;
+    }
     if (read.status !== 'ok') {
       diagnostics.push({
         path: `/files/${relativePath}`,
@@ -827,15 +933,17 @@ async function readStoredSources(
   for (const source of stored) {
     const index = bundle.identity.payload.sources.indexOf(source);
     const path = `/identity/payload/sources/${index}`;
-    let resolvedPath: string;
+    let read: BoundedReadResult;
     try {
-      resolvedPath = await resolveWithinAuthorityRoot(root, source.relativePath);
+      read = await readBoundedWithinAuthorityRoot(
+        root,
+        source.relativePath,
+        MAX_AUTHORITY_BYTES - totalBytes,
+      );
     } catch (error: unknown) {
       appendValidationDiagnostics(diagnostics, error, path + '/relativePath');
       continue;
     }
-
-    const read = await readBoundedFile(resolvedPath, MAX_AUTHORITY_BYTES - totalBytes);
     if (read.status !== 'ok') {
       diagnostics.push({
         path: path + '/relativePath',
@@ -880,8 +988,11 @@ export async function validateAuthorityBundle(
   bundlePath: string,
   expected: ExpectedBundle,
 ): Promise<ValidatedAuthorityBundle> {
-  const resolvedBundlePath = await resolveWithinAuthorityRoot(root, bundlePath);
-  const bundleRead = await readBoundedFile(resolvedBundlePath, DEFAULT_AUTHORITY_JSON_LIMITS.maxBytes);
+  const bundleRead = await readBoundedWithinAuthorityRoot(
+    root,
+    bundlePath,
+    DEFAULT_AUTHORITY_JSON_LIMITS.maxBytes,
+  );
   if (bundleRead.status === 'not-file') {
     throw pathError('path_not_file', 'bundle path must resolve to a regular file');
   }
@@ -892,6 +1003,7 @@ export async function validateAuthorityBundle(
     throw pathError('path_unreadable', 'bundle cannot be read');
   }
 
+  const resolvedBundlePath = bundleRead.resolvedPath;
   const bundleBytes = bundleRead.bytes;
   const parsed = parseAuthorityJson(bundleBytes, DEFAULT_AUTHORITY_JSON_LIMITS);
   const bundle = validateBundleSchema(parsed);

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
 import { canonicalJson, type JsonValue } from '../../src/authority/canonical-json.ts';
-import { sha256 } from '../../src/authority/hash.ts';
+import { identityHash, sha256 } from '../../src/authority/hash.ts';
 import {
   AuthorityValidationError,
   createCanonicalArtifact,
@@ -61,7 +61,7 @@ function manifestSource(overrides: Record<string, JsonValue> = {}): Record<strin
     mediaType: 'text/html',
     byteHash: HASH_B,
     derivation: {
-      method: 'manual-transcription',
+      method: 'verbatim',
       parentByteHashes: [],
       notes: 'Synthetic test record',
     },
@@ -248,10 +248,16 @@ async function withDerivationBundle<T>(
 
 test('DATA-03 accepts a strict artifact envelope with stable ID schema version provenance and content hash', () => {
   const artifact = createCanonicalArtifact(identity());
-  assert.deepEqual(validateCanonicalArtifact(artifact), artifact);
+  const validated = validateCanonicalArtifact(JSON.parse(canonicalJson(artifact)));
+  assert.deepEqual(validated, artifact);
   assert.equal(artifact.identity.stableId, 'rule:synthetic-one');
   assert.equal(artifact.identity.schemaVersion, 1);
   assert.match(artifact.contentHash, /^sha256:[0-9a-f]{64}$/);
+  assert.ok(Object.isFrozen(validated.identity.payload));
+  assert.throws(() => {
+    (validated.identity.payload as { title: string }).title = 'Tampered';
+  }, TypeError);
+  assert.equal(validated.contentHash, identityHash(validated.identity));
 });
 
 test('DATA-03 accepts stored sources only with their strict stored-byte shape', () => {
@@ -280,6 +286,29 @@ test('DATA-03 accepts manifest-only sources only with locator or procedure finge
   assert.equal(
     validateSourceRecord(manifestSource({ durableLocator: `urn:sha256:${'b'.repeat(64)}` })).byteHash,
     HASH_B,
+  );
+});
+
+test('DATA-03 requires every derived source to name a provenance parent', () => {
+  assert.deepEqual(
+    captureDiagnostics(() => validateSourceRecord(manifestSource({
+      derivation: {
+        method: 'manual-transcription',
+        parentByteHashes: [],
+        notes: 'Unrooted fixture',
+      },
+    }))).map(({ path, code }) => ({ path, code })),
+    [{ path: '/derivation/parentByteHashes', code: 'unrooted_derivation' }],
+  );
+  assert.deepEqual(
+    captureDiagnostics(() => validateSourceRecord(storedSource({
+      derivation: {
+        method: 'verbatim',
+        parentByteHashes: [HASH_B],
+        notes: 'Impossible fixture',
+      },
+    }))).map(({ path, code }) => ({ path, code })),
+    [{ path: '/derivation/parentByteHashes', code: 'verbatim_source_has_parents' }],
   );
 });
 
@@ -394,7 +423,7 @@ test('DATA-03 rejects duplicate stable IDs and source IDs in authority bundles',
       effectiveDate: '2026-08-20',
       precedencePolicyVersion: 1,
       inputRootHash: null,
-      sources: [storedSource(), storedSource()],
+      sources: [storedSource(), storedSource({ byteHash: HASH_B })],
       artifacts: [rule, rule],
     },
   });
@@ -623,18 +652,13 @@ test('DATA-03 accepts a rooted acyclic multi-source derivation graph', async () 
   );
 });
 
-test('DATA-03 retains missing self and verbatim derivation diagnostics', async () => {
+test('DATA-03 retains missing and self derivation diagnostics', async () => {
   const root = derivationSource('source:derivation-existing-root');
   const selfBase = derivationSource('source:derivation-existing-self');
   const self = derivationSource(selfBase.sourceId, [selfBase.byteHash]);
   const missing = derivationSource('source:derivation-existing-missing', [HASH_A]);
-  const verbatimBase = derivationSource('source:derivation-existing-verbatim');
-  const verbatim = validateSourceRecord({
-    ...verbatimBase,
-    derivation: { ...verbatimBase.derivation, parentByteHashes: [root.byteHash] },
-  });
   const diagnostics = await withDerivationBundle(
-    [root, self, missing, verbatim],
+    [root, self, missing],
     (bundleRoot, bundle) => captureAsyncDiagnostics(() =>
       validateBundleGraph(bundleRoot, 'bundle.json', {
         stableId: bundle.identity.stableId,
@@ -651,11 +675,26 @@ test('DATA-03 retains missing self and verbatim derivation diagnostics', async (
       path: '/identity/payload/sources/2/derivation/parentByteHashes/0',
       code: 'missing_derivation_parent',
     },
-    {
-      path: '/identity/payload/sources/3/derivation/parentByteHashes',
-      code: 'verbatim_source_has_parents',
-    },
   ]);
+});
+
+test('DATA-03 rejects duplicate source byte hashes before derivation traversal', async () => {
+  const first = derivationSource('source:duplicate-hash-first');
+  const second = validateSourceRecord({
+    ...first,
+    sourceId: 'source:duplicate-hash-second',
+    url: 'https://example.org/duplicate-hash-second',
+  });
+  const diagnostics = await withDerivationBundle([first, second], (bundleRoot, bundle) =>
+    captureAsyncDiagnostics(() => validateBundleGraph(bundleRoot, 'bundle.json', {
+      stableId: bundle.identity.stableId,
+      contentHash: bundle.contentHash,
+    })),
+  );
+  assert.deepEqual(diagnostics.map(({ path, code }) => ({ path, code })), [{
+    path: '/identity/payload/sources/1/byteHash',
+    code: 'duplicate_source_byte_hash',
+  }]);
 });
 
 test('DATA-03 rejects relative traversal and absolute stored-source paths', () => {
@@ -682,6 +721,31 @@ test('DATA-03 rejects bundle traversal absolute paths missing files and stored-s
         [{ path: '', code: 'path_escape' }],
       );
     }
+    const [stored, manifest] = materialized.bundle.identity.payload.sources;
+    assert.ok(stored);
+    assert.ok(manifest);
+    const aliased = validateSourceRecord({ ...stored, relativePath: 'alias/rules.json' });
+    const aliasedBundle = createCanonicalArtifact({
+      ...materialized.bundle.identity,
+      payload: {
+        ...materialized.bundle.identity.payload,
+        sources: [aliased, manifest],
+      },
+    });
+    await symlink(join(materialized.root, 'raw'), join(materialized.root, 'alias'), 'junction');
+    await writeBundle(materialized.root, aliasedBundle);
+    assert.deepEqual(
+      (await captureAsyncDiagnostics(() =>
+        validateBundleGraph(materialized.root, 'bundle.json', {
+          stableId: aliasedBundle.identity.stableId,
+          contentHash: aliasedBundle.contentHash,
+        }),
+      )).map(({ path, code }) => ({ path, code })),
+      [{ path: '/identity/payload/sources/0/relativePath', code: 'filesystem_alias' }],
+    );
+    await unlink(join(materialized.root, 'alias'));
+    await writeBundle(materialized.root, materialized.bundle);
+
     await rm(join(materialized.root, 'raw'), { recursive: true, force: true });
     assert.deepEqual(
       (await captureAsyncDiagnostics(() =>

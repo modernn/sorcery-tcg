@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "files": [
     {
-      "byteHash": "sha256:de752ecc83cf3ac8e17a461de270e13c98866783d70f81059f992dc95927e588",
+      "byteHash": "sha256:8fb12427233b3d29a28d7240d732090cefe70f0ccc959564afdff36dfb44b543",
       "relativePath": "cards.raw.json",
       "storageMode": "manifest-only"
     },
@@ -12,10 +12,10 @@
       "storageMode": "stored"
     },
     {
-      "byteHash": "sha256:295ef28aac1239ec742f15c6fd9161828db4f3ff9f5b22684b6fc0094f8f0349",
+      "byteHash": "sha256:c5a2d097f4b647350a1de09ea294a15f564f26cd860974efc4ad3859d5e1973b",
       "relativePath": "sources.json",
       "storageMode": "stored"
     }
   ],
-  "inputRootHash": "sha256:3d91031d54f30a49fb67590e04ed1809a65220cc9108de20d02af140128b510c"
+  "inputRootHash": "sha256:6d3b659be4ec2e7808bc13e044527f141b38e312e26b228bbbb2033434e664b7"
 }

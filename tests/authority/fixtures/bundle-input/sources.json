@@ -7,7 +7,7 @@
       "retrievedAt": "2026-08-20T00:00:00Z",
       "effectiveDate": "2026-08-20",
       "mediaType": "application/json",
-      "byteHash": "sha256:de752ecc83cf3ac8e17a461de270e13c98866783d70f81059f992dc95927e588",
+      "byteHash": "sha256:8fb12427233b3d29a28d7240d732090cefe70f0ccc959564afdff36dfb44b543",
       "derivation": {
         "method": "verbatim",
         "parentByteHashes": [],
@@ -16,7 +16,26 @@
       "licenseStatus": "reference-only",
       "storageMode": "manifest-only",
       "storagePolicy": "manifest-only",
-      "durableLocator": "urn:sha256:de752ecc83cf3ac8e17a461de270e13c98866783d70f81059f992dc95927e588",
+      "durableLocator": "urn:sha256:8fb12427233b3d29a28d7240d732090cefe70f0ccc959564afdff36dfb44b543",
+      "acquisitionProcedureHash": null
+    },
+    {
+      "sourceId": "source:formats-page-synthetic",
+      "url": "https://sorcerytcg.com/constructed",
+      "authorityClass": "official",
+      "retrievedAt": "2026-08-20T00:00:00Z",
+      "effectiveDate": "2026-08-20",
+      "mediaType": "text/html",
+      "byteHash": "sha256:c91bc9786b01d1bec76491eed602924805c65e37591e7cca1932fbfff7d7dd1a",
+      "derivation": {
+        "method": "verbatim",
+        "parentByteHashes": [],
+        "notes": "Synthetic fixture authority page"
+      },
+      "licenseStatus": "reference-only",
+      "storageMode": "manifest-only",
+      "storagePolicy": "manifest-only",
+      "durableLocator": "urn:sha256:c91bc9786b01d1bec76491eed602924805c65e37591e7cca1932fbfff7d7dd1a",
       "acquisitionProcedureHash": null
     },
     {
@@ -29,7 +48,9 @@
       "byteHash": "sha256:6ffa7a2ecb2fca12b0906770c07da949bed279bca5da8e419aa1ea2344c95f02",
       "derivation": {
         "method": "manual-transcription",
-        "parentByteHashes": [],
+        "parentByteHashes": [
+          "sha256:c91bc9786b01d1bec76491eed602924805c65e37591e7cca1932fbfff7d7dd1a"
+        ],
         "notes": "Synthetic fixture"
       },
       "licenseStatus": "reference-only",

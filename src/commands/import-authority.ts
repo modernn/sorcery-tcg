@@ -1,4 +1,4 @@
-import { lstat, mkdir, mkdtemp, open, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -22,7 +22,7 @@ import {
   type SourceRef,
 } from '../authority/schemas.ts';
 import {
-  resolveWithinAuthorityRoot,
+  readBoundedWithinAuthorityRoot,
   validateAuthorityBundle,
 } from '../authority/validate-bundle.ts';
 
@@ -31,6 +31,7 @@ const MAX_INPUT_BYTES = 32_000_000;
 const HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const REVISION_PATTERN = /^[a-z0-9][a-z0-9._-]{0,99}$/;
 const REQUIRED_INPUTS = ['cards.raw.json', 'formats.json', 'sources.json'] as const;
+const OFFICIAL_CARD_API_URL = 'https://api.sorcerytcg.com/api/cards';
 
 type LockedFile = Readonly<{
   byteHash: Hash;
@@ -147,31 +148,22 @@ function parseInputLock(bytes: Uint8Array): InputLock {
   return { schemaVersion: 1, files, inputRootHash };
 }
 
-async function readBounded(path: string, maxBytes: number, diagnosticPath: string): Promise<Uint8Array> {
-  let handle: Awaited<ReturnType<typeof open>>;
+async function readBounded(
+  root: string,
+  relativePath: string,
+  maxBytes: number,
+  diagnosticPath: string,
+): Promise<Uint8Array> {
+  let read: Awaited<ReturnType<typeof readBoundedWithinAuthorityRoot>>;
   try {
-    handle = await open(path, 'r');
-  } catch {
-    fail(diagnosticPath, 'path_unreadable', 'input file cannot be opened');
+    read = await readBoundedWithinAuthorityRoot(root, relativePath, maxBytes);
+  } catch (error: unknown) {
+    prefixValidation(error, diagnosticPath);
   }
-  try {
-    const metadata = await handle.stat();
-    if (!metadata.isFile()) fail(diagnosticPath, 'path_not_file', 'input path must be a regular file');
-    if (metadata.size > maxBytes) fail(diagnosticPath, 'max_bytes', 'input exceeds the fixed byte limit');
-    const chunks: Uint8Array[] = [];
-    const buffer = Buffer.allocUnsafe(Math.min(65_536, maxBytes + 1));
-    let total = 0;
-    while (true) {
-      const allowance = Math.min(buffer.byteLength, maxBytes + 1 - total);
-      const { bytesRead } = await handle.read(buffer, 0, allowance, null);
-      if (bytesRead === 0) return Buffer.concat(chunks, total);
-      total += bytesRead;
-      if (total > maxBytes) fail(diagnosticPath, 'max_bytes', 'input exceeds the fixed byte limit');
-      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
-    }
-  } finally {
-    await handle.close().catch(() => undefined);
-  }
+  if (read.status === 'not-file') fail(diagnosticPath, 'path_not_file', 'input path must be a regular file');
+  if (read.status === 'too-large') fail(diagnosticPath, 'max_bytes', 'input exceeds the fixed byte limit');
+  if (read.status === 'unreadable') fail(diagnosticPath, 'path_unreadable', 'input file cannot be read');
+  return read.bytes;
 }
 
 async function exactInputFiles(root: string, inputLockPath: string, lock: InputLock): Promise<void> {
@@ -196,14 +188,9 @@ async function readLockedInputs(root: string, lock: InputLock): Promise<Readonly
   const inputs = new Map<string, Uint8Array>();
   let totalBytes = 0;
   for (const [index, entry] of lock.files.entries()) {
-    let resolvedPath: string;
-    try {
-      resolvedPath = await resolveWithinAuthorityRoot(root, entry.relativePath);
-    } catch (error: unknown) {
-      prefixValidation(error, `/inputLock/files/${index}/relativePath`);
-    }
     const bytes = await readBounded(
-      resolvedPath,
+      root,
+      entry.relativePath,
       Math.min(DEFAULT_AUTHORITY_JSON_LIMITS.maxBytes, MAX_INPUT_BYTES - totalBytes),
       `/inputLock/files/${index}/relativePath`,
     );
@@ -320,14 +307,13 @@ export async function importAuthority(
   } catch {
     fail('/input', 'path_unreadable', 'input root cannot be resolved');
   }
-  let inputLockFile: string;
-  try {
-    inputLockFile = await resolveWithinAuthorityRoot(inputRoot, args.inputLockPath);
-  } catch (error: unknown) {
-    prefixValidation(error, '/inputLockPath');
-  }
   const lock = parseInputLock(
-    await readBounded(inputLockFile, DEFAULT_AUTHORITY_JSON_LIMITS.maxBytes, '/inputLockPath'),
+    await readBounded(
+      inputRoot,
+      args.inputLockPath,
+      DEFAULT_AUTHORITY_JSON_LIMITS.maxBytes,
+      '/inputLockPath',
+    ),
   );
   if (lock.inputRootHash !== args.expectedInputRootHash) {
     fail('/expectedInputRootHash', 'unexpected_input_root_hash', 'input root does not match the independently expected hash');
@@ -341,8 +327,13 @@ export async function importAuthority(
   const sources = parseSources(sourcesBytes);
   const cardsLock = lock.files[0]!;
   const cardSources = sources.filter((source) => source.byteHash === cardsLock.byteHash);
-  if (cardSources.length !== 1 || cardSources[0]!.mediaType !== 'application/json') {
-    fail('/sources', 'card_source_mismatch', 'exactly one JSON source must bind the locked card bytes');
+  if (
+    cardSources.length !== 1 ||
+    cardSources[0]!.authorityClass !== 'official' ||
+    cardSources[0]!.url !== OFFICIAL_CARD_API_URL ||
+    cardSources[0]!.mediaType !== 'application/json'
+  ) {
+    fail('/sources', 'card_source_mismatch', 'locked card bytes must come from the audited official card API');
   }
   const cardSource = cardSources[0]!;
   if (cardSource.storageMode !== cardsLock.storageMode) {

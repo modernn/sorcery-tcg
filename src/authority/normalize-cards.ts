@@ -15,14 +15,10 @@ import {
   type SourceMetadata,
 } from './schemas.ts';
 
+const ELEMENT_ORDER = ['earth', 'fire', 'water', 'air'] as const;
+
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
-}
-
-function deepFreeze<T>(value: T): T {
-  if (value === null || typeof value !== 'object') return value;
-  for (const child of Object.values(value)) deepFreeze(child);
-  return Object.freeze(value);
 }
 
 function stableHash(prefix: 'card' | 'card-snapshot', fields: Readonly<Record<string, string>>): string {
@@ -39,7 +35,9 @@ function normalizeCard(card: RawCard, source: SourceMetadata): NormalizedCard {
     officialSourceId: source.authorityClass === 'official' ? card.sourceCardId : null,
     name: card.name,
     cardType: card.cardType,
-    elements: [...card.elements],
+    elements: [...card.elements].sort(
+      (left, right) => ELEMENT_ORDER.indexOf(left) - ELEMENT_ORDER.indexOf(right),
+    ),
     rarity: card.rarity,
     manaCost: card.manaCost,
     attack: card.attack,
@@ -52,7 +50,7 @@ function normalizeCard(card: RawCard, source: SourceMetadata): NormalizedCard {
       water: card.thresholds.water,
     },
     rulesText: card.rulesText,
-    printingSlugs: [...card.printingSlugs],
+    printingSlugs: [...card.printingSlugs].sort(compareText),
   };
 }
 
@@ -73,7 +71,7 @@ export function normalizeCards(
   }
 
   const parsed = parseAuthorityJson(rawBytes, DEFAULT_AUTHORITY_JSON_LIMITS);
-  const rawSnapshot = Array.isArray(parsed)
+  const rawSnapshot = source.authorityClass === 'official'
     ? adaptOfficialCardApiSnapshot(parsed)
     : validateRawCardSnapshot(parsed);
   const cards = rawSnapshot.cards.map((card) => normalizeCard(card, source));
@@ -81,12 +79,12 @@ export function normalizeCards(
 
   const snapshot = validateNormalizedCardSnapshot({ cards });
 
-  return deepFreeze(createCanonicalArtifact({
+  return createCanonicalArtifact({
     artifactKind: 'card-snapshot',
     stableId: stableHash('card-snapshot', { sourceId: source.sourceId }),
     schemaVersion: 1,
     parentRefs: [],
     sourceRefs: [{ sourceId: source.sourceId, byteHash }],
     payload: snapshot,
-  }));
+  });
 }

@@ -24,7 +24,7 @@
     "mediaType": "text/html",
     "byteHash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "derivation": {
-      "method": "manual-transcription",
+      "method": "verbatim",
       "parentByteHashes": [],
       "notes": "Synthetic fixture"
     },

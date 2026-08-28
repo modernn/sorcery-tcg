@@ -68,20 +68,32 @@ function sourceMetadata(rawBytes: Uint8Array, overrides: Record<string, unknown>
   const byteHash = sha256(rawBytes);
   return {
     sourceId: 'source:synthetic-cards-2026',
-    url: 'https://api.sorcerytcg.com/api/cards',
-    authorityClass: 'official',
+    url: 'https://example.org/synthetic-cards',
+    authorityClass: 'community-provenance',
     retrievedAt: '2026-08-20T00:00:00Z',
     effectiveDate: '2026-08-20',
     mediaType: 'application/json',
     byteHash,
     derivation: { method: 'verbatim', parentByteHashes: [], notes: 'Synthetic test records' },
-    licenseStatus: 'permission-required',
+    licenseStatus: 'reference-only',
     storageMode: 'manifest-only',
     storagePolicy: 'prohibited',
     durableLocator: 'urn:' + byteHash,
     acquisitionProcedureHash: null,
     ...overrides,
   } as SourceMetadata;
+}
+
+function officialSourceMetadata(
+  rawBytes: Uint8Array,
+  overrides: Record<string, unknown> = {},
+): SourceMetadata {
+  return sourceMetadata(rawBytes, {
+    url: 'https://api.sorcerytcg.com/api/cards',
+    authorityClass: 'official',
+    licenseStatus: 'permission-required',
+    ...overrides,
+  });
 }
 
 function captureDiagnostics(run: () => unknown): readonly Diagnostic[] {
@@ -175,7 +187,7 @@ test('DATA-02 strictly adapts the audited official API shape without changing so
   });
   const rawBytes = bytes([second, first]);
   const adapted = adaptOfficialCardApiSnapshot(JSON.parse(new TextDecoder().decode(rawBytes)));
-  const normalized = normalizeCards(rawBytes, sourceMetadata(rawBytes));
+  const normalized = normalizeCards(rawBytes, officialSourceMetadata(rawBytes));
 
   assert.equal(adapted.cards.length, 2);
   assert.equal(adapted.cards[0]?.rarity, null);
@@ -198,7 +210,7 @@ test('DATA-02 strictly adapts the audited official API shape without changing so
     Object.fromEntries(Object.entries(second).reverse()),
   ]);
   assert.equal(
-    identityHash(normalizeCards(reorderedBytes, sourceMetadata(reorderedBytes)).identity.payload),
+    identityHash(normalizeCards(reorderedBytes, officialSourceMetadata(reorderedBytes)).identity.payload),
     identityHash(normalized.identity.payload),
   );
 });
@@ -206,7 +218,9 @@ test('DATA-02 strictly adapts the audited official API shape without changing so
 test('DATA-02 rejects malformed and unknown official API fields at exact paths', () => {
   const unknown = officialApiCard(1, { unexpected: true });
   assert.deepEqual(
-    pathsAndCodes(captureDiagnostics(() => normalizeCards(bytes([unknown]), sourceMetadata(bytes([unknown]))))),
+    pathsAndCodes(captureDiagnostics(() =>
+      normalizeCards(bytes([unknown]), officialSourceMetadata(bytes([unknown])))
+    )),
     [{ path: '/0/unexpected', code: 'unrecognized_key' }],
   );
 
@@ -216,7 +230,7 @@ test('DATA-02 rejects malformed and unknown official API fields at exact paths',
   });
   assert.deepEqual(
     pathsAndCodes(captureDiagnostics(() =>
-      normalizeCards(bytes([malformed]), sourceMetadata(bytes([malformed]))),
+      normalizeCards(bytes([malformed]), officialSourceMetadata(bytes([malformed]))),
     )),
     [{ path: '/0/guardian/cost', code: 'invalid_type' }],
   );
@@ -224,7 +238,7 @@ test('DATA-02 rejects malformed and unknown official API fields at exact paths',
 
 test('DATA-02 keeps the reviewed 1,100-record official API workload bounded and lossless', () => {
   const rawBytes = bytes(Array.from({ length: 1_100 }, (_, index) => officialApiCard(index)));
-  const normalized = normalizeCards(rawBytes, sourceMetadata(rawBytes));
+  const normalized = normalizeCards(rawBytes, officialSourceMetadata(rawBytes));
   assert.equal(normalized.identity.payload.cards.length, 1_100);
   assert.equal(new Set(normalized.identity.payload.cards.map(({ stableId }) => stableId)).size, 1_100);
 });
@@ -272,7 +286,7 @@ test('DATA-02 separates raw byte identity from normalized semantic artifact iden
   assert.notEqual(semantic.contentHash, original.contentHash);
 });
 
-test('DATA-02 valid cards retain official source identifiers printing slugs and deterministic project stable IDs', () => {
+test('DATA-02 valid generic cards retain printing slugs and deterministic project stable IDs', () => {
   const artifact = normalizeCards(VALID_BYTES, sourceMetadata(VALID_BYTES));
 
   assert.equal(artifact.identity.artifactKind, 'card-snapshot');
@@ -288,8 +302,8 @@ test('DATA-02 valid cards retain official source identifiers printing slugs and 
       printingSlugs,
     })),
     [
-      { officialSourceId: 'synthetic-card-fire-001', printingSlugs: ['synthetic-fire-keeper-alpha'] },
-      { officialSourceId: 'synthetic-card-air-001', printingSlugs: ['synthetic-air-scout-alpha'] },
+      { officialSourceId: null, printingSlugs: ['synthetic-air-scout-alpha'] },
+      { officialSourceId: null, printingSlugs: ['synthetic-fire-keeper-alpha'] },
     ],
   );
   assert.ok(artifact.identity.payload.cards.every(({ stableId }) => /^card:[0-9a-f]{64}$/.test(stableId)));
@@ -316,14 +330,43 @@ test('DATA-02 valid cards retain official source identifiers printing slugs and 
   );
 });
 
+test('DATA-02 canonicalizes set-like card fields and rejects duplicate elements', () => {
+  const parsed = JSON.parse(new TextDecoder().decode(VALID_BYTES)) as {
+    cards: Array<Record<string, unknown>>;
+  };
+  parsed.cards[0]!.elements = ['air', 'fire'];
+  parsed.cards[0]!.printingSlugs = ['synthetic-fire-keeper-zeta', 'synthetic-fire-keeper-alpha'];
+  const reordered = structuredClone(parsed);
+  (reordered.cards[0]!.elements as unknown[]).reverse();
+  (reordered.cards[0]!.printingSlugs as unknown[]).reverse();
+  const originalBytes = bytes(parsed);
+  const reorderedBytes = bytes(reordered);
+  const original = normalizeCards(originalBytes, sourceMetadata(originalBytes));
+  const normalizedReordered = normalizeCards(reorderedBytes, sourceMetadata(reorderedBytes));
+  assert.equal(identityHash(normalizedReordered.identity.payload), identityHash(original.identity.payload));
+  const card = original.identity.payload.cards.find(({ printingSlugs }) =>
+    printingSlugs.includes('synthetic-fire-keeper-alpha')
+  );
+  assert.ok(card);
+  assert.deepEqual(card.elements, ['fire', 'air']);
+  assert.deepEqual(card.printingSlugs, ['synthetic-fire-keeper-alpha', 'synthetic-fire-keeper-zeta']);
+
+  parsed.cards[0]!.elements = ['fire', 'fire'];
+  assert.deepEqual(
+    pathsAndCodes(captureDiagnostics(() => validateRawCardSnapshot(parsed))),
+    [{ path: '/cards/0/elements/1', code: 'duplicate_element' }],
+  );
+});
+
 test('DATA-03 keeps official card stable IDs across revisions while preserving revision provenance', () => {
+  const officialBytes = bytes([officialApiCard(1), officialApiCard(2)]);
   const firstRevision = normalizeCards(
-    VALID_BYTES,
-    sourceMetadata(VALID_BYTES, { sourceId: 'source:sorcerytcg-cards-2026-08' }),
+    officialBytes,
+    officialSourceMetadata(officialBytes, { sourceId: 'source:sorcerytcg-cards-2026-08' }),
   );
   const secondRevision = normalizeCards(
-    VALID_BYTES,
-    sourceMetadata(VALID_BYTES, { sourceId: 'source:sorcerytcg-cards-2026-09' }),
+    officialBytes,
+    officialSourceMetadata(officialBytes, { sourceId: 'source:sorcerytcg-cards-2026-09' }),
   );
   const officialIds = (artifact: typeof firstRevision) => Object.fromEntries(
     artifact.identity.payload.cards.map(({ officialSourceId, stableId }) => [officialSourceId, stableId]),
@@ -350,6 +393,15 @@ test('DATA-03 keeps official card stable IDs across revisions while preserving r
   assert.notDeepEqual(
     firstCommunity.identity.payload.cards.map(({ stableId }) => stableId),
     secondCommunity.identity.payload.cards.map(({ stableId }) => stableId),
+  );
+});
+
+test('DATA-02 rejects project-shaped card records from official sources', () => {
+  assert.deepEqual(
+    pathsAndCodes(captureDiagnostics(() =>
+      normalizeCards(VALID_BYTES, officialSourceMetadata(VALID_BYTES))
+    )),
+    [{ path: '', code: 'invalid_type' }],
   );
 });
 
