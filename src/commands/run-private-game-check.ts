@@ -539,6 +539,22 @@ export type PrivateGameCheck = Readonly<{
     replayVerified: boolean;
     summonedStateVerified: boolean;
   }>;
+  fireLash: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    damageBeforeUntap: boolean;
+    deck: DeckList;
+    exactNearbyTarget: boolean;
+    lash: string;
+    manaPaid: number;
+    noDeathTerminalOrRandomEffects: boolean;
+    otherStatePreserved: boolean;
+    raalDromedary: string;
+    replayVerified: boolean;
+    spellEnteredCemetery: boolean;
+    survivedWithOneDamage: boolean;
+    tappedThenUntapped: boolean;
+  }>;
   fireMinorExplosion: Readonly<{
     acceptedActionCount: number;
     avatarTookThreeDamage: boolean;
@@ -885,6 +901,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   leylineHenge: NormalizedCard;
   lesserBloodDemon: NormalizedCard;
   ignited: NormalizedCard;
+  lash: NormalizedCard;
   lightningBolt: NormalizedCard;
   lugbogCat: NormalizedCard;
   lure: NormalizedCard;
@@ -1202,6 +1219,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || ignited.thresholds.water !== 0
     || ignited.rarity !== 'ordinary') {
     throw new Error('private printed-Charge end-turn-death minion no longer matches its supported facts');
+  }
+  const lash = snapshot.cards.find(({ name }) => name === 'Lash');
+  if (!lash
+    || lash.cardType !== 'magic'
+    || ruleTextDigest(lash.rulesText) !== 'sha256:e3cde9c6aaa2022098a9a2e902ab06d6481a0dc5ca5865fe9647f1798a8d287f'
+    || lash.manaCost !== 3
+    || lash.attack !== null
+    || lash.defense !== null
+    || lash.life !== null
+    || lash.elements.length !== 1
+    || lash.elements[0] !== 'fire'
+    || lash.thresholds.air !== 0
+    || lash.thresholds.earth !== 0
+    || lash.thresholds.fire !== 1
+    || lash.thresholds.water !== 0
+    || lash.rarity !== 'ordinary') {
+    throw new Error('private nearby damage-and-untap Magic no longer matches its supported facts');
   }
   const freeze = snapshot.cards.find(({ name }) => name === 'Freeze');
   if (!freeze
@@ -1923,6 +1957,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     leylineHenge,
     lesserBloodDemon,
     ignited,
+    lash,
     lightningBolt,
     lugbogCat,
     lure,
@@ -2040,6 +2075,7 @@ function gameDefinition(
   grantPowerToAllyThisTurn: 0 | 2 = 0,
   spellcaster = false,
   genesisHealController: 0 | 2 = 0,
+  untapTargetMinionAfterDamage = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -2108,6 +2144,7 @@ function gameDefinition(
       manaCost: card.manaCost,
       ...(targetNearby ? { targetNearby: true } : {}),
       thresholds: card.thresholds,
+      ...(untapTargetMinionAfterDamage ? { untapTargetMinionAfterDamage: true } : {}),
     };
   }
   if (card.cardType === 'minion'
@@ -2164,7 +2201,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-immobile' | 'earth-overpower' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-immobile' | 'earth-overpower' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -2371,6 +2408,12 @@ function buildManifest(
   );
   const fireGenesisLifeLossDeck = elementalDeck('fire', [input.lesserBloodDemon]);
   const fireIgnitedDeck = elementalDeck('fire', [input.ignited]);
+  const fireLashDeck = elementalDeck(
+    'fire',
+    [input.raalDromedary],
+    [input.ghostTownSite],
+    [input.lash],
+  );
   const waterDeck = elementalDeck('water', [
     input.healingMinion,
     input.slyFox,
@@ -2476,6 +2519,8 @@ function buildManifest(
           ? fireGenesisLifeLossDeck
         : scenario === 'fire-ignited'
           ? fireIgnitedDeck
+        : scenario === 'fire-lash'
+          ? fireLashDeck
         : scenario === 'fire-minor-explosion'
           ? fireMinorExplosionDeck
         : scenario === 'water-edge-connection'
@@ -2619,8 +2664,10 @@ function buildManifest(
       card.stableId === input.pudgeButcher.stableId,
       card.stableId === input.arcLightning.stableId
         ? 4
-        : card.stableId === input.zap.stableId ? 1 : 0,
-      card.stableId === input.arcLightning.stableId,
+        : card.stableId === input.zap.stableId
+          || card.stableId === input.lash.stableId ? 1 : 0,
+      card.stableId === input.arcLightning.stableId
+        || card.stableId === input.lash.stableId,
       card.stableId === input.divineHealing.stableId ? 7 : 0,
       card.stableId === input.bury.stableId,
       card.stableId === input.shallowGrave.stableId ? 2 : 0,
@@ -2641,6 +2688,7 @@ function buildManifest(
       card.stableId === input.overpower.stableId ? 2 : 0,
       card.stableId === input.genesisSpellMinion.stableId,
       card.stableId === input.grainSparrow.stableId ? 2 : 0,
+      card.stableId === input.lash.stableId,
     ),
   ]));
   return {
@@ -3964,6 +4012,56 @@ function findFireGenesisLifeLossOpening(
     }
   }
   throw new Error('private Genesis life-loss scenario no longer produces its supported opening');
+}
+
+function findFireLashOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  fireSiteInstanceId: string;
+  ghostTownInstanceId: string;
+  lashInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  raalInstanceId: string;
+  session: GameSession;
+  southSiteInstanceId: string;
+}> {
+  // ponytail: bounded seed scan avoids another private config field.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const built = buildManifest(input, input.config.fireSeed + offset, 'fire-lash');
+    const session = createGameSession(built.manifest);
+    const fireSiteInstanceId = session.state.players.north.hand.atlas.find(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('fire');
+    })?.instanceId;
+    const ghostTownInstanceId = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.ghostTownSite.stableId)?.instanceId;
+    const raalInstanceId = session.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === input.raalDromedary.stableId)?.instanceId;
+    const lashInstanceId = availableMinionInstance(
+      session,
+      'north',
+      input.lash.stableId,
+      1,
+    );
+    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+    if (fireSiteInstanceId
+      && ghostTownInstanceId
+      && lashInstanceId
+      && raalInstanceId
+      && southSiteInstanceId) {
+      return {
+        ...built,
+        fireSiteInstanceId,
+        ghostTownInstanceId,
+        lashInstanceId,
+        raalInstanceId,
+        session,
+        southSiteInstanceId,
+      };
+    }
+  }
+  throw new Error('private Lash damage-and-untap scenario no longer produces its supported opening');
 }
 
 function findFireIgnitedOpening(
@@ -8326,6 +8424,176 @@ function runFireCharge(
   });
 }
 
+function runFireLash(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['fireLash'] {
+  const opening = findFireLashOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.fireSiteInstanceId
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.raalInstanceId
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.ghostTownInstanceId
+    && descriptor.cell === 'C3');
+
+  const readyRaal = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.raalInstanceId);
+  if (!readyRaal) throw new Error('private Lash setup lacks Raal Dromedary');
+  const zeroStepMoves = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.raalInstanceId
+      && descriptor.path.length === 1
+      && descriptor.to.cell === 'C4'
+      && descriptor.to.region === 'surface');
+  const zeroStepMove = zeroStepMoves[0];
+  if (!zeroStepMove || zeroStepMoves.length !== 1) {
+    throw new Error('private Lash setup lacks one exact zero-step Raal action');
+  }
+  session = accept(session, zeroStepMove);
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  const tappedRaal = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.raalInstanceId);
+  if (!tappedRaal) throw new Error('private Lash setup removed Raal Dromedary');
+
+  const northBefore = session.state.players.north;
+  const southBefore = session.state.players.south;
+  const sitesBefore = session.state.realm.sites;
+  const otherUnitsBefore = session.state.realm.units.filter(({ instanceId }) =>
+    instanceId !== opening.raalInstanceId);
+  const lashActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.lashInstanceId
+      && descriptor.casterInstanceId === northBefore.avatar.card.instanceId
+      && descriptor.target?.kind === 'minion'
+      && descriptor.target.instanceId === opening.raalInstanceId
+      && descriptor.target.seat === 'north');
+  const lashAction = lashActions[0];
+  if (!lashAction || lashActions.length !== 1) {
+    throw new Error('private Lash nearby Raal target is not exactly available');
+  }
+  const lashResult = stepGame(session, lashAction);
+  if (!lashResult.accepted) throw new Error('private Lash cast was rejected');
+  session = lashResult.session;
+  const northAfter = session.state.players.north;
+  const raalAfter = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.raalInstanceId);
+  const events = lashResult.receipt.events;
+  const castPayload = events[0] && isJsonRecord(events[0].payload)
+    ? events[0].payload
+    : undefined;
+  const allocationPayload = events[1] && isJsonRecord(events[1].payload)
+    ? events[1].payload
+    : undefined;
+  const damagePayload = events[2] && isJsonRecord(events[2].payload)
+    ? events[2].payload
+    : undefined;
+  const untapPayload = events[3] && isJsonRecord(events[3].payload)
+    ? events[3].payload
+    : undefined;
+  const resolvedPayload = events[4] && isJsonRecord(events[4].payload)
+    ? events[4].payload
+    : undefined;
+  const allocationIndex = events.findIndex(({ type }) => type === 'magic-damage-allocated');
+  const damageIndex = events.findIndex(({ type }) => type === 'damage-dealt');
+  const untapIndex = events.findIndex(({ type }) => type === 'minion-untapped');
+  const resolvedIndex = events.findIndex(({ type }) => type === 'magic-resolved');
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified: events.map(({ type }) => type).join(',')
+      === 'magic-cast,magic-damage-allocated,damage-dealt,minion-untapped,magic-resolved'
+      && castPayload?.casterInstanceId === northBefore.avatar.card.instanceId
+      && castPayload.instanceId === opening.lashInstanceId
+      && castPayload.manaPaid === 3
+      && castPayload.seat === 'north'
+      && castPayload.targetInstanceId === opening.raalInstanceId
+      && castPayload.targetSeat === 'north'
+      && allocationPayload?.amount === 1
+      && allocationPayload.sourceInstanceId === opening.lashInstanceId
+      && allocationPayload.targetInstanceId === opening.raalInstanceId
+      && damagePayload?.accumulated === 1
+      && damagePayload.amount === 1
+      && damagePayload.instanceId === opening.raalInstanceId
+      && damagePayload.seat === 'north'
+      && untapPayload?.instanceId === opening.raalInstanceId
+      && untapPayload.seat === 'north'
+      && untapPayload.sourceInstanceId === opening.lashInstanceId
+      && resolvedPayload?.instanceId === opening.lashInstanceId,
+    damageBeforeUntap: allocationIndex >= 0
+      && allocationIndex < damageIndex
+      && damageIndex < untapIndex
+      && untapIndex < resolvedIndex,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    exactNearbyTarget: lashActions.length === 1,
+    lash: input.lash.name,
+    manaPaid: northBefore.mana - northAfter.mana,
+    noDeathTerminalOrRandomEffects: events.every(({ type }) =>
+      type !== 'minion-died'
+        && type !== 'death-blow'
+        && type !== 'avatar-reached-deaths-door'
+        && type !== 'game-ended')
+      && lashResult.receipt.randomDraws.length === 0
+      && session.state.terminal.status === 'active',
+    otherStatePreserved: raalAfter !== undefined
+      && raalAfter.cardId === tappedRaal.cardId
+      && raalAfter.controller === tappedRaal.controller
+      && raalAfter.location === tappedRaal.location
+      && raalAfter.owner === tappedRaal.owner
+      && raalAfter.region === tappedRaal.region
+      && raalAfter.stealthed === tappedRaal.stealthed
+      && raalAfter.summoningSickness === tappedRaal.summoningSickness
+      && raalAfter.warded === tappedRaal.warded
+      && canonicalJson(session.state.realm.units
+        .filter(({ instanceId }) => instanceId !== opening.raalInstanceId) as unknown as JsonValue)
+        === canonicalJson(otherUnitsBefore as unknown as JsonValue)
+      && canonicalJson(session.state.realm.sites as unknown as JsonValue)
+        === canonicalJson(sitesBefore as unknown as JsonValue)
+      && canonicalJson(session.state.players.south as unknown as JsonValue)
+        === canonicalJson(southBefore as unknown as JsonValue)
+      && canonicalJson(northAfter.atlas as unknown as JsonValue)
+        === canonicalJson(northBefore.atlas as unknown as JsonValue)
+      && canonicalJson(northAfter.spellbook as unknown as JsonValue)
+        === canonicalJson(northBefore.spellbook as unknown as JsonValue)
+      && canonicalJson(northAfter.hand.atlas as unknown as JsonValue)
+        === canonicalJson(northBefore.hand.atlas as unknown as JsonValue)
+      && canonicalJson(northAfter.hand.spellbook as unknown as JsonValue)
+        === canonicalJson(northBefore.hand.spellbook
+          .filter(({ instanceId }) => instanceId !== opening.lashInstanceId) as unknown as JsonValue)
+      && canonicalJson(northAfter.cemetery
+        .filter(({ instanceId }) => instanceId !== opening.lashInstanceId) as unknown as JsonValue)
+        === canonicalJson(northBefore.cemetery as unknown as JsonValue)
+      && northAfter.avatar.card.instanceId === northBefore.avatar.card.instanceId
+      && northAfter.avatar.life === northBefore.avatar.life
+      && northAfter.avatar.location === northBefore.avatar.location
+      && northAfter.avatar.region === northBefore.avatar.region
+      && northAfter.avatar.tapped === northBefore.avatar.tapped
+      && session.state.phase === 'main',
+    raalDromedary: input.raalDromedary.name,
+    replayVerified: verifyGameReplay(session),
+    spellEnteredCemetery: northAfter.hand.spellbook
+      .every(({ instanceId }) => instanceId !== opening.lashInstanceId)
+      && northAfter.cemetery.some(({ instanceId }) => instanceId === opening.lashInstanceId),
+    survivedWithOneDamage: raalAfter?.damage === readyRaal.damage + 1
+      && northAfter.cemetery.every(({ instanceId }) => instanceId !== opening.raalInstanceId),
+    tappedThenUntapped: !readyRaal.tapped && tappedRaal.tapped && raalAfter?.tapped === false,
+  });
+}
+
 function runFireMinorExplosion(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['fireMinorExplosion'] {
@@ -9730,6 +9998,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const fireCharge = runFireCharge(input);
   const fireGenesisLifeLoss = runFireGenesisLifeLoss(input);
   const fireIgnited = runFireIgnited(input);
+  const fireLash = runFireLash(input);
   const fireMinorExplosion = runFireMinorExplosion(input);
   const fireResponse = runFireResponse(input);
   const stealth = runStealth(input);
@@ -9900,6 +10169,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     fireCharge,
     fireGenesisLifeLoss,
     fireIgnited,
+    fireLash,
     fireMinorExplosion,
     fireResponse,
     finalStateHash: hashGameState(session.state),
