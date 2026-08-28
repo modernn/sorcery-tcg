@@ -30,6 +30,7 @@ function deck(prefix: string, atlasCount = 30, spellbookCount = 50): GameDeckSpe
 
 type SpellFacts = Readonly<{
   attack?: number;
+  charge?: boolean;
   defense?: number;
   manaCost: number;
   thresholds: Readonly<{ air: number; earth: number; fire: number; water: number }>;
@@ -66,6 +67,7 @@ function cardsFor(
       cards[cardId] = {
         attack: spell.attack ?? 1,
         cardType: 'minion',
+        charge: spell.charge ?? false,
         defense: spell.defense ?? 1,
         manaCost: spell.manaCost,
         thresholds: { ...spell.thresholds },
@@ -456,9 +458,34 @@ test('RULE-03/04 a Spellcaster pays mana and summons a minion atop a controlled 
   assert.equal(result.receipt.events[0]?.type, 'minion-summoned');
   assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
     descriptor.kind === 'summon-minion'), false);
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === unit.instanceId), false);
 
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
   assert.equal(session.state.realm.units[0]?.summoningSickness, false);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 Charge allows a summoned minion to Move and Attack immediately', () => {
+  let session = keep(createGameSession(manifest(42, {
+    spell: {
+      charge: true,
+      manaCost: 1,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+  })));
+  session = keep(session);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'summon-minion'));
+  const unit = session.state.realm.units[0];
+  assert.ok(unit);
+  assert.equal(unit.summoningSickness, true);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === unit.instanceId
+      && descriptor.to.cell === 'C4'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  assert.equal(session.state.realm.units[0]?.tapped, true);
   assert.equal(verifyGameReplay(session), true);
 });
 

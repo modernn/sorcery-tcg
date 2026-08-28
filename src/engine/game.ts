@@ -39,6 +39,7 @@ export type GameCardDefinition =
   | Readonly<{
     attack: number;
     cardType: 'minion';
+    charge?: boolean;
     defense: number;
     manaCost: number;
     thresholds: GameThresholds;
@@ -365,6 +366,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     return;
   }
   if (card.cardType !== 'minion') throw new RangeError(`${path}.cardType is unsupported`);
+  if (card.charge !== undefined && typeof card.charge !== 'boolean') {
+    throw new RangeError(`${path}.charge must be boolean`);
+  }
   for (const field of ['attack', 'defense', 'manaCost'] as const) {
     if (!Number.isSafeInteger(card[field])
       || card[field] < 0
@@ -443,6 +447,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
           : {
             attack: card.attack,
             cardType: 'minion' as const,
+            ...(card.charge === true ? { charge: true } : {}),
             defense: card.defense,
             manaCost: card.manaCost,
             thresholds: { ...card.thresholds },
@@ -752,6 +757,7 @@ function unitStatus(
   ref: GameUnitRef,
 ): Readonly<{
   attack: number;
+  charge: boolean;
   location: RealmCell;
   summoningSickness: boolean;
   tapped: boolean;
@@ -763,6 +769,7 @@ function unitStatus(
     if (definition.cardType !== 'avatar') throw new Error('Avatar lacks Avatar definition');
     return {
       attack: definition.attack,
+      charge: false,
       location: avatar.location,
       summoningSickness: false,
       tapped: avatar.tapped,
@@ -774,6 +781,7 @@ function unitStatus(
   if (definition.cardType !== 'minion') throw new Error('minion lacks minion definition');
   return {
     attack: definition.attack,
+    charge: definition.charge === true,
     location: unit.location,
     summoningSickness: unit.summoningSickness,
     tapped: unit.tapped,
@@ -782,7 +790,7 @@ function unitStatus(
 
 function readyUnit(state: GameState, ref: GameUnitRef): boolean {
   const unit = unitStatus(state, ref);
-  return !unit.tapped && !unit.summoningSickness;
+  return !unit.tapped && (!unit.summoningSickness || unit.charge);
 }
 
 function movementDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
