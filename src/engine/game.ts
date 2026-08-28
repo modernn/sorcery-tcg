@@ -41,6 +41,7 @@ export type GameCardDefinition =
     cardType: 'minion';
     charge?: boolean;
     cannotDefend?: boolean;
+    cannotDefendOrIntercept?: boolean;
     deathriteHeal?: number;
     deathriteDrawSite?: boolean;
     defense: number;
@@ -393,6 +394,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.cannotDefend !== undefined && typeof card.cannotDefend !== 'boolean') {
     throw new RangeError(`${path}.cannotDefend must be boolean`);
   }
+  if (card.cannotDefendOrIntercept !== undefined && typeof card.cannotDefendOrIntercept !== 'boolean') {
+    throw new RangeError(`${path}.cannotDefendOrIntercept must be boolean`);
+  }
   if (card.deathriteDrawSite !== undefined && typeof card.deathriteDrawSite !== 'boolean') {
     throw new RangeError(`${path}.deathriteDrawSite must be boolean`);
   }
@@ -505,6 +509,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             cardType: 'minion' as const,
             ...(card.charge === true ? { charge: true } : {}),
             ...(card.cannotDefend === true ? { cannotDefend: true } : {}),
+            ...(card.cannotDefendOrIntercept === true ? { cannotDefendOrIntercept: true } : {}),
             ...(card.deathriteDrawSite === true ? { deathriteDrawSite: true } : {}),
             ...(card.deathriteHeal ? { deathriteHeal: card.deathriteHeal } : {}),
             defense: card.defense,
@@ -830,6 +835,7 @@ function unitStatus(
 ): Readonly<{
   attack: number;
   canMoveToDefend: boolean;
+  canRespondToAttack: boolean;
   charge: boolean;
   lethal: boolean;
   location: RealmCell;
@@ -845,6 +851,7 @@ function unitStatus(
     return {
       attack: definition.attack,
       canMoveToDefend: true,
+      canRespondToAttack: true,
       charge: false,
       lethal: false,
       location: avatar.location,
@@ -860,6 +867,7 @@ function unitStatus(
   return {
     attack: definition.attack,
     canMoveToDefend: definition.cannotDefend !== true,
+    canRespondToAttack: definition.cannotDefendOrIntercept !== true,
     charge: definition.charge === true,
     lethal: definition.lethal === true,
     location: unit.location,
@@ -964,6 +972,7 @@ function responseUnitRefs(
   return unitRefs(state, respondingSeat).filter((ref) => {
     if (unavailable.has(ref.instanceId) || !readyUnit(state, ref)) return false;
     const unit = unitStatus(state, ref);
+    if (!unit.canRespondToAttack) return false;
     const location = unit.location;
     return intercept
       ? location === pending.cell
