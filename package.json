@@ -10,6 +10,7 @@
   },
   "scripts": {
     "game:demo": "node src/commands/run-game-demo.ts",
+    "play": "node src/prototype/game-server.ts",
     "prototype": "node src/prototype/server.ts",
     "typecheck": "tsc --noEmit",
     "authority:import": "node src/commands/import-authority.ts",
