@@ -40,6 +40,7 @@ export type GameCardDefinition =
     attack: number;
     cardType: 'minion';
     charge?: boolean;
+    deathriteDrawSite?: boolean;
     defense: number;
     genesisDrawSite?: boolean;
     lethal?: boolean;
@@ -141,7 +142,7 @@ export type GameTerminal =
     winner: GameSeat;
   }>
   | Readonly<{
-    reason: 'simultaneous_avatar_defeat';
+    reason: 'simultaneous_avatar_defeat' | 'simultaneous_defeat';
     result: 'draw';
     status: 'finished';
   }>;
@@ -374,6 +375,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.charge !== undefined && typeof card.charge !== 'boolean') {
     throw new RangeError(`${path}.charge must be boolean`);
   }
+  if (card.deathriteDrawSite !== undefined && typeof card.deathriteDrawSite !== 'boolean') {
+    throw new RangeError(`${path}.deathriteDrawSite must be boolean`);
+  }
   if (card.lethal !== undefined && typeof card.lethal !== 'boolean') {
     throw new RangeError(`${path}.lethal must be boolean`);
   }
@@ -466,6 +470,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             attack: card.attack,
             cardType: 'minion' as const,
             ...(card.charge === true ? { charge: true } : {}),
+            ...(card.deathriteDrawSite === true ? { deathriteDrawSite: true } : {}),
             defense: card.defense,
             ...(card.genesisDrawSite === true ? { genesisDrawSite: true } : {}),
             ...(card.lethal === true ? { lethal: true } : {}),
@@ -1199,6 +1204,26 @@ function finishFight(
 
   const deadIds = new Set(deaths.map(({ instanceId }) => instanceId));
   units = units.filter(({ instanceId }) => !deadIds.has(instanceId));
+  const deckLosers = new Set<GameSeat>();
+  for (const dead of deaths) {
+    const definition = cardDefinition(state, dead.cardId);
+    if (definition.cardType !== 'minion' || !definition.deathriteDrawSite) continue;
+    const owner = players[dead.owner];
+    const [drawn, ...atlas] = owner.atlas;
+    if (!drawn) {
+      deckLosers.add(dead.owner);
+      continue;
+    }
+    players[dead.owner] = deepFreeze({
+      ...owner,
+      atlas,
+      hand: { ...owner.hand, atlas: [...owner.hand.atlas, drawn] },
+    });
+    damageOutcomes.push({
+      payload: { seat: dead.owner, sourceInstanceId: dead.instanceId },
+      type: 'site-drawn',
+    });
+  }
   for (const dead of deaths) {
     const owner = players[dead.owner];
     players[dead.owner] = deepFreeze({
@@ -1218,18 +1243,23 @@ function finishFight(
 
   let terminal: GameTerminal = { status: 'active' };
   const endingOutcomes: GameOutcome[] = [];
-  if (defeatedAvatars.size === 2) {
-    terminal = { reason: 'simultaneous_avatar_defeat', result: 'draw', status: 'finished' };
+  const losers = new Set([...defeatedAvatars, ...deckLosers]);
+  if (losers.size === 2) {
+    const reason = defeatedAvatars.size === 2 && deckLosers.size === 0
+      ? 'simultaneous_avatar_defeat'
+      : 'simultaneous_defeat';
+    terminal = { reason, result: 'draw', status: 'finished' };
     endingOutcomes.push({
-      payload: { reason: 'simultaneous_avatar_defeat', result: 'draw' },
+      payload: { reason, result: 'draw' },
       type: 'game-ended',
     });
-  } else if (defeatedAvatars.size === 1) {
-    const loser = [...defeatedAvatars][0]!;
+  } else if (losers.size === 1) {
+    const loser = [...losers][0]!;
     const winner = otherSeat(loser);
-    terminal = { loser, reason: 'avatar_defeated', status: 'finished', winner };
+    const reason = defeatedAvatars.has(loser) ? 'avatar_defeated' : 'deck_empty';
+    terminal = { loser, reason, status: 'finished', winner };
     endingOutcomes.push({
-      payload: { loser, reason: 'avatar_defeated', winner },
+      payload: { loser, reason, winner },
       type: 'game-ended',
     });
   }
