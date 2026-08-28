@@ -42,6 +42,7 @@ type SpellFacts = Readonly<{
   manaCost: number;
   movementPlusOne?: boolean;
   provides?: 'air' | 'earth' | 'fire' | 'water';
+  ranged?: boolean;
   summonToAnySite?: boolean;
   tapForMana?: number;
   thresholds: Readonly<{ air: number; earth: number; fire: number; water: number }>;
@@ -99,6 +100,7 @@ function cardsFor(
         manaCost: spell.manaCost,
         movementPlusOne: spell.movementPlusOne ?? false,
         ...(spell.provides ? { provides: spell.provides } : {}),
+        ranged: spell.ranged ?? false,
         summonToAnySite: spell.summonToAnySite ?? false,
         ...(spell.tapForMana ? { tapForMana: spell.tapForMana } : {}),
         thresholds: { ...spell.thresholds },
@@ -789,6 +791,102 @@ test('RULE-04 a restricted attacker can target units but not sites', () => {
       && descriptor.target.instanceId === setup.targetInstanceId));
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 Ranged shoots a one-step projectile that strikes a unit without a return strike', () => {
+  let session = keep(createGameSession(manifest(116, {
+    spell: {
+      attack: 3,
+      defense: 3,
+      manaCost: 1,
+      ranged: true,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+  })));
+  session = keep(session);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cell === 'C4'));
+  const shooterInstanceId = session.state.realm.units
+    .find(({ controller }) => controller === 'north')?.instanceId;
+  assert.ok(shooterInstanceId);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cell === 'C1'));
+  const targetInstanceId = session.state.realm.units
+    .find(({ controller }) => controller === 'south')?.instanceId;
+  assert.ok(targetInstanceId);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C3'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === shooterInstanceId
+      && descriptor.to.cell === 'C3'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C2'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cell === 'C2'));
+  const secondTargetInstanceId = session.state.realm.units
+    .find(({ controller, location }) => controller === 'south' && location === 'C2')?.instanceId;
+  assert.ok(secondTargetInstanceId);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === targetInstanceId
+      && descriptor.to.cell === 'C2'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+
+  const shots = legalGameActions(session.state, 'north')
+    .filter(({ descriptor }) => descriptor.kind === 'shoot-projectile');
+  const shot = shots.find(({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.shooterInstanceId === shooterInstanceId
+      && descriptor.direction === 'south'
+      && descriptor.hit?.instanceId === targetInstanceId);
+  assert.ok(shot);
+  assert.equal(shots.filter(({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.direction === 'south'
+      && descriptor.hit?.seat === 'south').length, 2);
+  assert.deepEqual(
+    shot.descriptor.kind === 'shoot-projectile'
+      ? shot.descriptor.path.map(({ cell }) => cell)
+      : [],
+    ['C3', 'C2'],
+  );
+  assert.equal(canonicalJson(shots).includes('"kind":"site"'), false);
+  session = accept(session, shot);
+
+  const shooter = session.state.realm.units.find(({ instanceId }) => instanceId === shooterInstanceId);
+  assert.deepEqual({ damage: shooter?.damage, location: shooter?.location, tapped: shooter?.tapped }, {
+    damage: 0,
+    location: 'C3',
+    tapped: true,
+  });
+  assert.equal(session.state.players.south.cemetery.some(({ instanceId }) => instanceId === targetInstanceId), true);
+  assert.equal(session.state.realm.units.some(({ instanceId }) => instanceId === secondTargetInstanceId), true);
+  assert.deepEqual(session.transcript.at(-1)?.events.map(({ type }) => type), [
+    'projectile-shot',
+    'strike-damage-allocated',
+    'damage-dealt',
+    'minion-died',
+  ]);
   assert.equal(verifyGameReplay(session), true);
 });
 
