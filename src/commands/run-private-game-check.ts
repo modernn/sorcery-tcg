@@ -27,6 +27,10 @@ import {
   type GameSession,
 } from '../engine/game.ts';
 
+function ruleTextDigest(rulesText: string): Hash {
+  return identityHash(rulesText as JsonValue);
+}
+
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
 const DEFAULT_SCENARIO = resolve(
   REPOSITORY_ROOT,
@@ -39,6 +43,7 @@ const MAX_SEED_SEARCH = 10_000;
 
 type ScenarioConfig = Readonly<{
   avatar: Readonly<{ drawSpell: boolean; stableId: string }>;
+  chargeMinionStableId: string;
   revisionId: string;
 }>;
 
@@ -52,6 +57,7 @@ export type PrivateGameCheck = Readonly<{
   acceptedActionCount: number;
   authorityHash: Hash;
   avatarSpellDrawn: boolean;
+  charge: Readonly<{ activatedOnSummon: boolean; minion: string }>;
   classification: 'private-local_actual-cards_unranked-partial-rules';
   combat: Readonly<{
     northMinion: string;
@@ -79,17 +85,23 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
   if (!isJsonRecord(avatar)
     || typeof avatar.stableId !== 'string'
     || typeof avatar.drawSpell !== 'boolean'
+    || typeof value.chargeMinionStableId !== 'string'
     || typeof value.revisionId !== 'string'
-    || Object.keys(value).sort().join(',') !== 'avatar,revisionId'
+    || Object.keys(value).sort().join(',') !== 'avatar,chargeMinionStableId,revisionId'
     || Object.keys(avatar).sort().join(',') !== 'drawSpell,stableId') {
     throw new Error('private game scenario has an unsupported shape');
   }
-  return { avatar: { drawSpell: avatar.drawSpell, stableId: avatar.stableId }, revisionId: value.revisionId };
+  return {
+    avatar: { drawSpell: avatar.drawSpell, stableId: avatar.stableId },
+    chargeMinionStableId: value.chargeMinionStableId,
+    revisionId: value.revisionId,
+  };
 }
 
 async function readPrivateInputs(path: string): Promise<Readonly<{
   authorityHash: Hash;
   cards: readonly NormalizedCard[];
+  chargeMinion: NormalizedCard;
   config: ScenarioConfig;
   format: FormatDefinition;
   formatStableId: string;
@@ -106,6 +118,16 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     throw new Error('private normalized card artifact identity is invalid');
   }
   const snapshot = normalizedCardSnapshotSchema.parse(artifact.identity.payload);
+  const chargeMinion = snapshot.cards.find(({ stableId }) => stableId === config.chargeMinionStableId);
+  if (!chargeMinion
+    || chargeMinion.cardType !== 'minion'
+    || ruleTextDigest(chargeMinion.rulesText) !== 'sha256:85c4ac28604c87578297367ac49adfd2139a72edeadc491fe9383ef50e127c07'
+    || chargeMinion.attack === null
+    || chargeMinion.defense === null
+    || chargeMinion.manaCost === null
+    || chargeMinion.rarity === null) {
+    throw new Error('private Charge minion no longer matches its supported facts');
+  }
 
   const formatsValue = parseJsonWithDuplicateKeyCheck(await readFile(resolve(revisionRoot, 'formats.json'), 'utf8'));
   if (!isJsonRecord(formatsValue)
@@ -125,6 +147,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   return {
     authorityHash: artifact.contentHash,
     cards: snapshot.cards,
+    chargeMinion,
     config,
     format: selected.identity.payload,
     formatStableId: selected.identity.stableId,
@@ -154,7 +177,7 @@ function fillZone(
   throw new Error(`supported actual cards can fill only ${result.length} of ${count} required cards`);
 }
 
-function gameDefinition(card: NormalizedCard, drawSpell: boolean): GameCardDefinition {
+function gameDefinition(card: NormalizedCard, drawSpell: boolean, charge = false): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
     && card.defense !== null
@@ -175,6 +198,7 @@ function gameDefinition(card: NormalizedCard, drawSpell: boolean): GameCardDefin
     return {
       attack: card.attack,
       cardType: 'minion',
+      charge,
       defense: card.defense,
       manaCost: card.manaCost,
       thresholds: card.thresholds,
@@ -197,12 +221,20 @@ function buildManifest(
       && card.attack !== null
       && card.defense !== null
       && card.manaCost !== null);
-  const deck = (reverse: boolean): GameDeckSpec => ({
+  const deck = (reverse: boolean, includeCharge: boolean): GameDeckSpec => {
+    const chargeCopies = includeCharge
+      ? input.format.copyLimits[input.chargeMinion.rarity!]
+      : 0;
+    return {
     atlas: fillZone(sites, input.format.atlasMinimum, input.format, reverse),
     avatar: avatar.stableId,
-    spellbook: fillZone(minions, input.format.spellbookMinimum, input.format, reverse),
-  });
-  const decks = { north: deck(false), south: deck(true) };
+    spellbook: [
+      ...Array.from({ length: chargeCopies }, () => input.chargeMinion.stableId),
+      ...fillZone(minions, input.format.spellbookMinimum - chargeCopies, input.format, reverse),
+    ],
+    };
+  };
+  const decks = { north: deck(false, true), south: deck(true, false) };
   const referenced = new Set([
     decks.north.avatar,
     ...decks.north.atlas,
@@ -213,7 +245,11 @@ function buildManifest(
   const selectedCards = input.cards.filter(({ stableId }) => referenced.has(stableId));
   const definitions = Object.fromEntries(selectedCards.map((card) => [
     card.stableId,
-    gameDefinition(card, card.stableId === avatar.stableId && input.config.avatar.drawSpell),
+    gameDefinition(
+      card,
+      card.stableId === avatar.stableId && input.config.avatar.drawSpell,
+      card.stableId === input.chargeMinion.stableId,
+    ),
   ]));
   return {
     manifest: createGameManifest({
@@ -243,19 +279,27 @@ function accept(session: GameSession, candidate: GameLegalAction): GameSession {
   return result.session;
 }
 
-function openingPair(session: GameSession, seat: GameSeat): Readonly<{
+function openingPair(
+  session: GameSession,
+  seat: GameSeat,
+  preferredCardId?: string,
+  maximumMana = 1,
+  excludedSiteInstanceId?: string,
+): Readonly<{
   minionInstanceId: string;
   siteInstanceId: string;
 }> | null {
   const player = session.state.players[seat];
   for (const site of player.hand.atlas) {
+    if (site.instanceId === excludedSiteInstanceId) continue;
     const siteDefinition = session.state.cards[site.cardId];
     if (siteDefinition?.cardType !== 'site') continue;
     const affinity = { air: 0, earth: 0, fire: 0, water: 0 };
     siteDefinition.elements.forEach((element) => { affinity[element] += 1; });
     for (const minion of player.hand.spellbook) {
+      if (preferredCardId && minion.cardId !== preferredCardId) continue;
       const definition = session.state.cards[minion.cardId];
-      if (definition?.cardType !== 'minion' || definition.manaCost > 1) continue;
+      if (definition?.cardType !== 'minion' || definition.manaCost > maximumMana) continue;
       if ((['air', 'earth', 'fire', 'water'] as const)
         .every((element) => affinity[element] >= definition.thresholds[element])) {
         return { minionInstanceId: minion.instanceId, siteInstanceId: site.instanceId };
@@ -271,6 +315,7 @@ function findOpening(
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   north: NonNullable<ReturnType<typeof openingPair>>;
+  northCharge: NonNullable<ReturnType<typeof openingPair>>;
   seed: number;
   session: GameSession;
   south: NonNullable<ReturnType<typeof openingPair>>;
@@ -279,8 +324,15 @@ function findOpening(
     const built = buildManifest(input, seed);
     const session = createGameSession(built.manifest);
     const north = openingPair(session, 'north');
+    const northCharge = north && openingPair(
+      session,
+      'north',
+      input.chargeMinion.stableId,
+      2,
+      north.siteInstanceId,
+    );
     const south = openingPair(session, 'south');
-    if (north && south) return { ...built, north, seed, session, south };
+    if (north && northCharge && south) return { ...built, north, northCharge, seed, session, south };
   }
   throw new Error(`no supported actual-card opening found in ${MAX_SEED_SEARCH} seeds`);
 }
@@ -327,7 +379,22 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
   session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C3'));
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.northCharge.siteInstanceId
+      && descriptor.cell === 'C3'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.northCharge.minionInstanceId
+      && descriptor.cell === 'C3'));
+  const chargeActivatedOnSummon = legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.northCharge.minionInstanceId
+      && descriptor.to.cell === 'C3');
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.northCharge.minionInstanceId
+      && descriptor.to.cell === 'C3'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.north.minionInstanceId
@@ -374,6 +441,10 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     acceptedActionCount: session.transcript.length,
     authorityHash: input.authorityHash,
     avatarSpellDrawn,
+    charge: {
+      activatedOnSummon: chargeActivatedOnSummon,
+      minion: opening.names.get(input.chargeMinion.stableId) ?? input.chargeMinion.stableId,
+    },
     classification: 'private-local_actual-cards_unranked-partial-rules',
     combat: {
       northMinion: opening.names.get(northCardId) ?? northCardId,
