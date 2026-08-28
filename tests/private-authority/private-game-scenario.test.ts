@@ -561,6 +561,29 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.fireCharge.deck.spellbook
     .find(({ name }) => name === 'Raal Dromedary')?.copies, 4);
   assert.equal(result.fireCharge.replayVerified, true);
+  assert.equal(result.fireLash.lash, 'Lash');
+  assert.equal(result.fireLash.raalDromedary, 'Raal Dromedary');
+  assert.equal(result.fireLash.acceptedActionCount, 13);
+  assert.equal(result.fireLash.exactNearbyTarget, true);
+  assert.equal(result.fireLash.manaPaid, 3);
+  assert.equal(result.fireLash.tappedThenUntapped, true);
+  assert.equal(result.fireLash.survivedWithOneDamage, true);
+  assert.equal(result.fireLash.damageBeforeUntap, true);
+  assert.equal(result.fireLash.causalEventsVerified, true);
+  assert.equal(result.fireLash.otherStatePreserved, true);
+  assert.equal(result.fireLash.noDeathTerminalOrRandomEffects, true);
+  assert.equal(result.fireLash.spellEnteredCemetery, true);
+  assert.equal(result.fireLash.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.fireLash.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.fireLash.deck.atlas
+    .find(({ name }) => name === 'Ghost Town')?.copies, 3);
+  assert.equal(result.fireLash.deck.spellbook
+    .find(({ name }) => name === 'Lash')?.copies, 4);
+  assert.equal(result.fireLash.deck.spellbook
+    .find(({ name }) => name === 'Raal Dromedary')?.copies, 4);
+  assert.equal(result.fireLash.replayVerified, true);
   assert.equal(result.fireGenesisLifeLoss.lesserBloodDemon, 'Lesser Blood Demon');
   assert.equal(result.fireGenesisLifeLoss.acceptedActionCount, 10);
   assert.equal(result.fireGenesisLifeLoss.summonedAtC3, true);

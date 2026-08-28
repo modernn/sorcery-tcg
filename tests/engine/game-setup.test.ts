@@ -622,6 +622,51 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /targetNearby/);
+  const lashManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        damageTargetUnit: 1,
+        manaCost: 1,
+        targetNearby: true,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+        untapTargetMinionAfterDamage: true,
+      },
+    },
+  });
+  assert.equal(
+    lashManifest.cards[firstSpell]?.cardType === 'magic'
+      && lashManifest.cards[firstSpell].untapTargetMinionAfterDamage,
+    true,
+  );
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        damageTargetUnit: 1,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+        untapTargetMinionAfterDamage: false,
+      } as unknown as GameCardDefinition,
+    },
+  }), /untapTargetMinionAfterDamage must be true/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        healController: 1,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+        untapTargetMinionAfterDamage: true,
+      } as GameCardDefinition,
+    },
+  }), /untapTargetMinionAfterDamage requires damageTargetUnit/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -1838,6 +1883,103 @@ test('RULE-03 Magic targets stay in the caster region and exclude enemy Stealth'
     manaCost: 1,
     thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
   }, 'surface', true), false);
+});
+
+test('RULE-03 Lash damages then untaps only a surviving nearby minion target', () => {
+  const decks = { north: deck('lash-north'), south: deck('lash-south') };
+  const cards = cardsFor(decks, {
+    defense: 2,
+    manaCost: 0,
+    summonToAnySite: true,
+    tapForMana: 1,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  });
+  for (const cardId of decks.north.spellbook) {
+    cards[cardId] = {
+      cardType: 'magic',
+      damageTargetUnit: 1,
+      manaCost: 1,
+      targetNearby: true,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      untapTargetMinionAfterDamage: true,
+    };
+  }
+  const gameManifest = createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic',
+      revisionId: 'synthetic-lash-v1',
+    },
+    cards,
+    decks,
+    firstSeat: 'north',
+    seed: 230,
+  });
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C1');
+  const nearbyTarget = session.state.realm.units.find(({ controller, location }) =>
+    controller === 'south' && location === 'C4');
+  const distantTarget = session.state.realm.units.find(({ controller, location }) =>
+    controller === 'south' && location === 'C1');
+  assert.ok(nearbyTarget);
+  assert.ok(distantTarget);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'activate-mana'
+    && descriptor.unitInstanceId === nearbyTarget.instanceId);
+  assert.equal(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === nearbyTarget.instanceId)?.tapped, true);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const spell = session.state.players.north.hand.spellbook.find(({ cardId }) => {
+    const definition = gameManifest.cards[cardId];
+    return definition?.cardType === 'magic' && definition.untapTargetMinionAfterDamage === true;
+  });
+  assert.ok(spell);
+  const lashActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === spell.instanceId);
+  assert.deepEqual(lashActions.map(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' ? descriptor.target?.instanceId : undefined), [nearbyTarget.instanceId]);
+  assert.equal(lashActions.some(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.target?.kind === 'avatar'), false);
+  assert.equal(lashActions.some(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.target?.instanceId === distantTarget.instanceId), false);
+
+  const before = session.state;
+  const result = stepGame(session, lashActions[0]!);
+  assert.equal(result.accepted, true);
+  const targetAfter = result.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === nearbyTarget.instanceId);
+  assert.equal(targetAfter?.damage, 1);
+  assert.equal(targetAfter?.tapped, false);
+  assert.equal(result.session.state.players.north.mana, before.players.north.mana - 1);
+  assert.equal(result.session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === spell.instanceId), true);
+  assert.equal(result.session.state.stateVersion, before.stateVersion + 1);
+  assert.deepEqual(result.receipt.events.map(({ type }) => type), [
+    'magic-cast',
+    'magic-damage-allocated',
+    'damage-dealt',
+    'minion-untapped',
+    'magic-resolved',
+  ]);
+  assert.deepEqual(result.receipt.events[3]?.payload, {
+    instanceId: nearbyTarget.instanceId,
+    seat: 'south',
+    sourceInstanceId: spell.instanceId,
+  });
+  assert.equal(verifyGameReplay(result.session), true);
 });
 
 test('RULE-03 Freeze disables a nearby minion until the caster next Start Phase', () => {

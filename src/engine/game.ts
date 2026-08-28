@@ -65,6 +65,7 @@ export type GameCardDefinition =
     targetNearby?: boolean;
     teleportAllyToTargetSite?: true;
     thresholds: GameThresholds;
+    untapTargetMinionAfterDamage?: true;
   }>
   | Readonly<{
     airborne?: boolean;
@@ -677,6 +678,7 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
       const status = unitStatus(state, target);
       return (!definition.burrowTargetMinion && !definition.submergeTargetMinion || target.kind === 'minion')
         && (!definition.disableTargetNearbyMinionUntilNextTurn || target.kind === 'minion')
+        && (!definition.untapTargetMinionAfterDamage || target.kind === 'minion')
         && status.region === caster.region
         && (target.seat === seat || !status.stealthed)
         && (!definition.targetNearby && !definition.disableTargetNearbyMinionUntilNextTurn
@@ -792,6 +794,13 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     }
     if (card.targetNearby !== undefined && card.damageTargetUnit === undefined) {
       throw new RangeError(`${path}.targetNearby requires damageTargetUnit`);
+    }
+    if (card.untapTargetMinionAfterDamage !== undefined
+      && card.untapTargetMinionAfterDamage !== true) {
+      throw new RangeError(`${path}.untapTargetMinionAfterDamage must be true when defined`);
+    }
+    if (card.untapTargetMinionAfterDamage === true && card.damageTargetUnit === undefined) {
+      throw new RangeError(`${path}.untapTargetMinionAfterDamage requires damageTargetUnit`);
     }
     if (card.damageTargetUnit !== undefined && (!Number.isSafeInteger(card.damageTargetUnit)
       || card.damageTargetUnit < 1
@@ -1095,6 +1104,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               manaCost: card.manaCost,
               ...(card.targetNearby === true ? { targetNearby: true } : {}),
               thresholds: { ...card.thresholds },
+              ...(card.untapTargetMinionAfterDamage === true
+                ? { untapTargetMinionAfterDamage: true as const }
+                : {}),
             }
           : {
             ...(card.airborne === true ? { airborne: true } : {}),
@@ -3804,15 +3816,16 @@ function applyDescriptor(
     if (definition.damageTargetUnit === undefined || descriptor.target === undefined) {
       throw new Error('unreachable targeted Magic cast');
     }
-    const target = unitStatus(castState, descriptor.target);
+    const targetRef = descriptor.target;
+    const target = unitStatus(castState, targetRef);
     const pending: PendingCombat = deepFreeze({
-      allocations: [{ amount: definition.damageTargetUnit, targetInstanceId: descriptor.target.instanceId }],
+      allocations: [{ amount: definition.damageTargetUnit, targetInstanceId: targetRef.instanceId }],
       attacker: caster,
       attackingSeat: seat,
       cell: target.location,
-      combatants: [descriptor.target],
+      combatants: [targetRef],
       defenders: [],
-      originalTarget: descriptor.target,
+      originalTarget: targetRef,
       ...(target.region === 'surface' ? {} : { region: target.region as 'underground' | 'underwater' | 'void' }),
       targetRemoved: false,
     });
@@ -3823,7 +3836,7 @@ function applyDescriptor(
         payload: {
           amount: definition.damageTargetUnit,
           sourceInstanceId: card.instanceId,
-          targetInstanceId: descriptor.target.instanceId,
+          targetInstanceId: targetRef.instanceId,
         },
         type: 'magic-damage-allocated',
       }],
@@ -3831,12 +3844,43 @@ function applyDescriptor(
       false,
       [caster],
     );
+    const survivingTarget = definition.untapTargetMinionAfterDamage === true
+      && targetRef.kind === 'minion'
+      ? damaged.realm.units.find(({ instanceId }) => instanceId === targetRef.instanceId)
+      : undefined;
+    const targetUntapped = Boolean(survivingTarget?.tapped);
+    const resolvedState = targetUntapped
+      ? deepFreeze({
+        ...damaged,
+        realm: {
+          ...damaged.realm,
+          units: damaged.realm.units.map((unit) => unit.instanceId === targetRef.instanceId
+            ? deepFreeze({ ...unit, tapped: false })
+            : unit),
+        },
+      })
+      : damaged;
+    const untapOutcomes: readonly GameOutcome[] = targetUntapped
+      ? [{
+        payload: {
+          instanceId: targetRef.instanceId,
+          seat: targetRef.seat,
+          sourceInstanceId: card.instanceId,
+        },
+        type: 'minion-untapped',
+      }]
+      : [];
     const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
     return [
-      withStateVersion(damaged, {}),
+      withStateVersion(resolvedState, {}),
       terminalIndex < 0
-        ? [...outcomes, resolved]
-        : [...outcomes.slice(0, terminalIndex), resolved, ...outcomes.slice(terminalIndex)],
+        ? [...outcomes, ...untapOutcomes, resolved]
+        : [
+          ...outcomes.slice(0, terminalIndex),
+          ...untapOutcomes,
+          resolved,
+          ...outcomes.slice(terminalIndex),
+        ],
       randomDraws,
     ];
   }
