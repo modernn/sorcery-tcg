@@ -41,6 +41,7 @@ export type GameCardDefinition =
     cardType: 'minion';
     charge?: boolean;
     defense: number;
+    lethal?: boolean;
     manaCost: number;
     provides?: GameElement;
     thresholds: GameThresholds;
@@ -370,6 +371,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.charge !== undefined && typeof card.charge !== 'boolean') {
     throw new RangeError(`${path}.charge must be boolean`);
   }
+  if (card.lethal !== undefined && typeof card.lethal !== 'boolean') {
+    throw new RangeError(`${path}.lethal must be boolean`);
+  }
   if (card.provides !== undefined && !elements.includes(card.provides)) {
     throw new RangeError(`${path}.provides must be a supported element`);
   }
@@ -453,6 +457,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             cardType: 'minion' as const,
             ...(card.charge === true ? { charge: true } : {}),
             defense: card.defense,
+            ...(card.lethal === true ? { lethal: true } : {}),
             manaCost: card.manaCost,
             ...(card.provides ? { provides: card.provides } : {}),
             thresholds: { ...card.thresholds },
@@ -770,6 +775,7 @@ function unitStatus(
 ): Readonly<{
   attack: number;
   charge: boolean;
+  lethal: boolean;
   location: RealmCell;
   summoningSickness: boolean;
   tapped: boolean;
@@ -782,6 +788,7 @@ function unitStatus(
     return {
       attack: definition.attack,
       charge: false,
+      lethal: false,
       location: avatar.location,
       summoningSickness: false,
       tapped: avatar.tapped,
@@ -794,6 +801,7 @@ function unitStatus(
   return {
     attack: definition.attack,
     charge: definition.charge === true,
+    lethal: definition.lethal === true,
     location: unit.location,
     summoningSickness: unit.summoningSickness,
     tapped: unit.tapped,
@@ -1070,11 +1078,20 @@ function finishFight(
   const allocations = new Map(pending.allocations.map(({ amount, targetInstanceId }) =>
     [targetInstanceId, amount]));
   const damage = new Map<StateHash, number>();
+  const lethalDamage = new Set<StateHash>();
+  const attackerStatus = unitStatus(state, pending.attacker);
   damage.set(
     pending.attacker.instanceId,
     pending.combatants.reduce((total, ref) => total + unitStatus(state, ref).attack, 0),
   );
   pending.combatants.forEach((ref) => damage.set(ref.instanceId, allocations.get(ref.instanceId) ?? 0));
+  pending.combatants.forEach((ref) => {
+    const striker = unitStatus(state, ref);
+    if (striker.lethal && striker.attack > 0) lethalDamage.add(pending.attacker.instanceId);
+    if (attackerStatus.lethal && (allocations.get(ref.instanceId) ?? 0) > 0) {
+      lethalDamage.add(ref.instanceId);
+    }
+  });
 
   const players: Record<GameSeat, PlayerState> = {
     north: state.players.north,
@@ -1148,7 +1165,10 @@ function finishFight(
     });
     const definition = cardDefinition(state, unit.cardId);
     if (definition.cardType !== 'minion') throw new Error('fight minion lacks minion definition');
-    if (accumulated > 0 && accumulated >= definition.defense) deaths.push(units[index]!);
+    if (accumulated > 0
+      && (accumulated >= definition.defense || lethalDamage.has(ref.instanceId))) {
+      deaths.push(units[index]!);
+    }
   }
 
   const deadIds = new Set(deaths.map(({ instanceId }) => instanceId));

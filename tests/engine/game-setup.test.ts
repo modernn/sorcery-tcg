@@ -32,6 +32,7 @@ type SpellFacts = Readonly<{
   attack?: number;
   charge?: boolean;
   defense?: number;
+  lethal?: boolean;
   manaCost: number;
   provides?: 'air' | 'earth' | 'fire' | 'water';
   thresholds: Readonly<{ air: number; earth: number; fire: number; water: number }>;
@@ -70,6 +71,7 @@ function cardsFor(
         cardType: 'minion',
         charge: spell.charge ?? false,
         defense: spell.defense ?? 1,
+        lethal: spell.lethal ?? false,
         manaCost: spell.manaCost,
         ...(spell.provides ? { provides: spell.provides } : {}),
         thresholds: { ...spell.thresholds },
@@ -602,6 +604,35 @@ test('RULE-03 a provider adds affinity until that minion dies', () => {
   assert.equal(observeGame(session.state, 'north').players.north.affinity.earth, 2);
   assert.equal(observeGame(session.state, 'south').players.south.affinity.earth, 3);
   assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 Lethal kills a tougher minion with positive damage but not zero damage', () => {
+  const resolve = (attack: number, seed: number): GameSession => {
+    const setup = northAttacksAtC2(seed, {
+      attack,
+      defense: 5,
+      lethal: true,
+      manaCost: 1,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    });
+    let { session } = setup;
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === setup.targetInstanceId));
+    return accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  };
+
+  const positive = resolve(1, 45);
+  assert.equal(positive.state.players.north.cemetery.length, 1);
+  assert.equal(positive.state.players.south.cemetery.length, 1);
+  assert.equal(verifyGameReplay(positive), true);
+
+  const zero = resolve(0, 44);
+  assert.equal(zero.state.players.north.cemetery.length, 0);
+  assert.equal(zero.state.players.south.cemetery.length, 0);
+  assert.equal(verifyGameReplay(zero), true);
 });
 
 test('RULE-04 Move and Attack stages movement before an undefended enemy-site strike', () => {
