@@ -485,6 +485,22 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.fireGenesisLifeLoss.deck.spellbook
     .find(({ name }) => name === 'Lesser Blood Demon')?.copies, 4);
   assert.equal(result.fireGenesisLifeLoss.replayVerified, true);
+  assert.equal(result.fireIgnited.ignited, 'Ignited');
+  assert.equal(result.fireIgnited.acceptedActionCount, 11);
+  assert.equal(result.fireIgnited.manaPaid, 2);
+  assert.equal(result.fireIgnited.summonedStateVerified, true);
+  assert.equal(result.fireIgnited.chargeActionAvailableImmediately, true);
+  assert.equal(result.fireIgnited.mandatoryDeathAndCemetery, true);
+  assert.equal(result.fireIgnited.causalEventsVerified, true);
+  assert.equal(result.fireIgnited.noDeathriteDamageTerminalOrRandomEffects, true);
+  assert.equal(result.fireIgnited.otherStatePreserved, true);
+  assert.equal(result.fireIgnited.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.fireIgnited.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.fireIgnited.deck.spellbook
+    .find(({ name }) => name === 'Ignited')?.copies, 4);
+  assert.equal(result.fireIgnited.replayVerified, true);
   assert.equal(result.combat.northMinionDied, true);
   assert.equal(result.combat.southMinionDied, true);
   assert.equal(result.waterDrown.drown, 'Drown');
