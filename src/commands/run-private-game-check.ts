@@ -113,6 +113,8 @@ export type PrivateGameCheck = Readonly<{
     deck: DeckList;
     movementMinion: string;
     replayVerified: boolean;
+    repeatedStepUnavailable: boolean;
+    returningPathAvailable: boolean;
     seed: number;
     threeStepAirbornePath: boolean;
   }>;
@@ -2358,6 +2360,15 @@ function runAirMovementTwo(
   take(({ descriptor }) => descriptor.kind === 'end-turn');
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
+  const legalMoves = legalGameActions(session.state, 'north');
+  const returningPathAvailable = legalMoves.some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.airborneInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C4,C3');
+  const repeatedStepUnavailable = !legalMoves.some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.airborneInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C4,C3,C4');
   const move = action(session, ({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.airborneInstanceId
@@ -2379,6 +2390,8 @@ function runAirMovementTwo(
     movementMinion:
       opening.names.get(input.movementTwoMinion.stableId) ?? input.movementTwoMinion.stableId,
     replayVerified: verifyGameReplay(session),
+    repeatedStepUnavailable,
+    returningPathAvailable,
     seed: opening.seed,
     threeStepAirbornePath,
   });

@@ -43,6 +43,8 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airMovementTwo.movementMinion, 'Cloud Spirit');
   assert.equal(result.airMovementTwo.threeStepAirbornePath, true);
   assert.equal(result.airMovementTwo.attackAvailableAfterThreeSteps, true);
+  assert.equal(result.airMovementTwo.returningPathAvailable, true);
+  assert.equal(result.airMovementTwo.repeatedStepUnavailable, true);
   assert.equal(result.airMovementTwo.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
   assert.equal(result.airMovementTwo.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
   assert.equal(result.airMovementTwo.deck.spellbook
