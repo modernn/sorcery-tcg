@@ -982,14 +982,18 @@ function surfacePaths(
   const paths: RealmCell[][] = [[start]];
   let frontier: RealmCell[][] = [[start]];
   for (let step = 0; step < maximumSteps; step += 1) {
-    frontier = frontier.flatMap((path) => [
-      ...borderingCells(path.at(-1)!),
-      ...(airborne ? diagonalCells(path.at(-1)!) : []),
-    ]
-      .filter((cell) => state.realm.sites[cell]
-        && (!movesOnlySideways || cell[1] === path.at(-1)![1]))
-      .sort()
-      .map((cell) => [...path, cell]));
+    frontier = frontier.flatMap((path) => {
+      const current = path.at(-1)!;
+      return [
+        ...borderingCells(current),
+        ...(airborne ? diagonalCells(current) : []),
+      ]
+        .filter((cell) => state.realm.sites[cell]
+          && (!movesOnlySideways || cell[1] === current[1])
+          && !path.some((from, index) => from === current && path[index + 1] === cell))
+        .sort()
+        .map((cell) => [...path, cell]);
+    });
     paths.push(...frontier);
   }
   return paths;

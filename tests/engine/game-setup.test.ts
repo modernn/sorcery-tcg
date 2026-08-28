@@ -1477,6 +1477,18 @@ test('RULE-04 Movement +2 issues exact three-step paths and attacks after moving
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
   const actions = legalGameActions(session.state, 'north');
+  assert.equal(actions.some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === setup.attackerInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3,C2'), true);
+  assert.equal(actions.some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === setup.attackerInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3,C2,C3'), false);
+  assert.equal(actions.some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === setup.attackerInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3,C4,C3'), true);
   const threeStep = actions.find(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === setup.attackerInstanceId
