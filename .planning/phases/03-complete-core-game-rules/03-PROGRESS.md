@@ -30,6 +30,7 @@
 - A minion prohibited from Defend and Intercept is excluded from both response abilities while a directly attacked unit may still participate without using Defend.
 - Movement +1 and +2 use engine-issued explicit surface paths for both Move and Attack and Defend, including exact bounded paths and legal returning routes without repeating a directed step; sideways-only basic movement excludes forward, backward, and diagonal steps from both actions.
 - Submerge minions can be summoned underwater at Water sites, move between surface and underwater at a Water site, and swim between adjacent Water sites; attacks, Defend, Intercept, and projectiles respect exact regions while sites remain surface targets.
+- Burrowing-enabled minions enter and traverse the below-ground region beneath Land sites; a minion that also has Submerge can change directly between qualifying neighboring below-ground and underwater spaces.
 - Ranged issues cardinal one-step projectile paths, stops at the first occupied location, lets the controller choose among multiple hit units, never hits sites, and resolves a tapped one-way strike through the normal damage and death pipeline.
 - Minion Ward enters with one public mark, prevents one complete positive damage event through the shared combat/projectile path, then breaks before later damage resolves normally.
 - Attacking-only first strike resolves its attacker's allocations, deaths, Deathrites, and terminal results in an early window; only surviving defenders then make their normal return strikes.
@@ -41,6 +42,7 @@
 - A third legal 30/60 Air teaching deck that proves Snallygaster's exact two-step Movement +1 paths and Roaming Monster's permission to summon onto an enemy site while ordinary minions remain restricted; variants prove Plumed Pegasus's diagonal flight and asymmetric attack/Intercept permissions, Band of Thieves's Stealth against Snow Leopard, and Cloud Spirit's legal return path, rejected repeated directed step, and exact three-step Airborne path ending with an available attack against Ghoul.
 - A fourth legal 30/60 Water teaching deck that proves Muddy Pigs heals exactly 3 before entering its cemetery after a real simultaneous combat death; variants prove Sly Fox's end-turn Stealth timing and Sedge Crabs' C3-to-B3 sideways movement while real C2/C4 paths remain unavailable.
 - A legal 30/60 Water teaching-deck variant that proves Coral-Reef Kelpie has distinct surface and underwater summon choices at a real Water site while a real non-Submerge minion has only the surface choice.
+- A legal 30/60 Earth teaching-deck variant that proves Cave Trolls has distinct surface and underground summon choices at a real land site, travels underground beneath an enemy land site without attacking it, then surfaces and can attack that site; a real non-Burrowing minion has only the surface summon choice.
 - A fifth legal 30/60 Fire teaching deck that proves Monstrous Lion can Charge into an opposing unit but cannot target its site, then proves Lumbering Giant cannot use Defend or Intercept while ready and in range.
 - Observer-safe actions, rejections, causal events, hashes, exact replay, and a deterministic unranked match runner.
 - A no-dependency browser client that renders the authoritative 5x4 realm, scopes hidden information by seat, exposes only engine-issued actions, and verifies replay.
@@ -56,14 +58,14 @@
 - `pnpm game:demo -- 23`: completes in 138 accepted actions over 56 turns with byte-exact replay.
 - `pnpm play`: serves the playable core at `http://127.0.0.1:4174/`.
 - Browser checkpoint: a 22-action match moved a minion, handed Defend to the non-active seat, resolved a simultaneous trade into both cemeteries, and replayed byte-identically.
-- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 24-action Earth first strike, 22-action Earth Ranged, 27-action Earth Ward, 27-action Airborne, 26-action Air Stealth, 26-action Air movement, 24-action Air Movement +2, 25-action Air unrestricted-summon, 43-action Fire targeting/response, 23-action Water end-turn Stealth, 22-action Water sideways movement, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
+- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 28-action Earth Burrowing, 24-action Earth first strike, 22-action Earth Ranged, 27-action Earth Ward, 27-action Airborne, 26-action Air Stealth, 26-action Air movement, 24-action Air Movement +2, 25-action Air unrestricted-summon, 43-action Fire targeting/response, 23-action Water end-turn Stealth, 22-action Water sideways movement, 16-action Water Submerge, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
 - `pnpm game:verify-private`: one passing ignored-authority integration scenario.
 - Death's Door scenarios prove same-turn direct-damage immunity, later death blows, simultaneous-defeat draws, nonlethal site strikes, and exact replay.
-- `pnpm verify`: 227 passing public tests at this checkpoint.
+- `pnpm verify`: 230 passing public tests at this checkpoint.
 
 ## Still required for Phase 3
 
-- Rubble replacement, land/water regions, connection rules, control changes, and card-specific placement overrides.
+- Rubble replacement, terrain mutation, connection rules beyond the supported surface/subsurface movement graph, control changes, and card-specific placement overrides.
 - Full start/main/end phase triggers and duration cleanup beyond the supported narrow Genesis/Deathrite effects, minion damage, and summoning sickness.
 - Additional costs, non-minion spells, movement beyond bounded +1/+2 bonuses and sideways-only self-movement, further activated abilities, and card-specific targets.
 - Combat tiers beyond attacking-only first strike, projectile ranges and effects beyond Ranged 1, additional healing sources, prevention/modification beyond minion Ward, additional card-triggered damage/death behavior, and tournament ending overlays.

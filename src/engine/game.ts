@@ -31,7 +31,7 @@ export type DeckZone = 'atlas' | 'spellbook';
 export type RealmCell = `${'A' | 'B' | 'C' | 'D' | 'E'}${1 | 2 | 3 | 4}`;
 export type GameElement = 'air' | 'earth' | 'fire' | 'water';
 export type GameThresholds = Readonly<Record<GameElement, number>>;
-export type GameRegion = 'surface' | 'underwater';
+export type GameRegion = 'surface' | 'underground' | 'underwater';
 
 export type GameCardDefinition =
   | Readonly<{ attack: number; cardType: 'avatar'; defense: number; drawSpell: boolean; life: number }>
@@ -39,6 +39,7 @@ export type GameCardDefinition =
   | Readonly<{
     airborne?: boolean;
     attack: number;
+    burrowing?: boolean;
     cardType: 'minion';
     cannotAttackSites?: boolean;
     charge?: boolean;
@@ -132,7 +133,7 @@ type PendingCombat = Readonly<{
   combatants: readonly GameUnitRef[];
   defenders: readonly GameUnitRef[];
   originalTarget: CombatTarget | null;
-  region?: 'underwater';
+  region?: 'underground' | 'underwater';
   targetRemoved: boolean;
 }>;
 
@@ -266,7 +267,7 @@ type GameActionDescriptor =
     cell: RealmCell;
     kind: 'summon-minion';
     manaCost: number;
-    region?: 'underwater';
+    region?: 'underground' | 'underwater';
   }>
   | Readonly<{ kind: 'draw'; zone: DeckZone }>
   | Readonly<{
@@ -398,6 +399,17 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
         kind: 'summon-minion' as const,
         manaCost: definition.manaCost,
       },
+      ...(definition.burrowing && !isWaterSite(state, cell)
+        ? [{
+          cardId,
+          cardInstanceId: instanceId,
+          casterInstanceId: player.avatar.card.instanceId,
+          cell,
+          kind: 'summon-minion' as const,
+          manaCost: definition.manaCost,
+          region: 'underground' as const,
+        }]
+        : []),
       ...(definition.submerge && isWaterSite(state, cell)
         ? [{
           cardId,
@@ -472,6 +484,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   }
   if (card.lethal !== undefined && typeof card.lethal !== 'boolean') {
     throw new RangeError(`${path}.lethal must be boolean`);
+  }
+  if (card.burrowing !== undefined && typeof card.burrowing !== 'boolean') {
+    throw new RangeError(`${path}.burrowing must be boolean`);
   }
   if (card.genesisDrawSite !== undefined && typeof card.genesisDrawSite !== 'boolean') {
     throw new RangeError(`${path}.genesisDrawSite must be boolean`);
@@ -595,6 +610,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
           : {
             ...(card.airborne === true ? { airborne: true } : {}),
             attack: card.attack,
+            ...(card.burrowing === true ? { burrowing: true } : {}),
             cardType: 'minion' as const,
             ...(card.cannotAttackSites === true ? { cannotAttackSites: true } : {}),
             ...(card.charge === true ? { charge: true } : {}),
@@ -934,6 +950,7 @@ function unitStatus(
 ): Readonly<{
   airborne: boolean;
   attack: number;
+  burrowing: boolean;
   canAttackSites: boolean;
   canMoveToDefend: boolean;
   canRespondToAttack: boolean;
@@ -958,6 +975,7 @@ function unitStatus(
     return {
       airborne: false,
       attack: definition.attack,
+      burrowing: false,
       canAttackSites: true,
       canMoveToDefend: true,
       canRespondToAttack: true,
@@ -982,6 +1000,7 @@ function unitStatus(
   return {
     airborne: definition.airborne === true && unit.region === 'surface',
     attack: definition.attack,
+    burrowing: definition.burrowing === true,
     canAttackSites: definition.cannotAttackSites !== true,
     canMoveToDefend: definition.cannotDefend !== true,
     canRespondToAttack: definition.cannotDefendOrIntercept !== true,
@@ -1011,7 +1030,8 @@ function sameLocation(left: GameLocation, right: GameLocation): boolean {
 
 function locationExists(state: GameState, location: GameLocation): boolean {
   return state.realm.sites[location.cell] !== undefined
-    && (location.region === 'surface' || isWaterSite(state, location.cell));
+    && (location.region === 'surface'
+      || location.region === (isWaterSite(state, location.cell) ? 'underwater' : 'underground'));
 }
 
 function movementPaths(
@@ -1020,6 +1040,7 @@ function movementPaths(
   maximumSteps: number,
   airborne = false,
   movesOnlySideways = false,
+  burrowing = false,
   submerge = false,
 ): readonly (readonly GameLocation[])[] {
   if (!locationExists(state, start)) return [];
@@ -1034,14 +1055,28 @@ function movementPaths(
           ...(airborne
             ? diagonalCells(current.cell).map((cell) => ({ cell, region: 'surface' as const }))
             : []),
+          ...(burrowing && !isWaterSite(state, current.cell)
+            ? [{ cell: current.cell, region: 'underground' as const }]
+            : []),
           ...(submerge && isWaterSite(state, current.cell)
             ? [{ cell: current.cell, region: 'underwater' as const }]
             : []),
         ]
-        : submerge
+        : current.region === 'underground' && burrowing
+          ? [
+            { cell: current.cell, region: 'surface' as const },
+            ...borderingCells(current.cell).map((cell) => ({ cell, region: 'underground' as const })),
+            ...(submerge
+              ? borderingCells(current.cell).map((cell) => ({ cell, region: 'underwater' as const }))
+              : []),
+          ]
+          : current.region === 'underwater' && submerge
           ? [
             { cell: current.cell, region: 'surface' as const },
             ...borderingCells(current.cell).map((cell) => ({ cell, region: 'underwater' as const })),
+            ...(burrowing
+              ? borderingCells(current.cell).map((cell) => ({ cell, region: 'underground' as const }))
+              : []),
           ]
           : [];
       return candidates
@@ -1084,6 +1119,7 @@ function defendPaths(
     unit.canMoveToDefend ? unit.movementSteps : 0,
     unit.airborne,
     unit.movesOnlySideways,
+    unit.burrowing,
     unit.submerge,
   ).filter((path) => sameLocation(path.at(-1)!, destination));
 }
@@ -1098,6 +1134,7 @@ function movementDescriptors(state: GameState, seat: GameSeat): readonly GameAct
       unit.movementSteps,
       unit.airborne,
       unit.movesOnlySideways,
+      unit.burrowing,
       unit.submerge,
     )
       .map((path) => ({
@@ -1335,8 +1372,8 @@ function actionLabel(descriptor: GameActionDescriptor): string {
   }
   if (descriptor.kind === 'move-and-attack') {
     return descriptor.path.length === 1
-      ? `Tap ${descriptor.unitInstanceId.slice(0, 15)}… without moving${descriptor.to.region === 'underwater' ? ' underwater' : ''}`
-      : `Move ${descriptor.unitInstanceId.slice(0, 15)}… ${descriptor.path.map(({ cell, region }) => `${cell}${region === 'underwater' ? ' underwater' : ''}`).join(' → ')}`;
+      ? `Tap ${descriptor.unitInstanceId.slice(0, 15)}… without moving${descriptor.to.region === 'surface' ? '' : ` ${descriptor.to.region}`}`
+      : `Move ${descriptor.unitInstanceId.slice(0, 15)}… ${descriptor.path.map(({ cell, region }) => `${cell}${region === 'surface' ? '' : ` ${region}`}`).join(' → ')}`;
   }
   if (descriptor.kind === 'shoot-projectile') {
     const target = descriptor.hit
@@ -1347,7 +1384,7 @@ function actionLabel(descriptor: GameActionDescriptor): string {
   if (descriptor.kind === 'decline-attack') return 'Decline attack';
   if (descriptor.kind === 'declare-attack') return `Attack ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`;
   if (descriptor.kind === 'defend') {
-    return `Defend with ${descriptor.unitInstanceId.slice(0, 15)}… via ${descriptor.path.map(({ cell, region }) => `${cell}${region === 'underwater' ? ' underwater' : ''}`).join(' → ')}`;
+    return `Defend with ${descriptor.unitInstanceId.slice(0, 15)}… via ${descriptor.path.map(({ cell, region }) => `${cell}${region === 'surface' ? '' : ` ${region}`}`).join(' → ')}`;
   }
   if (descriptor.kind === 'close-defend') {
     return descriptor.originalTargetParticipates ? 'Close defend window; keep target' : 'Close defend window; remove target';
@@ -2111,7 +2148,9 @@ function applyDescriptor(
       combatants: [descriptor.hit],
       defenders: [],
       originalTarget: descriptor.hit,
-      ...(unitStatus(state, descriptor.hit).region === 'underwater' ? { region: 'underwater' as const } : {}),
+      ...(unitStatus(state, descriptor.hit).region === 'surface'
+        ? {}
+        : { region: unitStatus(state, descriptor.hit).region as 'underground' | 'underwater' }),
       targetRemoved: false,
     }), [shot, ...stealthOutcomes, strike], false);
   }
@@ -2136,7 +2175,7 @@ function applyDescriptor(
       combatants: [],
       defenders: [],
       originalTarget: null,
-      ...(descriptor.to.region === 'underwater' ? { region: 'underwater' as const } : {}),
+      ...(descriptor.to.region === 'surface' ? {} : { region: descriptor.to.region }),
       targetRemoved: false,
     });
     return [

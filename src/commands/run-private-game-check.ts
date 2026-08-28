@@ -141,6 +141,22 @@ export type PrivateGameCheck = Readonly<{
   finalStateHash: Hash;
   formatStableId: string;
   genesis: Readonly<{ minion: string; siteDrawn: boolean }>;
+  earthBurrowing: Readonly<{
+    acceptedActionCount: number;
+    burrowingMinion: string;
+    deck: DeckList;
+    movedUnderground: boolean;
+    nonBurrowingSurfaceAvailable: boolean;
+    nonBurrowingUndergroundUnavailable: boolean;
+    replayVerified: boolean;
+    seed: number;
+    siteTargetAvailableAfterSurfacing: boolean;
+    siteTargetUnavailableUnderground: boolean;
+    surfaceSummonAvailable: boolean;
+    surfaced: boolean;
+    targetIsLandSite: boolean;
+    undergroundSummonAvailable: boolean;
+  }>;
   earthRamp: Readonly<{
     acceptedActionCount: number;
     affinityAdded: boolean;
@@ -391,6 +407,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   airborneMinion: NormalizedCard;
   airborneTargetMinion: NormalizedCard;
   authorityHash: Hash;
+  burrowingMinion: NormalizedCard;
   cards: readonly NormalizedCard[];
   cannotDefendMinion: NormalizedCard;
   chargeMinion: NormalizedCard;
@@ -543,6 +560,22 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || submergeMinion.thresholds.water !== 1
     || submergeMinion.rarity !== 'ordinary') {
     throw new Error('private Submerge minion no longer matches its supported facts');
+  }
+  const burrowingMinion = snapshot.cards.find(({ name }) => name === 'Cave Trolls');
+  if (!burrowingMinion
+    || burrowingMinion.cardType !== 'minion'
+    || ruleTextDigest(burrowingMinion.rulesText) !== 'sha256:861dc9af925b83fc1a0145ac74367a772f6ffeec5a254a25341a0361ef531425'
+    || burrowingMinion.manaCost !== 3
+    || burrowingMinion.attack !== 3
+    || burrowingMinion.defense !== 3
+    || burrowingMinion.elements.length !== 1
+    || burrowingMinion.elements[0] !== 'earth'
+    || burrowingMinion.thresholds.air !== 0
+    || burrowingMinion.thresholds.earth !== 1
+    || burrowingMinion.thresholds.fire !== 0
+    || burrowingMinion.thresholds.water !== 0
+    || burrowingMinion.rarity !== 'ordinary') {
+    throw new Error('private Burrowing minion no longer matches its supported facts');
   }
   const cannotDefendMinion = snapshot.cards
     .find(({ stableId }) => stableId === config.cannotDefendMinionStableId);
@@ -782,6 +815,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     airborneMinion,
     airborneTargetMinion,
     authorityHash: artifact.contentHash,
+    burrowingMinion,
     cards: snapshot.cards,
     cannotDefendMinion,
     chargeMinion,
@@ -860,6 +894,7 @@ function gameDefinition(
   gainsStealthAtEndOfTurn = false,
   movesOnlySideways = false,
   submerge = false,
+  burrowing = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -887,6 +922,7 @@ function gameDefinition(
     return {
       airborne,
       attack: card.attack,
+      burrowing,
       cardType: 'minion',
       cannotAttackSites,
       cannotDefend,
@@ -918,7 +954,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'airborne' | 'combat' | 'earth' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1006,7 +1042,7 @@ function buildManifest(
       ],
     };
   };
-  const earthDeck = elementalDeck('earth', [
+  const earthMinions = [
     input.earthProviderMinion,
     input.manaMinion,
     input.genesisMinion,
@@ -1016,6 +1052,11 @@ function buildManifest(
     input.wardMinion,
     input.firstStrikeMinion,
     input.firstStrikeTargetMinion,
+  ] as const;
+  const earthDeck = elementalDeck('earth', earthMinions, [input.ghostTownSite]);
+  const earthBurrowingDeck = elementalDeck('earth', [
+    ...earthMinions,
+    input.burrowingMinion,
   ], [input.ghostTownSite]);
   const airborneDeck = elementalDeck('air', [
     input.movementMinion,
@@ -1040,6 +1081,8 @@ function buildManifest(
   const decks = {
     north: scenario === 'airborne' || scenario === 'movement-two' || scenario === 'stealth'
       ? airborneDeck
+      : scenario === 'earth-burrowing'
+        ? earthBurrowingDeck
       : scenario === 'earth' || scenario === 'earth-first-strike' || scenario === 'earth-ward'
       ? earthDeck
       : scenario === 'air'
@@ -1053,6 +1096,8 @@ function buildManifest(
           : deck(false, true),
     south: scenario === 'airborne' || scenario === 'movement-two' || scenario === 'stealth'
       ? airborneDeck
+      : scenario === 'earth-burrowing'
+        ? earthBurrowingDeck
       : scenario === 'earth-first-strike' || scenario === 'earth-ward' ? earthDeck : deck(true, false),
   };
   const referenced = new Set([
@@ -1097,6 +1142,7 @@ function buildManifest(
       card.stableId === input.slyFox.stableId,
       card.stableId === input.sedgeCrabs.stableId,
       card.stableId === input.submergeMinion.stableId,
+      card.stableId === input.burrowingMinion.stableId,
     ),
   ]));
   return {
@@ -1447,6 +1493,82 @@ function findEarthDuelOpening(
     }
   }
   throw new Error(`private Earth ${mode} scenario seed ${seed} no longer produces its supported opening`);
+}
+
+function findEarthBurrowingOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  comparisonInstanceId: string;
+  featuredInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string];
+  seed: number;
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string];
+}> {
+  // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
+  for (let offset = 1; offset <= 64; offset += 1) {
+    const seed = input.config.earthRangedSeed + offset;
+    const built = buildManifest(input, seed, 'earth-burrowing');
+    const session = createGameSession(built.manifest);
+    const landSites = (seat: GameSeat) => session.state.players[seat].hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && !definition.elements.includes('water');
+    });
+    const northLandSites = landSites('north');
+    const earthSite = northLandSites.find(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('earth');
+    });
+    const northSites = earthSite
+      ? [earthSite, ...northLandSites.filter(({ instanceId }) => instanceId !== earthSite.instanceId)]
+      : [];
+    const southSites = landSites('south');
+    const featuredInstanceId = availableMinionInstance(
+      session,
+      'north',
+      input.burrowingMinion.stableId,
+      2,
+    );
+    const affinity = { air: 0, earth: 0, fire: 0, water: 0 };
+    northSites.slice(0, 3).forEach(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      if (definition?.cardType === 'site') {
+        definition.elements.forEach((element) => { affinity[element] += 1; });
+      }
+    });
+    const comparisonInstanceId = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 2),
+    ].find(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'minion'
+        && definition.burrowing !== true
+        && definition.manaCost <= 3
+        && (['air', 'earth', 'fire', 'water'] as const)
+          .every((element) => affinity[element] >= definition.thresholds[element]);
+    })?.instanceId;
+    if (northSites.length >= 3
+      && southSites.length >= 2
+      && featuredInstanceId
+      && comparisonInstanceId) {
+      return {
+        ...built,
+        comparisonInstanceId,
+        featuredInstanceId,
+        northSiteInstanceIds: [
+          northSites[0]!.instanceId,
+          northSites[1]!.instanceId,
+          northSites[2]!.instanceId,
+        ],
+        seed,
+        session,
+        southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
+      };
+    }
+  }
+  throw new Error('private Earth Burrowing scenario no longer produces its supported opening');
 }
 
 function findAirOpening(
@@ -1859,6 +1981,107 @@ function deckList(deck: GameDeckSpec, names: ReadonlyMap<string, string>): DeckL
     avatar: names.get(deck.avatar) ?? deck.avatar,
     spellbook: summarize(deck.spellbook),
   };
+}
+
+function runEarthBurrowing(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthBurrowing'] {
+  const opening = findEarthBurrowingOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+    && descriptor.cell === 'B3');
+
+  const summons = legalGameActions(session.state, 'north');
+  const matches = (cardInstanceId: string, region: 'surface' | 'underground'): boolean =>
+    summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === cardInstanceId
+      && descriptor.cell === 'C3'
+      && (descriptor.region ?? 'surface') === region);
+  const surfaceSummonAvailable = matches(opening.featuredInstanceId, 'surface');
+  const undergroundSummonAvailable = matches(opening.featuredInstanceId, 'underground');
+  const nonBurrowingSurfaceAvailable = matches(opening.comparisonInstanceId, 'surface');
+  const nonBurrowingUndergroundUnavailable = !matches(opening.comparisonInstanceId, 'underground');
+  const summonSite = session.state.realm.sites.C3;
+  const summonSiteDefinition = summonSite ? session.state.cards[summonSite.cardId] : undefined;
+  const attackSite = session.state.realm.sites.C2;
+  const attackSiteDefinition = attackSite ? session.state.cards[attackSite.cardId] : undefined;
+  const targetIsLandSite = summonSiteDefinition?.cardType === 'site'
+    && !summonSiteDefinition.elements.includes('water')
+    && attackSiteDefinition?.cardType === 'site'
+    && !attackSiteDefinition.elements.includes('water');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.featuredInstanceId
+    && descriptor.cell === 'C3'
+    && descriptor.region === 'underground');
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === opening.featuredInstanceId
+    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+      === 'C3/underground,C2/underground');
+  const movedUnderground = session.state.realm.units.some(({ instanceId, location, region }) =>
+    instanceId === opening.featuredInstanceId && location === 'C2' && region === 'underground');
+  const siteTargetUnavailableUnderground = !legalGameActions(session.state, 'north')
+    .some(({ descriptor }) => descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === opening.featuredInstanceId
+    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+      === 'C2/underground,C2/surface');
+  const surfaced = session.state.realm.units.some(({ instanceId, location, region }) =>
+    instanceId === opening.featuredInstanceId && location === 'C2' && region === 'surface');
+  const siteTargetAvailableAfterSurfacing = legalGameActions(session.state, 'north')
+    .some(({ descriptor }) => descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    burrowingMinion: opening.names.get(input.burrowingMinion.stableId) ?? input.burrowingMinion.stableId,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    movedUnderground,
+    nonBurrowingSurfaceAvailable,
+    nonBurrowingUndergroundUnavailable,
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    siteTargetAvailableAfterSurfacing,
+    siteTargetUnavailableUnderground,
+    surfaceSummonAvailable,
+    surfaced,
+    targetIsLandSite,
+    undergroundSummonAvailable,
+  });
 }
 
 function runEarthRamp(
@@ -3140,6 +3363,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airMovement = runAirMovement(input);
   const airMovementTwo = runAirMovementTwo(input);
   const airSummoning = runAirSummoning(input);
+  const earthBurrowing = runEarthBurrowing(input);
   const earthFirstStrike = runEarthFirstStrike(input);
   const earthRamp = runEarthRamp(input);
   const earthRanged = runEarthRanged(input);
@@ -3278,6 +3502,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
       north: deckList(opening.manifest.decks.north, opening.names),
       south: deckList(opening.manifest.decks.south, opening.names),
     },
+    earthBurrowing,
     earthRamp,
     earthFirstStrike,
     earthRanged,
