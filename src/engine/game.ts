@@ -45,6 +45,7 @@ export type GameCardDefinition =
     lethal?: boolean;
     manaCost: number;
     provides?: GameElement;
+    tapForMana?: number;
     thresholds: GameThresholds;
   }>;
 
@@ -261,6 +262,7 @@ type GameActionDescriptor =
   | Readonly<{ kind: 'intercept'; unitInstanceId: StateHash }>
   | Readonly<{ kind: 'close-intercept' }>
   | Readonly<{ amount: number; kind: 'allocate-strike'; targetInstanceId: StateHash }>
+  | Readonly<{ amount: number; kind: 'activate-mana'; unitInstanceId: StateHash }>
   | Readonly<{ kind: 'end-turn' }>;
 
 export type GameLegalAction = EngineLegalAction<GameActionDescriptor>;
@@ -378,6 +380,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.genesisDrawSite !== undefined && typeof card.genesisDrawSite !== 'boolean') {
     throw new RangeError(`${path}.genesisDrawSite must be boolean`);
   }
+  if (card.tapForMana !== undefined
+    && (!Number.isSafeInteger(card.tapForMana) || card.tapForMana < 1 || card.tapForMana > MAX_COMBAT_STAT)) {
+    throw new RangeError(path + '.tapForMana must be a safe integer between 1 and ' + MAX_COMBAT_STAT);
+  }
   if (card.provides !== undefined && !elements.includes(card.provides)) {
     throw new RangeError(`${path}.provides must be a supported element`);
   }
@@ -465,6 +471,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.lethal === true ? { lethal: true } : {}),
             manaCost: card.manaCost,
             ...(card.provides ? { provides: card.provides } : {}),
+            ...(card.tapForMana ? { tapForMana: card.tapForMana } : {}),
             thresholds: { ...card.thresholds },
           },
     ])),
@@ -834,6 +841,16 @@ function movementDescriptors(state: GameState, seat: GameSeat): readonly GameAct
   });
 }
 
+function manaAbilityDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
+  return state.realm.units.flatMap((unit) => {
+    if (unit.controller !== seat || unit.tapped || unit.summoningSickness) return [];
+    const definition = cardDefinition(state, unit.cardId);
+    return definition.cardType === 'minion' && definition.tapForMana
+      ? [{ amount: definition.tapForMana, kind: 'activate-mana' as const, unitInstanceId: unit.instanceId }]
+      : [];
+  });
+}
+
 function attackTargets(state: GameState, pending: PendingCombat): readonly CombatTarget[] {
   const defendingSeat = otherSeat(pending.attackingSeat);
   const targets: CombatTarget[] = unitRefs(state, defendingSeat)
@@ -951,6 +968,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     ...(player.avatar.tapped ? [] : [{ kind: 'draw-site' as const }]),
     ...(!player.avatar.tapped && avatarDefinition.drawSpell ? [{ kind: 'draw-spell' as const }] : []),
     ...summonDescriptors(state, seat),
+    ...manaAbilityDescriptors(state, seat),
     ...movementDescriptors(state, seat),
     { kind: 'end-turn' },
   ];
@@ -985,6 +1003,9 @@ function actionLabel(descriptor: GameActionDescriptor): string {
   if (descriptor.kind === 'close-intercept') return 'Close intercept window';
   if (descriptor.kind === 'allocate-strike') {
     return `Assign ${descriptor.amount} damage to ${descriptor.targetInstanceId.slice(0, 15)}…`;
+  }
+  if (descriptor.kind === 'activate-mana') {
+    return 'Tap ' + descriptor.unitInstanceId.slice(0, 15) + '… for ' + descriptor.amount + ' mana';
   }
   return 'End turn';
 }
@@ -1482,6 +1503,35 @@ function applyDescriptor(
         realm,
       }),
       [summoned],
+      [],
+    ];
+  }
+
+  if (descriptor.kind === 'activate-mana') {
+    const legal = manaAbilityDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'activate-mana'
+        && candidate.amount === descriptor.amount
+        && candidate.unitInstanceId === descriptor.unitInstanceId);
+    const unit = state.realm.units.find(({ instanceId }) => instanceId === descriptor.unitInstanceId);
+    if (!legal || !unit) throw new Error('unreachable illegal mana activation');
+    return [
+      withStateVersion(state, {
+        players: replacePlayer(state, seat, deepFreeze({ ...player, mana: player.mana + descriptor.amount })),
+        realm: {
+          ...state.realm,
+          units: state.realm.units.map((candidate) => candidate.instanceId === unit.instanceId
+            ? deepFreeze({ ...candidate, tapped: true })
+            : candidate),
+        },
+      }),
+      [{
+        payload: {
+          amount: descriptor.amount,
+          seat,
+          unitInstanceId: descriptor.unitInstanceId,
+        },
+        type: 'mana-activated',
+      }],
       [],
     ];
   }
