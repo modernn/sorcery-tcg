@@ -9,6 +9,7 @@ import {
   legalGameActions,
   stepGame,
   verifyGameReplay,
+  type GameCardDefinition,
   type GameDeckSpec,
   type GameLegalAction,
   type GameManifest,
@@ -27,14 +28,36 @@ function demoDeck(prefix: string): GameDeckSpec {
   };
 }
 
+function demoCards(decks: Readonly<Record<'north' | 'south', GameDeckSpec>>): Record<string, GameCardDefinition> {
+  const cards: Record<string, GameCardDefinition> = {};
+  for (const deck of Object.values(decks)) {
+    cards[deck.avatar] = { cardType: 'avatar' };
+    deck.atlas.forEach((cardId) => {
+      cards[cardId] = { cardType: 'site', elements: ['earth'] };
+    });
+    deck.spellbook.forEach((cardId) => {
+      cards[cardId] = {
+        attack: 1,
+        cardType: 'minion',
+        defense: 1,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      };
+    });
+  }
+  return cards;
+}
+
 export function createSyntheticDemoManifest(seed = 1): GameManifest {
+  const decks = { north: demoDeck('north'), south: demoDeck('south') };
   return createGameManifest({
     authority: {
       contentHash: SYNTHETIC_AUTHORITY_HASH,
       mode: 'synthetic',
       revisionId: 'synthetic-setup-fixture-v1',
     },
-    decks: { north: demoDeck('north'), south: demoDeck('south') },
+    cards: demoCards(decks),
+    decks,
     firstSeat: 'north',
     seed,
   });
@@ -47,6 +70,7 @@ function selectAction(session: GameSession): GameLegalAction {
       && descriptor.atlasOrder.length === 0
       && descriptor.spellbookOrder.length === 0)
     ?? actions.find(({ descriptor }) => descriptor.kind === 'play-site')
+    ?? actions.find(({ descriptor }) => descriptor.kind === 'summon-minion')
     ?? actions.find(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas')
     ?? actions.find(({ descriptor }) => descriptor.kind === 'end-turn');
   if (!selected) throw new Error('deterministic demo agent has no supported legal action');

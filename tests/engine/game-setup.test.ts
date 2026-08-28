@@ -10,6 +10,7 @@ import {
   observeGame,
   stepGame,
   verifyGameReplay,
+  type GameCardDefinition,
   type GameDeckSpec,
   type GameLegalAction,
   type GameManifest,
@@ -27,23 +28,57 @@ function deck(prefix: string, atlasCount = 30, spellbookCount = 50): GameDeckSpe
   };
 }
 
+type SpellFacts = Readonly<{
+  manaCost: number;
+  thresholds: Readonly<{ air: number; earth: number; fire: number; water: number }>;
+}>;
+
+function cardsFor(
+  decks: Readonly<Record<'north' | 'south', GameDeckSpec>>,
+  spell: SpellFacts = {
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  },
+): Record<string, GameCardDefinition> {
+  const cards: Record<string, GameCardDefinition> = {};
+  for (const playerDeck of Object.values(decks)) {
+    cards[playerDeck.avatar] = { cardType: 'avatar' };
+    playerDeck.atlas.forEach((cardId) => {
+      cards[cardId] = { cardType: 'site', elements: ['earth'] };
+    });
+    playerDeck.spellbook.forEach((cardId) => {
+      cards[cardId] = {
+        attack: 1,
+        cardType: 'minion',
+        defense: 1,
+        manaCost: spell.manaCost,
+        thresholds: { ...spell.thresholds },
+      };
+    });
+  }
+  return cards;
+}
+
 function manifest(
   seed = 1,
   options: Readonly<{
     north?: GameDeckSpec;
     south?: GameDeckSpec;
+    spell?: SpellFacts;
   }> = {},
 ): GameManifest {
+  const decks = {
+    north: options.north ?? deck('north'),
+    south: options.south ?? deck('south'),
+  };
   return createGameManifest({
     authority: {
       contentHash: SYNTHETIC_AUTHORITY_HASH,
       mode: 'synthetic',
       revisionId: 'synthetic-setup-fixture-v1',
     },
-    decks: {
-      north: options.north ?? deck('north'),
-      south: options.south ?? deck('south'),
-    },
+    cards: cardsFor(decks, options.spell),
+    decks,
     firstSeat: 'north',
     seed,
   });
@@ -92,6 +127,35 @@ test('RULE-01 setup shuffles two decks, deals split hidden hands, and places Ava
   assert.doesNotMatch(JSON.stringify(southView), /north-(?:site|spell)-/);
   assert.equal(legalGameActions(session.state, 'north').length, 76);
   assert.deepEqual(legalGameActions(session.state, 'south'), []);
+});
+
+test('RULE-06 the manifest accepts only exact deck-scoped supported card facts', () => {
+  const decks = { north: deck('north'), south: deck('south') };
+  const cards = cardsFor(decks);
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-catalog-validation-v1',
+    },
+    decks,
+    firstSeat: 'north' as const,
+    seed: 3,
+  };
+  assert.doesNotThrow(() => createGameManifest({ ...input, cards }));
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: { ...cards, unused: { cardType: 'avatar' } },
+  }), /exactly the deck-referenced definitions/);
+  const firstSpell = decks.north.spellbook[0];
+  assert.ok(firstSpell);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: { cardType: 'magic' } as unknown as GameCardDefinition,
+    },
+  }), /unsupported/);
 });
 
 test('TEST-03 different opponent hidden cards cannot change an observation or legal actions', () => {
@@ -161,7 +225,10 @@ test('RULE-01 first player skips its draw, establishes a domain, then second pla
   assert.equal(session.state.players.north.avatar.tapped, true);
   assert.equal(session.state.players.north.domainEstablished, true);
   assert.equal(session.state.players.north.mana, 1);
-  assert.deepEqual(legalGameActions(session.state, 'north').map(({ descriptor }) => descriptor.kind), ['end-turn']);
+  const afterSiteKinds = legalGameActions(session.state, 'north').map(({ descriptor }) => descriptor.kind);
+  assert.equal(afterSiteKinds.includes('play-site'), false);
+  assert.equal(afterSiteKinds.includes('draw-site'), false);
+  assert.equal(afterSiteKinds.includes('end-turn'), true);
 
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
   assert.equal(session.state.turnNumber, 2);
@@ -181,10 +248,10 @@ test('RULE-01 first player skips its draw, establishes a domain, then second pla
   assert.equal(verifyGameReplay(session), true);
 });
 
-function northSecondMain(seed = 23, shortDecks = false): GameSession {
+function northSecondMain(seed = 23, shortDecks = false, spell?: SpellFacts): GameSession {
   const options = shortDecks
-    ? { north: deck('north', 3, 4), south: deck('south', 3, 4) }
-    : {};
+    ? { north: deck('north', 3, 4), south: deck('south', 3, 4), ...(spell ? { spell } : {}) }
+    : spell ? { spell } : {};
   let session = keep(createGameSession(manifest(seed, options)));
   session = keep(session);
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
@@ -221,7 +288,10 @@ test('RULE-02 sites expand through unoccupied orthogonal cells controlled by the
   assert.equal(session.state.players.north.avatar.tapped, true);
   assert.equal(session.state.players.north.mana, 2);
   assert.equal(result.receipt.events[0]?.type, 'site-played');
-  assert.deepEqual(legalGameActions(session.state, 'north').map(({ descriptor }) => descriptor.kind), ['end-turn']);
+  const afterPlayKinds = legalGameActions(session.state, 'north').map(({ descriptor }) => descriptor.kind);
+  assert.equal(afterPlayKinds.includes('play-site'), false);
+  assert.equal(afterPlayKinds.includes('draw-site'), false);
+  assert.equal(afterPlayKinds.includes('end-turn'), true);
   assert.equal(verifyGameReplay(session), true);
 
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
@@ -258,7 +328,10 @@ test('RULE-02 the Avatar may draw a private site instead of playing one', () => 
   assert.equal(result.receipt.events[0]?.type, 'site-drawn');
   assert.equal(canonicalJson(result.receipt.events[0]?.payload ?? null).includes(drawn.cardId), false);
   assert.equal(canonicalJson(observeGame(session.state, 'south')).includes(drawn.cardId), false);
-  assert.deepEqual(legalGameActions(session.state, 'north').map(({ descriptor }) => descriptor.kind), ['end-turn']);
+  const afterDrawKinds = legalGameActions(session.state, 'north').map(({ descriptor }) => descriptor.kind);
+  assert.equal(afterDrawKinds.includes('play-site'), false);
+  assert.equal(afterDrawKinds.includes('draw-site'), false);
+  assert.equal(afterDrawKinds.includes('end-turn'), true);
   assert.equal(verifyGameReplay(session), true);
 });
 
@@ -290,6 +363,80 @@ test('RULE-02 forged spatial actions cannot mutate the game', () => {
   assert.equal(result.reason.code, 'unknown_action');
   assert.equal(canonicalJson(result.session.state), beforeState);
   assert.equal(result.session.transcript.length, session.transcript.length);
+});
+
+test('RULE-03/04 a Spellcaster pays mana and summons a minion atop a controlled site', () => {
+  let session = keep(createGameSession(manifest(41)));
+  session = keep(session);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  const before = session.state.players.north;
+  const summons = legalGameActions(session.state, 'north')
+    .filter(({ descriptor }) => descriptor.kind === 'summon-minion');
+  assert.equal(observeGame(session.state, 'north').players.north.affinity.earth, 1);
+  assert.equal(summons.length, 3);
+  assert.ok(summons.every(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'C4'
+      && descriptor.casterInstanceId === before.avatar.card.instanceId
+      && descriptor.manaCost === 1));
+
+  const summon = summons[0];
+  assert.ok(summon);
+  const result = stepGame(session, summon);
+  assert.equal(result.accepted, true);
+  session = result.session;
+  const unit = session.state.realm.units[0];
+  assert.ok(unit);
+  assert.equal(session.state.players.north.hand.spellbook.length, before.hand.spellbook.length - 1);
+  assert.equal(session.state.players.north.mana, 0);
+  assert.deepEqual({
+    controller: unit.controller,
+    damage: unit.damage,
+    location: unit.location,
+    summoningSickness: unit.summoningSickness,
+    tapped: unit.tapped,
+  }, {
+    controller: 'north',
+    damage: 0,
+    location: 'C4',
+    summoningSickness: true,
+    tapped: false,
+  });
+  assert.equal(result.receipt.events[0]?.type, 'minion-summoned');
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'), false);
+
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  assert.equal(session.state.realm.units[0]?.summoningSickness, false);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 mana and every elemental threshold gate minion actions without being spent together', () => {
+  let session = northSecondMain(43, false, {
+    manaCost: 2,
+    thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+  });
+  assert.equal(session.state.players.north.mana, 1);
+  assert.equal(observeGame(session.state, 'north').players.north.affinity.earth, 1);
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'), false);
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C3'));
+  assert.equal(session.state.players.north.mana, 2);
+  assert.equal(observeGame(session.state, 'north').players.north.affinity.earth, 2);
+  const cardId = session.state.players.north.hand.spellbook[0]?.cardId;
+  assert.ok(cardId);
+  const cells = legalGameActions(session.state, 'north')
+    .filter(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cardId === cardId)
+    .map(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell);
+  assert.deepEqual(cells, ['C3', 'C4']);
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cardId === cardId && descriptor.cell === 'C4'));
+  assert.equal(session.state.players.north.mana, 0);
+  assert.equal(observeGame(session.state, 'north').players.north.affinity.earth, 2);
+  assert.equal(verifyGameReplay(session), true);
 });
 
 test('shared stale rejection leaves game state, PRNG, and accepted transcript unchanged', () => {

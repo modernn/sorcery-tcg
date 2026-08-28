@@ -94,7 +94,10 @@ test('browser API plays setup through the second-seat draw choice and verifies r
   const northMain = await json('/api/view?seat=north');
   const played = await submit(findAction(northMain, ({ kind }) => kind === 'play-site'));
   assert.equal(played.accepted, true);
-  const ended = await submit(findAction(played, ({ kind }) => kind === 'end-turn'));
+  const summoned = await submit(findAction(played, ({ kind }) => kind === 'summon-minion'));
+  assert.equal(summoned.accepted, true);
+  assert.equal((((summoned.view as JsonObject).realm as JsonObject).units as unknown[]).length, 1);
+  const ended = await submit(findAction(summoned, ({ kind }) => kind === 'end-turn'));
   assert.equal(ended.accepted, true);
 
   const southDraw = await json('/api/view?seat=south');
@@ -105,7 +108,7 @@ test('browser API plays setup through the second-seat draw choice and verifies r
 
   const replay = await post('/api/replay');
   assert.equal(replay.verified, true);
-  assert.equal(replay.acceptedActionCount, 5);
+  assert.equal(replay.acceptedActionCount, 6);
   assert.equal(replay.finalStateHash, drawn.stateHash);
 });
 
