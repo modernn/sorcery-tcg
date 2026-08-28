@@ -22,6 +22,7 @@
 - Minion-provided elemental affinity participates in threshold checks and disappears when the provider leaves the realm.
 - Positive Lethal damage destroys a minion regardless of defense; zero damage does not.
 - A narrow Genesis effect draws a hidden site after summoning and loses on an empty Atlas.
+- A sibling Genesis effect draws a hidden spell after summoning and loses on an empty Spellbook, preserving summon-before-draw event order.
 - A narrow minion mana ability that requires readiness, taps for temporary mana, and expires at End Phase.
 - Deathrite site draws resolve before simultaneous dead minions enter their cemeteries, including hidden draws and deck-empty loss.
 - A narrow site Genesis effect grants temporary mana on entry, emits causal gain evidence, and expires through the existing End Phase reset.
@@ -42,6 +43,7 @@
 - A second real-card Earth ramp deck that proves Ghost Town's site-entry temporary mana, provided Earth affinity, Field Laborers' readiness-gated temporary mana, Zombie Horde as a five-mana payoff with restricted Defend, Land Surveyor's Genesis draw, and Kettletop Leprechaun's Deathrite draw; short replays of the same deck prove Belmotte Longbowmen's one-step Ranged strike, Holy Warrior's one-use Ward against two consecutive shots, and Albespine Pikemen killing Bosk Troll before its return strike.
 - A third legal 30/60 Air teaching deck that proves Snallygaster's exact two-step Movement +1 paths and Roaming Monster's permission to summon onto an enemy site while ordinary minions remain restricted; variants prove Plumed Pegasus's diagonal flight and asymmetric attack/Intercept permissions, Band of Thieves's Stealth against Snow Leopard, and Cloud Spirit's legal return path, rejected repeated directed step, and exact three-step Airborne path ending with an available attack against Ghoul.
 - A legal 30/60 Air teaching-deck variant that proves Spectral Stalker can be summoned to an arbitrary real void, move through void, exit onto an enemy site's surface, and attack that site while a real non-Voidwalk minion has no void summon choice.
+- A legal 30/60 Air teaching-deck variant that proves Apprentice Wizard's Genesis draws a hidden spell after it is summoned while keeping the opponent view redacted.
 - A fourth legal 30/60 Water teaching deck that proves Muddy Pigs heals exactly 3 before entering its cemetery after a real simultaneous combat death; variants prove Sly Fox's end-turn Stealth timing and Sedge Crabs' C3-to-B3 sideways movement while real C2/C4 paths remain unavailable.
 - A legal 30/60 Water teaching-deck variant that proves Coral-Reef Kelpie has distinct surface and underwater summon choices at a real Water site while a real non-Submerge minion has only the surface choice.
 - A legal 30/60 Earth teaching-deck variant that proves Cave Trolls has distinct surface and underground summon choices at a real land site, travels underground beneath an enemy land site without attacking it, then surfaces and can attack that site; a real non-Burrowing minion has only the surface summon choice.
@@ -60,10 +62,10 @@
 - `pnpm game:demo -- 23`: completes in 138 accepted actions over 56 turns with byte-exact replay.
 - `pnpm play`: serves the playable core at `http://127.0.0.1:4174/`.
 - Browser checkpoint: a 22-action match moved a minion, handed Defend to the non-active seat, resolved a simultaneous trade into both cemeteries, and replayed byte-identically.
-- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 28-action Earth Burrowing, 24-action Earth first strike, 22-action Earth Ranged, 27-action Earth Ward, 27-action Airborne, 26-action Air Stealth, 26-action Air movement, 24-action Air Movement +2, 25-action Air unrestricted-summon, 17-action Air Voidwalk, 43-action Fire targeting/response, 23-action Water end-turn Stealth, 22-action Water sideways movement, 16-action Water Submerge, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
+- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 28-action Earth Burrowing, 24-action Earth first strike, 22-action Earth Ranged, 27-action Earth Ward, 27-action Airborne, 26-action Air Stealth, 26-action Air movement, 24-action Air Movement +2, 25-action Air unrestricted-summon, 17-action Air Voidwalk, 15-action Air Genesis spell-draw, 43-action Fire targeting/response, 23-action Water end-turn Stealth, 22-action Water sideways movement, 16-action Water Submerge, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
 - `pnpm game:verify-private`: one passing ignored-authority integration scenario.
 - Death's Door scenarios prove same-turn direct-damage immunity, later death blows, simultaneous-defeat draws, nonlethal site strikes, and exact replay.
-- `pnpm verify`: 231 passing public tests at this checkpoint.
+- `pnpm verify`: 232 passing public tests at this checkpoint.
 
 ## Still required for Phase 3
 

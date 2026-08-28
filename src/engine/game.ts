@@ -51,6 +51,7 @@ export type GameCardDefinition =
     deathriteHeal?: number;
     deathriteDrawSite?: boolean;
     defense: number;
+    genesisDrawSpell?: boolean;
     genesisDrawSite?: boolean;
     gainsStealthAtEndOfTurn?: boolean;
     lethal?: boolean;
@@ -508,6 +509,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.genesisDrawSite !== undefined && typeof card.genesisDrawSite !== 'boolean') {
     throw new RangeError(`${path}.genesisDrawSite must be boolean`);
   }
+  if (card.genesisDrawSpell !== undefined && typeof card.genesisDrawSpell !== 'boolean') {
+    throw new RangeError(`${path}.genesisDrawSpell must be boolean`);
+  }
+  if (card.genesisDrawSite && card.genesisDrawSpell) {
+    throw new RangeError(`${path} simultaneous Genesis site and spell draws are unsupported`);
+  }
   if (card.gainsStealthAtEndOfTurn !== undefined && typeof card.gainsStealthAtEndOfTurn !== 'boolean') {
     throw new RangeError(`${path}.gainsStealthAtEndOfTurn must be boolean`);
   }
@@ -639,6 +646,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.deathriteDrawSite === true ? { deathriteDrawSite: true } : {}),
             ...(card.deathriteHeal ? { deathriteHeal: card.deathriteHeal } : {}),
             defense: card.defense,
+            ...(card.genesisDrawSpell === true ? { genesisDrawSpell: true } : {}),
             ...(card.genesisDrawSite === true ? { genesisDrawSite: true } : {}),
             ...(card.gainsStealthAtEndOfTurn === true ? { gainsStealthAtEndOfTurn: true } : {}),
             ...(card.lethal === true ? { lethal: true } : {}),
@@ -2073,8 +2081,11 @@ function applyDescriptor(
       },
       type: 'minion-summoned',
     };
-    if (definition.genesisDrawSite) {
-      const [drawn, ...atlas] = updatedPlayer.atlas;
+    const genesisDrawZone = definition.genesisDrawSite
+      ? 'atlas'
+      : definition.genesisDrawSpell ? 'spellbook' : undefined;
+    if (genesisDrawZone) {
+      const [drawn, ...remaining] = updatedPlayer[genesisDrawZone];
       if (!drawn) {
         const winner = otherSeat(seat);
         return [
@@ -2090,8 +2101,11 @@ function applyDescriptor(
       }
       const drawingPlayer = deepFreeze({
         ...updatedPlayer,
-        atlas,
-        hand: { ...updatedPlayer.hand, atlas: [...updatedPlayer.hand.atlas, drawn] },
+        [genesisDrawZone]: remaining,
+        hand: {
+          ...updatedPlayer.hand,
+          [genesisDrawZone]: [...updatedPlayer.hand[genesisDrawZone], drawn],
+        },
       });
       return [
         withStateVersion(state, {
@@ -2100,7 +2114,10 @@ function applyDescriptor(
         }),
         [
           summoned,
-          { payload: { seat, sourceInstanceId: card.instanceId }, type: 'site-drawn' },
+          {
+            payload: { seat, sourceInstanceId: card.instanceId },
+            type: genesisDrawZone === 'atlas' ? 'site-drawn' : 'spell-drawn',
+          },
         ],
         [],
       ];
