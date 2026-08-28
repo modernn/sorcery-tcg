@@ -46,6 +46,7 @@ type SpellFacts = Readonly<{
   summonToAnySite?: boolean;
   tapForMana?: number;
   thresholds: Readonly<{ air: number; earth: number; fire: number; water: number }>;
+  ward?: boolean;
 }>;
 
 type AvatarFacts = Readonly<{
@@ -104,6 +105,7 @@ function cardsFor(
         summonToAnySite: spell.summonToAnySite ?? false,
         ...(spell.tapForMana ? { tapForMana: spell.tapForMana } : {}),
         thresholds: { ...spell.thresholds },
+        ward: spell.ward ?? false,
       };
     });
   }
@@ -794,8 +796,8 @@ test('RULE-04 a restricted attacker can target units but not sites', () => {
   assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-04 Ranged shoots a one-step projectile that strikes a unit without a return strike', () => {
-  let session = keep(createGameSession(manifest(116, {
+test('RULE-04 Ranged strikes without return damage and Ward prevents the first positive damage event', () => {
+  const base = manifest(116, {
     spell: {
       attack: 3,
       defense: 3,
@@ -803,7 +805,17 @@ test('RULE-04 Ranged shoots a one-step projectile that strikes a unit without a 
       ranged: true,
       thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
     },
-  })));
+  });
+  const wardManifest = createGameManifest({
+    ...base,
+    cards: Object.fromEntries(Object.entries(base.cards).map(([cardId, definition]) => [
+      cardId,
+      definition.cardType === 'minion' && cardId.startsWith('south-')
+        ? { ...definition, ranged: false, ward: true }
+        : definition,
+    ])),
+  });
+  let session = keep(createGameSession(wardManifest));
   session = keep(session);
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
   session = accept(session, action(session, ({ descriptor }) =>
@@ -874,19 +886,34 @@ test('RULE-04 Ranged shoots a one-step projectile that strikes a unit without a 
   session = accept(session, shot);
 
   const shooter = session.state.realm.units.find(({ instanceId }) => instanceId === shooterInstanceId);
+  const wardedTarget = session.state.realm.units.find(({ instanceId }) => instanceId === targetInstanceId);
   assert.deepEqual({ damage: shooter?.damage, location: shooter?.location, tapped: shooter?.tapped }, {
     damage: 0,
     location: 'C3',
     tapped: true,
   });
-  assert.equal(session.state.players.south.cemetery.some(({ instanceId }) => instanceId === targetInstanceId), true);
+  assert.deepEqual({ damage: wardedTarget?.damage, warded: wardedTarget?.warded }, { damage: 0, warded: false });
   assert.equal(session.state.realm.units.some(({ instanceId }) => instanceId === secondTargetInstanceId), true);
   assert.deepEqual(session.transcript.at(-1)?.events.map(({ type }) => type), [
     'projectile-shot',
     'strike-damage-allocated',
     'damage-dealt',
-    'minion-died',
+    'ward-broken',
   ]);
+  assert.equal(observeGame(session.state, 'north').realm.units
+    .find(({ instanceId }) => instanceId === targetInstanceId)?.warded, false);
+
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.shooterInstanceId === shooterInstanceId
+      && descriptor.hit?.instanceId === targetInstanceId));
+  assert.equal(session.state.players.south.cemetery.some(({ instanceId }) => instanceId === targetInstanceId), true);
   assert.equal(verifyGameReplay(session), true);
 });
 
