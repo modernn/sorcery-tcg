@@ -38,6 +38,7 @@ const DEFAULT_SCENARIO = resolve(
   'vanilla-constructed.json',
 );
 type ScenarioConfig = Readonly<{
+  airborneSeed: number;
   airSeed: number;
   avatar: Readonly<{ drawSpell: boolean; stableId: string }>;
   cannotDefendMinionStableId: string;
@@ -77,6 +78,18 @@ type DeckList = Readonly<{
 
 export type PrivateGameCheck = Readonly<{
   acceptedActionCount: number;
+  airborne: Readonly<{
+    acceptedActionCount: number;
+    airborneCanAttackGround: boolean;
+    airborneMinion: string;
+    deck: DeckList;
+    diagonalMove: boolean;
+    groundCannotAttackAirborne: boolean;
+    groundCannotIntercept: boolean;
+    groundMinion: string;
+    replayVerified: boolean;
+    seed: number;
+  }>;
   airMovement: Readonly<{
     acceptedActionCount: number;
     deck: DeckList;
@@ -202,6 +215,9 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
   }
   const avatar = value.avatar;
   if (!isJsonRecord(avatar)
+    || !Number.isSafeInteger(value.airborneSeed)
+    || typeof value.airborneSeed !== 'number'
+    || value.airborneSeed < 0
     || !Number.isSafeInteger(value.airSeed)
     || typeof value.airSeed !== 'number'
     || value.airSeed < 0
@@ -250,11 +266,12 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     || typeof value.waterSeed !== 'number'
     || value.waterSeed < 0
     || typeof value.wardMinionStableId !== 'string'
-    || Object.keys(value).sort().join(',') !== 'airSeed,avatar,cannotDefendMinionStableId,chargeMinionStableId,deathriteMinionStableId,earthFirstStrikeSeed,earthProviderMinionStableId,earthRangedSeed,earthSeed,earthWardSeed,fireSeed,firstStrikeMinionStableId,firstStrikeTargetMinionStableId,genesisMinionStableId,ghostTownSiteStableId,healingMinionStableId,lethalMinionStableId,lumberingMinionStableId,manaMinionStableId,monstrousLionStableId,movementMinionStableId,providerMinionStableId,rangedMinionStableId,revisionId,roamingMinionStableId,roamingSeed,seed,wardMinionStableId,waterSeed'
+    || Object.keys(value).sort().join(',') !== 'airSeed,airborneSeed,avatar,cannotDefendMinionStableId,chargeMinionStableId,deathriteMinionStableId,earthFirstStrikeSeed,earthProviderMinionStableId,earthRangedSeed,earthSeed,earthWardSeed,fireSeed,firstStrikeMinionStableId,firstStrikeTargetMinionStableId,genesisMinionStableId,ghostTownSiteStableId,healingMinionStableId,lethalMinionStableId,lumberingMinionStableId,manaMinionStableId,monstrousLionStableId,movementMinionStableId,providerMinionStableId,rangedMinionStableId,revisionId,roamingMinionStableId,roamingSeed,seed,wardMinionStableId,waterSeed'
     || Object.keys(avatar).sort().join(',') !== 'drawSpell,stableId') {
     throw new Error('private game scenario has an unsupported shape');
   }
   return {
+    airborneSeed: value.airborneSeed,
     airSeed: value.airSeed,
     avatar: { drawSpell: avatar.drawSpell, stableId: avatar.stableId },
     cannotDefendMinionStableId: value.cannotDefendMinionStableId,
@@ -288,6 +305,8 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
 }
 
 async function readPrivateInputs(path: string): Promise<Readonly<{
+  airborneMinion: NormalizedCard;
+  airborneTargetMinion: NormalizedCard;
   authorityHash: Hash;
   cards: readonly NormalizedCard[];
   cannotDefendMinion: NormalizedCard;
@@ -324,6 +343,38 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     throw new Error('private normalized card artifact identity is invalid');
   }
   const snapshot = normalizedCardSnapshotSchema.parse(artifact.identity.payload);
+  const airborneMinion = snapshot.cards.find(({ name }) => name === 'Plumed Pegasus');
+  if (!airborneMinion
+    || airborneMinion.cardType !== 'minion'
+    || airborneMinion.rulesText.trim() !== 'Airborne'
+    || airborneMinion.manaCost !== 3
+    || airborneMinion.attack !== 3
+    || airborneMinion.defense !== 3
+    || airborneMinion.elements.length !== 1
+    || airborneMinion.elements[0] !== 'air'
+    || airborneMinion.thresholds.air !== 1
+    || airborneMinion.thresholds.earth !== 0
+    || airborneMinion.thresholds.fire !== 0
+    || airborneMinion.thresholds.water !== 0
+    || airborneMinion.rarity !== 'ordinary') {
+    throw new Error('private Airborne minion no longer matches its supported facts');
+  }
+  const airborneTargetMinion = snapshot.cards.find(({ name }) => name === 'Ghoul');
+  if (!airborneTargetMinion
+    || airborneTargetMinion.cardType !== 'minion'
+    || airborneTargetMinion.rulesText.trim() !== ''
+    || airborneTargetMinion.manaCost !== 3
+    || airborneTargetMinion.attack !== 3
+    || airborneTargetMinion.defense !== 3
+    || airborneTargetMinion.elements.length !== 1
+    || airborneTargetMinion.elements[0] !== 'air'
+    || airborneTargetMinion.thresholds.air !== 1
+    || airborneTargetMinion.thresholds.earth !== 0
+    || airborneTargetMinion.thresholds.fire !== 0
+    || airborneTargetMinion.thresholds.water !== 0
+    || airborneTargetMinion.rarity !== 'ordinary') {
+    throw new Error('private Airborne target minion no longer matches its supported facts');
+  }
   const cannotDefendMinion = snapshot.cards
     .find(({ stableId }) => stableId === config.cannotDefendMinionStableId);
   if (!cannotDefendMinion
@@ -543,6 +594,8 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     .sort((left, right) => right.identity.payload.effectiveDate.localeCompare(left.identity.payload.effectiveDate))[0];
   if (!selected) throw new Error('private authority has no Constructed format');
   return {
+    airborneMinion,
+    airborneTargetMinion,
     authorityHash: artifact.contentHash,
     cards: snapshot.cards,
     cannotDefendMinion,
@@ -611,6 +664,7 @@ function gameDefinition(
   ranged = false,
   strikesFirstWhileAttacking = false,
   ward = false,
+  airborne = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -636,6 +690,7 @@ function gameDefinition(
     && card.defense !== null
     && card.manaCost !== null) {
     return {
+      airborne,
       attack: card.attack,
       cardType: 'minion',
       cannotAttackSites,
@@ -664,7 +719,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'combat' | 'earth' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'water' = 'combat',
+  scenario: 'air' | 'airborne' | 'combat' | 'earth' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'water' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -763,8 +818,16 @@ function buildManifest(
     input.firstStrikeMinion,
     input.firstStrikeTargetMinion,
   ], [input.ghostTownSite]);
+  const airborneDeck = elementalDeck('air', [
+    input.movementMinion,
+    input.roamingMinion,
+    input.airborneMinion,
+    input.airborneTargetMinion,
+  ]);
   const decks = {
-    north: scenario === 'earth' || scenario === 'earth-first-strike' || scenario === 'earth-ward'
+    north: scenario === 'airborne'
+      ? airborneDeck
+      : scenario === 'earth' || scenario === 'earth-first-strike' || scenario === 'earth-ward'
       ? earthDeck
       : scenario === 'air'
         ? elementalDeck('air', [input.movementMinion, input.roamingMinion])
@@ -773,7 +836,9 @@ function buildManifest(
         : scenario === 'water'
           ? elementalDeck('water', [input.healingMinion])
           : deck(false, true),
-    south: scenario === 'earth-first-strike' || scenario === 'earth-ward' ? earthDeck : deck(true, false),
+    south: scenario === 'airborne'
+      ? airborneDeck
+      : scenario === 'earth-first-strike' || scenario === 'earth-ward' ? earthDeck : deck(true, false),
   };
   const referenced = new Set([
     decks.north.avatar,
@@ -809,6 +874,7 @@ function buildManifest(
       card.stableId === input.rangedMinion.stableId,
       card.stableId === input.firstStrikeMinion.stableId,
       card.stableId === input.wardMinion.stableId,
+      card.stableId === input.airborneMinion.stableId,
     ),
   ]));
   return {
@@ -1210,6 +1276,63 @@ function findAirOpening(
     };
   }
   throw new Error(`private Air scenario seed ${seed} no longer produces its supported opening`);
+}
+
+function findAirborneOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  airborneInstanceId: string;
+  groundInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string];
+  seed: number;
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string, string];
+}> {
+  const seed = input.config.airborneSeed;
+    const built = buildManifest(input, seed, 'airborne');
+    const session = createGameSession(built.manifest);
+    const sites = (seat: GameSeat) => session.state.players[seat].hand.atlas;
+    const northSites = sites('north');
+    const southSites = sites('south');
+    const northSiteInstanceIds = northSites.map(({ instanceId }) => instanceId);
+    const southSiteInstanceIds = southSites.map(({ instanceId }) => instanceId);
+    const airborneInstanceId = availableMinionInstance(
+      session,
+      'north',
+      input.airborneMinion.stableId,
+      2,
+    );
+    const groundInstanceId = availableMinionInstance(
+      session,
+      'south',
+      input.airborneTargetMinion.stableId,
+      3,
+    );
+    if (northSiteInstanceIds.length === 3
+      && southSiteInstanceIds.length === 3
+      && northSites.some(({ cardId }) => {
+        const definition = session.state.cards[cardId];
+        return definition?.cardType === 'site' && definition.elements.includes('air');
+      })
+      && southSites.some(({ cardId }) => {
+        const definition = session.state.cards[cardId];
+        return definition?.cardType === 'site' && definition.elements.includes('air');
+      })
+      && airborneInstanceId
+      && groundInstanceId) {
+      return {
+        ...built,
+        airborneInstanceId,
+        groundInstanceId,
+        northSiteInstanceIds: northSiteInstanceIds as [string, string, string],
+        seed,
+        session,
+        southSiteInstanceIds: southSiteInstanceIds as [string, string, string],
+      };
+  }
+  throw new Error(`private Airborne scenario seed ${seed} no longer produces its supported opening`);
 }
 
 function findAirSummoningOpening(
@@ -1843,6 +1966,98 @@ function runAirMovement(
   });
 }
 
+function runAirborne(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airborne'] {
+  const opening = findAirborneOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+      && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+      && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+      && descriptor.cell === 'B3');
+  take(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.airborneInstanceId
+      && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.southSiteInstanceIds[2]
+      && descriptor.cell === 'B2');
+  take(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.groundInstanceId
+      && descriptor.cell === 'B2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const move = action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.airborneInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,B2');
+  const diagonalMove = move.descriptor.kind === 'move-and-attack'
+    && move.descriptor.path.length === 2;
+  session = accept(session, move);
+  const airborneCanAttackGround = legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === opening.groundInstanceId);
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  const groundCannotIntercept = session.state.phase === 'main';
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.groundInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'B2');
+  const groundCannotAttackAirborne = legalGameActions(session.state, 'south').every(({ descriptor }) =>
+    descriptor.kind !== 'declare-attack'
+      || descriptor.target.kind !== 'minion'
+      || descriptor.target.instanceId !== opening.airborneInstanceId);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    airborneCanAttackGround,
+    airborneMinion: opening.names.get(input.airborneMinion.stableId) ?? input.airborneMinion.stableId,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    diagonalMove,
+    groundCannotAttackAirborne,
+    groundCannotIntercept,
+    groundMinion:
+      opening.names.get(input.airborneTargetMinion.stableId) ?? input.airborneTargetMinion.stableId,
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+  });
+}
+
 function runAirSummoning(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['airSummoning'] {
@@ -2137,6 +2352,7 @@ function runWaterHealing(
 
 export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<PrivateGameCheck> {
   const input = await readPrivateInputs(path);
+  const airborne = runAirborne(input);
   const airMovement = runAirMovement(input);
   const airSummoning = runAirSummoning(input);
   const earthFirstStrike = runEarthFirstStrike(input);
@@ -2250,6 +2466,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const southDefinition = opening.session.state.cards[southCardId];
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
+    airborne,
     airMovement,
     airSummoning,
     authorityHash: input.authorityHash,

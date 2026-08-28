@@ -6,6 +6,19 @@ import { runPrivateGameCheck } from '../../src/commands/run-private-game-check.t
 test('private actual-card decks complete deterministic combat, Earth, Air, Fire, and Water scenarios', async () => {
   const result = await runPrivateGameCheck();
   assert.equal(result.classification, 'private-local_actual-cards_unranked-partial-rules');
+  assert.equal(result.airborne.airborneMinion, 'Plumed Pegasus');
+  assert.equal(result.airborne.groundMinion, 'Ghoul');
+  assert.equal(result.airborne.diagonalMove, true);
+  assert.equal(result.airborne.airborneCanAttackGround, true);
+  assert.equal(result.airborne.groundCannotIntercept, true);
+  assert.equal(result.airborne.groundCannotAttackAirborne, true);
+  assert.equal(result.airborne.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airborne.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airborne.deck.spellbook
+    .find(({ name }) => name === 'Plumed Pegasus')?.copies, 4);
+  assert.equal(result.airborne.deck.spellbook
+    .find(({ name }) => name === 'Ghoul')?.copies, 4);
+  assert.equal(result.airborne.replayVerified, true);
   assert.equal(result.airMovement.movementMinion, 'Snallygaster');
   assert.equal(result.airMovement.twoStepDefend, true);
   assert.equal(result.airMovement.twoStepMoveAndAttack, true);
