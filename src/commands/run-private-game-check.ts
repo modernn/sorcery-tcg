@@ -430,6 +430,22 @@ export type PrivateGameCheck = Readonly<{
     wardTargetDiedAfterSecondShot: boolean;
     wardTargetSurvived: boolean;
   }>;
+  fireCharge: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    charge: string;
+    deck: DeckList;
+    exactNonTargetAllyChoice: boolean;
+    expiredAtEndOfTurn: boolean;
+    manaPaid: number;
+    moveAvailableAfterCharge: boolean;
+    moveUnavailableBeforeCharge: boolean;
+    raalDromedary: string;
+    replayVerified: boolean;
+    spellEnteredCemetery: boolean;
+    temporaryChargeRecorded: boolean;
+    unitStatePreservedOnGrant: boolean;
+  }>;
   fireMinorExplosion: Readonly<{
     acceptedActionCount: number;
     avatarTookThreeDamage: boolean;
@@ -717,6 +733,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   burrowingMinion: NormalizedCard;
   cards: readonly NormalizedCard[];
   cannotDefendMinion: NormalizedCard;
+  chargeMagic: NormalizedCard;
   chargeMinion: NormalizedCard;
   config: ScenarioConfig;
   deathriteMinion: NormalizedCard;
@@ -913,6 +930,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || minorExplosion.thresholds.water !== 0
     || minorExplosion.rarity !== 'ordinary') {
     throw new Error('private location-wide damage Magic no longer matches its supported facts');
+  }
+  const chargeMagic = snapshot.cards.find(({ name }) => name === 'Charge');
+  if (!chargeMagic
+    || chargeMagic.cardType !== 'magic'
+    || ruleTextDigest(chargeMagic.rulesText) !== 'sha256:8dcca712f443c631d09c5f0c0870d845f8d303ddf7dcab146a69c2c101e71d10'
+    || chargeMagic.manaCost !== 1
+    || chargeMagic.attack !== null
+    || chargeMagic.defense !== null
+    || chargeMagic.life !== null
+    || chargeMagic.elements.length !== 1
+    || chargeMagic.elements[0] !== 'fire'
+    || chargeMagic.thresholds.air !== 0
+    || chargeMagic.thresholds.earth !== 0
+    || chargeMagic.thresholds.fire !== 1
+    || chargeMagic.thresholds.water !== 0
+    || chargeMagic.rarity !== 'ordinary') {
+    throw new Error('private temporary Charge Magic no longer matches its supported facts');
   }
   const freeze = snapshot.cards.find(({ name }) => name === 'Freeze');
   if (!freeze
@@ -1574,6 +1608,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     burrowingMinion,
     cards: snapshot.cards,
     cannotDefendMinion,
+    chargeMagic,
     chargeMinion,
     config,
     dalceanPhalanx,
@@ -1698,6 +1733,7 @@ function gameDefinition(
   sacrificeToDestroyNearbySite = false,
   submergeTargetMinion = false,
   damageEachUnitAtLocationWithinTwoSteps: 0 | 3 = 0,
+  grantChargeToAllyThisTurn = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1727,6 +1763,7 @@ function gameDefinition(
   const supportedMagicEffects = Number(damageTargetUnit !== 0)
     + Number(damageEachUnitAtLocationWithinTwoSteps !== 0)
     + Number(damageRandomUnitAtLocation !== 0)
+    + Number(grantChargeToAllyThisTurn)
     + Number(teleportAllyToTargetSite)
     + Number(returnMinionFromOwnCemetery)
     + Number(disableTargetNearbyMinionUntilNextTurn)
@@ -1745,8 +1782,10 @@ function gameDefinition(
         : damageEachUnitAtLocationWithinTwoSteps !== 0
           ? { damageEachUnitAtLocationWithinTwoSteps }
           : damageRandomUnitAtLocation !== 0
-          ? { damageRandomUnitAtLocation }
-          : teleportAllyToTargetSite
+            ? { damageRandomUnitAtLocation }
+            : grantChargeToAllyThisTurn
+              ? { grantChargeToAllyThisTurn: true }
+              : teleportAllyToTargetSite
             ? { teleportAllyToTargetSite: true }
             : returnMinionFromOwnCemetery
               ? { returnMinionFromOwnCemetery: true }
@@ -1807,7 +1846,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-charge' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1961,6 +2000,12 @@ function buildManifest(
     [],
     [input.minorExplosion],
   );
+  const fireChargeDeck = elementalDeck(
+    'fire',
+    [input.raalDromedary],
+    [],
+    [input.chargeMagic],
+  );
   const waterDeck = elementalDeck('water', [
     input.healingMinion,
     input.slyFox,
@@ -2046,6 +2091,8 @@ function buildManifest(
         ? elementalDeck('air', [input.movementMinion, input.roamingMinion])
         : scenario === 'fire'
           ? elementalDeck('fire', [input.lumberingMinion, input.monstrousLion])
+        : scenario === 'fire-charge'
+          ? fireChargeDeck
         : scenario === 'fire-minor-explosion'
           ? fireMinorExplosionDeck
         : scenario === 'water-edge-connection'
@@ -2184,6 +2231,7 @@ function buildManifest(
       card.stableId === input.sinkhole.stableId,
       card.stableId === input.drown.stableId,
       card.stableId === input.minorExplosion.stableId ? 3 : 0,
+      card.stableId === input.chargeMagic.stableId,
     ),
   ]));
   return {
@@ -3316,6 +3364,54 @@ function findAirTeleportOpening(
     }
   }
   throw new Error('private ally-to-site Teleport scenario no longer produces its supported opening');
+}
+
+function findFireChargeOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  chargeInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string];
+  raalInstanceId: string;
+  session: GameSession;
+  southSiteInstanceId: string;
+}> {
+  // ponytail: a bounded opening scan avoids adding another private seed field.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const built = buildManifest(input, input.config.fireSeed + offset, 'fire-charge');
+    const session = createGameSession(built.manifest);
+    const northFireSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('fire');
+    });
+    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+    const accessibleSpells = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 1),
+    ];
+    const chargeInstanceId = accessibleSpells
+      .find(({ cardId }) => cardId === input.chargeMagic.stableId)?.instanceId;
+    const raalInstanceId = accessibleSpells
+      .find(({ cardId }) => cardId === input.raalDromedary.stableId)?.instanceId;
+    if (northFireSites.length >= 2
+      && southSiteInstanceId
+      && chargeInstanceId
+      && raalInstanceId) {
+      return {
+        ...built,
+        chargeInstanceId,
+        northSiteInstanceIds: [
+          northFireSites[0]!.instanceId,
+          northFireSites[1]!.instanceId,
+        ],
+        raalInstanceId,
+        session,
+        southSiteInstanceId,
+      };
+    }
+  }
+  throw new Error('private temporary Charge Magic scenario lacks its supported opening');
 }
 
 function findFireMinorExplosionOpening(
@@ -6436,6 +6532,138 @@ function runAirSummoning(
   });
 }
 
+function runFireCharge(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['fireCharge'] {
+  const opening = findFireChargeOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.raalInstanceId
+    && descriptor.cell === 'C3');
+
+  const hasPositiveRaalMove = (candidate: GameSession): boolean =>
+    legalGameActions(candidate.state, 'north').some(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === opening.raalInstanceId
+        && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C4');
+  const before = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.raalInstanceId);
+  if (!before) throw new Error('private temporary Charge setup lacks Raal Dromedary');
+  const moveUnavailableBeforeCharge = legalGameActions(session.state, 'north')
+    .every(({ descriptor }) =>
+      descriptor.kind !== 'move-and-attack'
+        || descriptor.unitInstanceId !== opening.raalInstanceId);
+  const chargeActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.chargeInstanceId
+      && descriptor.ally?.kind === 'minion'
+      && descriptor.ally.instanceId === opening.raalInstanceId
+      && descriptor.ally.seat === 'north'
+      && descriptor.target === undefined
+      && descriptor.targetLocation === undefined
+      && descriptor.targetSiteInstanceId === undefined
+      && descriptor.cemeteryMinionInstanceId === undefined);
+  const chosenCharge = chargeActions[0];
+  if (!chosenCharge || chargeActions.length !== 1) {
+    throw new Error('private non-target Charge ally choice is not exactly available');
+  }
+  const manaBefore = session.state.players.north.mana;
+  session = accept(session, chosenCharge);
+  const after = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.raalInstanceId);
+  if (!after) throw new Error('private temporary Charge removed its ally');
+  const castEvents = session.transcript.at(-1)?.events ?? [];
+  const castPayload = castEvents[0] && isJsonRecord(castEvents[0].payload)
+    ? castEvents[0].payload
+    : undefined;
+  const grantedPayload = castEvents[1] && isJsonRecord(castEvents[1].payload)
+    ? castEvents[1].payload
+    : undefined;
+  const resolvedPayload = castEvents[2] && isJsonRecord(castEvents[2].payload)
+    ? castEvents[2].payload
+    : undefined;
+  const temporaryChargeRecorded = after.temporaryChargeSources?.length === 1
+    && after.temporaryChargeSources[0] === opening.chargeInstanceId;
+  const moveAvailableAfterCharge = hasPositiveRaalMove(session);
+  const unitStatePreservedOnGrant = after.cardId === before.cardId
+    && after.controller === before.controller
+    && after.damage === before.damage
+    && after.location === before.location
+    && after.owner === before.owner
+    && after.region === before.region
+    && after.stealthed === before.stealthed
+    && after.summoningSickness === before.summoningSickness
+    && after.tapped === before.tapped
+    && after.warded === before.warded;
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  const expired = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.raalInstanceId);
+  const expiryEvents = session.transcript.at(-1)?.events ?? [];
+  const expiryIndex = expiryEvents.findIndex(({ payload, type }) =>
+    type === 'charge-expired'
+      && isJsonRecord(payload)
+      && payload.instanceId === opening.raalInstanceId
+      && payload.seat === 'north'
+      && payload.sourceInstanceId === opening.chargeInstanceId);
+  const turnEndedIndex = expiryEvents.findIndex(({ payload, type }) =>
+    type === 'turn-ended' && isJsonRecord(payload) && payload.seat === 'north');
+  const expiredAtEndOfTurn = expired !== undefined
+    && expired.temporaryChargeSources === undefined
+    && expiryIndex >= 0
+    && expiryIndex < turnEndedIndex;
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified: castEvents.map(({ type }) => type).join(',')
+      === 'magic-cast,charge-granted,magic-resolved'
+      && castPayload?.instanceId === opening.chargeInstanceId
+      && castPayload.manaPaid === 1
+      && castPayload.seat === 'north'
+      && castPayload.allyInstanceId === opening.raalInstanceId
+      && castPayload.allySeat === 'north'
+      && grantedPayload?.instanceId === opening.raalInstanceId
+      && grantedPayload.seat === 'north'
+      && grantedPayload.sourceInstanceId === opening.chargeInstanceId
+      && resolvedPayload?.instanceId === opening.chargeInstanceId
+      && expiryIndex >= 0
+      && expiryIndex < turnEndedIndex,
+    charge: input.chargeMagic.name,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    exactNonTargetAllyChoice: chargeActions.length === 1,
+    expiredAtEndOfTurn,
+    manaPaid: manaBefore - session.state.players.north.mana,
+    moveAvailableAfterCharge,
+    moveUnavailableBeforeCharge,
+    raalDromedary: input.raalDromedary.name,
+    replayVerified: verifyGameReplay(session),
+    spellEnteredCemetery: session.state.players.north.hand.spellbook
+      .every(({ instanceId }) => instanceId !== opening.chargeInstanceId)
+      && session.state.players.north.cemetery
+        .some(({ instanceId }) => instanceId === opening.chargeInstanceId),
+    temporaryChargeRecorded,
+    unitStatePreservedOnGrant,
+  });
+}
+
 function runFireMinorExplosion(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['fireMinorExplosion'] {
@@ -7507,6 +7735,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthRanged = runEarthRanged(input);
   const earthSecretTunnel = runEarthSecretTunnel(input);
   const earthWard = runEarthWard(input);
+  const fireCharge = runFireCharge(input);
   const fireMinorExplosion = runFireMinorExplosion(input);
   const fireResponse = runFireResponse(input);
   const stealth = runStealth(input);
@@ -7668,6 +7897,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthRanged,
     earthSecretTunnel,
     earthWard,
+    fireCharge,
     fireMinorExplosion,
     fireResponse,
     finalStateHash: hashGameState(session.state),

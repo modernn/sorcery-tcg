@@ -54,6 +54,7 @@ export type GameCardDefinition =
     damageRandomUnitAtLocation?: number;
     damageTargetUnit?: number;
     disableTargetNearbyMinionUntilNextTurn?: true;
+    grantChargeToAllyThisTurn?: true;
     healController?: number;
     manaCost: number;
     returnMinionFromOwnCemetery?: true;
@@ -156,6 +157,7 @@ type UnitInstance = Readonly<CardInstance & {
   stealthed: boolean;
   summoningSickness: boolean;
   tapped: boolean;
+  temporaryChargeSources?: readonly StateHash[];
   warded: boolean;
 }>;
 
@@ -560,6 +562,9 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
       kind: 'cast-magic' as const,
     };
     if (definition.healController !== undefined) return [cast];
+    if (definition.grantChargeToAllyThisTurn === true) {
+      return unitRefs(state, seat).map((ally) => ({ ...cast, ally }));
+    }
     if (definition.returnMinionFromOwnCemetery === true) {
       const eligible = player.cemetery.filter(({ cardId }) =>
         cardDefinition(state, cardId).cardType === 'minion');
@@ -684,12 +689,17 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.disableTargetNearbyMinionUntilNextTurn !== true) {
       throw new RangeError(`${path}.disableTargetNearbyMinionUntilNextTurn must be true when defined`);
     }
+    if (card.grantChargeToAllyThisTurn !== undefined
+      && card.grantChargeToAllyThisTurn !== true) {
+      throw new RangeError(`${path}.grantChargeToAllyThisTurn must be true when defined`);
+    }
     const effectCount = Number(card.burrowTargetMinion === true)
       + Number(card.submergeTargetMinion === true)
       + Number(card.damageEachUnitAtLocationWithinTwoSteps !== undefined)
       + Number(card.damageRandomUnitAtLocation !== undefined)
       + Number(card.damageTargetUnit !== undefined)
       + Number(card.disableTargetNearbyMinionUntilNextTurn === true)
+      + Number(card.grantChargeToAllyThisTurn === true)
       + Number(card.healController !== undefined)
       + Number(card.returnMinionFromOwnCemetery === true)
       + Number(card.teleportAllyToTargetSite === true);
@@ -953,6 +963,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                   ? { damageTargetUnit: card.damageTargetUnit }
                   : card.disableTargetNearbyMinionUntilNextTurn === true
                     ? { disableTargetNearbyMinionUntilNextTurn: true as const }
+                  : card.grantChargeToAllyThisTurn === true
+                    ? { grantChargeToAllyThisTurn: true as const }
                   : card.healController !== undefined
                     ? { healController: card.healController }
                     : card.returnMinionFromOwnCemetery === true
@@ -1392,7 +1404,8 @@ function unitStatus(
     canAttackSites: !disabled && definition.cannotAttackSites !== true,
     canMoveToDefend: !disabled && definition.cannotDefend !== true,
     canRespondToAttack: !disabled && definition.cannotDefendOrIntercept !== true,
-    charge: !disabled && definition.charge === true,
+    charge: !disabled
+      && (definition.charge === true || Boolean(unit.temporaryChargeSources?.length)),
     connectsTopBottom: !disabled && definition.connectsTopBottom === true,
     disabled,
     immobile: !disabled && definition.immobile === true,
@@ -1929,6 +1942,8 @@ function actionLabel(descriptor: GameActionDescriptor): string {
       ? `Cast ${descriptor.cardId} on ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`
       : descriptor.ally && descriptor.targetLocation
         ? `Cast ${descriptor.cardId} to teleport ${descriptor.ally.kind} ${descriptor.ally.instanceId.slice(0, 15)}… to ${descriptor.targetLocation.cell}`
+      : descriptor.ally
+        ? `Cast ${descriptor.cardId} to grant Charge to ${descriptor.ally.kind} ${descriptor.ally.instanceId.slice(0, 15)}…`
       : descriptor.targetLocation
         ? `Cast ${descriptor.cardId} at ${descriptor.targetLocation.cell} ${descriptor.targetLocation.region}`
       : `Cast ${descriptor.cardId}`;
@@ -2965,6 +2980,58 @@ function applyDescriptor(
         [],
       ];
     }
+    if (definition.grantChargeToAllyThisTurn === true) {
+      if (!descriptor.ally) throw new Error('unreachable Charge cast');
+      if (descriptor.ally.kind === 'avatar') {
+        return [
+          withStateVersion(castState, {}),
+          [
+            castOutcome,
+            {
+              payload: {
+                instanceId: descriptor.ally.instanceId,
+                seat,
+                sourceInstanceId: card.instanceId,
+              },
+              type: 'charge-granted',
+            },
+            resolved,
+          ],
+          [],
+        ];
+      }
+      const allyIndex = castState.realm.units.findIndex(({ controller, instanceId }) =>
+        controller === seat && instanceId === descriptor.ally!.instanceId);
+      const ally = castState.realm.units[allyIndex];
+      if (!ally) throw new Error('unreachable Charge ally');
+      const charged = deepFreeze({
+        ...ally,
+        temporaryChargeSources: [...(ally.temporaryChargeSources ?? []), card.instanceId],
+      });
+      const chargedState = deepFreeze({
+        ...castState,
+        realm: {
+          ...castState.realm,
+          units: castState.realm.units.map((unit, index) => index === allyIndex ? charged : unit),
+        },
+      });
+      return [
+        withStateVersion(chargedState, {}),
+        [
+          castOutcome,
+          {
+            payload: {
+              instanceId: ally.instanceId,
+              seat,
+              sourceInstanceId: card.instanceId,
+            },
+            type: 'charge-granted',
+          },
+          resolved,
+        ],
+        [],
+      ];
+    }
     if (definition.disableTargetNearbyMinionUntilNextTurn === true) {
       if (descriptor.target?.kind !== 'minion') throw new Error('unreachable Freeze cast');
       const targetIndex = castState.realm.units.findIndex(({ instanceId, controller }) =>
@@ -3902,10 +3969,21 @@ function applyDescriptor(
     (unit.disableEffects ?? [])
       .filter(({ expiresAtSeat }) => expiresAtSeat === nextSeat)
       .map((effect) => ({ effect, unit })));
+  const chargeExpired: GameOutcome[] = [];
   const units = state.realm.units.map((unit) => {
-    const { disableEffects: previousDisableEffects, ...baseUnit } = unit;
+    const {
+      disableEffects: previousDisableEffects,
+      temporaryChargeSources,
+      ...baseUnit
+    } = unit;
     const disableEffects = (previousDisableEffects ?? [])
       .filter(({ expiresAtSeat }) => expiresAtSeat !== nextSeat);
+    for (const sourceInstanceId of temporaryChargeSources ?? []) {
+      chargeExpired.push({
+        payload: { instanceId: unit.instanceId, seat: unit.controller, sourceInstanceId },
+        type: 'charge-expired',
+      });
+    }
     return deepFreeze({
       ...baseUnit,
       ...(disableEffects.length > 0 ? { disableEffects } : {}),
@@ -3931,6 +4009,7 @@ function applyDescriptor(
         payload: { instanceId, seat: controller },
         type: 'stealth-gained',
       })),
+      ...chargeExpired,
       { payload: { seat, turnNumber: state.turnNumber }, type: 'turn-ended' },
       ...expiredDisableEffects.map(({ effect, unit }) => ({
         payload: {

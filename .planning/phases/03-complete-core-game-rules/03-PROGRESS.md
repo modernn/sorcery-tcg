@@ -20,6 +20,7 @@
 - Avatar combat facts and life tracking, undefended-site life loss, Death's Door state, direct-damage immunity, death blows, Avatar defeat, and simultaneous-defeat draw state.
 - A catalog-gated Avatar spell-draw ability with tap cost and opponent-safe hidden-card events.
 - Charge bypasses summoning sickness for Move and Attack while ordinary summoned minions remain unavailable.
+- Charge Magic uses a non-target ally choice across regions, grants source-linked temporary Charge without disturbing Stealth or Ward, composes with printed Charge and Disabled state, and expires every temporary source at the current End Phase.
 - Minion-provided elemental affinity participates in threshold checks and disappears when the provider leaves the realm.
 - Positive Lethal damage destroys a minion regardless of defense; zero damage does not.
 - A narrow Genesis effect draws a hidden site after summoning and loses on an empty Atlas.
@@ -90,6 +91,7 @@
 - A legal 30/60 Water teaching-deck variant with three Lugbog Cats proves casting to an opponent-controlled Water site while excluding an opponent land site; Sly Fox in the same opening remains restricted to controlled sites.
 - A fifth legal 30/60 Fire teaching deck that proves Monstrous Lion can Charge into an opposing unit but cannot target its site, then proves Lumbering Giant cannot use Defend or Intercept while ready and in range.
 - A legal 30/60 Fire teaching-deck variant with four Minor Explosions and four Raal Dromedaries proves one 17-action cast at the Avatar's own location, the exact three-location target set, three mana payment, simultaneous damage to the Avatar and two co-located minions, both minion deaths and cemetery entries, no random draw, and exact replay.
+- A legal 30/60 Fire teaching-deck variant with four Charges and four Raal Dromedaries proves one 12-action non-target ally choice, one mana payment, no Move and Attack while newly summoned, immediate positive movement after the grant, unchanged unit state, source-linked End Phase expiry, cemetery entry, and exact replay.
 - Observer-safe actions, rejections, causal events, hashes, exact replay, and a deterministic unranked match runner.
 - A no-dependency browser client that renders the authoritative 5x4 realm, scopes hidden information by seat, exposes only engine-issued actions, and verifies replay.
 
@@ -104,15 +106,15 @@
 - `pnpm game:demo -- 23`: completes in 138 accepted actions over 56 turns with byte-exact replay.
 - `pnpm play`: serves the playable core at `http://127.0.0.1:4174/`.
 - Browser checkpoint: a 22-action match moved a minion, handed Defend to the non-active seat, resolved a simultaneous trade into both cemeteries, and replayed byte-identically.
-- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 28-action Earth Burrowing, 17-action Earth Bury, 21-action Earth Rescue, 3-action Earth Shallow Grave, 10-action Earth Sinkhole, 10-action Earth burrowed-only casting, 24-action Earth first strike, 22-action Earth forward movement, 30-action Earth Immobile plus two 22-action Pudge drag branches, 21-action Earth Secret Tunnel, 24-action Earth Divine Healing, 22-action Earth Ranged, 27-action Earth Ward, 27-action Airborne, 26-action Air Stealth, 26-action Air movement, 24-action Air Movement +2, 25-action Air unrestricted-summon, 17-action Air Voidwalk/outer-column casting, 15-action Air Genesis spell-draw, 9-action Air Leyline Genesis, 10-action Air Zap Magic, 26-action Air Arc Lightning Magic, 11-action Air Lightning Bolt Magic, 11-action Air Teleport Magic, 43-action Fire targeting/response, 17-action Fire Minor Explosion, 23-action Water end-turn Stealth, 22-action Water sideways movement, 16-action Water edge connection, 16-action Water Submerge, 10-action Water submerged-only casting, 16-action Water any-Water-site casting, 15-action Water Freeze, 11-action Water Drown, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
+- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 28-action Earth Burrowing, 17-action Earth Bury, 21-action Earth Rescue, 3-action Earth Shallow Grave, 10-action Earth Sinkhole, 10-action Earth burrowed-only casting, 24-action Earth first strike, 22-action Earth forward movement, 30-action Earth Immobile plus two 22-action Pudge drag branches, 21-action Earth Secret Tunnel, 24-action Earth Divine Healing, 22-action Earth Ranged, 27-action Earth Ward, 27-action Airborne, 26-action Air Stealth, 26-action Air movement, 24-action Air Movement +2, 25-action Air unrestricted-summon, 17-action Air Voidwalk/outer-column casting, 15-action Air Genesis spell-draw, 9-action Air Leyline Genesis, 10-action Air Zap Magic, 26-action Air Arc Lightning Magic, 11-action Air Lightning Bolt Magic, 11-action Air Teleport Magic, 43-action Fire targeting/response, 12-action Fire Charge, 17-action Fire Minor Explosion, 23-action Water end-turn Stealth, 22-action Water sideways movement, 16-action Water edge connection, 16-action Water Submerge, 10-action Water submerged-only casting, 16-action Water any-Water-site casting, 15-action Water Freeze, 11-action Water Drown, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
 - `pnpm game:verify-private`: one passing ignored-authority integration scenario.
 - Death's Door scenarios prove same-turn direct-damage immunity, later death blows, simultaneous-defeat draws, nonlethal site strikes, and exact replay.
-- `pnpm verify`: 254 passing public tests at this checkpoint.
+- `pnpm verify`: 255 passing public tests at this checkpoint.
 
 ## Still required for Phase 3
 
 - Terrain mutation, connection rules beyond the supported region graph, top/bottom wrap, and Secret Tunnel links, control changes, and other card-specific casting or placement overrides.
-- Full start/main/end phase triggers and duration cleanup beyond the supported narrow Genesis/Deathrite effects, Freeze, Drown, minion damage, and summoning sickness.
+- Full start/main/end phase triggers and duration cleanup beyond the supported narrow Genesis/Deathrite effects, Freeze, Drown, Charge, minion damage, and summoning sickness.
 - Additional costs, broader non-minion spells, movement beyond bounded +1/+2 bonuses and supported static restrictions, further activated abilities, and card-specific targets.
 - Combat tiers beyond attacking-only first strike, projectile ranges and effects beyond Ranged and Pudge drag, additional healing sources, prevention/modification beyond minion Ward, additional card-triggered damage/death behavior, and tournament ending overlays.
 - State-based banishment/death beyond supported forced burrowing/submerging and Rubble terrain conversion, including forced movement into unsupported terrain or regions, ability loss, or a deliberately suicidal step that leaves a unit unable to survive in its region.

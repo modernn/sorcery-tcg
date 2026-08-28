@@ -446,6 +446,27 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.fireMinorExplosion.deck.spellbook
     .find(({ name }) => name === 'Raal Dromedary')?.copies, 4);
   assert.equal(result.fireMinorExplosion.replayVerified, true);
+  assert.equal(result.fireCharge.charge, 'Charge');
+  assert.equal(result.fireCharge.raalDromedary, 'Raal Dromedary');
+  assert.equal(result.fireCharge.acceptedActionCount, 12);
+  assert.equal(result.fireCharge.moveUnavailableBeforeCharge, true);
+  assert.equal(result.fireCharge.exactNonTargetAllyChoice, true);
+  assert.equal(result.fireCharge.manaPaid, 1);
+  assert.equal(result.fireCharge.temporaryChargeRecorded, true);
+  assert.equal(result.fireCharge.moveAvailableAfterCharge, true);
+  assert.equal(result.fireCharge.unitStatePreservedOnGrant, true);
+  assert.equal(result.fireCharge.expiredAtEndOfTurn, true);
+  assert.equal(result.fireCharge.causalEventsVerified, true);
+  assert.equal(result.fireCharge.spellEnteredCemetery, true);
+  assert.equal(result.fireCharge.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.fireCharge.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.fireCharge.deck.spellbook
+    .find(({ name }) => name === 'Charge')?.copies, 4);
+  assert.equal(result.fireCharge.deck.spellbook
+    .find(({ name }) => name === 'Raal Dromedary')?.copies, 4);
+  assert.equal(result.fireCharge.replayVerified, true);
   assert.equal(result.combat.northMinionDied, true);
   assert.equal(result.combat.southMinionDied, true);
   assert.equal(result.waterDrown.drown, 'Drown');
