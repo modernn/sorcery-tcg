@@ -49,6 +49,7 @@ export type GameCardDefinition =
     cardType: 'magic';
     damageTargetUnit: number;
     manaCost: number;
+    targetNearby?: boolean;
     thresholds: GameThresholds;
   }>
   | Readonly<{
@@ -485,23 +486,26 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
 
 function magicDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   const player = state.players[seat];
-  const casterRegion = unitStatus(state, {
+  const caster = unitStatus(state, {
     instanceId: player.avatar.card.instanceId,
     kind: 'avatar',
     seat,
-  }).region;
-  const targets = (['north', 'south'] as const)
-    .flatMap((targetSeat) => unitRefs(state, targetSeat))
-    .filter((target) => {
-      const status = unitStatus(state, target);
-      return status.region === casterRegion && (target.seat === seat || !status.stealthed);
-    });
+  });
+  const targets = (['north', 'south'] as const).flatMap((targetSeat) => unitRefs(state, targetSeat));
   return player.hand.spellbook.flatMap(({ cardId, instanceId }) => {
     const definition = cardDefinition(state, cardId);
     if (definition.cardType !== 'magic'
       || player.mana < definition.manaCost
       || !meetsThresholds(state, seat, definition.thresholds)) return [];
-    return targets.map((target) => ({
+    return targets.filter((target) => {
+      const status = unitStatus(state, target);
+      return status.region === caster.region
+        && (target.seat === seat || !status.stealthed)
+        && (!definition.targetNearby
+          || status.location === caster.location
+          || borderingCells(caster.location).includes(status.location)
+          || diagonalCells(caster.location).includes(status.location));
+    }).map((target) => ({
       cardId,
       cardInstanceId: instanceId,
       casterInstanceId: player.avatar.card.instanceId,
@@ -551,6 +555,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     return;
   }
   if (card.cardType === 'magic') {
+    if (card.targetNearby !== undefined && typeof card.targetNearby !== 'boolean') {
+      throw new RangeError(`${path}.targetNearby must be boolean`);
+    }
     if (!Number.isSafeInteger(card.damageTargetUnit)
       || card.damageTargetUnit < 1
       || card.damageTargetUnit > MAX_COMBAT_STAT) {
@@ -768,6 +775,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               cardType: 'magic' as const,
               damageTargetUnit: card.damageTargetUnit,
               manaCost: card.manaCost,
+              ...(card.targetNearby === true ? { targetNearby: true } : {}),
               thresholds: { ...card.thresholds },
             }
           : {

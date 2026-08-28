@@ -107,6 +107,23 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airZap.deck.spellbook
     .find(({ name }) => name === 'Snow Leopard')?.copies, 4);
   assert.equal(result.airZap.replayVerified, true);
+  assert.equal(result.airArcLightning.arcLightning, 'Arc Lightning');
+  assert.equal(result.airArcLightning.snowLeopard, 'Snow Leopard');
+  assert.equal(result.airArcLightning.acceptedActionCount, 26);
+  assert.equal(result.airArcLightning.nearbyTargetAvailable, true);
+  assert.equal(result.airArcLightning.farSameRegionUnitUnavailable, true);
+  assert.equal(result.airArcLightning.manaPaid, 4);
+  assert.equal(result.airArcLightning.snowLeopardDied, true);
+  assert.equal(result.airArcLightning.spellEnteredCemetery, true);
+  assert.equal(result.airArcLightning.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airArcLightning.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airArcLightning.deck.spellbook
+    .find(({ name }) => name === 'Arc Lightning')?.copies, 4);
+  assert.equal(result.airArcLightning.deck.spellbook
+    .find(({ name }) => name === 'Snow Leopard')?.copies, 4);
+  assert.equal(result.airArcLightning.replayVerified, true);
   assert.equal(result.airLeyline.henge, 'Leyline Henge');
   assert.equal(result.airLeyline.acceptedActionCount, 9);
   assert.equal(result.airLeyline.firstHengeDrewNothing, true);
