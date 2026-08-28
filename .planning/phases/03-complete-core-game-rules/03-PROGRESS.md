@@ -23,6 +23,7 @@
 - Positive Lethal damage destroys a minion regardless of defense; zero damage does not.
 - A narrow Genesis effect draws a hidden site after summoning and loses on an empty Atlas.
 - A narrow minion mana ability that requires readiness, taps for temporary mana, and expires at End Phase.
+- Deathrite site draws resolve before simultaneous dead minions enter their cemeteries, including hidden draws and deck-empty loss.
 - A private-local actual-card adapter that verifies the normalized artifact and current Constructed format, builds legal 30/60 beginner decks under official rarity copy limits, and executes a deterministic real-card Charge and combat scenario without committing source data.
 - A second real-card Earth ramp deck that proves provided Earth affinity, Field Laborers' readiness-gated temporary mana, and Land Surveyor's Genesis draw.
 - Observer-safe actions, rejections, causal events, hashes, exact replay, and a deterministic unranked match runner.
@@ -42,14 +43,14 @@
 - `pnpm game:check-private`: a 34-action combat match and a 22-action Earth ramp match exercise two concrete real-card beginner decks with byte-exact replay.
 - `pnpm game:verify-private`: one passing ignored-authority integration scenario.
 - Death's Door scenarios prove same-turn direct-damage immunity, later death blows, simultaneous-defeat draws, nonlethal site strikes, and exact replay.
-- `pnpm verify`: 211 passing public tests at this checkpoint.
+- `pnpm verify`: 212 passing public tests at this checkpoint.
 
 ## Still required for Phase 3
 
 - Rubble replacement, land/water regions, connection rules, control changes, and card-specific placement overrides.
 - Full start/main/end phase triggers and duration cleanup beyond vanilla minion damage and summoning sickness.
 - Additional costs, non-minion spells, card-provided movement, further activated abilities, and card-specific targets.
-- Combat tiers, projectiles, healing, prevention/modification, card-triggered damage/death behavior, and tournament ending overlays.
+- Combat tiers, projectiles, healing, prevention/modification, additional card-triggered damage/death behavior, and tournament ending overlays.
 - Source-linked scenario and invariant coverage for every supported core mechanic.
 
 The runner is intentionally classified `unranked_partial_rules`; it proves the real engine loop and replay contract without claiming complete Sorcery behavior.

@@ -31,6 +31,7 @@ function deck(prefix: string, atlasCount = 30, spellbookCount = 50): GameDeckSpe
 type SpellFacts = Readonly<{
   attack?: number;
   charge?: boolean;
+  deathriteDrawSite?: boolean;
   defense?: number;
   genesisDrawSite?: boolean;
   lethal?: boolean;
@@ -72,6 +73,7 @@ function cardsFor(
         attack: spell.attack ?? 1,
         cardType: 'minion',
         charge: spell.charge ?? false,
+        deathriteDrawSite: spell.deathriteDrawSite ?? false,
         defense: spell.defense ?? 1,
         genesisDrawSite: spell.genesisDrawSite ?? false,
         lethal: spell.lethal ?? false,
@@ -610,13 +612,18 @@ function northAttacksAtC2(
   seed: number,
   spell?: SpellFacts,
   avatar?: AvatarFacts,
+  emptyAtlasAfterOpening = false,
 ): Readonly<{
   attackerInstanceId: string;
   defenderInstanceId: string;
   session: GameSession;
   targetInstanceId: string;
 }> {
+  const shortDecks = emptyAtlasAfterOpening
+    ? { north: deck('north', 3), south: deck('south', 3) }
+    : {};
   let session = keep(createGameSession(manifest(seed, {
+    ...shortDecks,
     ...(spell ? { spell } : {}),
     ...(avatar ? { avatar } : {}),
   })));
@@ -718,6 +725,50 @@ test('RULE-04 Lethal kills a tougher minion with positive damage but not zero da
   assert.equal(zero.state.players.north.cemetery.length, 0);
   assert.equal(zero.state.players.south.cemetery.length, 0);
   assert.equal(verifyGameReplay(zero), true);
+});
+
+test('RULE-05 Deathrite draws sites before simultaneous deaths enter their cemeteries', () => {
+  const spell = {
+    attack: 1,
+    deathriteDrawSite: true,
+    defense: 1,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  } as const;
+  const setup = northAttacksAtC2(48, spell);
+  const before = setup.session.state.players;
+  let session = accept(setup.session, action(setup.session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === setup.targetInstanceId));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+
+  for (const seat of ['north', 'south'] as const) {
+    assert.equal(session.state.players[seat].atlas.length, before[seat].atlas.length - 1);
+    assert.equal(session.state.players[seat].hand.atlas.length, before[seat].hand.atlas.length + 1);
+  }
+  const events = session.transcript.at(-1)?.events ?? [];
+  const firstCemeteryEvent = events.findIndex(({ type }) => type === 'minion-died');
+  assert.ok(firstCemeteryEvent > 0);
+  assert.equal(events.slice(0, firstCemeteryEvent).filter(({ type }) => type === 'site-drawn').length, 2);
+  assert.equal(session.state.players.north.cemetery.length, 1);
+  assert.equal(session.state.players.south.cemetery.length, 1);
+  assert.equal(verifyGameReplay(session), true);
+
+  const empty = northAttacksAtC2(49, spell, undefined, true);
+  let deckOut = accept(empty.session, action(empty.session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === empty.targetInstanceId));
+  deckOut = accept(deckOut, action(deckOut, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  assert.deepEqual(deckOut.state.terminal, {
+    reason: 'simultaneous_defeat',
+    result: 'draw',
+    status: 'finished',
+  });
+  assert.equal(verifyGameReplay(deckOut), true);
 });
 
 test('RULE-04 Move and Attack stages movement before an undefended enemy-site strike', () => {
