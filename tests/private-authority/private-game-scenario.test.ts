@@ -283,6 +283,31 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthBury.deck.spellbook
     .find(({ name }) => name === 'Bosk Troll')?.copies, 4);
   assert.equal(result.earthBury.replayVerified, true);
+  assert.equal(result.earthDuel.duel, 'Duel');
+  assert.equal(result.earthDuel.boskTroll, 'Bosk Troll');
+  assert.equal(result.earthDuel.elthamTownsfolk, 'Eltham Townsfolk');
+  assert.equal(result.earthDuel.acceptedActionCount, 18);
+  assert.equal(result.earthDuel.exactFightPair, true);
+  assert.equal(result.earthDuel.manaPaid, 3);
+  assert.equal(result.earthDuel.allySurvivedWithTwoDamage, true);
+  assert.equal(result.earthDuel.targetDiedAndEnteredCemetery, true);
+  assert.equal(result.earthDuel.unitsDidNotMoveOrTap, true);
+  assert.equal(result.earthDuel.spellEnteredCemetery, true);
+  assert.equal(result.earthDuel.causalEventsVerified, true);
+  assert.equal(result.earthDuel.noRandomDraws, true);
+  assert.equal(result.earthDuel.sitesAndAvatarsPreserved, true);
+  assert.equal(result.earthDuel.gameRemainedActive, true);
+  assert.equal(result.earthDuel.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthDuel.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthDuel.deck.spellbook
+    .find(({ name }) => name === 'Duel')?.copies, 4);
+  assert.equal(result.earthDuel.deck.spellbook
+    .find(({ name }) => name === 'Bosk Troll')?.copies, 4);
+  assert.equal(result.earthDuel.deck.spellbook
+    .find(({ name }) => name === 'Eltham Townsfolk')?.copies, 4);
+  assert.equal(result.earthDuel.replayVerified, true);
   assert.equal(result.earthRescue.rescue, 'Rescue');
   assert.equal(result.earthRescue.boskTroll, 'Bosk Troll');
   assert.equal(result.earthRescue.acceptedActionCount, 21);

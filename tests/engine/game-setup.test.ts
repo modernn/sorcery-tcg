@@ -1957,6 +1957,185 @@ test('RULE-03/05 targeted Magic pays mana, damages any unit, resolves Deathrite,
   assert.equal(verifyGameReplay(session), true);
 });
 
+test('RULE-03/04 Duel makes a chosen ally fight a same-square targeted enemy', () => {
+  const decks = {
+    north: deck('duel-north', 4, 4),
+    south: deck('duel-south', 4, 4),
+  };
+  const cards = cardsFor(decks, {
+    defense: 4,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  });
+  const duelId = decks.north.spellbook[0]!;
+  const allyId = decks.north.spellbook[1]!;
+  const casterId = decks.north.spellbook[2]!;
+  const normalTargetId = decks.south.spellbook[0]!;
+  const wardedTargetId = decks.south.spellbook[1]!;
+  const stealthedTargetId = decks.south.spellbook[2]!;
+  const disabledTargetId = decks.south.spellbook[3]!;
+  cards[duelId] = {
+    cardType: 'magic',
+    fightAllyWithAdjacentEnemy: true,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  } as GameCardDefinition;
+  cards[allyId] = {
+    ...cards[allyId]!,
+    attack: 3,
+    defense: 4,
+  } as GameCardDefinition;
+  cards[casterId] = {
+    ...cards[casterId]!,
+    burrowing: true,
+    spellcaster: true,
+  } as GameCardDefinition;
+  for (const targetId of [normalTargetId, wardedTargetId, stealthedTargetId, disabledTargetId]) {
+    cards[targetId] = {
+      ...cards[targetId]!,
+      attack: 2,
+      defense: 3,
+      summonToAnySite: true,
+    } as GameCardDefinition;
+  }
+  cards[wardedTargetId] = { ...cards[wardedTargetId]!, ward: true } as GameCardDefinition;
+  cards[stealthedTargetId] = { ...cards[stealthedTargetId]!, stealth: true } as GameCardDefinition;
+  cards[disabledTargetId] = { ...cards[disabledTargetId]!, waterbound: true } as GameCardDefinition;
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-duel-v1',
+    },
+    cards,
+    decks,
+    firstSeat: 'north' as const,
+  };
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [duelId]: { ...cards[duelId]!, fightAllyWithAdjacentEnemy: false } as unknown as GameCardDefinition,
+    },
+    seed: 1,
+  }), /fightAllyWithAdjacentEnemy must be true/);
+
+  let gameManifest: GameManifest | undefined;
+  for (let seed = 1; seed < 100; seed += 1) {
+    const candidate = createGameManifest({ ...input, seed });
+    const opening = createGameSession(candidate).state.players.north.hand.spellbook;
+    if ([duelId, allyId, casterId].every((cardId) =>
+      opening.some((card) => card.cardId === cardId))) {
+      gameManifest = candidate;
+      break;
+    }
+  }
+  assert.ok(gameManifest);
+  assert.equal(gameManifest.cards[duelId]?.cardType === 'magic'
+    && gameManifest.cards[duelId].fightAllyWithAdjacentEnemy, true);
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === allyId && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === casterId && descriptor.cell === 'C4'
+    && descriptor.region === 'underground');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  for (const targetId of [normalTargetId, wardedTargetId, stealthedTargetId, disabledTargetId]) {
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === targetId && descriptor.cell === 'C4');
+  }
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  const ally = session.state.realm.units.find(({ cardId }) => cardId === allyId);
+  const caster = session.state.realm.units.find(({ cardId }) => cardId === casterId);
+  const normalTarget = session.state.realm.units.find(({ cardId }) => cardId === normalTargetId);
+  const wardedTarget = session.state.realm.units.find(({ cardId }) => cardId === wardedTargetId);
+  const stealthedTarget = session.state.realm.units.find(({ cardId }) => cardId === stealthedTargetId);
+  const disabledTarget = session.state.realm.units.find(({ cardId }) => cardId === disabledTargetId);
+  assert.ok(ally);
+  assert.ok(caster);
+  assert.ok(normalTarget);
+  assert.ok(wardedTarget);
+  assert.ok(stealthedTarget);
+  assert.ok(disabledTarget);
+  const duelActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardId === duelId
+      && descriptor.casterInstanceId === caster.instanceId
+      && descriptor.ally?.instanceId === ally.instanceId);
+  const targetIds = duelActions.flatMap(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.target ? [descriptor.target.instanceId] : []);
+  assert.ok(targetIds.includes(normalTarget.instanceId));
+  assert.ok(targetIds.includes(wardedTarget.instanceId));
+  assert.ok(targetIds.includes(disabledTarget.instanceId));
+  assert.equal(targetIds.includes(stealthedTarget.instanceId), false);
+  assert.equal(targetIds.includes(session.state.players.south.avatar.card.instanceId), false);
+  const normalAction = duelActions.find(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.target?.instanceId === normalTarget.instanceId);
+  const wardedAction = duelActions.find(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.target?.instanceId === wardedTarget.instanceId);
+  const disabledAction = duelActions.find(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.target?.instanceId === disabledTarget.instanceId);
+  assert.ok(normalAction);
+  assert.ok(wardedAction);
+  assert.ok(disabledAction);
+  const checkpoint = session;
+
+  const fought = stepGame(checkpoint, normalAction);
+  assert.equal(fought.accepted, true);
+  assert.deepEqual(fought.receipt.events.map(({ type }) => type), [
+    'magic-cast',
+    'fight-started',
+    'strike-damage-allocated',
+    'damage-dealt',
+    'damage-dealt',
+    'minion-died',
+    'magic-resolved',
+  ]);
+  const fightingAlly = fought.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === ally.instanceId);
+  assert.ok(fightingAlly);
+  assert.deepEqual({
+    damage: fightingAlly.damage,
+    location: fightingAlly.location,
+    tapped: fightingAlly.tapped,
+  }, { damage: 2, location: 'C4', tapped: false });
+  assert.equal(fought.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === normalTarget.instanceId), false);
+  assert.equal(fought.session.state.players.south.cemetery.some(({ instanceId }) =>
+    instanceId === normalTarget.instanceId), true);
+  assert.equal(fought.session.state.players.north.mana, 0);
+  assert.equal(fought.session.state.players.north.cemetery.some(({ cardId }) => cardId === duelId), true);
+  assert.equal(verifyGameReplay(fought.session), true);
+
+  const warded = stepGame(checkpoint, wardedAction);
+  assert.equal(warded.accepted, true);
+  assert.deepEqual(warded.receipt.events.map(({ type }) => type), [
+    'magic-cast',
+    'ward-broken',
+    'magic-resolved',
+  ]);
+  assert.equal(warded.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === ally.instanceId)?.damage, 0);
+  assert.equal(warded.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === wardedTarget.instanceId)?.warded, false);
+  assert.equal(verifyGameReplay(warded.session), true);
+
+  const disabled = stepGame(checkpoint, disabledAction);
+  assert.equal(disabled.accepted, true);
+  assert.equal(disabled.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === ally.instanceId)?.damage, 0);
+  assert.equal(disabled.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === disabledTarget.instanceId), false);
+  assert.equal(verifyGameReplay(disabled.session), true);
+});
+
 test('RULE-03 Magic targets stay in the caster region and exclude enemy Stealth', () => {
   const targetIsLegal = (
     spell: SpellFacts,

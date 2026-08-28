@@ -371,6 +371,24 @@ export type PrivateGameCheck = Readonly<{
     replayVerified: boolean;
     spellEnteredCemetery: boolean;
   }>;
+  earthDuel: Readonly<{
+    acceptedActionCount: number;
+    allySurvivedWithTwoDamage: boolean;
+    boskTroll: string;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    duel: string;
+    elthamTownsfolk: string;
+    exactFightPair: boolean;
+    gameRemainedActive: boolean;
+    manaPaid: number;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    sitesAndAvatarsPreserved: boolean;
+    spellEnteredCemetery: boolean;
+    targetDiedAndEnteredCemetery: boolean;
+    unitsDidNotMoveOrTap: boolean;
+  }>;
   earthGrainSparrow: Readonly<{
     acceptedActionCount: number;
     actualLifeGained: number;
@@ -898,6 +916,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   deathriteMinion: NormalizedCard;
   dalceanPhalanx: NormalizedCard;
   divineHealing: NormalizedCard;
+  duel: NormalizedCard;
   drown: NormalizedCard;
   drowned: NormalizedCard;
   earthProviderMinion: NormalizedCard;
@@ -1014,6 +1033,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || bury.thresholds.water !== 0
     || bury.rarity !== 'ordinary') {
     throw new Error('private forced-burrow Magic no longer matches its supported facts');
+  }
+  const duel = snapshot.cards.find(({ name }) => name === 'Duel');
+  if (!duel
+    || duel.cardType !== 'magic'
+    || ruleTextDigest(duel.rulesText) !== 'sha256:df368aaa082ae1a50bbd9750efab688d6e56387a55b86c4e5005eb422d049913'
+    || duel.manaCost !== 3
+    || duel.attack !== null
+    || duel.defense !== null
+    || duel.life !== null
+    || duel.elements.length !== 1
+    || duel.elements[0] !== 'earth'
+    || duel.thresholds.air !== 0
+    || duel.thresholds.earth !== 1
+    || duel.thresholds.fire !== 0
+    || duel.thresholds.water !== 0
+    || duel.rarity !== 'ordinary') {
+    throw new Error('private ally-versus-adjacent-enemy Duel Magic no longer matches its supported facts');
   }
   const rescue = snapshot.cards.find(({ name }) => name === 'Rescue');
   if (!rescue
@@ -1972,6 +2008,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     dalceanPhalanx,
     deathriteMinion,
     divineHealing,
+    duel,
     drown,
     drowned,
     earthProviderMinion,
@@ -2112,6 +2149,7 @@ function gameDefinition(
   genesisHealController: 0 | 2 = 0,
   untapTargetMinionAfterDamage = false,
   discardRandomCardInsteadOfMana = false,
+  fightAllyWithAdjacentEnemy = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -2150,7 +2188,8 @@ function gameDefinition(
     + Number(disableTargetNearbyMinionUntilNextTurn)
     + Number(submergeTargetMinion)
     + Number(healController !== 0)
-    + Number(burrowTargetMinion);
+    + Number(burrowTargetMinion)
+    + Number(fightAllyWithAdjacentEnemy);
   if (card.cardType === 'magic'
     && card.manaCost !== null
     && supportedMagicEffects === 1) {
@@ -2158,6 +2197,7 @@ function gameDefinition(
       ...(burrowTargetMinion ? { burrowTargetMinion: true } : {}),
       cardType: 'magic',
       ...(damageEachAbovegroundMinion !== 0 ? { damageEachAbovegroundMinion } : {}),
+      ...(fightAllyWithAdjacentEnemy ? { fightAllyWithAdjacentEnemy: true } : {}),
       ...(grantPowerToAllyThisTurn !== 0 ? { grantPowerToAllyThisTurn } : {}),
       ...(submergeTargetMinion ? { submergeTargetMinion: true } : {}),
       ...(damageTargetUnit !== 0
@@ -2238,7 +2278,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-immobile' | 'earth-overpower' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-immobile' | 'earth-overpower' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -2347,6 +2387,12 @@ function buildManifest(
     [input.overpower],
   );
   const earthBuryDeck = elementalDeck('earth', earthMinions, [], [input.bury]);
+  const earthDuelDeck = elementalDeck(
+    'earth',
+    [...earthMinions, input.elthamTownsfolk],
+    [],
+    [input.duel],
+  );
   const earthRescueDeck = elementalDeck('earth', earthMinions, [], [input.bury, input.rescue]);
   const earthDivineHealingDeck = elementalDeck('earth', earthMinions, [], [input.divineHealing]);
   const earthGrainSparrowDeck = elementalDeck(
@@ -2528,6 +2574,8 @@ function buildManifest(
         ? earthEntombedDeck
       : scenario === 'earth-bury'
         ? earthBuryDeck
+      : scenario === 'earth-duel'
+        ? earthDuelDeck
       : scenario === 'earth-rescue'
         ? earthRescueDeck
       : scenario === 'earth-divine-healing'
@@ -2623,6 +2671,8 @@ function buildManifest(
         ? earthEntombedDeck
       : scenario === 'earth-bury'
         ? earthBuryDeck
+      : scenario === 'earth-duel'
+        ? earthDuelDeck
       : scenario === 'earth-rescue'
         ? earthRescueDeck
       : scenario === 'earth-divine-healing'
@@ -2733,6 +2783,7 @@ function buildManifest(
       card.stableId === input.grainSparrow.stableId ? 2 : 0,
       card.stableId === input.lash.stableId,
       card.stableId === input.aramosMercenaries.stableId,
+      card.stableId === input.duel.stableId,
     ),
   ]));
   return {
@@ -3083,6 +3134,74 @@ function findEarthDuelOpening(
     }
   }
   throw new Error(`private Earth ${mode} scenario seed ${seed} no longer produces its supported opening`);
+}
+
+function findEarthDuelMagicOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  boskTrollInstanceId: string;
+  duelInstanceId: string;
+  elthamTownsfolkInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string];
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string];
+}> {
+  // ponytail: bounded opening scan avoids another private seed/config field.
+  for (let offset = 1; offset <= 4096; offset += 1) {
+    const built = buildManifest(input, input.config.earthSeed + offset, 'earth-duel');
+    const session = createGameSession(built.manifest);
+    const northEarthSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('earth');
+    });
+    const southEarthSites = session.state.players.south.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('earth');
+    });
+    const northEarlySpells = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 1),
+    ];
+    const northLaterSpells = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 2),
+    ];
+    const southSpells = [
+      ...session.state.players.south.hand.spellbook,
+      ...session.state.players.south.spellbook.slice(0, 1),
+    ];
+    const boskTrollInstanceId = northEarlySpells
+      .find(({ cardId }) => cardId === input.firstStrikeTargetMinion.stableId)?.instanceId;
+    const duelInstanceId = northLaterSpells
+      .find(({ cardId }) => cardId === input.duel.stableId)?.instanceId;
+    const elthamTownsfolkInstanceId = southSpells
+      .find(({ cardId }) => cardId === input.elthamTownsfolk.stableId)?.instanceId;
+    if (northEarthSites.length >= 3
+      && southEarthSites.length >= 2
+      && boskTrollInstanceId
+      && duelInstanceId
+      && elthamTownsfolkInstanceId) {
+      return {
+        ...built,
+        boskTrollInstanceId,
+        duelInstanceId,
+        elthamTownsfolkInstanceId,
+        northSiteInstanceIds: [
+          northEarthSites[0]!.instanceId,
+          northEarthSites[1]!.instanceId,
+          northEarthSites[2]!.instanceId,
+        ],
+        session,
+        southSiteInstanceIds: [
+          southEarthSites[0]!.instanceId,
+          southEarthSites[1]!.instanceId,
+        ],
+      };
+    }
+  }
+  throw new Error('private Duel Magic scenario no longer produces its supported opening');
 }
 
 function findEarthOverpowerOpening(
@@ -5891,6 +6010,151 @@ function runEarthBury(
       .some(({ instanceId }) => instanceId === opening.boskTrollInstanceId),
     targetLeftRealm: !session.state.realm.units
       .some(({ instanceId }) => instanceId === opening.boskTrollInstanceId),
+  });
+}
+
+function runEarthDuel(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthDuel'] {
+  const opening = findEarthDuelMagicOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.boskTrollInstanceId
+    && descriptor.cell === 'C3'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.elthamTownsfolkInstanceId
+    && descriptor.cell === 'C2'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+    && descriptor.cell === 'B3');
+
+  const boskBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.boskTrollInstanceId);
+  const elthamBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.elthamTownsfolkInstanceId);
+  if (!boskBefore || !elthamBefore) throw new Error('private Duel setup lacks its real minions');
+  const sitesBefore = canonicalJson(session.state.realm.sites as unknown as JsonValue);
+  const avatarsBefore = canonicalJson({
+    north: session.state.players.north.avatar,
+    south: session.state.players.south.avatar,
+  } as unknown as JsonValue);
+  const manaBefore = session.state.players.north.mana;
+  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.duelInstanceId
+      && descriptor.ally?.kind === 'minion'
+      && descriptor.ally.instanceId === opening.boskTrollInstanceId
+      && descriptor.target?.kind === 'minion'
+      && descriptor.target.instanceId === opening.elthamTownsfolkInstanceId);
+  const chosen = choices[0];
+  if (!chosen) throw new Error('private Duel Bosk-to-Eltham fight pair is unavailable');
+  const duelResult = stepGame(session, chosen);
+  if (!duelResult.accepted) throw new Error('private Duel cast was rejected');
+  session = duelResult.session;
+
+  const events = duelResult.receipt.events;
+  const payload = (type: string): Readonly<Record<string, JsonValue>> | undefined => {
+    const found = events.find((event) => event.type === type);
+    return found && isJsonRecord(found.payload) ? found.payload : undefined;
+  };
+  const castPayload = payload('magic-cast');
+  const fightPayload = payload('fight-started');
+  const strikePayload = payload('strike-damage-allocated');
+  const deathPayload = payload('minion-died');
+  const resolvedPayload = payload('magic-resolved');
+  const damagePayloads = events.filter(({ type }) => type === 'damage-dealt')
+    .map(({ payload: value }) => isJsonRecord(value) ? value : undefined);
+  const boskAfter = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.boskTrollInstanceId);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    allySurvivedWithTwoDamage: boskAfter?.damage === 2
+      && boskAfter.cardId === input.firstStrikeTargetMinion.stableId
+      && boskAfter.controller === 'north'
+      && boskAfter.owner === 'north',
+    boskTroll: input.firstStrikeTargetMinion.name,
+    causalEventsVerified: events.map(({ type }) => type).join(',')
+      === 'magic-cast,fight-started,strike-damage-allocated,damage-dealt,damage-dealt,minion-died,magic-resolved'
+      && castPayload?.instanceId === opening.duelInstanceId
+      && castPayload.manaPaid === 3
+      && castPayload.seat === 'north'
+      && castPayload.allyInstanceId === opening.boskTrollInstanceId
+      && castPayload.targetInstanceId === opening.elthamTownsfolkInstanceId
+      && fightPayload?.attackerInstanceId === opening.boskTrollInstanceId
+      && canonicalJson(fightPayload.combatantInstanceIds ?? null)
+        === canonicalJson([opening.elthamTownsfolkInstanceId])
+      && strikePayload?.amount === 3
+      && strikePayload.strikerInstanceId === opening.boskTrollInstanceId
+      && strikePayload.targetInstanceId === opening.elthamTownsfolkInstanceId
+      && damagePayloads.some((value) => value?.instanceId === opening.boskTrollInstanceId
+        && value.amount === 2 && value.accumulated === 2)
+      && damagePayloads.some((value) => value?.instanceId === opening.elthamTownsfolkInstanceId
+        && value.amount === 3 && value.accumulated === 3)
+      && deathPayload?.cardId === input.elthamTownsfolk.stableId
+      && deathPayload.instanceId === opening.elthamTownsfolkInstanceId
+      && deathPayload.owner === 'south'
+      && resolvedPayload?.instanceId === opening.duelInstanceId,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    duel: input.duel.name,
+    elthamTownsfolk: input.elthamTownsfolk.name,
+    exactFightPair: choices.length === 1
+      && chosen.descriptor.kind === 'cast-magic'
+      && chosen.descriptor.ally?.seat === 'north'
+      && chosen.descriptor.target?.seat === 'south',
+    gameRemainedActive: session.state.phase === 'main' && session.state.terminal.status === 'active',
+    manaPaid: manaBefore - session.state.players.north.mana,
+    noRandomDraws: duelResult.receipt.randomDraws.length === 0,
+    replayVerified: verifyGameReplay(session),
+    sitesAndAvatarsPreserved:
+      canonicalJson(session.state.realm.sites as unknown as JsonValue) === sitesBefore
+      && canonicalJson({
+        north: session.state.players.north.avatar,
+        south: session.state.players.south.avatar,
+      } as unknown as JsonValue) === avatarsBefore,
+    spellEnteredCemetery: session.state.players.north.hand.spellbook
+      .every(({ instanceId }) => instanceId !== opening.duelInstanceId)
+      && session.state.players.north.cemetery
+        .some(({ instanceId }) => instanceId === opening.duelInstanceId),
+    targetDiedAndEnteredCemetery: session.state.realm.units
+      .every(({ instanceId }) => instanceId !== opening.elthamTownsfolkInstanceId)
+      && session.state.players.south.cemetery.some(({ cardId, instanceId }) =>
+        cardId === input.elthamTownsfolk.stableId
+          && instanceId === opening.elthamTownsfolkInstanceId),
+    unitsDidNotMoveOrTap: boskBefore.location === 'C3'
+      && !boskBefore.tapped
+      && elthamBefore.location === 'C2'
+      && !elthamBefore.tapped
+      && boskAfter?.location === boskBefore.location
+      && boskAfter.tapped === boskBefore.tapped
+      && events.every(({ type }) => type !== 'unit-moved' && type !== 'unit-tapped'),
   });
 }
 
@@ -10229,6 +10493,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthBurrowing = runEarthBurrowing(input);
   const earthOverpower = runEarthOverpower(input);
   const earthBury = runEarthBury(input);
+  const earthDuel = runEarthDuel(input);
   const earthRescue = runEarthRescue(input);
   const earthDivineHealing = runEarthDivineHealing(input);
   const earthGrainSparrow = runEarthGrainSparrow(input);
@@ -10401,6 +10666,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthBurrowing,
     earthOverpower,
     earthBury,
+    earthDuel,
     earthRescue,
     earthDivineHealing,
     earthGrainSparrow,
