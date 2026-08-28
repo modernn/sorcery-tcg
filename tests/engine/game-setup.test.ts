@@ -40,6 +40,7 @@ type SpellFacts = Readonly<{
   deathriteDrawSite?: boolean;
   deathriteHeal?: number;
   defense?: number;
+  discardRandomCardInsteadOfMana?: true;
   diesAtEndOfControllerTurn?: true;
   gainsStealthAtEndOfTurn?: boolean;
   genesisDrawSpell?: boolean;
@@ -134,6 +135,9 @@ function cardsFor(
         deathriteDrawSite: facts.deathriteDrawSite ?? false,
         ...(facts.deathriteHeal ? { deathriteHeal: facts.deathriteHeal } : {}),
         defense: facts.defense ?? 1,
+        ...(facts.discardRandomCardInsteadOfMana === true
+          ? { discardRandomCardInsteadOfMana: true as const }
+          : {}),
         ...(facts.diesAtEndOfControllerTurn === true
           ? { diesAtEndOfControllerTurn: true as const }
           : {}),
@@ -1459,6 +1463,149 @@ test('RULE-03/04 a Spellcaster pays mana and summons a minion atop a controlled 
 
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
   assert.equal(session.state.realm.units[0]?.summoningSickness, false);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 Aramos Mercenaries may discard a deterministic random hand card instead of paying mana', () => {
+  const decks = {
+    north: deck('aramos-north', 6, 8),
+    south: deck('aramos-south', 6, 8),
+  };
+  const northSpell: SpellFacts = {
+    attack: 3,
+    defense: 3,
+    discardRandomCardInsteadOfMana: true,
+    manaCost: 3,
+    thresholds: { air: 0, earth: 0, fire: 2, water: 0 },
+  };
+  const cards = cardsFor(decks, undefined, undefined, { elements: ['fire'] }, {
+    north: northSpell,
+    south: {
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+  });
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-random-card-summon-cost-v1',
+    },
+    cards,
+    decks,
+    firstSeat: 'north' as const,
+    seed: 417,
+  };
+  const aramosId = decks.north.spellbook[0]!;
+  const gameManifest = createGameManifest(input);
+  assert.equal(
+    gameManifest.cards[aramosId]?.cardType === 'minion'
+      && gameManifest.cards[aramosId].discardRandomCardInsteadOfMana,
+    true,
+  );
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [aramosId]: {
+        ...cards[aramosId],
+        discardRandomCardInsteadOfMana: false,
+      } as unknown as GameCardDefinition,
+    },
+  }), /discardRandomCardInsteadOfMana must be true/);
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+  assert.equal(session.state.players.north.mana, 1);
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'), false);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C3'));
+  assert.equal(session.state.players.north.mana, 2);
+
+  const alternateActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.paymentMode === 'random-card-discard');
+  assert.ok(alternateActions.length > 0);
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.paymentMode === undefined), false);
+  assert.ok(alternateActions.every(({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.manaCost === 0));
+  const cast = alternateActions.find(({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cell === 'C3');
+  assert.ok(cast);
+  const castInstanceId = cast.descriptor.kind === 'summon-minion'
+    ? cast.descriptor.cardInstanceId
+    : '';
+  const eligible = [
+    ...session.state.players.north.hand.atlas.map((candidate) => ({ ...candidate, zone: 'atlas' as const })),
+    ...session.state.players.north.hand.spellbook
+      .filter(({ instanceId }) => instanceId !== castInstanceId)
+      .map((candidate) => ({ ...candidate, zone: 'spellbook' as const })),
+  ];
+  assert.ok(eligible.length > 0);
+  assert.deepEqual(new Set(eligible.map(({ zone }) => zone)), new Set(['atlas', 'spellbook']));
+  const handBefore = session.state.players.north.hand;
+  const southBefore = canonicalJson(observeGame(session.state, 'south'));
+  assert.ok(eligible.every(({ cardId, instanceId }) =>
+    !southBefore.includes(cardId) && !southBefore.includes(instanceId)));
+  const checkpoint = session;
+  const first = stepGame(checkpoint, cast);
+  const second = stepGame(checkpoint, cast);
+  assert.equal(first.accepted, true);
+  assert.equal(second.accepted, true);
+  assert.deepEqual(second.receipt.randomDraws, first.receipt.randomDraws);
+  assert.deepEqual(second.receipt.events, first.receipt.events);
+  assert.equal(hashGameState(second.session.state), hashGameState(first.session.state));
+  session = first.session;
+
+  const discard = first.receipt.events.find(({ type }) => type === 'card-discarded');
+  assert.ok(discard);
+  assert.equal(typeof discard.payload, 'object');
+  assert.ok(discard.payload && !Array.isArray(discard.payload));
+  const discardPayload = discard.payload as Readonly<Record<string, unknown>>;
+  const discardedInstanceId = discardPayload.instanceId;
+  const discardedCardId = discardPayload.cardId;
+  const discardedZone = discardPayload.zone;
+  assert.equal(discardPayload.sourceInstanceId, castInstanceId);
+  assert.ok(eligible.some(({ cardId, instanceId, zone }) =>
+    cardId === discardedCardId && instanceId === discardedInstanceId && zone === discardedZone));
+  assert.deepEqual(first.receipt.events.map(({ type }) => type), [
+    'card-discarded',
+    'minion-summoned',
+  ]);
+  const summoned = first.receipt.events[1];
+  assert.ok(summoned && typeof summoned.payload === 'object' && !Array.isArray(summoned.payload));
+  assert.equal((summoned.payload as Readonly<Record<string, unknown>>).manaPaid, 0);
+  assert.equal(session.state.players.north.mana, 2);
+  assert.equal(session.state.players.north.hand.atlas.length,
+    handBefore.atlas.length - (discardedZone === 'atlas' ? 1 : 0));
+  assert.equal(session.state.players.north.hand.spellbook.length,
+    handBefore.spellbook.length - 1 - (discardedZone === 'spellbook' ? 1 : 0));
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === discardedInstanceId), true);
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === castInstanceId), false);
+  assert.ok(first.receipt.randomDraws.length > 0);
+  assert.ok(first.receipt.randomDraws.every(({ domain, purpose }) => {
+    if (typeof domain !== 'object' || domain === null || Array.isArray(domain)) return false;
+    const drawDomain = domain as Readonly<Record<string, unknown>>;
+    return purpose === 'summon_random_card_discard_cost'
+      && drawDomain.kind === 'card_index_candidate'
+      && drawDomain.exclusiveMaximum === eligible.length;
+  }));
+  const southAfter = canonicalJson(observeGame(session.state, 'south'));
+  assert.ok(southAfter.includes(String(discardedCardId)));
+  assert.ok(southAfter.includes(String(discardedInstanceId)));
   assert.equal(verifyGameReplay(session), true);
 });
 
