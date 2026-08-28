@@ -2425,6 +2425,227 @@ test('RULE-03 Charge Magic grants an untargeted ally Charge only for the current
   assert.equal(verifyGameReplay(session), true);
 });
 
+test('RULE-03 Overpower gives a chosen ally +2 power until the current End Phase', () => {
+  const decks = { north: deck('overpower-north', 4, 6), south: deck('overpower-south', 4, 6) };
+  const baseCards = cardsFor(decks, {
+    attack: 1,
+    defense: 1,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  });
+  const authority = {
+    contentHash: SYNTHETIC_AUTHORITY_HASH,
+    mode: 'synthetic' as const,
+    revisionId: 'synthetic-overpower-v1',
+  };
+  const seed = 264;
+  const preview = createGameSession(createGameManifest({
+    authority,
+    cards: baseCards,
+    decks,
+    firstSeat: 'north',
+    seed,
+  }));
+  const overpowerCardId = preview.state.players.north.hand.spellbook[0]?.cardId;
+  const fighterCardId = preview.state.players.north.hand.spellbook[1]?.cardId;
+  const hiddenCardId = preview.state.players.north.hand.spellbook[2]?.cardId;
+  const disabledCardId = preview.state.players.north.spellbook[0]?.cardId;
+  const enemyCardId = preview.state.players.south.hand.spellbook[0]?.cardId;
+  assert.ok(overpowerCardId);
+  assert.ok(fighterCardId);
+  assert.ok(hiddenCardId);
+  assert.ok(disabledCardId);
+  assert.ok(enemyCardId);
+
+  const cards: Record<string, GameCardDefinition> = { ...baseCards };
+  cards[overpowerCardId] = {
+    cardType: 'magic',
+    grantPowerToAllyThisTurn: 2,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  } as unknown as GameCardDefinition;
+  cards[hiddenCardId] = {
+    ...baseCards[hiddenCardId]!,
+    burrowing: true,
+    stealth: true,
+    ward: true,
+  } as GameCardDefinition;
+  cards[disabledCardId] = {
+    ...baseCards[disabledCardId]!,
+    waterbound: true,
+  } as GameCardDefinition;
+  cards[enemyCardId] = {
+    ...baseCards[enemyCardId]!,
+    attack: 2,
+    defense: 2,
+    summonToAnySite: true,
+  } as GameCardDefinition;
+  assert.throws(() => createGameManifest({
+    authority,
+    cards: {
+      ...cards,
+      [overpowerCardId]: {
+        cardType: 'magic',
+        grantPowerToAllyThisTurn: 1,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+    decks,
+    firstSeat: 'north',
+    seed,
+  }), /grantPowerToAllyThisTurn/);
+  const gameManifest = createGameManifest({ authority, cards, decks, firstSeat: 'north', seed });
+  assert.deepEqual(gameManifest.cards[overpowerCardId], {
+    cardType: 'magic',
+    grantPowerToAllyThisTurn: 2,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  });
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === fighterCardId && descriptor.cell === 'C4' && !descriptor.region);
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === hiddenCardId && descriptor.cell === 'C4'
+    && descriptor.region === 'underground');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === enemyCardId && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === disabledCardId && descriptor.cell === 'C4');
+
+  const checkpoint = session;
+  const overpower = checkpoint.state.players.north.hand.spellbook.find(({ cardId }) =>
+    cardId === overpowerCardId);
+  const fighter = checkpoint.state.realm.units.find(({ cardId }) => cardId === fighterCardId);
+  const hidden = checkpoint.state.realm.units.find(({ cardId }) => cardId === hiddenCardId);
+  const disabled = checkpoint.state.realm.units.find(({ cardId }) => cardId === disabledCardId);
+  const enemy = checkpoint.state.realm.units.find(({ cardId }) => cardId === enemyCardId);
+  assert.ok(overpower);
+  assert.ok(fighter);
+  assert.ok(hidden);
+  assert.ok(disabled);
+  assert.ok(enemy);
+  const casts = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === overpower.instanceId);
+  assert.deepEqual(casts.flatMap(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.ally ? [descriptor.ally.instanceId] : []).sort(), [
+    checkpoint.state.players.north.avatar.card.instanceId,
+    disabled.instanceId,
+    fighter.instanceId,
+    hidden.instanceId,
+  ].sort());
+  assert.equal(casts.some(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.ally?.instanceId === enemy.instanceId), false);
+  assert.equal(casts.every(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.target === undefined && descriptor.targetLocation === undefined), true);
+  assert.equal(casts.find(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.ally?.instanceId === fighter.instanceId)?.label.includes('grant +2 power'), true);
+
+  const avatarGrant = accept(checkpoint, action(checkpoint, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === overpower.instanceId
+      && descriptor.ally?.kind === 'avatar'));
+  assert.deepEqual({
+    attack: observeGame(avatarGrant.state, 'north').players.north.avatar.attack,
+    defense: observeGame(avatarGrant.state, 'north').players.north.avatar.defense,
+  }, { attack: 3, defense: 3 });
+  assert.deepEqual(avatarGrant.transcript.at(-1)?.events.slice(1, 2).map(({ payload, type }) => ({
+    payload,
+    type,
+  })), [{
+    payload: {
+      amount: 2,
+      instanceId: checkpoint.state.players.north.avatar.card.instanceId,
+      seat: 'north',
+      sourceInstanceId: overpower.instanceId,
+    },
+    type: 'power-granted',
+  }]);
+  assert.equal(verifyGameReplay(avatarGrant), true);
+
+  const disabledGrant = accept(checkpoint, action(checkpoint, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === overpower.instanceId
+      && descriptor.ally?.instanceId === disabled.instanceId));
+  const disabledView = observeGame(disabledGrant.state, 'north').realm.units.find(({ instanceId }) =>
+    instanceId === disabled.instanceId);
+  assert.deepEqual({
+    attack: disabledView?.attack,
+    defense: disabledView?.defense,
+    disabled: disabledView?.disabled,
+  }, { attack: 3, defense: 3, disabled: true });
+  assert.equal(verifyGameReplay(disabledGrant), true);
+
+  const powered = stepGame(checkpoint, action(checkpoint, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === overpower.instanceId
+      && descriptor.ally?.instanceId === fighter.instanceId));
+  assert.equal(powered.accepted, true);
+  if (!powered.accepted) return;
+  session = powered.session;
+  assert.deepEqual(powered.receipt.events.map(({ type }) => type), [
+    'magic-cast',
+    'power-granted',
+    'magic-resolved',
+  ]);
+  const poweredView = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
+    instanceId === fighter.instanceId);
+  assert.deepEqual({ attack: poweredView?.attack, defense: poweredView?.defense }, {
+    attack: 3,
+    defense: 3,
+  });
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === fighter.instanceId && descriptor.path.length === 1);
+  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+    && descriptor.target.kind === 'minion' && descriptor.target.instanceId === enemy.instanceId);
+  const fought = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  assert.equal(fought.accepted, true);
+  if (!fought.accepted) return;
+  session = fought.session;
+  assert.equal(fought.receipt.events.some(({ payload, type }) => type === 'damage-dealt'
+    && (payload as { amount?: number; instanceId?: string }).amount === 3
+    && (payload as { instanceId?: string }).instanceId === enemy.instanceId), true);
+  const survivor = session.state.realm.units.find(({ instanceId }) => instanceId === fighter.instanceId);
+  assert.equal(survivor?.damage, 2);
+  assert.equal(session.state.realm.units.some(({ instanceId }) => instanceId === enemy.instanceId), false);
+
+  const ended = stepGame(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  assert.equal(ended.accepted, true);
+  if (!ended.accepted) return;
+  session = ended.session;
+  const expiryIndex = ended.receipt.events.findIndex(({ type }) => type === 'power-expired');
+  const turnEndedIndex = ended.receipt.events.findIndex(({ type }) => type === 'turn-ended');
+  assert.equal(expiryIndex >= 0 && expiryIndex < turnEndedIndex, true);
+  assert.deepEqual(ended.receipt.events[expiryIndex]?.payload, {
+    amount: 2,
+    instanceId: fighter.instanceId,
+    seat: 'north',
+    sourceInstanceId: overpower.instanceId,
+  });
+  const expired = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
+    instanceId === fighter.instanceId);
+  assert.deepEqual({
+    attack: expired?.attack,
+    damage: expired?.damage,
+    defense: expired?.defense,
+  }, { attack: 1, damage: 0, defense: 1 });
+  assert.equal(session.state.realm.units.some(({ instanceId }) => instanceId === fighter.instanceId), true);
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === overpower.instanceId), true);
+  assert.equal(verifyGameReplay(session), true);
+});
+
 test('RULE-03 Lure makes a chosen enemy minion take its own closer step', () => {
   const decks = { north: deck('lure-north', 6, 8), south: deck('lure-south', 6, 8) };
   const baseCards = cardsFor(decks, {

@@ -196,6 +196,27 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airLeyline.deck.atlas
     .find(({ name }) => name === 'Leyline Henge')?.copies, 4);
   assert.equal(result.airLeyline.replayVerified, true);
+  assert.equal(result.earthOverpower.overpower, 'Overpower');
+  assert.equal(result.earthOverpower.elthamTownsfolk, 'Eltham Townsfolk');
+  assert.equal(result.earthOverpower.acceptedActionCount, 12);
+  assert.equal(result.earthOverpower.exactOwnAllyChoices, true);
+  assert.equal(result.earthOverpower.currentPowerIncreasedByTwo, true);
+  assert.equal(result.earthOverpower.unitStatePreservedOnGrant, true);
+  assert.equal(result.earthOverpower.manaPaid, 1);
+  assert.equal(result.earthOverpower.spellEnteredCemetery, true);
+  assert.equal(result.earthOverpower.causalEventsVerified, true);
+  assert.equal(result.earthOverpower.expiredBeforeTurnEnded, true);
+  assert.equal(result.earthOverpower.printedPowerRestored, true);
+  assert.equal(result.earthOverpower.noRandomDraws, true);
+  assert.equal(result.earthOverpower.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthOverpower.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthOverpower.deck.spellbook
+    .find(({ name }) => name === 'Overpower')?.copies, 4);
+  assert.equal(result.earthOverpower.deck.spellbook
+    .find(({ name }) => name === 'Eltham Townsfolk')?.copies, 4);
+  assert.equal(result.earthOverpower.replayVerified, true);
   assert.equal(result.waterEdgeConnection.polarBears, 'Polar Bears');
   assert.equal(result.waterEdgeConnection.acceptedActionCount, 16);
   assert.equal(result.waterEdgeConnection.wrapMoveAvailable, true);

@@ -56,6 +56,7 @@ export type GameCardDefinition =
     damageTargetUnit?: number;
     disableTargetNearbyMinionUntilNextTurn?: true;
     grantChargeToAllyThisTurn?: true;
+    grantPowerToAllyThisTurn?: 2;
     healController?: number;
     lureEnemyMinionOneStepCloser?: true;
     manaCost: number;
@@ -163,6 +164,7 @@ type UnitInstance = Readonly<CardInstance & {
   summoningSickness: boolean;
   tapped: boolean;
   temporaryChargeSources?: readonly StateHash[];
+  temporaryPowerSources?: readonly StateHash[];
   warded: boolean;
 }>;
 
@@ -203,6 +205,7 @@ type PlayerState = Readonly<{
     location: RealmCell;
     region: GameRegion;
     tapped: boolean;
+    temporaryPowerSources?: readonly StateHash[];
   }>;
   cemetery: readonly CardInstance[];
   domainEstablished: boolean;
@@ -577,6 +580,9 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
     if (definition.grantChargeToAllyThisTurn === true) {
       return unitRefs(state, seat).map((ally) => ({ ...cast, ally }));
     }
+    if (definition.grantPowerToAllyThisTurn === 2) {
+      return unitRefs(state, seat).map((ally) => ({ ...cast, ally }));
+    }
     if (definition.lureEnemyMinionOneStepCloser === true) {
       const choices = unitRefs(state, seat).flatMap((ally) => {
         const allyStatus = unitStatus(state, ally);
@@ -751,6 +757,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.grantChargeToAllyThisTurn !== true) {
       throw new RangeError(`${path}.grantChargeToAllyThisTurn must be true when defined`);
     }
+    if (card.grantPowerToAllyThisTurn !== undefined
+      && card.grantPowerToAllyThisTurn !== 2) {
+      throw new RangeError(`${path}.grantPowerToAllyThisTurn must be 2`);
+    }
     if (card.lureEnemyMinionOneStepCloser !== undefined
       && card.lureEnemyMinionOneStepCloser !== true) {
       throw new RangeError(`${path}.lureEnemyMinionOneStepCloser must be true when defined`);
@@ -767,6 +777,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.damageTargetUnit !== undefined)
       + Number(card.disableTargetNearbyMinionUntilNextTurn === true)
       + Number(card.grantChargeToAllyThisTurn === true)
+      + Number(card.grantPowerToAllyThisTurn === 2)
       + Number(card.healController !== undefined)
       + Number(card.lureEnemyMinionOneStepCloser === true)
       + Number(card.returnMinionFromOwnCemetery === true)
@@ -1058,6 +1069,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? { disableTargetNearbyMinionUntilNextTurn: true as const }
                   : card.grantChargeToAllyThisTurn === true
                     ? { grantChargeToAllyThisTurn: true as const }
+                  : card.grantPowerToAllyThisTurn === 2
+                    ? { grantPowerToAllyThisTurn: 2 as const }
                   : card.lureEnemyMinionOneStepCloser === true
                     ? { lureEnemyMinionOneStepCloser: true as const }
                   : card.healController !== undefined
@@ -1313,18 +1326,27 @@ function observedCard(card: CardInstance): Readonly<{ cardId: string; instanceId
   return { cardId: card.cardId, instanceId: card.instanceId };
 }
 
+function temporaryPowerBonus(sources: readonly StateHash[] | undefined): number {
+  return 2 * (sources?.length ?? 0);
+}
+
 function observePlayer(state: GameState, player: PlayerState, owner: GameSeat, viewer: GameSeat): ObservedPlayer {
   const own = owner === viewer;
   const avatarDefinition = cardDefinition(state, player.avatar.card.cardId);
   if (avatarDefinition.cardType !== 'avatar') throw new Error('player Avatar lacks Avatar definition');
+  const status = unitStatus(state, {
+    instanceId: player.avatar.card.instanceId,
+    kind: 'avatar',
+    seat: owner,
+  });
   return deepFreeze({
     affinity: affinity(state, owner),
     atlasCount: player.atlas.length,
     avatar: {
-      attack: avatarDefinition.attack,
+      attack: status.attack,
       cardId: player.avatar.card.cardId,
       deathDoorTurn: player.avatar.deathDoorTurn,
-      defense: avatarDefinition.defense,
+      defense: status.defense,
       instanceId: player.avatar.card.instanceId,
       life: player.avatar.life,
       location: player.avatar.location,
@@ -1369,12 +1391,17 @@ export function observeGame(state: GameState, viewer: GameSeat): GameObservation
   const units = state.realm.units.map((unit) => {
     const definition = cardDefinition(state, unit.cardId);
     if (definition.cardType !== 'minion') throw new Error('unit lacks minion definition');
+    const status = unitStatus(state, {
+      instanceId: unit.instanceId,
+      kind: 'minion',
+      seat: unit.controller,
+    });
     return {
-      attack: definition.attack,
+      attack: status.attack,
       cardId: unit.cardId,
       controller: unit.controller,
       damage: unit.damage,
-      defense: definition.defense,
+      defense: status.defense,
       disabled: minionDisabled(state, unit),
       instanceId: unit.instanceId,
       location: unit.location,
@@ -1452,6 +1479,7 @@ function unitStatus(
   canRespondToAttack: boolean;
   charge: boolean;
   connectsTopBottom: boolean;
+  defense: number;
   disabled: boolean;
   immobile: boolean;
   lethal: boolean;
@@ -1473,15 +1501,17 @@ function unitStatus(
     if (avatar.card.instanceId !== ref.instanceId) throw new Error('unreachable Avatar reference');
     const definition = cardDefinition(state, avatar.card.cardId);
     if (definition.cardType !== 'avatar') throw new Error('Avatar lacks Avatar definition');
+    const powerBonus = temporaryPowerBonus(avatar.temporaryPowerSources);
     return {
       airborne: false,
-      attack: definition.attack,
+      attack: definition.attack + powerBonus,
       burrowing: false,
       canAttackSites: true,
       canMoveToDefend: true,
       canRespondToAttack: true,
       charge: false,
       connectsTopBottom: false,
+      defense: definition.defense + powerBonus,
       disabled: false,
       immobile: false,
       lethal: false,
@@ -1504,9 +1534,10 @@ function unitStatus(
   const definition = cardDefinition(state, unit.cardId);
   if (definition.cardType !== 'minion') throw new Error('minion lacks minion definition');
   const disabled = minionDisabled(state, unit);
+  const powerBonus = temporaryPowerBonus(unit.temporaryPowerSources);
   return {
     airborne: !disabled && definition.airborne === true && unit.region === 'surface',
-    attack: definition.attack,
+    attack: definition.attack + powerBonus,
     burrowing: !disabled && definition.burrowing === true,
     canAttackSites: !disabled && definition.cannotAttackSites !== true,
     canMoveToDefend: !disabled && definition.cannotDefend !== true,
@@ -1514,6 +1545,7 @@ function unitStatus(
     charge: !disabled
       && (definition.charge === true || Boolean(unit.temporaryChargeSources?.length)),
     connectsTopBottom: !disabled && definition.connectsTopBottom === true,
+    defense: definition.defense + powerBonus,
     disabled,
     immobile: !disabled && definition.immobile === true,
     lethal: !disabled && definition.lethal === true,
@@ -2025,7 +2057,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
   ];
 }
 
-function actionLabel(descriptor: GameActionDescriptor): string {
+function actionLabel(state: GameState, descriptor: GameActionDescriptor): string {
   if (descriptor.kind === 'mulligan') {
     const count = descriptor.atlasOrder.length + descriptor.spellbookOrder.length;
     return count === 0
@@ -2043,18 +2075,28 @@ function actionLabel(descriptor: GameActionDescriptor): string {
     return `Summon ${descriptor.cardId} at ${descriptor.cell}${descriptor.region ? ` ${descriptor.region}` : ''} (${descriptor.manaCost} mana)`;
   }
   if (descriptor.kind === 'cast-magic') {
-    return descriptor.cemeteryMinionInstanceId
-      ? `Cast ${descriptor.cardId} to return minion ${descriptor.cemeteryMinionInstanceId.slice(0, 15)}…`
-      : descriptor.ally && descriptor.temptedEnemy && descriptor.temptedDestination
-        ? `Cast ${descriptor.cardId}: ${descriptor.ally.kind} ${descriptor.ally.instanceId.slice(0, 15)}… tempts minion ${descriptor.temptedEnemy.instanceId.slice(0, 15)}… to ${descriptor.temptedDestination.cell}`
-      : descriptor.target
-      ? `Cast ${descriptor.cardId} on ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`
-      : descriptor.ally && descriptor.targetLocation
-        ? `Cast ${descriptor.cardId} to teleport ${descriptor.ally.kind} ${descriptor.ally.instanceId.slice(0, 15)}… to ${descriptor.targetLocation.cell}`
-      : descriptor.ally
-        ? `Cast ${descriptor.cardId} to grant Charge to ${descriptor.ally.kind} ${descriptor.ally.instanceId.slice(0, 15)}…`
-      : descriptor.targetLocation
-        ? `Cast ${descriptor.cardId} at ${descriptor.targetLocation.cell} ${descriptor.targetLocation.region}`
+    if (descriptor.cemeteryMinionInstanceId) {
+      return `Cast ${descriptor.cardId} to return minion ${descriptor.cemeteryMinionInstanceId.slice(0, 15)}…`;
+    }
+    if (descriptor.ally && descriptor.temptedEnemy && descriptor.temptedDestination) {
+      return `Cast ${descriptor.cardId}: ${descriptor.ally.kind} ${descriptor.ally.instanceId.slice(0, 15)}… tempts minion ${descriptor.temptedEnemy.instanceId.slice(0, 15)}… to ${descriptor.temptedDestination.cell}`;
+    }
+    if (descriptor.target) {
+      return `Cast ${descriptor.cardId} on ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`;
+    }
+    if (descriptor.ally && descriptor.targetLocation) {
+      return `Cast ${descriptor.cardId} to teleport ${descriptor.ally.kind} ${descriptor.ally.instanceId.slice(0, 15)}… to ${descriptor.targetLocation.cell}`;
+    }
+    if (descriptor.ally) {
+      const definition = cardDefinition(state, descriptor.cardId);
+      const effect = definition.cardType === 'magic'
+        && definition.grantPowerToAllyThisTurn === 2
+        ? 'grant +2 power'
+        : 'grant Charge';
+      return `Cast ${descriptor.cardId} to ${effect} to ${descriptor.ally.kind} ${descriptor.ally.instanceId.slice(0, 15)}…`;
+    }
+    return descriptor.targetLocation
+      ? `Cast ${descriptor.cardId} at ${descriptor.targetLocation.cell} ${descriptor.targetLocation.region}`
       : `Cast ${descriptor.cardId}`;
   }
   if (descriptor.kind === 'move-and-attack') {
@@ -2097,7 +2139,7 @@ export function legalGameActions(state: GameState, seat: GameSeat): readonly Gam
   return orderLegalActions(actionDescriptors(state, seat).map((descriptor) => ({
     actionId: opaqueActionId('sorcery-core-v1', seat, state.stateVersion, descriptor),
     descriptor,
-    label: actionLabel(descriptor),
+    label: actionLabel(state, descriptor),
     seat,
     stateVersion: state.stateVersion,
   })));
@@ -2711,10 +2753,8 @@ function resolveFightWindow(
       payload: { accumulated, amount, direct: true, instanceId: ref.instanceId, seat: ref.seat },
       type: 'damage-dealt',
     });
-    const definition = cardDefinition(state, unit.cardId);
-    if (definition.cardType !== 'minion') throw new Error('fight minion lacks minion definition');
     if (accumulated > 0
-      && (accumulated >= definition.defense || lethalDamage.has(ref.instanceId))) {
+      && (accumulated >= unitStatus(state, ref).defense || lethalDamage.has(ref.instanceId))) {
       deaths.push(units[index]!);
     }
   }
@@ -3307,6 +3347,60 @@ function applyDescriptor(
           },
           resolved,
         ],
+        [],
+      ];
+    }
+    if (definition.grantPowerToAllyThisTurn === 2) {
+      if (!descriptor.ally) throw new Error('unreachable Overpower cast');
+      const grantOutcome: GameOutcome = {
+        payload: {
+          amount: definition.grantPowerToAllyThisTurn,
+          instanceId: descriptor.ally.instanceId,
+          seat,
+          sourceInstanceId: card.instanceId,
+        },
+        type: 'power-granted',
+      };
+      if (descriptor.ally.kind === 'avatar') {
+        const allyPlayer = castState.players[seat];
+        const poweredState = deepFreeze({
+          ...castState,
+          players: replacePlayer(castState, seat, deepFreeze({
+            ...allyPlayer,
+            avatar: {
+              ...allyPlayer.avatar,
+              temporaryPowerSources: [
+                ...(allyPlayer.avatar.temporaryPowerSources ?? []),
+                card.instanceId,
+              ],
+            },
+          })),
+        });
+        return [
+          withStateVersion(poweredState, {}),
+          [castOutcome, grantOutcome, resolved],
+          [],
+        ];
+      }
+      const allyIndex = castState.realm.units.findIndex(({ controller, instanceId }) =>
+        controller === seat && instanceId === descriptor.ally!.instanceId);
+      const ally = castState.realm.units[allyIndex];
+      if (!ally) throw new Error('unreachable Overpower ally');
+      const poweredState = deepFreeze({
+        ...castState,
+        realm: {
+          ...castState.realm,
+          units: castState.realm.units.map((unit, index) => index === allyIndex
+            ? deepFreeze({
+              ...ally,
+              temporaryPowerSources: [...(ally.temporaryPowerSources ?? []), card.instanceId],
+            })
+            : unit),
+        },
+      });
+      return [
+        withStateVersion(poweredState, {}),
+        [castOutcome, grantOutcome, resolved],
         [],
       ];
     }
@@ -4382,7 +4476,24 @@ function applyDescriptor(
     ];
   }
   const nextSeat = otherSeat(seat);
-  const endingPlayer = deepFreeze({ ...endState.players[seat], mana: 0 });
+  const {
+    temporaryPowerSources: avatarPowerSources,
+    ...endingAvatar
+  } = endState.players[seat].avatar;
+  const powerExpired: GameOutcome[] = (avatarPowerSources ?? []).map((sourceInstanceId) => ({
+    payload: {
+      amount: 2,
+      instanceId: endingAvatar.card.instanceId,
+      seat,
+      sourceInstanceId,
+    },
+    type: 'power-expired',
+  }));
+  const endingPlayer = deepFreeze({
+    ...endState.players[seat],
+    avatar: deepFreeze(endingAvatar),
+    mana: 0,
+  });
   const nextPlayer = endState.players[nextSeat];
   const startingPlayer = deepFreeze({
     ...nextPlayer,
@@ -4405,6 +4516,7 @@ function applyDescriptor(
     const {
       disableEffects: previousDisableEffects,
       temporaryChargeSources,
+      temporaryPowerSources,
       ...baseUnit
     } = unit;
     const disableEffects = (previousDisableEffects ?? [])
@@ -4413,6 +4525,17 @@ function applyDescriptor(
       chargeExpired.push({
         payload: { instanceId: unit.instanceId, seat: unit.controller, sourceInstanceId },
         type: 'charge-expired',
+      });
+    }
+    for (const sourceInstanceId of temporaryPowerSources ?? []) {
+      powerExpired.push({
+        payload: {
+          amount: 2,
+          instanceId: unit.instanceId,
+          seat: unit.controller,
+          sourceInstanceId,
+        },
+        type: 'power-expired',
       });
     }
     return deepFreeze({
@@ -4442,6 +4565,7 @@ function applyDescriptor(
         type: 'stealth-gained',
       })),
       ...chargeExpired,
+      ...powerExpired,
       { payload: { seat, turnNumber: endState.turnNumber }, type: 'turn-ended' },
       ...expiredDisableEffects.map(({ effect, unit }) => ({
         payload: {
