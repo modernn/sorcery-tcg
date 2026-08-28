@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { runPrivateGameCheck } from '../../src/commands/run-private-game-check.ts';
 
-test('private actual-card decks complete a deterministic supported combat scenario', async () => {
+test('private actual-card decks complete deterministic combat and Earth-ramp scenarios', async () => {
   const result = await runPrivateGameCheck();
   assert.equal(result.classification, 'private-local_actual-cards_unranked-partial-rules');
   assert.equal(result.avatarSpellDrawn, true);
@@ -15,6 +15,13 @@ test('private actual-card decks complete a deterministic supported combat scenar
   assert.equal(result.decks.south.atlas.reduce((total, card) => total + card.copies, 0), 30);
   assert.equal(result.decks.north.spellbook.reduce((total, card) => total + card.copies, 0), 60);
   assert.equal(result.decks.south.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthRamp.affinityAdded, true);
+  assert.equal(result.earthRamp.manaUnavailableWhileSick, true);
+  assert.equal(result.earthRamp.manaGained, 2);
+  assert.equal(result.earthRamp.genesisSiteDrawn, true);
+  assert.equal(result.earthRamp.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthRamp.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthRamp.replayVerified, true);
   assert.equal(result.combat.northMinionDied, true);
   assert.equal(result.combat.southMinionDied, true);
   assert.equal(result.replayVerified, true);
