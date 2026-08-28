@@ -9,6 +9,7 @@
     "pnpm": "11.22.0"
   },
   "scripts": {
+    "game:demo": "node src/commands/run-game-demo.ts",
     "prototype": "node src/prototype/server.ts",
     "typecheck": "tsc --noEmit",
     "authority:import": "node src/commands/import-authority.ts",
