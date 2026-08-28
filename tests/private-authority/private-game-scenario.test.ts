@@ -3,9 +3,15 @@ import test from 'node:test';
 
 import { runPrivateGameCheck } from '../../src/commands/run-private-game-check.ts';
 
-test('private actual-card decks complete deterministic combat and Earth-ramp scenarios', async () => {
+test('private actual-card decks complete deterministic combat, Earth-ramp, and Air-movement scenarios', async () => {
   const result = await runPrivateGameCheck();
   assert.equal(result.classification, 'private-local_actual-cards_unranked-partial-rules');
+  assert.equal(result.airMovement.movementMinion, 'Snallygaster');
+  assert.equal(result.airMovement.twoStepDefend, true);
+  assert.equal(result.airMovement.twoStepMoveAndAttack, true);
+  assert.equal(result.airMovement.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airMovement.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airMovement.replayVerified, true);
   assert.equal(result.avatarSpellDrawn, true);
   assert.equal(result.charge.activatedOnSummon, true);
   assert.equal(result.genesis.siteDrawn, true);

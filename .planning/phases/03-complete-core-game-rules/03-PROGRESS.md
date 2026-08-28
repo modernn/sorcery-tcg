@@ -28,6 +28,7 @@
 - Movement +1 uses engine-issued explicit surface paths for both Move and Attack and Defend, including exact two-step and legal returning routes.
 - A private-local actual-card adapter that verifies the normalized artifact and current Constructed format, builds legal 30/60 beginner decks under official rarity copy limits, and executes a deterministic real-card Charge and combat scenario without committing source data.
 - A second real-card Earth ramp deck that proves provided Earth affinity, Field Laborers' readiness-gated temporary mana, Zombie Horde as a five-mana payoff with restricted Defend, Land Surveyor's Genesis draw, and Kettletop Leprechaun's Deathrite draw.
+- A third legal 30/60 Air teaching deck that proves Snallygaster's exact two-step Movement +1 paths for both Defend and Move and Attack.
 - Observer-safe actions, rejections, causal events, hashes, exact replay, and a deterministic unranked match runner.
 - A no-dependency browser client that renders the authoritative 5x4 realm, scopes hidden information by seat, exposes only engine-issued actions, and verifies replay.
 
@@ -42,7 +43,7 @@
 - `pnpm game:demo -- 23`: completes in 138 accepted actions over 56 turns with byte-exact replay.
 - `pnpm play`: serves the playable core at `http://127.0.0.1:4174/`.
 - Browser checkpoint: a 22-action match moved a minion, handed Defend to the non-active seat, resolved a simultaneous trade into both cemeteries, and replayed byte-identically.
-- `pnpm game:check-private`: a 34-action combat match and a 38-action Earth ramp/Deathrite match exercise two concrete real-card beginner decks with byte-exact replay.
+- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, and 26-action Air movement matches exercise three concrete real-card teaching decks with byte-exact replay.
 - `pnpm game:verify-private`: one passing ignored-authority integration scenario.
 - Death's Door scenarios prove same-turn direct-damage immunity, later death blows, simultaneous-defeat draws, nonlethal site strikes, and exact replay.
 - `pnpm verify`: 215 passing public tests at this checkpoint.
@@ -51,7 +52,7 @@
 
 - Rubble replacement, land/water regions, connection rules, control changes, and card-specific placement overrides.
 - Full start/main/end phase triggers and duration cleanup beyond vanilla minion damage and summoning sickness.
-- Additional costs, non-minion spells, card-provided movement, further activated abilities, and card-specific targets.
+- Additional costs, non-minion spells, movement beyond Movement +1, further activated abilities, and card-specific targets.
 - Combat tiers, projectiles, healing, prevention/modification, additional card-triggered damage/death behavior, and tournament ending overlays.
 - Source-linked scenario and invariant coverage for every supported core mechanic.
 
