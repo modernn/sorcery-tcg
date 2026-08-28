@@ -43,6 +43,10 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthRamp.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
   assert.equal(result.earthRamp.replayVerified, true);
   assert.equal(result.fireResponse.lumberingGiant, 'Lumbering Giant');
+  assert.equal(result.fireResponse.monstrousLion, 'Monstrous Lion');
+  assert.equal(result.fireResponse.chargeMoveAndAttack, true);
+  assert.equal(result.fireResponse.unitTargetAvailable, true);
+  assert.equal(result.fireResponse.siteTargetUnavailable, true);
   assert.equal(result.fireResponse.defendUnavailable, true);
   assert.equal(result.fireResponse.interceptUnavailable, true);
   assert.equal(result.fireResponse.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);

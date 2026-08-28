@@ -56,6 +56,7 @@ type ScenarioConfig = Readonly<{
   lethalMinionStableId: string;
   lumberingMinionStableId: string;
   manaMinionStableId: string;
+  monstrousLionStableId: string;
   movementMinionStableId: string;
   providerMinionStableId: string;
   revisionId: string;
@@ -127,12 +128,16 @@ export type PrivateGameCheck = Readonly<{
   }>;
   fireResponse: Readonly<{
     acceptedActionCount: number;
+    chargeMoveAndAttack: boolean;
     deck: DeckList;
     defendUnavailable: boolean;
     interceptUnavailable: boolean;
     lumberingGiant: string;
+    monstrousLion: string;
     replayVerified: boolean;
     seed: number;
+    siteTargetUnavailable: boolean;
+    unitTargetAvailable: boolean;
   }>;
   lethal: Readonly<{ minion: string; tougherMinionKilled: boolean }>;
   provider: Readonly<{ affinityAdded: boolean; minion: string }>;
@@ -183,6 +188,7 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     || typeof value.lethalMinionStableId !== 'string'
     || typeof value.lumberingMinionStableId !== 'string'
     || typeof value.manaMinionStableId !== 'string'
+    || typeof value.monstrousLionStableId !== 'string'
     || typeof value.movementMinionStableId !== 'string'
     || typeof value.providerMinionStableId !== 'string'
     || typeof value.revisionId !== 'string'
@@ -196,7 +202,7 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     || !Number.isSafeInteger(value.waterSeed)
     || typeof value.waterSeed !== 'number'
     || value.waterSeed < 0
-    || Object.keys(value).sort().join(',') !== 'airSeed,avatar,cannotDefendMinionStableId,chargeMinionStableId,deathriteMinionStableId,earthProviderMinionStableId,earthSeed,fireSeed,genesisMinionStableId,ghostTownSiteStableId,healingMinionStableId,lethalMinionStableId,lumberingMinionStableId,manaMinionStableId,movementMinionStableId,providerMinionStableId,revisionId,roamingMinionStableId,roamingSeed,seed,waterSeed'
+    || Object.keys(value).sort().join(',') !== 'airSeed,avatar,cannotDefendMinionStableId,chargeMinionStableId,deathriteMinionStableId,earthProviderMinionStableId,earthSeed,fireSeed,genesisMinionStableId,ghostTownSiteStableId,healingMinionStableId,lethalMinionStableId,lumberingMinionStableId,manaMinionStableId,monstrousLionStableId,movementMinionStableId,providerMinionStableId,revisionId,roamingMinionStableId,roamingSeed,seed,waterSeed'
     || Object.keys(avatar).sort().join(',') !== 'drawSpell,stableId') {
     throw new Error('private game scenario has an unsupported shape');
   }
@@ -215,6 +221,7 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     lethalMinionStableId: value.lethalMinionStableId,
     lumberingMinionStableId: value.lumberingMinionStableId,
     manaMinionStableId: value.manaMinionStableId,
+    monstrousLionStableId: value.monstrousLionStableId,
     movementMinionStableId: value.movementMinionStableId,
     providerMinionStableId: value.providerMinionStableId,
     revisionId: value.revisionId,
@@ -241,6 +248,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   lethalMinion: NormalizedCard;
   lumberingMinion: NormalizedCard;
   manaMinion: NormalizedCard;
+  monstrousLion: NormalizedCard;
   movementMinion: NormalizedCard;
   providerMinion: NormalizedCard;
   roamingMinion: NormalizedCard;
@@ -317,6 +325,16 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || lumberingMinion.manaCost === null
     || lumberingMinion.rarity === null) {
     throw new Error('private Defend-or-Intercept prohibition minion no longer matches its supported facts');
+  }
+  const monstrousLion = snapshot.cards.find(({ stableId }) => stableId === config.monstrousLionStableId);
+  if (!monstrousLion
+    || monstrousLion.cardType !== 'minion'
+    || ruleTextDigest(monstrousLion.rulesText) !== 'sha256:deb371d2f58d8c61fdcd1c6fe7b66d351aa29b8da3f6a9b2a289bada52ad8103'
+    || monstrousLion.attack === null
+    || monstrousLion.defense === null
+    || monstrousLion.manaCost === null
+    || monstrousLion.rarity === null) {
+    throw new Error('private Charge and site-attack restriction minion no longer matches its supported facts');
   }
   const genesisMinion = snapshot.cards.find(({ stableId }) => stableId === config.genesisMinionStableId);
   if (!genesisMinion
@@ -418,6 +436,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     lethalMinion,
     lumberingMinion,
     manaMinion,
+    monstrousLion,
     movementMinion,
     providerMinion,
     roamingMinion,
@@ -462,6 +481,7 @@ function gameDefinition(
   siteGenesisGainMana = 0,
   summonToAnySite = false,
   cannotDefendOrIntercept = false,
+  cannotAttackSites = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -489,6 +509,7 @@ function gameDefinition(
     return {
       attack: card.attack,
       cardType: 'minion',
+      cannotAttackSites,
       cannotDefend,
       cannotDefendOrIntercept,
       charge,
@@ -610,7 +631,7 @@ function buildManifest(
       : scenario === 'air'
         ? elementalDeck('air', [input.movementMinion, input.roamingMinion])
         : scenario === 'fire'
-          ? elementalDeck('fire', [input.lumberingMinion])
+          ? elementalDeck('fire', [input.lumberingMinion, input.monstrousLion])
         : scenario === 'water'
           ? elementalDeck('water', [input.healingMinion])
           : deck(false, true),
@@ -629,7 +650,8 @@ function buildManifest(
     gameDefinition(
       card,
       card.stableId === avatar.stableId && input.config.avatar.drawSpell,
-      card.stableId === input.chargeMinion.stableId,
+      card.stableId === input.chargeMinion.stableId
+        || card.stableId === input.monstrousLion.stableId,
       card.stableId === input.genesisMinion.stableId,
       card.stableId === input.lethalMinion.stableId,
       card.stableId === input.providerMinion.stableId
@@ -645,6 +667,7 @@ function buildManifest(
       card.stableId === input.ghostTownSite.stableId ? 1 : 0,
       card.stableId === input.roamingMinion.stableId,
       card.stableId === input.lumberingMinion.stableId,
+      card.stableId === input.monstrousLion.stableId,
     ),
   ]));
   return {
@@ -1024,6 +1047,7 @@ function findFireOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): Readonly<{
   attackerInstanceId: string;
+  lionInstanceId: string;
   lumberingInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -1047,6 +1071,12 @@ function findFireOpening(
     session,
     'north',
     input.lumberingMinion.stableId,
+    3,
+  );
+  const lionInstanceId = availableMinionInstance(
+    session,
+    'north',
+    input.monstrousLion.stableId,
     2,
   );
   for (const first of session.state.players.south.hand.atlas) {
@@ -1065,12 +1095,14 @@ function findFireOpening(
       .find(({ instanceId }) => instanceId !== first.instanceId);
     if (northSites.length === 4
       && fireAffinity >= 2
+      && lionInstanceId
       && lumberingInstanceId
       && attacker
       && second) {
       return {
         ...built,
         attackerInstanceId: attacker.instanceId,
+        lionInstanceId,
         lumberingInstanceId,
         northSiteInstanceIds: northSites.map(({ instanceId }) => instanceId) as [string, string, string, string],
         seed,
@@ -1522,12 +1554,33 @@ function runFireResponse(
       && descriptor.cell === 'D4');
   take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.lionInstanceId
+      && descriptor.cell === 'C3');
+  const chargeMoveAndAttack = legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.lionInstanceId
+      && descriptor.to.cell === 'C2');
+  take(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.lionInstanceId
+      && descriptor.to.cell === 'C2');
+  const lionTargets = legalGameActions(session.state, 'north');
+  const unitTargetAvailable = lionTargets.some(({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === opening.attackerInstanceId);
+  const siteTargetUnavailable = lionTargets.every(({ descriptor }) =>
+    descriptor.kind !== 'declare-attack' || descriptor.target.kind !== 'site');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'close-intercept');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.lumberingInstanceId
       && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   take(({ descriptor }) => descriptor.kind === 'end-turn');
 
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
@@ -1536,7 +1589,11 @@ function runFireResponse(
       && descriptor.unitInstanceId === opening.attackerInstanceId
       && descriptor.to.cell === 'C3');
   take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  const interceptUnavailable = session.state.phase === 'main';
+  const interceptUnavailable = legalGameActions(session.state, 'north').every(({ descriptor }) =>
+    descriptor.kind !== 'intercept' || descriptor.unitInstanceId !== opening.lumberingInstanceId);
+  if (session.state.phase === 'intercept') {
+    take(({ descriptor }) => descriptor.kind === 'close-intercept');
+  }
   take(({ descriptor }) => descriptor.kind === 'end-turn');
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   take(({ descriptor }) => descriptor.kind === 'end-turn');
@@ -1557,13 +1614,18 @@ function runFireResponse(
 
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
+    chargeMoveAndAttack,
     deck: deckList(opening.manifest.decks.north, opening.names),
     defendUnavailable,
     interceptUnavailable,
     lumberingGiant:
       opening.names.get(input.lumberingMinion.stableId) ?? input.lumberingMinion.stableId,
+    monstrousLion:
+      opening.names.get(input.monstrousLion.stableId) ?? input.monstrousLion.stableId,
     replayVerified: verifyGameReplay(session),
     seed: opening.seed,
+    siteTargetUnavailable,
+    unitTargetAvailable,
   });
 }
 
