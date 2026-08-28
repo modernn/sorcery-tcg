@@ -31,6 +31,7 @@
 - A minion that cannot move to Defend is excluded only when movement is required; stationary Defend and Intercept remain legal.
 - A minion prohibited from Defend and Intercept is excluded from both response abilities while a directly attacked unit may still participate without using Defend.
 - Movement +1 and +2 use engine-issued explicit surface paths for both Move and Attack and Defend, including exact bounded paths and legal returning routes without repeating a directed step; sideways-only basic movement excludes forward, backward, and diagonal steps from both actions.
+- Forward-only self-movement follows each player's orientation for Move and Attack and Defend while retaining the legal zero-step activation.
 - Card-granted top/bottom realm connection adds exact wraparound steps for Move and Attack and Defend without changing ordinary unit or site adjacency.
 - Submerge minions can be summoned underwater at Water sites, move between surface and underwater at a Water site, and swim between adjacent Water sites; attacks, Defend, Intercept, and projectiles respect exact regions while sites remain surface targets.
 - Burrowing-enabled minions enter and traverse the below-ground region beneath Land sites; a minion that also has Submerge can change directly between qualifying neighboring below-ground and underwater spaces.
@@ -55,6 +56,7 @@
 - A legal 30/60 Water teaching-deck variant that proves Coral-Reef Kelpie has distinct surface and underwater summon choices at a real Water site while a real non-Submerge minion has only the surface choice.
 - A legal 30/60 Earth teaching-deck variant that proves Cave Trolls has distinct surface and underground summon choices at a real land site, travels underground beneath an enemy land site without attacking it, then surfaces and can attack that site; a real non-Burrowing minion has only the surface summon choice.
 - A legal 30/60 Earth teaching-deck variant with four Entombed proves its real land-site cast exists only underground while Bosk Troll in the same opening can be cast only on the surface.
+- A legal 30/60 Earth teaching-deck variant with three Dalcean Phalanx proves its real C3-to-C2 forward move while real backward and sideways site paths remain unavailable.
 - A legal 30/60 Water teaching-deck variant with four Drowned proves its real Water-site cast exists only underwater while Sly Fox in the same opening can be cast only on the surface.
 - A fifth legal 30/60 Fire teaching deck that proves Monstrous Lion can Charge into an opposing unit but cannot target its site, then proves Lumbering Giant cannot use Defend or Intercept while ready and in range.
 - Observer-safe actions, rejections, causal events, hashes, exact replay, and a deterministic unranked match runner.
@@ -71,10 +73,10 @@
 - `pnpm game:demo -- 23`: completes in 138 accepted actions over 56 turns with byte-exact replay.
 - `pnpm play`: serves the playable core at `http://127.0.0.1:4174/`.
 - Browser checkpoint: a 22-action match moved a minion, handed Defend to the non-active seat, resolved a simultaneous trade into both cemeteries, and replayed byte-identically.
-- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 28-action Earth Burrowing, 10-action Earth burrowed-only casting, 24-action Earth first strike, 22-action Earth Ranged, 27-action Earth Ward, 27-action Airborne, 26-action Air Stealth, 26-action Air movement, 24-action Air Movement +2, 25-action Air unrestricted-summon, 17-action Air Voidwalk/outer-column casting, 15-action Air Genesis spell-draw, 9-action Air Leyline Genesis, 43-action Fire targeting/response, 23-action Water end-turn Stealth, 22-action Water sideways movement, 16-action Water edge connection, 16-action Water Submerge, 10-action Water submerged-only casting, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
+- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 28-action Earth Burrowing, 10-action Earth burrowed-only casting, 24-action Earth first strike, 22-action Earth forward movement, 22-action Earth Ranged, 27-action Earth Ward, 27-action Airborne, 26-action Air Stealth, 26-action Air movement, 24-action Air Movement +2, 25-action Air unrestricted-summon, 17-action Air Voidwalk/outer-column casting, 15-action Air Genesis spell-draw, 9-action Air Leyline Genesis, 43-action Fire targeting/response, 23-action Water end-turn Stealth, 22-action Water sideways movement, 16-action Water edge connection, 16-action Water Submerge, 10-action Water submerged-only casting, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
 - `pnpm game:verify-private`: one passing ignored-authority integration scenario.
 - Death's Door scenarios prove same-turn direct-damage immunity, later death blows, simultaneous-defeat draws, nonlethal site strikes, and exact replay.
-- `pnpm verify`: 237 passing public tests at this checkpoint.
+- `pnpm verify`: 238 passing public tests at this checkpoint.
 
 ## Still required for Phase 3
 
