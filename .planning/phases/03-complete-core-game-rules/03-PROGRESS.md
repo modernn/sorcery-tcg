@@ -10,7 +10,7 @@
 - Mandatory first-domain site placement at the Avatar's square, Avatar tapping, turn end, untap, mana from controlled sites, and repeatable turns.
 - Ordinary site placement on unoccupied orthogonal cells bordering a controlled site, with controller-aware domains and immediate mana on entry.
 - The Avatar's once-per-turn choice to play a site or privately draw one from the Atlas, including empty-Atlas defeat.
-- A deck-scoped, manifest-bound mechanical catalog that admits only Avatars, sites, and fully specified vanilla minions for this slice and rejects unsupported spell types before play.
+- A deck-scoped, manifest-bound mechanical catalog that admits Avatars, sites, supported minions, and targeted unit-damage Magic while rejecting unsupported spell shapes before play.
 - Mana payment, controlled-site affinity thresholds, Avatar spellcasting, public minion placement, unlimited shared-site occupancy, and end-of-turn summoning-sickness cleanup.
 - Vanilla surface Move and Attack for Avatars and ready minions, including zero-step activation, one orthogonal site step, post-movement attack choice, and tap costs.
 - Separate turn-owner and decision-seat tracking for non-active-player Defend and Intercept windows.
@@ -28,6 +28,7 @@
 - Deathrite site draws resolve before simultaneous dead minions enter their cemeteries, including hidden draws and deck-empty loss.
 - A narrow site Genesis effect grants temporary mana on entry, emits causal gain evidence, and expires through the existing End Phase reset.
 - Numeric Deathrite healing resolves before cemetery entry, caps at printed Avatar life, and cannot change life at Death's Door.
+- Targeted unit-damage Magic pays mana and thresholds, issues same-region targets while respecting enemy Stealth, resolves through the shared Ward/damage/death/Deathrite pipeline, and enters its owner's cemetery before any terminal event.
 - A minion that cannot move to Defend is excluded only when movement is required; stationary Defend and Intercept remain legal.
 - A minion prohibited from Defend and Intercept is excluded from both response abilities while a directly attacked unit may still participate without using Defend.
 - Movement +1 and +2 use engine-issued explicit surface paths for both Move and Attack and Defend, including exact bounded paths and legal returning routes without repeating a directed step; sideways-only basic movement excludes forward, backward, and diagonal steps from both actions.
@@ -54,6 +55,7 @@
 - A legal 30/60 Air teaching-deck variant that proves Spectral Stalker can be summoned to an arbitrary real void, move through void, exit onto an enemy site's surface, and attack that site while a real non-Voidwalk minion has no void summon choice; the same opening proves Forsaken has outer-column void choices but no inner-column surface or void cast.
 - A legal 30/60 Air teaching-deck variant that proves Apprentice Wizard's Genesis draws a hidden spell after it is summoned while keeping the opponent view redacted.
 - A legal 30/60 Air teaching-deck variant with four Leyline Henges that proves the first Henge draws nothing and an adjacent second copy draws exactly one opponent-hidden spell.
+- A legal 30/60 Air teaching-deck variant with four Zap! and four Snow Leopards proves one targeted Magic damage, survival, mana payment, hand removal, cemetery entry, and exact replay.
 - A fourth legal 30/60 Water teaching deck that proves Muddy Pigs heals exactly 3 before entering its cemetery after a real simultaneous combat death; variants prove Sly Fox's end-turn Stealth timing and Sedge Crabs' C3-to-B3 sideways movement while real C2/C4 paths remain unavailable.
 - A legal 30/60 Water teaching-deck variant that proves Polar Bears can move directly from the top to bottom realm edge and attack the opposing site while its co-located Avatar has no wraparound move.
 - A legal 30/60 Water teaching-deck variant that proves Coral-Reef Kelpie has distinct surface and underwater summon choices at a real Water site while a real non-Submerge minion has only the surface choice.
@@ -79,16 +81,16 @@
 - `pnpm game:demo -- 23`: completes in 138 accepted actions over 56 turns with byte-exact replay.
 - `pnpm play`: serves the playable core at `http://127.0.0.1:4174/`.
 - Browser checkpoint: a 22-action match moved a minion, handed Defend to the non-active seat, resolved a simultaneous trade into both cemeteries, and replayed byte-identically.
-- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 28-action Earth Burrowing, 10-action Earth burrowed-only casting, 24-action Earth first strike, 22-action Earth forward movement, 30-action Earth Immobile, 21-action Earth Secret Tunnel, 22-action Earth Ranged, 27-action Earth Ward, 27-action Airborne, 26-action Air Stealth, 26-action Air movement, 24-action Air Movement +2, 25-action Air unrestricted-summon, 17-action Air Voidwalk/outer-column casting, 15-action Air Genesis spell-draw, 9-action Air Leyline Genesis, 43-action Fire targeting/response, 23-action Water end-turn Stealth, 22-action Water sideways movement, 16-action Water edge connection, 16-action Water Submerge, 10-action Water submerged-only casting, 16-action Water any-Water-site casting, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
+- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 28-action Earth Burrowing, 10-action Earth burrowed-only casting, 24-action Earth first strike, 22-action Earth forward movement, 30-action Earth Immobile, 21-action Earth Secret Tunnel, 22-action Earth Ranged, 27-action Earth Ward, 27-action Airborne, 26-action Air Stealth, 26-action Air movement, 24-action Air Movement +2, 25-action Air unrestricted-summon, 17-action Air Voidwalk/outer-column casting, 15-action Air Genesis spell-draw, 9-action Air Leyline Genesis, 10-action Air Zap Magic, 43-action Fire targeting/response, 23-action Water end-turn Stealth, 22-action Water sideways movement, 16-action Water edge connection, 16-action Water Submerge, 10-action Water submerged-only casting, 16-action Water any-Water-site casting, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
 - `pnpm game:verify-private`: one passing ignored-authority integration scenario.
 - Death's Door scenarios prove same-turn direct-damage immunity, later death blows, simultaneous-defeat draws, nonlethal site strikes, and exact replay.
-- `pnpm verify`: 241 passing public tests at this checkpoint.
+- `pnpm verify`: 243 passing public tests at this checkpoint.
 
 ## Still required for Phase 3
 
 - Rubble replacement, terrain mutation, connection rules beyond the supported region graph, top/bottom edge wrap, and Secret Tunnel links, control changes, and other card-specific casting or placement overrides.
 - Full start/main/end phase triggers and duration cleanup beyond the supported narrow Genesis/Deathrite effects, minion damage, and summoning sickness.
-- Additional costs, non-minion spells, movement beyond bounded +1/+2 bonuses and supported static restrictions, further activated abilities (including Pudge Butcher's projectile/drag), and card-specific targets.
+- Additional costs, broader non-minion spells, movement beyond bounded +1/+2 bonuses and supported static restrictions, further activated abilities (including Pudge Butcher's projectile/drag), and card-specific targets.
 - Combat tiers beyond attacking-only first strike, projectile ranges and effects beyond Ranged 1, additional healing sources, prevention/modification beyond minion Ward, additional card-triggered damage/death behavior, and tournament ending overlays.
 - State-based banishment/death when forced movement, ability loss, or a deliberately suicidal step leaves a unit unable to survive in its region.
 - Source-linked scenario and invariant coverage for every supported core mechanic.

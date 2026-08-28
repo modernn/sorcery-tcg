@@ -262,7 +262,19 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       ...cards,
       [firstSpell]: { cardType: 'magic' } as unknown as GameCardDefinition,
     },
-  }), /unsupported/);
+  }), /damageTargetUnit/);
+  assert.doesNotThrow(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        damageTargetUnit: 1,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }));
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -720,6 +732,184 @@ test('RULE-03/04 a Spellcaster pays mana and summons a minion atop a controlled 
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
   assert.equal(session.state.realm.units[0]?.summoningSickness, false);
   assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03/05 targeted Magic pays mana, damages any unit, resolves Deathrite, and enters the cemetery', () => {
+  const decks = { north: deck('magic-north', 4, 6), south: deck('magic-south', 4, 6) };
+  const cards = cardsFor(decks, {
+    deathriteDrawSite: true,
+    defense: 1,
+    manaCost: 1,
+    thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+  }, { attack: 1, defense: 1, drawSpell: false, life: 1 }, { elements: ['air'] });
+  for (const cardId of decks.north.spellbook) {
+    cards[cardId] = {
+      cardType: 'magic',
+      damageTargetUnit: 1,
+      manaCost: 1,
+      thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+    };
+  }
+  const gameManifest = createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic',
+      revisionId: 'synthetic-targeted-magic-v1',
+    },
+    cards,
+    decks,
+    firstSeat: 'north',
+    seed: 148,
+  });
+  let session = keep(createGameSession(gameManifest));
+  session = keep(session);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cell === 'C1'));
+  const target = session.state.realm.units.find(({ controller }) => controller === 'south');
+  assert.ok(target);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+
+  const spell = session.state.players.north.hand.spellbook[0];
+  assert.ok(spell);
+  const casts = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === spell.instanceId);
+  assert.deepEqual(casts.map(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && `${descriptor.target.kind}:${descriptor.target.seat}:${descriptor.target.instanceId}`).sort(), [
+    `avatar:north:${session.state.players.north.avatar.card.instanceId}`,
+    `avatar:south:${session.state.players.south.avatar.card.instanceId}`,
+    `minion:south:${target.instanceId}`,
+  ].sort());
+  const before = session.state.players;
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === spell.instanceId
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === target.instanceId));
+
+  assert.equal(session.state.players.north.mana, before.north.mana - 1);
+  assert.equal(session.state.players.north.hand.spellbook.length, before.north.hand.spellbook.length - 1);
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === spell.instanceId), true);
+  assert.equal(session.state.realm.units.some(({ instanceId }) => instanceId === target.instanceId), false);
+  assert.equal(session.state.players.south.cemetery.some(({ instanceId }) =>
+    instanceId === target.instanceId), true);
+  assert.equal(session.state.players.south.atlas.length, before.south.atlas.length - 1);
+  assert.equal(session.state.players.south.hand.atlas.length, before.south.hand.atlas.length + 1);
+  assert.deepEqual(session.transcript.at(-1)?.events.map(({ type }) => type), [
+    'magic-cast',
+    'magic-damage-allocated',
+    'damage-dealt',
+    'site-drawn',
+    'minion-died',
+    'magic-resolved',
+  ]);
+  assert.equal(session.state.phase, 'main');
+  assert.equal(verifyGameReplay(session), true);
+
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.target.kind === 'avatar'
+      && descriptor.target.seat === 'south'));
+  assert.equal(session.state.players.south.avatar.life, 0);
+  assert.deepEqual(session.state.terminal, { status: 'active' });
+
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  const finalSpell = session.state.players.north.hand.spellbook[0];
+  assert.ok(finalSpell);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === finalSpell.instanceId
+      && descriptor.target.kind === 'avatar'
+      && descriptor.target.seat === 'south'));
+  assert.deepEqual(session.state.terminal, {
+    loser: 'south',
+    reason: 'avatar_defeated',
+    status: 'finished',
+    winner: 'north',
+  });
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === finalSpell.instanceId), true);
+  assert.equal(session.transcript.at(-1)?.events.at(-1)?.type, 'game-ended');
+  assert.equal(session.transcript.at(-1)?.events.at(-2)?.type, 'magic-resolved');
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 Magic targets stay in the caster region and exclude enemy Stealth', () => {
+  const targetIsLegal = (spell: SpellFacts, region: 'surface' | 'underground'): boolean => {
+    const decks = { north: deck('target-north', 4, 6), south: deck('target-south', 4, 6) };
+    const cards = cardsFor(decks, spell, undefined, { elements: ['air'] });
+    for (const cardId of decks.north.spellbook) {
+      cards[cardId] = {
+        cardType: 'magic',
+        damageTargetUnit: 1,
+        manaCost: 1,
+        thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+      };
+    }
+    let session = keep(createGameSession(createGameManifest({
+      authority: {
+        contentHash: SYNTHETIC_AUTHORITY_HASH,
+        mode: 'synthetic',
+        revisionId: `synthetic-magic-target-${region}-v1`,
+      },
+      cards,
+      decks,
+      firstSeat: 'north',
+      seed: region === 'surface' ? 149 : 150,
+    })));
+    session = keep(session);
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'summon-minion' && (descriptor.region ?? 'surface') === region));
+    const target = session.state.realm.units.find(({ controller }) => controller === 'south');
+    assert.ok(target);
+    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    assert.equal(verifyGameReplay(session), true);
+    return legalGameActions(session.state, 'north').some(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === target.instanceId);
+  };
+
+  assert.equal(targetIsLegal({
+    manaCost: 1,
+    stealth: true,
+    thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+  }, 'surface'), false);
+  assert.equal(targetIsLegal({
+    burrowing: true,
+    manaCost: 1,
+    mustBeCastBurrowed: true,
+    thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+  }, 'underground'), false);
 });
 
 test('RULE-03 explicit permission allows a minion to be summoned to any site', () => {
