@@ -1,9 +1,29 @@
 import { canonicalJson, type JsonValue } from '../authority/canonical-json.ts';
 import { identityHash } from '../authority/hash.ts';
 import { createEngineState, drawUint32, type EngineState } from './determinism.ts';
+import {
+  createAttempt,
+  createEvents,
+  createReceipt,
+  createRejection,
+  deepFreeze,
+  opaqueActionId,
+  orderLegalActions,
+  type EngineActionRequest,
+  type EngineAttempt,
+  type EngineEvent,
+  type EngineLegalAction,
+  type EngineRandomDraw,
+  type EngineReceipt,
+  type EngineRejection,
+} from './contract.ts';
 
 export type DemoSeat = 'north' | 'south';
 type DemoActionKind = 'draw' | 'finish' | 'pass' | 'reveal';
+type DemoActionDescriptor = Readonly<{
+  kind: DemoActionKind;
+  zone: 'marker';
+}>;
 type DemoMarker =
   | Readonly<{ status: 'empty' }>
   | Readonly<{ identity: string; status: 'hidden' | 'revealed' }>;
@@ -30,45 +50,28 @@ export type DemoObservation = Readonly<{
   viewer: DemoSeat;
 }>;
 
-export type DemoLegalAction = Readonly<{
-  actionId: string;
-  label: string;
-  seat: DemoSeat;
-  stateVersion: number;
-}>;
+export type DemoLegalAction = EngineLegalAction<DemoActionDescriptor>;
+export type DemoActionRequest = EngineActionRequest;
+export type DemoPublicEvent = EngineEvent;
+export type DemoReceipt = EngineReceipt;
 
-export type DemoActionRequest = Readonly<{
-  actionId: string;
-  seat: DemoSeat;
-  stateVersion: number;
-}>;
-
-export type DemoPublicEvent =
-  | Readonly<{ seat: DemoSeat; type: 'marker-drawn' }>
-  | Readonly<{ identity: string; seat: DemoSeat; type: 'marker-revealed' }>
-  | Readonly<{ nextSeat: DemoSeat; seat: DemoSeat; type: 'turn-passed' }>
-  | Readonly<{ seat: DemoSeat; type: 'demo-finished' }>;
-
-export type DemoReceipt = Readonly<{
-  actionId: string;
-  event: DemoPublicEvent;
-  postStateHash: ReturnType<typeof identityHash>;
-  preStateHash: ReturnType<typeof identityHash>;
-  seat: DemoSeat;
-  stateVersion: number;
-  nextStateVersion: number;
+export type DemoManifest = Readonly<{
+  contractVersion: 'synthetic-demo-v2';
+  mode: 'synthetic';
+  schemaVersion: 1;
+  seed: number;
 }>;
 
 export type DemoSession = Readonly<{
+  attempts: readonly EngineAttempt[];
+  manifest: DemoManifest;
   state: DemoState;
   transcript: readonly DemoReceipt[];
 }>;
 
-export type DemoRejectionReason = 'stale_version' | 'terminal_state' | 'unknown_action' | 'wrong_seat';
-
 export type DemoStepResult =
   | Readonly<{ accepted: true; receipt: DemoReceipt; session: DemoSession }>
-  | Readonly<{ accepted: false; reason: DemoRejectionReason; session: DemoSession }>;
+  | Readonly<{ accepted: false; reason: EngineRejection; session: DemoSession }>;
 
 const ACTION_LABELS: Readonly<Record<DemoActionKind, string>> = Object.freeze({
   draw: 'Draw hidden marker',
@@ -76,12 +79,6 @@ const ACTION_LABELS: Readonly<Record<DemoActionKind, string>> = Object.freeze({
   pass: 'Pass turn',
   reveal: 'Reveal marker',
 });
-
-function deepFreeze<T>(value: T): T {
-  if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value;
-  for (const child of Object.values(value)) deepFreeze(child);
-  return Object.freeze(value);
-}
 
 function asJson(value: unknown): JsonValue {
   return value as JsonValue;
@@ -99,8 +96,12 @@ function otherSeat(seat: DemoSeat): DemoSeat {
   return seat === 'north' ? 'south' : 'north';
 }
 
+function actionDescriptor(kind: DemoActionKind): DemoActionDescriptor {
+  return deepFreeze({ kind, zone: 'marker' });
+}
+
 function actionId(kind: DemoActionKind, seat: DemoSeat, stateVersion: number): string {
-  return identityHash({ contract: 'synthetic-demo-v1', kind, seat, stateVersion });
+  return opaqueActionId('synthetic-demo-v2', seat, stateVersion, actionDescriptor(kind));
 }
 
 function actionKinds(state: DemoState, seat: DemoSeat): readonly DemoActionKind[] {
@@ -150,8 +151,13 @@ export function createDemoState(seed: number): DemoState {
   });
 }
 
-export function createDemoSession(seed: number): DemoSession {
-  return deepFreeze({ state: createDemoState(seed), transcript: [] });
+export function createDemoManifest(seed: number): DemoManifest {
+  createEngineState(seed);
+  return deepFreeze({ contractVersion: 'synthetic-demo-v2', mode: 'synthetic', schemaVersion: 1, seed });
+}
+
+export function createDemoSession(manifest: DemoManifest): DemoSession {
+  return deepFreeze({ attempts: [], manifest, state: createDemoState(manifest.seed), transcript: [] });
 }
 
 function observedMarker(marker: DemoMarker, owner: DemoSeat, viewer: DemoSeat): ObservedMarker {
@@ -175,23 +181,47 @@ export function observeDemo(state: DemoState, seat: DemoSeat): DemoObservation {
 }
 
 export function legalDemoActions(state: DemoState, seat: DemoSeat): readonly DemoLegalAction[] {
-  return deepFreeze(
-    actionKinds(state, seat)
-      .map((kind) => ({
+  return orderLegalActions(
+    actionKinds(state, seat).map((kind) => {
+      const descriptor = actionDescriptor(kind);
+      return {
         actionId: actionId(kind, seat, state.stateVersion),
+        descriptor,
         label: ACTION_LABELS[kind],
         seat,
         stateVersion: state.stateVersion,
-      }))
-      .sort((left, right) => canonicalJson(left) .localeCompare(canonicalJson(right))),
+      };
+    }),
   );
 }
 
-function applyAction(state: DemoState, seat: DemoSeat, kind: DemoActionKind): readonly [DemoState, DemoPublicEvent] {
+type DemoOutcome = Readonly<{
+  payload: JsonValue;
+  type: 'demo-finished' | 'marker-drawn' | 'marker-revealed' | 'turn-passed';
+}>;
+
+function applyAction(
+  state: DemoState,
+  seat: DemoSeat,
+  kind: DemoActionKind,
+): readonly [DemoState, DemoOutcome, readonly EngineRandomDraw[]] {
   if (kind === 'draw') {
+    const prePrngStateHash = identityHash(asJson(state.engine.prng));
     const draw = drawUint32(state.engine);
     const markers = { ...state.markers, [seat]: { identity: markerIdentity(draw.value), status: 'hidden' } } as const;
-    return [stateWith(state, { engine: draw.nextState, markers }), { seat, type: 'marker-drawn' }];
+    const randomDraw = deepFreeze({
+      domain: { kind: 'uint32', maximum: 0xffff_ffff, minimum: 0 },
+      drawSequence: draw.nextState.prng.draws,
+      postPrngStateHash: identityHash(asJson(draw.nextState.prng)),
+      prePrngStateHash,
+      purpose: 'synthetic_marker_identity',
+      result: draw.value,
+    });
+    return [
+      stateWith(state, { engine: draw.nextState, markers }),
+      { payload: { seat }, type: 'marker-drawn' },
+      [randomDraw],
+    ];
   }
   if (kind === 'reveal') {
     const marker = state.markers[seat];
@@ -199,71 +229,115 @@ function applyAction(state: DemoState, seat: DemoSeat, kind: DemoActionKind): re
     const markers = { ...state.markers, [seat]: { identity: marker.identity, status: 'revealed' } } as const;
     return [
       stateWith(state, { markers }),
-      { identity: marker.identity, seat, type: 'marker-revealed' },
+      { payload: { identity: marker.identity, seat }, type: 'marker-revealed' },
+      [],
     ];
   }
   if (kind === 'finish') {
-    return [stateWith(state, { terminal: true }), { seat, type: 'demo-finished' }];
+    return [stateWith(state, { terminal: true }), { payload: { seat }, type: 'demo-finished' }, []];
   }
 
   const nextSeat = otherSeat(seat);
-  return [stateWith(state, { activeSeat: nextSeat }), { nextSeat, seat, type: 'turn-passed' }];
+  return [
+    stateWith(state, { activeSeat: nextSeat }),
+    { payload: { nextSeat, seat }, type: 'turn-passed' },
+    [],
+  ];
 }
 
 export function stepDemo(session: DemoSession, request: DemoActionRequest): DemoStepResult {
   const { state } = session;
-  if (state.terminal) return deepFreeze({ accepted: false, reason: 'terminal_state', session });
-  if (request.stateVersion !== state.stateVersion) {
-    return deepFreeze({ accepted: false, reason: 'stale_version', session });
-  }
-  if (request.seat !== state.activeSeat) {
-    return deepFreeze({ accepted: false, reason: 'wrong_seat', session });
-  }
-
-  const kind = actionKinds(state, request.seat).find(
-    (candidate) => actionId(candidate, request.seat, state.stateVersion) === request.actionId,
-  );
-  if (kind === undefined) return deepFreeze({ accepted: false, reason: 'unknown_action', session });
-
-  const preStateHash = hashDemoState(state);
-  const [nextState, event] = applyAction(state, request.seat, kind);
-  const receipt: DemoReceipt = deepFreeze({
+  const command: DemoActionRequest = deepFreeze({
     actionId: request.actionId,
-    event,
+    seat: request.seat,
+    stateVersion: request.stateVersion,
+  });
+  const stateHash = hashDemoState(state);
+  const reject = (code: EngineRejection['code']): DemoStepResult => {
+    const reason = createRejection(code, state.stateVersion, stateHash);
+    const attempt = createAttempt(
+      session.attempts.length + 1,
+      command,
+      state.stateVersion,
+      stateHash,
+      { reasonCode: code },
+    );
+    return deepFreeze({
+      accepted: false,
+      reason,
+      session: { ...session, attempts: [...session.attempts, attempt] },
+    });
+  };
+
+  if (state.terminal) return reject('terminal_state');
+  if (command.stateVersion !== state.stateVersion) {
+    return reject('stale_version');
+  }
+  if (command.seat !== state.activeSeat) {
+    return reject('wrong_seat');
+  }
+
+  const kind = actionKinds(state, command.seat).find(
+    (candidate) => actionId(candidate, command.seat, state.stateVersion) === command.actionId,
+  );
+  if (kind === undefined) return reject('unknown_action');
+
+  const receiptSequence = session.transcript.length + 1;
+  // ponytail: the demo transcript is tiny; real match state will own the global event sequence.
+  const firstEventSequence = session.transcript.reduce((count, receipt) => count + receipt.events.length, 0) + 1;
+  const [nextState, outcome, randomDraws] = applyAction(state, command.seat, kind);
+  const events = createEvents(command.actionId, receiptSequence, firstEventSequence, [outcome]);
+  const receipt: DemoReceipt = createReceipt({
+    actionId: command.actionId,
+    events,
     nextStateVersion: nextState.stateVersion,
     postStateHash: hashDemoState(nextState),
-    preStateHash,
-    seat: request.seat,
+    preStateHash: stateHash,
+    randomDraws,
+    receiptSequence,
+    seat: command.seat,
     stateVersion: state.stateVersion,
   });
+  const attempt = createAttempt(
+    session.attempts.length + 1,
+    command,
+    state.stateVersion,
+    stateHash,
+    { receiptId: receipt.receiptId },
+  );
   return deepFreeze({
     accepted: true,
     receipt,
-    session: { state: nextState, transcript: [...session.transcript, receipt] },
+    session: {
+      attempts: [...session.attempts, attempt],
+      manifest: session.manifest,
+      state: nextState,
+      transcript: [...session.transcript, receipt],
+    },
   });
 }
 
-export function replayDemo(seed: number, actionIds: readonly string[]): DemoSession {
-  let session = createDemoSession(seed);
+export function replayDemo(manifest: DemoManifest, actionIds: readonly string[]): DemoSession {
+  let session = createDemoSession(manifest);
   for (const replayActionId of actionIds) {
     const result = stepDemo(session, {
       actionId: replayActionId,
       seat: session.state.activeSeat,
       stateVersion: session.state.stateVersion,
     });
-    if (!result.accepted) throw new Error(`demo replay rejected action: ${result.reason}`);
+    if (!result.accepted) throw new Error(`demo replay rejected action: ${result.reason.code}`);
     session = result.session;
   }
   return session;
 }
 
 export function verifyDemoReplay(
-  seed: number,
+  manifest: DemoManifest,
   actionIds: readonly string[],
   expectedTranscript: readonly DemoReceipt[],
 ): boolean {
   try {
-    return canonicalJson(replayDemo(seed, actionIds).transcript) === canonicalJson(expectedTranscript);
+    return canonicalJson(replayDemo(manifest, actionIds).transcript) === canonicalJson(expectedTranscript);
   } catch {
     return false;
   }
