@@ -37,7 +37,10 @@ const ZERO_HASH = `sha256:${'0'.repeat(64)}` as Hash;
 const FINAL_REVISION_ID = 'official-2026-08-27-v3';
 const FINAL_STABLE_ID = `bundle:${FINAL_REVISION_ID}`;
 const FINAL_LOCK_PATH = `${LOCAL_ROOT}/locks/${FINAL_REVISION_ID}/source-set-lock.json`;
+const FINAL_SELECTED_REVISION = `${LOCAL_ROOT}/revisions/${FINAL_REVISION_ID}`;
+const FINAL_RECEIPT_PATH = `data/authority/receipts/${FINAL_REVISION_ID}.json`;
 const FINAL_SUMMARY_PATH = '.planning/phases/01-rules-and-data-authority/01-15-SUMMARY.md';
+const AUTHORITY_README_PATH = 'data/authority/README.md';
 const FINAL_METHOD = 'user-provided-manual-download';
 const FINAL_REFERENCE = 'phase-01-20260827-manual-provision-1';
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
@@ -494,6 +497,13 @@ test('fresh v3 roots build final v3 candidates while historical evidence remains
     assert.deepEqual(await fileEvidence(RECEIPT_PATH), historicalBefore.receipt);
     await cleanTemp(sandbox);
   }
+});
+
+test('official-2026-08-27-v3 safe receipt write-once selection receipt root validates', async () => {
+  assert.equal((await stat(FINAL_SELECTED_REVISION)).isDirectory(), true);
+  await readFile(FINAL_RECEIPT_PATH, 'utf8');
+  await readFile(AUTHORITY_README_PATH, 'utf8');
+  assert.fail('final v3 write-once selection is not implemented');
 });
 
 test('live private roots independently reproduce the exact selected revision without mutation', async () => {
