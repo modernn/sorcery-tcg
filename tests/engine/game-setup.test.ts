@@ -37,6 +37,7 @@ type SpellFacts = Readonly<{
   genesisDrawSite?: boolean;
   lethal?: boolean;
   manaCost: number;
+  movementPlusOne?: boolean;
   provides?: 'air' | 'earth' | 'fire' | 'water';
   tapForMana?: number;
   thresholds: Readonly<{ air: number; earth: number; fire: number; water: number }>;
@@ -80,6 +81,7 @@ function cardsFor(
         genesisDrawSite: spell.genesisDrawSite ?? false,
         lethal: spell.lethal ?? false,
         manaCost: spell.manaCost,
+        movementPlusOne: spell.movementPlusOne ?? false,
         ...(spell.provides ? { provides: spell.provides } : {}),
         ...(spell.tapForMana ? { tapForMana: spell.tapForMana } : {}),
         thresholds: { ...spell.thresholds },
@@ -760,6 +762,98 @@ test('RULE-04 a prohibited minion cannot move to Defend but can still Intercept'
     descriptor.kind === 'decline-attack'));
   assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
     descriptor.kind === 'intercept' && descriptor.unitInstanceId === intercept.targetInstanceId), true);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 Movement +1 issues exact two-step and returning Move and Attack paths', () => {
+  const setup = northAttacksAtC2(53, {
+    attack: 2,
+    defense: 2,
+    manaCost: 1,
+    movementPlusOne: true,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  });
+  let session = accept(setup.session, action(setup.session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'close-intercept'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  const actions = legalGameActions(session.state, 'north');
+  const twoStep = actions.find(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === setup.attackerInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3,C4');
+  assert.ok(twoStep);
+  assert.equal(actions.some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === setup.attackerInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3,C2'), true);
+  const result = stepGame(session, twoStep);
+  assert.equal(result.accepted, true);
+  session = result.session;
+  assert.equal(session.state.pendingCombat?.cell, 'C4');
+  assert.match(canonicalJson(result.receipt.events[0]?.payload ?? null), /\"steps\":2/);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 Movement +1 can take an exact two-step path to Defend', () => {
+  let session = keep(createGameSession(manifest(54, {
+    spell: {
+      attack: 2,
+      defense: 2,
+      manaCost: 1,
+      movementPlusOne: true,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+  })));
+  session = keep(session);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cell === 'C4'));
+  const defenderInstanceId = session.state.realm.units[0]?.instanceId;
+  assert.ok(defenderInstanceId);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cell === 'C1'));
+  const attackerInstanceId = session.state.realm.units.find(({ controller }) => controller === 'south')?.instanceId;
+  assert.ok(attackerInstanceId);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C3'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C2'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === attackerInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C1,C2'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site'));
+  const defend = action(session, ({ descriptor }) =>
+    descriptor.kind === 'defend'
+      && descriptor.unitInstanceId === defenderInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3,C2');
+  session = accept(session, defend);
+  assert.equal(session.state.realm.units.find(({ instanceId }) => instanceId === defenderInstanceId)?.location, 'C2');
+  assert.match(canonicalJson(session.transcript.at(-1)?.events[0]?.payload ?? null), /\"steps\":2/);
   assert.equal(verifyGameReplay(session), true);
 });
 

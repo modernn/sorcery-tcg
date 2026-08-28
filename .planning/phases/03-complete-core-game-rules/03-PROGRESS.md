@@ -25,6 +25,7 @@
 - A narrow minion mana ability that requires readiness, taps for temporary mana, and expires at End Phase.
 - Deathrite site draws resolve before simultaneous dead minions enter their cemeteries, including hidden draws and deck-empty loss.
 - A minion that cannot move to Defend is excluded only when movement is required; stationary Defend and Intercept remain legal.
+- Movement +1 uses engine-issued explicit surface paths for both Move and Attack and Defend, including exact two-step and legal returning routes.
 - A private-local actual-card adapter that verifies the normalized artifact and current Constructed format, builds legal 30/60 beginner decks under official rarity copy limits, and executes a deterministic real-card Charge and combat scenario without committing source data.
 - A second real-card Earth ramp deck that proves provided Earth affinity, Field Laborers' readiness-gated temporary mana, Zombie Horde as a five-mana payoff with restricted Defend, Land Surveyor's Genesis draw, and Kettletop Leprechaun's Deathrite draw.
 - Observer-safe actions, rejections, causal events, hashes, exact replay, and a deterministic unranked match runner.
@@ -44,7 +45,7 @@
 - `pnpm game:check-private`: a 34-action combat match and a 38-action Earth ramp/Deathrite match exercise two concrete real-card beginner decks with byte-exact replay.
 - `pnpm game:verify-private`: one passing ignored-authority integration scenario.
 - Death's Door scenarios prove same-turn direct-damage immunity, later death blows, simultaneous-defeat draws, nonlethal site strikes, and exact replay.
-- `pnpm verify`: 213 passing public tests at this checkpoint.
+- `pnpm verify`: 215 passing public tests at this checkpoint.
 
 ## Still required for Phase 3
 
