@@ -14,7 +14,7 @@
     "authority:validate": "node src/commands/validate-authority.ts",
     "authority:verify-private": "node --test tests/private-authority/*.test.ts",
     "lint": "eslint .",
-    "test": "node --test tests/authority/*.test.ts",
+    "test": "node --test tests/authority/*.test.ts tests/engine/*.test.ts",
     "verify": "pnpm typecheck && pnpm lint && pnpm test"
   },
   "dependencies": {
