@@ -296,6 +296,18 @@ export type PrivateGameCheck = Readonly<{
     spellHandUnchanged: boolean;
     spellbookReducedByTwo: boolean;
   }>;
+  earthSinkhole: Readonly<{
+    acceptedActionCount: number;
+    avatarRemainedOnSurface: boolean;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    exactActivationAvailable: boolean;
+    noAffinityOrControlContribution: boolean;
+    replayVerified: boolean;
+    sinkhole: string;
+    sourceAndTargetEnteredCemetery: boolean;
+    twoNeutralRubbleSites: boolean;
+  }>;
   earthDivineHealing: Readonly<{
     acceptedActionCount: number;
     actualLifeGained: number;
@@ -708,6 +720,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   sedgeCrabs: NormalizedCard;
   seravaTownsfolk: NormalizedCard;
   shallowGrave: NormalizedCard;
+  sinkhole: NormalizedCard;
   slyFox: NormalizedCard;
   stealthMinion: NormalizedCard;
   stealthTargetMinion: NormalizedCard;
@@ -747,6 +760,22 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || shallowGrave.thresholds.water !== 0
     || shallowGrave.rarity !== 'exceptional') {
     throw new Error('private site discard Genesis no longer matches its supported facts');
+  }
+  const sinkhole = snapshot.cards.find(({ name }) => name === 'Sinkhole');
+  if (!sinkhole
+    || sinkhole.cardType !== 'site'
+    || ruleTextDigest(sinkhole.rulesText) !== 'sha256:6f196f25c0e42096f19bbb20cb52c4b2d5e5164c04fe92bbba169b8698820859'
+    || sinkhole.manaCost !== null
+    || sinkhole.attack !== null
+    || sinkhole.defense !== null
+    || sinkhole.life !== null
+    || sinkhole.elements.length !== 0
+    || sinkhole.thresholds.air !== 0
+    || sinkhole.thresholds.earth !== 0
+    || sinkhole.thresholds.fire !== 0
+    || sinkhole.thresholds.water !== 0
+    || sinkhole.rarity !== 'elite') {
+    throw new Error('private sacrifice-to-destroy site no longer matches its supported facts');
   }
   const bury = snapshot.cards.find(({ name }) => name === 'Bury');
   if (!bury
@@ -1486,6 +1515,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     sedgeCrabs,
     seravaTownsfolk,
     shallowGrave,
+    sinkhole,
     slyFox,
     stealthMinion,
     stealthTargetMinion,
@@ -1566,6 +1596,7 @@ function gameDefinition(
   teleportAllyToTargetSite = false,
   returnMinionFromOwnCemetery = false,
   disableTargetNearbyMinionUntilNextTurn = false,
+  sacrificeToDestroyNearbySite = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1589,6 +1620,7 @@ function gameDefinition(
         : {}),
       genesisDrawSpellPerAdjacentSameCard: siteGenesisDrawSpellPerAdjacentSameCard,
       ...(siteGenesisGainMana ? { genesisGainMana: siteGenesisGainMana } : {}),
+      ...(sacrificeToDestroyNearbySite ? { sacrificeToDestroyNearbySite: true } : {}),
     };
   }
   const supportedMagicEffects = Number(damageTargetUnit !== 0)
@@ -1669,7 +1701,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1775,6 +1807,7 @@ function buildManifest(
   const earthRescueDeck = elementalDeck('earth', earthMinions, [], [input.bury, input.rescue]);
   const earthDivineHealingDeck = elementalDeck('earth', earthMinions, [], [input.divineHealing]);
   const earthShallowGraveDeck = elementalDeck('earth', earthMinions, [input.shallowGrave]);
+  const earthSinkholeDeck = elementalDeck('earth', earthMinions, [input.sinkhole]);
   const earthBurrowingDeck = elementalDeck('earth', [
     ...earthMinions,
     input.burrowingMinion,
@@ -1879,6 +1912,8 @@ function buildManifest(
         ? earthDivineHealingDeck
       : scenario === 'earth-shallow-grave'
         ? earthShallowGraveDeck
+      : scenario === 'earth-sinkhole'
+        ? earthSinkholeDeck
       : scenario === 'earth-forward'
         ? earthForwardDeck
       : scenario === 'earth-immobile'
@@ -1940,6 +1975,8 @@ function buildManifest(
         ? earthDivineHealingDeck
       : scenario === 'earth-shallow-grave'
         ? earthShallowGraveDeck
+      : scenario === 'earth-sinkhole'
+        ? earthSinkholeDeck
       : scenario === 'earth-forward'
         ? earthForwardDeck
       : scenario === 'earth-immobile'
@@ -2020,6 +2057,7 @@ function buildManifest(
       card.stableId === input.teleport.stableId,
       card.stableId === input.rescue.stableId,
       card.stableId === input.freeze.stableId,
+      card.stableId === input.sinkhole.stableId,
     ),
   ]));
   return {
@@ -2787,6 +2825,44 @@ function findEarthShallowGraveOpening(
     }
   }
   throw new Error('private site discard Genesis scenario no longer produces its supported opening');
+}
+
+function findEarthSinkholeOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  session: GameSession;
+  sinkholeInstanceId: string;
+  southSiteInstanceId: string;
+  targetSiteInstanceId: string;
+}> {
+  // ponytail: bounded seed scan avoids another private config field.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const built = buildManifest(input, input.config.earthSeed + offset, 'earth-sinkhole');
+    const session = createGameSession(built.manifest);
+    const sinkholeInstanceId = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.sinkhole.stableId)?.instanceId;
+    const targetSiteInstanceId = session.state.players.north.hand.atlas.find(({ cardId }) => {
+      const card = input.cards.find(({ stableId }) => stableId === cardId);
+      return card?.cardType === 'site'
+        && card.rarity === 'ordinary'
+        && card.rulesText.trim() === ''
+        && card.elements.includes('earth');
+    })?.instanceId;
+    const southSiteInstanceId = session.state.players.south.hand.atlas
+      .find(({ cardId }) => cardId !== input.sinkhole.stableId)?.instanceId;
+    if (sinkholeInstanceId && targetSiteInstanceId && southSiteInstanceId) {
+      return {
+        ...built,
+        session,
+        sinkholeInstanceId,
+        southSiteInstanceId,
+        targetSiteInstanceId,
+      };
+    }
+  }
+  throw new Error('private sacrifice-to-destroy site scenario no longer produces its supported opening');
 }
 
 function findEarthSecretTunnelOpening(
@@ -3850,9 +3926,13 @@ function runEarthBurrowing(
   const nonBurrowingSurfaceAvailable = matches(opening.comparisonInstanceId, 'surface');
   const nonBurrowingUndergroundUnavailable = !matches(opening.comparisonInstanceId, 'underground');
   const summonSite = session.state.realm.sites.C3;
-  const summonSiteDefinition = summonSite ? session.state.cards[summonSite.cardId] : undefined;
+  const summonSiteDefinition = summonSite && !('rubble' in summonSite)
+    ? session.state.cards[summonSite.cardId]
+    : undefined;
   const attackSite = session.state.realm.sites.C2;
-  const attackSiteDefinition = attackSite ? session.state.cards[attackSite.cardId] : undefined;
+  const attackSiteDefinition = attackSite && !('rubble' in attackSite)
+    ? session.state.cards[attackSite.cardId]
+    : undefined;
   const targetIsLandSite = summonSiteDefinition?.cardType === 'site'
     && !summonSiteDefinition.elements.includes('water')
     && attackSiteDefinition?.cardType === 'site'
@@ -4483,6 +4563,111 @@ function runEarthShallowGrave(
     spellHandUnchanged:
       canonicalJson(after.hand.spellbook as unknown as JsonValue) === spellHandBefore,
     spellbookReducedByTwo: after.spellbook.length === before.spellbook.length - 2,
+  });
+}
+
+function runEarthSinkhole(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthSinkhole'] {
+  const opening = findEarthSinkholeOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.sinkholeInstanceId
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.targetSiteInstanceId
+    && descriptor.cell === 'C3');
+
+  const sourceBefore = session.state.realm.sites.C4;
+  const targetBefore = session.state.realm.sites.C3;
+  if (!sourceBefore || !targetBefore || 'rubble' in sourceBefore || 'rubble' in targetBefore) {
+    throw new Error('private sacrifice-to-destroy setup lacks its two real sites');
+  }
+  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'activate-site-destruction'
+      && descriptor.sourceSiteInstanceId === opening.sinkholeInstanceId
+      && descriptor.targetCell === 'C3'
+      && descriptor.targetSiteInstanceId === opening.targetSiteInstanceId);
+  const selected = choices[0];
+  if (!selected) throw new Error('private sacrifice-to-destroy site action is unavailable');
+  const exactActivationAvailable = choices.length === 1;
+  session = accept(session, selected);
+
+  const rubbleC3 = session.state.realm.sites.C3;
+  const rubbleC4 = session.state.realm.sites.C4;
+  const events = session.transcript.at(-1)?.events ?? [];
+  const sacrificedPayload = events[0] && isJsonRecord(events[0].payload)
+    ? events[0].payload
+    : undefined;
+  const destroyedPayload = events[1] && isJsonRecord(events[1].payload)
+    ? events[1].payload
+    : undefined;
+  const rubbleC3Payload = events[2] && isJsonRecord(events[2].payload)
+    ? events[2].payload
+    : undefined;
+  const rubbleC4Payload = events[3] && isJsonRecord(events[3].payload)
+    ? events[3].payload
+    : undefined;
+  const affinity = observeGame(session.state, 'north').players.north.affinity;
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    avatarRemainedOnSurface: session.state.players.north.avatar.location === 'C4'
+      && session.state.players.north.avatar.region === 'surface',
+    causalEventsVerified: events.map(({ type }) => type).join(',')
+      === 'site-sacrificed,site-destroyed,rubble-created,rubble-created'
+      && sacrificedPayload?.cell === 'C4'
+      && sacrificedPayload.instanceId === opening.sinkholeInstanceId
+      && sacrificedPayload.owner === 'north'
+      && sacrificedPayload.sourceInstanceId === opening.sinkholeInstanceId
+      && destroyedPayload?.cell === 'C3'
+      && destroyedPayload.instanceId === opening.targetSiteInstanceId
+      && destroyedPayload.owner === 'north'
+      && destroyedPayload.sourceInstanceId === opening.sinkholeInstanceId
+      && rubbleC3Payload?.cell === 'C3'
+      && rubbleC3Payload.instanceId === rubbleC3?.instanceId
+      && rubbleC3Payload.sourceInstanceId === opening.sinkholeInstanceId
+      && rubbleC4Payload?.cell === 'C4'
+      && rubbleC4Payload.instanceId === rubbleC4?.instanceId
+      && rubbleC4Payload.sourceInstanceId === opening.sinkholeInstanceId,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    exactActivationAvailable,
+    noAffinityOrControlContribution: affinity.air === 0
+      && affinity.earth === 0
+      && affinity.fire === 0
+      && affinity.water === 0
+      && Object.values(session.state.realm.sites)
+        .every(({ controller }) => controller !== 'north'),
+    replayVerified: verifyGameReplay(session),
+    sinkhole: input.sinkhole.name,
+    sourceAndTargetEnteredCemetery: session.state.players.north.cemetery
+      .some(({ instanceId }) => instanceId === opening.sinkholeInstanceId)
+      && session.state.players.north.cemetery
+        .some(({ instanceId }) => instanceId === opening.targetSiteInstanceId),
+    twoNeutralRubbleSites: rubbleC3 !== undefined
+      && 'rubble' in rubbleC3
+      && rubbleC3.rubble === true
+      && rubbleC3.controller === null
+      && !('cardId' in rubbleC3)
+      && rubbleC3.instanceId !== opening.targetSiteInstanceId
+      && rubbleC4 !== undefined
+      && 'rubble' in rubbleC4
+      && rubbleC4.rubble === true
+      && rubbleC4.controller === null
+      && !('cardId' in rubbleC4)
+      && rubbleC4.instanceId !== opening.sinkholeInstanceId,
   });
 }
 
@@ -6277,7 +6462,9 @@ function runWaterSubmerge(
   const nonSubmergeSurfaceAvailable = matches(opening.comparisonInstanceId, 'surface');
   const nonSubmergeUnderwaterUnavailable = !matches(opening.comparisonInstanceId, 'underwater');
   const targetSite = session.state.realm.sites.C3;
-  const targetDefinition = targetSite ? session.state.cards[targetSite.cardId] : undefined;
+  const targetDefinition = targetSite && !('rubble' in targetSite)
+    ? session.state.cards[targetSite.cardId]
+    : undefined;
   const targetIsWaterSite = targetDefinition?.cardType === 'site'
     && targetDefinition.elements.includes('water');
   take(({ descriptor }) =>
@@ -6861,6 +7048,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthRescue = runEarthRescue(input);
   const earthDivineHealing = runEarthDivineHealing(input);
   const earthShallowGrave = runEarthShallowGrave(input);
+  const earthSinkhole = runEarthSinkhole(input);
   const earthEntombed = runEarthEntombed(input);
   const earthFirstStrike = runEarthFirstStrike(input);
   const earthForwardMovement = runEarthForwardMovement(input);
@@ -7019,6 +7207,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthRescue,
     earthDivineHealing,
     earthShallowGrave,
+    earthSinkhole,
     earthEntombed,
     earthRamp,
     earthFirstStrike,

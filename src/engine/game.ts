@@ -45,6 +45,7 @@ export type GameCardDefinition =
     genesisDiscardTopSpells?: 2;
     genesisDrawSpellPerAdjacentSameCard?: boolean;
     genesisGainMana?: number;
+    sacrificeToDestroyNearbySite?: true;
   }>
   | Readonly<{
     burrowTargetMinion?: boolean;
@@ -130,6 +131,14 @@ type CardInstance = Readonly<{
 }>;
 
 type SiteInstance = Readonly<CardInstance & { controller: GameSeat }>;
+
+type RubbleInstance = Readonly<{
+  controller: null;
+  instanceId: StateHash;
+  rubble: true;
+}>;
+
+type RealmSiteInstance = SiteInstance | RubbleInstance;
 
 type DisableEffect = Readonly<{
   expiresAtSeat: GameSeat;
@@ -217,7 +226,7 @@ export type GameState = Readonly<{
   phase: 'allocate' | 'attack' | 'defend' | 'draw' | 'intercept' | 'main' | 'mulligan' | 'terminal';
   players: Readonly<Record<GameSeat, PlayerState>>;
   realm: Readonly<{
-    sites: Readonly<Partial<Record<RealmCell, SiteInstance>>>;
+    sites: Readonly<Partial<Record<RealmCell, RealmSiteInstance>>>;
     units: readonly UnitInstance[];
   }>;
   schemaVersion: 1;
@@ -258,13 +267,21 @@ export type GameObservation = Readonly<{
   phase: GameState['phase'];
   players: Readonly<Record<GameSeat, ObservedPlayer>>;
   realm: Readonly<{
-    sites: Readonly<Partial<Record<RealmCell, Readonly<{
-      cardId: string;
-      controller: GameSeat;
-      elements: readonly GameElement[];
-      instanceId: StateHash;
-      owner: GameSeat;
-    }>>>>;
+    sites: Readonly<Partial<Record<RealmCell,
+      | Readonly<{
+        cardId: 'rubble';
+        controller: null;
+        elements: readonly [];
+        instanceId: StateHash;
+        rubble: true;
+      }>
+      | Readonly<{
+        cardId: string;
+        controller: GameSeat;
+        elements: readonly GameElement[];
+        instanceId: StateHash;
+        owner: GameSeat;
+      }>>>>;
     units: readonly Readonly<{
       attack: number;
       cardId: string;
@@ -300,6 +317,12 @@ type GameActionDescriptor =
   | Readonly<{ kind: 'draw-site' }>
   | Readonly<{ kind: 'draw-spell' }>
   | Readonly<{ cardId: string; cardInstanceId: string; cell: RealmCell; kind: 'play-site' }>
+  | Readonly<{
+    kind: 'activate-site-destruction';
+    sourceSiteInstanceId: StateHash;
+    targetCell: RealmCell;
+    targetSiteInstanceId: StateHash;
+  }>
   | Readonly<{
     cardId: string;
     cardInstanceId: string;
@@ -417,11 +440,15 @@ function diagonalCells(cell: RealmCell, connectsTopBottom = false): readonly Rea
     .map(([nextFile, nextRank]) => `${String.fromCharCode(nextFile!)}${nextRank}` as RealmCell);
 }
 
+function isRubble(site: RealmSiteInstance): site is RubbleInstance {
+  return 'rubble' in site;
+}
+
 function legalSiteCells(state: GameState, seat: GameSeat): readonly RealmCell[] {
   return [...new Set(Object.entries(state.realm.sites)
     .filter(([, site]) => site.controller === seat)
     .flatMap(([cell]) => borderingCells(cell as RealmCell)))]
-    .filter((cell) => !state.realm.sites[cell])
+    .filter((cell) => !state.realm.sites[cell] || isRubble(state.realm.sites[cell]!))
     .sort();
 }
 
@@ -434,7 +461,7 @@ function controlledSiteCells(state: GameState, seat: GameSeat): readonly RealmCe
 
 function isWaterSite(state: GameState, cell: RealmCell): boolean {
   const site = state.realm.sites[cell];
-  if (!site) return false;
+  if (!site || isRubble(site)) return false;
   const definition = cardDefinition(state, site.cardId);
   if (definition.cardType !== 'site') throw new Error('realm site lacks site definition');
   return definition.elements.includes('water');
@@ -616,6 +643,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     }
     if (card.connectsBurrowedAllies !== undefined && typeof card.connectsBurrowedAllies !== 'boolean') {
       throw new RangeError(`${path}.connectsBurrowedAllies must be boolean`);
+    }
+    if (card.sacrificeToDestroyNearbySite !== undefined
+      && card.sacrificeToDestroyNearbySite !== true) {
+      throw new RangeError(`${path}.sacrificeToDestroyNearbySite must be true when defined`);
     }
     return;
   }
@@ -876,6 +907,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? { genesisDrawSpellPerAdjacentSameCard: true }
               : {}),
             ...(card.genesisGainMana ? { genesisGainMana: card.genesisGainMana } : {}),
+            ...(card.sacrificeToDestroyNearbySite === true
+              ? { sacrificeToDestroyNearbySite: true as const }
+              : {}),
           }
           : card.cardType === 'magic'
             ? {
@@ -1108,6 +1142,7 @@ function affinity(state: GameState, seat: GameSeat): GameThresholds {
   Object.values(state.realm.sites)
     .filter((site) => site.controller === seat)
     .forEach((site) => {
+      if (isRubble(site)) return;
       const definition = cardDefinition(state, site.cardId);
       if (definition.cardType !== 'site') throw new Error('realm site lacks site definition');
       definition.elements.forEach((element) => {
@@ -1161,6 +1196,15 @@ function observePlayer(state: GameState, player: PlayerState, owner: GameSeat, v
 export function observeGame(state: GameState, viewer: GameSeat): GameObservation {
   const sites = Object.fromEntries(
     Object.entries(state.realm.sites).map(([cell, card]) => {
+      if (isRubble(card)) {
+        return [cell, {
+          cardId: 'rubble',
+          controller: null,
+          elements: [],
+          instanceId: card.instanceId,
+          rubble: true,
+        }];
+      }
       const definition = cardDefinition(state, card.cardId);
       if (definition.cardType !== 'site') throw new Error('realm site lacks site definition');
       return [cell, {
@@ -1364,7 +1408,7 @@ function burrowedConnectionLocations(
   if (!controlled.includes(cell)) return [];
   const tunnels = controlled.filter((candidate) => {
     const site = state.realm.sites[candidate];
-    const definition = site && cardDefinition(state, site.cardId);
+    const definition = site && !isRubble(site) ? cardDefinition(state, site.cardId) : undefined;
     return definition?.cardType === 'site' && definition.connectsBurrowedAllies === true;
   });
   const adjacent = new Set(borderingCells(cell, connectsTopBottom));
@@ -1663,6 +1707,27 @@ function manaAbilityDescriptors(state: GameState, seat: GameSeat): readonly Game
   });
 }
 
+function siteDestructionDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
+  return REALM_CELLS.flatMap((sourceCell) => {
+    const source = state.realm.sites[sourceCell];
+    if (!source || isRubble(source) || source.controller !== seat) return [];
+    const definition = cardDefinition(state, source.cardId);
+    if (definition.cardType !== 'site' || definition.sacrificeToDestroyNearbySite !== true) return [];
+    const nearby = new Set([sourceCell, ...borderingCells(sourceCell), ...diagonalCells(sourceCell)]);
+    return REALM_CELLS.flatMap((targetCell) => {
+      const target = nearby.has(targetCell) ? state.realm.sites[targetCell] : undefined;
+      return target
+        ? [{
+          kind: 'activate-site-destruction' as const,
+          sourceSiteInstanceId: source.instanceId,
+          targetCell,
+          targetSiteInstanceId: target.instanceId,
+        }]
+        : [];
+    });
+  });
+}
+
 function attackTargets(state: GameState, pending: PendingCombat): readonly CombatTarget[] {
   const defendingSeat = otherSeat(pending.attackingSeat);
   const attackerAirborne = unitStatus(state, pending.attacker).airborne;
@@ -1800,6 +1865,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     ...(!player.avatar.tapped && avatarDefinition.drawSpell ? [{ kind: 'draw-spell' as const }] : []),
     ...summonDescriptors(state, seat),
     ...magicDescriptors(state, seat),
+    ...siteDestructionDescriptors(state, seat),
     ...manaAbilityDescriptors(state, seat),
     ...movementDescriptors(state, seat),
     ...dragProjectileDescriptors(state, seat),
@@ -1819,6 +1885,9 @@ function actionLabel(descriptor: GameActionDescriptor): string {
   if (descriptor.kind === 'draw-site') return 'Draw a site with Avatar';
   if (descriptor.kind === 'draw-spell') return 'Draw a spell with Avatar';
   if (descriptor.kind === 'play-site') return `Play ${descriptor.cardId} at ${descriptor.cell}`;
+  if (descriptor.kind === 'activate-site-destruction') {
+    return `Sacrifice site to destroy ${descriptor.targetCell}`;
+  }
   if (descriptor.kind === 'summon-minion') {
     return `Summon ${descriptor.cardId} at ${descriptor.cell}${descriptor.region ? ` ${descriptor.region}` : ''} (${descriptor.manaCost} mana)`;
   }
@@ -2096,6 +2165,97 @@ function resolveMinionDeaths(
     players: deepFreeze(players),
     terminal,
     units: survivingUnits,
+  };
+}
+
+function minionSurvivesRegion(state: GameState, unit: UnitInstance): boolean {
+  if (unit.region === 'surface') return true;
+  const definition = cardDefinition(state, unit.cardId);
+  if (definition.cardType !== 'minion' || unit.disableEffects?.length) return false;
+  if (unit.region === 'underground') return definition.burrowing === true;
+  if (unit.region === 'underwater') return definition.submerge === true;
+  return definition.voidwalk === true;
+}
+
+function resolveSiteDeaths(
+  state: GameState,
+  destroyed: readonly Readonly<{ cell: RealmCell; site: SiteInstance }>[],
+  sourceInstanceId: StateHash,
+): Readonly<{
+  outcomes: readonly GameOutcome[];
+  players: GameState['players'];
+  realm: GameState['realm'];
+  terminal: GameTerminal;
+}> {
+  const unique = [...new Map(destroyed.map((entry) => [entry.site.instanceId, entry])).values()]
+    .sort((left, right) => left.cell.localeCompare(right.cell));
+  const destroyedCells = new Set(unique.map(({ cell }) => cell));
+  const floodedCells = new Set(unique
+    .filter(({ site }) => {
+      const definition = cardDefinition(state, site.cardId);
+      return definition.cardType === 'site' && definition.elements.includes('water');
+    })
+    .map(({ cell }) => cell));
+  const sites = { ...state.realm.sites };
+  const rubbleOutcomes: GameOutcome[] = [];
+  for (const { cell, site } of unique) {
+    const rubble = deepFreeze({
+      controller: null,
+      instanceId: identityHash(asJson({
+        cell,
+        destroyedSiteInstanceId: site.instanceId,
+        kind: 'rubble',
+        sourceInstanceId,
+      })),
+      rubble: true as const,
+    });
+    sites[cell] = rubble;
+    rubbleOutcomes.push({
+      payload: { cell, instanceId: rubble.instanceId, sourceInstanceId },
+      type: 'rubble-created',
+    });
+  }
+  const units = state.realm.units.map((unit) =>
+    floodedCells.has(unit.location) && unit.region === 'underwater'
+      ? deepFreeze({ ...unit, region: 'underground' as const })
+      : unit);
+  const deaths = units.filter((unit) =>
+    destroyedCells.has(unit.location) && !minionSurvivesRegion(state, unit));
+  const deathResolution = resolveMinionDeaths(
+    state,
+    state.players,
+    units,
+    deaths,
+    new Set<GameSeat>(),
+  );
+  const players: Record<GameSeat, PlayerState> = {
+    north: deathResolution.players.north,
+    south: deathResolution.players.south,
+  };
+  for (const { site } of unique) {
+    const owner = players[site.owner];
+    players[site.owner] = deepFreeze({
+      ...owner,
+      cemetery: [...owner.cemetery, {
+        cardId: site.cardId,
+        instanceId: site.instanceId,
+        owner: site.owner,
+        source: site.source,
+      }],
+    });
+  }
+  const terminalIndex = deathResolution.outcomes.findIndex(({ type }) => type === 'game-ended');
+  return {
+    outcomes: terminalIndex < 0
+      ? [...deathResolution.outcomes, ...rubbleOutcomes]
+      : [
+        ...deathResolution.outcomes.slice(0, terminalIndex),
+        ...rubbleOutcomes,
+        ...deathResolution.outcomes.slice(terminalIndex),
+      ],
+    players: deepFreeze(players),
+    realm: deepFreeze({ sites, units: deathResolution.units }),
+    terminal: deathResolution.terminal,
   };
 }
 
@@ -2447,22 +2607,82 @@ function applyDescriptor(
     ];
   }
 
+  if (descriptor.kind === 'activate-site-destruction') {
+    const legal = siteDestructionDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'activate-site-destruction'
+        && candidate.sourceSiteInstanceId === descriptor.sourceSiteInstanceId
+        && candidate.targetCell === descriptor.targetCell
+        && candidate.targetSiteInstanceId === descriptor.targetSiteInstanceId);
+    const sourceEntry = REALM_CELLS
+      .map((cell) => ({ cell, site: state.realm.sites[cell] }))
+      .find(({ site }) => site?.instanceId === descriptor.sourceSiteInstanceId);
+    const target = state.realm.sites[descriptor.targetCell];
+    if (!legal || !sourceEntry?.site || isRubble(sourceEntry.site)
+      || !target || target.instanceId !== descriptor.targetSiteInstanceId) {
+      throw new Error('unreachable illegal site destruction');
+    }
+    const source = sourceEntry.site;
+    const resolved = resolveSiteDeaths(
+      state,
+      [
+        { cell: sourceEntry.cell, site: source },
+        ...(isRubble(target) ? [] : [{ cell: descriptor.targetCell, site: target }]),
+      ],
+      source.instanceId,
+    );
+    return [
+      withStateVersion(state, {
+        ...(resolved.terminal.status === 'finished' ? { phase: 'terminal' as const } : {}),
+        players: resolved.players,
+        realm: resolved.realm,
+        terminal: resolved.terminal,
+      }),
+      [
+        {
+          payload: {
+            cell: sourceEntry.cell,
+            instanceId: source.instanceId,
+            owner: source.owner,
+            sourceInstanceId: source.instanceId,
+          },
+          type: 'site-sacrificed',
+        },
+        {
+          payload: {
+            cell: descriptor.targetCell,
+            instanceId: target.instanceId,
+            ...(!isRubble(target) ? { owner: target.owner } : {}),
+            sourceInstanceId: source.instanceId,
+          },
+          type: 'site-destroyed',
+        },
+        ...resolved.outcomes,
+      ],
+      [],
+    ];
+  }
+
   if (descriptor.kind === 'play-site') {
     const card = player.hand.atlas.find(({ cardId, instanceId }) =>
       instanceId === descriptor.cardInstanceId && cardId === descriptor.cardId);
     if (!card) throw new Error('unreachable site card');
     const definition = cardDefinition(state, card.cardId);
     if (definition.cardType !== 'site') throw new Error('unreachable non-site card');
+    const previousSite = state.realm.sites[descriptor.cell];
+    const replacingRubble = previousSite !== undefined && isRubble(previousSite);
     const legalCell = !player.domainEstablished
       ? !player.avatar.tapped
         && descriptor.cell === player.avatar.location
-        && !state.realm.sites[descriptor.cell]
+        && (!previousSite || replacingRubble)
       : !player.avatar.tapped && legalSiteCells(state, seat).includes(descriptor.cell);
     if (!legalCell) throw new Error('unreachable illegal site cell');
     const site = deepFreeze({ ...card, controller: seat });
     const genesisSpellDrawCount = definition.genesisDrawSpellPerAdjacentSameCard
       ? borderingCells(descriptor.cell)
-        .filter((cell) => state.realm.sites[cell]?.cardId === card.cardId).length
+        .filter((cell) => {
+          const adjacent = state.realm.sites[cell];
+          return adjacent !== undefined && !isRubble(adjacent) && adjacent.cardId === card.cardId;
+        }).length
       : 0;
     const genesisSpellDraws = player.spellbook.slice(0, genesisSpellDrawCount);
     const genesisSpellDiscards = definition.genesisDiscardTopSpells
@@ -2483,24 +2703,54 @@ function applyDescriptor(
       spellbook: player.spellbook.slice(genesisSpellDraws.length + genesisSpellDiscards.length),
     });
     const winner = otherSeat(seat);
+    const placedUnits = state.realm.units.map((unit) => {
+      if (unit.location !== descriptor.cell) return unit;
+      if (unit.region === 'void') return deepFreeze({ ...unit, region: 'surface' as const });
+      if (replacingRubble && unit.region === 'underground' && definition.elements.includes('water')) {
+        return deepFreeze({ ...unit, region: 'underwater' as const });
+      }
+      return unit;
+    });
+    const placedState = deepFreeze({
+      ...state,
+      players: replacePlayer(state, seat, updatedPlayer),
+      realm: {
+        ...state.realm,
+        sites: { ...state.realm.sites, [descriptor.cell]: site },
+        units: placedUnits,
+      },
+    });
+    const deaths = replacingRubble && !genesisDrawFailed
+      ? placedUnits.filter((unit) => unit.location === descriptor.cell && !minionSurvivesRegion(placedState, unit))
+      : [];
+    const deathResolution = resolveMinionDeaths(
+      placedState,
+      placedState.players,
+      placedUnits,
+      deaths,
+      new Set<GameSeat>(),
+    );
+    const terminal = genesisDrawFailed
+      ? { loser: seat, reason: 'deck_empty' as const, status: 'finished' as const, winner }
+      : deathResolution.terminal;
     return [
       withStateVersion(state, {
-        ...(genesisDrawFailed
-          ? {
-            phase: 'terminal' as const,
-            terminal: { loser: seat, reason: 'deck_empty' as const, status: 'finished' as const, winner },
-          }
-          : {}),
-        players: replacePlayer(state, seat, updatedPlayer),
-        realm: {
-          ...state.realm,
-          sites: { ...state.realm.sites, [descriptor.cell]: site },
-          units: state.realm.units.map((unit) => unit.location === descriptor.cell && unit.region === 'void'
-            ? { ...unit, region: 'surface' as const }
-            : unit),
-        },
+        ...(terminal.status === 'finished' ? { phase: 'terminal' as const } : {}),
+        players: deathResolution.players,
+        realm: { ...placedState.realm, units: deathResolution.units },
+        terminal,
       }),
       [
+        ...(replacingRubble
+          ? [{
+            payload: {
+              cell: descriptor.cell,
+              instanceId: previousSite.instanceId,
+              targetSiteInstanceId: card.instanceId,
+            },
+            type: 'rubble-replaced',
+          }]
+          : []),
         { payload: { cardId: card.cardId, cell: descriptor.cell, instanceId: card.instanceId, seat }, type: 'site-played' },
         ...(definition.genesisGainMana
           ? [{
@@ -2522,6 +2772,7 @@ function applyDescriptor(
           },
           type: 'spell-discarded',
         })),
+        ...deathResolution.outcomes,
         ...(genesisDrawFailed
           ? [{ payload: { loser: seat, reason: 'deck_empty', winner }, type: 'game-ended' }]
           : []),

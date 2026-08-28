@@ -79,6 +79,7 @@ type SiteFacts = Readonly<{
   genesisDiscardTopSpells?: 2;
   genesisDrawSpellPerAdjacentSameCard?: boolean;
   genesisGainMana?: number;
+  sacrificeToDestroyNearbySite?: true;
 }>;
 
 function cardsFor(
@@ -110,6 +111,9 @@ function cardsFor(
         genesisDrawSpellPerAdjacentSameCard:
           site.genesisDrawSpellPerAdjacentSameCard ?? false,
         ...(site.genesisGainMana ? { genesisGainMana: site.genesisGainMana } : {}),
+        ...(site.sacrificeToDestroyNearbySite === true
+          ? { sacrificeToDestroyNearbySite: true as const }
+          : {}),
       };
     });
     playerDeck.spellbook.forEach((cardId) => {
@@ -966,6 +970,164 @@ test('RULE-02 forged spatial actions cannot mutate the game', () => {
   assert.equal(result.reason.code, 'unknown_action');
   assert.equal(canonicalJson(result.session.state), beforeState);
   assert.equal(result.session.transcript.length, session.transcript.length);
+});
+
+test('RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relative subsurface', () => {
+  const base = manifest(244);
+  const preview = createGameSession(base);
+  const northSites = preview.state.players.north.hand.atlas;
+  const southSites = preview.state.players.south.hand.atlas;
+  const southMinions = preview.state.players.south.hand.spellbook;
+  const sourceCardId = northSites[1]?.cardId;
+  const targetCardId = southSites[1]?.cardId;
+  const drownedCardId = southMinions[0]?.cardId;
+  const survivorCardId = southMinions[1]?.cardId;
+  assert.ok(sourceCardId);
+  assert.ok(targetCardId);
+  assert.ok(drownedCardId);
+  assert.ok(survivorCardId);
+  const cards: Record<string, GameCardDefinition> = { ...base.cards };
+  cards[sourceCardId] = {
+    ...cards[sourceCardId]!,
+    sacrificeToDestroyNearbySite: true,
+  } as GameCardDefinition;
+  cards[targetCardId] = { cardType: 'site', elements: ['water'] };
+  cards[drownedCardId] = {
+    attack: 1,
+    cardType: 'minion',
+    defense: 1,
+    manaCost: 0,
+    submerge: true,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  };
+  cards[survivorCardId] = {
+    attack: 1,
+    burrowing: true,
+    cardType: 'minion',
+    defense: 1,
+    manaCost: 0,
+    submerge: true,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  };
+  assert.throws(() => createGameManifest({
+    ...base,
+    cards: {
+      ...cards,
+      [sourceCardId]: {
+        ...cards[sourceCardId]!,
+        sacrificeToDestroyNearbySite: false,
+      } as unknown as GameCardDefinition,
+    },
+  }), /sacrificeToDestroyNearbySite/);
+  const gameManifest = createGameManifest({
+    authority: base.authority,
+    cards,
+    decks: base.decks,
+    firstSeat: base.firstSeat,
+    seed: base.seed,
+  });
+  let session = keep(keep(createGameSession(gameManifest)));
+  const sourceCard = session.state.players.north.hand.atlas.find(({ cardId }) => cardId === sourceCardId);
+  const targetCard = session.state.players.south.hand.atlas.find(({ cardId }) => cardId === targetCardId);
+  const drownedCard = session.state.players.south.hand.spellbook.find(({ cardId }) => cardId === drownedCardId);
+  const survivorCard = session.state.players.south.hand.spellbook.find(({ cardId }) => cardId === survivorCardId);
+  assert.ok(sourceCard);
+  assert.ok(targetCard);
+  assert.ok(drownedCard);
+  assert.ok(survivorCard);
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId !== sourceCard.instanceId
+      && descriptor.cell === 'C4'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId !== targetCard.instanceId
+      && descriptor.cell === 'C1'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === sourceCard.instanceId
+      && descriptor.cell === 'C3'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === targetCard.instanceId
+      && descriptor.cell === 'C2'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === drownedCard.instanceId
+      && descriptor.cell === 'C2'
+      && descriptor.region === 'underwater'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === survivorCard.instanceId
+      && descriptor.cell === 'C2'
+      && descriptor.region === 'underwater'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
+
+  const checkpoint = session;
+  const actions = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'activate-site-destruction'
+      && descriptor.sourceSiteInstanceId === sourceCard.instanceId);
+  assert.deepEqual(actions.flatMap(({ descriptor }) => descriptor.kind === 'activate-site-destruction'
+    ? [descriptor.targetCell]
+    : []), ['C2', 'C3', 'C4']);
+  const activation = actions.find(({ descriptor }) =>
+    descriptor.kind === 'activate-site-destruction' && descriptor.targetCell === 'C2');
+  assert.ok(activation);
+  const result = stepGame(checkpoint, activation);
+  assert.equal(result.accepted, true);
+  if (!result.accepted) return;
+  session = result.session;
+  assert.equal(session.state.stateVersion, checkpoint.state.stateVersion + 1);
+  const stale = stepGame(session, activation);
+  assert.equal(stale.accepted, false);
+  assert.equal(stale.reason.code, 'stale_version');
+  assert.deepEqual(result.receipt.events.map(({ type }) => type), [
+    'site-sacrificed',
+    'site-destroyed',
+    'minion-died',
+    'rubble-created',
+    'rubble-created',
+  ]);
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === sourceCard.instanceId), true);
+  assert.equal(session.state.players.south.cemetery.some(({ instanceId }) =>
+    instanceId === targetCard.instanceId), true);
+  assert.equal(session.state.players.south.cemetery.some(({ instanceId }) =>
+    instanceId === drownedCard.instanceId), true);
+  const survivor = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === survivorCard.instanceId);
+  assert.equal(survivor?.region, 'underground');
+  assert.deepEqual(observeGame(session.state, 'north').realm.sites.C2, {
+    cardId: 'rubble',
+    controller: null,
+    elements: [],
+    instanceId: session.state.realm.sites.C2?.instanceId,
+    rubble: true,
+  });
+  assert.equal(observeGame(session.state, 'north').players.north.affinity.earth, 1);
+  assert.equal(observeGame(session.state, 'north').players.south.affinity.water, 0);
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C3'));
+  assert.deepEqual(session.transcript.at(-1)?.events.map(({ type }) => type), [
+    'rubble-replaced',
+    'site-played',
+  ]);
+  assert.equal(session.state.realm.sites.C3?.controller, 'north');
+  assert.equal('rubble' in session.state.realm.sites.C3!, false);
+  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-03/04 a Spellcaster pays mana and summons a minion atop a controlled site', () => {

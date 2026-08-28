@@ -254,6 +254,21 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthShallowGrave.deck.atlas
     .find(({ name }) => name === 'Shallow Grave')?.copies, 3);
   assert.equal(result.earthShallowGrave.replayVerified, true);
+  assert.equal(result.earthSinkhole.sinkhole, 'Sinkhole');
+  assert.equal(result.earthSinkhole.acceptedActionCount, 10);
+  assert.equal(result.earthSinkhole.exactActivationAvailable, true);
+  assert.equal(result.earthSinkhole.sourceAndTargetEnteredCemetery, true);
+  assert.equal(result.earthSinkhole.twoNeutralRubbleSites, true);
+  assert.equal(result.earthSinkhole.noAffinityOrControlContribution, true);
+  assert.equal(result.earthSinkhole.avatarRemainedOnSurface, true);
+  assert.equal(result.earthSinkhole.causalEventsVerified, true);
+  assert.equal(result.earthSinkhole.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthSinkhole.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthSinkhole.deck.atlas
+    .find(({ name }) => name === 'Sinkhole')?.copies, 2);
+  assert.equal(result.earthSinkhole.replayVerified, true);
   assert.equal(result.earthDivineHealing.divineHealing, 'Divine Healing');
   assert.equal(result.earthDivineHealing.acceptedActionCount, 24);
   assert.equal(result.earthDivineHealing.lifeWasDamagedAboveDeathsDoor, true);
