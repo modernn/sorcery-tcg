@@ -19,6 +19,7 @@
 - Avatar combat facts and life tracking, undefended-site life loss, Death's Door state, direct-damage immunity, death blows, Avatar defeat, and simultaneous-defeat draw state.
 - A catalog-gated Avatar spell-draw ability with tap cost and opponent-safe hidden-card events.
 - Charge bypasses summoning sickness for Move and Attack while ordinary summoned minions remain unavailable.
+- Minion-provided elemental affinity participates in threshold checks and disappears when the provider leaves the realm.
 - A private-local actual-card adapter that verifies the normalized artifact and current Constructed format, builds two different legal 30/60 beginner decks under official rarity copy limits, and executes a deterministic real-card Charge and combat scenario without committing source data.
 - Observer-safe actions, rejections, causal events, hashes, exact replay, and a deterministic unranked match runner.
 - A no-dependency browser client that renders the authoritative 5x4 realm, scopes hidden information by seat, exposes only engine-issued actions, and verifies replay.
@@ -34,10 +35,10 @@
 - `pnpm game:demo -- 23`: completes in 138 accepted actions over 56 turns with byte-exact replay.
 - `pnpm play`: serves the playable core at `http://127.0.0.1:4174/`.
 - Browser checkpoint: a 22-action match moved a minion, handed Defend to the non-active seat, resolved a simultaneous trade into both cemeteries, and replayed byte-identically.
-- `pnpm game:check-private`: a 27-action actual-card match immediately activates a real Charge minion, exercises the selected Avatar's spell draw, and resolves a real minion trade with byte-exact replay.
+- `pnpm game:check-private`: a 28-action actual-card match immediately activates a real Charge minion, gains affinity from a real provider, exercises the selected Avatar's spell draw, and resolves a real minion trade with byte-exact replay.
 - `pnpm game:verify-private`: one passing ignored-authority integration scenario.
 - Death's Door scenarios prove same-turn direct-damage immunity, later death blows, simultaneous-defeat draws, nonlethal site strikes, and exact replay.
-- `pnpm verify`: 207 passing public tests at this checkpoint.
+- `pnpm verify`: 208 passing public tests at this checkpoint.
 
 ## Still required for Phase 3
 
