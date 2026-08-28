@@ -35,22 +35,29 @@ type SpellFacts = Readonly<{
   thresholds: Readonly<{ air: number; earth: number; fire: number; water: number }>;
 }>;
 
+type AvatarFacts = Readonly<{
+  attack: number;
+  defense: number;
+  drawSpell: boolean;
+  life: number;
+}>;
+
 function cardsFor(
   decks: Readonly<Record<'north' | 'south', GameDeckSpec>>,
   spell: SpellFacts = {
     manaCost: 1,
     thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
   },
-  avatarDrawSpell = false,
+  avatar: AvatarFacts = { attack: 1, defense: 1, drawSpell: false, life: 20 },
 ): Record<string, GameCardDefinition> {
   const cards: Record<string, GameCardDefinition> = {};
   for (const playerDeck of Object.values(decks)) {
     cards[playerDeck.avatar] = {
-      attack: 1,
+      attack: avatar.attack,
       cardType: 'avatar',
-      defense: 1,
-      drawSpell: avatarDrawSpell,
-      life: 20,
+      defense: avatar.defense,
+      drawSpell: avatar.drawSpell,
+      life: avatar.life,
     };
     playerDeck.atlas.forEach((cardId) => {
       cards[cardId] = { cardType: 'site', elements: ['earth'] };
@@ -74,7 +81,7 @@ function manifest(
     north?: GameDeckSpec;
     south?: GameDeckSpec;
     spell?: SpellFacts;
-    avatarDrawSpell?: boolean;
+    avatar?: AvatarFacts;
   }> = {},
 ): GameManifest {
   const decks = {
@@ -87,7 +94,7 @@ function manifest(
       mode: 'synthetic',
       revisionId: 'synthetic-setup-fixture-v1',
     },
-    cards: cardsFor(decks, options.spell, options.avatarDrawSpell),
+    cards: cardsFor(decks, options.spell, options.avatar),
     decks,
     firstSeat: 'north',
     seed,
@@ -353,7 +360,9 @@ test('RULE-02 the Avatar may draw a private site instead of playing one', () => 
 });
 
 test('RULE-03 a draw-spell Avatar pays its tap cost and keeps the drawn identity private', () => {
-  let session = keep(createGameSession(manifest(30, { avatarDrawSpell: true })));
+  let session = keep(createGameSession(manifest(30, {
+    avatar: { attack: 1, defense: 1, drawSpell: true, life: 20 },
+  })));
   session = keep(session);
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
@@ -484,13 +493,17 @@ test('RULE-03 mana and every elemental threshold gate minion actions without bei
 function northAttacksAtC2(
   seed: number,
   spell?: SpellFacts,
+  avatar?: AvatarFacts,
 ): Readonly<{
   attackerInstanceId: string;
   defenderInstanceId: string;
   session: GameSession;
   targetInstanceId: string;
 }> {
-  let session = keep(createGameSession(manifest(seed, spell ? { spell } : {})));
+  let session = keep(createGameSession(manifest(seed, {
+    ...(spell ? { spell } : {}),
+    ...(avatar ? { avatar } : {}),
+  })));
   session = keep(session);
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
   session = accept(session, action(session, ({ descriptor }) =>
@@ -668,6 +681,178 @@ test('RULE-04 surviving minion damage persists through the turn and clears in En
 
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
   assert.equal(session.state.realm.units.every(({ damage }) => damage === 0), true);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+function northAvatarAttacksSouthAtC2(seed: number): Readonly<{
+  northAvatarInstanceId: string;
+  northMinionInstanceId: string;
+  session: GameSession;
+  southAvatarInstanceId: string;
+}> {
+  let session = keep(createGameSession(manifest(seed, {
+    avatar: { attack: 1, defense: 1, drawSpell: false, life: 1 },
+  })));
+  session = keep(session);
+  const northAvatarInstanceId = session.state.players.north.avatar.card.instanceId;
+  const southAvatarInstanceId = session.state.players.south.avatar.card.instanceId;
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cell === 'C4'));
+  const northMinionInstanceId = session.state.realm.units[0]?.instanceId;
+  assert.ok(northMinionInstanceId);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C3'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === northMinionInstanceId
+      && descriptor.to.cell === 'C3'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C2'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === northMinionInstanceId
+      && descriptor.to.cell === 'C2'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === northAvatarInstanceId
+      && descriptor.to.cell === 'C3'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === southAvatarInstanceId
+      && descriptor.to.cell === 'C2'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === northAvatarInstanceId
+      && descriptor.to.cell === 'C2'));
+  return { northAvatarInstanceId, northMinionInstanceId, session, southAvatarInstanceId };
+}
+
+test("RULE-04 Death's Door prevents same-turn direct damage and later simultaneous death blows draw", () => {
+  const setup = northAvatarAttacksSouthAtC2(67);
+  const { northAvatarInstanceId, northMinionInstanceId, southAvatarInstanceId } = setup;
+  let { session } = setup;
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'avatar'
+      && descriptor.target.instanceId === southAvatarInstanceId));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  assert.equal(session.state.players.north.avatar.life, 0);
+  assert.equal(session.state.players.south.avatar.life, 0);
+  assert.equal(session.state.players.north.avatar.deathDoorTurn, 7);
+  assert.equal(session.state.players.south.avatar.deathDoorTurn, 7);
+  assert.deepEqual(session.state.terminal, { status: 'active' });
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === northMinionInstanceId
+      && descriptor.to.cell === 'C2'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'avatar'
+      && descriptor.target.instanceId === southAvatarInstanceId));
+  const immunityResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  assert.equal(immunityResult.accepted, true);
+  session = immunityResult.session;
+  assert.deepEqual(session.state.terminal, { status: 'active' });
+  assert.equal(session.state.players.south.avatar.life, 0);
+  assert.equal(immunityResult.receipt.events.some(({ payload, type }) =>
+    type === 'damage-dealt'
+      && typeof payload === 'object'
+      && payload !== null
+      && !Array.isArray(payload)
+      && 'prevented' in payload
+      && payload.prevented === true), true);
+
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === southAvatarInstanceId
+      && descriptor.to.cell === 'C2'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'avatar'
+      && descriptor.target.instanceId === northAvatarInstanceId));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  assert.deepEqual(session.state.terminal, {
+    reason: 'simultaneous_avatar_defeat',
+    result: 'draw',
+    status: 'finished',
+  });
+  assert.equal(session.transcript.at(-1)?.events.filter(({ type }) => type === 'death-blow').length, 2);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test("RULE-04 later undefended site strikes cannot deliver Death's Door death blows", () => {
+  const setup = northAttacksAtC2(
+    71,
+    undefined,
+    { attack: 1, defense: 1, drawSpell: false, life: 1 },
+  );
+  let { session } = setup;
+  const site = session.state.realm.sites.C2;
+  assert.ok(site);
+  const strikeSite = (): GameLegalAction => action(session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'site'
+      && descriptor.target.instanceId === site.instanceId);
+  session = accept(session, strikeSite());
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && !descriptor.originalTargetParticipates));
+  assert.equal(session.state.players.south.avatar.life, 0);
+  assert.equal(session.state.players.south.avatar.deathDoorTurn, 5);
+  assert.deepEqual(session.state.terminal, { status: 'active' });
+
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === setup.attackerInstanceId
+      && descriptor.to.cell === 'C2'));
+  session = accept(session, strikeSite());
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && !descriptor.originalTargetParticipates));
+  assert.equal(session.state.players.south.avatar.life, 0);
+  assert.deepEqual(session.state.terminal, { status: 'active' });
+  assert.equal(session.transcript.at(-1)?.events.some(({ type }) => type === 'death-blow'), false);
   assert.equal(verifyGameReplay(session), true);
 });
 

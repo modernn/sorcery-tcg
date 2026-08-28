@@ -35,7 +35,8 @@
 - Browser checkpoint: a 22-action match moved a minion, handed Defend to the non-active seat, resolved a simultaneous trade into both cemeteries, and replayed byte-identically.
 - `pnpm game:check-private`: a 24-action actual-card match exercises the selected Avatar's spell draw and resolves a real 2/2 minion trade with byte-exact replay.
 - `pnpm game:verify-private`: one passing ignored-authority integration scenario.
-- `pnpm verify`: 204 passing public tests at this checkpoint.
+- Death's Door scenarios prove same-turn direct-damage immunity, later death blows, simultaneous-defeat draws, nonlethal site strikes, and exact replay.
+- `pnpm verify`: 206 passing public tests at this checkpoint.
 
 ## Still required for Phase 3
 
