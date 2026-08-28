@@ -1,13 +1,13 @@
 ---
 phase: 01-rules-and-data-authority
 implemented: 2026-08-28
-status: review_open
+status: complete
 requirements: [DATA-01, DATA-02, DATA-03]
 ---
 
 # Phase 1: Rules and Data Authority
 
-Phase 1 established the offline authority and provenance layer consumed by every later phase. Implementation is present, but the current [code review](./01-REVIEW.md) reports open findings; resolve or explicitly accept the applicable findings before treating this boundary as closed.
+Phase 1 established the offline authority and provenance layer consumed by every later phase. Its [code review](./01-REVIEW.md) findings were resolved in verified commits; the conservative all-artwork publication rejection remains explicitly deferred until project-owned UI assets exist.
 
 ## Delivered
 
@@ -43,4 +43,4 @@ Phase 1 established the offline authority and provenance layer consumed by every
 
 ## Next
 
-Address the review findings that affect the Phase 2 boundary, then plan Phase 2 from [its locked context](../02-deterministic-engine-contract/02-CONTEXT.md).
+Continue Phase 2 directly from [its locked context](../02-deterministic-engine-contract/02-CONTEXT.md) and the committed deterministic state kernel.

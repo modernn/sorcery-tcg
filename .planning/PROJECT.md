@@ -8,8 +8,8 @@ Build a TypeScript application for rules-correct, deterministic Sorcery: Contest
 
 ## Current milestone
 
-- Phase 1 authority/data infrastructure is implemented. Its current code review still reports open findings; see [the Phase 1 review](./phases/01-rules-and-data-authority/01-REVIEW.md) and [retrospective](./phases/01-rules-and-data-authority/01-SUMMARY.md).
-- Phase 2, the deterministic engine contract, is next. Locked decisions are in [Phase 2 context](./phases/02-deterministic-engine-contract/02-CONTEXT.md).
+- Phase 1 authority/data infrastructure is implemented and its review findings are resolved or explicitly deferred; see [the Phase 1 review](./phases/01-rules-and-data-authority/01-REVIEW.md) and [retrospective](./phases/01-rules-and-data-authority/01-SUMMARY.md).
+- Phase 2, the deterministic engine contract, is in progress with a frozen JSON state and versioned seeded PRNG kernel. Locked decisions are in [Phase 2 context](./phases/02-deterministic-engine-contract/02-CONTEXT.md).
 - [Requirements](./REQUIREMENTS.md) are the canonical product contract; [ROADMAP.md](./ROADMAP.md) owns phase order and status.
 
 ## Non-negotiable constraints

@@ -4,8 +4,8 @@ Requirements live in [REQUIREMENTS.md](./REQUIREMENTS.md). This file owns only p
 
 | Phase | Depends on | Requirements | Outcome | Status |
 |---|---|---|---|---|
-| 1. Rules and Data Authority | — | DATA-01–03 | Immutable offline authority, normalized cards, provenance, and private reuse boundary | Implemented; [review findings open](./phases/01-rules-and-data-authority/01-REVIEW.md) |
-| 2. Deterministic Engine Contract | 1 | ENG-01–06, TEST-02–03 | Authoritative JSON state, seeded randomness, scoped observations, legal actions, events, and replay receipts | Ready to plan |
+| 1. Rules and Data Authority | — | DATA-01–03 | Immutable offline authority, normalized cards, provenance, and private reuse boundary | Complete; [review resolved](./phases/01-rules-and-data-authority/01-REVIEW.md) |
+| 2. Deterministic Engine Contract | 1 | ENG-01–06, TEST-02–03 | Authoritative JSON state, seeded randomness, scoped observations, legal actions, events, and replay receipts | In progress |
 | 3. Complete Core Game Rules | 2 | RULE-01–04, RULE-06 | Complete setup, turn, spatial, resource, movement, combat, damage, and ending rules | Pending |
 | 4. Storyline, Card Effects, and Coverage | 3 | RULE-05, CARD-01–03, CARD-05 | Typed effects, Storyline ordering, explicit coverage, and fail-closed unsupported routes | Pending |
 | 5. Replayable Simulator and Baseline Gauntlets | 4 | SIM-01–07, TEST-05 | Reproducible matches, baseline agents, replay, scheduling, and auditable reports | Pending |
@@ -16,7 +16,7 @@ Requirements live in [REQUIREMENTS.md](./REQUIREMENTS.md). This file owns only p
 
 ## Current phase: 2
 
-Phase 2 defines the universal engine boundary without implementing Sorcery setup, turns, spatial rules, combat, card effects, simulation scheduling, model providers, or UI. Its accepted decisions are in [02-CONTEXT.md](./phases/02-deterministic-engine-contract/02-CONTEXT.md).
+Phase 2 defines the universal engine boundary without implementing Sorcery setup, turns, spatial rules, combat, card effects, simulation scheduling, model providers, or UI. Its accepted decisions are in [02-CONTEXT.md](./phases/02-deterministic-engine-contract/02-CONTEXT.md). The first slice provides frozen canonical state, a versioned serializable PRNG, fixed vectors, state hashes, checkpoint resume, and fresh-process reproducibility.
 
 Completion requires:
 
@@ -26,4 +26,4 @@ Completion requires:
 - canonical semantic event receipts and byte-exact action replay;
 - one public observation/action/step contract for every client and competitor.
 
-Plan Phase 2 only after the open Phase 1 review findings required by this boundary are resolved or explicitly accepted.
+Continue with seat-scoped observations and engine-issued legal actions over this deterministic kernel.
