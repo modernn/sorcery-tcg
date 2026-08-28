@@ -1,13 +1,18 @@
 ---
 phase: 01-rules-and-data-authority
-reviewed: 2026-08-26T19:36:29Z
+reviewed: 2026-08-28T02:41:27Z
 depth: standard
-files_reviewed: 35
+files_reviewed: 42
 files_reviewed_list:
+  - .gitattributes
+  - .gitignore
   - data/authority/README.md
   - data/authority/receipts/official-2026-08-20.json
+  - data/authority/receipts/official-2026-08-27-v3.json
   - docs/authority-precedence.md
   - docs/external-reuse-policy.md
+  - eslint.config.js
+  - package.json
   - scripts/collect-private-authority.ps1
   - scripts/verify-private-authority-boundary.ts
   - src/authority/canonical-json.ts
@@ -38,129 +43,140 @@ files_reviewed_list:
   - tests/authority/private-source-set.test.ts
   - tests/authority/provenance.test.ts
   - tests/private-authority/private-revision.test.ts
+  - tests/private-authority/private-source-completeness.test.ts
   - tests/private-authority/repository-boundary.test.ts
+  - tsconfig.json
 findings:
-  critical: 9
-  warning: 3
+  critical: 12
+  warning: 5
   info: 0
-  total: 12
+  total: 17
 status: issues_found
 ---
 
 # Phase 1: Code Review Report
 
-**Reviewed:** 2026-08-26T19:36:29Z  
-**Depth:** standard  
-**Files Reviewed:** 35  
+**Reviewed:** 2026-08-28T02:41:27Z
+**Depth:** standard
+**Files Reviewed:** 42
 **Status:** issues_found
 
 ## Summary
 
-The authority pipeline has strong hashing and filesystem checks, but nine defects undermine its fail-closed and lossless contracts. In addition to collector, precedence, provenance, and boundary failures, normalization drops game-critical fields, card IDs change with each revision-qualified source ID, and source derivation cycles are accepted.
+The authority implementation has serious fail-closed gaps. Invalid specialized artifacts and unrooted derivations can be accepted, official card input can bypass the official API adapter, supersession can select older authority, trusted artifacts remain mutable after hashing, and several private-boundary paths can miss protected data. One opt-in verification test can also install missing real private state instead of detecting its absence.
+
+The clean-clone-safe `pnpm verify` command passed during review. The ignored private suite was not run or read; its tracked test source was reviewed without accessing `.local/authority`.
+
+## Narrative Findings (AI reviewer)
 
 ## Critical Issues
 
-### CR-01: Changelog extraction can fail on current markup or select a hidden date
+### CR-01: Generic bundles bypass specialized artifact schemas
 
-**Classification:** BLOCKER  
-**File:** `scripts/collect-private-authority.ps1:147-153,309-337`  
-**Issue:** `Get-NormalizedVisibleText` strips tags but retains script, style, comment, and head text. `Get-ChangelogDate` then takes the first ISO or full-English-month date anywhere after a raw marker. This both caused the reported live failure at line 323 and can silently select a hidden build/metadata date instead of the first visible changelog entry. The synthetic test fixture at `tests/authority/private-authority-collector.test.ts:29-40` cannot detect either failure mode.
+**File:** `src/authority/validate-bundle.ts:359-365,689-695`
+**Issue:** `validateGraph` validates every child with only `validateCanonicalArtifact`, whose payload is arbitrary JSON. The only format/card-snapshot payload validation is skipped entirely when `inputRootHash` is `null`. A hash-consistent artifact can therefore declare `artifactKind: "format"` or `"card-snapshot"` while carrying an invalid payload and still pass bundle validation.
+**Fix:** Dispatch by artifact kind in `validateGraph` for every bundle: run `validateFormatArtifact` for formats and `validateNormalizedCardSnapshot` on card-snapshot payloads in addition to canonical hash validation. Add a generic-bundle regression for each specialized kind.
 
-**Fix:** Remove non-visible elements before extracting text and bind the date to the first changelog entry, preferably a unique `<time datetime>` element. Test the exact current publisher structure, a hidden earlier date, an ambiguous pair, and the publisher's actual date spelling; reject ambiguity.
+### CR-02: Canonical artifacts remain mutable after their hash is trusted
 
-### CR-02: Direct collector output leaks private roots and the Drive locator
+**File:** `src/authority/schemas.ts:648-663,694-701`
+**Issue:** Creation and validation return mutable identities, payloads, arrays, and references; only the outer artifact created at line 698 is frozen. A caller can mutate `artifact.identity.payload` after hashing, leaving `contentHash` stale while the object still appears trusted. `normalizeCards` needs a separate deep freeze, which confirms the generic contract is unsafe.
+**Fix:** Deep-freeze the validated/cloned identity before hashing and returning it, and deep-freeze artifacts returned by all validation functions. Add a regression that attempts nested mutation and then rechecks the hash.
 
-**Classification:** BLOCKER  
-**File:** `scripts/collect-private-authority.ps1:197-218,845-887,960-963`  
-**Issue:** Transport errors interpolate the full request URI, including the private Drive file ID/query. On success the core returns the complete lock object, and the direct script invocation emits that object through PowerShell's output stream. That object contains `primaryRoot`, `backupRoot`, and `privateLocatorEvidence`, contradicting the policy that private absolute locators exist only in the ignored lock and allowing terminal/transcript logs to retain them.
+### CR-03: Official card inputs can bypass the audited official API adapter
 
-**Fix:** Sanitize shared transport errors to a fixed source label and approved host without path/query. Suppress the lock object in the direct wrapper and emit only a constant success message. Add canary roots/locators and assert neither stdout nor stderr contains them.
+**File:** `src/authority/normalize-cards.ts:63-79`
+**Issue:** Parser selection depends only on whether the JSON root is an array. An `official` source whose bytes use the internal `{cards:[...]}` shape bypasses `adaptOfficialCardApiSnapshot`, accepts arbitrary project-shaped records, and mints them in the `sorcerytcg` namespace. The tracked importer fixture exercises this path with official metadata (`tests/authority/fixtures/bundle-input/cards.raw.json:1-19` and `sources.json:3-20`).
+**Fix:** Route by trusted source contract, not root shape: official Sorcery card sources must pass `adaptOfficialCardApiSnapshot`; generic raw snapshots must be non-official (or use an explicit separately validated source type). Require the importer card source to be the expected official API source and convert the synthetic official fixture to the audited API shape.
 
-### CR-03: Superficial source checks can publish a partial corpus as complete authority
+### CR-04: Set-like card fields are neither canonical nor fully validated
 
-**Classification:** BLOCKER  
-**File:** `scripts/collect-private-authority.ps1:274-306,442-472`  
-**Issue:** HTML authority is accepted from a doctype, title marker, and absence of challenge words. Card authority is accepted from any nonempty JSON array whose members merely have a nonblank `name`; the happy fixture is one such card. A publisher shell/error page or a truncated-but-valid one-card response can therefore be hashed, backed up, and locked as the complete seven-source authority set. `verifyPrivateSourceSet` only checks that card JSON has an object/array root (`src/authority/private-source-set.ts:442-458`), so it does not close this gap.
+**File:** `src/authority/normalize-cards.ts:42,55`; `src/authority/schemas.ts:390-406`
+**Issue:** `elements` and `printingSlugs` are copied in input order, and duplicate elements are accepted. Semantically identical cards with reordered element/printing sets produce different normalized payload hashes, while a card such as `elements: ["fire", "fire"]` is accepted. This breaks the phase's normalized semantic identity contract.
+**Fix:** Reject duplicate elements and sort elements by a fixed project order; sort printing slugs during normalization after the existing duplicate check. Add order-invariance and duplicate-element regressions.
 
-**Fix:** Validate the card payload with the production official API adapter before publication and enforce the pinned revision's reviewed cardinality/baseline invariants. Add source-specific structural markers for HTML. Test one-card, duplicate-printing-ID, missing-field, title-only, and partial-shell rejection.
+### CR-05: Derived sources can be accepted without any provenance parent
 
-### CR-04: Partial supersession silently defeats an unrelated viable contender
+**File:** `src/authority/schemas.ts:246-249`; `src/authority/validate-bundle.ts:394-428`
+**Issue:** `manual-transcription` and `normalized` sources may have an empty `parentByteHashes` array. Bundle validation rejects parents on `verbatim` sources but never requires a parent for derived methods. The shipped format fixture is an accepted unrooted official manual transcription at `tests/authority/fixtures/bundle-input/sources.json:23-39`.
+**Fix:** Make derivation validation method-specific: `verbatim` requires exactly zero parents; `normalized` and `manual-transcription` require at least one resolvable parent. Add an `unrooted_derivation` regression and root the format fixture in an actual source record.
 
-**Classification:** BLOCKER  
-**File:** `src/authority/validate-bundle.ts:258-277`  
-**Issue:** Any record with a nonempty `supersedes` array receives rank 100. If A supersedes B while unrelated C remains applicable, B is removed and A silently outranks C even though no relationship resolves A versus C. This violates `docs/authority-precedence.md:30-41`, which requires ambiguous or otherwise unresolved official conflicts to return `unsupported` rather than guess.
+### CR-06: An older source can supersede and defeat newer official authority
 
-**Fix:** Resolve supersession as a graph. A unique winner exists only when exactly one viable node remains after applying all valid supersession edges (or when the remaining peers are uniquely resolved by the documented non-supersession rank/date rules). Add A→B plus unrelated C, competing superseders, and transitive/cyclic tests.
+**File:** `src/authority/validate-bundle.ts:263-315`
+**Issue:** Supersession edges are checked for existence and cycles, but never for chronological direction. An older applicable source can name a newer source in `supersedes`; line 299 then removes the newer source and resolves the older one as the winner. This contradicts `docs/authority-precedence.md:23`, which says the newer record wins, and violates fail-closed resolution.
+**Fix:** Reject every supersession edge unless the superseder has a strictly later effective date than its target (or add a separate explicit same-day ordering field). Add reverse-date and equal-date supersession regressions.
 
-### CR-05: Manifest-only evidence is reported as verified without verifying its locator or procedure
+### CR-07: Path confinement is vulnerable to a check/open race
 
-**Classification:** BLOCKER  
-**File:** `src/authority/schemas.ts:205-208,270-291`; `src/authority/validate-bundle.ts:838-841`  
-**Issue:** The schema requires a locator or procedure hash syntactically, but never binds a `urn:sha256:*` locator to `source.byteHash` and never resolves or verifies `acquisitionProcedureHash`. Validation nevertheless returns every manifest-only source as `manifestBindingsVerified`, and the command emits `verification: manifest-binding-verified`. The tamper test at `tests/authority/provenance.test.ts:510-539` only catches stale outer hashes; recomputing the bundle hash makes the mismatched locator/procedure pass.
+**File:** `src/authority/validate-bundle.ts:113-141,149-186,878-884`; `src/commands/import-authority.ts:149-173,194-208,322-330`
+**Issue:** Paths are realpathed and checked inside the authority root, then reopened later by pathname without verifying the opened handle's identity. A local writer can replace the checked file with a symlink/reparse target between `realpath` and `open`, causing validation/import to read outside the configured root.
+**Fix:** Open once, reject links/reparse aliases, compare `lstat`/`realpath` identity with `FileHandle.stat` before and after the bounded read, and fail if the pathname identity changes. Reuse the handle-identity pattern already implemented in `private-source-set.ts`.
 
-**Fix:** Require a URN locator digest to equal `byteHash`. Define and verify the acquisition-procedure binding when that alternative is used. For HTTPS-only declarations that cannot be checked offline, report an honest state such as `manifest-declaration-bound` rather than `verified`, and add recomputed-hash negative tests.
+### CR-08: The production boundary scanner trusts incomplete lock metadata
 
-### CR-06: The private-boundary gate misses most copied excerpts and normalized derivatives
+**File:** `scripts/verify-private-authority-boundary.ts:777-813`
+**Issue:** The scanner checks only that roots are strings, entries is an array, and each listed entry has a path/hash. It never requires the exact seven paths or validates the complete source-set contract. An empty or partial lock builds incomplete fingerprint indexes and can let protected excerpts from omitted sources pass the release gate.
+**Fix:** Reuse `verifyPrivateSourceSet` (including the exact seven-path allowlist and root checks) before building fingerprints, and scan only its validated sorted result. Add empty, partial, duplicate, and unknown-entry lock regressions.
 
-**Classification:** BLOCKER  
-**File:** `scripts/verify-private-authority-boundary.ts:90-94,116-133,155-162`  
-**Issue:** Each private source contributes only three 32-byte markers: start, midpoint, and end. A committed excerpt from any other offset, or a normalized/re-encoded derivative, passes unless it independently triggers the exact-file or artwork checks. Private-locator scanning likewise checks only native and slash-normalized bytes, so JSON/TypeScript-escaped Windows paths and case variants evade the gate. The tests deliberately use the midpoint marker and a plain-text locator (`tests/authority/private-authority-boundary.test.ts:175-186`) and therefore prove only the sampled cases.
+### CR-09: Escaped static template literals evade private-content decoding
 
-**Fix:** Replace three-position sampling with a deterministic comprehensive fingerprint strategy over the prohibited source and normalized corpus. Scan native, slash-normalized, JSON-escaped, and Windows case-folded locator forms. Add arbitrary-offset, reordered JSON, partial-card, encoded-derivative, JSON-string, and TypeScript-string negatives across committed, staged, and packaged surfaces.
+**File:** `scripts/verify-private-authority-boundary.ts:488-555,630-659`
+**Issue:** The decoder recognizes only single- and double-quoted strings. Protected bytes or a private locator encoded with `\\x`/`\\u` escapes inside a static backtick template literal contain no raw match and are never decoded, so they can pass every publication surface.
+**Fix:** Decode static backtick literals through the same bounded path, rejecting/interpreting interpolation conservatively, and add escaped template-literal cases for raw excerpts, semantic records, and locators on all four surfaces.
 
-### CR-07: Official API normalization drops avatar life and elemental thresholds
+### CR-10: Protected content in publication paths is never scanned
 
-**Classification:** BLOCKER  
-**File:** `src/authority/official-card-api-adapter.ts:62-70,136-154`; `src/authority/schemas.ts:90-120`  
-**Issue:** The strict adapter validates `guardian.life` and all four `guardian.thresholds`, then `adaptCard` omits them. `RawCard` and `NormalizedCard` cannot represent either field. The snapshot is therefore not lossless and lacks authoritative inputs needed for avatar life and threshold-based casting/deck logic.
+**File:** `scripts/verify-private-authority-boundary.ts:574-582,663-693`
+**Issue:** Candidate bytes are scanned, but `candidate.path` is checked only for the literal private directory and artwork extensions. A Git/package filename containing a protected excerpt or locator can be published undetected. If another check fails, `fail` also prints that unscanned path verbatim.
+**Fix:** Inspect UTF-8 path bytes with the same raw/normalized/locator indexes before content inspection. If the path itself is sensitive, emit only category and surface with an opaque candidate identifier, never the path.
 
-**Fix:** Add typed life and four-element threshold fields to raw and normalized cards, copy them in `adaptCard` and `normalizeCard`, and add nonzero-threshold/avatar-life preservation assertions.
+### CR-11: The supposedly bounded subprocess path can hang forever
 
-### CR-08: Project card IDs change when the authority revision changes
+**File:** `scripts/collect-private-authority.ps1:278-292`
+**Issue:** On timeout, `Kill($true)` failures are swallowed and the code immediately calls parameterless `WaitForExit()`. A process that cannot be terminated blocks collection indefinitely. Output is also fully accumulated by `ReadToEndAsync` before the `MaximumOutputCharacters` truncation, so the advertised output bound is post-hoc.
+**Fix:** Treat termination failure as a sanitized hard failure, use a short bounded second wait, and never call parameterless `WaitForExit` on the timeout path. Enforce the output limit while streaming and kill the process tree when it is exceeded.
 
-**Classification:** BLOCKER  
-**File:** `src/authority/normalize-cards.ts:28-37`; `tests/private-authority/private-revision.test.ts:118-126`  
-**Issue:** Every card stable ID hashes `source.sourceId`, while the real source-ID convention includes the acquisition revision. Identical publisher card IDs under the next authority revision therefore receive different project IDs, breaking saved decks, owned-collection mappings, longitudinal simulations, and update reconciliation.
+### CR-12: A verification test installs missing real private authority state
 
-**Fix:** Derive official card IDs from a revision-independent publisher namespace plus the publisher card ID. Keep the revision-qualified source ID only in `SourceRef`. Add a cross-revision stable-ID test.
-
-### CR-09: Circular source derivations pass provenance validation
-
-**Classification:** BLOCKER  
-**File:** `src/authority/validate-bundle.ts:351-377`  
-**Issue:** Source derivation validation rejects missing and self parents but never traverses the byte-hash graph. Two normalized/manual sources can name each other's byte hashes and pass, leaving circular provenance with no rooted evidence.
-
-**Fix:** Build the source byte-hash derivation graph, reject duplicate parent hashes and cycles deterministically, and add a recomputed-hash two-source cycle fixture.
+**File:** `tests/private-authority/private-revision.test.ts:281-289,551-582,630-642`
+**Issue:** The test permits the selected revision to be absent, then `installWriteOnce` renames the rebuilt candidate into the real ignored selected-revision path. Cleanup restores nothing when `selectedBefore` is `null`. The test can therefore repair and persist missing production evidence, masking the exact failure it should detect.
+**Fix:** Require the selected revision to exist, compare its file map with the independently rebuilt temporary candidate, and never install/rename into real authority paths from a test. Keep installation in an explicit non-test command.
 
 ## Warnings
 
-### WR-01: Collector subprocesses can hang indefinitely
+### WR-01: Duplicate source byte hashes make derivation traversal order-dependent
 
-**Classification:** WARNING  
-**File:** `scripts/collect-private-authority.ps1:743-766`; `tests/authority/private-authority-collector.test.ts:55-75`  
-**Issue:** The verifier has no deadline and drains stdout completely before stderr. A hung child never returns; a sufficiently chatty stderr can block the child while the parent waits on stdout. The test process helper also has no timeout, so this regression can hang the suite.
+**File:** `src/authority/validate-bundle.ts:350-354,431-463`
+**Issue:** Duplicate source `byteHash` values are allowed, but both `sourceIndexByHash` and traversal state are keyed only by hash. One source overwrites another in the index and later records with the same hash can have their derivation edges skipped, hiding a cycle or depth violation depending on array order.
+**Fix:** Reject duplicate source byte hashes in a bundle, or model traversal nodes by source ID and reject ambiguous hash-to-source parent resolution.
 
-**Fix:** Read both streams concurrently, enforce a bounded wait, kill the child on expiry, and add the same timeout/cleanup behavior to `runPwsh`.
+### WR-02: The privacy-critical TypeScript scanner is not typechecked or linted
 
+**File:** `eslint.config.js:3-5`; `tsconfig.json:16`
+**Issue:** Both configurations include `src` and `tests` but omit `scripts/**/*.ts`. Consequently `pnpm verify` can pass while `scripts/verify-private-authority-boundary.ts` has type or lint defects.
+**Fix:** Include `scripts/**/*.ts` in the TypeScript project and ESLint file patterns.
 
-### WR-02: Public precedence resolution accepts impossible calendar dates
+### WR-03: The boundary scanner rejects all artwork despite the written policy
 
-**Classification:** WARNING  
-**File:** `src/authority/validate-bundle.ts:222-237`  
-**Issue:** `effectiveAt` is checked only with `^\d{4}-\d{2}-\d{2}$`. Values such as `2026-99-99` are treated as valid and can resolve a winner, contrary to the documented requirement for a valid resolution date. Bundle callers currently receive schema-validated dates, but the exported resolver itself does not enforce its contract.
+**File:** `scripts/verify-private-authority-boundary.ts:679-682`; `docs/external-reuse-policy.md:67`
+**Issue:** Every image extension or recognized image signature is rejected, including original/project-owned presentation art that the policy explicitly permits for Phase 9. This makes the release gate incompatible with a planned allowed asset class.
+**Fix:** Scope rejection to publisher/private artwork evidence, or introduce a small reviewed project-owned asset allowlist before Phase 9. Do not blanket-reject all image files.
 
-**Fix:** Perform semantic UTC date validation before lexical comparison and add impossible-day/month and leap-day tests.
+### WR-04: Boundary test subprocesses have no time or output bound
 
-### WR-03: Storage policy and importer disagree about normalized official card data
+**File:** `tests/authority/private-authority-boundary.test.ts:28-41`; `tests/private-authority/repository-boundary.test.ts:225-258`
+**Issue:** The async helper accumulates unlimited stdout/stderr and has no timeout/tree kill; both production `spawnSync` calls also omit `timeout`. A hung Git, pnpm, or scanner stalls the test suite indefinitely.
+**Fix:** Reuse one bounded child helper with a finite timeout, incremental output cap, and process-tree termination; set `timeout` on synchronous calls.
 
-**Classification:** WARNING  
-**File:** `docs/external-reuse-policy.md:63-75`; `src/commands/import-authority.ts:399-405`  
-**Issue:** The policy says normalized official derivatives are forbidden from the built revision, while every import writes `cards.normalized.json`; the expected file is asserted at `tests/authority/bundle.test.ts:542-546`. The implementation and operating/legal boundary therefore cannot both be correct.
+### WR-05: Non-disclosure tests do not assert that matched content stays out of diagnostics
 
-**Fix:** Make an explicit recorded decision: either amend the policy to permit normalized derivatives only inside the ignored private local revision, or keep the prohibition and change the revision format. Add a policy-boundary assertion matching that decision.
+**File:** `tests/authority/private-authority-boundary.test.ts:332-337,390-394,474-480`
+**Issue:** Negative cases check that roots and one host are absent from stderr, but do not assert that the actual matched excerpt, decoded record, or other distinctive protected content is absent. A regression that prints the offending content can still pass.
+**Fix:** For each synthetic case, assert stderr excludes the exact candidate content and distinctive decoded fields while allowing only the fixed category, surface, and safe path/identifier.
 
 ---
 
-_Reviewed: 2026-08-26T19:36:29Z_  
-_Reviewer: the agent (gsd-code-reviewer)_  
+_Reviewed: 2026-08-28T02:41:27Z_
+_Reviewer: the agent (gsd-code-reviewer)_
 _Depth: standard_
