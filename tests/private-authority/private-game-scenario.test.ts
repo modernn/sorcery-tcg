@@ -28,6 +28,9 @@ test('private actual-card decks complete deterministic combat, Earth-ramp, and A
   assert.equal(result.earthRamp.payoffCanMoveAndAttack, true);
   assert.equal(result.earthRamp.movingDefendUnavailable, true);
   assert.equal(result.earthRamp.genesisSiteDrawn, true);
+  assert.equal(result.earthRamp.ghostTown, 'Ghost Town');
+  assert.equal(result.earthRamp.ghostTownBonusMana, 1);
+  assert.equal(result.earthRamp.ghostTownUnusedManaExpired, true);
   assert.equal(result.earthRamp.deathriteSiteDrawnBeforeCemetery, true);
   assert.equal(result.earthRamp.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
   assert.equal(result.earthRamp.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
