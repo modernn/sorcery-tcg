@@ -48,6 +48,7 @@ export type GameCardDefinition =
     deathriteDrawSite?: boolean;
     defense: number;
     genesisDrawSite?: boolean;
+    gainsStealthAtEndOfTurn?: boolean;
     lethal?: boolean;
     manaCost: number;
     movementBonus?: 1 | 2;
@@ -450,6 +451,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.genesisDrawSite !== undefined && typeof card.genesisDrawSite !== 'boolean') {
     throw new RangeError(`${path}.genesisDrawSite must be boolean`);
   }
+  if (card.gainsStealthAtEndOfTurn !== undefined && typeof card.gainsStealthAtEndOfTurn !== 'boolean') {
+    throw new RangeError(`${path}.gainsStealthAtEndOfTurn must be boolean`);
+  }
   if (card.movementBonus !== undefined
     && (!Number.isSafeInteger(card.movementBonus)
       || card.movementBonus < 1
@@ -569,6 +573,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.deathriteHeal ? { deathriteHeal: card.deathriteHeal } : {}),
             defense: card.defense,
             ...(card.genesisDrawSite === true ? { genesisDrawSite: true } : {}),
+            ...(card.gainsStealthAtEndOfTurn === true ? { gainsStealthAtEndOfTurn: true } : {}),
             ...(card.lethal === true ? { lethal: true } : {}),
             manaCost: card.manaCost,
             ...(card.movementBonus ? { movementBonus: card.movementBonus } : {}),
@@ -2322,9 +2327,16 @@ function applyDescriptor(
     mana: siteCount(state, nextSeat),
   });
   const players = deepFreeze({ ...state.players, [seat]: endingPlayer, [nextSeat]: startingPlayer });
+  const stealthGained = state.realm.units.filter((unit) => {
+    if (unit.controller !== seat || unit.stealthed) return false;
+    const definition = cardDefinition(state, unit.cardId);
+    return definition.cardType === 'minion' && definition.gainsStealthAtEndOfTurn === true;
+  });
+  const stealthGainedIds = new Set(stealthGained.map(({ instanceId }) => instanceId));
   const units = state.realm.units.map((unit) => deepFreeze({
     ...unit,
     damage: 0,
+    ...(stealthGainedIds.has(unit.instanceId) ? { stealthed: true } : {}),
     ...(unit.controller === seat ? { summoningSickness: false } : {}),
     ...(unit.controller === nextSeat ? { tapped: false } : {}),
   }));
@@ -2340,6 +2352,10 @@ function applyDescriptor(
       turnNumber,
     }),
     [
+      ...stealthGained.map(({ controller, instanceId }) => ({
+        payload: { instanceId, seat: controller },
+        type: 'stealth-gained',
+      })),
       { payload: { seat, turnNumber: state.turnNumber }, type: 'turn-ended' },
       { payload: { drawSkipped: false, seat: nextSeat, turnNumber }, type: 'turn-started' },
     ],

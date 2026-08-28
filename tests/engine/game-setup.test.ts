@@ -38,6 +38,7 @@ type SpellFacts = Readonly<{
   deathriteDrawSite?: boolean;
   deathriteHeal?: number;
   defense?: number;
+  gainsStealthAtEndOfTurn?: boolean;
   genesisDrawSite?: boolean;
   lethal?: boolean;
   manaCost: number;
@@ -102,6 +103,7 @@ function cardsFor(
         deathriteDrawSite: facts.deathriteDrawSite ?? false,
         ...(facts.deathriteHeal ? { deathriteHeal: facts.deathriteHeal } : {}),
         defense: facts.defense ?? 1,
+        gainsStealthAtEndOfTurn: facts.gainsStealthAtEndOfTurn ?? false,
         genesisDrawSite: facts.genesisDrawSite ?? false,
         lethal: facts.lethal ?? false,
         manaCost: facts.manaCost,
@@ -1256,6 +1258,37 @@ test('RULE-04 Stealth blocks attacks, Defend, Intercept, and projectiles until i
   assert.equal(session.state.realm.units
     .find(({ instanceId }) => instanceId === ranged.targetInstanceId)?.stealthed, true);
   assert.equal(session.transcript.at(-1)?.events.some(({ type }) => type === 'stealth-lost'), true);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 Sly Fox gains Stealth once at the end of its controller turn', () => {
+  let session = keep(createGameSession(manifest(126, {
+    spell: {
+      attack: 1,
+      defense: 1,
+      gainsStealthAtEndOfTurn: true,
+      manaCost: 1,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+  })));
+  session = keep(session);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'summon-minion'));
+  assert.equal(session.state.realm.units[0]?.stealthed, false);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  assert.equal(session.state.realm.units[0]?.stealthed, true);
+  assert.deepEqual(
+    session.transcript.at(-1)?.events.map(({ type }) => type),
+    ['stealth-gained', 'turn-ended', 'turn-started'],
+  );
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  assert.equal(session.transcript.at(-1)?.events.some(({ type }) => type === 'stealth-gained'), false);
   assert.equal(verifyGameReplay(session), true);
 });
 
