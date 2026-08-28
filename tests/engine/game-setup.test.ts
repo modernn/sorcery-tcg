@@ -373,6 +373,49 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /grantChargeToAllyThisTurn/);
+  const lureManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        lureEnemyMinionOneStepCloser: true,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 1 },
+      },
+    },
+  });
+  assert.deepEqual(lureManifest.cards[firstSpell], {
+    cardType: 'magic',
+    lureEnemyMinionOneStepCloser: true,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 1 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        lureEnemyMinionOneStepCloser: false,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 1 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /lureEnemyMinionOneStepCloser/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        healController: 1,
+        lureEnemyMinionOneStepCloser: true,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 1 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
   const teleportManifest = createGameManifest({
     ...input,
     cards: {
@@ -2115,6 +2158,190 @@ test('RULE-03 Charge Magic grants an untargeted ally Charge only for the current
     instanceId === printedCharge.instanceId)?.temporaryChargeSources, undefined);
   assert.equal(gameManifest.cards[printedChargeCardId]?.cardType === 'minion'
     && gameManifest.cards[printedChargeCardId].charge, true);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 Lure makes a chosen enemy minion take its own closer step', () => {
+  const decks = { north: deck('lure-north', 6, 8), south: deck('lure-south', 6, 8) };
+  const baseCards = cardsFor(decks, {
+    defense: 3,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  }, undefined, { elements: ['water'] });
+  const authority = {
+    contentHash: SYNTHETIC_AUTHORITY_HASH,
+    mode: 'synthetic' as const,
+    revisionId: 'synthetic-lure-v1',
+  };
+  const seed = 251;
+  const preview = createGameSession(createGameManifest({
+    authority,
+    cards: baseCards,
+    decks,
+    firstSeat: 'north',
+    seed,
+  }));
+  const mobileCardId = preview.state.players.south.hand.spellbook[0]?.cardId;
+  const immobileCardId = preview.state.players.south.hand.spellbook[1]?.cardId;
+  assert.ok(mobileCardId);
+  assert.ok(immobileCardId);
+
+  const cards: Record<string, GameCardDefinition> = { ...baseCards };
+  for (const cardId of decks.north.spellbook) {
+    cards[cardId] = {
+      cardType: 'magic',
+      lureEnemyMinionOneStepCloser: true,
+      manaCost: 1,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 1 },
+    };
+  }
+  cards[mobileCardId] = {
+    ...baseCards[mobileCardId]!,
+    charge: true,
+    stealth: true,
+    summonToAnySite: true,
+    ward: true,
+  } as GameCardDefinition;
+  cards[immobileCardId] = {
+    ...baseCards[immobileCardId]!,
+    immobile: true,
+    summonToAnySite: true,
+  } as GameCardDefinition;
+  const gameManifest = createGameManifest({ authority, cards, decks, firstSeat: 'north', seed });
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === immobileCardId && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'D4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'D2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'D3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === mobileCardId && descriptor.cell === 'D3');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === session.state.realm.units.find(({ cardId }) =>
+      cardId === mobileCardId)?.instanceId
+    && descriptor.path.length === 1);
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const checkpoint = session;
+  const allyInstanceId = checkpoint.state.players.north.avatar.card.instanceId;
+  const mobile = checkpoint.state.realm.units.find(({ cardId }) => cardId === mobileCardId);
+  const immobile = checkpoint.state.realm.units.find(({ cardId }) => cardId === immobileCardId);
+  const lureCards = checkpoint.state.players.north.hand.spellbook.slice(0, 3);
+  assert.ok(mobile);
+  assert.ok(immobile);
+  assert.equal(lureCards.length, 3);
+  assert.deepEqual({
+    location: mobile.location,
+    stealthed: mobile.stealthed,
+    tapped: mobile.tapped,
+    warded: mobile.warded,
+  }, { location: 'D3', stealthed: true, tapped: true, warded: true });
+
+  const choices = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === lureCards[0]?.instanceId);
+  assert.deepEqual(choices.flatMap(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.temptedDestination
+    ? [descriptor.temptedDestination.cell]
+    : []).sort(), ['C3', 'D4']);
+  assert.equal(choices.every(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.ally?.instanceId === allyInstanceId
+    && descriptor.temptedEnemy?.instanceId === mobile.instanceId
+    && descriptor.target === undefined), true);
+  assert.equal(choices.some(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.temptedEnemy?.instanceId === immobile.instanceId), false);
+  assert.equal(choices.every(({ label }) => label.includes('tempts minion')), true);
+
+  const first = stepGame(checkpoint, action(checkpoint, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === lureCards[0]?.instanceId
+      && descriptor.temptedDestination?.cell === 'C3'));
+  assert.equal(first.accepted, true);
+  if (!first.accepted) return;
+  session = first.session;
+  assert.deepEqual(first.receipt.events.map(({ type }) => type), [
+    'magic-cast',
+    'unit-lured',
+    'magic-resolved',
+  ]);
+  assert.deepEqual(first.receipt.events[1]?.payload, {
+    allyInstanceId,
+    from: { cell: 'D3', region: 'surface' },
+    path: [
+      { cell: 'D3', region: 'surface' },
+      { cell: 'C3', region: 'surface' },
+    ],
+    seat: 'south',
+    sourceInstanceId: lureCards[0]!.instanceId,
+    steps: 1,
+    targetInstanceId: mobile.instanceId,
+    to: { cell: 'C3', region: 'surface' },
+  });
+  assert.deepEqual(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === mobile.instanceId), { ...mobile, location: 'C3' });
+
+  const second = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === lureCards[1]?.instanceId
+      && descriptor.temptedEnemy?.instanceId === mobile.instanceId
+      && descriptor.temptedDestination?.cell === 'C4'));
+  assert.equal(second.accepted, true);
+  if (!second.accepted) return;
+  session = second.session;
+  const noChoiceActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === lureCards[2]?.instanceId);
+  assert.equal(noChoiceActions.length, 1);
+  assert.equal(noChoiceActions[0]?.descriptor.kind === 'cast-magic'
+    && noChoiceActions[0].descriptor.ally === undefined
+    && noChoiceActions[0].descriptor.temptedEnemy === undefined
+    && noChoiceActions[0].descriptor.temptedDestination === undefined, true);
+
+  const noOp = stepGame(session, noChoiceActions[0]!);
+  assert.equal(noOp.accepted, true);
+  if (!noOp.accepted) return;
+  session = noOp.session;
+  assert.deepEqual(noOp.receipt.events.map(({ type }) => type), [
+    'magic-cast',
+    'magic-resolved',
+  ]);
+  assert.deepEqual(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === mobile.instanceId), { ...mobile, location: 'C4' });
+  assert.equal(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === immobile.instanceId)?.location, 'C3');
+  assert.equal(session.state.players.north.mana, checkpoint.state.players.north.mana - 3);
+  assert.equal(session.state.players.north.cemetery.filter(({ instanceId }) =>
+    lureCards.some((card) => card.instanceId === instanceId)).length, 3);
+  assert.equal(session.state.stateVersion, checkpoint.state.stateVersion + 3);
+  assert.equal([
+    ...first.receipt.randomDraws,
+    ...second.receipt.randomDraws,
+    ...noOp.receipt.randomDraws,
+  ].length, 0);
   assert.equal(verifyGameReplay(session), true);
 });
 

@@ -521,6 +521,22 @@ export type PrivateGameCheck = Readonly<{
     spellEnteredCemetery: boolean;
     unitStatePreserved: boolean;
   }>;
+  waterLure: Readonly<{
+    acceptedActionCount: number;
+    allyUnchanged: boolean;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    exactNonTargetChoices: boolean;
+    lure: string;
+    manaPaid: number;
+    noCombatDamageOrTap: boolean;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    seravaTownsfolk: string;
+    spellEnteredCemetery: boolean;
+    targetCemeteriesUnchanged: boolean;
+    uniqueStepResolved: boolean;
+  }>;
   waterDrown: Readonly<{
     acceptedActionCount: number;
     causalEventsVerified: boolean;
@@ -757,6 +773,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   leylineHenge: NormalizedCard;
   lightningBolt: NormalizedCard;
   lugbogCat: NormalizedCard;
+  lure: NormalizedCard;
   lumberingMinion: NormalizedCard;
   manaMinion: NormalizedCard;
   minorExplosion: NormalizedCard;
@@ -964,6 +981,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || freeze.thresholds.water !== 1
     || freeze.rarity !== 'ordinary') {
     throw new Error('private timed-disable Magic no longer matches its supported facts');
+  }
+  const lure = snapshot.cards.find(({ name }) => name === 'Lure');
+  if (!lure
+    || lure.cardType !== 'magic'
+    || ruleTextDigest(lure.rulesText) !== 'sha256:7015110fc769206c98c7d48c4d9e1e5e52cd5efb7ddd63340f06b79eba40ed1c'
+    || lure.manaCost !== 1
+    || lure.attack !== null
+    || lure.defense !== null
+    || lure.life !== null
+    || lure.elements.length !== 1
+    || lure.elements[0] !== 'water'
+    || lure.thresholds.air !== 0
+    || lure.thresholds.earth !== 0
+    || lure.thresholds.fire !== 0
+    || lure.thresholds.water !== 1
+    || lure.rarity !== 'ordinary') {
+    throw new Error('private non-target Lure Magic no longer matches its supported facts');
   }
   const seravaTownsfolk = snapshot.cards.find(({ name }) => name === 'Serava Townsfolk');
   if (!seravaTownsfolk
@@ -1632,6 +1666,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     leylineHenge,
     lightningBolt,
     lugbogCat,
+    lure,
     lumberingMinion,
     manaMinion,
     minorExplosion,
@@ -1734,6 +1769,7 @@ function gameDefinition(
   submergeTargetMinion = false,
   damageEachUnitAtLocationWithinTwoSteps: 0 | 3 = 0,
   grantChargeToAllyThisTurn = false,
+  lureEnemyMinionOneStepCloser = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1764,6 +1800,7 @@ function gameDefinition(
     + Number(damageEachUnitAtLocationWithinTwoSteps !== 0)
     + Number(damageRandomUnitAtLocation !== 0)
     + Number(grantChargeToAllyThisTurn)
+    + Number(lureEnemyMinionOneStepCloser)
     + Number(teleportAllyToTargetSite)
     + Number(returnMinionFromOwnCemetery)
     + Number(disableTargetNearbyMinionUntilNextTurn)
@@ -1785,6 +1822,8 @@ function gameDefinition(
             ? { damageRandomUnitAtLocation }
             : grantChargeToAllyThisTurn
               ? { grantChargeToAllyThisTurn: true }
+              : lureEnemyMinionOneStepCloser
+                ? { lureEnemyMinionOneStepCloser: true }
               : teleportAllyToTargetSite
             ? { teleportAllyToTargetSite: true }
             : returnMinionFromOwnCemetery
@@ -1846,7 +1885,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-charge' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-charge' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -2017,6 +2056,7 @@ function buildManifest(
     input.sedgeCrabs,
     input.seravaTownsfolk,
   ], [], [input.freeze]);
+  const waterLureDeck = elementalDeck('water', [input.seravaTownsfolk], [], [input.lure]);
   const waterDrownDeck = elementalDeck('water', [
     input.healingMinion,
     input.slyFox,
@@ -2103,6 +2143,8 @@ function buildManifest(
           ? waterDrownDeck
         : scenario === 'water-freeze'
           ? waterFreezeDeck
+        : scenario === 'water-lure'
+          ? waterLureDeck
         : scenario === 'water-lugbog'
           ? waterLugbogDeck
         : scenario === 'water-submerge'
@@ -2134,6 +2176,8 @@ function buildManifest(
         ? waterDrownDeck
       : scenario === 'water-freeze'
         ? waterFreezeDeck
+      : scenario === 'water-lure'
+        ? waterLureDeck
       : scenario === 'water-lugbog'
         ? waterLugbogDeck
       : scenario === 'earth-entombed'
@@ -2232,6 +2276,7 @@ function buildManifest(
       card.stableId === input.drown.stableId,
       card.stableId === input.minorExplosion.stableId ? 3 : 0,
       card.stableId === input.chargeMagic.stableId,
+      card.stableId === input.lure.stableId,
     ),
   ]));
   return {
@@ -3997,6 +4042,66 @@ function findWaterDrownOpening(
     }
   }
   throw new Error('private forced-submerge Magic scenario no longer produces its supported opening');
+}
+
+function findWaterLureOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  lureInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSeravaInstanceId: string;
+  northSiteInstanceIds: readonly [string, string];
+  session: GameSession;
+  southSeravaInstanceId: string;
+  southSiteInstanceIds: readonly [string, string];
+}> {
+  // ponytail: bounded opening scan avoids adding another private seed field.
+  for (let offset = 1; offset <= 2048; offset += 1) {
+    const built = buildManifest(input, input.config.waterSeed + offset, 'water-lure');
+    const session = createGameSession(built.manifest);
+    const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('water');
+    });
+    const southSites = session.state.players.south.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('water');
+    });
+    const northAccessible = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 2),
+    ];
+    const southAccessible = [
+      ...session.state.players.south.hand.spellbook,
+      ...session.state.players.south.spellbook.slice(0, 2),
+    ];
+    const lureInstanceId = northAccessible
+      .find(({ cardId }) => cardId === input.lure.stableId)?.instanceId;
+    const northSeravaInstanceId = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 1),
+    ]
+      .find(({ cardId }) => cardId === input.seravaTownsfolk.stableId)?.instanceId;
+    const southSeravaInstanceId = southAccessible
+      .find(({ cardId }) => cardId === input.seravaTownsfolk.stableId)?.instanceId;
+    if (northSites.length >= 2
+      && southSites.length >= 2
+      && lureInstanceId
+      && northSeravaInstanceId
+      && southSeravaInstanceId) {
+      return {
+        ...built,
+        lureInstanceId,
+        northSeravaInstanceId,
+        northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
+        session,
+        southSeravaInstanceId,
+        southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
+      };
+    }
+  }
+  throw new Error('private non-target Lure scenario no longer produces its supported opening');
 }
 
 function findWaterFreezeOpening(
@@ -7456,6 +7561,160 @@ function runWaterEndTurnStealth(
   });
 }
 
+function runWaterLure(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['waterLure'] {
+  const opening = findWaterLureOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.northSeravaInstanceId
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.southSeravaInstanceId
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const allyBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.northSeravaInstanceId);
+  const targetBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.southSeravaInstanceId);
+  if (!allyBefore || !targetBefore) {
+    throw new Error('private non-target Lure setup lacks its two Serava Townsfolk');
+  }
+  const northCemeteryBefore = session.state.players.north.cemetery;
+  const southCemeteryBefore = session.state.players.south.cemetery;
+  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.lureInstanceId
+      && descriptor.ally?.kind === 'minion'
+      && descriptor.ally.instanceId === opening.northSeravaInstanceId
+      && descriptor.ally.seat === 'north'
+      && descriptor.temptedEnemy?.kind === 'minion'
+      && descriptor.temptedEnemy.instanceId === opening.southSeravaInstanceId
+      && descriptor.temptedEnemy.seat === 'south'
+      && descriptor.temptedDestination?.cell === 'C3'
+      && descriptor.temptedDestination.region === 'surface'
+      && descriptor.target === undefined
+      && descriptor.targetLocation === undefined
+      && descriptor.targetSiteInstanceId === undefined
+      && descriptor.cemeteryMinionInstanceId === undefined);
+  const chosen = choices[0];
+  if (!chosen || choices.length !== 1) {
+    throw new Error('private Lure ally, enemy, and unique closer step are not exactly available');
+  }
+  const manaBefore = session.state.players.north.mana;
+  session = accept(session, chosen);
+
+  const allyAfter = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.northSeravaInstanceId);
+  const targetAfter = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.southSeravaInstanceId);
+  if (!allyAfter || !targetAfter) throw new Error('private Lure removed a Serava Townsfolk');
+  const receipt = session.transcript.at(-1);
+  const events = receipt?.events ?? [];
+  const castPayload = events[0] && isJsonRecord(events[0].payload)
+    ? events[0].payload
+    : undefined;
+  const luredPayload = events[1] && isJsonRecord(events[1].payload)
+    ? events[1].payload
+    : undefined;
+  const resolvedPayload = events[2] && isJsonRecord(events[2].payload)
+    ? events[2].payload
+    : undefined;
+  const luredFrom = luredPayload && isJsonRecord(luredPayload.from)
+    ? luredPayload.from
+    : undefined;
+  const luredTo = luredPayload && isJsonRecord(luredPayload.to)
+    ? luredPayload.to
+    : undefined;
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    allyUnchanged: allyAfter.cardId === allyBefore.cardId
+      && allyAfter.controller === allyBefore.controller
+      && allyAfter.damage === allyBefore.damage
+      && allyAfter.location === allyBefore.location
+      && allyAfter.owner === allyBefore.owner
+      && allyAfter.region === allyBefore.region
+      && allyAfter.stealthed === allyBefore.stealthed
+      && allyAfter.summoningSickness === allyBefore.summoningSickness
+      && allyAfter.tapped === allyBefore.tapped
+      && allyAfter.warded === allyBefore.warded,
+    causalEventsVerified: events.map(({ type }) => type).join(',')
+      === 'magic-cast,unit-lured,magic-resolved'
+      && castPayload?.instanceId === opening.lureInstanceId
+      && castPayload.manaPaid === 1
+      && castPayload.seat === 'north'
+      && castPayload.allyInstanceId === opening.northSeravaInstanceId
+      && castPayload.allySeat === 'north'
+      && luredPayload?.allyInstanceId === opening.northSeravaInstanceId
+      && luredPayload.seat === 'south'
+      && luredPayload.sourceInstanceId === opening.lureInstanceId
+      && luredPayload.targetInstanceId === opening.southSeravaInstanceId
+      && luredFrom?.cell === 'C2'
+      && luredFrom.region === 'surface'
+      && luredTo?.cell === 'C3'
+      && luredTo.region === 'surface'
+      && resolvedPayload?.instanceId === opening.lureInstanceId,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    exactNonTargetChoices: choices.length === 1,
+    lure: input.lure.name,
+    manaPaid: manaBefore - session.state.players.north.mana,
+    noCombatDamageOrTap: targetAfter.damage === targetBefore.damage
+      && targetAfter.tapped === targetBefore.tapped
+      && session.state.phase === 'main'
+      && session.state.pendingCombat === null,
+    noRandomDraws: receipt?.randomDraws.length === 0,
+    replayVerified: verifyGameReplay(session),
+    seravaTownsfolk: input.seravaTownsfolk.name,
+    spellEnteredCemetery: session.state.players.north.hand.spellbook
+      .every(({ instanceId }) => instanceId !== opening.lureInstanceId)
+      && session.state.players.north.cemetery
+        .some(({ instanceId }) => instanceId === opening.lureInstanceId),
+    targetCemeteriesUnchanged: session.state.players.north.cemetery.length
+      === northCemeteryBefore.length + 1
+      && session.state.players.south.cemetery.length === southCemeteryBefore.length
+      && session.state.players.north.cemetery
+        .every(({ instanceId }) => instanceId !== opening.northSeravaInstanceId)
+      && session.state.players.south.cemetery
+        .every(({ instanceId }) => instanceId !== opening.southSeravaInstanceId),
+    uniqueStepResolved: targetBefore.location === 'C2'
+      && targetBefore.region === 'surface'
+      && targetAfter.location === 'C3'
+      && targetAfter.region === 'surface'
+      && targetAfter.cardId === targetBefore.cardId
+      && targetAfter.controller === targetBefore.controller
+      && targetAfter.owner === targetBefore.owner
+      && targetAfter.stealthed === targetBefore.stealthed
+      && targetAfter.summoningSickness === targetBefore.summoningSickness
+      && targetAfter.warded === targetBefore.warded,
+  });
+}
+
 function runWaterFreeze(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['waterFreeze'] {
@@ -7743,6 +8002,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const waterDrown = runWaterDrown(input);
   const waterEdgeConnection = runWaterEdgeConnection(input);
   const waterLugbog = runWaterLugbog(input);
+  const waterLure = runWaterLure(input);
   const waterEndTurnStealth = runWaterEndTurnStealth(input);
   const waterFreeze = runWaterFreeze(input);
   const waterHealing = runWaterHealing(input);
@@ -7928,6 +8188,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     waterDrown,
     waterEdgeConnection,
     waterLugbog,
+    waterLure,
     waterEndTurnStealth,
     waterFreeze,
     waterHealing,

@@ -582,6 +582,26 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.waterFreeze.deck.spellbook
     .find(({ name }) => name === 'Serava Townsfolk')?.copies, 4);
   assert.equal(result.waterFreeze.replayVerified, true);
+  assert.equal(result.waterLure.lure, 'Lure');
+  assert.equal(result.waterLure.seravaTownsfolk, 'Serava Townsfolk');
+  assert.equal(result.waterLure.acceptedActionCount, 17);
+  assert.equal(result.waterLure.exactNonTargetChoices, true);
+  assert.equal(result.waterLure.uniqueStepResolved, true);
+  assert.equal(result.waterLure.manaPaid, 1);
+  assert.equal(result.waterLure.allyUnchanged, true);
+  assert.equal(result.waterLure.noCombatDamageOrTap, true);
+  assert.equal(result.waterLure.targetCemeteriesUnchanged, true);
+  assert.equal(result.waterLure.spellEnteredCemetery, true);
+  assert.equal(result.waterLure.noRandomDraws, true);
+  assert.equal(result.waterLure.causalEventsVerified, true);
+  assert.equal(result.waterLure.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.waterLure.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.waterLure.deck.spellbook
+    .find(({ name }) => name === 'Lure')?.copies, 4);
+  assert.equal(result.waterLure.deck.spellbook
+    .find(({ name }) => name === 'Serava Townsfolk')?.copies, 4);
+  assert.equal(result.waterLure.replayVerified, true);
   assert.equal(result.waterHealing.healingMinion, 'Muddy Pigs');
   assert.equal(result.waterHealing.healed, 3);
   assert.equal(result.waterHealing.healedBeforeCemetery, true);
