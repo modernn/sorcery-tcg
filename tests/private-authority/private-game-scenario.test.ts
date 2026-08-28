@@ -42,6 +42,14 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthRamp.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
   assert.equal(result.earthRamp.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
   assert.equal(result.earthRamp.replayVerified, true);
+  assert.equal(result.earthRanged.rangedMinion, 'Belmotte Longbowmen');
+  assert.equal(result.earthRanged.rangedOneStep, true);
+  assert.equal(result.earthRanged.rangedShooterStayedSafe, true);
+  assert.equal(result.earthRanged.rangedTargetDied, true);
+  assert.equal(result.earthRanged.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthRanged.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.deepEqual(result.earthRanged.deck, result.earthRamp.deck);
+  assert.equal(result.earthRanged.replayVerified, true);
   assert.equal(result.fireResponse.lumberingGiant, 'Lumbering Giant');
   assert.equal(result.fireResponse.monstrousLion, 'Monstrous Lion');
   assert.equal(result.fireResponse.chargeMoveAndAttack, true);
