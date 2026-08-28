@@ -34,6 +34,9 @@ const SELECTED_REVISION = `${LOCAL_ROOT}/revisions/${REVISION_ID}`;
 const RECEIPT_PATH = `data/authority/receipts/${REVISION_ID}.json`;
 const SUMMARY_PATH = '.planning/phases/01-rules-and-data-authority/01-07-SUMMARY.md';
 const ZERO_HASH = `sha256:${'0'.repeat(64)}` as Hash;
+const FINAL_REVISION_ID = 'official-2026-08-27-v3';
+const FINAL_LOCK_PATH = `${LOCAL_ROOT}/locks/${FINAL_REVISION_ID}/source-set-lock.json`;
+const FINAL_SUMMARY_PATH = '.planning/phases/01-rules-and-data-authority/01-15-SUMMARY.md';
 
 type Evidence = Record<string, unknown>;
 type Receipt = Readonly<{
@@ -324,6 +327,12 @@ test('publication evidence accepts only the two closed structures and exact curr
   for (const [lock, consumed, receipt] of invalid) {
     assert.equal(validCurrentPublication(lock, consumed ?? {}, receipt), false);
   }
+});
+
+test('fresh v3 roots build final v3 candidates while historical evidence remains immutable', async () => {
+  await readFile(FINAL_LOCK_PATH, 'utf8');
+  await readFile(FINAL_SUMMARY_PATH, 'utf8');
+  assert.fail('final v3 candidate build is not implemented');
 });
 
 test('live private roots independently reproduce the exact selected revision without mutation', async () => {
