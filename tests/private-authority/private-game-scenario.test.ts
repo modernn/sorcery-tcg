@@ -482,6 +482,27 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.waterSubmerge.deck.spellbook
     .find(({ name }) => name === 'Coral-Reef Kelpie')?.copies, 4);
   assert.equal(result.waterSubmerge.replayVerified, true);
+  assert.equal(result.waterFreeze.freeze, 'Freeze');
+  assert.equal(result.waterFreeze.seravaTownsfolk, 'Serava Townsfolk');
+  assert.equal(result.waterFreeze.acceptedActionCount, 15);
+  assert.equal(result.waterFreeze.actionAvailableBefore, true);
+  assert.equal(result.waterFreeze.disabledStateRecorded, true);
+  assert.equal(result.waterFreeze.actionUnavailableWhileDisabled, true);
+  assert.equal(result.waterFreeze.disabledThroughOpponentTurn, true);
+  assert.equal(result.waterFreeze.expiredAtCasterStart, true);
+  assert.equal(result.waterFreeze.actionReturnedOnNextTurn, true);
+  assert.equal(result.waterFreeze.manaPaid, 1);
+  assert.equal(result.waterFreeze.spellEnteredCemetery, true);
+  assert.equal(result.waterFreeze.unitStatePreserved, true);
+  assert.equal(result.waterFreeze.causalEventsVerified, true);
+  assert.equal(result.waterFreeze.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.waterFreeze.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.waterFreeze.deck.spellbook
+    .find(({ name }) => name === 'Freeze')?.copies, 4);
+  assert.equal(result.waterFreeze.deck.spellbook
+    .find(({ name }) => name === 'Serava Townsfolk')?.copies, 4);
+  assert.equal(result.waterFreeze.replayVerified, true);
   assert.equal(result.waterHealing.healingMinion, 'Muddy Pigs');
   assert.equal(result.waterHealing.healed, 3);
   assert.equal(result.waterHealing.healedBeforeCemetery, true);
