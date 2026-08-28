@@ -2,6 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 
 import {
   CanonicalJsonError,
@@ -9,19 +11,16 @@ import {
   parseJsonWithDuplicateKeyCheck,
   type JsonValue,
 } from '../src/authority/canonical-json.ts';
+import {
+  verifyPrivateSourceSet,
+  type PrivateAuthoritySourceEntry,
+} from '../src/authority/private-source-set.ts';
 
-type PrivateEntry = Readonly<{
-  relativePath: string;
-  byteHash: string;
-  url?: string;
-  retrievedAt?: string;
-  effectiveDate?: string | null;
-  mediaType?: string;
-}>;
 type PrivateLock = Readonly<{
   primaryRoot: string;
   backupRoot: string;
-  entries: readonly PrivateEntry[];
+  entries: readonly PrivateAuthoritySourceEntry[];
+  sourceSetRootHash: string;
   rulebookAcquisitionEvidence?: Readonly<{ privateLocatorEvidence?: string }>;
 }>;
 type CandidateSurface = 'reachable-history' | 'worktree' | 'index' | 'package';
@@ -40,6 +39,11 @@ type InspectionState = {
   decodedStrings: number;
 };
 
+export type PrivateInspectionSource = Readonly<{
+  bytes: Uint8Array;
+  kind: 'binary' | 'html' | 'json';
+}>;
+
 const MIN_PROTECTED_EXCERPT_BYTES = 32;
 const MIN_NORMALIZED_TEXT_BYTES = 96;
 const MIN_SEMANTIC_RECORD_BYTES = 96;
@@ -52,6 +56,7 @@ const MAX_DECODED_STRINGS = 100_000;
 const MAX_DECODE_DEPTH = 4;
 const MAX_SEMANTIC_SUBTREES = 200_000;
 const MAX_COMMAND_BUFFER = 268_435_456;
+const MAX_COMMAND_MILLISECONDS = 120_000;
 const HASH_BASE_A = 16_777_619;
 const HASH_BASE_B = 2_246_822_519;
 const PUBLIC_PROVENANCE_VALUE_HASHES = new Set([
@@ -73,49 +78,96 @@ const MAX_PUBLIC_PROVENANCE_LITERAL_BYTES = 256;
 
 class BoundaryViolation extends Error {}
 
-function parseArguments(arguments_: readonly string[]): Readonly<{ repositoryRoot: string; lockPath: string }> {
-  let repositoryRoot: string | undefined;
-  let lockPath: string | undefined;
-  for (let index = 0; index < arguments_.length; index += 2) {
-    const flag = arguments_[index];
-    const value = arguments_[index + 1];
-    if (value === undefined || (flag !== '--repository-root' && flag !== '--lock')) {
-      throw new BoundaryViolation('Usage: --repository-root <path> --lock <path>');
-    }
-    if (flag === '--repository-root') repositoryRoot = value;
-    else lockPath = value;
+function parseArguments(arguments_: readonly string[]): Readonly<{ repositoryRoot: string; lockPaths: readonly string[] }> {
+  let values: ReturnType<typeof parseArgs>['values'];
+  try {
+    ({ values } = parseArgs({
+      args: [...arguments_],
+      allowPositionals: false,
+      strict: true,
+      options: {
+        'repository-root': { type: 'string' },
+        lock: { type: 'string', multiple: true },
+      },
+    }));
+  } catch {
+    throw new BoundaryViolation('Usage: --repository-root <path> --lock <path> [--lock <path> ...]');
   }
-  if (repositoryRoot === undefined || lockPath === undefined) {
-    throw new BoundaryViolation('Usage: --repository-root <path> --lock <path>');
+  const repositoryRoot = values['repository-root'];
+  const locks = values.lock;
+  if (
+    typeof repositoryRoot !== 'string' ||
+    !Array.isArray(locks) ||
+    locks.length === 0 ||
+    !locks.every((lockPath): lockPath is string => typeof lockPath === 'string')
+  ) {
+    throw new BoundaryViolation('Usage: --repository-root <path> --lock <path> [--lock <path> ...]');
   }
   const root = resolve(repositoryRoot);
-  return { repositoryRoot: root, lockPath: isAbsolute(lockPath) ? resolve(lockPath) : resolve(root, lockPath) };
+  return {
+    repositoryRoot: root,
+    lockPaths: locks.map((lockPath) => isAbsolute(lockPath) ? resolve(lockPath) : resolve(root, lockPath)),
+  };
 }
 
-function commandBytes(command: string, arguments_: readonly string[], cwd: string): Buffer {
-  return execFileSync(command, arguments_, {
-    cwd,
-    encoding: 'buffer',
-    maxBuffer: MAX_COMMAND_BUFFER,
-    windowsHide: true,
-  });
+function commandBytes(
+  command: string,
+  arguments_: readonly string[],
+  cwd: string,
+  input?: string | Uint8Array,
+): Buffer {
+  try {
+    return execFileSync(command, arguments_, {
+      cwd,
+      encoding: null,
+      input,
+      killSignal: 'SIGKILL',
+      maxBuffer: MAX_COMMAND_BUFFER,
+      timeout: MAX_COMMAND_MILLISECONDS,
+      windowsHide: true,
+    });
+  } catch {
+    throw new BoundaryViolation(`Boundary command failed [${command}:${arguments_[0] ?? 'unknown'}].`);
+  }
 }
 
 function reachableHistoryCandidates(repositoryRoot: string): readonly Candidate[] {
   const candidates: Candidate[] = [];
   const objects = commandBytes('git', ['rev-list', '--objects', '--all'], repositoryRoot).toString('utf8');
-  for (const record of objects.split(/\r?\n/)) {
-    if (record === '') continue;
+  const records = objects.split(/\r?\n/).flatMap((record) => {
+    if (record === '') return [];
     const separator = record.indexOf(' ');
-    if (separator < 0) continue;
-    const objectId = record.slice(0, separator);
-    const path = record.slice(separator + 1);
-    if (commandBytes('git', ['cat-file', '-t', objectId], repositoryRoot).toString('utf8').trim() !== 'blob') continue;
-    candidates.push({
-      path,
-      bytes: commandBytes('git', ['cat-file', 'blob', objectId], repositoryRoot),
-      surface: 'reachable-history',
-    });
+    return separator < 0 ? [] : [{ objectId: record.slice(0, separator), path: record.slice(separator + 1) }];
+  });
+  if (records.length === 0) return candidates;
+  const batch = commandBytes(
+    'git',
+    ['cat-file', '--batch'],
+    repositoryRoot,
+    records.map(({ objectId }) => objectId).join('\n') + '\n',
+  );
+  let offset = 0;
+  for (const record of records) {
+    const headerEnd = batch.indexOf(0x0a, offset);
+    if (headerEnd < 0) throw new BoundaryViolation('Could not parse Git history batch header.');
+    const match = /^([0-9a-f]+) ([a-z]+) (\d+)$/.exec(batch.subarray(offset, headerEnd).toString('ascii'));
+    if (match === null || match[1] !== record.objectId) {
+      throw new BoundaryViolation('Could not parse Git history batch record.');
+    }
+    const size = Number.parseInt(match[3]!, 10);
+    const contentStart = headerEnd + 1;
+    const contentEnd = contentStart + size;
+    if (!Number.isSafeInteger(size) || contentEnd >= batch.length || batch[contentEnd] !== 0x0a) {
+      throw new BoundaryViolation('Could not parse Git history batch content.');
+    }
+    if (match[2] === 'blob') {
+      candidates.push({
+        path: record.path,
+        bytes: Buffer.from(batch.subarray(contentStart, contentEnd)),
+        surface: 'reachable-history',
+      });
+    }
+    offset = contentEnd + 1;
   }
   return candidates;
 }
@@ -490,12 +542,13 @@ function decodeStringLiteral(
   start: number,
 ): Readonly<{ value: string; end: number }> | null {
   const quote = text[start];
-  if (quote !== "'" && quote !== '"') return null;
+  if (quote !== "'" && quote !== '"' && quote !== '`') return null;
   let value = '';
   for (let index = start + 1; index < text.length; index += 1) {
     const character = text[index]!;
     if (character === quote) return { value, end: index + 1 };
-    if (character === '\n' || character === '\r') return null;
+    if ((character === '\n' || character === '\r') && quote !== '`') return null;
+    if (quote === '`' && character === '$' && text[index + 1] === '{') return null;
     if (character !== '\\') {
       value += character;
       continue;
@@ -506,6 +559,7 @@ function decodeStringLiteral(
     const simple: Readonly<Record<string, string>> = {
       '"': '"',
       "'": "'",
+      '`': '`',
       '\\': '\\',
       '/': '/',
       b: '\b',
@@ -571,14 +625,17 @@ function hasArtworkSignature(bytes: Buffer): boolean {
   );
 }
 
-function fail(category: string, candidate: Candidate): never {
+function fail(category: string, candidate: Candidate, redactPath = false): never {
+  const candidateLabel = redactPath
+    ? 'candidate-' + sha256Hex(Buffer.from(candidate.path, 'utf8')).slice(0, 16)
+    : candidate.path;
   throw new BoundaryViolation(
     'Private authority boundary violation [' +
       category +
       '] [' +
       candidate.surface +
       ']: ' +
-      candidate.path,
+      candidateLabel,
   );
 }
 
@@ -635,7 +692,7 @@ function inspectContent(
     return;
   }
   for (let index = 0; index < text.length; index += 1) {
-    if (text[index] !== "'" && text[index] !== '"') continue;
+    if (text[index] !== "'" && text[index] !== '"' && text[index] !== '`') continue;
     const decoded = decodeStringLiteral(text, index);
     if (decoded === null) continue;
     state.decodedStrings += 1;
@@ -676,6 +733,19 @@ function inspectCandidate(
   if (normalizedPath === '.local/authority' || normalizedPath.startsWith('.local/authority/')) {
     fail('forbidden-private-path', candidate);
   }
+  const pathBytes = Buffer.from(normalizedPath, 'utf8');
+  const normalizedPathBytes = normalizedVisibleText(pathBytes);
+  if (containsProtectedContent(pathBytes, rawIndex)) {
+    fail('source-derived-path', candidate, true);
+  }
+  if (
+    normalizedPathBytes !== null &&
+    normalizedPathBytes.length >= normalizedIndex.minimumBytes &&
+    containsProtectedWindow(normalizedPathBytes, normalizedIndex)
+  ) {
+    fail('source-derived-normalized-path', candidate, true);
+  }
+  if (matchesLocator(pathBytes, locators)) fail('private-locator-path', candidate, true);
   if (/\.(?:avif|bmp|gif|ico|jpe?g|png|svg|tiff?|webp)$/i.test(normalizedPath)) {
     fail('artwork-path', candidate);
   }
@@ -691,6 +761,42 @@ function inspectCandidate(
     0,
     state,
   );
+}
+
+export function createPrivateCandidateInspectorForTest(
+  sources: readonly PrivateInspectionSource[],
+  locatorTexts: readonly string[] = [],
+): (candidate: Readonly<{ path: string; bytes: string | Uint8Array }>) => void {
+  const privateHashes = new Set<string>();
+  const rawFingerprintBuffers = new Map<string, Buffer>();
+  const normalizedTextBuffers = new Map<string, Buffer>();
+  const semanticIndex: SemanticIndex = new Map();
+  for (const source of sources) {
+    const bytes = Buffer.from(source.bytes);
+    privateHashes.add(sha256Hex(bytes));
+    addRawFingerprintSegments(bytes, rawFingerprintBuffers);
+    if (source.kind === 'json') addPrivateJsonSemantics(bytes, semanticIndex);
+    if (source.kind === 'html') {
+      const normalized = normalizedVisibleText(bytes);
+      if (normalized !== null && normalized.length >= MIN_PROTECTED_EXCERPT_BYTES) {
+        normalizedTextBuffers.set(sha256Hex(normalized), normalized);
+      }
+    }
+  }
+  const rawIndex = buildRawFingerprintIndex([...rawFingerprintBuffers.values()], MIN_PROTECTED_EXCERPT_BYTES);
+  const normalizedIndex = buildRawFingerprintIndex([...normalizedTextBuffers.values()], MIN_NORMALIZED_TEXT_BYTES);
+  const locators = buildLocators(locatorTexts);
+  return ({ path, bytes }): void => {
+    inspectCandidate(
+      { path, bytes: typeof bytes === 'string' ? Buffer.from(bytes, 'utf8') : Buffer.from(bytes), surface: 'worktree' },
+      privateHashes,
+      rawIndex,
+      normalizedIndex,
+      semanticIndex,
+      locators,
+      { candidateBytes: 0, decodedBytes: 0, decodedStrings: 0 },
+    );
+  };
 }
 
 function readConfinedPrivateFile(root: string, relativePath: string): Buffer {
@@ -774,53 +880,61 @@ function buildLocators(values: readonly string[]): readonly Locator[] {
   return [...locators.values()];
 }
 
-function main(): void {
-  const { repositoryRoot, lockPath } = parseArguments(process.argv.slice(2));
-  const lock = JSON.parse(readFileSync(lockPath, 'utf8')) as PrivateLock;
-  if (typeof lock.primaryRoot !== 'string' || typeof lock.backupRoot !== 'string' || !Array.isArray(lock.entries)) {
-    throw new BoundaryViolation('Private lock is missing required boundary metadata.');
-  }
-
+async function main(): Promise<void> {
+  const { repositoryRoot, lockPaths } = parseArguments(process.argv.slice(2));
   const privateHashes = new Set<string>();
   const rawFingerprintBuffers = new Map<string, Buffer>();
   const normalizedTextBuffers = new Map<string, Buffer>();
   const semanticIndex: SemanticIndex = new Map();
-  for (const [rootIndex, root] of [lock.primaryRoot, lock.backupRoot].entries()) {
-    for (const entry of lock.entries) {
-      if (typeof entry.relativePath !== 'string' || typeof entry.byteHash !== 'string') {
-        throw new BoundaryViolation('Private lock contains an invalid source entry.');
-      }
-      const bytes = readConfinedPrivateFile(root, entry.relativePath);
-      const hash = sha256Hex(bytes);
-      if (entry.byteHash !== 'sha256:' + hash) {
-        throw new BoundaryViolation('Private lock source hash does not match its bytes.');
-      }
-      privateHashes.add(hash);
-      if (rootIndex === 0) {
-        addRawFingerprintSegments(bytes, rawFingerprintBuffers);
-      }
-      if (rootIndex === 0 && entry.relativePath.endsWith('.json')) {
-        addPrivateJsonSemantics(bytes, semanticIndex);
-      }
-      if (rootIndex === 0 && entry.relativePath.endsWith('.html')) {
-        const normalized = normalizedVisibleText(bytes);
-        if (normalized !== null && normalized.length >= MIN_PROTECTED_EXCERPT_BYTES) {
-          normalizedTextBuffers.set(sha256Hex(normalized), normalized);
+  const locatorTexts: string[] = [];
+  const localFileEvidence = ['user-provided', 'manual-local-file'].join('-');
+  for (const lockPath of lockPaths) {
+    const lock = JSON.parse(readFileSync(lockPath, 'utf8')) as PrivateLock;
+    if (typeof lock.primaryRoot !== 'string' || typeof lock.backupRoot !== 'string' || !Array.isArray(lock.entries)) {
+      throw new BoundaryViolation('Private lock is missing required boundary metadata.');
+    }
+    const verified = await verifyPrivateSourceSet({
+      repositoryRoot,
+      primaryRoot: lock.primaryRoot,
+      backupRoot: lock.backupRoot,
+      entries: lock.entries,
+    });
+    if (verified.sourceSetRootHash !== lock.sourceSetRootHash) {
+      throw new BoundaryViolation('Private lock source-set root does not match verified evidence.');
+    }
+    for (const [rootIndex, root] of [lock.primaryRoot, lock.backupRoot].entries()) {
+      for (const entry of verified.entries) {
+        if (typeof entry.relativePath !== 'string' || typeof entry.byteHash !== 'string') {
+          throw new BoundaryViolation('Private lock contains an invalid source entry.');
+        }
+        const bytes = readConfinedPrivateFile(root, entry.relativePath);
+        const hash = sha256Hex(bytes);
+        if (entry.byteHash !== 'sha256:' + hash) {
+          throw new BoundaryViolation('Private lock source hash does not match its bytes.');
+        }
+        privateHashes.add(hash);
+        if (rootIndex === 0) addRawFingerprintSegments(bytes, rawFingerprintBuffers);
+        if (rootIndex === 0 && entry.relativePath.endsWith('.json')) {
+          addPrivateJsonSemantics(bytes, semanticIndex);
+        }
+        if (rootIndex === 0 && entry.relativePath.endsWith('.html')) {
+          const normalized = normalizedVisibleText(bytes);
+          if (normalized !== null && normalized.length >= MIN_PROTECTED_EXCERPT_BYTES) {
+            normalizedTextBuffers.set(sha256Hex(normalized), normalized);
+          }
         }
       }
     }
+    addSelectedRevisionEvidence(repositoryRoot, lockPath, privateHashes, semanticIndex);
+    const privateLocatorEvidence = lock.rulebookAcquisitionEvidence?.privateLocatorEvidence;
+    locatorTexts.push(lock.primaryRoot, lock.backupRoot);
+    if (typeof privateLocatorEvidence === 'string' && privateLocatorEvidence.length > 0 && privateLocatorEvidence !== localFileEvidence) {
+      locatorTexts.push(privateLocatorEvidence);
+    }
   }
-  addSelectedRevisionEvidence(repositoryRoot, lockPath, privateHashes, semanticIndex);
 
   const rawIndex = buildRawFingerprintIndex([...rawFingerprintBuffers.values()], MIN_PROTECTED_EXCERPT_BYTES);
   const normalizedIndex = buildRawFingerprintIndex([...normalizedTextBuffers.values()], MIN_NORMALIZED_TEXT_BYTES);
-  const localFileEvidence = ['user-provided', 'manual-local-file'].join('-');
-  const privateLocatorEvidence = lock.rulebookAcquisitionEvidence?.privateLocatorEvidence;
-  const locatorTexts = [
-    lock.primaryRoot,
-    lock.backupRoot,
-    privateLocatorEvidence === localFileEvidence ? undefined : privateLocatorEvidence,
-  ].filter((value): value is string => typeof value === 'string' && value.length > 0);
   const locators = buildLocators(locatorTexts);
   const state: InspectionState = { candidateBytes: 0, decodedBytes: 0, decodedStrings: 0 };
   for (const enumerate of [
@@ -829,18 +943,27 @@ function main(): void {
     packageCandidates,
     worktreeCandidates,
   ] as const) {
-    for (const candidate of enumerate(repositoryRoot)) {
+    let candidates: readonly Candidate[];
+    try {
+      candidates = enumerate(repositoryRoot);
+    } catch (error) {
+      if (error instanceof BoundaryViolation) throw error;
+      throw new BoundaryViolation(`Candidate enumeration failed [${enumerate.name}].`);
+    }
+    for (const candidate of candidates) {
       inspectCandidate(candidate, privateHashes, rawIndex, normalizedIndex, semanticIndex, locators, state);
     }
   }
   process.stdout.write('Private authority boundary verified.\n');
 }
 
-try {
-  main();
-} catch (error) {
-  process.stderr.write(
-    `${error instanceof BoundaryViolation ? error.message : 'Private authority boundary verification failed.'}\n`,
-  );
-  process.exitCode = 1;
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
+  try {
+    await main();
+  } catch (error) {
+    process.stderr.write(
+      `${error instanceof BoundaryViolation ? error.message : 'Private authority boundary verification failed.'}\n`,
+    );
+    process.exitCode = 1;
+  }
 }

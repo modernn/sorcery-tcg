@@ -1,12 +1,20 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 
-import { PRIVATE_AUTHORITY_SOURCE_PATHS } from '../../src/authority/private-source-set.ts';
+import {
+  PRIVATE_AUTHORITY_SOURCE_PATHS,
+  verifyPrivateSourceSet,
+  type PrivateAuthoritySourceEntry,
+} from '../../src/authority/private-source-set.ts';
+import {
+  createPrivateCandidateInspectorForTest,
+  type PrivateInspectionSource,
+} from '../../scripts/verify-private-authority-boundary.ts';
+import { runBounded } from '../helpers/bounded-process.ts';
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
 const SCRIPT_PATH = join(REPOSITORY_ROOT, 'scripts', 'verify-private-authority-boundary.ts');
@@ -24,26 +32,58 @@ type Fixture = Readonly<{
 }>;
 
 type Surface = 'reachable-history' | 'worktree' | 'index' | 'package';
-
-function run(
-  command: string,
-  arguments_: readonly string[],
-  cwd: string,
-): Promise<Readonly<{ code: number | null; stdout: string; stderr: string }>> {
-  return new Promise((resolveProcess, reject) => {
-    const child = spawn(command, arguments_, { cwd, env: process.env, windowsHide: true });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.setEncoding('utf8').on('data', (chunk: string) => (stdout += chunk));
-    child.stderr.setEncoding('utf8').on('data', (chunk: string) => (stderr += chunk));
-    child.once('error', reject);
-    child.once('close', (code) => resolveProcess({ code, stdout, stderr }));
-  });
-}
+type PrivateData = Pick<Fixture, 'protectedCard' | 'publicProvenanceMarker' | 'sourceBytes'>;
 
 async function git(fixture: Fixture, ...arguments_: readonly string[]): Promise<void> {
-  const result = await run('git', arguments_, fixture.repositoryRoot);
+  const result = await runBounded('git', arguments_, fixture.repositoryRoot);
   assert.equal(result.code, 0, result.stderr);
+}
+
+let privateDataPromise: Promise<PrivateData> | undefined;
+
+function privateData(): Promise<PrivateData> {
+  privateDataPromise ??= (async () => {
+    const collector = await readFile(join(REPOSITORY_ROOT, 'scripts', 'collect-private-authority.ps1'), 'utf8');
+    const publicProvenanceMarker = [...collector.matchAll(/^\s*sourceMarker\s*=\s*'([^']+)'/gm)]
+      .map((match) => match[1]!)
+      .find((value) => Buffer.byteLength(value, 'utf8') >= 32);
+    assert.ok(publicProvenanceMarker !== undefined, 'tracked public provenance marker missing');
+    const sourceBytes = new Map<string, Buffer>();
+    const protectedCard = {
+      name: 'Synthetic Boundary Sentinel',
+      guardian: {
+        rulesText: 'A deliberately private synthetic card record used only for boundary verification.',
+        threshold: { air: 1, earth: 0, fire: 0, water: 0 },
+      },
+      sets: [{ variants: [{ finish: 'standard', slug: 'synthetic-boundary-sentinel' }] }],
+    } as const;
+    for (const [sourceIndex, relativePath] of PRIVATE_AUTHORITY_SOURCE_PATHS.entries()) {
+      const canonicalLink = relativePath === 'formats/constructed-current.html'
+        ? '<link rel="canonical" href="' + SYNTHETIC_PUBLIC_PROVENANCE_URL + '">'
+        : '';
+      const bytes = relativePath.endsWith('.json')
+        ? Buffer.from(JSON.stringify([protectedCard, { name: 'Second Synthetic Record', ordinal: sourceIndex }]), 'utf8')
+        : relativePath.endsWith('.html')
+          ? Buffer.from(
+              '<!doctype html><html><head>' + canonicalLink + '<style>.hidden { display: none }</style></head><body>' +
+                '<h1>Visible Private Heading ' + sourceIndex + '</h1><p>Alpha   Beta\nGamma Secret Passage ' +
+                sourceIndex + ' ' + 'visible-boundary-text '.repeat(8) + '</p><h2>' +
+                publicProvenanceMarker + '</h2></body></html>',
+              'utf8',
+            )
+          : Buffer.from(
+              'Synthetic source ' + sourceIndex + ': ' +
+                Array.from(
+                  { length: 90 },
+                  (_, index) => 'segment-' + sourceIndex + '-' + String(index).padStart(3, '0') + ';',
+                ).join(''),
+              'utf8',
+            );
+      sourceBytes.set(relativePath, bytes);
+    }
+    return { protectedCard, publicProvenanceMarker, sourceBytes };
+  })();
+  return privateDataPromise;
 }
 
 async function createFixture(
@@ -54,45 +94,11 @@ async function createFixture(
   const primaryRoot = join(repositoryRoot, '.local', 'authority', 'inputs', 'synthetic', 'primary');
   const backupRoot = join(sandbox, 'backup');
   const lockPath = join(repositoryRoot, '.local', 'authority', 'locks', 'synthetic', 'source-set-lock.json');
-  const collector = await readFile(join(REPOSITORY_ROOT, 'scripts', 'collect-private-authority.ps1'), 'utf8');
-  const publicProvenanceMarker = [...collector.matchAll(/^\s*sourceMarker\s*=\s*'([^']+)'/gm)]
-    .map((match) => match[1]!)
-    .find((value) => Buffer.byteLength(value, 'utf8') >= 32);
-  assert.ok(publicProvenanceMarker !== undefined, 'tracked public provenance marker missing');
-  const sourceBytes = new Map<string, Buffer>();
-  const protectedCard = {
-    name: 'Synthetic Boundary Sentinel',
-    guardian: {
-      rulesText: 'A deliberately private synthetic card record used only for boundary verification.',
-      threshold: { air: 1, earth: 0, fire: 0, water: 0 },
-    },
-    sets: [{ variants: [{ finish: 'standard', slug: 'synthetic-boundary-sentinel' }] }],
-  } as const;
-  const entries = [];
+  const data = await privateData();
+  const entries: PrivateAuthoritySourceEntry[] = [];
   await mkdir(repositoryRoot, { recursive: true });
-  for (const [sourceIndex, relativePath] of PRIVATE_AUTHORITY_SOURCE_PATHS.entries()) {
-    const canonicalLink = relativePath === 'formats/constructed-current.html'
-      ? '<link rel="canonical" href="' + SYNTHETIC_PUBLIC_PROVENANCE_URL + '">'
-      : '';
-    const bytes = relativePath.endsWith('.json')
-      ? Buffer.from(JSON.stringify([protectedCard, { name: 'Second Synthetic Record', ordinal: sourceIndex }]), 'utf8')
-      : relativePath.endsWith('.html')
-        ? Buffer.from(
-            '<!doctype html><html><head>' + canonicalLink + '<style>.hidden { display: none }</style></head><body>' +
-              '<h1>Visible Private Heading ' + sourceIndex + '</h1><p>Alpha   Beta\nGamma Secret Passage ' +
-              sourceIndex + ' ' + 'visible-boundary-text '.repeat(8) + '</p><h2>' +
-              publicProvenanceMarker + '</h2></body></html>',
-            'utf8',
-          )
-        : Buffer.from(
-            'Synthetic source ' + sourceIndex + ': ' +
-              Array.from(
-                { length: 90 },
-                (_, index) => 'segment-' + sourceIndex + '-' + String(index).padStart(3, '0') + ';',
-              ).join(''),
-            'utf8',
-          );
-    sourceBytes.set(relativePath, bytes);
+  for (const relativePath of PRIVATE_AUTHORITY_SOURCE_PATHS) {
+    const bytes = data.sourceBytes.get(relativePath)!;
     const primaryPath = join(primaryRoot, ...relativePath.split('/'));
     const backupPath = join(backupRoot, ...relativePath.split('/'));
     await mkdir(dirname(primaryPath), { recursive: true });
@@ -101,7 +107,7 @@ async function createFixture(
     await writeFile(backupPath, bytes);
     entries.push({
       relativePath,
-      url: `https://official.invalid/${relativePath}`,
+      url: `https://sorcerytcg.com/${relativePath}`,
       retrievedAt: '2026-08-25T00:00:00.000Z',
       effectiveDate: null,
       mediaType: relativePath.endsWith('.pdf')
@@ -113,6 +119,7 @@ async function createFixture(
       byteHash: `sha256:${createHash('sha256').update(bytes).digest('hex')}`,
     });
   }
+  const verified = await verifyPrivateSourceSet({ repositoryRoot, primaryRoot, backupRoot, entries });
   await mkdir(dirname(lockPath), { recursive: true });
   await writeFile(
     lockPath,
@@ -120,7 +127,7 @@ async function createFixture(
       primaryRoot,
       backupRoot,
       entries,
-      sourceSetRootHash: `sha256:${'1'.repeat(64)}`,
+      sourceSetRootHash: verified.sourceSetRootHash,
       rulebookAcquisitionEvidence: {
         privateLocatorEvidence,
       },
@@ -144,9 +151,7 @@ async function createFixture(
     primaryRoot,
     backupRoot,
     lockPath,
-    sourceBytes,
-    protectedCard,
-    publicProvenanceMarker,
+    ...data,
   };
   await git(fixture, 'init', '--quiet');
   await git(fixture, 'config', 'user.email', 'boundary@example.invalid');
@@ -184,7 +189,7 @@ async function addSurfaceCandidate(
   );
 }
 
-function reorderedProtectedCard(fixture: Fixture): string {
+function reorderedProtectedCard(fixture: PrivateData): string {
   const card = fixture.protectedCard as {
     name: string;
     guardian: { rulesText: string; threshold: Record<string, number> };
@@ -205,6 +210,40 @@ function reorderedProtectedCard(fixture: Fixture): string {
   });
 }
 
+async function privateInspector(locator = 'https://private.invalid/rulebook-locator') {
+  const data = await privateData();
+  const sources: PrivateInspectionSource[] = [...data.sourceBytes].map(([relativePath, bytes]) => ({
+    bytes,
+    kind: relativePath.endsWith('.json') ? 'json' : relativePath.endsWith('.html') ? 'html' : 'binary',
+  }));
+  return {
+    ...data,
+    inspect: createPrivateCandidateInspectorForTest(sources, [locator]),
+  };
+}
+
+function assertViolation(
+  inspect: ReturnType<typeof createPrivateCandidateInspectorForTest>,
+  path: string,
+  bytes: string | Uint8Array,
+  category: RegExp,
+  forbidden: readonly string[] = [],
+): void {
+  assert.throws(() => inspect({ path, bytes }), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, category);
+    const protectedText = typeof bytes === 'string' ? bytes : Buffer.from(bytes).toString('utf8');
+    for (const value of new Set([...forbidden, protectedText].filter(Boolean))) {
+      assert.equal(error.message.includes(value), false);
+    }
+    return true;
+  });
+}
+
+function escapedTemplate(value: string): string {
+  return '`' + [...value].map((character) => `\\u{${character.codePointAt(0)!.toString(16)}}`).join('') + '`';
+}
+
 async function cleanupFixture(fixture: Fixture): Promise<void> {
   const sandbox = resolve(fixture.sandbox);
   assert.equal(dirname(sandbox), resolve(tmpdir()));
@@ -213,7 +252,7 @@ async function cleanupFixture(fixture: Fixture): Promise<void> {
 }
 
 async function runGate(fixture: Fixture): Promise<Readonly<{ code: number | null; stdout: string; stderr: string }>> {
-  return run(
+  return runBounded(
     'node',
     [SCRIPT_PATH, '--repository-root', fixture.repositoryRoot, '--lock', fixture.lockPath],
     fixture.repositoryRoot,
@@ -258,152 +297,144 @@ test('generic local-file evidence label is not treated as a private locator', as
   }
 });
 
-test('private bytes locators excerpts paths and artwork fail without disclosing content', async (context) => {
-  const firstSource = PRIVATE_AUTHORITY_SOURCE_PATHS[0];
-  const cases: readonly Readonly<{
-    name: string;
-    path: string;
-    bytes: (fixture: Fixture) => string | Buffer;
-    mode: 'commit' | 'stage' | 'untracked' | 'stage-force';
-    category: RegExp;
-  }>[] = [
-    {
-      name: 'exact bytes in HEAD under another name',
-      path: 'included/exact-copy.bin',
-      bytes: (fixture: Fixture) => fixture.sourceBytes.get(firstSource)!,
-      mode: 'commit',
-      category: /exact-private-bytes/i,
-    },
-    {
-      name: 'exact bytes staged under another name',
-      path: 'included/staged-copy.dat',
-      bytes: (fixture: Fixture) => fixture.sourceBytes.get(firstSource)!,
-      mode: 'stage',
-      category: /exact-private-bytes/i,
-    },
+test('empty partial duplicate and unknown private locks fail before candidate scanning', async (context) => {
+  const mutations = {
+    empty: (entries: readonly Record<string, unknown>[]) => entries.slice(0, 0),
+    partial: (entries: readonly Record<string, unknown>[]) => entries.slice(0, -1),
+    duplicate: (entries: readonly Record<string, unknown>[]) => [...entries, entries[0]!],
+    unknown: (entries: readonly Record<string, unknown>[]) => [
+      ...entries.slice(0, -1),
+      { ...entries.at(-1)!, relativePath: 'unknown/private-source.html' },
+    ],
+  } as const;
+  for (const [name, mutate] of Object.entries(mutations)) {
+    await context.test(name, async () => {
+      const fixture = await createFixture();
+      try {
+        const lock = JSON.parse(await readFile(fixture.lockPath, 'utf8')) as {
+          entries: readonly Record<string, unknown>[];
+        } & Record<string, unknown>;
+        await writeFile(fixture.lockPath, JSON.stringify({ ...lock, entries: mutate(lock.entries) }));
+        const result = await runGate(fixture);
+        assert.notEqual(result.code, 0);
+        assert.equal(result.stderr, 'Private authority boundary verification failed.\n');
+        for (const privateValue of [
+          fixture.primaryRoot,
+          fixture.backupRoot,
+          'private.invalid',
+          fixture.sourceBytes.get(PRIVATE_AUTHORITY_SOURCE_PATHS[0])!.subarray(137, 169).toString('utf8'),
+        ]) {
+          assert.equal(result.stderr.includes(privateValue), false);
+        }
+      } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+  }
+});
+
+test('exact private bytes fail on every repository and package surface without disclosure', async (context) => {
+  for (const surface of ['reachable-history', 'worktree', 'index', 'package'] as const) {
+    await context.test(surface, async () => {
+      const fixture = await createFixture();
+      try {
+        await addSurfaceCandidate(
+          fixture,
+          surface,
+          'exact-private-copy-' + surface,
+          fixture.sourceBytes.get(PRIVATE_AUTHORITY_SOURCE_PATHS[0])!,
+        );
+        const result = await runGate(fixture);
+        assert.notEqual(result.code, 0);
+        assert.match(result.stderr, /exact-private-bytes/i);
+        assert.match(result.stderr, new RegExp(surface));
+        for (const privateValue of [
+          fixture.primaryRoot,
+          fixture.backupRoot,
+          'private.invalid',
+          fixture.sourceBytes.get(PRIVATE_AUTHORITY_SOURCE_PATHS[0])!.subarray(137, 169).toString('utf8'),
+        ]) {
+          assert.equal(result.stderr.includes(privateValue), false);
+        }
+      } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+  }
+});
+
+test('pure detector rejects private content paths and artwork without disclosure', async (context) => {
+  const fixture = await privateInspector();
+  const firstSource = fixture.sourceBytes.get(PRIVATE_AUTHORITY_SOURCE_PATHS[0])!;
+  const pathExcerpt = firstSource.subarray(137, 169).toString('utf8');
+  const cases = [
+    { name: 'exact private bytes', path: 'candidate.bin', bytes: firstSource, category: /exact-private-bytes/i },
     {
       name: 'private locator',
-      path: 'included/locator.txt',
-      bytes: (fixture: Fixture) => `do not publish ${fixture.primaryRoot}`,
-      mode: 'commit',
+      path: 'candidate.txt',
+      bytes: 'do not publish https://private.invalid/rulebook-locator',
       category: /private-locator/i,
     },
+    { name: 'source excerpt', path: 'candidate.bin', bytes: firstSource.subarray(32, 64), category: /source-derived/i },
+    { name: 'arbitrary offset', path: 'candidate.bin', bytes: firstSource.subarray(137, 169), category: /source-derived/i },
+    { name: 'reordered card', path: 'candidate.json', bytes: reorderedProtectedCard(fixture), category: /semantic|source-derived/i },
     {
-      name: 'source-derived excerpt marker',
-      path: 'included/excerpt.bin',
-      bytes: (fixture: Fixture) => fixture.sourceBytes.get(firstSource)!.subarray(32, 64),
-      mode: 'commit',
-      category: /source-derived/i,
+      name: 'normalized HTML',
+      path: 'candidate.txt',
+      bytes: 'VISIBLE private heading 1 alpha beta gamma secret passage 1 visible-boundary-text visible-boundary-text visible-boundary-text',
+      category: /semantic|source-derived/i,
     },
+    { name: 'artwork extension', path: 'artwork.png', bytes: 'synthetic non-image payload', category: /artwork-path/i },
     {
-      name: 'artwork extension',
-      path: 'included/artwork.png',
-      bytes: () => 'synthetic non-image payload',
-      mode: 'commit',
-      category: /artwork-path/i,
-    },
-    {
-      name: 'artwork binary signature',
-      path: 'included/payload.bin',
-      bytes: () => Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]),
-      mode: 'commit',
+      name: 'artwork signature',
+      path: 'payload.bin',
+      bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]),
       category: /artwork-signature/i,
     },
     {
-      name: 'forbidden private candidate path',
+      name: 'private candidate path',
       path: '.local/authority/package-leak.txt',
-      bytes: () => 'synthetic candidate',
-      mode: 'stage-force',
+      bytes: 'synthetic candidate',
       category: /forbidden-private-path/i,
+    },
+    {
+      name: 'source excerpt in candidate path',
+      path: 'prefix-' + pathExcerpt + '-suffix.txt',
+      bytes: 'safe candidate content',
+      category: /source-derived-path/i,
+      forbidden: [pathExcerpt],
+    },
+    {
+      name: 'private locator in candidate path',
+      path: 'prefix-https://private.invalid/rulebook-locator-suffix.txt',
+      bytes: 'safe candidate content',
+      category: /private-locator-path/i,
+      forbidden: ['https://private.invalid/rulebook-locator'],
     },
   ] as const;
   for (const scenario of cases) {
-    await context.test(scenario.name, async () => {
-      const fixture = await createFixture();
-      try {
-        if (scenario.mode === 'stage-force') {
-          const path = join(fixture.repositoryRoot, ...scenario.path.split('/'));
-          await mkdir(dirname(path), { recursive: true });
-          await writeFile(path, scenario.bytes(fixture));
-          await git(fixture, 'add', '-f', scenario.path);
-        } else {
-          await addCandidate(fixture, scenario.path, scenario.bytes(fixture), scenario.mode);
-        }
-        const result = await runGate(fixture);
-        assert.notEqual(result.code, 0);
-        assert.match(result.stderr, scenario.category);
-        assert.equal(result.stderr.includes(fixture.primaryRoot), false);
-        assert.equal(result.stderr.includes(fixture.backupRoot), false);
-        assert.equal(result.stderr.includes('private.invalid'), false);
-      } finally {
-        await cleanupFixture(fixture);
-      }
+    await context.test(scenario.name, () => {
+      assertViolation(
+        fixture.inspect,
+        scenario.path,
+        scenario.bytes,
+        scenario.category,
+        [
+          'https://private.invalid/rulebook-locator',
+          ...('forbidden' in scenario ? scenario.forbidden : []),
+        ],
+      );
     });
   }
 });
 
-test('every pnpm dry-run package file is inspected even when untracked', async () => {
-  const fixture = await createFixture();
-  try {
-    await addCandidate(
-      fixture,
-      'included/untracked-copy.bin',
-      fixture.sourceBytes.get(PRIVATE_AUTHORITY_SOURCE_PATHS[1])!,
-      'untracked',
-    );
-    const result = await runGate(fixture);
-    assert.notEqual(result.code, 0);
-    assert.match(result.stderr, /exact-private-bytes/i);
-  } finally {
-    await cleanupFixture(fixture);
-  }
-});
-
-test('arbitrary offset raw excerpts and normalized semantic derivatives fail', async (context) => {
-  const cases: readonly Readonly<{
-    name: string;
-    candidate: (fixture: Fixture) => string | Buffer;
-    category: RegExp;
-  }>[] = [
-    {
-      name: 'arbitrary unsampled offset',
-      candidate: (fixture) => fixture.sourceBytes.get(PRIVATE_AUTHORITY_SOURCE_PATHS[0])!.subarray(137, 169),
-      category: /source-derived/i,
-    },
-    {
-      name: 'reordered partial card record',
-      candidate: reorderedProtectedCard,
-      category: /semantic|source-derived/i,
-    },
-    {
-      name: 'normalized visible HTML text',
-      candidate: () =>
-        'VISIBLE private heading 1 alpha beta gamma secret passage 1 visible-boundary-text visible-boundary-text visible-boundary-text',
-      category: /semantic|source-derived/i,
-    },
-  ];
-  for (const scenario of cases) {
-    await context.test(scenario.name, async () => {
-      const fixture = await createFixture();
-      try {
-        await addCandidate(fixture, 'included/' + scenario.name.replaceAll(' ', '-') + '.txt', scenario.candidate(fixture));
-        const result = await runGate(fixture);
-        assert.notEqual(result.code, 0);
-        assert.match(result.stderr, scenario.category);
-        assert.equal(result.stderr.includes(fixture.primaryRoot), false);
-      } finally {
-        await cleanupFixture(fixture);
-      }
-    });
-  }
-});
-
-test('exact declared public provenance literals pass while one-byte extensions and private prose fail', async (context) => {
+test('pure detector allows exact public provenance while rejecting extensions and private prose', async (context) => {
+  const fixture = await privateInspector();
   const cases = [
-    { name: 'exact public metadata', candidate: (fixture: Fixture) => '`' + fixture.publicProvenanceMarker + '`', passes: true },
+    { name: 'exact public metadata', candidate: (fixture: PrivateData) => '`' + fixture.publicProvenanceMarker + '`', passes: true },
     {
       name: 'embedded exact public metadata',
-      candidate: (fixture: Fixture) => '<title>' + fixture.publicProvenanceMarker + '</title>',
+      candidate: (fixture: PrivateData) => '<title>' + fixture.publicProvenanceMarker + '</title>',
       passes: true,
     },
     {
@@ -418,12 +449,12 @@ test('exact declared public provenance literals pass while one-byte extensions a
     },
     {
       name: 'one-byte-extended public metadata',
-      candidate: (fixture: Fixture) => '`' + fixture.publicProvenanceMarker + 'x`',
+      candidate: (fixture: PrivateData) => '`' + fixture.publicProvenanceMarker + 'x`',
       passes: false,
     },
     {
       name: 'embedded one-byte-extended public metadata',
-      candidate: (fixture: Fixture) => '<title>' + fixture.publicProvenanceMarker + 'x</title>',
+      candidate: (fixture: PrivateData) => '<title>' + fixture.publicProvenanceMarker + 'x</title>',
       passes: false,
     },
     {
@@ -433,110 +464,65 @@ test('exact declared public provenance literals pass while one-byte extensions a
     },
     {
       name: 'private prose',
-      candidate: (fixture: Fixture) => fixture.sourceBytes.get(PRIVATE_AUTHORITY_SOURCE_PATHS[0])!.subarray(137, 169),
+      candidate: (fixture: PrivateData) => fixture.sourceBytes.get(PRIVATE_AUTHORITY_SOURCE_PATHS[0])!.subarray(137, 169),
       passes: false,
     },
   ] as const;
   for (const scenario of cases) {
-    await context.test(scenario.name, async () => {
-      const fixture = await createFixture();
-      try {
-        await addCandidate(fixture, 'included/' + scenario.name.replaceAll(' ', '-') + '.txt', scenario.candidate(fixture));
-        const result = await runGate(fixture);
-        if (scenario.passes) {
-          assert.equal(result.code, 0, result.stderr);
-          assert.equal(result.stdout, 'Private authority boundary verified.\n');
-        } else {
-          assert.notEqual(result.code, 0);
-          assert.match(result.stderr, /source-derived/i);
-        }
-      } finally {
-        await cleanupFixture(fixture);
-      }
+    await context.test(scenario.name, () => {
+      const candidate = scenario.candidate(fixture);
+      if (scenario.passes) assert.doesNotThrow(() => fixture.inspect({ path: 'candidate.txt', bytes: candidate }));
+      else assertViolation(fixture.inspect, 'candidate.txt', candidate, /source-derived/i);
     });
   }
 });
 
-test('encoded and escaped source excerpts and card records fail on every history worktree index and package surface', async (context) => {
-  const surfaces: readonly Surface[] = ['reachable-history', 'worktree', 'index', 'package'];
-  for (const surface of surfaces) {
-    for (const encoding of ['escaped source', 'escaped card'] as const) {
-      await context.test(encoding + ' on ' + surface, async () => {
-        const fixture = await createFixture();
-        try {
-          const raw = encoding === 'escaped source'
-            ? fixture.sourceBytes.get(PRIVATE_AUTHORITY_SOURCE_PATHS[0])!.subarray(137, 169).toString('utf8')
-            : reorderedProtectedCard(fixture);
-          const candidate = encoding === 'escaped source'
-            ? 'const protectedExcerpt = ' + JSON.stringify(raw) + ';'
-            : "const protectedCard = '" + raw + "';";
-          await addSurfaceCandidate(fixture, surface, encoding.replaceAll(' ', '-') + '-' + surface, candidate);
-          const result = await runGate(fixture);
-          assert.notEqual(result.code, 0, encoding + ' unexpectedly passed on ' + surface);
-          assert.match(result.stderr, /source-derived|semantic/i);
-          assert.match(result.stderr, new RegExp(surface));
-          assert.equal(result.stderr.includes(fixture.primaryRoot), false);
-          assert.equal(result.stderr.includes(fixture.backupRoot), false);
-          assert.equal(result.stderr.includes('private.invalid'), false);
-        } finally {
-          await cleanupFixture(fixture);
-        }
-      });
-    }
+test('pure detector rejects encoded and escaped private content', async (context) => {
+  const fixture = await privateInspector();
+  const sourceExcerpt = fixture.sourceBytes.get(PRIVATE_AUTHORITY_SOURCE_PATHS[0])!.subarray(137, 169).toString('utf8');
+  const protectedCard = reorderedProtectedCard(fixture);
+  const cases = [
+    { name: 'escaped source', candidate: 'const protectedExcerpt = ' + JSON.stringify(sourceExcerpt) + ';', category: /source-derived/i },
+    { name: 'escaped card', candidate: "const protectedCard = '" + protectedCard + "';", category: /source-derived|semantic/i },
+    { name: 'backtick escaped source', candidate: escapedTemplate(sourceExcerpt), category: /source-derived/i },
+    { name: 'backtick escaped card', candidate: escapedTemplate(protectedCard), category: /source-derived|semantic/i },
+    {
+      name: 'backtick escaped locator',
+      candidate: escapedTemplate('https://private.invalid/rulebook-locator'),
+      category: /private-locator/i,
+    },
+  ] as const;
+  for (const scenario of cases) {
+    await context.test(scenario.name, () => {
+      assertViolation(fixture.inspect, 'candidate.ts', scenario.candidate, scenario.category, [sourceExcerpt, protectedCard]);
+    });
   }
 });
 
-test('locator escaped and case-varied Windows forms fail on every surface', async (context) => {
+test('pure detector rejects escaped and case-varied Windows locators', async (context) => {
   const locator = 'C:\\Private\\Authority\\Rulebook';
   const mixedCase = 'c:\\pRIVATE\\AUTHORITY\\rULEBOOK';
+  const fixture = await privateInspector(locator);
   const candidates = {
     'JSON escaped': 'const locator = ' + JSON.stringify(mixedCase) + ';',
     'TypeScript escaped': "const locator = '" + mixedCase.replaceAll('\\', '\\\\') + "';",
     'slash-normalized case-varied': mixedCase.replaceAll('\\', '/'),
   } as const;
-  for (const surface of ['reachable-history', 'worktree', 'index', 'package'] as const) {
-    for (const [encoding, candidate] of Object.entries(candidates)) {
-      await context.test(encoding + ' on ' + surface, async () => {
-        const fixture = await createFixture(locator);
-        try {
-          await addSurfaceCandidate(fixture, surface, 'locator-' + encoding.replaceAll(' ', '-') + '-' + surface, candidate);
-          const result = await runGate(fixture);
-          assert.notEqual(result.code, 0, encoding + ' unexpectedly passed on ' + surface);
-          assert.match(result.stderr, /private-locator/i);
-          assert.match(result.stderr, new RegExp(surface));
-          assert.equal(result.stderr.includes(locator), false);
-          assert.equal(result.stderr.includes(mixedCase), false);
-        } finally {
-          await cleanupFixture(fixture);
-        }
-      });
-    }
+  for (const [encoding, candidate] of Object.entries(candidates)) {
+    await context.test(encoding, () => {
+      assertViolation(fixture.inspect, 'candidate.ts', candidate, /private-locator/i, [locator, mixedCase]);
+    });
   }
 });
 
-test('POSIX locator matching remains exact and case-sensitive', async (context) => {
+test('pure detector keeps POSIX locator matching exact and case-sensitive', async (context) => {
   const locator = '/Private/Authority/Rulebook';
-  await context.test('exact locator fails', async () => {
-    const fixture = await createFixture(locator);
-    try {
-      await addCandidate(fixture, 'included/posix-exact.txt', locator);
-      const result = await runGate(fixture);
-      assert.notEqual(result.code, 0);
-      assert.match(result.stderr, /private-locator/i);
-    } finally {
-      await cleanupFixture(fixture);
-    }
+  const fixture = await privateInspector(locator);
+  await context.test('exact locator fails', () => {
+    assertViolation(fixture.inspect, 'candidate.txt', locator, /private-locator/i, [locator]);
   });
-  await context.test('case-varied locator passes', async () => {
-    const fixture = await createFixture(locator);
-    try {
-      await addCandidate(fixture, 'included/posix-case-varied.txt', locator.toLowerCase());
-      const result = await runGate(fixture);
-      assert.equal(result.code, 0, result.stderr);
-      assert.equal(result.stdout, 'Private authority boundary verified.\n');
-    } finally {
-      await cleanupFixture(fixture);
-    }
+  await context.test('case-varied locator passes', () => {
+    assert.doesNotThrow(() => fixture.inspect({ path: 'candidate.txt', bytes: locator.toLowerCase() }));
   });
 });
 

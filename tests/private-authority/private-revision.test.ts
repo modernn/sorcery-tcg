@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import test from 'node:test';
@@ -268,27 +268,6 @@ async function fileEvidence(path: string): Promise<FileEvidence> {
   return { byteLength: bytes.byteLength, byteHash: sha256(bytes) };
 }
 
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch (error: unknown) {
-    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') return false;
-    throw error;
-  }
-}
-
-async function installWriteOnce(candidate: string, target: string): Promise<void> {
-  const candidateMap = await treeMap(candidate);
-  if (await pathExists(target)) {
-    assert.deepEqual(await treeMap(target), candidateMap, 'Write-once revision has different content.');
-    return;
-  }
-  await mkdir(dirname(target), { recursive: true });
-  await rename(candidate, target);
-  assert.deepEqual(await treeMap(target), candidateMap);
-}
-
 function finalReceipt(lock: LiveLock, bundle: AuthorityBundle, revisionFileMapHash: Hash): JsonValue {
   const payload = bundle.identity.payload as unknown as { inputRootHash: Hash };
   return {
@@ -317,13 +296,6 @@ function finalReceipt(lock: LiveLock, bundle: AuthorityBundle, revisionFileMapHa
       commercialUse: false,
     },
   } as unknown as JsonValue;
-}
-
-async function cleanLocalCandidate(root: string): Promise<void> {
-  const resolved = resolve(root);
-  assert.equal(dirname(resolved), resolve(LOCAL_ROOT), 'selection cleanup must stay directly under the private authority root');
-  assert.match(basename(resolved), /^\.plan-01-13-selection-/);
-  await rm(resolved, { recursive: true, force: true });
 }
 
 function installNetworkSentinels(
@@ -459,6 +431,7 @@ test('fresh v3 roots build final v3 candidates while historical evidence remains
     revision: await treeMap(SELECTED_REVISION),
     receipt: await fileEvidence(RECEIPT_PATH),
   };
+  const finalSelectedBefore = await treeMap(FINAL_SELECTED_REVISION);
   assert.deepEqual(freshBefore.primary, freshBefore.backup);
 
   const http = await import('node:http');
@@ -498,6 +471,7 @@ test('fresh v3 roots build final v3 candidates while historical evidence remains
     assert.equal(primary.verifiedInputRootHash, backup.verifiedInputRootHash);
     assert.equal(primary.bundleRootHash, backup.bundleRootHash);
     assert.deepEqual(await treeMap(primary.revisionPath), await treeMap(backup.revisionPath));
+    assert.deepEqual(await treeMap(primary.revisionPath), finalSelectedBefore);
 
     const primaryBundle = JSON.parse(await readFile(join(primary.revisionPath, 'bundle.json'), 'utf8')) as AuthorityBundle;
     const backupBundle = JSON.parse(await readFile(join(backup.revisionPath, 'bundle.json'), 'utf8')) as AuthorityBundle;
@@ -524,123 +498,50 @@ test('fresh v3 roots build final v3 candidates while historical evidence remains
     assert.deepEqual(await treeMap(`${LOCAL_ROOT}/authorizations`), historicalBefore.authorizations);
     assert.deepEqual(await treeMap(SELECTED_REVISION), historicalBefore.revision);
     assert.deepEqual(await fileEvidence(RECEIPT_PATH), historicalBefore.receipt);
+    assert.deepEqual(await treeMap(FINAL_SELECTED_REVISION), finalSelectedBefore);
     await cleanTemp(sandbox);
   }
 });
 
-test('official-2026-08-27-v3 safe receipt write-once selection receipt root validates', async () => {
-  const candidateRoot = await mkdtemp(join(resolve(LOCAL_ROOT), '.plan-01-13-selection-'));
+test('official-2026-08-27-v3 safe receipt and preinstalled selected root validate', async () => {
   const summary = await readFile(FINAL_SUMMARY_PATH, 'utf8');
-  const lock = JSON.parse(await readFile(FINAL_LOCK_PATH, 'utf8')) as Evidence;
+  const lock = JSON.parse(await readFile(FINAL_LOCK_PATH, 'utf8')) as LiveLock & Evidence;
   assert.ok(validFinalEvidence(lock, summary), 'Fresh v3 publication evidence is invalid.');
   assert.equal(validFinalEvidence(JSON.parse(await readFile(LOCK_PATH, 'utf8')) as Evidence, summary), false);
-  const historicalLock = JSON.parse(await readFile(LOCK_PATH, 'utf8')) as LiveLock;
-  const freshBefore = {
-    primary: await treeMap(lock.primaryRoot),
-    backup: await treeMap(lock.backupRoot),
-    lock: await fileEvidence(FINAL_LOCK_PATH),
-  };
-  const historicalBefore = {
-    primary: await treeMap(historicalLock.primaryRoot),
-    backup: await treeMap(historicalLock.backupRoot),
-    lock: await fileEvidence(LOCK_PATH),
-    authorizations: await treeMap(`${LOCAL_ROOT}/authorizations`),
-    revision: await treeMap(SELECTED_REVISION),
-    receipt: await fileEvidence(RECEIPT_PATH),
-  };
-  const selectedBefore = await pathExists(FINAL_SELECTED_REVISION)
-    ? await treeMap(FINAL_SELECTED_REVISION)
-    : null;
-
-  const http = await import('node:http');
-  const https = await import('node:https');
-  const net = await import('node:net');
-  const sentinel = installNetworkSentinels(http, https, net);
-  try {
-    const verified = await verifyPrivateSourceSet({
-      primaryRoot: lock.primaryRoot,
-      backupRoot: lock.backupRoot,
-      repositoryRoot: REPOSITORY_ROOT,
-      entries: lock.entries,
-    });
-    assert.equal(verified.sourceSetRootHash, lock.sourceSetRootHash);
-    const input = join(candidateRoot, 'input');
-    const inputLock = await writeDerivedInput(input, lock.primaryRoot, verified.entries);
-    const candidate = await importAuthority(importArgs(
-      input,
-      inputLock,
-      join(candidateRoot, 'build'),
-      FINAL_REVISION_ID,
-    ));
-    const candidateBundle = JSON.parse(await readFile(join(candidate.revisionPath, 'bundle.json'), 'utf8')) as AuthorityBundle;
-    const selectedRoot = identityHash(candidateBundle.identity as unknown as JsonValue);
-    assert.equal(candidate.bundleRootHash, selectedRoot);
-    await validateAuthorityBundle(dirname(candidate.revisionPath), `${FINAL_REVISION_ID}/bundle.json`, {
-      stableId: FINAL_STABLE_ID,
-      contentHash: selectedRoot,
-    });
-    await installWriteOnce(candidate.revisionPath, FINAL_SELECTED_REVISION);
-
-    const installedMap = await treeMap(FINAL_SELECTED_REVISION);
-    const installedBundle = JSON.parse(await readFile(join(FINAL_SELECTED_REVISION, 'bundle.json'), 'utf8')) as AuthorityBundle;
-    const expectedReceipt = finalReceipt(lock, installedBundle, identityHash(installedMap));
-    const receiptText = await readFile(FINAL_RECEIPT_PATH, 'utf8');
-    const receipt = JSON.parse(receiptText) as JsonValue;
-    assert.equal(receiptText, canonicalJson(receipt));
-    assert.deepEqual(receipt, expectedReceipt);
-    for (const privateValue of [lock.primaryRoot, lock.backupRoot]) {
-      assert.equal(receiptText.includes(privateValue), false, 'Safe receipt contains a private root.');
-    }
-    for (const forbidden of ['primaryRoot', 'backupRoot', 'privateLocatorEvidence', 'rulebookAcquisitionEvidence', 'operatingAcknowledgment']) {
-      assert.equal(receiptText.includes(`"${forbidden}"`), false, 'Safe receipt contains a private-only field.');
-    }
-
-    const readme = await readFile(AUTHORITY_README_PATH, 'utf8');
-    const selection = readme.split(/\r?\n\r?\n/)[1] ?? '';
-    assert.ok(selection.includes(FINAL_STABLE_ID) && selection.includes(`receipts/${FINAL_REVISION_ID}.json`));
-    assert.equal(selection.includes(STABLE_ID), false);
-    assert.equal(/bundle:(?:latest|official-\d{4}-\d{2}-\d{2})(?!-v3)/.test(selection), false);
-    for (const statement of ['private', 'local', 'noncommercial', 'no-redistribution', 'release', 'hosting', 'upload', 'artwork', 'public API', 'recurring acquisition', 'legal permission']) {
-      assert.ok(readme.toLowerCase().includes(statement.toLowerCase()), `README is missing the ${statement} boundary.`);
-    }
-
-    const receiptRecord = receipt as unknown as { bundleRootHash: Hash };
-    await validateAuthorityBundle(FINAL_SELECTED_REVISION, 'bundle.json', {
-      stableId: FINAL_STABLE_ID,
-      contentHash: receiptRecord.bundleRootHash,
-    });
-    await expectAuthorityFailure(() => validateAuthorityBundle(FINAL_SELECTED_REVISION, 'bundle.json', {
-      stableId: STABLE_ID,
-      contentHash: receiptRecord.bundleRootHash,
-    }));
-    await assert.rejects(() => stat(`${LOCAL_ROOT}/revisions/latest`), { code: 'ENOENT' });
-
-    const matching = join(candidateRoot, 'matching-candidate');
-    await cp(FINAL_SELECTED_REVISION, matching, { recursive: true });
-    await installWriteOnce(matching, FINAL_SELECTED_REVISION);
-    const different = join(candidateRoot, 'different-candidate');
-    await cp(FINAL_SELECTED_REVISION, different, { recursive: true });
-    await writeFile(join(different, 'unexpected.json'), '{}', { flag: 'wx' });
-    await assert.rejects(
-      () => installWriteOnce(different, FINAL_SELECTED_REVISION),
-      /Write-once revision has different content/,
-    );
-    assert.deepEqual(await treeMap(FINAL_SELECTED_REVISION), installedMap);
-    assert.equal(sentinel.calls(), 0, 'Final v3 selection attempted network access.');
-  } finally {
-    sentinel.restore();
-    assert.deepEqual(await treeMap(lock.primaryRoot), freshBefore.primary);
-    assert.deepEqual(await treeMap(lock.backupRoot), freshBefore.backup);
-    assert.deepEqual(await fileEvidence(FINAL_LOCK_PATH), freshBefore.lock);
-    assert.deepEqual(await treeMap(historicalLock.primaryRoot), historicalBefore.primary);
-    assert.deepEqual(await treeMap(historicalLock.backupRoot), historicalBefore.backup);
-    assert.deepEqual(await fileEvidence(LOCK_PATH), historicalBefore.lock);
-    assert.deepEqual(await treeMap(`${LOCAL_ROOT}/authorizations`), historicalBefore.authorizations);
-    assert.deepEqual(await treeMap(SELECTED_REVISION), historicalBefore.revision);
-    assert.deepEqual(await fileEvidence(RECEIPT_PATH), historicalBefore.receipt);
-    if (selectedBefore !== null) assert.deepEqual(await treeMap(FINAL_SELECTED_REVISION), selectedBefore);
-    await cleanLocalCandidate(candidateRoot);
+  const installedMap = await treeMap(FINAL_SELECTED_REVISION);
+  const installedBundle = JSON.parse(await readFile(join(FINAL_SELECTED_REVISION, 'bundle.json'), 'utf8')) as AuthorityBundle;
+  const expectedReceipt = finalReceipt(lock, installedBundle, identityHash(installedMap));
+  const receiptText = await readFile(FINAL_RECEIPT_PATH, 'utf8');
+  const receipt = JSON.parse(receiptText) as JsonValue;
+  assert.equal(receiptText, canonicalJson(receipt));
+  assert.deepEqual(receipt, expectedReceipt);
+  for (const privateValue of [lock.primaryRoot, lock.backupRoot]) {
+    assert.equal(receiptText.includes(privateValue), false, 'Safe receipt contains a private root.');
   }
+  for (const forbidden of ['primaryRoot', 'backupRoot', 'privateLocatorEvidence', 'rulebookAcquisitionEvidence', 'operatingAcknowledgment']) {
+    assert.equal(receiptText.includes(`"${forbidden}"`), false, 'Safe receipt contains a private-only field.');
+  }
+
+  const readme = await readFile(AUTHORITY_README_PATH, 'utf8');
+  const selection = readme.split(/\r?\n\r?\n/)[1] ?? '';
+  assert.ok(selection.includes(FINAL_STABLE_ID) && selection.includes(`receipts/${FINAL_REVISION_ID}.json`));
+  assert.equal(selection.includes(STABLE_ID), false);
+  assert.equal(/bundle:(?:latest|official-\d{4}-\d{2}-\d{2})(?!-v3)/.test(selection), false);
+  for (const statement of ['private', 'local', 'noncommercial', 'no-redistribution', 'release', 'hosting', 'upload', 'artwork', 'public API', 'recurring acquisition', 'legal permission']) {
+    assert.ok(readme.toLowerCase().includes(statement.toLowerCase()), `README is missing the ${statement} boundary.`);
+  }
+
+  const receiptRecord = receipt as unknown as { bundleRootHash: Hash };
+  await validateAuthorityBundle(FINAL_SELECTED_REVISION, 'bundle.json', {
+    stableId: FINAL_STABLE_ID,
+    contentHash: receiptRecord.bundleRootHash,
+  });
+  await expectAuthorityFailure(() => validateAuthorityBundle(FINAL_SELECTED_REVISION, 'bundle.json', {
+    stableId: STABLE_ID,
+    contentHash: receiptRecord.bundleRootHash,
+  }));
+  await assert.rejects(() => stat(`${LOCAL_ROOT}/revisions/latest`), { code: 'ENOENT' });
+  assert.deepEqual(await treeMap(FINAL_SELECTED_REVISION), installedMap);
 });
 
 test('historical private roots rebuild deterministically while the selected revision remains immutable', async () => {

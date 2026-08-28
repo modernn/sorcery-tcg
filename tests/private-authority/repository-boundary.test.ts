@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import test from 'node:test';
+
+import { runBounded } from '../helpers/bounded-process.ts';
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
 const REVISION_ID = 'official-2026-08-20';
@@ -222,38 +223,25 @@ test('only the fixed offline manual importer exists and no runtime acquisition o
   }
 });
 
-test('reachable history worktree index and package contain no private authority bytes or locators', async () => {
-  const result = spawnSync(
+test('historical and final v3 locks pass one production boundary scan', async () => {
+  await Promise.all([
+    readFile(LOCK_PATH, 'utf8'),
+    readFile(FINAL_LOCK_PATH, 'utf8'),
+    readFile(FINAL_RECEIPT_PATH, 'utf8'),
+  ]);
+  const lockArguments = [
+    '--lock', LOCK_PATH,
+    '--lock', FINAL_LOCK_PATH,
+  ];
+  assert.equal(lockArguments[1], LOCK_PATH, 'historical lock is not exercised');
+  assert.equal(lockArguments[3], FINAL_LOCK_PATH, 'final v3 lock is not exercised');
+  const result = await runBounded(
     process.execPath,
-    [BOUNDARY_SCRIPT, '--repository-root', REPOSITORY_ROOT, '--lock', LOCK_PATH],
-    {
-      cwd: REPOSITORY_ROOT,
-      encoding: 'utf8',
-      maxBuffer: 268_435_456,
-      windowsHide: true,
-    },
+    [BOUNDARY_SCRIPT, '--repository-root', REPOSITORY_ROOT, ...lockArguments],
+    REPOSITORY_ROOT,
+    { maxBuffer: 268_435_456 },
   );
-  assert.equal(result.status, 0, 'production private authority boundary scanner failed');
-  assert.equal(result.signal, null);
-  assert.equal(result.stdout, 'Private authority boundary verified.\n');
-  assert.equal(result.stderr, '');
-});
-
-test('final v3 receipt and ignored revision pass the production boundary scanner', async () => {
-  await readFile(FINAL_LOCK_PATH, 'utf8');
-  await readFile(FINAL_RECEIPT_PATH, 'utf8');
-  const result = spawnSync(
-    process.execPath,
-    [BOUNDARY_SCRIPT, '--repository-root', REPOSITORY_ROOT, '--lock', FINAL_LOCK_PATH],
-    {
-      cwd: REPOSITORY_ROOT,
-      encoding: 'utf8',
-      maxBuffer: 268_435_456,
-      windowsHide: true,
-    },
-  );
-  assert.equal(result.status, 0, 'production v3 private authority boundary scanner failed');
-  assert.equal(result.signal, null);
+  assert.equal(result.code, 0, 'production private authority boundary scanner failed');
   assert.equal(result.stdout, 'Private authority boundary verified.\n');
   assert.equal(result.stderr, '');
 });
