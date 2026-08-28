@@ -242,6 +242,19 @@ export type PrivateGameCheck = Readonly<{
     seed: number;
     sidewaysPathAvailable: boolean;
   }>;
+  waterSubmerge: Readonly<{
+    acceptedActionCount: number;
+    deck: DeckList;
+    nonSubmergeSurfaceAvailable: boolean;
+    nonSubmergeUnderwaterUnavailable: boolean;
+    replayVerified: boolean;
+    seed: number;
+    submergeMinion: string;
+    summonedUnderwater: boolean;
+    surfaceSummonAvailable: boolean;
+    targetIsWaterSite: boolean;
+    underwaterSummonAvailable: boolean;
+  }>;
   waterHealing: Readonly<{
     acceptedActionCount: number;
     deck: DeckList;
@@ -400,6 +413,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   slyFox: NormalizedCard;
   stealthMinion: NormalizedCard;
   stealthTargetMinion: NormalizedCard;
+  submergeMinion: NormalizedCard;
   wardMinion: NormalizedCard;
 }>> {
   const config = scenarioConfig(parseJsonWithDuplicateKeyCheck(await readFile(path, 'utf8')));
@@ -509,6 +523,22 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || sedgeCrabs.thresholds.water !== 1
     || sedgeCrabs.rarity !== 'ordinary') {
     throw new Error('private sideways-only minion no longer matches its supported facts');
+  }
+  const submergeMinion = snapshot.cards.find(({ name }) => name === 'Coral-Reef Kelpie');
+  if (!submergeMinion
+    || submergeMinion.cardType !== 'minion'
+    || submergeMinion.rulesText.trim() !== 'Submerge'
+    || submergeMinion.manaCost !== 3
+    || submergeMinion.attack !== 3
+    || submergeMinion.defense !== 3
+    || submergeMinion.elements.length !== 1
+    || submergeMinion.elements[0] !== 'water'
+    || submergeMinion.thresholds.air !== 0
+    || submergeMinion.thresholds.earth !== 0
+    || submergeMinion.thresholds.fire !== 0
+    || submergeMinion.thresholds.water !== 1
+    || submergeMinion.rarity !== 'ordinary') {
+    throw new Error('private Submerge minion no longer matches its supported facts');
   }
   const cannotDefendMinion = snapshot.cards
     .find(({ stableId }) => stableId === config.cannotDefendMinionStableId);
@@ -774,6 +804,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     slyFox,
     stealthMinion,
     stealthTargetMinion,
+    submergeMinion,
     wardMinion,
   };
 }
@@ -824,6 +855,7 @@ function gameDefinition(
   stealth = false,
   gainsStealthAtEndOfTurn = false,
   movesOnlySideways = false,
+  submerge = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -869,6 +901,7 @@ function gameDefinition(
       ranged,
       stealth,
       strikesFirstWhileAttacking,
+      submerge,
       summonToAnySite,
       ...(tapForMana ? { tapForMana } : {}),
       thresholds: card.thresholds,
@@ -881,7 +914,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'airborne' | 'combat' | 'earth' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-sideways' | 'water-stealth' = 'combat',
+  scenario: 'air' | 'airborne' | 'combat' | 'earth' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -994,6 +1027,12 @@ function buildManifest(
     input.slyFox,
     input.sedgeCrabs,
   ]);
+  const waterSubmergeDeck = elementalDeck('water', [
+    input.healingMinion,
+    input.slyFox,
+    input.sedgeCrabs,
+    input.submergeMinion,
+  ]);
   const decks = {
     north: scenario === 'airborne' || scenario === 'movement-two' || scenario === 'stealth'
       ? airborneDeck
@@ -1003,6 +1042,8 @@ function buildManifest(
         ? elementalDeck('air', [input.movementMinion, input.roamingMinion])
         : scenario === 'fire'
           ? elementalDeck('fire', [input.lumberingMinion, input.monstrousLion])
+        : scenario === 'water-submerge'
+          ? waterSubmergeDeck
         : scenario === 'water' || scenario === 'water-sideways' || scenario === 'water-stealth'
           ? waterDeck
           : deck(false, true),
@@ -1051,6 +1092,7 @@ function buildManifest(
       card.stableId === input.stealthMinion.stableId,
       card.stableId === input.slyFox.stableId,
       card.stableId === input.sedgeCrabs.stableId,
+      card.stableId === input.submergeMinion.stableId,
     ),
   ]));
   return {
@@ -1697,9 +1739,10 @@ function findFireOpening(
 
 function findWaterOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-  scenario: 'water' | 'water-sideways' | 'water-stealth' = 'water',
+  scenario: 'water' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'water',
 ): Readonly<{
   attackerInstanceId: string;
+  comparisonInstanceId?: string;
   featuredInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -1710,9 +1753,12 @@ function findWaterOpening(
 }> {
   const endTurnStealth = scenario === 'water-stealth';
   const sideways = scenario === 'water-sideways';
+  const submerge = scenario === 'water-submerge';
   const seed = endTurnStealth
     ? input.config.slyFoxSeed
-    : sideways ? input.config.sedgeCrabsSeed : input.config.waterSeed;
+    : sideways || submerge
+      ? input.config.sedgeCrabsSeed + (submerge ? 3 : 0)
+      : input.config.waterSeed;
   const built = buildManifest(input, seed, scenario);
   const session = createGameSession(built.manifest);
   const northSites = session.state.players.north.hand.atlas.filter((site) => {
@@ -1724,9 +1770,28 @@ function findWaterOpening(
     'north',
     endTurnStealth
       ? input.slyFox.stableId
-      : sideways ? input.sedgeCrabs.stableId : input.healingMinion.stableId,
-    1,
+      : sideways
+        ? input.sedgeCrabs.stableId
+        : submerge ? input.submergeMinion.stableId : input.healingMinion.stableId,
+    submerge ? 2 : 1,
   );
+  const comparisonInstanceId = submerge
+    ? [...session.state.players.north.hand.spellbook, ...session.state.players.north.spellbook.slice(0, 2)]
+      .find(({ cardId }) => {
+        const definition = session.state.cards[cardId];
+        return definition?.cardType === 'minion'
+          && definition.submerge !== true
+          && definition.manaCost <= 3
+          && definition.thresholds.air === 0
+          && definition.thresholds.earth === 0
+          && definition.thresholds.fire === 0
+          && definition.thresholds.water <= 3;
+      })?.instanceId
+    : undefined;
+  const thirdNorthSite = submerge
+    ? session.state.players.north.hand.atlas.find(({ instanceId }) =>
+      instanceId !== northSites[0]?.instanceId && instanceId !== northSites[1]?.instanceId)
+    : undefined;
   for (const first of session.state.players.south.hand.atlas) {
     const siteDefinition = session.state.cards[first.cardId];
     if (siteDefinition?.cardType !== 'site') continue;
@@ -1743,13 +1808,21 @@ function findWaterOpening(
     });
     const second = session.state.players.south.hand.atlas
       .find(({ instanceId }) => instanceId !== first.instanceId);
-    if (northSites.length >= (sideways ? 3 : 2) && featuredInstanceId && attacker && second) {
+    if (northSites.length >= (sideways ? 3 : 2)
+      && featuredInstanceId
+      && (!submerge || comparisonInstanceId)
+      && (!submerge || thirdNorthSite)
+      && attacker
+      && second) {
       const northSiteInstanceIds: [string, string, string?] = sideways
         ? [northSites[0]!.instanceId, northSites[1]!.instanceId, northSites[2]!.instanceId]
+        : submerge
+          ? [northSites[0]!.instanceId, northSites[1]!.instanceId, thirdNorthSite!.instanceId]
         : [northSites[0]!.instanceId, northSites[1]!.instanceId];
       return {
         ...built,
         attackerInstanceId: attacker.instanceId,
+        ...(comparisonInstanceId ? { comparisonInstanceId } : {}),
         featuredInstanceId,
         northSiteInstanceIds,
         seed,
@@ -1758,8 +1831,10 @@ function findWaterOpening(
       };
     }
   }
-  const scenarioName = endTurnStealth ? 'end-turn Stealth' : sideways ? 'sideways movement' : 'healing';
-  throw new Error(`private Water ${scenarioName} scenario seed ${seed} no longer produces its supported opening`);
+  const scenarioName = endTurnStealth
+    ? 'end-turn Stealth'
+    : sideways ? 'sideways movement' : submerge ? 'Submerge' : 'healing';
+  throw new Error(`private Water ${scenarioName} scenario no longer produces its supported opening`);
 }
 
 function keep(session: GameSession): GameSession {
@@ -2774,6 +2849,85 @@ function runWaterSidewaysMovement(
   });
 }
 
+function runWaterSubmerge(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['waterSubmerge'] {
+  const opening = findWaterOpening(input, 'water-submerge');
+  if (!opening.comparisonInstanceId || !opening.northSiteInstanceIds[2]) {
+    throw new Error('private Water Submerge opening is incomplete');
+  }
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+      && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+      && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+      && descriptor.cell === 'B3');
+
+  const summons = legalGameActions(session.state, 'north');
+  const matches = (cardInstanceId: string, region: 'surface' | 'underwater'): boolean =>
+    summons.some(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === cardInstanceId
+        && descriptor.cell === 'C3'
+        && (descriptor.region ?? 'surface') === region);
+  const surfaceSummonAvailable = matches(opening.featuredInstanceId, 'surface');
+  const underwaterSummonAvailable = matches(opening.featuredInstanceId, 'underwater');
+  const nonSubmergeSurfaceAvailable = matches(opening.comparisonInstanceId, 'surface');
+  const nonSubmergeUnderwaterUnavailable = !matches(opening.comparisonInstanceId, 'underwater');
+  const targetSite = session.state.realm.sites.C3;
+  const targetDefinition = targetSite ? session.state.cards[targetSite.cardId] : undefined;
+  const targetIsWaterSite = targetDefinition?.cardType === 'site'
+    && targetDefinition.elements.includes('water');
+  take(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.featuredInstanceId
+      && descriptor.cell === 'C3'
+      && descriptor.region === 'underwater');
+  const summonedUnderwater = session.state.realm.units.some(({ instanceId, location, region }) =>
+    instanceId === opening.featuredInstanceId && location === 'C3' && region === 'underwater');
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    nonSubmergeSurfaceAvailable,
+    nonSubmergeUnderwaterUnavailable,
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    submergeMinion:
+      opening.names.get(input.submergeMinion.stableId) ?? input.submergeMinion.stableId,
+    summonedUnderwater,
+    surfaceSummonAvailable,
+    targetIsWaterSite,
+    underwaterSummonAvailable,
+  });
+}
+
 function runWaterEndTurnStealth(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['waterEndTurnStealth'] {
@@ -2991,6 +3145,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const waterEndTurnStealth = runWaterEndTurnStealth(input);
   const waterHealing = runWaterHealing(input);
   const waterSidewaysMovement = runWaterSidewaysMovement(input);
+  const waterSubmerge = runWaterSubmerge(input);
   const opening = findOpening(input);
   let session = keep(opening.session);
   session = keep(session);
@@ -3151,6 +3306,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     waterEndTurnStealth,
     waterHealing,
     waterSidewaysMovement,
+    waterSubmerge,
   });
 }
 
