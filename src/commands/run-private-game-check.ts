@@ -264,6 +264,22 @@ export type PrivateGameCheck = Readonly<{
     targetIsLandSite: boolean;
     undergroundSummonAvailable: boolean;
   }>;
+  earthOverpower: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    currentPowerIncreasedByTwo: boolean;
+    deck: DeckList;
+    elthamTownsfolk: string;
+    exactOwnAllyChoices: boolean;
+    expiredBeforeTurnEnded: boolean;
+    manaPaid: number;
+    noRandomDraws: boolean;
+    overpower: string;
+    printedPowerRestored: boolean;
+    replayVerified: boolean;
+    spellEnteredCemetery: boolean;
+    unitStatePreservedOnGrant: boolean;
+  }>;
   earthBury: Readonly<{
     acceptedActionCount: number;
     boskTroll: string;
@@ -816,6 +832,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   drown: NormalizedCard;
   drowned: NormalizedCard;
   earthProviderMinion: NormalizedCard;
+  elthamTownsfolk: NormalizedCard;
   entombed: NormalizedCard;
   format: FormatDefinition;
   formatStableId: string;
@@ -840,6 +857,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   monstrousLion: NormalizedCard;
   movementMinion: NormalizedCard;
   movementTwoMinion: NormalizedCard;
+  overpower: NormalizedCard;
   providerMinion: NormalizedCard;
   raalDromedary: NormalizedCard;
   rangedMinion: NormalizedCard;
@@ -1044,6 +1062,40 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || chargeMagic.thresholds.water !== 0
     || chargeMagic.rarity !== 'ordinary') {
     throw new Error('private temporary Charge Magic no longer matches its supported facts');
+  }
+  const overpower = snapshot.cards.find(({ name }) => name === 'Overpower');
+  if (!overpower
+    || overpower.cardType !== 'magic'
+    || overpower.rulesText.trim() !== 'Give an ally +2 power this turn.'
+    || overpower.manaCost !== 1
+    || overpower.attack !== null
+    || overpower.defense !== null
+    || overpower.life !== null
+    || overpower.elements.length !== 1
+    || overpower.elements[0] !== 'earth'
+    || overpower.thresholds.air !== 0
+    || overpower.thresholds.earth !== 1
+    || overpower.thresholds.fire !== 0
+    || overpower.thresholds.water !== 0
+    || overpower.rarity !== 'ordinary') {
+    throw new Error('private temporary power Magic no longer matches its supported facts');
+  }
+  const elthamTownsfolk = snapshot.cards.find(({ name }) => name === 'Eltham Townsfolk');
+  if (!elthamTownsfolk
+    || elthamTownsfolk.cardType !== 'minion'
+    || elthamTownsfolk.rulesText.trim() !== ''
+    || elthamTownsfolk.manaCost !== 1
+    || elthamTownsfolk.attack !== 2
+    || elthamTownsfolk.defense !== 2
+    || elthamTownsfolk.life !== null
+    || elthamTownsfolk.elements.length !== 1
+    || elthamTownsfolk.elements[0] !== 'earth'
+    || elthamTownsfolk.thresholds.air !== 0
+    || elthamTownsfolk.thresholds.earth !== 1
+    || elthamTownsfolk.thresholds.fire !== 0
+    || elthamTownsfolk.thresholds.water !== 0
+    || elthamTownsfolk.rarity !== 'ordinary') {
+    throw new Error('private temporary power helper minion no longer matches its supported facts');
   }
   const lesserBloodDemon = snapshot.cards.find(({ name }) => name === 'Lesser Blood Demon');
   if (!lesserBloodDemon
@@ -1789,6 +1841,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     drown,
     drowned,
     earthProviderMinion,
+    elthamTownsfolk,
     entombed,
     format: selected.identity.payload,
     formatStableId: selected.identity.stableId,
@@ -1813,6 +1866,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     monstrousLion,
     movementMinion,
     movementTwoMinion,
+    overpower,
     polarBears,
     pirateShip,
     pudgeButcher,
@@ -1916,6 +1970,7 @@ function gameDefinition(
   waterbound = false,
   diesAtEndOfControllerTurn = false,
   damageEachAbovegroundMinion: 0 | 1 = 0,
+  grantPowerToAllyThisTurn: 0 | 2 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1947,6 +2002,7 @@ function gameDefinition(
     + Number(damageEachUnitAtLocationWithinTwoSteps !== 0)
     + Number(damageRandomUnitAtLocation !== 0)
     + Number(grantChargeToAllyThisTurn)
+    + Number(grantPowerToAllyThisTurn !== 0)
     + Number(lureEnemyMinionOneStepCloser)
     + Number(teleportAllyToTargetSite)
     + Number(returnMinionFromOwnCemetery)
@@ -1961,6 +2017,7 @@ function gameDefinition(
       ...(burrowTargetMinion ? { burrowTargetMinion: true } : {}),
       cardType: 'magic',
       ...(damageEachAbovegroundMinion !== 0 ? { damageEachAbovegroundMinion } : {}),
+      ...(grantPowerToAllyThisTurn !== 0 ? { grantPowerToAllyThisTurn } : {}),
       ...(submergeTargetMinion ? { submergeTargetMinion: true } : {}),
       ...(damageTargetUnit !== 0
         ? { damageTargetUnit }
@@ -2036,7 +2093,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-overpower' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -2138,6 +2195,12 @@ function buildManifest(
     input.firstStrikeTargetMinion,
   ] as const;
   const earthDeck = elementalDeck('earth', earthMinions, [input.ghostTownSite]);
+  const earthOverpowerDeck = elementalDeck(
+    'earth',
+    [...earthMinions, input.elthamTownsfolk],
+    [],
+    [input.overpower],
+  );
   const earthBuryDeck = elementalDeck('earth', earthMinions, [], [input.bury]);
   const earthRescueDeck = elementalDeck('earth', earthMinions, [], [input.bury, input.rescue]);
   const earthDivineHealingDeck = elementalDeck('earth', earthMinions, [], [input.divineHealing]);
@@ -2282,6 +2345,8 @@ function buildManifest(
         ? earthForwardDeck
       : scenario === 'earth-immobile'
         ? earthImmobileDeck
+      : scenario === 'earth-overpower'
+        ? earthOverpowerDeck
       : scenario === 'earth-tunnel'
         ? earthTunnelDeck
       : scenario === 'earth-burrowing'
@@ -2367,6 +2432,8 @@ function buildManifest(
         ? earthForwardDeck
       : scenario === 'earth-immobile'
         ? earthImmobileDeck
+      : scenario === 'earth-overpower'
+        ? earthOverpowerDeck
       : scenario === 'earth-tunnel'
         ? earthTunnelDeck
       : scenario === 'earth-burrowing'
@@ -2453,6 +2520,7 @@ function buildManifest(
       card.stableId === input.pirateShip.stableId,
       card.stableId === input.ignited.stableId,
       card.stableId === input.rainOfArrows.stableId ? 1 : 0,
+      card.stableId === input.overpower.stableId ? 2 : 0,
     ),
   ]));
   return {
@@ -2803,6 +2871,51 @@ function findEarthDuelOpening(
     }
   }
   throw new Error(`private Earth ${mode} scenario seed ${seed} no longer produces its supported opening`);
+}
+
+function findEarthOverpowerOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  elthamTownsfolkInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string];
+  overpowerInstanceId: string;
+  session: GameSession;
+  southSiteInstanceId: string;
+}> {
+  // ponytail: bounded opening scan avoids another private config field.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const built = buildManifest(input, input.config.earthSeed + offset, 'earth-overpower');
+    const session = createGameSession(built.manifest);
+    const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('earth');
+    });
+    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+    const elthamTownsfolkInstanceId = session.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === input.elthamTownsfolk.stableId)?.instanceId;
+    const overpowerInstanceId = availableMinionInstance(
+      session,
+      'north',
+      input.overpower.stableId,
+      1,
+    );
+    if (northSites.length >= 2
+      && southSiteInstanceId
+      && elthamTownsfolkInstanceId
+      && overpowerInstanceId) {
+      return {
+        ...built,
+        elthamTownsfolkInstanceId,
+        northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
+        overpowerInstanceId,
+        session,
+        southSiteInstanceId,
+      };
+    }
+  }
+  throw new Error('private temporary power Magic no longer produces its supported opening');
 }
 
 function findEarthBurrowingOpening(
@@ -4668,6 +4781,152 @@ function deckList(deck: GameDeckSpec, names: ReadonlyMap<string, string>): DeckL
     avatar: names.get(deck.avatar) ?? deck.avatar,
     spellbook: summarize(deck.spellbook),
   };
+}
+
+function runEarthOverpower(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthOverpower'] {
+  const opening = findEarthOverpowerOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.elthamTownsfolkInstanceId
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+
+  const before = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.elthamTownsfolkInstanceId);
+  const observedBefore = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
+    instanceId === opening.elthamTownsfolkInstanceId);
+  if (!before || !observedBefore) throw new Error('private Overpower setup lacks Eltham Townsfolk');
+  const allyActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.overpowerInstanceId);
+  const selected = allyActions.find(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.ally?.kind === 'minion'
+    && descriptor.ally.instanceId === opening.elthamTownsfolkInstanceId
+    && descriptor.ally.seat === 'north');
+  if (!selected) throw new Error('private Overpower Townsfolk ally choice is unavailable');
+  const avatarInstanceId = session.state.players.north.avatar.card.instanceId;
+  const chosenAllyIds = allyActions.flatMap(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.ally?.seat === 'north' ? [descriptor.ally.instanceId] : []).sort();
+  const exactOwnAllyChoices = allyActions.length === 2
+    && chosenAllyIds.join(',')
+      === [avatarInstanceId, opening.elthamTownsfolkInstanceId].sort().join(',')
+    && allyActions.every(({ descriptor }) => descriptor.kind === 'cast-magic'
+      && descriptor.ally !== undefined
+      && descriptor.target === undefined
+      && descriptor.targetLocation === undefined
+      && descriptor.targetSiteInstanceId === undefined
+      && descriptor.cemeteryMinionInstanceId === undefined
+      && descriptor.temptedEnemy === undefined
+      && descriptor.temptedDestination === undefined);
+  const manaBefore = session.state.players.north.mana;
+  session = accept(session, selected);
+  const manaAfterCast = session.state.players.north.mana;
+
+  const afterGrant = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.elthamTownsfolkInstanceId);
+  const observedAfterGrant = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
+    instanceId === opening.elthamTownsfolkInstanceId);
+  if (!afterGrant || !observedAfterGrant) throw new Error('private Overpower removed its ally');
+  const castReceipt = session.transcript.at(-1);
+  const castEvents = castReceipt?.events ?? [];
+  const castPayload = castEvents[0] && isJsonRecord(castEvents[0].payload)
+    ? castEvents[0].payload
+    : undefined;
+  const grantedPayload = castEvents[1] && isJsonRecord(castEvents[1].payload)
+    ? castEvents[1].payload
+    : undefined;
+  const resolvedPayload = castEvents[2] && isJsonRecord(castEvents[2].payload)
+    ? castEvents[2].payload
+    : undefined;
+  const currentPowerIncreasedByTwo = observedAfterGrant.attack === observedBefore.attack + 2
+    && observedAfterGrant.defense === observedBefore.defense + 2;
+  const unitStatePreservedOnGrant = afterGrant.temporaryPowerSources?.length === 1
+    && afterGrant.temporaryPowerSources[0] === opening.overpowerInstanceId
+    && afterGrant.cardId === before.cardId
+    && afterGrant.controller === before.controller
+    && afterGrant.damage === before.damage
+    && afterGrant.location === before.location
+    && afterGrant.owner === before.owner
+    && afterGrant.region === before.region
+    && afterGrant.stealthed === before.stealthed
+    && afterGrant.summoningSickness === before.summoningSickness
+    && afterGrant.tapped === before.tapped
+    && afterGrant.warded === before.warded;
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  const afterExpiry = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.elthamTownsfolkInstanceId);
+  const observedAfterExpiry = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
+    instanceId === opening.elthamTownsfolkInstanceId);
+  const expiryReceipt = session.transcript.at(-1);
+  const expiryEvents = expiryReceipt?.events ?? [];
+  const expiryIndex = expiryEvents.findIndex(({ payload, type }) => type === 'power-expired'
+    && isJsonRecord(payload)
+    && payload.amount === 2
+    && payload.instanceId === opening.elthamTownsfolkInstanceId
+    && payload.seat === 'north'
+    && payload.sourceInstanceId === opening.overpowerInstanceId);
+  const turnEndedIndex = expiryEvents.findIndex(({ payload, type }) => type === 'turn-ended'
+    && isJsonRecord(payload)
+    && payload.seat === 'north');
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified: castEvents.map(({ type }) => type).join(',')
+      === 'magic-cast,power-granted,magic-resolved'
+      && castPayload?.allyInstanceId === opening.elthamTownsfolkInstanceId
+      && castPayload.allySeat === 'north'
+      && castPayload.instanceId === opening.overpowerInstanceId
+      && castPayload.manaPaid === 1
+      && castPayload.seat === 'north'
+      && grantedPayload?.amount === 2
+      && grantedPayload.instanceId === opening.elthamTownsfolkInstanceId
+      && grantedPayload.seat === 'north'
+      && grantedPayload.sourceInstanceId === opening.overpowerInstanceId
+      && resolvedPayload?.instanceId === opening.overpowerInstanceId
+      && expiryIndex >= 0
+      && expiryIndex < turnEndedIndex,
+    currentPowerIncreasedByTwo,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    elthamTownsfolk: input.elthamTownsfolk.name,
+    exactOwnAllyChoices,
+    expiredBeforeTurnEnded: expiryIndex >= 0 && expiryIndex < turnEndedIndex,
+    manaPaid: manaBefore - manaAfterCast,
+    noRandomDraws: castReceipt?.randomDraws.length === 0
+      && expiryReceipt?.randomDraws.length === 0,
+    overpower: input.overpower.name,
+    printedPowerRestored: afterExpiry !== undefined
+      && observedAfterExpiry !== undefined
+      && afterExpiry.temporaryPowerSources === undefined
+      && observedAfterExpiry.attack === input.elthamTownsfolk.attack
+      && observedAfterExpiry.defense === input.elthamTownsfolk.defense
+      && afterExpiry.damage === 0,
+    replayVerified: verifyGameReplay(session),
+    spellEnteredCemetery: session.state.players.north.hand.spellbook
+      .every(({ instanceId }) => instanceId !== opening.overpowerInstanceId)
+      && session.state.players.north.cemetery
+        .some(({ instanceId }) => instanceId === opening.overpowerInstanceId),
+    unitStatePreservedOnGrant,
+  });
 }
 
 function runEarthBurrowing(
@@ -8909,6 +9168,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airVoidwalk = runAirVoidwalk(input);
   const airZap = runAirZap(input);
   const earthBurrowing = runEarthBurrowing(input);
+  const earthOverpower = runEarthOverpower(input);
   const earthBury = runEarthBury(input);
   const earthRescue = runEarthRescue(input);
   const earthDivineHealing = runEarthDivineHealing(input);
@@ -9076,6 +9336,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
       south: deckList(opening.manifest.decks.south, opening.names),
     },
     earthBurrowing,
+    earthOverpower,
     earthBury,
     earthRescue,
     earthDivineHealing,
