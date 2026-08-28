@@ -165,6 +165,22 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthForwardMovement.deck.spellbook
     .find(({ name }) => name === 'Dalcean Phalanx')?.copies, 3);
   assert.equal(result.earthForwardMovement.replayVerified, true);
+  assert.equal(result.earthImmobile.pudgeButcher, 'Pudge Butcher');
+  assert.equal(result.earthImmobile.comparatorMinion, 'Bosk Troll');
+  assert.equal(result.earthImmobile.acceptedActionCount, 30);
+  assert.equal(result.earthImmobile.nearbySitePresent, true);
+  assert.equal(result.earthImmobile.positiveStepMoveUnavailable, true);
+  assert.equal(result.earthImmobile.sameLocationAttackAvailable, true);
+  assert.equal(result.earthImmobile.localDefendAvailable, true);
+  assert.equal(result.earthImmobile.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthImmobile.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthImmobile.deck.spellbook
+    .find(({ name }) => name === 'Pudge Butcher')?.copies, 3);
+  assert.equal(result.earthImmobile.deck.spellbook
+    .find(({ name }) => name === 'Bosk Troll')?.copies, 4);
+  assert.equal(result.earthImmobile.replayVerified, true);
   assert.equal(result.earthSecretTunnel.secretTunnel, 'Secret Tunnel');
   assert.equal(result.earthSecretTunnel.caveTrolls, 'Cave Trolls');
   assert.equal(result.earthSecretTunnel.acceptedActionCount, 21);

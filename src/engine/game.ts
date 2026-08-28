@@ -61,6 +61,7 @@ export type GameCardDefinition =
     genesisDrawSpell?: boolean;
     genesisDrawSite?: boolean;
     gainsStealthAtEndOfTurn?: boolean;
+    immobile?: boolean;
     lethal?: boolean;
     manaCost: number;
     movementBonus?: 1 | 2;
@@ -554,6 +555,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.gainsStealthAtEndOfTurn !== undefined && typeof card.gainsStealthAtEndOfTurn !== 'boolean') {
     throw new RangeError(`${path}.gainsStealthAtEndOfTurn must be boolean`);
   }
+  if (card.immobile !== undefined && typeof card.immobile !== 'boolean') {
+    throw new RangeError(`${path}.immobile must be boolean`);
+  }
   if (card.movementBonus !== undefined
     && (!Number.isSafeInteger(card.movementBonus)
       || card.movementBonus < 1
@@ -718,6 +722,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.genesisDrawSpell === true ? { genesisDrawSpell: true } : {}),
             ...(card.genesisDrawSite === true ? { genesisDrawSite: true } : {}),
             ...(card.gainsStealthAtEndOfTurn === true ? { gainsStealthAtEndOfTurn: true } : {}),
+            ...(card.immobile === true ? { immobile: true } : {}),
             ...(card.lethal === true ? { lethal: true } : {}),
             manaCost: card.manaCost,
             ...(card.movementBonus ? { movementBonus: card.movementBonus } : {}),
@@ -1059,6 +1064,7 @@ function unitStatus(
   canRespondToAttack: boolean;
   charge: boolean;
   connectsTopBottom: boolean;
+  immobile: boolean;
   lethal: boolean;
   location: RealmCell;
   movementSteps: number;
@@ -1087,6 +1093,7 @@ function unitStatus(
       canRespondToAttack: true,
       charge: false,
       connectsTopBottom: false,
+      immobile: false,
       lethal: false,
       location: avatar.location,
       movementSteps: 1,
@@ -1115,6 +1122,7 @@ function unitStatus(
     canRespondToAttack: definition.cannotDefendOrIntercept !== true,
     charge: definition.charge === true,
     connectsTopBottom: definition.connectsTopBottom === true,
+    immobile: definition.immobile === true,
     lethal: definition.lethal === true,
     location: unit.location,
     movementSteps: 1 + (definition.movementBonus ?? 0),
@@ -1181,8 +1189,10 @@ function movementPaths(
   submerge = false,
   voidwalk = false,
   connectsTopBottom = false,
+  immobile = false,
 ): readonly (readonly GameLocation[])[] {
   if (!locationExists(state, start)) return [];
+  if (immobile) return [[start]];
   const paths: GameLocation[][] = [[start]];
   let frontier: GameLocation[][] = [[start]];
   for (let step = 0; step < maximumSteps; step += 1) {
@@ -1301,6 +1311,7 @@ function defendPaths(
     unit.submerge,
     unit.voidwalk,
     unit.connectsTopBottom,
+    unit.immobile,
   ).filter((path) => sameLocation(path.at(-1)!, destination));
 }
 
@@ -1321,6 +1332,7 @@ function movementDescriptors(state: GameState, seat: GameSeat): readonly GameAct
       unit.submerge,
       unit.voidwalk,
       unit.connectsTopBottom,
+      unit.immobile,
     )
       .map((path) => ({
         from: { cell: unit.location, region: unit.region },

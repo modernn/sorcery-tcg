@@ -43,6 +43,7 @@ type SpellFacts = Readonly<{
   gainsStealthAtEndOfTurn?: boolean;
   genesisDrawSpell?: boolean;
   genesisDrawSite?: boolean;
+  immobile?: boolean;
   lethal?: boolean;
   manaCost: number;
   movementBonus?: 1 | 2;
@@ -125,6 +126,7 @@ function cardsFor(
         gainsStealthAtEndOfTurn: facts.gainsStealthAtEndOfTurn ?? false,
         genesisDrawSpell: facts.genesisDrawSpell ?? false,
         genesisDrawSite: facts.genesisDrawSite ?? false,
+        immobile: facts.immobile ?? false,
         lethal: facts.lethal ?? false,
         manaCost: facts.manaCost,
         ...(facts.movementBonus ? { movementBonus: facts.movementBonus } : {}),
@@ -400,6 +402,13 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as GameCardDefinition,
     },
   }), /simultaneous Genesis/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: { ...cards[firstSpell]!, immobile: 'yes' } as unknown as GameCardDefinition,
+    },
+  }), /immobile/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -1495,6 +1504,78 @@ test('RULE-04 a prohibited minion cannot move to Defend but can still Intercept'
     descriptor.kind === 'decline-attack'));
   assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
     descriptor.kind === 'intercept' && descriptor.unitInstanceId === intercept.targetInstanceId), true);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 Immobile units attack and Defend in place but cannot move themselves', () => {
+  const vanilla = {
+    airborne: true,
+    attack: 2,
+    defense: 5,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  } as const;
+  const immobile = {
+    ...vanilla,
+    connectsTopBottom: true,
+    immobile: true,
+    movementBonus: 2 as const,
+  };
+
+  const movingDefend = northAttacksAtC2(145, vanilla, undefined, false, immobile);
+  let session = accept(movingDefend.session, action(movingDefend.session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === movingDefend.targetInstanceId));
+  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'defend'
+      && descriptor.unitInstanceId === movingDefend.defenderInstanceId), false);
+  assert.equal(verifyGameReplay(session), true);
+
+  const stationary = northAttacksAtC2(146, vanilla, undefined, false, immobile);
+  const site = stationary.session.state.realm.sites.C2;
+  assert.ok(site);
+  session = accept(stationary.session, action(stationary.session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'site'
+      && descriptor.target.instanceId === site.instanceId));
+  const stationaryDefend = action(session, ({ descriptor }) => descriptor.kind === 'defend'
+    && descriptor.unitInstanceId === stationary.targetInstanceId
+    && descriptor.path.length === 1);
+  session = accept(session, stationaryDefend);
+  assert.equal(verifyGameReplay(session), true);
+
+  const local = northAttacksAtC2(147, vanilla, undefined, false, immobile);
+  session = accept(local.session, action(local.session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'close-intercept'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  const moves = legalGameActions(session.state, 'south').filter(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === local.targetInstanceId);
+  assert.equal(moves.length, 1);
+  const zero = moves[0];
+  assert.ok(zero);
+  assert.equal(zero.descriptor.kind === 'move-and-attack'
+    && zero.descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(','), 'C2/surface');
+  assert.equal(zero.descriptor.kind, 'move-and-attack');
+  const forged: GameLegalAction = {
+    ...zero,
+    descriptor: {
+      ...zero.descriptor,
+      path: [...zero.descriptor.path, { cell: 'C3', region: 'surface' }],
+      to: { cell: 'C3', region: 'surface' },
+    },
+  };
+  const ignored = stepGame(session, forged);
+  assert.equal(ignored.accepted, true);
+  session = ignored.session;
+  assert.equal(session.state.realm.units
+    .find(({ instanceId }) => instanceId === local.targetInstanceId)?.location, 'C2');
+  assert.doesNotMatch(canonicalJson(ignored.receipt.events), /"C3"/);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'declare-attack'
+    && descriptor.target.kind === 'minion'
+    && descriptor.target.instanceId === local.attackerInstanceId));
   assert.equal(verifyGameReplay(session), true);
 });
 
