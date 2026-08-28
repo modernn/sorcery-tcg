@@ -70,6 +70,7 @@ type ScenarioConfig = Readonly<{
   roamingMinionStableId: string;
   roamingSeed: number;
   seed: number;
+  stealthSeed: number;
   waterSeed: number;
   wardMinionStableId: string;
 }>;
@@ -196,6 +197,19 @@ export type PrivateGameCheck = Readonly<{
   replayVerified: boolean;
   revisionId: string;
   seed: number;
+  stealth: Readonly<{
+    acceptedActionCount: number;
+    attackSkippedDefend: boolean;
+    deck: DeckList;
+    enteredStealthed: boolean;
+    groundCouldNotAttack: boolean;
+    groundMinion: string;
+    groundMinionDied: boolean;
+    replayVerified: boolean;
+    seed: number;
+    stealthLostAfterAttack: boolean;
+    stealthMinion: string;
+  }>;
   waterHealing: Readonly<{
     acceptedActionCount: number;
     deck: DeckList;
@@ -266,11 +280,14 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     || !Number.isSafeInteger(value.seed)
     || typeof value.seed !== 'number'
     || value.seed < 0
+    || !Number.isSafeInteger(value.stealthSeed)
+    || typeof value.stealthSeed !== 'number'
+    || value.stealthSeed < 0
     || !Number.isSafeInteger(value.waterSeed)
     || typeof value.waterSeed !== 'number'
     || value.waterSeed < 0
     || typeof value.wardMinionStableId !== 'string'
-    || Object.keys(value).sort().join(',') !== 'airSeed,airborneSeed,avatar,cannotDefendMinionStableId,chargeMinionStableId,deathriteMinionStableId,earthFirstStrikeSeed,earthProviderMinionStableId,earthRangedSeed,earthSeed,earthWardSeed,fireSeed,firstStrikeMinionStableId,firstStrikeTargetMinionStableId,genesisMinionStableId,ghostTownSiteStableId,healingMinionStableId,lethalMinionStableId,lumberingMinionStableId,manaMinionStableId,monstrousLionStableId,movementMinionStableId,providerMinionStableId,rangedMinionStableId,revisionId,roamingMinionStableId,roamingSeed,seed,wardMinionStableId,waterSeed'
+    || Object.keys(value).sort().join(',') !== 'airSeed,airborneSeed,avatar,cannotDefendMinionStableId,chargeMinionStableId,deathriteMinionStableId,earthFirstStrikeSeed,earthProviderMinionStableId,earthRangedSeed,earthSeed,earthWardSeed,fireSeed,firstStrikeMinionStableId,firstStrikeTargetMinionStableId,genesisMinionStableId,ghostTownSiteStableId,healingMinionStableId,lethalMinionStableId,lumberingMinionStableId,manaMinionStableId,monstrousLionStableId,movementMinionStableId,providerMinionStableId,rangedMinionStableId,revisionId,roamingMinionStableId,roamingSeed,seed,stealthSeed,wardMinionStableId,waterSeed'
     || Object.keys(avatar).sort().join(',') !== 'drawSpell,stableId') {
     throw new Error('private game scenario has an unsupported shape');
   }
@@ -303,6 +320,7 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     roamingMinionStableId: value.roamingMinionStableId,
     roamingSeed: value.roamingSeed,
     seed: value.seed,
+    stealthSeed: value.stealthSeed,
     waterSeed: value.waterSeed,
     wardMinionStableId: value.wardMinionStableId,
   };
@@ -333,6 +351,8 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   providerMinion: NormalizedCard;
   rangedMinion: NormalizedCard;
   roamingMinion: NormalizedCard;
+  stealthMinion: NormalizedCard;
+  stealthTargetMinion: NormalizedCard;
   wardMinion: NormalizedCard;
 }>> {
   const config = scenarioConfig(parseJsonWithDuplicateKeyCheck(await readFile(path, 'utf8')));
@@ -378,6 +398,38 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || airborneTargetMinion.thresholds.water !== 0
     || airborneTargetMinion.rarity !== 'ordinary') {
     throw new Error('private Airborne target minion no longer matches its supported facts');
+  }
+  const stealthMinion = snapshot.cards.find(({ name }) => name === 'Band of Thieves');
+  if (!stealthMinion
+    || stealthMinion.cardType !== 'minion'
+    || ruleTextDigest(stealthMinion.rulesText) !== 'sha256:72a55afdb2b2d9624948393c357d58ee59673b285dd30c70dad3056b49aa4288'
+    || stealthMinion.manaCost !== 3
+    || stealthMinion.attack !== 3
+    || stealthMinion.defense !== 3
+    || stealthMinion.elements.length !== 1
+    || stealthMinion.elements[0] !== 'air'
+    || stealthMinion.thresholds.air !== 2
+    || stealthMinion.thresholds.earth !== 0
+    || stealthMinion.thresholds.fire !== 0
+    || stealthMinion.thresholds.water !== 0
+    || stealthMinion.rarity !== 'ordinary') {
+    throw new Error('private Stealth minion no longer matches its supported facts');
+  }
+  const stealthTargetMinion = snapshot.cards.find(({ name }) => name === 'Snow Leopard');
+  if (!stealthTargetMinion
+    || stealthTargetMinion.cardType !== 'minion'
+    || stealthTargetMinion.rulesText.trim() !== ''
+    || stealthTargetMinion.manaCost !== 1
+    || stealthTargetMinion.attack !== 2
+    || stealthTargetMinion.defense !== 2
+    || stealthTargetMinion.elements.length !== 1
+    || stealthTargetMinion.elements[0] !== 'air'
+    || stealthTargetMinion.thresholds.air !== 1
+    || stealthTargetMinion.thresholds.earth !== 0
+    || stealthTargetMinion.thresholds.fire !== 0
+    || stealthTargetMinion.thresholds.water !== 0
+    || stealthTargetMinion.rarity !== 'ordinary') {
+    throw new Error('private Stealth target minion no longer matches its supported facts');
   }
   const cannotDefendMinion = snapshot.cards
     .find(({ stableId }) => stableId === config.cannotDefendMinionStableId);
@@ -622,6 +674,8 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     providerMinion,
     rangedMinion,
     roamingMinion,
+    stealthMinion,
+    stealthTargetMinion,
     wardMinion,
   };
 }
@@ -669,6 +723,7 @@ function gameDefinition(
   strikesFirstWhileAttacking = false,
   ward = false,
   airborne = false,
+  stealth = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -710,6 +765,7 @@ function gameDefinition(
       movementPlusOne,
       ...(provides ? { provides } : {}),
       ranged,
+      stealth,
       strikesFirstWhileAttacking,
       summonToAnySite,
       ...(tapForMana ? { tapForMana } : {}),
@@ -723,7 +779,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'airborne' | 'combat' | 'earth' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'water' = 'combat',
+  scenario: 'air' | 'airborne' | 'combat' | 'earth' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'stealth' | 'water' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -827,9 +883,11 @@ function buildManifest(
     input.roamingMinion,
     input.airborneMinion,
     input.airborneTargetMinion,
+    input.stealthMinion,
+    input.stealthTargetMinion,
   ]);
   const decks = {
-    north: scenario === 'airborne'
+    north: scenario === 'airborne' || scenario === 'stealth'
       ? airborneDeck
       : scenario === 'earth' || scenario === 'earth-first-strike' || scenario === 'earth-ward'
       ? earthDeck
@@ -840,7 +898,7 @@ function buildManifest(
         : scenario === 'water'
           ? elementalDeck('water', [input.healingMinion])
           : deck(false, true),
-    south: scenario === 'airborne'
+    south: scenario === 'airborne' || scenario === 'stealth'
       ? airborneDeck
       : scenario === 'earth-first-strike' || scenario === 'earth-ward' ? earthDeck : deck(true, false),
   };
@@ -879,6 +937,7 @@ function buildManifest(
       card.stableId === input.firstStrikeMinion.stableId,
       card.stableId === input.wardMinion.stableId,
       card.stableId === input.airborneMinion.stableId,
+      card.stableId === input.stealthMinion.stableId,
     ),
   ]));
   return {
@@ -1337,6 +1396,58 @@ function findAirborneOpening(
       };
   }
   throw new Error(`private Airborne scenario seed ${seed} no longer produces its supported opening`);
+}
+
+function findStealthOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  groundInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string];
+  seed: number;
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string, string];
+  stealthInstanceId: string;
+}> {
+  const seed = input.config.stealthSeed;
+  const built = buildManifest(input, seed, 'stealth');
+  const session = createGameSession(built.manifest);
+  const northSites = session.state.players.north.hand.atlas;
+  const southSites = session.state.players.south.hand.atlas;
+  const airAffinity = (sites: typeof northSites): number => sites.reduce((total, { cardId }) => {
+    const definition = session.state.cards[cardId];
+    return total + (definition?.cardType === 'site' && definition.elements.includes('air') ? 1 : 0);
+  }, 0);
+  const stealthInstanceId = availableMinionInstance(
+    session,
+    'north',
+    input.stealthMinion.stableId,
+    2,
+  );
+  const groundInstanceId = availableMinionInstance(
+    session,
+    'south',
+    input.stealthTargetMinion.stableId,
+    2,
+  );
+  if (northSites.length === 3
+    && southSites.length === 3
+    && airAffinity(northSites) >= 2
+    && airAffinity(southSites.slice(0, 2)) >= 1
+    && stealthInstanceId
+    && groundInstanceId) {
+    return {
+      ...built,
+      groundInstanceId,
+      northSiteInstanceIds: northSites.map(({ instanceId }) => instanceId) as [string, string, string],
+      seed,
+      session,
+      southSiteInstanceIds: southSites.map(({ instanceId }) => instanceId) as [string, string, string],
+      stealthInstanceId,
+    };
+  }
+  throw new Error(`private Stealth scenario seed ${seed} no longer produces its supported opening`);
 }
 
 function findAirSummoningOpening(
@@ -2062,6 +2173,116 @@ function runAirborne(
   });
 }
 
+function runStealth(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['stealth'] {
+  const opening = findStealthOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+      && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+      && descriptor.cell === 'C2');
+  take(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.groundInstanceId
+      && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+      && descriptor.cell === 'B3');
+  take(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.stealthInstanceId
+      && descriptor.cell === 'C3');
+  const enteredStealthed = session.state.realm.units
+    .some(({ instanceId, stealthed }) => instanceId === opening.stealthInstanceId && stealthed);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.groundInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3');
+  const groundTargets = legalGameActions(session.state, 'south');
+  const protectedUnit = session.state.realm.units
+    .find(({ instanceId }) => instanceId === opening.stealthInstanceId);
+  const groundCouldNotAttack = protectedUnit?.location === 'C3'
+    && protectedUnit.stealthed
+    && groundTargets.some(({ descriptor }) =>
+      descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site')
+    && groundTargets.every(({ descriptor }) =>
+      descriptor.kind !== 'declare-attack'
+        || descriptor.target.kind !== 'minion'
+        || descriptor.target.instanceId !== opening.stealthInstanceId);
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'close-intercept');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.stealthInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C3');
+  take(({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === opening.groundInstanceId);
+  const finalEvents = session.transcript.at(-1)?.events ?? [];
+  const attackSkippedDefend = session.state.phase === 'main'
+    && session.state.decisionSeat === 'north'
+    && finalEvents.some(({ type }) => type === 'attack-declared')
+    && finalEvents.every(({ type }) => type !== 'defend-window-closed');
+  const strikeIndex = finalEvents.findIndex(({ type }) => type === 'strike-damage-allocated');
+  const stealthLostIndex = finalEvents.findIndex(({ type }) => type === 'stealth-lost');
+  const deathIndex = finalEvents.findIndex(({ type }) => type === 'minion-died');
+  const stealthLostAfterAttack = session.state.realm.units.some(({ instanceId, stealthed }) =>
+    instanceId === opening.stealthInstanceId && !stealthed)
+    && finalEvents.some(({ payload, type }) =>
+      type === 'stealth-lost'
+        && isJsonRecord(payload)
+        && payload.instanceId === opening.stealthInstanceId)
+    && strikeIndex >= 0
+    && strikeIndex < stealthLostIndex
+    && stealthLostIndex < deathIndex;
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    attackSkippedDefend,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    enteredStealthed,
+    groundCouldNotAttack,
+    groundMinion:
+      opening.names.get(input.stealthTargetMinion.stableId) ?? input.stealthTargetMinion.stableId,
+    groundMinionDied: session.state.players.south.cemetery
+      .some(({ instanceId }) => instanceId === opening.groundInstanceId),
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    stealthLostAfterAttack,
+    stealthMinion: opening.names.get(input.stealthMinion.stableId) ?? input.stealthMinion.stableId,
+  });
+}
+
 function runAirSummoning(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['airSummoning'] {
@@ -2364,6 +2585,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthRanged = runEarthRanged(input);
   const earthWard = runEarthWard(input);
   const fireResponse = runFireResponse(input);
+  const stealth = runStealth(input);
   const waterHealing = runWaterHealing(input);
   const opening = findOpening(input);
   let session = keep(opening.session);
@@ -2520,6 +2742,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     replayVerified: verifyGameReplay(session),
     revisionId: input.config.revisionId,
     seed: opening.seed,
+    stealth,
     waterHealing,
   });
 }
