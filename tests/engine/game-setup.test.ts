@@ -29,6 +29,7 @@ function deck(prefix: string, atlasCount = 30, spellbookCount = 50): GameDeckSpe
 }
 
 type SpellFacts = Readonly<{
+  airborne?: boolean;
   attack?: number;
   cannotAttackSites?: boolean;
   cannotDefend?: boolean;
@@ -90,6 +91,7 @@ function cardsFor(
     });
     playerDeck.spellbook.forEach((cardId) => {
       cards[cardId] = {
+        airborne: facts.airborne ?? false,
         attack: facts.attack ?? 1,
         cardType: 'minion',
         cannotAttackSites: facts.cannotAttackSites ?? false,
@@ -1072,6 +1074,83 @@ test('RULE-04 a fully prohibited minion cannot use Defend or Intercept', () => {
   assert.equal(session.state.phase, 'main');
   assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
     descriptor.kind === 'intercept'), false);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 Airborne moves diagonally and restricts attacks and Intercept', () => {
+  const ground = {
+    attack: 3,
+    defense: 3,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  } as const;
+  const airborne = { ...ground, airborne: true };
+  const ranged = { ...ground, ranged: true };
+  const canTarget = (
+    session: GameSession,
+    targetInstanceId: string,
+  ): boolean => legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === targetInstanceId);
+  const addDiagonalSite = (initial: GameSession): GameSession => {
+    let session = initial;
+    if (session.state.phase === 'intercept') {
+      session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'close-intercept'));
+    }
+    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    return accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'B3'));
+  };
+
+  const rangedAttacksAirborne = northAttacksAtC2(118, ranged, undefined, false, airborne);
+  assert.equal(canTarget(rangedAttacksAirborne.session, rangedAttacksAirborne.targetInstanceId), false);
+
+  const airborneAttacksAirborne = northAttacksAtC2(119, airborne, undefined, false, airborne);
+  assert.equal(canTarget(airborneAttacksAirborne.session, airborneAttacksAirborne.targetInstanceId), true);
+  let session = accept(airborneAttacksAirborne.session, action(airborneAttacksAirborne.session, ({ descriptor }) =>
+    descriptor.kind === 'decline-attack'));
+  assert.equal(session.state.phase, 'intercept');
+  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'intercept'
+      && descriptor.unitInstanceId === airborneAttacksAirborne.targetInstanceId), true);
+  assert.equal(verifyGameReplay(session), true);
+
+  const groundIntercept = northAttacksAtC2(120, airborne, undefined, false, ground);
+  session = accept(groundIntercept.session, action(groundIntercept.session, ({ descriptor }) =>
+    descriptor.kind === 'decline-attack'));
+  assert.equal(session.state.phase, 'main');
+  session = addDiagonalSite(session);
+  const diagonal = action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === groundIntercept.attackerInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,B3');
+  session = accept(session, diagonal);
+  assert.equal(session.state.realm.units
+    .find(({ instanceId }) => instanceId === groundIntercept.attackerInstanceId)?.location, 'B3');
+  assert.equal(verifyGameReplay(session), true);
+
+  const rangedIntercept = northAttacksAtC2(121, airborne, undefined, false, ranged);
+  session = accept(rangedIntercept.session, action(rangedIntercept.session, ({ descriptor }) =>
+    descriptor.kind === 'decline-attack'));
+  assert.equal(session.state.phase, 'intercept');
+  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'intercept' && descriptor.unitInstanceId === rangedIntercept.targetInstanceId), true);
+  assert.equal(verifyGameReplay(session), true);
+
+  const groundMovement = northAttacksAtC2(122, ground, undefined, false, ground);
+  session = accept(groundMovement.session, action(groundMovement.session, ({ descriptor }) =>
+    descriptor.kind === 'decline-attack'));
+  session = addDiagonalSite(session);
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === groundMovement.attackerInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,B3'), false);
   assert.equal(verifyGameReplay(session), true);
 });
 
