@@ -80,6 +80,7 @@ export type GameCardDefinition =
     connectsTopBottom?: boolean;
     deathriteHeal?: number;
     deathriteDrawSite?: boolean;
+    deathriteLoseLifePerNearbySiteControlled?: 1;
     defense: number;
     discardRandomCardInsteadOfMana?: true;
     diesAtEndOfControllerTurn?: true;
@@ -897,6 +898,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.deathriteHeal > MAX_COMBAT_STAT)) {
     throw new RangeError(`${path}.deathriteHeal must be a safe integer between 1 and ${MAX_COMBAT_STAT}`);
   }
+  if (card.deathriteLoseLifePerNearbySiteControlled !== undefined
+    && card.deathriteLoseLifePerNearbySiteControlled !== 1) {
+    throw new RangeError(`${path}.deathriteLoseLifePerNearbySiteControlled must be 1`);
+  }
   if (card.discardRandomCardInsteadOfMana !== undefined
     && card.discardRandomCardInsteadOfMana !== true) {
     throw new RangeError(`${path}.discardRandomCardInsteadOfMana must be true when defined`);
@@ -1161,6 +1166,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.connectsTopBottom === true ? { connectsTopBottom: true } : {}),
             ...(card.deathriteDrawSite === true ? { deathriteDrawSite: true } : {}),
             ...(card.deathriteHeal ? { deathriteHeal: card.deathriteHeal } : {}),
+            ...(card.deathriteLoseLifePerNearbySiteControlled === 1
+              ? { deathriteLoseLifePerNearbySiteControlled: 1 as const }
+              : {}),
             defense: card.defense,
             ...(card.diesAtEndOfControllerTurn === true
               ? { diesAtEndOfControllerTurn: true as const }
@@ -2434,6 +2442,42 @@ function resolveMinionDeaths(
           },
           type: 'avatar-healed',
         });
+      }
+    }
+    if (definition.deathriteLoseLifePerNearbySiteControlled === 1) {
+      const nearbyCells = new Set([
+        dead.location,
+        ...borderingCells(dead.location),
+        ...diagonalCells(dead.location),
+      ]);
+      for (const seat of ['north', 'south'] as const) {
+        const amount = Object.entries(state.realm.sites).filter(([cell, site]) =>
+          site.controller === seat
+            && nearbyCells.has(cell as RealmCell)
+            && locationExists(state, { cell: cell as RealmCell, region: dead.region })).length;
+        const [lifePlayer, lost, reachedDeathsDoor] = loseAvatarLife(
+          players[seat],
+          amount,
+          state.turnNumber,
+        );
+        players[seat] = lifePlayer;
+        if (lost > 0) {
+          deathOutcomes.push({
+            payload: {
+              amount: lost,
+              life: lifePlayer.avatar.life,
+              seat,
+              sourceInstanceId: dead.instanceId,
+            },
+            type: 'avatar-life-lost',
+          });
+        }
+        if (reachedDeathsDoor) {
+          deathOutcomes.push({
+            payload: { seat, sourceInstanceId: dead.instanceId, turnNumber: state.turnNumber },
+            type: 'avatar-reached-deaths-door',
+          });
+        }
       }
     }
     if (!definition.deathriteDrawSite) continue;

@@ -86,6 +86,22 @@ type DeckList = Readonly<{
 
 export type PrivateGameCheck = Readonly<{
   acceptedActionCount: number;
+  airBladderblimp: Readonly<{
+    acceptedActionCount: number;
+    airborneAtC3: boolean;
+    bladderblimp: string;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    exactNearbySiteCounts: boolean;
+    gameRemainedActive: boolean;
+    lifeLossOnly: boolean;
+    lightningBolt: string;
+    magicManaPaid: number;
+    minionAndMagicEnteredCemetery: boolean;
+    randomSelectionRecorded: boolean;
+    replayVerified: boolean;
+    summonManaPaid: number;
+  }>;
   airArcLightning: Readonly<{
     acceptedActionCount: number;
     arcLightning: string;
@@ -906,6 +922,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   aramosMercenaries: NormalizedCard;
   arcLightning: NormalizedCard;
   authorityHash: Hash;
+  bladderblimp: NormalizedCard;
   bury: NormalizedCard;
   burrowingMinion: NormalizedCard;
   cards: readonly NormalizedCard[];
@@ -1118,6 +1135,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || lightningBolt.thresholds.water !== 0
     || lightningBolt.rarity !== 'ordinary') {
     throw new Error('private random location-damage Magic no longer matches its supported facts');
+  }
+  const bladderblimp = snapshot.cards.find(({ name }) => name === 'Bladderblimp');
+  if (!bladderblimp
+    || bladderblimp.cardType !== 'minion'
+    || ruleTextDigest(bladderblimp.rulesText) !== 'sha256:ae91504c0f6b76d449aa6c1f45afb00c1ac5bee4b47bf3b669c957ed582ddf60'
+    || bladderblimp.manaCost !== 5
+    || bladderblimp.attack !== 3
+    || bladderblimp.defense !== 3
+    || bladderblimp.life !== null
+    || bladderblimp.elements.length !== 1
+    || bladderblimp.elements[0] !== 'air'
+    || bladderblimp.thresholds.air !== 1
+    || bladderblimp.thresholds.earth !== 0
+    || bladderblimp.thresholds.fire !== 0
+    || bladderblimp.thresholds.water !== 0
+    || bladderblimp.rarity !== 'exceptional') {
+    throw new Error('private nearby-site life-loss Deathrite minion no longer matches its supported facts');
   }
   const rainOfArrows = snapshot.cards.find(({ name }) => name === 'Rain of Arrows');
   if (!rainOfArrows
@@ -1998,6 +2032,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     aramosMercenaries,
     arcLightning,
     authorityHash: artifact.contentHash,
+    bladderblimp,
     bury,
     burrowingMinion,
     cards: snapshot.cards,
@@ -2150,6 +2185,7 @@ function gameDefinition(
   untapTargetMinionAfterDamage = false,
   discardRandomCardInsteadOfMana = false,
   fightAllyWithAdjacentEnemy = false,
+  deathriteLoseLifePerNearbySiteControlled = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -2239,6 +2275,9 @@ function gameDefinition(
       connectsTopBottom,
       deathriteDrawSite,
       ...(deathriteHeal ? { deathriteHeal } : {}),
+      ...(deathriteLoseLifePerNearbySiteControlled
+        ? { deathriteLoseLifePerNearbySiteControlled: 1 as const }
+        : {}),
       defense: card.defense,
       ...(discardRandomCardInsteadOfMana ? { discardRandomCardInsteadOfMana: true } : {}),
       ...(diesAtEndOfControllerTurn ? { diesAtEndOfControllerTurn: true } : {}),
@@ -2278,7 +2317,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-immobile' | 'earth-overpower' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-immobile' | 'earth-overpower' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -2433,6 +2472,12 @@ function buildManifest(
   ] as const;
   const airborneDeck = elementalDeck('air', airMinions);
   const airArcLightningDeck = elementalDeck('air', airMinions, [], [input.arcLightning]);
+  const airBladderblimpDeck = elementalDeck(
+    'air',
+    [...airMinions, input.bladderblimp],
+    [input.ghostTownSite],
+    [input.lightningBolt],
+  );
   const airLightningBoltDeck = elementalDeck('air', airMinions, [], [input.lightningBolt]);
   const airRainOfArrowsDeck = elementalDeck('air', airMinions, [], [input.rainOfArrows]);
   const airTeleportDeck = elementalDeck('air', airMinions, [], [input.teleport]);
@@ -2554,6 +2599,8 @@ function buildManifest(
       ? airLeylineDeck
       : scenario === 'air-arc-lightning'
       ? airArcLightningDeck
+      : scenario === 'air-bladderblimp'
+      ? airBladderblimpDeck
       : scenario === 'air-lightning-bolt'
       ? airLightningBoltDeck
       : scenario === 'air-rain-of-arrows'
@@ -2637,6 +2684,8 @@ function buildManifest(
       ? airLeylineDeck
       : scenario === 'air-arc-lightning'
       ? airArcLightningDeck
+      : scenario === 'air-bladderblimp'
+      ? airBladderblimpDeck
       : scenario === 'air-lightning-bolt'
       ? airLightningBoltDeck
       : scenario === 'air-rain-of-arrows'
@@ -2735,7 +2784,8 @@ function buildManifest(
       card.stableId === input.wardMinion.stableId,
       card.stableId === input.airborneMinion.stableId
         || card.stableId === input.movementTwoMinion.stableId
-        || card.stableId === input.grainSparrow.stableId,
+        || card.stableId === input.grainSparrow.stableId
+        || card.stableId === input.bladderblimp.stableId,
       card.stableId === input.stealthMinion.stableId,
       card.stableId === input.slyFox.stableId,
       card.stableId === input.sedgeCrabs.stableId,
@@ -2784,6 +2834,7 @@ function buildManifest(
       card.stableId === input.lash.stableId,
       card.stableId === input.aramosMercenaries.stableId,
       card.stableId === input.duel.stableId,
+      card.stableId === input.bladderblimp.stableId,
     ),
   ]));
   return {
@@ -4041,6 +4092,74 @@ function findAirLightningBoltOpening(
     }
   }
   throw new Error('private random location-damage Magic scenario no longer produces its supported opening');
+}
+
+function findAirBladderblimpOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  bladderblimpInstanceId: string;
+  ghostTownSiteInstanceId: string;
+  lightningBoltInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northAirSiteInstanceIds: readonly [string, string, string];
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string];
+}> {
+  // ponytail: a bounded opening scan avoids another private seed field for one deterministic proof.
+  for (let offset = 1; offset <= 2048; offset += 1) {
+    const built = buildManifest(input, input.config.airSeed + offset, 'air-bladderblimp');
+    const session = createGameSession(built.manifest);
+    const northHandAirSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return cardId !== input.ghostTownSite.stableId
+        && definition?.cardType === 'site'
+        && definition.elements.includes('air');
+    });
+    const northDrawnAirSite = session.state.players.north.atlas[0];
+    const northDrawnAirSiteDefinition = northDrawnAirSite
+      ? session.state.cards[northDrawnAirSite.cardId]
+      : undefined;
+    const ghostTownSiteInstanceId = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.ghostTownSite.stableId)?.instanceId;
+    const southSites = session.state.players.south.hand.atlas;
+    const bladderblimpInstanceId = availableMinionInstance(
+      session,
+      'north',
+      input.bladderblimp.stableId,
+      2,
+    );
+    const lightningBoltInstanceId = availableMinionInstance(
+      session,
+      'north',
+      input.lightningBolt.stableId,
+      3,
+    );
+    if (northHandAirSites.length >= 2
+      && northDrawnAirSite
+      && northDrawnAirSite.cardId !== input.ghostTownSite.stableId
+      && northDrawnAirSiteDefinition?.cardType === 'site'
+      && northDrawnAirSiteDefinition.elements.includes('air')
+      && ghostTownSiteInstanceId
+      && southSites.length >= 2
+      && bladderblimpInstanceId
+      && lightningBoltInstanceId) {
+      return {
+        ...built,
+        bladderblimpInstanceId,
+        ghostTownSiteInstanceId,
+        lightningBoltInstanceId,
+        northAirSiteInstanceIds: [
+          northHandAirSites[0]!.instanceId,
+          northHandAirSites[1]!.instanceId,
+          northDrawnAirSite.instanceId,
+        ],
+        session,
+        southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
+      };
+    }
+  }
+  throw new Error('private Bladderblimp nearby-site Deathrite scenario lacks its supported opening');
 }
 
 function findAirRainOfArrowsOpening(
@@ -7439,6 +7558,153 @@ function runAirLightningBolt(
   });
 }
 
+function runAirBladderblimp(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airBladderblimp'] {
+  const opening = findAirBladderblimpOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northAirSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northAirSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northAirSiteInstanceIds[2]
+    && descriptor.cell === 'B4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.ghostTownSiteInstanceId
+    && descriptor.cell === 'B3');
+
+  const manaBeforeSummon = session.state.players.north.mana;
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.bladderblimpInstanceId
+    && descriptor.cell === 'C3');
+  const summonManaPaid = manaBeforeSummon - session.state.players.north.mana;
+  const blimpDefinition = session.state.cards[input.bladderblimp.stableId];
+  const blimp = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.bladderblimpInstanceId);
+  const airborneAtC3 = blimpDefinition?.cardType === 'minion'
+    && blimpDefinition.airborne === true
+    && blimpDefinition.deathriteLoseLifePerNearbySiteControlled === 1
+    && blimp?.location === 'C3'
+    && blimp.region === 'surface'
+    && blimp.owner === 'north'
+    && blimp.controller === 'north';
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const nearbyCells = new Set(['B2', 'B3', 'B4', 'C2', 'C3', 'C4', 'D2', 'D3', 'D4']);
+  const nearbySiteCounts = (['north', 'south'] as const).map((seat) =>
+    Object.entries(session.state.realm.sites).filter(([cell, site]) =>
+      nearbyCells.has(cell) && site.controller === seat).length);
+  const exactNearbySiteCounts = nearbySiteCounts[0] === 4 && nearbySiteCounts[1] === 1;
+  const lifeBefore = {
+    north: session.state.players.north.avatar.life,
+    south: session.state.players.south.avatar.life,
+  };
+  const manaBeforeMagic = session.state.players.north.mana;
+  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.lightningBoltInstanceId
+      && descriptor.targetLocation?.cell === 'C3'
+      && descriptor.targetLocation.region === 'surface');
+  if (choices.length !== 1) throw new Error('private Bladderblimp Lightning Bolt location is not unique');
+  const result = stepGame(session, choices[0]!);
+  if (!result.accepted) throw new Error('private Bladderblimp Lightning Bolt cast was rejected');
+  session = result.session;
+
+  const events = result.receipt.events;
+  const eventTypes = events.map(({ type }) => type);
+  const lifeEvents = events.filter(({ type }) => type === 'avatar-life-lost');
+  const northLifePayload = lifeEvents[0] && isJsonRecord(lifeEvents[0].payload)
+    ? lifeEvents[0].payload
+    : undefined;
+  const southLifePayload = lifeEvents[1] && isJsonRecord(lifeEvents[1].payload)
+    ? lifeEvents[1].payload
+    : undefined;
+  const deathEvent = events.find(({ type }) => type === 'minion-died');
+  const deathPayload = deathEvent && isJsonRecord(deathEvent.payload) ? deathEvent.payload : undefined;
+  const damageEvents = events.filter(({ type }) => type === 'damage-dealt');
+  const damagePayload = damageEvents[0] && isJsonRecord(damageEvents[0].payload)
+    ? damageEvents[0].payload
+    : undefined;
+  const random = result.receipt.randomDraws[0];
+  const randomDomain = random && isJsonRecord(random.domain) ? random.domain : undefined;
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    airborneAtC3,
+    bladderblimp: input.bladderblimp.name,
+    causalEventsVerified: eventTypes.join(',')
+      === 'magic-cast,magic-damage-allocated,damage-dealt,avatar-life-lost,avatar-life-lost,minion-died,magic-resolved'
+      && northLifePayload?.amount === 4
+      && northLifePayload.life === 16
+      && northLifePayload.seat === 'north'
+      && northLifePayload.sourceInstanceId === opening.bladderblimpInstanceId
+      && southLifePayload?.amount === 1
+      && southLifePayload.life === 19
+      && southLifePayload.seat === 'south'
+      && southLifePayload.sourceInstanceId === opening.bladderblimpInstanceId
+      && deathPayload?.cardId === input.bladderblimp.stableId
+      && deathPayload.instanceId === opening.bladderblimpInstanceId
+      && deathPayload.owner === 'north',
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    exactNearbySiteCounts,
+    gameRemainedActive: session.state.terminal.status === 'active'
+      && events.every(({ type }) =>
+        type !== 'avatar-reached-deaths-door' && type !== 'death-blow' && type !== 'game-ended'),
+    lifeLossOnly: session.state.players.north.avatar.life === lifeBefore.north - 4
+      && session.state.players.south.avatar.life === lifeBefore.south - 1
+      && damageEvents.length === 1
+      && damagePayload?.amount === 3
+      && damagePayload.instanceId === opening.bladderblimpInstanceId,
+    lightningBolt: input.lightningBolt.name,
+    magicManaPaid: manaBeforeMagic - session.state.players.north.mana,
+    minionAndMagicEnteredCemetery: session.state.realm.units
+      .every(({ instanceId }) => instanceId !== opening.bladderblimpInstanceId)
+      && session.state.players.north.cemetery
+        .some(({ instanceId }) => instanceId === opening.bladderblimpInstanceId)
+      && session.state.players.north.cemetery
+        .some(({ instanceId }) => instanceId === opening.lightningBoltInstanceId)
+      && session.state.players.north.hand.spellbook
+        .every(({ instanceId }) => instanceId !== opening.lightningBoltInstanceId),
+    randomSelectionRecorded: result.receipt.randomDraws.length === 1
+      && random?.purpose === 'magic_random_unit_at_location'
+      && randomDomain?.accepted === true
+      && randomDomain.exclusiveMaximum === 1
+      && randomDomain.kind === 'unit_index_candidate',
+    replayVerified: verifyGameReplay(session),
+    summonManaPaid,
+  });
+}
+
 function runAirRainOfArrows(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['airRainOfArrows'] {
@@ -10477,6 +10743,7 @@ function runWaterHealing(
 
 export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<PrivateGameCheck> {
   const input = await readPrivateInputs(path);
+  const airBladderblimp = runAirBladderblimp(input);
   const airGenesisSpell = runAirGenesisSpell(input);
   const airSpellcasterFreeze = runAirSpellcasterFreeze(input);
   const airArcLightning = runAirArcLightning(input);
@@ -10631,6 +10898,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const southDefinition = opening.session.state.cards[southCardId];
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
+    airBladderblimp,
     airGenesisSpell,
     airSpellcasterFreeze,
     airArcLightning,

@@ -39,6 +39,7 @@ type SpellFacts = Readonly<{
   connectsTopBottom?: boolean;
   deathriteDrawSite?: boolean;
   deathriteHeal?: number;
+  deathriteLoseLifePerNearbySiteControlled?: 1;
   defense?: number;
   discardRandomCardInsteadOfMana?: true;
   diesAtEndOfControllerTurn?: true;
@@ -134,6 +135,9 @@ function cardsFor(
         connectsTopBottom: facts.connectsTopBottom ?? false,
         deathriteDrawSite: facts.deathriteDrawSite ?? false,
         ...(facts.deathriteHeal ? { deathriteHeal: facts.deathriteHeal } : {}),
+        ...(facts.deathriteLoseLifePerNearbySiteControlled === 1
+          ? { deathriteLoseLifePerNearbySiteControlled: 1 as const }
+          : {}),
         defense: facts.defense ?? 1,
         ...(facts.discardRandomCardInsteadOfMana === true
           ? { discardRandomCardInsteadOfMana: true as const }
@@ -7164,6 +7168,83 @@ test('RULE-05 Deathrite draws sites before simultaneous deaths enter their cemet
     status: 'finished',
   });
   assert.equal(verifyGameReplay(deckOut), true);
+});
+
+test('RULE-05 Bladderblimp Deathrite makes each player lose life for their nearby sites', () => {
+  const blimp = {
+    airborne: true,
+    attack: 1,
+    deathriteLoseLifePerNearbySiteControlled: 1,
+    defense: 1,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  } as const;
+  const ordinary = {
+    attack: 1,
+    defense: 1,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  } as const;
+  const validation = manifest(146, { northSpell: blimp, southSpell: ordinary });
+  const blimpCardId = validation.decks.north.spellbook[0]!;
+  assert.equal(validation.cards[blimpCardId]?.cardType === 'minion'
+    && validation.cards[blimpCardId].deathriteLoseLifePerNearbySiteControlled, 1);
+  assert.throws(() => createGameManifest({
+    authority: validation.authority,
+    cards: {
+      ...validation.cards,
+      [blimpCardId]: {
+        ...validation.cards[blimpCardId]!,
+        deathriteLoseLifePerNearbySiteControlled: 2,
+      } as unknown as GameCardDefinition,
+    },
+    decks: validation.decks,
+    firstSeat: validation.firstSeat,
+    seed: validation.seed,
+  }), /deathriteLoseLifePerNearbySiteControlled must be 1/);
+
+  const setup = northAttacksAtC2(
+    147,
+    blimp,
+    { attack: 1, defense: 1, drawSpell: false, life: 2 },
+    false,
+    ordinary,
+  );
+  let session = accept(setup.session, action(setup.session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === setup.targetInstanceId));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  assert.equal(session.state.players.north.avatar.life, 1);
+  assert.equal(session.state.players.south.avatar.life, 0);
+  assert.deepEqual(session.state.terminal, { status: 'active' });
+  const events = session.transcript.at(-1)?.events ?? [];
+  const lifeEvents = events.filter(({ type }) => type === 'avatar-life-lost');
+  assert.deepEqual(lifeEvents.map(({ payload }) => payload), [
+    {
+      amount: 1,
+      life: 1,
+      seat: 'north',
+      sourceInstanceId: setup.attackerInstanceId,
+    },
+    {
+      amount: 2,
+      life: 0,
+      seat: 'south',
+      sourceInstanceId: setup.attackerInstanceId,
+    },
+  ]);
+  const deathsDoor = events.find(({ type }) => type === 'avatar-reached-deaths-door');
+  assert.deepEqual(deathsDoor?.payload, {
+    seat: 'south',
+    sourceInstanceId: setup.attackerInstanceId,
+    turnNumber: session.state.turnNumber,
+  });
+  const firstDeath = events.findIndex(({ type }) => type === 'minion-died');
+  assert.ok(firstDeath > events.findIndex(({ type }) => type === 'avatar-reached-deaths-door'));
+  assert.equal(events.some(({ type }) => type === 'game-ended'), false);
+  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-05 Deathrite healing caps at maximum, fails at Death\'s Door, and precedes cemetery entry', () => {
