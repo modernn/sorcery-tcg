@@ -19,6 +19,21 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airborne.deck.spellbook
     .find(({ name }) => name === 'Ghoul')?.copies, 4);
   assert.equal(result.airborne.replayVerified, true);
+  assert.equal(result.stealth.stealthMinion, 'Band of Thieves');
+  assert.equal(result.stealth.groundMinion, 'Snow Leopard');
+  assert.equal(result.stealth.enteredStealthed, true);
+  assert.equal(result.stealth.groundCouldNotAttack, true);
+  assert.equal(result.stealth.attackSkippedDefend, true);
+  assert.equal(result.stealth.stealthLostAfterAttack, true);
+  assert.equal(result.stealth.groundMinionDied, true);
+  assert.equal(result.stealth.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.stealth.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.stealth.deck.spellbook
+    .find(({ name }) => name === 'Band of Thieves')?.copies, 4);
+  assert.equal(result.stealth.deck.spellbook
+    .find(({ name }) => name === 'Snow Leopard')?.copies, 4);
+  assert.deepEqual(result.stealth.deck, result.airborne.deck);
+  assert.equal(result.stealth.replayVerified, true);
   assert.equal(result.airMovement.movementMinion, 'Snallygaster');
   assert.equal(result.airMovement.twoStepDefend, true);
   assert.equal(result.airMovement.twoStepMoveAndAttack, true);
