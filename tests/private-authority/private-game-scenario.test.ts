@@ -121,6 +121,20 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.fireResponse.replayVerified, true);
   assert.equal(result.combat.northMinionDied, true);
   assert.equal(result.combat.southMinionDied, true);
+  assert.equal(result.waterEndTurnStealth.slyFox, 'Sly Fox');
+  assert.equal(result.waterEndTurnStealth.acceptedActionCount, 23);
+  assert.equal(result.waterEndTurnStealth.summonedUnstealthed, true);
+  assert.equal(result.waterEndTurnStealth.gainedStealthAtEndOfTurn, true);
+  assert.equal(result.waterEndTurnStealth.coLocatedReadyAttacker, true);
+  assert.equal(result.waterEndTurnStealth.attackSiteAvailable, true);
+  assert.equal(result.waterEndTurnStealth.slyFoxAttackUnavailable, true);
+  assert.equal(result.waterEndTurnStealth.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.waterEndTurnStealth.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.waterEndTurnStealth.deck.spellbook
+    .find(({ name }) => name === 'Sly Fox')?.copies, 4);
+  assert.equal(result.waterEndTurnStealth.replayVerified, true);
   assert.equal(result.waterHealing.healingMinion, 'Muddy Pigs');
   assert.equal(result.waterHealing.healed, 3);
   assert.equal(result.waterHealing.healedBeforeCemetery, true);
@@ -128,6 +142,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.waterHealing.opponentMinionDied, true);
   assert.equal(result.waterHealing.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
   assert.equal(result.waterHealing.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.deepEqual(result.waterEndTurnStealth.deck, result.waterHealing.deck);
   assert.equal(result.waterHealing.replayVerified, true);
   assert.equal(result.replayVerified, true);
 });
