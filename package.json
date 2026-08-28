@@ -9,6 +9,7 @@
     "pnpm": "11.22.0"
   },
   "scripts": {
+    "prototype": "node src/prototype/server.ts",
     "typecheck": "tsc --noEmit",
     "authority:import": "node src/commands/import-authority.ts",
     "authority:validate": "node src/commands/validate-authority.ts",

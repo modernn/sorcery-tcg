@@ -64,7 +64,7 @@ export type DemoSession = Readonly<{
   transcript: readonly DemoReceipt[];
 }>;
 
-export type DemoRejectionReason = 'stale' | 'terminal' | 'unknown_action' | 'wrong_seat';
+export type DemoRejectionReason = 'stale_version' | 'terminal_state' | 'unknown_action' | 'wrong_seat';
 
 export type DemoStepResult =
   | Readonly<{ accepted: true; receipt: DemoReceipt; session: DemoSession }>
@@ -212,9 +212,9 @@ function applyAction(state: DemoState, seat: DemoSeat, kind: DemoActionKind): re
 
 export function stepDemo(session: DemoSession, request: DemoActionRequest): DemoStepResult {
   const { state } = session;
-  if (state.terminal) return deepFreeze({ accepted: false, reason: 'terminal', session });
+  if (state.terminal) return deepFreeze({ accepted: false, reason: 'terminal_state', session });
   if (request.stateVersion !== state.stateVersion) {
-    return deepFreeze({ accepted: false, reason: 'stale', session });
+    return deepFreeze({ accepted: false, reason: 'stale_version', session });
   }
   if (request.seat !== state.activeSeat) {
     return deepFreeze({ accepted: false, reason: 'wrong_seat', session });
