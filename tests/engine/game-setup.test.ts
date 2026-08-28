@@ -36,6 +36,7 @@ type SpellFacts = Readonly<{
   lethal?: boolean;
   manaCost: number;
   provides?: 'air' | 'earth' | 'fire' | 'water';
+  tapForMana?: number;
   thresholds: Readonly<{ air: number; earth: number; fire: number; water: number }>;
 }>;
 
@@ -76,6 +77,7 @@ function cardsFor(
         lethal: spell.lethal ?? false,
         manaCost: spell.manaCost,
         ...(spell.provides ? { provides: spell.provides } : {}),
+        ...(spell.tapForMana ? { tapForMana: spell.tapForMana } : {}),
         thresholds: { ...spell.thresholds },
       };
     });
@@ -533,6 +535,46 @@ test('RULE-03 Genesis draws a hidden site and an empty Atlas loses after summoni
     session.transcript.at(-1)?.events.map(({ type }) => type),
     ['minion-summoned', 'game-ended'],
   );
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 a minion mana ability requires readiness, taps, and expires at End Phase', () => {
+  let session = keep(createGameSession(manifest(39, {
+    spell: {
+      manaCost: 1,
+      tapForMana: 2,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+  })));
+  session = keep(session);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'summon-minion'));
+  const unit = session.state.realm.units[0];
+  assert.ok(unit);
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'activate-mana' && descriptor.unitInstanceId === unit.instanceId), false);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  const before = session.state.players.north.mana;
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'activate-mana' && descriptor.unitInstanceId === unit.instanceId));
+  assert.equal(session.state.players.north.mana, before + 2);
+  assert.equal(session.state.realm.units[0]?.tapped, true);
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'activate-mana' && descriptor.unitInstanceId === unit.instanceId), false);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  assert.equal(session.state.players.north.mana, 1);
+  assert.equal(session.state.realm.units[0]?.tapped, false);
   assert.equal(verifyGameReplay(session), true);
 });
 
