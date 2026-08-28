@@ -43,6 +43,7 @@ type SpellFacts = Readonly<{
   movementPlusOne?: boolean;
   provides?: 'air' | 'earth' | 'fire' | 'water';
   ranged?: boolean;
+  strikesFirstWhileAttacking?: boolean;
   summonToAnySite?: boolean;
   tapForMana?: number;
   thresholds: Readonly<{ air: number; earth: number; fire: number; water: number }>;
@@ -68,9 +69,11 @@ function cardsFor(
   },
   avatar: AvatarFacts = { attack: 1, defense: 1, drawSpell: false, life: 20 },
   site: SiteFacts = {},
+  seatSpells: Readonly<Partial<Record<'north' | 'south', SpellFacts>>> = {},
 ): Record<string, GameCardDefinition> {
   const cards: Record<string, GameCardDefinition> = {};
-  for (const playerDeck of Object.values(decks)) {
+  for (const [seat, playerDeck] of Object.entries(decks) as ['north' | 'south', GameDeckSpec][]) {
+    const facts = seatSpells[seat] ?? spell;
     cards[playerDeck.avatar] = {
       attack: avatar.attack,
       cardType: 'avatar',
@@ -87,25 +90,26 @@ function cardsFor(
     });
     playerDeck.spellbook.forEach((cardId) => {
       cards[cardId] = {
-        attack: spell.attack ?? 1,
+        attack: facts.attack ?? 1,
         cardType: 'minion',
-        cannotAttackSites: spell.cannotAttackSites ?? false,
-        cannotDefend: spell.cannotDefend ?? false,
-        cannotDefendOrIntercept: spell.cannotDefendOrIntercept ?? false,
-        charge: spell.charge ?? false,
-        deathriteDrawSite: spell.deathriteDrawSite ?? false,
-        ...(spell.deathriteHeal ? { deathriteHeal: spell.deathriteHeal } : {}),
-        defense: spell.defense ?? 1,
-        genesisDrawSite: spell.genesisDrawSite ?? false,
-        lethal: spell.lethal ?? false,
-        manaCost: spell.manaCost,
-        movementPlusOne: spell.movementPlusOne ?? false,
-        ...(spell.provides ? { provides: spell.provides } : {}),
-        ranged: spell.ranged ?? false,
-        summonToAnySite: spell.summonToAnySite ?? false,
-        ...(spell.tapForMana ? { tapForMana: spell.tapForMana } : {}),
-        thresholds: { ...spell.thresholds },
-        ward: spell.ward ?? false,
+        cannotAttackSites: facts.cannotAttackSites ?? false,
+        cannotDefend: facts.cannotDefend ?? false,
+        cannotDefendOrIntercept: facts.cannotDefendOrIntercept ?? false,
+        charge: facts.charge ?? false,
+        deathriteDrawSite: facts.deathriteDrawSite ?? false,
+        ...(facts.deathriteHeal ? { deathriteHeal: facts.deathriteHeal } : {}),
+        defense: facts.defense ?? 1,
+        genesisDrawSite: facts.genesisDrawSite ?? false,
+        lethal: facts.lethal ?? false,
+        manaCost: facts.manaCost,
+        movementPlusOne: facts.movementPlusOne ?? false,
+        ...(facts.provides ? { provides: facts.provides } : {}),
+        ranged: facts.ranged ?? false,
+        strikesFirstWhileAttacking: facts.strikesFirstWhileAttacking ?? false,
+        summonToAnySite: facts.summonToAnySite ?? false,
+        ...(facts.tapForMana ? { tapForMana: facts.tapForMana } : {}),
+        thresholds: { ...facts.thresholds },
+        ward: facts.ward ?? false,
       };
     });
   }
@@ -117,8 +121,10 @@ function manifest(
   options: Readonly<{
     avatar?: AvatarFacts;
     north?: GameDeckSpec;
+    northSpell?: SpellFacts;
     site?: SiteFacts;
     south?: GameDeckSpec;
+    southSpell?: SpellFacts;
     spell?: SpellFacts;
   }> = {},
 ): GameManifest {
@@ -132,7 +138,10 @@ function manifest(
       mode: 'synthetic',
       revisionId: 'synthetic-setup-fixture-v1',
     },
-    cards: cardsFor(decks, options.spell, options.avatar, options.site),
+    cards: cardsFor(decks, options.spell, options.avatar, options.site, {
+      ...(options.northSpell ? { north: options.northSpell } : {}),
+      ...(options.southSpell ? { south: options.southSpell } : {}),
+    }),
     decks,
     firstSeat: 'north',
     seed,
@@ -707,6 +716,7 @@ function northAttacksAtC2(
   spell?: SpellFacts,
   avatar?: AvatarFacts,
   emptyAtlasAfterOpening = false,
+  southSpell?: SpellFacts,
 ): Readonly<{
   attackerInstanceId: string;
   defenderInstanceId: string;
@@ -719,6 +729,7 @@ function northAttacksAtC2(
   let session = keep(createGameSession(manifest(seed, {
     ...shortDecks,
     ...(spell ? { spell } : {}),
+    ...(southSpell ? { southSpell } : {}),
     ...(avatar ? { avatar } : {}),
   })));
   session = keep(session);
@@ -793,6 +804,41 @@ test('RULE-04 a restricted attacker can target units but not sites', () => {
       && descriptor.target.instanceId === setup.targetInstanceId));
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 attacking-only first strike resolves deaths before normal strikes and is inactive while defending', () => {
+  const vanilla = {
+    attack: 3,
+    defense: 3,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  } as const;
+  const firstStrike = { ...vanilla, strikesFirstWhileAttacking: true };
+  const attacking = northAttacksAtC2(117, firstStrike, undefined, false, vanilla);
+  let session = accept(attacking.session, action(attacking.session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === attacking.targetInstanceId));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  assert.equal(session.state.realm.units
+    .find(({ instanceId }) => instanceId === attacking.attackerInstanceId)?.damage, 0);
+  assert.equal(session.state.players.south.cemetery
+    .some(({ instanceId }) => instanceId === attacking.targetInstanceId), true);
+  assert.equal(verifyGameReplay(session), true);
+
+  const defending = northAttacksAtC2(118, vanilla, undefined, false, firstStrike);
+  session = accept(defending.session, action(defending.session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === defending.targetInstanceId));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  assert.equal(session.state.players.north.cemetery
+    .some(({ instanceId }) => instanceId === defending.attackerInstanceId), true);
+  assert.equal(session.state.players.south.cemetery
+    .some(({ instanceId }) => instanceId === defending.targetInstanceId), true);
   assert.equal(verifyGameReplay(session), true);
 });
 
