@@ -86,6 +86,22 @@ function privateData(): Promise<PrivateData> {
   return privateDataPromise;
 }
 
+function sourceEntry(relativePath: PrivateAuthoritySourceEntry['relativePath'], bytes: Buffer): PrivateAuthoritySourceEntry {
+  return {
+    relativePath,
+    url: `https://sorcerytcg.com/${relativePath}`,
+    retrievedAt: '2026-08-25T00:00:00.000Z',
+    effectiveDate: null,
+    mediaType: relativePath.endsWith('.pdf')
+      ? 'application/pdf'
+      : relativePath.endsWith('.json')
+        ? 'application/json'
+        : 'text/html',
+    byteLength: bytes.length,
+    byteHash: `sha256:${createHash('sha256').update(bytes).digest('hex')}`,
+  };
+}
+
 async function createFixture(
   privateLocatorEvidence = 'https://private.invalid/rulebook-locator',
 ): Promise<Fixture> {
@@ -105,19 +121,7 @@ async function createFixture(
     await mkdir(dirname(backupPath), { recursive: true });
     await writeFile(primaryPath, bytes);
     await writeFile(backupPath, bytes);
-    entries.push({
-      relativePath,
-      url: `https://sorcerytcg.com/${relativePath}`,
-      retrievedAt: '2026-08-25T00:00:00.000Z',
-      effectiveDate: null,
-      mediaType: relativePath.endsWith('.pdf')
-        ? 'application/pdf'
-        : relativePath.endsWith('.json')
-          ? 'application/json'
-          : 'text/html',
-      byteLength: bytes.length,
-      byteHash: `sha256:${createHash('sha256').update(bytes).digest('hex')}`,
-    });
+    entries.push(sourceEntry(relativePath, bytes));
   }
   const verified = await verifyPrivateSourceSet({ repositoryRoot, primaryRoot, backupRoot, entries });
   await mkdir(dirname(lockPath), { recursive: true });
@@ -159,6 +163,49 @@ async function createFixture(
   await git(fixture, 'add', '.gitignore', 'package.json', 'safe-metadata.json');
   await git(fixture, 'commit', '--quiet', '-m', 'safe fixture');
   return fixture;
+}
+
+async function createSecondaryLock(fixture: Fixture): Promise<Readonly<{
+  lockPath: string;
+  primaryRoot: string;
+  backupRoot: string;
+  uniqueExcerpt: Buffer;
+}>> {
+  const primaryRoot = join(fixture.repositoryRoot, '.local', 'authority', 'inputs', 'synthetic-secondary', 'primary');
+  const backupRoot = join(fixture.sandbox, 'backup-secondary');
+  const lockPath = join(
+    fixture.repositoryRoot,
+    '.local',
+    'authority',
+    'locks',
+    'synthetic-secondary',
+    'source-set-lock.json',
+  );
+  const uniqueExcerpt = Buffer.from('secondary-lock-exclusive-private-excerpt-' + 'x'.repeat(64), 'utf8');
+  const entries: PrivateAuthoritySourceEntry[] = [];
+  for (const relativePath of PRIVATE_AUTHORITY_SOURCE_PATHS) {
+    const original = fixture.sourceBytes.get(relativePath)!;
+    const bytes = relativePath === PRIVATE_AUTHORITY_SOURCE_PATHS[0]
+      ? Buffer.concat([original, Buffer.from('\n'), uniqueExcerpt])
+      : original;
+    const primaryPath = join(primaryRoot, ...relativePath.split('/'));
+    const backupPath = join(backupRoot, ...relativePath.split('/'));
+    await mkdir(dirname(primaryPath), { recursive: true });
+    await mkdir(dirname(backupPath), { recursive: true });
+    await writeFile(primaryPath, bytes);
+    await writeFile(backupPath, bytes);
+    entries.push(sourceEntry(relativePath, bytes));
+  }
+  const verified = await verifyPrivateSourceSet({ repositoryRoot: fixture.repositoryRoot, primaryRoot, backupRoot, entries });
+  await mkdir(dirname(lockPath), { recursive: true });
+  await writeFile(lockPath, JSON.stringify({
+    primaryRoot,
+    backupRoot,
+    entries,
+    sourceSetRootHash: verified.sourceSetRootHash,
+    rulebookAcquisitionEvidence: { privateLocatorEvidence: 'https://private.invalid/secondary-rulebook-locator' },
+  }));
+  return { lockPath, primaryRoot, backupRoot, uniqueExcerpt };
 }
 
 async function addSurfaceCandidate(
@@ -251,10 +298,18 @@ async function cleanupFixture(fixture: Fixture): Promise<void> {
   await rm(sandbox, { recursive: true, force: true });
 }
 
-async function runGate(fixture: Fixture): Promise<Readonly<{ code: number | null; stdout: string; stderr: string }>> {
+async function runGate(
+  fixture: Fixture,
+  lockPaths: readonly string[] = [fixture.lockPath],
+): Promise<Readonly<{ code: number | null; stdout: string; stderr: string }>> {
   return runBounded(
     'node',
-    [SCRIPT_PATH, '--repository-root', fixture.repositoryRoot, '--lock', fixture.lockPath],
+    [
+      SCRIPT_PATH,
+      '--repository-root',
+      fixture.repositoryRoot,
+      ...lockPaths.flatMap((lockPath) => ['--lock', lockPath]),
+    ],
     fixture.repositoryRoot,
   );
 }
@@ -292,6 +347,26 @@ test('generic local-file evidence label is not treated as a private locator', as
     const result = await runGate(fixture);
     assert.equal(result.code, 0, result.stderr);
     assert.equal(result.stdout, 'Private authority boundary verified.\n');
+  } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
+test('multiple locks keep independent evidence and inspect secondary private content', async () => {
+  const fixture = await createFixture();
+  try {
+    const secondary = await createSecondaryLock(fixture);
+    await addCandidate(fixture, 'included/secondary-lock-excerpt.txt', secondary.uniqueExcerpt, 'untracked');
+    const result = await runGate(fixture, [fixture.lockPath, secondary.lockPath]);
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /source-derived-content/i);
+    for (const privateValue of [
+      secondary.primaryRoot,
+      secondary.backupRoot,
+      secondary.uniqueExcerpt.toString('utf8'),
+    ]) {
+      assert.equal(result.stderr.includes(privateValue), false);
+    }
   } finally {
     await cleanupFixture(fixture);
   }

@@ -38,6 +38,14 @@ type InspectionState = {
   decodedBytes: number;
   decodedStrings: number;
 };
+type PrivateEvidence = Readonly<{
+  privateHashes: ReadonlySet<string>;
+  rawIndex: RawFingerprintIndex;
+  normalizedIndex: RawFingerprintIndex;
+  semanticIndex: SemanticIndex;
+  locators: readonly Locator[];
+  state: InspectionState;
+}>;
 
 export type PrivateInspectionSource = Readonly<{
   bytes: Uint8Array;
@@ -880,63 +888,70 @@ function buildLocators(values: readonly string[]): readonly Locator[] {
   return [...locators.values()];
 }
 
-async function main(): Promise<void> {
-  const { repositoryRoot, lockPaths } = parseArguments(process.argv.slice(2));
+async function preparePrivateEvidence(repositoryRoot: string, lockPath: string): Promise<PrivateEvidence> {
   const privateHashes = new Set<string>();
   const rawFingerprintBuffers = new Map<string, Buffer>();
   const normalizedTextBuffers = new Map<string, Buffer>();
   const semanticIndex: SemanticIndex = new Map();
   const locatorTexts: string[] = [];
   const localFileEvidence = ['user-provided', 'manual-local-file'].join('-');
-  for (const lockPath of lockPaths) {
-    const lock = JSON.parse(readFileSync(lockPath, 'utf8')) as PrivateLock;
-    if (typeof lock.primaryRoot !== 'string' || typeof lock.backupRoot !== 'string' || !Array.isArray(lock.entries)) {
-      throw new BoundaryViolation('Private lock is missing required boundary metadata.');
-    }
-    const verified = await verifyPrivateSourceSet({
-      repositoryRoot,
-      primaryRoot: lock.primaryRoot,
-      backupRoot: lock.backupRoot,
-      entries: lock.entries,
-    });
-    if (verified.sourceSetRootHash !== lock.sourceSetRootHash) {
-      throw new BoundaryViolation('Private lock source-set root does not match verified evidence.');
-    }
-    for (const [rootIndex, root] of [lock.primaryRoot, lock.backupRoot].entries()) {
-      for (const entry of verified.entries) {
-        if (typeof entry.relativePath !== 'string' || typeof entry.byteHash !== 'string') {
-          throw new BoundaryViolation('Private lock contains an invalid source entry.');
-        }
-        const bytes = readConfinedPrivateFile(root, entry.relativePath);
-        const hash = sha256Hex(bytes);
-        if (entry.byteHash !== 'sha256:' + hash) {
-          throw new BoundaryViolation('Private lock source hash does not match its bytes.');
-        }
-        privateHashes.add(hash);
-        if (rootIndex === 0) addRawFingerprintSegments(bytes, rawFingerprintBuffers);
-        if (rootIndex === 0 && entry.relativePath.endsWith('.json')) {
-          addPrivateJsonSemantics(bytes, semanticIndex);
-        }
-        if (rootIndex === 0 && entry.relativePath.endsWith('.html')) {
-          const normalized = normalizedVisibleText(bytes);
-          if (normalized !== null && normalized.length >= MIN_PROTECTED_EXCERPT_BYTES) {
-            normalizedTextBuffers.set(sha256Hex(normalized), normalized);
-          }
+  const lock = JSON.parse(readFileSync(lockPath, 'utf8')) as PrivateLock;
+  if (typeof lock.primaryRoot !== 'string' || typeof lock.backupRoot !== 'string' || !Array.isArray(lock.entries)) {
+    throw new BoundaryViolation('Private lock is missing required boundary metadata.');
+  }
+  const verified = await verifyPrivateSourceSet({
+    repositoryRoot,
+    primaryRoot: lock.primaryRoot,
+    backupRoot: lock.backupRoot,
+    entries: lock.entries,
+  });
+  if (verified.sourceSetRootHash !== lock.sourceSetRootHash) {
+    throw new BoundaryViolation('Private lock source-set root does not match verified evidence.');
+  }
+  for (const [rootIndex, root] of [lock.primaryRoot, lock.backupRoot].entries()) {
+    for (const entry of verified.entries) {
+      if (typeof entry.relativePath !== 'string' || typeof entry.byteHash !== 'string') {
+        throw new BoundaryViolation('Private lock contains an invalid source entry.');
+      }
+      const bytes = readConfinedPrivateFile(root, entry.relativePath);
+      const hash = sha256Hex(bytes);
+      if (entry.byteHash !== 'sha256:' + hash) {
+        throw new BoundaryViolation('Private lock source hash does not match its bytes.');
+      }
+      privateHashes.add(hash);
+      if (rootIndex === 0) addRawFingerprintSegments(bytes, rawFingerprintBuffers);
+      if (rootIndex === 0 && entry.relativePath.endsWith('.json')) {
+        addPrivateJsonSemantics(bytes, semanticIndex);
+      }
+      if (rootIndex === 0 && entry.relativePath.endsWith('.html')) {
+        const normalized = normalizedVisibleText(bytes);
+        if (normalized !== null && normalized.length >= MIN_PROTECTED_EXCERPT_BYTES) {
+          normalizedTextBuffers.set(sha256Hex(normalized), normalized);
         }
       }
     }
-    addSelectedRevisionEvidence(repositoryRoot, lockPath, privateHashes, semanticIndex);
-    const privateLocatorEvidence = lock.rulebookAcquisitionEvidence?.privateLocatorEvidence;
-    locatorTexts.push(lock.primaryRoot, lock.backupRoot);
-    if (typeof privateLocatorEvidence === 'string' && privateLocatorEvidence.length > 0 && privateLocatorEvidence !== localFileEvidence) {
-      locatorTexts.push(privateLocatorEvidence);
-    }
+  }
+  addSelectedRevisionEvidence(repositoryRoot, lockPath, privateHashes, semanticIndex);
+  const privateLocatorEvidence = lock.rulebookAcquisitionEvidence?.privateLocatorEvidence;
+  locatorTexts.push(lock.primaryRoot, lock.backupRoot);
+  if (typeof privateLocatorEvidence === 'string' && privateLocatorEvidence.length > 0 && privateLocatorEvidence !== localFileEvidence) {
+    locatorTexts.push(privateLocatorEvidence);
   }
 
-  const rawIndex = buildRawFingerprintIndex([...rawFingerprintBuffers.values()], MIN_PROTECTED_EXCERPT_BYTES);
-  const normalizedIndex = buildRawFingerprintIndex([...normalizedTextBuffers.values()], MIN_NORMALIZED_TEXT_BYTES);
-  const locators = buildLocators(locatorTexts);
-  const state: InspectionState = { candidateBytes: 0, decodedBytes: 0, decodedStrings: 0 };
+  return {
+    privateHashes,
+    rawIndex: buildRawFingerprintIndex([...rawFingerprintBuffers.values()], MIN_PROTECTED_EXCERPT_BYTES),
+    normalizedIndex: buildRawFingerprintIndex([...normalizedTextBuffers.values()], MIN_NORMALIZED_TEXT_BYTES),
+    semanticIndex,
+    locators: buildLocators(locatorTexts),
+    state: { candidateBytes: 0, decodedBytes: 0, decodedStrings: 0 },
+  };
+}
+
+async function main(): Promise<void> {
+  const { repositoryRoot, lockPaths } = parseArguments(process.argv.slice(2));
+  const evidenceSets: PrivateEvidence[] = [];
+  for (const lockPath of lockPaths) evidenceSets.push(await preparePrivateEvidence(repositoryRoot, lockPath));
   for (const enumerate of [
     reachableHistoryCandidates,
     indexCandidates,
@@ -951,7 +966,17 @@ async function main(): Promise<void> {
       throw new BoundaryViolation(`Candidate enumeration failed [${enumerate.name}].`);
     }
     for (const candidate of candidates) {
-      inspectCandidate(candidate, privateHashes, rawIndex, normalizedIndex, semanticIndex, locators, state);
+      for (const evidence of evidenceSets) {
+        inspectCandidate(
+          candidate,
+          evidence.privateHashes,
+          evidence.rawIndex,
+          evidence.normalizedIndex,
+          evidence.semanticIndex,
+          evidence.locators,
+          evidence.state,
+        );
+      }
     }
   }
   process.stdout.write('Private authority boundary verified.\n');
