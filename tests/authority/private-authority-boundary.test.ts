@@ -245,6 +245,19 @@ test('safe relative metadata and hashes pass the Git index and package boundary'
   }
 });
 
+test('generic local-file evidence label is not treated as a private locator', async () => {
+  const label = ['user-provided', 'manual-local-file'].join('-');
+  const fixture = await createFixture(label);
+  try {
+    await addCandidate(fixture, 'included/generic-evidence-label.txt', label);
+    const result = await runGate(fixture);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout, 'Private authority boundary verified.\n');
+  } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
 test('private bytes locators excerpts paths and artwork fail without disclosing content', async (context) => {
   const firstSource = PRIVATE_AUTHORITY_SOURCE_PATHS[0];
   const cases: readonly Readonly<{

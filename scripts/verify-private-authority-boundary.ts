@@ -814,10 +814,12 @@ function main(): void {
 
   const rawIndex = buildRawFingerprintIndex([...rawFingerprintBuffers.values()], MIN_PROTECTED_EXCERPT_BYTES);
   const normalizedIndex = buildRawFingerprintIndex([...normalizedTextBuffers.values()], MIN_NORMALIZED_TEXT_BYTES);
+  const localFileEvidence = ['user-provided', 'manual-local-file'].join('-');
+  const privateLocatorEvidence = lock.rulebookAcquisitionEvidence?.privateLocatorEvidence;
   const locatorTexts = [
     lock.primaryRoot,
     lock.backupRoot,
-    lock.rulebookAcquisitionEvidence?.privateLocatorEvidence,
+    privateLocatorEvidence === localFileEvidence ? undefined : privateLocatorEvidence,
   ].filter((value): value is string => typeof value === 'string' && value.length > 0);
   const locators = buildLocators(locatorTexts);
   const state: InspectionState = { candidateBytes: 0, decodedBytes: 0, decodedStrings: 0 };
