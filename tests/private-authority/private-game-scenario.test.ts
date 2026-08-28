@@ -169,6 +169,29 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airLightningBolt.deck.spellbook
     .find(({ name }) => name === 'Snow Leopard')?.copies, 4);
   assert.equal(result.airLightningBolt.replayVerified, true);
+  assert.equal(result.airBladderblimp.bladderblimp, 'Bladderblimp');
+  assert.equal(result.airBladderblimp.lightningBolt, 'Lightning Bolt');
+  assert.equal(result.airBladderblimp.acceptedActionCount, 26);
+  assert.equal(result.airBladderblimp.airborneAtC3, true);
+  assert.equal(result.airBladderblimp.exactNearbySiteCounts, true);
+  assert.equal(result.airBladderblimp.summonManaPaid, 5);
+  assert.equal(result.airBladderblimp.magicManaPaid, 2);
+  assert.equal(result.airBladderblimp.causalEventsVerified, true);
+  assert.equal(result.airBladderblimp.lifeLossOnly, true);
+  assert.equal(result.airBladderblimp.randomSelectionRecorded, true);
+  assert.equal(result.airBladderblimp.minionAndMagicEnteredCemetery, true);
+  assert.equal(result.airBladderblimp.gameRemainedActive, true);
+  assert.equal(result.airBladderblimp.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airBladderblimp.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airBladderblimp.deck.atlas
+    .find(({ name }) => name === 'Ghost Town')?.copies, 3);
+  assert.equal(result.airBladderblimp.deck.spellbook
+    .find(({ name }) => name === 'Bladderblimp')?.copies, 3);
+  assert.equal(result.airBladderblimp.deck.spellbook
+    .find(({ name }) => name === 'Lightning Bolt')?.copies, 4);
+  assert.equal(result.airBladderblimp.replayVerified, true);
   assert.equal(result.airRainOfArrows.rainOfArrows, 'Rain of Arrows');
   assert.equal(result.airRainOfArrows.snowLeopard, 'Snow Leopard');
   assert.equal(result.airRainOfArrows.acceptedActionCount, 12);
