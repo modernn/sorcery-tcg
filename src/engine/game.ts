@@ -52,6 +52,7 @@ export type GameCardDefinition =
     movementPlusOne?: boolean;
     provides?: GameElement;
     ranged?: boolean;
+    strikesFirstWhileAttacking?: boolean;
     summonToAnySite?: boolean;
     tapForMana?: number;
     thresholds: GameThresholds;
@@ -435,6 +436,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.ranged !== undefined && typeof card.ranged !== 'boolean') {
     throw new RangeError(`${path}.ranged must be boolean`);
   }
+  if (card.strikesFirstWhileAttacking !== undefined && typeof card.strikesFirstWhileAttacking !== 'boolean') {
+    throw new RangeError(`${path}.strikesFirstWhileAttacking must be boolean`);
+  }
   if (card.ward !== undefined && typeof card.ward !== 'boolean') {
     throw new RangeError(`${path}.ward must be boolean`);
   }
@@ -543,6 +547,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.movementPlusOne === true ? { movementPlusOne: true } : {}),
             ...(card.provides ? { provides: card.provides } : {}),
             ...(card.ranged === true ? { ranged: true } : {}),
+            ...(card.strikesFirstWhileAttacking === true ? { strikesFirstWhileAttacking: true } : {}),
             ...(card.summonToAnySite === true ? { summonToAnySite: true } : {}),
             ...(card.tapForMana ? { tapForMana: card.tapForMana } : {}),
             thresholds: { ...card.thresholds },
@@ -869,6 +874,7 @@ function unitStatus(
   location: RealmCell;
   movementSteps: 1 | 2;
   ranged: boolean;
+  strikesFirstWhileAttacking: boolean;
   summoningSickness: boolean;
   tapped: boolean;
 }> {
@@ -887,6 +893,7 @@ function unitStatus(
       location: avatar.location,
       movementSteps: 1,
       ranged: false,
+      strikesFirstWhileAttacking: false,
       summoningSickness: false,
       tapped: avatar.tapped,
     };
@@ -905,6 +912,7 @@ function unitStatus(
     location: unit.location,
     movementSteps: definition.movementPlusOne ? 2 : 1,
     ranged: definition.ranged === true,
+    strikesFirstWhileAttacking: definition.strikesFirstWhileAttacking === true,
     summoningSickness: unit.summoningSickness,
     tapped: unit.tapped,
   };
@@ -1282,28 +1290,31 @@ function moveAndTapUnit(
   };
 }
 
-function finishFight(
+function resolveFightWindow(
   state: GameState,
   pending: PendingCombat,
   outcomes: readonly GameOutcome[],
-  returnStrikes = true,
+  attackerStrikes: boolean,
+  combatantsStrike: boolean,
 ): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
   const allocations = new Map(pending.allocations.map(({ amount, targetInstanceId }) =>
     [targetInstanceId, amount]));
   const damage = new Map<StateHash, number>();
   const lethalDamage = new Set<StateHash>();
   const attackerStatus = unitStatus(state, pending.attacker);
-  if (returnStrikes) {
+  if (combatantsStrike) {
     damage.set(
       pending.attacker.instanceId,
       pending.combatants.reduce((total, ref) => total + unitStatus(state, ref).attack, 0),
     );
   }
-  pending.combatants.forEach((ref) => damage.set(ref.instanceId, allocations.get(ref.instanceId) ?? 0));
+  if (attackerStrikes) {
+    pending.combatants.forEach((ref) => damage.set(ref.instanceId, allocations.get(ref.instanceId) ?? 0));
+  }
   pending.combatants.forEach((ref) => {
     const striker = unitStatus(state, ref);
-    if (returnStrikes && striker.lethal && striker.attack > 0) lethalDamage.add(pending.attacker.instanceId);
-    if (attackerStatus.lethal && (allocations.get(ref.instanceId) ?? 0) > 0) {
+    if (combatantsStrike && striker.lethal && striker.attack > 0) lethalDamage.add(pending.attacker.instanceId);
+    if (attackerStrikes && attackerStatus.lethal && (allocations.get(ref.instanceId) ?? 0) > 0) {
       lethalDamage.add(ref.instanceId);
     }
   });
@@ -1317,7 +1328,11 @@ function finishFight(
   const deaths: UnitInstance[] = [];
   const damageOutcomes: GameOutcome[] = [];
 
-  for (const ref of returnStrikes ? [pending.attacker, ...pending.combatants] : pending.combatants) {
+  const damagedRefs = [
+    ...(combatantsStrike ? [pending.attacker] : []),
+    ...(attackerStrikes ? pending.combatants : []),
+  ];
+  for (const ref of damagedRefs) {
     const amount = damage.get(ref.instanceId) ?? 0;
     if (ref.kind === 'avatar') {
       const player = players[ref.seat];
@@ -1491,7 +1506,8 @@ function finishFight(
   }
 
   return [
-    withStateVersion(state, {
+    deepFreeze({
+      ...state,
       decisionSeat: state.activeSeat,
       pendingCombat: null,
       phase: terminal.status === 'finished' ? 'terminal' : 'main',
@@ -1502,6 +1518,46 @@ function finishFight(
     [...outcomes, ...damageOutcomes, ...endingOutcomes],
     [],
   ];
+}
+
+function finishFight(
+  state: GameState,
+  pending: PendingCombat,
+  outcomes: readonly GameOutcome[],
+  returnStrikes = true,
+): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
+  const attacker = unitStatus(state, pending.attacker);
+  if (returnStrikes && attacker.strikesFirstWhileAttacking) {
+    const [earlyState, earlyOutcomes, earlyDraws] = resolveFightWindow(
+      state,
+      pending,
+      outcomes,
+      true,
+      false,
+    );
+    const survivors = pending.combatants.filter((ref) =>
+      ref.kind === 'avatar'
+        || earlyState.realm.units.some(({ instanceId }) => instanceId === ref.instanceId));
+    if (earlyState.terminal.status === 'finished' || survivors.length === 0) {
+      return [withStateVersion(earlyState, {}), earlyOutcomes, earlyDraws];
+    }
+    const [resolved, resolvedOutcomes, normalDraws] = resolveFightWindow(
+      earlyState,
+      deepFreeze({ ...pending, combatants: survivors }),
+      earlyOutcomes,
+      false,
+      true,
+    );
+    return [withStateVersion(resolved, {}), resolvedOutcomes, [...earlyDraws, ...normalDraws]];
+  }
+  const [resolved, resolvedOutcomes, draws] = resolveFightWindow(
+    state,
+    pending,
+    outcomes,
+    true,
+    returnStrikes,
+  );
+  return [withStateVersion(resolved, {}), resolvedOutcomes, draws];
 }
 
 function beginFight(
