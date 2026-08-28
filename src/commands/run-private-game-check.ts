@@ -207,6 +207,17 @@ export type PrivateGameCheck = Readonly<{
     seed: number;
     summonedUnderground: boolean;
   }>;
+  earthImmobile: Readonly<{
+    acceptedActionCount: number;
+    comparatorMinion: string;
+    deck: DeckList;
+    localDefendAvailable: boolean;
+    nearbySitePresent: boolean;
+    positiveStepMoveUnavailable: boolean;
+    pudgeButcher: string;
+    replayVerified: boolean;
+    sameLocationAttackAvailable: boolean;
+  }>;
   earthForwardMovement: Readonly<{
     acceptedActionCount: number;
     backwardPathUnavailable: boolean;
@@ -556,6 +567,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   voidwalkMinion: NormalizedCard;
   wardMinion: NormalizedCard;
   polarBears: NormalizedCard;
+  pudgeButcher: NormalizedCard;
 }>> {
   const config = scenarioConfig(parseJsonWithDuplicateKeyCheck(await readFile(path, 'utf8')));
   const revisionRoot = resolve(REPOSITORY_ROOT, '.local', 'authority', 'revisions', config.revisionId);
@@ -863,6 +875,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || polarBears.rarity !== 'ordinary') {
     throw new Error('private top/bottom connection minion no longer matches its supported facts');
   }
+  const pudgeButcher = snapshot.cards.find(({ name }) => name === 'Pudge Butcher');
+  if (!pudgeButcher
+    || pudgeButcher.cardType !== 'minion'
+    || pudgeButcher.rulesText.trim().replaceAll('\r\n', '\n')
+      !== 'UPDATED: Immobile\n\nTap → Shoot a projectile. If it hits a unit, drag it to this location. Pudge may fight it when it arrives.'
+    || pudgeButcher.manaCost !== 4
+    || pudgeButcher.attack !== 5
+    || pudgeButcher.defense !== 5
+    || pudgeButcher.elements.length !== 1
+    || pudgeButcher.elements[0] !== 'earth'
+    || pudgeButcher.thresholds.air !== 0
+    || pudgeButcher.thresholds.earth !== 2
+    || pudgeButcher.thresholds.fire !== 0
+    || pudgeButcher.thresholds.water !== 0
+    || pudgeButcher.rarity !== 'exceptional') {
+    throw new Error('private Immobile minion no longer matches its supported facts');
+  }
   const cannotDefendMinion = snapshot.cards
     .find(({ stableId }) => stableId === config.cannotDefendMinionStableId);
   if (!cannotDefendMinion
@@ -1129,6 +1158,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     movementMinion,
     movementTwoMinion,
     polarBears,
+    pudgeButcher,
     providerMinion,
     rangedMinion,
     roamingMinion,
@@ -1201,6 +1231,7 @@ function gameDefinition(
   mustBeCastToWaterSite = false,
   movesOnlyForward = false,
   connectsBurrowedAllies = false,
+  immobile = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1243,6 +1274,7 @@ function gameDefinition(
       genesisDrawSpell,
       genesisDrawSite,
       gainsStealthAtEndOfTurn,
+      immobile,
       lethal,
       manaCost: card.manaCost,
       movesOnlyForward,
@@ -1270,7 +1302,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-genesis-spell' | 'air-leyline' | 'air-voidwalk' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-genesis-spell' | 'air-leyline' | 'air-voidwalk' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1382,6 +1414,10 @@ function buildManifest(
     ...earthMinions,
     input.dalceanPhalanx,
   ], [input.ghostTownSite]);
+  const earthImmobileDeck = elementalDeck('earth', [
+    ...earthMinions,
+    input.pudgeButcher,
+  ], [input.ghostTownSite]);
   const earthTunnelDeck = elementalDeck('earth', [
     ...earthMinions,
     input.burrowingMinion,
@@ -1446,6 +1482,8 @@ function buildManifest(
         ? earthEntombedDeck
       : scenario === 'earth-forward'
         ? earthForwardDeck
+      : scenario === 'earth-immobile'
+        ? earthImmobileDeck
       : scenario === 'earth-tunnel'
         ? earthTunnelDeck
       : scenario === 'earth-burrowing'
@@ -1485,6 +1523,8 @@ function buildManifest(
         ? earthEntombedDeck
       : scenario === 'earth-forward'
         ? earthForwardDeck
+      : scenario === 'earth-immobile'
+        ? earthImmobileDeck
       : scenario === 'earth-tunnel'
         ? earthTunnelDeck
       : scenario === 'earth-burrowing'
@@ -1548,6 +1588,7 @@ function buildManifest(
       card.stableId === input.lugbogCat.stableId,
       card.stableId === input.dalceanPhalanx.stableId,
       card.stableId === input.secretTunnel.stableId,
+      card.stableId === input.pudgeButcher.stableId,
     ),
   ]));
   return {
@@ -2072,6 +2113,65 @@ function findEarthForwardOpening(
     }
   }
   throw new Error('private Earth forward-only scenario no longer produces its supported opening');
+}
+
+function findEarthImmobileOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  comparatorInstanceId: string;
+  ghostTownSiteInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string];
+  pudgeInstanceId: string;
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string];
+}> {
+  // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
+  for (let offset = 1; offset <= 2048; offset += 1) {
+    const built = buildManifest(input, input.config.earthSeed + offset, 'earth-immobile');
+    const session = createGameSession(built.manifest);
+    const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return cardId !== input.ghostTownSite.stableId
+        && definition?.cardType === 'site'
+        && definition.elements.includes('earth');
+    });
+    const ghostTownSiteInstanceId = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.ghostTownSite.stableId)?.instanceId;
+    const pudgeInstanceId = availableMinionInstance(
+      session,
+      'north',
+      input.pudgeButcher.stableId,
+      2,
+    );
+    const comparatorInstanceId = availableMinionInstance(
+      session,
+      'south',
+      input.firstStrikeTargetMinion.stableId,
+      2,
+    );
+    const southSites = session.state.players.south.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('earth');
+    });
+    if (northSites.length >= 2
+      && ghostTownSiteInstanceId
+      && pudgeInstanceId
+      && comparatorInstanceId
+      && southSites.length >= 2) {
+      return {
+        ...built,
+        comparatorInstanceId,
+        ghostTownSiteInstanceId,
+        northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
+        pudgeInstanceId,
+        session,
+        southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
+      };
+    }
+  }
+  throw new Error('private Earth Immobile scenario no longer produces its supported opening');
 }
 
 function findEarthSecretTunnelOpening(
@@ -3061,6 +3161,106 @@ function runEarthForwardMovement(
     seed: opening.seed,
     sidewaysPathUnavailable,
     siteTargetAvailable,
+  });
+}
+
+function runEarthImmobile(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthImmobile'] {
+  const opening = findEarthImmobileOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.comparatorInstanceId
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.ghostTownSiteInstanceId
+    && descriptor.cell === 'B3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.pudgeInstanceId
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === opening.comparatorInstanceId
+    && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'close-intercept');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const pudgeMoves = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.pudgeInstanceId);
+  const nearbySitePresent = session.state.realm.sites.C4 !== undefined
+    && session.state.realm.sites.B3 !== undefined;
+  const positiveStepMoveUnavailable = nearbySitePresent
+    && pudgeMoves.every(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack' && descriptor.path.length === 1);
+  const sameLocationAttackAvailable = session.state.realm.units.some(({ instanceId, location }) =>
+    instanceId === opening.comparatorInstanceId && location === 'C3')
+    && pudgeMoves.some(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.path.length === 1
+        && descriptor.to.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === opening.comparatorInstanceId
+    && descriptor.path.length === 1
+    && descriptor.to.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+    && descriptor.target.kind === 'site'
+    && descriptor.target.instanceId === session.state.realm.sites.C3?.instanceId);
+  const defend = action(session, ({ descriptor }) =>
+    descriptor.kind === 'defend'
+      && descriptor.unitInstanceId === opening.pudgeInstanceId
+      && descriptor.path.length === 1
+      && descriptor.to.cell === 'C3');
+  const localDefendAvailable = defend.descriptor.kind === 'defend'
+    && defend.descriptor.path.length === 1;
+  session = accept(session, defend);
+  take(({ descriptor }) =>
+    descriptor.kind === 'close-defend' && !descriptor.originalTargetParticipates);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    comparatorMinion:
+      opening.names.get(input.firstStrikeTargetMinion.stableId)
+        ?? input.firstStrikeTargetMinion.stableId,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    localDefendAvailable,
+    nearbySitePresent,
+    positiveStepMoveUnavailable,
+    pudgeButcher:
+      opening.names.get(input.pudgeButcher.stableId) ?? input.pudgeButcher.stableId,
+    replayVerified: verifyGameReplay(session),
+    sameLocationAttackAvailable,
   });
 }
 
@@ -4833,6 +5033,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthEntombed = runEarthEntombed(input);
   const earthFirstStrike = runEarthFirstStrike(input);
   const earthForwardMovement = runEarthForwardMovement(input);
+  const earthImmobile = runEarthImmobile(input);
   const earthRamp = runEarthRamp(input);
   const earthRanged = runEarthRanged(input);
   const earthSecretTunnel = runEarthSecretTunnel(input);
@@ -4982,6 +5183,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthRamp,
     earthFirstStrike,
     earthForwardMovement,
+    earthImmobile,
     earthRanged,
     earthSecretTunnel,
     earthWard,
