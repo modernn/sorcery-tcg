@@ -77,6 +77,7 @@ export type GameCardDefinition =
     deathriteHeal?: number;
     deathriteDrawSite?: boolean;
     defense: number;
+    diesAtEndOfControllerTurn?: true;
     genesisDrawSpell?: boolean;
     genesisDrawSite?: boolean;
     genesisLoseControllerLife?: 2;
@@ -847,6 +848,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.genesisLoseControllerLife !== undefined && card.genesisLoseControllerLife !== 2) {
     throw new RangeError(`${path}.genesisLoseControllerLife must be 2`);
   }
+  if (card.diesAtEndOfControllerTurn !== undefined
+    && card.diesAtEndOfControllerTurn !== true) {
+    throw new RangeError(`${path}.diesAtEndOfControllerTurn must be true when defined`);
+  }
   if (card.genesisDrawSite && card.genesisDrawSpell) {
     throw new RangeError(`${path} simultaneous Genesis site and spell draws are unsupported`);
   }
@@ -1068,6 +1073,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.deathriteDrawSite === true ? { deathriteDrawSite: true } : {}),
             ...(card.deathriteHeal ? { deathriteHeal: card.deathriteHeal } : {}),
             defense: card.defense,
+            ...(card.diesAtEndOfControllerTurn === true
+              ? { diesAtEndOfControllerTurn: true as const }
+              : {}),
             ...(card.genesisDrawSpell === true ? { genesisDrawSpell: true } : {}),
             ...(card.genesisDrawSite === true ? { genesisDrawSite: true } : {}),
             ...(card.genesisLoseControllerLife === 2 ? { genesisLoseControllerLife: 2 as const } : {}),
@@ -2325,6 +2333,45 @@ function resolveMinionDeaths(
     terminal,
     units: survivingUnits,
   };
+}
+
+function resolveEndOfTurnDeaths(
+  state: GameState,
+  seat: GameSeat,
+): Readonly<{ outcomes: readonly GameOutcome[]; state: GameState }> {
+  const triggeredIds = state.realm.units.flatMap((unit) => {
+    if (unit.controller !== seat || minionDisabled(state, unit)) return [];
+    const definition = cardDefinition(state, unit.cardId);
+    return definition.cardType === 'minion'
+      && definition.diesAtEndOfControllerTurn === true
+      ? [unit.instanceId]
+      : [];
+  });
+  let current = state;
+  const outcomes: GameOutcome[] = [];
+  for (const instanceId of triggeredIds) {
+    const dead = current.realm.units.find((unit) => unit.instanceId === instanceId);
+    if (!dead) continue;
+    const resolution = resolveMinionDeaths(
+      current,
+      current.players,
+      current.realm.units,
+      [dead],
+      new Set<GameSeat>(),
+    );
+    current = deepFreeze({
+      ...current,
+      ...(resolution.terminal.status === 'finished'
+        ? { pendingCombat: null, phase: 'terminal' as const }
+        : {}),
+      players: resolution.players,
+      realm: { ...current.realm, units: resolution.units },
+      terminal: resolution.terminal,
+    });
+    outcomes.push(...resolution.outcomes);
+    if (resolution.terminal.status === 'finished') break;
+  }
+  return { outcomes, state: current };
 }
 
 type MinionRegionDisposition = 'banished' | 'dies' | 'survives';
@@ -4269,27 +4316,36 @@ function applyDescriptor(
   }
 
   if (descriptor.kind !== 'end-turn') throw new Error('unreachable unsupported action');
+  const endOfTurnDeaths = resolveEndOfTurnDeaths(state, seat);
+  const endState = endOfTurnDeaths.state;
+  if (endState.terminal.status === 'finished') {
+    return [
+      withStateVersion(endState, { pendingCombat: null, phase: 'terminal' }),
+      endOfTurnDeaths.outcomes,
+      [],
+    ];
+  }
   const nextSeat = otherSeat(seat);
-  const endingPlayer = deepFreeze({ ...player, mana: 0 });
-  const nextPlayer = state.players[nextSeat];
+  const endingPlayer = deepFreeze({ ...endState.players[seat], mana: 0 });
+  const nextPlayer = endState.players[nextSeat];
   const startingPlayer = deepFreeze({
     ...nextPlayer,
     avatar: { ...nextPlayer.avatar, tapped: false },
-    mana: siteCount(state, nextSeat),
+    mana: siteCount(endState, nextSeat),
   });
-  const players = deepFreeze({ ...state.players, [seat]: endingPlayer, [nextSeat]: startingPlayer });
-  const stealthGained = state.realm.units.filter((unit) => {
-    if (unit.controller !== seat || minionDisabled(state, unit) || unit.stealthed) return false;
-    const definition = cardDefinition(state, unit.cardId);
+  const players = deepFreeze({ ...endState.players, [seat]: endingPlayer, [nextSeat]: startingPlayer });
+  const stealthGained = endState.realm.units.filter((unit) => {
+    if (unit.controller !== seat || minionDisabled(endState, unit) || unit.stealthed) return false;
+    const definition = cardDefinition(endState, unit.cardId);
     return definition.cardType === 'minion' && definition.gainsStealthAtEndOfTurn === true;
   });
   const stealthGainedIds = new Set(stealthGained.map(({ instanceId }) => instanceId));
-  const expiredDisableEffects = state.realm.units.flatMap((unit) =>
+  const expiredDisableEffects = endState.realm.units.flatMap((unit) =>
     (unit.disableEffects ?? [])
       .filter(({ expiresAtSeat }) => expiresAtSeat === nextSeat)
       .map((effect) => ({ effect, unit })));
   const chargeExpired: GameOutcome[] = [];
-  const units = state.realm.units.map((unit) => {
+  const units = endState.realm.units.map((unit) => {
     const {
       disableEffects: previousDisableEffects,
       temporaryChargeSources,
@@ -4312,24 +4368,25 @@ function applyDescriptor(
       ...(unit.controller === nextSeat ? { tapped: false } : {}),
     });
   });
-  const turnNumber = state.turnNumber + 1;
+  const turnNumber = endState.turnNumber + 1;
   return [
-    withStateVersion(state, {
+    withStateVersion(endState, {
       activeSeat: nextSeat,
       decisionSeat: nextSeat,
       pendingCombat: null,
       phase: 'draw',
       players,
-      realm: { ...state.realm, units },
+      realm: { ...endState.realm, units },
       turnNumber,
     }),
     [
+      ...endOfTurnDeaths.outcomes,
       ...stealthGained.map(({ controller, instanceId }) => ({
         payload: { instanceId, seat: controller },
         type: 'stealth-gained',
       })),
       ...chargeExpired,
-      { payload: { seat, turnNumber: state.turnNumber }, type: 'turn-ended' },
+      { payload: { seat, turnNumber: endState.turnNumber }, type: 'turn-ended' },
       ...expiredDisableEffects.map(({ effect, unit }) => ({
         payload: {
           instanceId: unit.instanceId,

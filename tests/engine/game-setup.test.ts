@@ -40,6 +40,7 @@ type SpellFacts = Readonly<{
   deathriteDrawSite?: boolean;
   deathriteHeal?: number;
   defense?: number;
+  diesAtEndOfControllerTurn?: true;
   gainsStealthAtEndOfTurn?: boolean;
   genesisDrawSpell?: boolean;
   genesisDrawSite?: boolean;
@@ -132,6 +133,9 @@ function cardsFor(
         deathriteDrawSite: facts.deathriteDrawSite ?? false,
         ...(facts.deathriteHeal ? { deathriteHeal: facts.deathriteHeal } : {}),
         defense: facts.defense ?? 1,
+        ...(facts.diesAtEndOfControllerTurn === true
+          ? { diesAtEndOfControllerTurn: true as const }
+          : {}),
         gainsStealthAtEndOfTurn: facts.gainsStealthAtEndOfTurn ?? false,
         genesisDrawSpell: facts.genesisDrawSpell ?? false,
         genesisDrawSite: facts.genesisDrawSite ?? false,
@@ -4909,6 +4913,96 @@ test('RULE-04 Sly Fox gains Stealth once at the end of its controller turn', () 
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
   assert.equal(session.transcript.at(-1)?.events.some(({ type }) => type === 'stealth-gained'), false);
   assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 Ignited dies before turn cleanup unless it is Disabled', () => {
+  const gameManifest = manifest(127, {
+    spell: {
+      attack: 3,
+      charge: true,
+      defense: 3,
+      diesAtEndOfControllerTurn: true,
+      manaCost: 1,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+  });
+  const ignitedCardId = gameManifest.decks.north.spellbook[0]!;
+  assert.equal(gameManifest.cards[ignitedCardId]?.cardType === 'minion'
+    && gameManifest.cards[ignitedCardId].diesAtEndOfControllerTurn, true);
+  assert.throws(() => createGameManifest({
+    authority: gameManifest.authority,
+    cards: {
+      ...gameManifest.cards,
+      [ignitedCardId]: {
+        ...gameManifest.cards[ignitedCardId],
+        diesAtEndOfControllerTurn: false,
+      } as unknown as GameCardDefinition,
+    },
+    decks: gameManifest.decks,
+    firstSeat: gameManifest.firstSeat,
+    seed: gameManifest.seed,
+  }), /diesAtEndOfControllerTurn must be true when defined/);
+
+  let checkpoint = keep(createGameSession(gameManifest));
+  checkpoint = keep(checkpoint);
+  checkpoint = accept(checkpoint, action(checkpoint, ({ descriptor }) => descriptor.kind === 'play-site'));
+  checkpoint = accept(checkpoint, action(checkpoint, ({ descriptor }) => descriptor.kind === 'summon-minion'));
+  const ignited = checkpoint.state.realm.units[0];
+  assert.ok(ignited);
+
+  const ended = stepGame(checkpoint, action(checkpoint, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  assert.equal(ended.accepted, true);
+  if (!ended.accepted) return;
+  assert.deepEqual(ended.receipt.events.map(({ type }) => type), [
+    'minion-died',
+    'turn-ended',
+    'turn-started',
+  ]);
+  assert.equal(ended.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === ignited.instanceId), false);
+  assert.equal(ended.session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === ignited.instanceId), true);
+  assert.deepEqual({
+    activeSeat: ended.session.state.activeSeat,
+    mana: ended.session.state.players.south.mana,
+    phase: ended.session.state.phase,
+    stateVersion: ended.session.state.stateVersion,
+  }, {
+    activeSeat: 'south',
+    mana: 0,
+    phase: 'draw',
+    stateVersion: checkpoint.state.stateVersion + 1,
+  });
+  assert.equal(verifyGameReplay(ended.session), true);
+
+  const disabledCheckpoint: GameSession = {
+    ...checkpoint,
+    state: {
+      ...checkpoint.state,
+      realm: {
+        ...checkpoint.state.realm,
+        units: [{
+          ...ignited,
+          damage: 2,
+          disableEffects: [{ expiresAtSeat: 'south', sourceInstanceId: ignited.instanceId }],
+        }],
+      },
+    },
+  };
+  const disabledEnd = stepGame(disabledCheckpoint, action(disabledCheckpoint, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  assert.equal(disabledEnd.accepted, true);
+  if (!disabledEnd.accepted) return;
+  assert.deepEqual(disabledEnd.receipt.events.map(({ type }) => type), [
+    'turn-ended',
+    'minion-disable-expired',
+    'turn-started',
+  ]);
+  assert.deepEqual(disabledEnd.session.state.realm.units.map((unit) => ({
+    damage: unit.damage,
+    disableEffects: unit.disableEffects,
+    instanceId: unit.instanceId,
+  })), [{ damage: 0, disableEffects: undefined, instanceId: ignited.instanceId }]);
 });
 
 test('RULE-04 Sedge Crabs can move themselves only sideways', () => {
