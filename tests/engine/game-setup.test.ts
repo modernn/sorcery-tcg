@@ -32,6 +32,7 @@ type SpellFacts = Readonly<{
   attack?: number;
   charge?: boolean;
   defense?: number;
+  genesisDrawSite?: boolean;
   lethal?: boolean;
   manaCost: number;
   provides?: 'air' | 'earth' | 'fire' | 'water';
@@ -71,6 +72,7 @@ function cardsFor(
         cardType: 'minion',
         charge: spell.charge ?? false,
         defense: spell.defense ?? 1,
+        genesisDrawSite: spell.genesisDrawSite ?? false,
         lethal: spell.lethal ?? false,
         manaCost: spell.manaCost,
         ...(spell.provides ? { provides: spell.provides } : {}),
@@ -490,6 +492,47 @@ test('RULE-04 Charge allows a summoned minion to Move and Attack immediately', (
       && descriptor.to.cell === 'C4'));
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
   assert.equal(session.state.realm.units[0]?.tapped, true);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 Genesis draws a hidden site and an empty Atlas loses after summoning', () => {
+  const spell: SpellFacts = {
+    genesisDrawSite: true,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  };
+  let session = keep(createGameSession(manifest(40, { spell })));
+  session = keep(session);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  const before = session.state.players.north;
+  const drawn = before.atlas[0];
+  assert.ok(drawn);
+  const result = stepGame(session, action(session, ({ descriptor }) => descriptor.kind === 'summon-minion'));
+  assert.equal(result.accepted, true);
+  session = result.session;
+  assert.equal(session.state.players.north.atlas.length, before.atlas.length - 1);
+  assert.equal(session.state.players.north.hand.atlas.length, before.hand.atlas.length + 1);
+  assert.deepEqual(result.receipt.events.map(({ type }) => type), ['minion-summoned', 'site-drawn']);
+  assert.doesNotMatch(canonicalJson(result.receipt.events[1]?.payload ?? null), new RegExp(drawn.cardId));
+  assert.doesNotMatch(canonicalJson(observeGame(session.state, 'south')), new RegExp(drawn.cardId));
+  assert.equal(verifyGameReplay(session), true);
+
+  const short = deck('genesis-short', 3, 3);
+  session = keep(createGameSession(manifest(40, { north: short, south: short, spell })));
+  session = keep(session);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'summon-minion'));
+  assert.equal(session.state.realm.units.length, 1);
+  assert.deepEqual(session.state.terminal, {
+    loser: 'north',
+    reason: 'deck_empty',
+    status: 'finished',
+    winner: 'south',
+  });
+  assert.deepEqual(
+    session.transcript.at(-1)?.events.map(({ type }) => type),
+    ['minion-summoned', 'game-ended'],
+  );
   assert.equal(verifyGameReplay(session), true);
 });
 
