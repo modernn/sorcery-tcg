@@ -82,6 +82,7 @@ export type GameCardDefinition =
     mustBeCastToWaterSite?: boolean;
     provides?: GameElement;
     ranged?: boolean;
+    shootsDragProjectile?: boolean;
     stealth?: boolean;
     strikesFirstWhileAttacking?: boolean;
     submerge?: boolean;
@@ -316,6 +317,14 @@ type GameActionDescriptor =
     direction: ProjectileDirection;
     hit: GameUnitRef | null;
     kind: 'shoot-projectile';
+    path: readonly GameLocation[];
+    shooterInstanceId: StateHash;
+  }>
+  | Readonly<{
+    direction: ProjectileDirection;
+    fightOnArrival: boolean;
+    hit: GameUnitRef | null;
+    kind: 'shoot-drag-projectile';
     path: readonly GameLocation[];
     shooterInstanceId: StateHash;
   }>
@@ -686,6 +695,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.ranged !== undefined && typeof card.ranged !== 'boolean') {
     throw new RangeError(`${path}.ranged must be boolean`);
   }
+  if (card.shootsDragProjectile !== undefined && typeof card.shootsDragProjectile !== 'boolean') {
+    throw new RangeError(`${path}.shootsDragProjectile must be boolean`);
+  }
   if (card.stealth !== undefined && typeof card.stealth !== 'boolean') {
     throw new RangeError(`${path}.stealth must be boolean`);
   }
@@ -838,6 +850,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.mustBeCastToWaterSite === true ? { mustBeCastToWaterSite: true } : {}),
             ...(card.provides ? { provides: card.provides } : {}),
             ...(card.ranged === true ? { ranged: true } : {}),
+            ...(card.shootsDragProjectile === true ? { shootsDragProjectile: true } : {}),
             ...(card.stealth === true ? { stealth: true } : {}),
             ...(card.strikesFirstWhileAttacking === true ? { strikesFirstWhileAttacking: true } : {}),
             ...(card.submerge === true ? { submerge: true } : {}),
@@ -1505,6 +1518,57 @@ function rangedDescriptors(state: GameState, seat: GameSeat): readonly GameActio
   });
 }
 
+function dragProjectileDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
+  const directions = ['east', 'north', 'south', 'west'] as const;
+  const allUnits = [...unitRefs(state, 'north'), ...unitRefs(state, 'south')];
+  return unitRefs(state, seat).flatMap((shooter) => {
+    if (shooter.kind !== 'minion') return [];
+    const unit = state.realm.units.find(({ instanceId }) => instanceId === shooter.instanceId);
+    if (!unit) throw new Error('unreachable drag projectile shooter');
+    const definition = cardDefinition(state, unit.cardId);
+    const status = unitStatus(state, shooter);
+    if (definition.cardType !== 'minion'
+      || !definition.shootsDragProjectile
+      || status.tapped
+      || status.summoningSickness) return [];
+    return directions.flatMap<GameActionDescriptor>((direction) => {
+      const path: GameLocation[] = [{ cell: status.location, region: status.region }];
+      while (true) {
+        const location = path.at(-1)!;
+        const hits = allUnits.filter((ref) => {
+          const target = unitStatus(state, ref);
+          return !target.stealthed
+            && target.location === location.cell
+            && target.region === location.region
+            && (path.length > 1 || ref.seat !== seat);
+        }).sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+        if (hits.length > 0) {
+          return hits.flatMap((hit) => ([false, true] as const).map((fightOnArrival) => ({
+            direction,
+            fightOnArrival,
+            hit,
+            kind: 'shoot-drag-projectile' as const,
+            path,
+            shooterInstanceId: shooter.instanceId,
+          })));
+        }
+        const nextCell = projectileStep(location.cell, direction);
+        const next = nextCell ? { cell: nextCell, region: status.region } : undefined;
+        if (!next || !locationExists(state, next)) break;
+        path.push(next);
+      }
+      return [{
+        direction,
+        fightOnArrival: false,
+        hit: null,
+        kind: 'shoot-drag-projectile' as const,
+        path,
+        shooterInstanceId: shooter.instanceId,
+      }];
+    });
+  });
+}
+
 function manaAbilityDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   return state.realm.units.flatMap((unit) => {
     if (unit.controller !== seat || unit.tapped || unit.summoningSickness) return [];
@@ -1654,6 +1718,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     ...magicDescriptors(state, seat),
     ...manaAbilityDescriptors(state, seat),
     ...movementDescriptors(state, seat),
+    ...dragProjectileDescriptors(state, seat),
     ...rangedDescriptors(state, seat),
     { kind: 'end-turn' },
   ];
@@ -1688,6 +1753,12 @@ function actionLabel(descriptor: GameActionDescriptor): string {
       ? `${descriptor.hit.kind} ${descriptor.hit.instanceId.slice(0, 15)}…`
       : 'nothing';
     return `Shoot ${descriptor.direction} at ${target}`;
+  }
+  if (descriptor.kind === 'shoot-drag-projectile') {
+    const target = descriptor.hit
+      ? `${descriptor.hit.kind} ${descriptor.hit.instanceId.slice(0, 15)}…`
+      : 'nothing';
+    return `Hook ${descriptor.direction} at ${target}${descriptor.fightOnArrival ? ' and fight' : ''}`;
   }
   if (descriptor.kind === 'decline-attack') return 'Decline attack';
   if (descriptor.kind === 'declare-attack') return `Attack ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`;
@@ -1775,10 +1846,11 @@ function siteCount(state: GameState, seat: GameSeat): number {
   return Object.values(state.realm.sites).filter((site) => site.controller === seat).length;
 }
 
-function moveAndTapUnit(
+function moveUnit(
   state: GameState,
   ref: GameUnitRef,
   location: GameLocation,
+  tap: boolean,
 ): Readonly<{ players: GameState['players']; realm: GameState['realm'] }> {
   if (ref.kind === 'avatar') {
     const player = state.players[ref.seat];
@@ -1786,7 +1858,12 @@ function moveAndTapUnit(
     return {
       players: replacePlayer(state, ref.seat, deepFreeze({
         ...player,
-        avatar: { ...player.avatar, location: location.cell, region: location.region, tapped: true },
+        avatar: {
+          ...player.avatar,
+          location: location.cell,
+          region: location.region,
+          tapped: tap || player.avatar.tapped,
+        },
       })),
       realm: state.realm,
     };
@@ -1799,10 +1876,18 @@ function moveAndTapUnit(
     realm: {
       ...state.realm,
       units: state.realm.units.map((unit) => unit.instanceId === ref.instanceId
-        ? deepFreeze({ ...unit, location: location.cell, region: location.region, tapped: true })
+        ? deepFreeze({ ...unit, location: location.cell, region: location.region, tapped: tap || unit.tapped })
         : unit),
     },
   };
+}
+
+function moveAndTapUnit(
+  state: GameState,
+  ref: GameUnitRef,
+  location: GameLocation,
+): Readonly<{ players: GameState['players']; realm: GameState['realm'] }> {
+  return moveUnit(state, ref, location, true);
 }
 
 function loseStealth(
@@ -2750,6 +2835,85 @@ function applyDescriptor(
         : { region: unitStatus(state, descriptor.hit).region as 'underground' | 'underwater' | 'void' }),
       targetRemoved: false,
     }), [shot, ...stealthOutcomes, strike], false);
+  }
+
+  if (descriptor.kind === 'shoot-drag-projectile') {
+    const legal = dragProjectileDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'shoot-drag-projectile'
+        && candidate.shooterInstanceId === descriptor.shooterInstanceId
+        && candidate.direction === descriptor.direction
+        && candidate.fightOnArrival === descriptor.fightOnArrival
+        && samePath(candidate.path, descriptor.path)
+        && (candidate.hit === null && descriptor.hit === null
+          || candidate.hit !== null && descriptor.hit !== null
+            && candidate.hit.instanceId === descriptor.hit.instanceId
+            && candidate.hit.kind === descriptor.hit.kind
+            && candidate.hit.seat === descriptor.hit.seat));
+    const shooter = unitRefs(state, seat)
+      .find(({ instanceId }) => instanceId === descriptor.shooterInstanceId);
+    if (!legal || !shooter) throw new Error('unreachable illegal drag projectile');
+    const shooterStatus = unitStatus(state, shooter);
+    const tapped = moveAndTapUnit(state, shooter, {
+      cell: shooterStatus.location,
+      region: shooterStatus.region,
+    });
+    const [units, stealthOutcomes] = loseStealth(tapped.realm.units, [shooter]);
+    const shotState = deepFreeze({
+      ...state,
+      players: tapped.players,
+      realm: { ...tapped.realm, units },
+    });
+    const shot: GameOutcome = {
+      payload: {
+        direction: descriptor.direction,
+        hit: descriptor.hit,
+        path: descriptor.path,
+        seat,
+        shooterInstanceId: shooter.instanceId,
+      },
+      type: 'projectile-shot',
+    };
+    if (!descriptor.hit) {
+      return [withStateVersion(shotState, {}), [shot, ...stealthOutcomes], []];
+    }
+    const targetStatus = unitStatus(shotState, descriptor.hit);
+    const from: GameLocation = { cell: targetStatus.location, region: targetStatus.region };
+    const to: GameLocation = { cell: shooterStatus.location, region: shooterStatus.region };
+    const dragPath = [...descriptor.path].reverse();
+    const moved = moveUnit(shotState, descriptor.hit, to, false);
+    const draggedState = deepFreeze({
+      ...shotState,
+      players: moved.players,
+      realm: moved.realm,
+    });
+    const dragged: GameOutcome = {
+      payload: {
+        from,
+        path: dragPath,
+        seat,
+        sourceInstanceId: shooter.instanceId,
+        steps: dragPath.length - 1,
+        targetInstanceId: descriptor.hit.instanceId,
+        to,
+      },
+      type: 'unit-dragged',
+    };
+    const outcomes = [shot, ...stealthOutcomes, dragged];
+    if (!descriptor.fightOnArrival) {
+      return [withStateVersion(draggedState, {}), outcomes, []];
+    }
+    const pending: PendingCombat = deepFreeze({
+      allocations: [],
+      attacker: shooter,
+      attackingSeat: seat,
+      cell: to.cell,
+      combatants: [],
+      defenders: [],
+      originalTarget: descriptor.hit,
+      ...(to.region === 'surface' ? {} : { region: to.region }),
+      targetRemoved: false,
+    });
+    return beginFight(draggedState, pending, [descriptor.hit], outcomes);
   }
 
   if (descriptor.kind === 'move-and-attack') {

@@ -259,6 +259,15 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthImmobile.positiveStepMoveUnavailable, true);
   assert.equal(result.earthImmobile.sameLocationAttackAvailable, true);
   assert.equal(result.earthImmobile.localDefendAvailable, true);
+  assert.equal(result.earthImmobile.dragChoicePairAvailable, true);
+  assert.equal(result.earthImmobile.dragOnlyAcceptedActionCount, 22);
+  assert.equal(result.earthImmobile.dragOnlyEventsVerified, true);
+  assert.equal(result.earthImmobile.dragOnlyStateVerified, true);
+  assert.equal(result.earthImmobile.dragOnlyReplayVerified, true);
+  assert.equal(result.earthImmobile.fightAcceptedActionCount, 22);
+  assert.equal(result.earthImmobile.fightEventsVerified, true);
+  assert.equal(result.earthImmobile.fightStateVerified, true);
+  assert.equal(result.earthImmobile.fightReplayVerified, true);
   assert.equal(result.earthImmobile.deck.atlas
     .reduce((total, card) => total + card.copies, 0), 30);
   assert.equal(result.earthImmobile.deck.spellbook

@@ -278,6 +278,15 @@ export type PrivateGameCheck = Readonly<{
     acceptedActionCount: number;
     comparatorMinion: string;
     deck: DeckList;
+    dragChoicePairAvailable: boolean;
+    dragOnlyAcceptedActionCount: number;
+    dragOnlyEventsVerified: boolean;
+    dragOnlyReplayVerified: boolean;
+    dragOnlyStateVerified: boolean;
+    fightAcceptedActionCount: number;
+    fightEventsVerified: boolean;
+    fightReplayVerified: boolean;
+    fightStateVerified: boolean;
     localDefendAvailable: boolean;
     nearbySitePresent: boolean;
     positiveStepMoveUnavailable: boolean;
@@ -1399,6 +1408,7 @@ function gameDefinition(
   healController: 0 | 7 = 0,
   burrowTargetMinion = false,
   siteGenesisDiscardTopSpells: 0 | 2 = 0,
+  shootsDragProjectile = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1473,6 +1483,7 @@ function gameDefinition(
       movesOnlySideways,
       ...(provides ? { provides } : {}),
       ranged,
+      shootsDragProjectile,
       stealth,
       strikesFirstWhileAttacking,
       submerge,
@@ -1810,6 +1821,7 @@ function buildManifest(
       card.stableId === input.divineHealing.stableId ? 7 : 0,
       card.stableId === input.bury.stableId,
       card.stableId === input.shallowGrave.stableId ? 2 : 0,
+      card.stableId === input.pudgeButcher.stableId,
     ),
   ]));
   return {
@@ -3662,6 +3674,58 @@ function runEarthImmobile(
     && descriptor.cell === 'C3');
   take(({ descriptor }) => descriptor.kind === 'end-turn');
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  let dragCheckpoint = session;
+  dragCheckpoint = accept(dragCheckpoint, action(dragCheckpoint, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  dragCheckpoint = accept(dragCheckpoint, action(dragCheckpoint, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  const dragChoices = legalGameActions(dragCheckpoint.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'shoot-drag-projectile'
+      && descriptor.shooterInstanceId === opening.pudgeInstanceId
+      && descriptor.direction === 'south'
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C2'
+      && descriptor.hit?.instanceId === opening.comparatorInstanceId);
+  const noFightAction = dragChoices.find(({ descriptor }) =>
+    descriptor.kind === 'shoot-drag-projectile' && !descriptor.fightOnArrival);
+  const fightAction = dragChoices.find(({ descriptor }) =>
+    descriptor.kind === 'shoot-drag-projectile' && descriptor.fightOnArrival);
+  if (!noFightAction || !fightAction) {
+    throw new Error('private Pudge drag scenario lacks both optional fight choices');
+  }
+  const dragChoicePairAvailable = dragChoices.length === 2;
+  const dragOnlySession = accept(dragCheckpoint, noFightAction);
+  const fightSession = accept(dragCheckpoint, fightAction);
+  const dragOnlyEvents = dragOnlySession.transcript.at(-1)?.events ?? [];
+  const fightEvents = fightSession.transcript.at(-1)?.events ?? [];
+  const dragOnlyPudge = dragOnlySession.state.realm.units
+    .find(({ instanceId }) => instanceId === opening.pudgeInstanceId);
+  const dragOnlyBosk = dragOnlySession.state.realm.units
+    .find(({ instanceId }) => instanceId === opening.comparatorInstanceId);
+  const fightPudge = fightSession.state.realm.units
+    .find(({ instanceId }) => instanceId === opening.pudgeInstanceId);
+  const dragEventsAreSourceLinked = (events: typeof dragOnlyEvents): boolean => {
+    const shot = events[0];
+    const dragged = events[1];
+    return shot?.type === 'projectile-shot'
+      && isJsonRecord(shot.payload)
+      && shot.payload.direction === 'south'
+      && shot.payload.seat === 'north'
+      && shot.payload.shooterInstanceId === opening.pudgeInstanceId
+      && isJsonRecord(shot.payload.hit)
+      && shot.payload.hit.instanceId === opening.comparatorInstanceId
+      && dragged?.type === 'unit-dragged'
+      && isJsonRecord(dragged.payload)
+      && dragged.payload.seat === 'north'
+      && dragged.payload.sourceInstanceId === opening.pudgeInstanceId
+      && dragged.payload.targetInstanceId === opening.comparatorInstanceId
+      && dragged.payload.steps === 1
+      && isJsonRecord(dragged.payload.from)
+      && dragged.payload.from.cell === 'C2'
+      && isJsonRecord(dragged.payload.to)
+      && dragged.payload.to.cell === 'C3';
+  };
+
   take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.comparatorInstanceId
     && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3');
@@ -3711,6 +3775,33 @@ function runEarthImmobile(
       opening.names.get(input.firstStrikeTargetMinion.stableId)
         ?? input.firstStrikeTargetMinion.stableId,
     deck: deckList(opening.manifest.decks.north, opening.names),
+    dragChoicePairAvailable,
+    dragOnlyAcceptedActionCount: dragOnlySession.transcript.length,
+    dragOnlyEventsVerified: dragOnlyEvents.map(({ type }) => type).join(',')
+      === 'projectile-shot,unit-dragged'
+      && dragEventsAreSourceLinked(dragOnlyEvents),
+    dragOnlyReplayVerified: verifyGameReplay(dragOnlySession),
+    dragOnlyStateVerified: dragOnlyPudge?.location === 'C3'
+      && dragOnlyPudge.tapped
+      && dragOnlyPudge.damage === 0
+      && dragOnlyBosk?.location === 'C3'
+      && dragOnlyBosk.damage === 0
+      && !dragOnlySession.state.players.south.cemetery
+        .some(({ instanceId }) => instanceId === opening.comparatorInstanceId)
+      && dragOnlySession.state.terminal.status === 'active',
+    fightAcceptedActionCount: fightSession.transcript.length,
+    fightEventsVerified: fightEvents.map(({ type }) => type).join(',')
+      === 'projectile-shot,unit-dragged,fight-started,strike-damage-allocated,damage-dealt,damage-dealt,minion-died'
+      && dragEventsAreSourceLinked(fightEvents),
+    fightReplayVerified: verifyGameReplay(fightSession),
+    fightStateVerified: fightPudge?.location === 'C3'
+      && fightPudge.tapped
+      && fightPudge.damage === 3
+      && !fightSession.state.realm.units
+        .some(({ instanceId }) => instanceId === opening.comparatorInstanceId)
+      && fightSession.state.players.south.cemetery
+        .some(({ instanceId }) => instanceId === opening.comparatorInstanceId)
+      && fightSession.state.terminal.status === 'active',
     localDefendAvailable,
     nearbySitePresent,
     positiveStepMoveUnavailable,
