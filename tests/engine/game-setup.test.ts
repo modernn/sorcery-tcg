@@ -48,6 +48,7 @@ type SpellFacts = Readonly<{
   movementBonus?: 1 | 2;
   movesOnlySideways?: boolean;
   mustBeCastBurrowed?: boolean;
+  mustBeCastSubmerged?: boolean;
   provides?: 'air' | 'earth' | 'fire' | 'water';
   ranged?: boolean;
   stealth?: boolean;
@@ -125,6 +126,7 @@ function cardsFor(
         ...(facts.movementBonus ? { movementBonus: facts.movementBonus } : {}),
         movesOnlySideways: facts.movesOnlySideways ?? false,
         mustBeCastBurrowed: facts.mustBeCastBurrowed ?? false,
+        mustBeCastSubmerged: facts.mustBeCastSubmerged ?? false,
         ...(facts.provides ? { provides: facts.provides } : {}),
         ranged: facts.ranged ?? false,
         stealth: facts.stealth ?? false,
@@ -312,6 +314,40 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as GameCardDefinition,
     },
   }), /requires Burrowing/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        mustBeCastSubmerged: 'yes',
+      } as unknown as GameCardDefinition,
+    },
+  }), /mustBeCastSubmerged/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        mustBeCastSubmerged: true,
+        submerge: false,
+      } as GameCardDefinition,
+    },
+  }), /requires Submerge/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        burrowing: true,
+        mustBeCastBurrowed: true,
+        mustBeCastSubmerged: true,
+        submerge: true,
+      } as GameCardDefinition,
+    },
+  }), /both burrowed and submerged/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -1885,6 +1921,91 @@ test('RULE-03 a must-be-burrowed cast restriction suppresses only non-undergroun
     && descriptor.unitInstanceId === unitId
     && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
       === 'C4/underground,C4/surface');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 a must-be-submerged cast restriction suppresses only non-underwater casts', () => {
+  const decks = { north: deck('submerged-north'), south: deck('submerged-south') };
+  const cards = cardsFor(decks, {
+    attack: 3,
+    burrowing: true,
+    defense: 3,
+    manaCost: 1,
+    mustBeCastSubmerged: true,
+    submerge: true,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 1 },
+    voidwalk: true,
+  });
+  decks.north.atlas.forEach((cardId, index) => {
+    cards[cardId] = { cardType: 'site', elements: [index % 2 === 0 ? 'water' : 'earth'] };
+  });
+  decks.south.atlas.forEach((cardId) => {
+    cards[cardId] = { cardType: 'site', elements: ['water'] };
+  });
+  const submergedManifest = createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic',
+      revisionId: 'synthetic-submerged-only-v1',
+    },
+    cards,
+    decks,
+    firstSeat: 'north',
+    seed: 0,
+  });
+  let session = keep(createGameSession(submergedManifest));
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  const water = session.state.players.north.hand.atlas.find(({ cardId }) => {
+    const definition = session.state.cards[cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('water');
+  });
+  const land = session.state.players.north.hand.atlas.find(({ cardId }) => {
+    const definition = session.state.cards[cardId];
+    return definition?.cardType === 'site' && !definition.elements.includes('water');
+  });
+  assert.ok(water);
+  assert.ok(land);
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === water.instanceId && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === land.instanceId && descriptor.cell === 'C3');
+  const summons = legalGameActions(session.state, 'north');
+  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.region === undefined), false);
+  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cell === 'C3' && descriptor.region === 'underground'), false);
+  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.region === 'void'), false);
+  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cell === 'C4' && descriptor.region === 'underwater'), true);
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cell === 'C4' && descriptor.region === 'underwater');
+  const unitId = session.state.realm.units[0]?.instanceId;
+  assert.ok(unitId);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const moves = legalGameActions(session.state, 'north');
+  assert.equal(moves.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === unitId
+    && descriptor.to.cell === 'C3' && descriptor.to.region === 'underground'), true);
+  assert.equal(moves.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === unitId && descriptor.to.region === 'void'), true);
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === unitId
+    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+      === 'C4/underwater,C4/surface');
   take(({ descriptor }) => descriptor.kind === 'decline-attack');
   assert.equal(verifyGameReplay(session), true);
 });

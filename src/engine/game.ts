@@ -65,6 +65,7 @@ export type GameCardDefinition =
     movementBonus?: 1 | 2;
     movesOnlySideways?: boolean;
     mustBeCastBurrowed?: boolean;
+    mustBeCastSubmerged?: boolean;
     provides?: GameElement;
     ranged?: boolean;
     stealth?: boolean;
@@ -414,7 +415,7 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
         ? (definition.summonToAnySite ? siteCells : controlledCells)
           .filter((cell) => cell[0] === 'A' || cell[0] === 'E')
         : definition.summonToAnySite ? siteCells : controlledCells).flatMap((cell) => [
-      ...(!definition.mustBeCastBurrowed
+      ...(!definition.mustBeCastBurrowed && !definition.mustBeCastSubmerged
         ? [{
           cardId,
           cardInstanceId: instanceId,
@@ -424,7 +425,7 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
           manaCost: definition.manaCost,
         }]
         : []),
-      ...(definition.burrowing && !isWaterSite(state, cell)
+      ...(definition.burrowing && !definition.mustBeCastSubmerged && !isWaterSite(state, cell)
         ? [{
           cardId,
           cardInstanceId: instanceId,
@@ -447,7 +448,7 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
         }]
         : []),
       ]),
-      ...(definition.voidwalk && !definition.mustBeCastBurrowed
+      ...(definition.voidwalk && !definition.mustBeCastBurrowed && !definition.mustBeCastSubmerged
         ? REALM_CELLS.filter((cell) => !state.realm.sites[cell]
           && (!definition.mustBeCastToOuterColumn || cell[0] === 'A' || cell[0] === 'E'))
           .map((cell) => ({
@@ -560,6 +561,15 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   }
   if (card.mustBeCastBurrowed && !card.burrowing) {
     throw new RangeError(`${path}.mustBeCastBurrowed requires Burrowing`);
+  }
+  if (card.mustBeCastSubmerged !== undefined && typeof card.mustBeCastSubmerged !== 'boolean') {
+    throw new RangeError(`${path}.mustBeCastSubmerged must be boolean`);
+  }
+  if (card.mustBeCastSubmerged && !card.submerge) {
+    throw new RangeError(`${path}.mustBeCastSubmerged requires Submerge`);
+  }
+  if (card.mustBeCastBurrowed && card.mustBeCastSubmerged) {
+    throw new RangeError(`${path} cannot require both burrowed and submerged casting`);
   }
   if (card.ranged !== undefined && typeof card.ranged !== 'boolean') {
     throw new RangeError(`${path}.ranged must be boolean`);
@@ -696,6 +706,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.movementBonus ? { movementBonus: card.movementBonus } : {}),
             ...(card.movesOnlySideways === true ? { movesOnlySideways: true } : {}),
             ...(card.mustBeCastBurrowed === true ? { mustBeCastBurrowed: true } : {}),
+            ...(card.mustBeCastSubmerged === true ? { mustBeCastSubmerged: true } : {}),
             ...(card.provides ? { provides: card.provides } : {}),
             ...(card.ranged === true ? { ranged: true } : {}),
             ...(card.stealth === true ? { stealth: true } : {}),
