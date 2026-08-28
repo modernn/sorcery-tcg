@@ -85,6 +85,17 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airVoidwalk.deck.spellbook
     .find(({ name }) => name === 'Spectral Stalker')?.copies, 4);
   assert.equal(result.airVoidwalk.replayVerified, true);
+  assert.equal(result.waterEdgeConnection.polarBears, 'Polar Bears');
+  assert.equal(result.waterEdgeConnection.acceptedActionCount, 16);
+  assert.equal(result.waterEdgeConnection.wrapMoveAvailable, true);
+  assert.equal(result.waterEdgeConnection.avatarWrapUnavailable, true);
+  assert.equal(result.waterEdgeConnection.siteTargetAvailable, true);
+  assert.equal(result.waterEdgeConnection.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.waterEdgeConnection.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.waterEdgeConnection.deck.spellbook
+    .find(({ name }) => name === 'Polar Bears')?.copies, 4);
+  assert.equal(result.waterEdgeConnection.replayVerified, true);
   assert.equal(result.avatarSpellDrawn, true);
   assert.equal(result.charge.activatedOnSummon, true);
   assert.equal(result.genesis.siteDrawn, true);

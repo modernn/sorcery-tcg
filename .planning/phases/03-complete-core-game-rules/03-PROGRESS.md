@@ -30,6 +30,7 @@
 - A minion that cannot move to Defend is excluded only when movement is required; stationary Defend and Intercept remain legal.
 - A minion prohibited from Defend and Intercept is excluded from both response abilities while a directly attacked unit may still participate without using Defend.
 - Movement +1 and +2 use engine-issued explicit surface paths for both Move and Attack and Defend, including exact bounded paths and legal returning routes without repeating a directed step; sideways-only basic movement excludes forward, backward, and diagonal steps from both actions.
+- Card-granted top/bottom realm connection adds exact wraparound steps for Move and Attack and Defend without changing ordinary unit or site adjacency.
 - Submerge minions can be summoned underwater at Water sites, move between surface and underwater at a Water site, and swim between adjacent Water sites; attacks, Defend, Intercept, and projectiles respect exact regions while sites remain surface targets.
 - Burrowing minions can be summoned underground at land sites, move between surface and underground at a land site, and travel between adjacent land sites; units with both Burrowing and Submerge cross directly between adjacent underground land and underwater Water locations.
 - Voidwalk minions can be summoned to any empty void, move between adjacent voids and adjacent site surfaces, and cross directly between void and eligible subsurface regions; playing a site into an occupied void places its units on the new surface without moving them.
@@ -45,6 +46,7 @@
 - A legal 30/60 Air teaching-deck variant that proves Spectral Stalker can be summoned to an arbitrary real void, move through void, exit onto an enemy site's surface, and attack that site while a real non-Voidwalk minion has no void summon choice.
 - A legal 30/60 Air teaching-deck variant that proves Apprentice Wizard's Genesis draws a hidden spell after it is summoned while keeping the opponent view redacted.
 - A fourth legal 30/60 Water teaching deck that proves Muddy Pigs heals exactly 3 before entering its cemetery after a real simultaneous combat death; variants prove Sly Fox's end-turn Stealth timing and Sedge Crabs' C3-to-B3 sideways movement while real C2/C4 paths remain unavailable.
+- A legal 30/60 Water teaching-deck variant that proves Polar Bears can move directly from the top to bottom realm edge and attack the opposing site while its co-located Avatar has no wraparound move.
 - A legal 30/60 Water teaching-deck variant that proves Coral-Reef Kelpie has distinct surface and underwater summon choices at a real Water site while a real non-Submerge minion has only the surface choice.
 - A legal 30/60 Earth teaching-deck variant that proves Cave Trolls has distinct surface and underground summon choices at a real land site, travels underground beneath an enemy land site without attacking it, then surfaces and can attack that site; a real non-Burrowing minion has only the surface summon choice.
 - A fifth legal 30/60 Fire teaching deck that proves Monstrous Lion can Charge into an opposing unit but cannot target its site, then proves Lumbering Giant cannot use Defend or Intercept while ready and in range.
@@ -62,14 +64,14 @@
 - `pnpm game:demo -- 23`: completes in 138 accepted actions over 56 turns with byte-exact replay.
 - `pnpm play`: serves the playable core at `http://127.0.0.1:4174/`.
 - Browser checkpoint: a 22-action match moved a minion, handed Defend to the non-active seat, resolved a simultaneous trade into both cemeteries, and replayed byte-identically.
-- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 28-action Earth Burrowing, 24-action Earth first strike, 22-action Earth Ranged, 27-action Earth Ward, 27-action Airborne, 26-action Air Stealth, 26-action Air movement, 24-action Air Movement +2, 25-action Air unrestricted-summon, 17-action Air Voidwalk, 15-action Air Genesis spell-draw, 43-action Fire targeting/response, 23-action Water end-turn Stealth, 22-action Water sideways movement, 16-action Water Submerge, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
+- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 28-action Earth Burrowing, 24-action Earth first strike, 22-action Earth Ranged, 27-action Earth Ward, 27-action Airborne, 26-action Air Stealth, 26-action Air movement, 24-action Air Movement +2, 25-action Air unrestricted-summon, 17-action Air Voidwalk, 15-action Air Genesis spell-draw, 43-action Fire targeting/response, 23-action Water end-turn Stealth, 22-action Water sideways movement, 16-action Water edge connection, 16-action Water Submerge, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
 - `pnpm game:verify-private`: one passing ignored-authority integration scenario.
 - Death's Door scenarios prove same-turn direct-damage immunity, later death blows, simultaneous-defeat draws, nonlethal site strikes, and exact replay.
-- `pnpm verify`: 232 passing public tests at this checkpoint.
+- `pnpm verify`: 233 passing public tests at this checkpoint.
 
 ## Still required for Phase 3
 
-- Rubble replacement, terrain mutation, connection rules beyond the supported surface/subsurface movement graph, control changes, and card-specific placement overrides.
+- Rubble replacement, terrain mutation, connection rules beyond the supported region graph and top/bottom edge wrap, control changes, and card-specific placement overrides.
 - Full start/main/end phase triggers and duration cleanup beyond the supported narrow Genesis/Deathrite effects, minion damage, and summoning sickness.
 - Additional costs, non-minion spells, movement beyond bounded +1/+2 bonuses and sideways-only self-movement, further activated abilities, and card-specific targets.
 - Combat tiers beyond attacking-only first strike, projectile ranges and effects beyond Ranged 1, additional healing sources, prevention/modification beyond minion Ward, additional card-triggered damage/death behavior, and tournament ending overlays.

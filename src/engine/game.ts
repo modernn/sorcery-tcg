@@ -48,6 +48,7 @@ export type GameCardDefinition =
     charge?: boolean;
     cannotDefend?: boolean;
     cannotDefendOrIntercept?: boolean;
+    connectsTopBottom?: boolean;
     deathriteHeal?: number;
     deathriteDrawSite?: boolean;
     defense: number;
@@ -331,7 +332,7 @@ function otherSeat(seat: GameSeat): GameSeat {
   return seat === 'north' ? 'south' : 'north';
 }
 
-function borderingCells(cell: RealmCell): readonly RealmCell[] {
+function borderingCells(cell: RealmCell, connectsTopBottom = false): readonly RealmCell[] {
   const file = cell.charCodeAt(0);
   const rank = Number(cell[1]);
   return [
@@ -339,12 +340,15 @@ function borderingCells(cell: RealmCell): readonly RealmCell[] {
     [file, rank - 1],
     [file + 1, rank],
     [file, rank + 1],
+    ...(connectsTopBottom && rank === 1
+      ? [[file, 4]]
+      : connectsTopBottom && rank === 4 ? [[file, 1]] : []),
   ].filter(([nextFile, nextRank]) =>
     nextFile! >= 65 && nextFile! <= 69 && nextRank! >= 1 && nextRank! <= 4)
     .map(([nextFile, nextRank]) => `${String.fromCharCode(nextFile!)}${nextRank}` as RealmCell);
 }
 
-function diagonalCells(cell: RealmCell): readonly RealmCell[] {
+function diagonalCells(cell: RealmCell, connectsTopBottom = false): readonly RealmCell[] {
   const file = cell.charCodeAt(0);
   const rank = Number(cell[1]);
   return [
@@ -352,6 +356,9 @@ function diagonalCells(cell: RealmCell): readonly RealmCell[] {
     [file - 1, rank + 1],
     [file + 1, rank - 1],
     [file + 1, rank + 1],
+    ...(connectsTopBottom && rank === 1
+      ? [[file - 1, 4], [file + 1, 4]]
+      : connectsTopBottom && rank === 4 ? [[file - 1, 1], [file + 1, 1]] : []),
   ].filter(([nextFile, nextRank]) =>
     nextFile! >= 65 && nextFile! <= 69 && nextRank! >= 1 && nextRank! <= 4)
     .map(([nextFile, nextRank]) => `${String.fromCharCode(nextFile!)}${nextRank}` as RealmCell);
@@ -490,6 +497,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   }
   if (card.cannotDefendOrIntercept !== undefined && typeof card.cannotDefendOrIntercept !== 'boolean') {
     throw new RangeError(`${path}.cannotDefendOrIntercept must be boolean`);
+  }
+  if (card.connectsTopBottom !== undefined && typeof card.connectsTopBottom !== 'boolean') {
+    throw new RangeError(`${path}.connectsTopBottom must be boolean`);
   }
   if (card.deathriteDrawSite !== undefined && typeof card.deathriteDrawSite !== 'boolean') {
     throw new RangeError(`${path}.deathriteDrawSite must be boolean`);
@@ -643,6 +653,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.charge === true ? { charge: true } : {}),
             ...(card.cannotDefend === true ? { cannotDefend: true } : {}),
             ...(card.cannotDefendOrIntercept === true ? { cannotDefendOrIntercept: true } : {}),
+            ...(card.connectsTopBottom === true ? { connectsTopBottom: true } : {}),
             ...(card.deathriteDrawSite === true ? { deathriteDrawSite: true } : {}),
             ...(card.deathriteHeal ? { deathriteHeal: card.deathriteHeal } : {}),
             defense: card.defense,
@@ -984,6 +995,7 @@ function unitStatus(
   canMoveToDefend: boolean;
   canRespondToAttack: boolean;
   charge: boolean;
+  connectsTopBottom: boolean;
   lethal: boolean;
   location: RealmCell;
   movementSteps: number;
@@ -1010,6 +1022,7 @@ function unitStatus(
       canMoveToDefend: true,
       canRespondToAttack: true,
       charge: false,
+      connectsTopBottom: false,
       lethal: false,
       location: avatar.location,
       movementSteps: 1,
@@ -1036,6 +1049,7 @@ function unitStatus(
     canMoveToDefend: definition.cannotDefend !== true,
     canRespondToAttack: definition.cannotDefendOrIntercept !== true,
     charge: definition.charge === true,
+    connectsTopBottom: definition.connectsTopBottom === true,
     lethal: definition.lethal === true,
     location: unit.location,
     movementSteps: 1 + (definition.movementBonus ?? 0),
@@ -1076,6 +1090,7 @@ function movementPaths(
   burrowing = false,
   submerge = false,
   voidwalk = false,
+  connectsTopBottom = false,
 ): readonly (readonly GameLocation[])[] {
   if (!locationExists(state, start)) return [];
   const paths: GameLocation[][] = [[start]];
@@ -1085,9 +1100,9 @@ function movementPaths(
       const current = path.at(-1)!;
       const candidates: GameLocation[] = current.region === 'surface'
         ? [
-          ...borderingCells(current.cell).map((cell) => ({ cell, region: 'surface' as const })),
+          ...borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'surface' as const })),
           ...(airborne
-            ? diagonalCells(current.cell).map((cell) => ({ cell, region: 'surface' as const }))
+            ? diagonalCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'surface' as const }))
             : []),
           ...(burrowing && !isWaterSite(state, current.cell)
             ? [{ cell: current.cell, region: 'underground' as const }]
@@ -1096,40 +1111,40 @@ function movementPaths(
             ? [{ cell: current.cell, region: 'underwater' as const }]
             : []),
           ...(voidwalk
-            ? borderingCells(current.cell).map((cell) => ({ cell, region: 'void' as const }))
+            ? borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'void' as const }))
             : []),
         ]
         : current.region === 'underground' && burrowing
           ? [
             { cell: current.cell, region: 'surface' as const },
-            ...borderingCells(current.cell).map((cell) => ({ cell, region: 'underground' as const })),
+            ...borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'underground' as const })),
             ...(submerge
-              ? borderingCells(current.cell).map((cell) => ({ cell, region: 'underwater' as const }))
+              ? borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'underwater' as const }))
               : []),
             ...(voidwalk
-              ? borderingCells(current.cell).map((cell) => ({ cell, region: 'void' as const }))
+              ? borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'void' as const }))
               : []),
           ]
           : current.region === 'underwater' && submerge
           ? [
             { cell: current.cell, region: 'surface' as const },
-            ...borderingCells(current.cell).map((cell) => ({ cell, region: 'underwater' as const })),
+            ...borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'underwater' as const })),
             ...(burrowing
-              ? borderingCells(current.cell).map((cell) => ({ cell, region: 'underground' as const }))
+              ? borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'underground' as const }))
               : []),
             ...(voidwalk
-              ? borderingCells(current.cell).map((cell) => ({ cell, region: 'void' as const }))
+              ? borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'void' as const }))
               : []),
           ]
           : current.region === 'void' && voidwalk
             ? [
-              ...borderingCells(current.cell).map((cell) => ({ cell, region: 'void' as const })),
-              ...borderingCells(current.cell).map((cell) => ({ cell, region: 'surface' as const })),
+              ...borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'void' as const })),
+              ...borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'surface' as const })),
               ...(burrowing
-                ? borderingCells(current.cell).map((cell) => ({ cell, region: 'underground' as const }))
+                ? borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'underground' as const }))
                 : []),
               ...(submerge
-                ? borderingCells(current.cell).map((cell) => ({ cell, region: 'underwater' as const }))
+                ? borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'underwater' as const }))
                 : []),
             ]
           : [];
@@ -1176,6 +1191,7 @@ function defendPaths(
     unit.burrowing,
     unit.submerge,
     unit.voidwalk,
+    unit.connectsTopBottom,
   ).filter((path) => sameLocation(path.at(-1)!, destination));
 }
 
@@ -1193,6 +1209,7 @@ function movementDescriptors(state: GameState, seat: GameSeat): readonly GameAct
       unit.burrowing,
       unit.submerge,
       unit.voidwalk,
+      unit.connectsTopBottom,
     )
       .map((path) => ({
         from: { cell: unit.location, region: unit.region },

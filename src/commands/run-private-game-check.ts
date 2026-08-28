@@ -263,6 +263,16 @@ export type PrivateGameCheck = Readonly<{
     stealthLostAfterAttack: boolean;
     stealthMinion: string;
   }>;
+  waterEdgeConnection: Readonly<{
+    acceptedActionCount: number;
+    avatarWrapUnavailable: boolean;
+    deck: DeckList;
+    polarBears: string;
+    replayVerified: boolean;
+    seed: number;
+    siteTargetAvailable: boolean;
+    wrapMoveAvailable: boolean;
+  }>;
   waterEndTurnStealth: Readonly<{
     acceptedActionCount: number;
     attackSiteAvailable: boolean;
@@ -461,6 +471,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   submergeMinion: NormalizedCard;
   voidwalkMinion: NormalizedCard;
   wardMinion: NormalizedCard;
+  polarBears: NormalizedCard;
 }>> {
   const config = scenarioConfig(parseJsonWithDuplicateKeyCheck(await readFile(path, 'utf8')));
   const revisionRoot = resolve(REPOSITORY_ROOT, '.local', 'authority', 'revisions', config.revisionId);
@@ -633,6 +644,22 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || genesisSpellMinion.thresholds.water !== 0
     || genesisSpellMinion.rarity !== 'ordinary') {
     throw new Error('private Genesis spell-draw minion no longer matches its supported facts');
+  }
+  const polarBears = snapshot.cards.find(({ name }) => name === 'Polar Bears');
+  if (!polarBears
+    || polarBears.cardType !== 'minion'
+    || polarBears.rulesText.trim() !== 'Can move as if the top and bottom edges of the realm were connected.'
+    || polarBears.manaCost !== 2
+    || polarBears.attack !== 2
+    || polarBears.defense !== 2
+    || polarBears.elements.length !== 1
+    || polarBears.elements[0] !== 'water'
+    || polarBears.thresholds.air !== 0
+    || polarBears.thresholds.earth !== 0
+    || polarBears.thresholds.fire !== 0
+    || polarBears.thresholds.water !== 1
+    || polarBears.rarity !== 'ordinary') {
+    throw new Error('private top/bottom connection minion no longer matches its supported facts');
   }
   const cannotDefendMinion = snapshot.cards
     .find(({ stableId }) => stableId === config.cannotDefendMinionStableId);
@@ -893,6 +920,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     monstrousLion,
     movementMinion,
     movementTwoMinion,
+    polarBears,
     providerMinion,
     rangedMinion,
     roamingMinion,
@@ -956,6 +984,7 @@ function gameDefinition(
   burrowing = false,
   voidwalk = false,
   genesisDrawSpell = false,
+  connectsTopBottom = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -989,6 +1018,7 @@ function gameDefinition(
       cannotDefend,
       cannotDefendOrIntercept,
       charge,
+      connectsTopBottom,
       deathriteDrawSite,
       ...(deathriteHeal ? { deathriteHeal } : {}),
       defense: card.defense,
@@ -1017,7 +1047,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-genesis-spell' | 'air-voidwalk' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-genesis-spell' | 'air-voidwalk' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-edge-connection' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1144,6 +1174,12 @@ function buildManifest(
     input.sedgeCrabs,
     input.submergeMinion,
   ]);
+  const waterEdgeConnectionDeck = elementalDeck('water', [
+    input.healingMinion,
+    input.slyFox,
+    input.sedgeCrabs,
+    input.polarBears,
+  ]);
   const decks = {
     north: scenario === 'air-genesis-spell'
       ? airGenesisSpellDeck
@@ -1159,6 +1195,8 @@ function buildManifest(
         ? elementalDeck('air', [input.movementMinion, input.roamingMinion])
         : scenario === 'fire'
           ? elementalDeck('fire', [input.lumberingMinion, input.monstrousLion])
+        : scenario === 'water-edge-connection'
+          ? waterEdgeConnectionDeck
         : scenario === 'water-submerge'
           ? waterSubmergeDeck
         : scenario === 'water' || scenario === 'water-sideways' || scenario === 'water-stealth'
@@ -1170,6 +1208,8 @@ function buildManifest(
       ? airVoidwalkDeck
       : scenario === 'airborne' || scenario === 'movement-two' || scenario === 'stealth'
       ? airborneDeck
+      : scenario === 'water-edge-connection'
+        ? waterEdgeConnectionDeck
       : scenario === 'earth-burrowing'
         ? earthBurrowingDeck
       : scenario === 'earth-first-strike' || scenario === 'earth-ward' ? earthDeck : deck(true, false),
@@ -1219,6 +1259,7 @@ function buildManifest(
       card.stableId === input.burrowingMinion.stableId,
       card.stableId === input.voidwalkMinion.stableId,
       card.stableId === input.genesisSpellMinion.stableId,
+      card.stableId === input.polarBears.stableId,
     ),
   ]));
   return {
@@ -2136,6 +2177,47 @@ function findWaterOpening(
     ? 'end-turn Stealth'
     : sideways ? 'sideways movement' : submerge ? 'Submerge' : 'healing';
   throw new Error(`private Water ${scenarioName} scenario no longer produces its supported opening`);
+}
+
+function findWaterEdgeConnectionOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  featuredInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string];
+  seed: number;
+  session: GameSession;
+  southSiteInstanceId: string;
+}> {
+  // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
+  for (let offset = 1; offset <= 64; offset += 1) {
+    const seed = input.config.waterSeed + offset;
+    const built = buildManifest(input, seed, 'water-edge-connection');
+    const session = createGameSession(built.manifest);
+    const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('water');
+    });
+    const featuredInstanceId = availableMinionInstance(
+      session,
+      'north',
+      input.polarBears.stableId,
+      1,
+    );
+    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+    if (northSites.length >= 2 && featuredInstanceId && southSiteInstanceId) {
+      return {
+        ...built,
+        featuredInstanceId,
+        northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
+        seed,
+        session,
+        southSiteInstanceId,
+      };
+    }
+  }
+  throw new Error('private Water top/bottom connection scenario no longer produces its supported opening');
 }
 
 function keep(session: GameSession): GameSession {
@@ -3473,6 +3555,63 @@ function runWaterSubmerge(
   });
 }
 
+function runWaterEdgeConnection(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['waterEdgeConnection'] {
+  const opening = findWaterEdgeConnectionOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.featuredInstanceId
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const moves = legalGameActions(session.state, 'north');
+  const wraps = (candidate: GameLegalAction): boolean => candidate.descriptor.kind === 'move-and-attack'
+    && candidate.descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C1';
+  const wrapMoveAvailable = moves.some((candidate) => wraps(candidate)
+    && candidate.descriptor.kind === 'move-and-attack'
+    && candidate.descriptor.unitInstanceId === opening.featuredInstanceId);
+  const avatarWrapUnavailable = !moves.some((candidate) => wraps(candidate)
+    && candidate.descriptor.kind === 'move-and-attack'
+    && candidate.descriptor.unitInstanceId === session.state.players.north.avatar.card.instanceId);
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === opening.featuredInstanceId
+    && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C1');
+  const siteTargetAvailable = legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    avatarWrapUnavailable,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    polarBears: opening.names.get(input.polarBears.stableId) ?? input.polarBears.stableId,
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    siteTargetAvailable,
+    wrapMoveAvailable,
+  });
+}
+
 function runWaterEndTurnStealth(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['waterEndTurnStealth'] {
@@ -3690,6 +3829,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthWard = runEarthWard(input);
   const fireResponse = runFireResponse(input);
   const stealth = runStealth(input);
+  const waterEdgeConnection = runWaterEdgeConnection(input);
   const waterEndTurnStealth = runWaterEndTurnStealth(input);
   const waterHealing = runWaterHealing(input);
   const waterSidewaysMovement = runWaterSidewaysMovement(input);
@@ -3854,6 +3994,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     revisionId: input.config.revisionId,
     seed: opening.seed,
     stealth,
+    waterEdgeConnection,
     waterEndTurnStealth,
     waterHealing,
     waterSidewaysMovement,
