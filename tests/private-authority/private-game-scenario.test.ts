@@ -201,6 +201,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthBury.manaPaid, 3);
   assert.equal(result.earthBury.buriedBeforeDeath, true);
   assert.equal(result.earthBury.causalEventsVerified, true);
+  assert.equal(result.earthBury.deathNotBanishmentAndGameActive, true);
   assert.equal(result.earthBury.targetLeftRealm, true);
   assert.equal(result.earthBury.targetEnteredCemetery, true);
   assert.equal(result.earthBury.spellEnteredCemetery, true);
@@ -497,6 +498,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.waterDrown.targetEnteredCemetery, true);
   assert.equal(result.waterDrown.spellEnteredCemetery, true);
   assert.equal(result.waterDrown.causalEventsVerified, true);
+  assert.equal(result.waterDrown.deathNotBanishmentAndGameActive, true);
   assert.equal(result.waterDrown.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
   assert.equal(result.waterDrown.deck.spellbook
     .reduce((total, card) => total + card.copies, 0), 60);

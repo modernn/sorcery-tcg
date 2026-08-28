@@ -254,6 +254,7 @@ export type PrivateGameCheck = Readonly<{
     bury: string;
     causalEventsVerified: boolean;
     deck: DeckList;
+    deathNotBanishmentAndGameActive: boolean;
     exactlyOneBuryTarget: boolean;
     manaPaid: number;
     replayVerified: boolean;
@@ -567,6 +568,7 @@ export type PrivateGameCheck = Readonly<{
     acceptedActionCount: number;
     causalEventsVerified: boolean;
     deck: DeckList;
+    deathNotBanishmentAndGameActive: boolean;
     drown: string;
     exactTargetAvailable: boolean;
     ghostTownManaConsumed: boolean;
@@ -4959,6 +4961,20 @@ function runEarthBury(
   session = accept(session, chosenBury);
 
   const finalEvents = session.transcript.at(-1)?.events ?? [];
+  const exactEventOrder = finalEvents.map(({ type }) => type).join(',')
+    === 'magic-cast,minion-burrowed,minion-died,magic-resolved';
+  const castPayload = finalEvents[0] && isJsonRecord(finalEvents[0].payload)
+    ? finalEvents[0].payload
+    : undefined;
+  const burrowPayload = finalEvents[1] && isJsonRecord(finalEvents[1].payload)
+    ? finalEvents[1].payload
+    : undefined;
+  const deathPayload = finalEvents[2] && isJsonRecord(finalEvents[2].payload)
+    ? finalEvents[2].payload
+    : undefined;
+  const resolvedPayload = finalEvents[3] && isJsonRecord(finalEvents[3].payload)
+    ? finalEvents[3].payload
+    : undefined;
   const eventIndex = (type: string, instanceId: string): number =>
     finalEvents.findIndex(({ payload, type: eventType }) =>
       eventType === type && isJsonRecord(payload) && payload.instanceId === instanceId);
@@ -4979,11 +4995,27 @@ function runEarthBury(
         ?? input.firstStrikeTargetMinion.stableId,
     buriedBeforeDeath: burrowIndex >= 0 && burrowIndex < deathIndex,
     bury: opening.names.get(input.bury.stableId) ?? input.bury.stableId,
-    causalEventsVerified: castIndex >= 0
-      && castIndex < burrowIndex
+    causalEventsVerified: exactEventOrder
+      && castIndex === 0
+      && burrowIndex === 1
       && deathIndex === burrowIndex + 1
-      && deathIndex < resolvedIndex,
+      && resolvedIndex === 3
+      && castPayload?.instanceId === opening.buryInstanceId
+      && castPayload.manaPaid === 3
+      && castPayload.seat === 'north'
+      && castPayload.targetInstanceId === opening.boskTrollInstanceId
+      && castPayload.targetSeat === 'south'
+      && burrowPayload?.cell === 'C2'
+      && burrowPayload.instanceId === opening.boskTrollInstanceId
+      && burrowPayload.seat === 'south'
+      && burrowPayload.sourceInstanceId === opening.buryInstanceId
+      && deathPayload?.cardId === input.firstStrikeTargetMinion.stableId
+      && deathPayload.instanceId === opening.boskTrollInstanceId
+      && deathPayload.owner === 'south'
+      && resolvedPayload?.instanceId === opening.buryInstanceId,
     deck: deckList(opening.manifest.decks.north, opening.names),
+    deathNotBanishmentAndGameActive: exactEventOrder
+      && session.state.terminal.status === 'active',
     exactlyOneBuryTarget,
     manaPaid: manaBefore - session.state.players.north.mana,
     replayVerified: verifyGameReplay(session),
@@ -7498,11 +7530,12 @@ function runWaterDrown(
     : undefined;
   const submergedIndex = events.findIndex(({ type }) => type === 'minion-submerged');
   const deathIndex = events.findIndex(({ type }) => type === 'minion-died');
+  const exactEventOrder = events.map(({ type }) => type).join(',')
+    === 'magic-cast,minion-submerged,minion-died,magic-resolved';
 
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
-    causalEventsVerified: events.map(({ type }) => type).join(',')
-      === 'magic-cast,minion-submerged,minion-died,magic-resolved'
+    causalEventsVerified: exactEventOrder
       && castPayload?.instanceId === opening.drownInstanceId
       && castPayload.manaPaid === 3
       && castPayload.seat === 'north'
@@ -7517,6 +7550,8 @@ function runWaterDrown(
       && deathPayload.owner === 'north'
       && resolvedPayload?.instanceId === opening.drownInstanceId,
     deck: deckList(opening.manifest.decks.north, opening.names),
+    deathNotBanishmentAndGameActive: exactEventOrder
+      && session.state.terminal.status === 'active',
     drown: input.drown.name,
     exactTargetAvailable,
     ghostTownManaConsumed: manaBeforeGhostTown === 1
@@ -7530,7 +7565,9 @@ function runWaterDrown(
     replayVerified: verifyGameReplay(session),
     seravaTownsfolk: input.seravaTownsfolk.name,
     spellEnteredCemetery: session.state.players.north.cemetery
-      .some(({ instanceId }) => instanceId === opening.drownInstanceId),
+      .some(({ instanceId }) => instanceId === opening.drownInstanceId)
+      && session.state.players.north.hand.spellbook
+        .every(({ instanceId }) => instanceId !== opening.drownInstanceId),
     targetEnteredCemetery: session.state.players.north.cemetery
       .some(({ instanceId }) => instanceId === opening.seravaInstanceId),
     targetLeftRealm: session.state.realm.units
