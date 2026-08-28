@@ -53,6 +53,7 @@ type SpellFacts = Readonly<{
   summonToAnySite?: boolean;
   tapForMana?: number;
   thresholds: Readonly<{ air: number; earth: number; fire: number; water: number }>;
+  voidwalk?: boolean;
   ward?: boolean;
 }>;
 
@@ -122,6 +123,7 @@ function cardsFor(
         summonToAnySite: facts.summonToAnySite ?? false,
         ...(facts.tapForMana ? { tapForMana: facts.tapForMana } : {}),
         thresholds: { ...facts.thresholds },
+        voidwalk: facts.voidwalk ?? false,
         ward: facts.ward ?? false,
       };
     });
@@ -261,6 +263,13 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       [firstSpell]: { ...cards[firstSpell]!, burrowing: 'yes' } as unknown as GameCardDefinition,
     },
   }), /burrowing/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: { ...cards[firstSpell]!, voidwalk: 'yes' } as unknown as GameCardDefinition,
+    },
+  }), /voidwalk/);
 });
 
 test('TEST-03 different opponent hidden cards cannot change an observation or legal actions', () => {
@@ -1561,13 +1570,15 @@ test('RULE-04 Burrowing uses underground summons and movement only at land sites
   assert.equal(verifyGameReplay(water), true);
 });
 
-test('RULE-04 Burrowing and Submerge cross directly between adjacent land and Water', () => {
+test('RULE-04 combined region abilities permit eligible cross-region adjacency steps', () => {
   const decks = { north: deck('cross-north'), south: deck('cross-south') };
   const cards = cardsFor(decks, {
     burrowing: true,
     manaCost: 1,
+    movementBonus: 1,
     submerge: true,
     thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    voidwalk: true,
   });
   decks.north.atlas.forEach((cardId, index) => {
     cards[cardId] = { cardType: 'site', elements: [index % 2 === 0 ? 'earth' : 'water'] };
@@ -1624,7 +1635,68 @@ test('RULE-04 Burrowing and Submerge cross directly between adjacent land and Wa
   take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === unitId
     && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-      === 'C3/underwater,C4/underground');
+      === 'C3/underwater,C4/underground,B4/void');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 Voidwalk summons to any void and moves between adjacent void and surface locations', () => {
+  const voidwalk = {
+    attack: 2,
+    defense: 2,
+    manaCost: 1,
+    thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+    voidwalk: true,
+  } as const;
+  let session = keep(createGameSession(manifest(134, {
+    northSpell: voidwalk,
+    site: { elements: ['air'] },
+  })));
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site');
+  const summons = legalGameActions(session.state, 'north');
+  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cell === 'C4' && descriptor.region === undefined), true);
+  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cell === 'B4' && descriptor.region === 'void'), true);
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cell === 'B4' && descriptor.region === 'void');
+  const coveredUnitId = session.state.realm.units[0]?.instanceId;
+  assert.ok(coveredUnitId);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site');
+  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.region === 'void'), false);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B4');
+  assert.equal(session.state.realm.units.find(({ instanceId }) => instanceId === coveredUnitId)?.region, 'surface');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cell === 'B3' && descriptor.region === 'void');
+  const unitId = session.state.realm.units.find(({ region }) => region === 'void')?.instanceId;
+  assert.ok(unitId);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const moves = legalGameActions(session.state, 'north');
+  assert.equal(moves.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === unitId
+    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+      === 'B3/void,A3/void'), true);
+  assert.equal(moves.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === unitId
+    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+      === 'B3/void,B4/surface'), true);
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === unitId
+    && descriptor.to.cell === 'B4' && descriptor.to.region === 'surface');
   take(({ descriptor }) => descriptor.kind === 'decline-attack');
   assert.equal(verifyGameReplay(session), true);
 });

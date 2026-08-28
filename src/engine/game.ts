@@ -31,7 +31,10 @@ export type DeckZone = 'atlas' | 'spellbook';
 export type RealmCell = `${'A' | 'B' | 'C' | 'D' | 'E'}${1 | 2 | 3 | 4}`;
 export type GameElement = 'air' | 'earth' | 'fire' | 'water';
 export type GameThresholds = Readonly<Record<GameElement, number>>;
-export type GameRegion = 'surface' | 'underground' | 'underwater';
+export type GameRegion = 'surface' | 'underground' | 'underwater' | 'void';
+
+const REALM_CELLS = (['A', 'B', 'C', 'D', 'E'] as const)
+  .flatMap((file) => ([1, 2, 3, 4] as const).map((rank) => `${file}${rank}` as RealmCell));
 
 export type GameCardDefinition =
   | Readonly<{ attack: number; cardType: 'avatar'; defense: number; drawSpell: boolean; life: number }>
@@ -62,6 +65,7 @@ export type GameCardDefinition =
     summonToAnySite?: boolean;
     tapForMana?: number;
     thresholds: GameThresholds;
+    voidwalk?: boolean;
     ward?: boolean;
   }>;
 
@@ -133,7 +137,7 @@ type PendingCombat = Readonly<{
   combatants: readonly GameUnitRef[];
   defenders: readonly GameUnitRef[];
   originalTarget: CombatTarget | null;
-  region?: 'underground' | 'underwater';
+  region?: 'underground' | 'underwater' | 'void';
   targetRemoved: boolean;
 }>;
 
@@ -267,7 +271,7 @@ type GameActionDescriptor =
     cell: RealmCell;
     kind: 'summon-minion';
     manaCost: number;
-    region?: 'underground' | 'underwater';
+    region?: 'underground' | 'underwater' | 'void';
   }>
   | Readonly<{ kind: 'draw'; zone: DeckZone }>
   | Readonly<{
@@ -390,7 +394,8 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     if (definition.cardType !== 'minion'
       || player.mana < definition.manaCost
       || !meetsThresholds(state, seat, definition.thresholds)) return [];
-    return (definition.summonToAnySite ? siteCells : controlledCells).flatMap((cell) => [
+    return [
+      ...(definition.summonToAnySite ? siteCells : controlledCells).flatMap((cell) => [
       {
         cardId,
         cardInstanceId: instanceId,
@@ -421,7 +426,19 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
           region: 'underwater' as const,
         }]
         : []),
-    ]);
+      ]),
+      ...(definition.voidwalk
+        ? REALM_CELLS.filter((cell) => !state.realm.sites[cell]).map((cell) => ({
+          cardId,
+          cardInstanceId: instanceId,
+          casterInstanceId: player.avatar.card.instanceId,
+          cell,
+          kind: 'summon-minion' as const,
+          manaCost: definition.manaCost,
+          region: 'void' as const,
+        }))
+        : []),
+    ];
   });
 }
 
@@ -517,6 +534,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   }
   if (card.ward !== undefined && typeof card.ward !== 'boolean') {
     throw new RangeError(`${path}.ward must be boolean`);
+  }
+  if (card.voidwalk !== undefined && typeof card.voidwalk !== 'boolean') {
+    throw new RangeError(`${path}.voidwalk must be boolean`);
   }
   if (card.summonToAnySite !== undefined && typeof card.summonToAnySite !== 'boolean') {
     throw new RangeError(`${path}.summonToAnySite must be boolean`);
@@ -633,6 +653,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.summonToAnySite === true ? { summonToAnySite: true } : {}),
             ...(card.tapForMana ? { tapForMana: card.tapForMana } : {}),
             thresholds: { ...card.thresholds },
+            ...(card.voidwalk === true ? { voidwalk: true } : {}),
             ...(card.ward === true ? { ward: true } : {}),
           },
     ])),
@@ -966,6 +987,7 @@ function unitStatus(
   submerge: boolean;
   summoningSickness: boolean;
   tapped: boolean;
+  voidwalk: boolean;
 }> {
   if (ref.kind === 'avatar') {
     const avatar = state.players[ref.seat].avatar;
@@ -991,6 +1013,7 @@ function unitStatus(
       submerge: false,
       summoningSickness: false,
       tapped: avatar.tapped,
+      voidwalk: false,
     };
   }
   const unit = state.realm.units.find(({ instanceId }) => instanceId === ref.instanceId);
@@ -1016,6 +1039,7 @@ function unitStatus(
     submerge: definition.submerge === true,
     summoningSickness: unit.summoningSickness,
     tapped: unit.tapped,
+    voidwalk: definition.voidwalk === true,
   };
 }
 
@@ -1029,6 +1053,7 @@ function sameLocation(left: GameLocation, right: GameLocation): boolean {
 }
 
 function locationExists(state: GameState, location: GameLocation): boolean {
+  if (location.region === 'void') return state.realm.sites[location.cell] === undefined;
   return state.realm.sites[location.cell] !== undefined
     && (location.region === 'surface'
       || location.region === (isWaterSite(state, location.cell) ? 'underwater' : 'underground'));
@@ -1042,6 +1067,7 @@ function movementPaths(
   movesOnlySideways = false,
   burrowing = false,
   submerge = false,
+  voidwalk = false,
 ): readonly (readonly GameLocation[])[] {
   if (!locationExists(state, start)) return [];
   const paths: GameLocation[][] = [[start]];
@@ -1061,6 +1087,9 @@ function movementPaths(
           ...(submerge && isWaterSite(state, current.cell)
             ? [{ cell: current.cell, region: 'underwater' as const }]
             : []),
+          ...(voidwalk
+            ? borderingCells(current.cell).map((cell) => ({ cell, region: 'void' as const }))
+            : []),
         ]
         : current.region === 'underground' && burrowing
           ? [
@@ -1068,6 +1097,9 @@ function movementPaths(
             ...borderingCells(current.cell).map((cell) => ({ cell, region: 'underground' as const })),
             ...(submerge
               ? borderingCells(current.cell).map((cell) => ({ cell, region: 'underwater' as const }))
+              : []),
+            ...(voidwalk
+              ? borderingCells(current.cell).map((cell) => ({ cell, region: 'void' as const }))
               : []),
           ]
           : current.region === 'underwater' && submerge
@@ -1077,7 +1109,21 @@ function movementPaths(
             ...(burrowing
               ? borderingCells(current.cell).map((cell) => ({ cell, region: 'underground' as const }))
               : []),
+            ...(voidwalk
+              ? borderingCells(current.cell).map((cell) => ({ cell, region: 'void' as const }))
+              : []),
           ]
+          : current.region === 'void' && voidwalk
+            ? [
+              ...borderingCells(current.cell).map((cell) => ({ cell, region: 'void' as const })),
+              ...borderingCells(current.cell).map((cell) => ({ cell, region: 'surface' as const })),
+              ...(burrowing
+                ? borderingCells(current.cell).map((cell) => ({ cell, region: 'underground' as const }))
+                : []),
+              ...(submerge
+                ? borderingCells(current.cell).map((cell) => ({ cell, region: 'underwater' as const }))
+                : []),
+            ]
           : [];
       return candidates
         .filter((candidate) => locationExists(state, candidate)
@@ -1121,13 +1167,15 @@ function defendPaths(
     unit.movesOnlySideways,
     unit.burrowing,
     unit.submerge,
+    unit.voidwalk,
   ).filter((path) => sameLocation(path.at(-1)!, destination));
 }
 
 function movementDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   return unitRefs(state, seat).flatMap((ref) => {
     const unit = unitStatus(state, ref);
-    if (!readyUnit(state, ref) || !state.realm.sites[unit.location]) return [];
+    if (!readyUnit(state, ref)
+      || !locationExists(state, { cell: unit.location, region: unit.region })) return [];
     return movementPaths(
       state,
       { cell: unit.location, region: unit.region },
@@ -1136,6 +1184,7 @@ function movementDescriptors(state: GameState, seat: GameSeat): readonly GameAct
       unit.movesOnlySideways,
       unit.burrowing,
       unit.submerge,
+      unit.voidwalk,
     )
       .map((path) => ({
         from: { cell: unit.location, region: unit.region },
@@ -1957,7 +2006,13 @@ function applyDescriptor(
     return [
       withStateVersion(state, {
         players: replacePlayer(state, seat, updatedPlayer),
-        realm: { ...state.realm, sites: { ...state.realm.sites, [descriptor.cell]: site } },
+        realm: {
+          ...state.realm,
+          sites: { ...state.realm.sites, [descriptor.cell]: site },
+          units: state.realm.units.map((unit) => unit.location === descriptor.cell && unit.region === 'void'
+            ? { ...unit, region: 'surface' as const }
+            : unit),
+        },
       }),
       [
         { payload: { cardId: card.cardId, cell: descriptor.cell, instanceId: card.instanceId, seat }, type: 'site-played' },
@@ -2150,7 +2205,7 @@ function applyDescriptor(
       originalTarget: descriptor.hit,
       ...(unitStatus(state, descriptor.hit).region === 'surface'
         ? {}
-        : { region: unitStatus(state, descriptor.hit).region as 'underground' | 'underwater' }),
+        : { region: unitStatus(state, descriptor.hit).region as 'underground' | 'underwater' | 'void' }),
       targetRemoved: false,
     }), [shot, ...stealthOutcomes, strike], false);
   }
