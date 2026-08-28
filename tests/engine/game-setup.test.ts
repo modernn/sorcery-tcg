@@ -30,6 +30,7 @@ function deck(prefix: string, atlasCount = 30, spellbookCount = 50): GameDeckSpe
 
 type SpellFacts = Readonly<{
   attack?: number;
+  cannotAttackSites?: boolean;
   cannotDefend?: boolean;
   cannotDefendOrIntercept?: boolean;
   charge?: boolean;
@@ -86,6 +87,7 @@ function cardsFor(
       cards[cardId] = {
         attack: spell.attack ?? 1,
         cardType: 'minion',
+        cannotAttackSites: spell.cannotAttackSites ?? false,
         cannotDefend: spell.cannotDefend ?? false,
         cannotDefendOrIntercept: spell.cannotDefendOrIntercept ?? false,
         charge: spell.charge ?? false,
@@ -763,6 +765,32 @@ function northAttacksAtC2(
       && descriptor.to.cell === 'C2'));
   return { attackerInstanceId, defenderInstanceId, session, targetInstanceId };
 }
+
+test('RULE-04 a restricted attacker can target units but not sites', () => {
+  const setup = northAttacksAtC2(114, {
+    attack: 4,
+    cannotAttackSites: true,
+    charge: true,
+    defense: 4,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  });
+  let { session } = setup;
+  const actions = legalGameActions(session.state, 'north');
+  const targets = actions.flatMap(({ descriptor }) =>
+    descriptor.kind === 'declare-attack' ? [descriptor.target] : []);
+  assert.equal(targets.some(({ instanceId, kind }) =>
+    kind === 'minion' && instanceId === setup.targetInstanceId), true);
+  assert.equal(targets.some(({ kind }) => kind === 'site'), false);
+  assert.equal(actions.some(({ descriptor }) => descriptor.kind === 'decline-attack'), true);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === setup.targetInstanceId));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  assert.equal(verifyGameReplay(session), true);
+});
 
 test('RULE-03 a provider adds affinity until that minion dies', () => {
   const setup = northAttacksAtC2(46, {

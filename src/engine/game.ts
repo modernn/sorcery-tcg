@@ -39,6 +39,7 @@ export type GameCardDefinition =
   | Readonly<{
     attack: number;
     cardType: 'minion';
+    cannotAttackSites?: boolean;
     charge?: boolean;
     cannotDefend?: boolean;
     cannotDefendOrIntercept?: boolean;
@@ -391,6 +392,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.charge !== undefined && typeof card.charge !== 'boolean') {
     throw new RangeError(`${path}.charge must be boolean`);
   }
+  if (card.cannotAttackSites !== undefined && typeof card.cannotAttackSites !== 'boolean') {
+    throw new RangeError(`${path}.cannotAttackSites must be boolean`);
+  }
   if (card.cannotDefend !== undefined && typeof card.cannotDefend !== 'boolean') {
     throw new RangeError(`${path}.cannotDefend must be boolean`);
   }
@@ -507,6 +511,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
           : {
             attack: card.attack,
             cardType: 'minion' as const,
+            ...(card.cannotAttackSites === true ? { cannotAttackSites: true } : {}),
             ...(card.charge === true ? { charge: true } : {}),
             ...(card.cannotDefend === true ? { cannotDefend: true } : {}),
             ...(card.cannotDefendOrIntercept === true ? { cannotDefendOrIntercept: true } : {}),
@@ -834,6 +839,7 @@ function unitStatus(
   ref: GameUnitRef,
 ): Readonly<{
   attack: number;
+  canAttackSites: boolean;
   canMoveToDefend: boolean;
   canRespondToAttack: boolean;
   charge: boolean;
@@ -850,6 +856,7 @@ function unitStatus(
     if (definition.cardType !== 'avatar') throw new Error('Avatar lacks Avatar definition');
     return {
       attack: definition.attack,
+      canAttackSites: true,
       canMoveToDefend: true,
       canRespondToAttack: true,
       charge: false,
@@ -866,6 +873,7 @@ function unitStatus(
   if (definition.cardType !== 'minion') throw new Error('minion lacks minion definition');
   return {
     attack: definition.attack,
+    canAttackSites: definition.cannotAttackSites !== true,
     canMoveToDefend: definition.cannotDefend !== true,
     canRespondToAttack: definition.cannotDefendOrIntercept !== true,
     charge: definition.charge === true,
@@ -953,7 +961,7 @@ function attackTargets(state: GameState, pending: PendingCombat): readonly Comba
   const targets: CombatTarget[] = unitRefs(state, defendingSeat)
     .filter((ref) => unitStatus(state, ref).location === pending.cell);
   const site = state.realm.sites[pending.cell];
-  if (site?.controller === defendingSeat) {
+  if (site?.controller === defendingSeat && unitStatus(state, pending.attacker).canAttackSites) {
     targets.push({ instanceId: site.instanceId, kind: 'site', seat: defendingSeat });
   }
   return targets;
