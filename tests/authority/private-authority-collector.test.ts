@@ -234,6 +234,63 @@ function runPwsh(
   });
 }
 
+function invokeBoundedNode(
+  source: string,
+  timeoutSeconds: number,
+  maximumOutputCharacters: number,
+): Promise<ProcessResult> {
+  const command = [
+    '. $env:SORCERY_COLLECTOR_SCRIPT',
+    '$module = Get-Module Sorcery.PrivateAuthorityCollector',
+    'try { $result = & $module { param($source, $workingDirectory, $timeoutSeconds, $maximumOutputCharacters) Invoke-BoundedProcess -FileName "node" -ArgumentList @("--input-type=module", "--eval", $source) -WorkingDirectory $workingDirectory -TimeoutSeconds $timeoutSeconds -MaximumOutputCharacters $maximumOutputCharacters } $env:SORCERY_BOUNDED_SOURCE $env:SORCERY_REPOSITORY_ROOT ([int]$env:SORCERY_BOUNDED_TIMEOUT_SECONDS) ([int]$env:SORCERY_BOUNDED_MAXIMUM_OUTPUT_CHARACTERS); $result | ConvertTo-Json -Compress } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }',
+  ].join('; ');
+  return runPwsh(
+    ['-Command', command],
+    {
+      SORCERY_BOUNDED_MAXIMUM_OUTPUT_CHARACTERS: String(maximumOutputCharacters),
+      SORCERY_BOUNDED_SOURCE: source,
+      SORCERY_BOUNDED_TIMEOUT_SECONDS: String(timeoutSeconds),
+      SORCERY_COLLECTOR_SCRIPT: SCRIPT_PATH,
+      SORCERY_REPOSITORY_ROOT: REPOSITORY_ROOT,
+    },
+    5_000,
+  );
+}
+
+test('bounded verifier subprocess stops on timeout and output overflow without leaking output', async (context) => {
+  await context.test('timeout', async () => {
+    const startedAt = Date.now();
+    const result = await invokeBoundedNode(
+      "process.stderr.write('PRIVATE_TIMEOUT_CANARY'); setInterval(() => {}, 1000);",
+      1,
+      1_024,
+    );
+    assert.notEqual(result.code, null, result.stderr);
+    assert.notEqual(result.code, 0);
+    assert.equal(result.stdout, '');
+    assert.equal(result.stderr.trimEnd(), 'Subprocess timed out');
+    assert.ok(Date.now() - startedAt < 4_000, 'timeout termination exceeded its bounded grace');
+  });
+
+  await context.test('output overflow', async () => {
+    const startedAt = Date.now();
+    const result = await invokeBoundedNode(
+      "process.stdout.write('PRIVATE_OUTPUT_CANARY'.repeat(100000)); setInterval(() => {}, 1000);",
+      30,
+      1_024,
+    );
+    assert.notEqual(result.code, null, result.stderr);
+    assert.notEqual(result.code, 0);
+    assert.equal(result.stdout, '');
+    assert.equal(result.stderr.trimEnd(), 'Subprocess output limit exceeded');
+    assert.ok(Date.now() - startedAt < 4_000, 'output overflow termination exceeded its bounded grace');
+  });
+
+  const source = await readFile(SCRIPT_PATH, 'utf8');
+  assert.doesNotMatch(source, /\.WaitForExit\(\s*\)/);
+  assert.doesNotMatch(source, /Kill\(\$true\)\s*\}\s*catch\s*\{\s*\}/);
+});
+
 async function createFixture(): Promise<Fixture> {
   const sandbox = await mkdtemp(join(tmpdir(), 'sorcery-manual-intake-'));
   const repositoryRoot = join(sandbox, 'repository');

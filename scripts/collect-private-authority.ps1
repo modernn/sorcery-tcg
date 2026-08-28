@@ -253,13 +253,29 @@ function Assert-PrivateAuthorityContentSet {
     return $effectiveDates
 }
 
+function Stop-BoundedProcess {
+    param([Parameter(Mandatory)][Diagnostics.Process]$Process)
+
+    try {
+        if (-not $Process.HasExited) { $Process.Kill($true) }
+    }
+    catch {
+        try {
+            if ($Process.HasExited) { return }
+        }
+        catch { }
+        throw 'Subprocess termination failed'
+    }
+    if (-not $Process.WaitForExit(1000)) { throw 'Subprocess termination failed' }
+}
+
 function Invoke-BoundedProcess {
     param(
         [Parameter(Mandatory)][string]$FileName,
         [Parameter(Mandatory)][string[]]$ArgumentList,
         [Parameter(Mandatory)][string]$WorkingDirectory,
-        [Parameter(Mandatory)][int]$TimeoutSeconds,
-        [int]$MaximumOutputCharacters = 4096
+        [Parameter(Mandatory)][ValidateRange(1, 300)][int]$TimeoutSeconds,
+        [ValidateRange(1, 1048576)][int]$MaximumOutputCharacters = 4096
     )
 
     $start = [Diagnostics.ProcessStartInfo]::new()
@@ -275,21 +291,109 @@ function Invoke-BoundedProcess {
     $process.StartInfo = $start
     try {
         if (-not $process.Start()) { throw 'Subprocess did not start' }
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        $stderrTask = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit([int][TimeSpan]::FromSeconds($TimeoutSeconds).TotalMilliseconds)) {
-            try { $process.Kill($true) } catch { }
-            $process.WaitForExit()
-            $stdoutTask.GetAwaiter().GetResult() | Out-Null
-            $stderrTask.GetAwaiter().GetResult() | Out-Null
-            throw 'Subprocess timed out'
+        $bufferLength = [Math]::Min(1024, $MaximumOutputCharacters + 1)
+        $stdoutBuffer = [char[]]::new($bufferLength)
+        $stderrBuffer = [char[]]::new($bufferLength)
+        $stdout = [Text.StringBuilder]::new()
+        $stderr = [Text.StringBuilder]::new()
+        try {
+            $stdoutTask = $process.StandardOutput.ReadAsync($stdoutBuffer, 0, $stdoutBuffer.Length)
+            $stderrTask = $process.StandardError.ReadAsync($stderrBuffer, 0, $stderrBuffer.Length)
         }
-        $stdout = $stdoutTask.GetAwaiter().GetResult()
-        $stderr = $stderrTask.GetAwaiter().GetResult()
+        catch {
+            Stop-BoundedProcess $process
+            throw 'Subprocess output read failed'
+        }
+
+        $timer = [Diagnostics.Stopwatch]::StartNew()
+        $timeoutMilliseconds = $TimeoutSeconds * 1000
+        $processExited = $false
+        $drainTimer = $null
+        while (-not ($processExited -and $null -eq $stdoutTask -and $null -eq $stderrTask)) {
+            if ($null -ne $stdoutTask -and $stdoutTask.IsCompleted) {
+                try { $count = [int]$stdoutTask.GetAwaiter().GetResult() }
+                catch {
+                    Stop-BoundedProcess $process
+                    throw 'Subprocess output read failed'
+                }
+                if ($count -eq 0) {
+                    $stdoutTask = $null
+                }
+                else {
+                    if ($stdout.Length + $count -gt $MaximumOutputCharacters) {
+                        Stop-BoundedProcess $process
+                        throw 'Subprocess output limit exceeded'
+                    }
+                    $stdout.Append($stdoutBuffer, 0, $count) | Out-Null
+                    try {
+                        $stdoutTask = $process.StandardOutput.ReadAsync($stdoutBuffer, 0, $stdoutBuffer.Length)
+                    }
+                    catch {
+                        Stop-BoundedProcess $process
+                        throw 'Subprocess output read failed'
+                    }
+                }
+            }
+            if ($null -ne $stderrTask -and $stderrTask.IsCompleted) {
+                try { $count = [int]$stderrTask.GetAwaiter().GetResult() }
+                catch {
+                    Stop-BoundedProcess $process
+                    throw 'Subprocess output read failed'
+                }
+                if ($count -eq 0) {
+                    $stderrTask = $null
+                }
+                else {
+                    if ($stderr.Length + $count -gt $MaximumOutputCharacters) {
+                        Stop-BoundedProcess $process
+                        throw 'Subprocess output limit exceeded'
+                    }
+                    $stderr.Append($stderrBuffer, 0, $count) | Out-Null
+                    try {
+                        $stderrTask = $process.StandardError.ReadAsync($stderrBuffer, 0, $stderrBuffer.Length)
+                    }
+                    catch {
+                        Stop-BoundedProcess $process
+                        throw 'Subprocess output read failed'
+                    }
+                }
+            }
+
+            if (-not $processExited -and $process.WaitForExit(0)) {
+                $processExited = $true
+                $drainTimer = [Diagnostics.Stopwatch]::StartNew()
+            }
+            if ($processExited -and $null -eq $stdoutTask -and $null -eq $stderrTask) { break }
+
+            $remainingMilliseconds = if ($processExited) {
+                1000 - [int]$drainTimer.ElapsedMilliseconds
+            }
+            else {
+                $timeoutMilliseconds - [int]$timer.ElapsedMilliseconds
+            }
+            if ($remainingMilliseconds -le 0) {
+                Stop-BoundedProcess $process
+                if ($processExited) { throw 'Subprocess output read failed' }
+                throw 'Subprocess timed out'
+            }
+
+            $waitMilliseconds = [Math]::Min(25, $remainingMilliseconds)
+            $pendingTasks = @(@($stdoutTask, $stderrTask) | Where-Object { $null -ne $_ })
+            if ($pendingTasks.Count -gt 0) {
+                [Threading.Tasks.Task]::WaitAny(
+                    [Threading.Tasks.Task[]]$pendingTasks,
+                    $waitMilliseconds
+                ) | Out-Null
+            }
+            else {
+                $process.WaitForExit($waitMilliseconds) | Out-Null
+            }
+        }
+
         return [pscustomobject]@{
             exitCode = $process.ExitCode
-            stdout = if ($stdout.Length -le $MaximumOutputCharacters) { $stdout } else { $stdout.Substring(0, $MaximumOutputCharacters) }
-            stderr = if ($stderr.Length -le $MaximumOutputCharacters) { $stderr } else { $stderr.Substring(0, $MaximumOutputCharacters) }
+            stdout = $stdout.ToString()
+            stderr = $stderr.ToString()
         }
     }
     finally {
