@@ -28,7 +28,7 @@
 - A minion that cannot move to Defend is excluded only when movement is required; stationary Defend and Intercept remain legal.
 - Movement +1 uses engine-issued explicit surface paths for both Move and Attack and Defend, including exact two-step and legal returning routes.
 - A private-local actual-card adapter that verifies the normalized artifact and current Constructed format, builds legal 30/60 beginner decks under official rarity copy limits, and executes a deterministic real-card Charge and combat scenario without committing source data.
-- A second real-card Earth ramp deck that proves provided Earth affinity, Field Laborers' readiness-gated temporary mana, Zombie Horde as a five-mana payoff with restricted Defend, Land Surveyor's Genesis draw, and Kettletop Leprechaun's Deathrite draw.
+- A second real-card Earth ramp deck that proves Ghost Town's site-entry temporary mana, provided Earth affinity, Field Laborers' readiness-gated temporary mana, Zombie Horde as a five-mana payoff with restricted Defend, Land Surveyor's Genesis draw, and Kettletop Leprechaun's Deathrite draw.
 - A third legal 30/60 Air teaching deck that proves Snallygaster's exact two-step Movement +1 paths for both Defend and Move and Attack.
 - Observer-safe actions, rejections, causal events, hashes, exact replay, and a deterministic unranked match runner.
 - A no-dependency browser client that renders the authoritative 5x4 realm, scopes hidden information by seat, exposes only engine-issued actions, and verifies replay.

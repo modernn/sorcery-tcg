@@ -50,6 +50,7 @@ type ScenarioConfig = Readonly<{
   earthProviderMinionStableId: string;
   earthSeed: number;
   genesisMinionStableId: string;
+  ghostTownSiteStableId: string;
   lethalMinionStableId: string;
   manaMinionStableId: string;
   movementMinionStableId: string;
@@ -96,6 +97,9 @@ export type PrivateGameCheck = Readonly<{
     deathriteMinion: string;
     deathriteSiteDrawnBeforeCemetery: boolean;
     genesisSiteDrawn: boolean;
+    ghostTown: string;
+    ghostTownBonusMana: number;
+    ghostTownUnusedManaExpired: boolean;
     manaGained: number;
     manaMinion: string;
     manaUnavailableWhileSick: boolean;
@@ -136,6 +140,7 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     || typeof value.earthSeed !== 'number'
     || value.earthSeed < 0
     || typeof value.genesisMinionStableId !== 'string'
+    || typeof value.ghostTownSiteStableId !== 'string'
     || typeof value.lethalMinionStableId !== 'string'
     || typeof value.manaMinionStableId !== 'string'
     || typeof value.movementMinionStableId !== 'string'
@@ -144,7 +149,7 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     || !Number.isSafeInteger(value.seed)
     || typeof value.seed !== 'number'
     || value.seed < 0
-    || Object.keys(value).sort().join(',') !== 'airSeed,avatar,cannotDefendMinionStableId,chargeMinionStableId,deathriteMinionStableId,earthProviderMinionStableId,earthSeed,genesisMinionStableId,lethalMinionStableId,manaMinionStableId,movementMinionStableId,providerMinionStableId,revisionId,seed'
+    || Object.keys(value).sort().join(',') !== 'airSeed,avatar,cannotDefendMinionStableId,chargeMinionStableId,deathriteMinionStableId,earthProviderMinionStableId,earthSeed,genesisMinionStableId,ghostTownSiteStableId,lethalMinionStableId,manaMinionStableId,movementMinionStableId,providerMinionStableId,revisionId,seed'
     || Object.keys(avatar).sort().join(',') !== 'drawSpell,stableId') {
     throw new Error('private game scenario has an unsupported shape');
   }
@@ -157,6 +162,7 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     earthProviderMinionStableId: value.earthProviderMinionStableId,
     earthSeed: value.earthSeed,
     genesisMinionStableId: value.genesisMinionStableId,
+    ghostTownSiteStableId: value.ghostTownSiteStableId,
     lethalMinionStableId: value.lethalMinionStableId,
     manaMinionStableId: value.manaMinionStableId,
     movementMinionStableId: value.movementMinionStableId,
@@ -177,6 +183,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   format: FormatDefinition;
   formatStableId: string;
   genesisMinion: NormalizedCard;
+  ghostTownSite: NormalizedCard;
   lethalMinion: NormalizedCard;
   manaMinion: NormalizedCard;
   movementMinion: NormalizedCard;
@@ -255,6 +262,13 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || genesisMinion.rarity === null) {
     throw new Error('private Genesis minion no longer matches its supported facts');
   }
+  const ghostTownSite = snapshot.cards.find(({ stableId }) => stableId === config.ghostTownSiteStableId);
+  if (!ghostTownSite
+    || ghostTownSite.cardType !== 'site'
+    || ruleTextDigest(ghostTownSite.rulesText) !== 'sha256:88d7d0059b0cb0b591affdaf84626949782c50f2fdd0d332a4424662f4fef791'
+    || ghostTownSite.rarity === null) {
+    throw new Error('private site Genesis mana card no longer matches its supported facts');
+  }
   const earthProviderMinion = snapshot.cards
     .find(({ stableId }) => stableId === config.earthProviderMinionStableId);
   if (!earthProviderMinion
@@ -313,6 +327,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     format: selected.identity.payload,
     formatStableId: selected.identity.stableId,
     genesisMinion,
+    ghostTownSite,
     lethalMinion,
     manaMinion,
     movementMinion,
@@ -354,6 +369,7 @@ function gameDefinition(
   deathriteDrawSite = false,
   cannotDefend = false,
   movementPlusOne = false,
+  siteGenesisGainMana = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -367,7 +383,13 @@ function gameDefinition(
       life: card.life,
     };
   }
-  if (card.cardType === 'site') return { cardType: 'site', elements: card.elements };
+  if (card.cardType === 'site') {
+    return {
+      cardType: 'site',
+      elements: card.elements,
+      ...(siteGenesisGainMana ? { genesisGainMana: siteGenesisGainMana } : {}),
+    };
+  }
   if (card.cardType === 'minion'
     && card.attack !== null
     && card.defense !== null
@@ -441,6 +463,7 @@ function buildManifest(
     };
   };
   const earthDeck = (): GameDeckSpec => {
+    const ghostTownCopies = input.format.copyLimits[input.ghostTownSite.rarity!];
     const featured = [
       input.earthProviderMinion,
       input.manaMinion,
@@ -452,16 +475,17 @@ function buildManifest(
       Array.from({ length: input.format.copyLimits[card.rarity!] }, () => card.stableId));
     const earthSites = sites.filter((card) => card.rarity && card.elements.includes('earth'));
     const earthSiteCount = Math.min(
-      input.format.atlasMinimum,
+      input.format.atlasMinimum - ghostTownCopies,
       earthSites.reduce((total, card) => total + input.format.copyLimits[card.rarity!], 0),
     );
     const earthSiteIds = new Set(earthSites.map(({ stableId }) => stableId));
     return {
       atlas: [
+        ...Array.from({ length: ghostTownCopies }, () => input.ghostTownSite.stableId),
         ...fillZone(earthSites, earthSiteCount, input.format, false),
         ...fillZone(
           sites.filter(({ stableId }) => !earthSiteIds.has(stableId)),
-          input.format.atlasMinimum - earthSiteCount,
+          input.format.atlasMinimum - ghostTownCopies - earthSiteCount,
           input.format,
           false,
         ),
@@ -532,6 +556,7 @@ function buildManifest(
       card.stableId === input.deathriteMinion.stableId,
       card.stableId === input.cannotDefendMinion.stableId,
       card.stableId === input.movementMinion.stableId,
+      card.stableId === input.ghostTownSite.stableId ? 1 : 0,
     ),
   ]));
   return {
@@ -727,6 +752,7 @@ function findEarthOpening(
 ): Readonly<{
   deathriteInstanceId: string;
   genesisInstanceId: string;
+  ghostTownSiteInstanceId: string;
   manaInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -746,6 +772,8 @@ function findEarthOpening(
     const definition = session.state.cards[site.cardId];
     return definition?.cardType === 'site' && definition.elements.includes('earth');
   });
+  const ghostTownSiteInstanceId = session.state.players.north.hand.atlas
+    .find(({ cardId }) => cardId === input.ghostTownSite.stableId)?.instanceId;
   const providerInstanceId = availableMinionInstance(
     session,
     'north',
@@ -767,7 +795,8 @@ function findEarthOpening(
     4,
   );
   const south = earthOpponentOpening(session);
-  if (northSites.length === 3
+  if (northSites.length >= 2
+    && ghostTownSiteInstanceId
     && providerInstanceId
     && manaInstanceId
     && payoffInstanceId
@@ -778,11 +807,12 @@ function findEarthOpening(
       ...built,
       deathriteInstanceId,
       genesisInstanceId,
+      ghostTownSiteInstanceId,
       manaInstanceId,
       northSiteInstanceIds: [
         northSites[0]!.instanceId,
         northSites[1]!.instanceId,
-        northSites[2]!.instanceId,
+        ghostTownSiteInstanceId,
       ],
       payoffInstanceId,
       providerInstanceId,
@@ -914,10 +944,13 @@ function runEarthRamp(
 
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  const manaBeforeGhostTown = session.state.players.north.mana;
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
       && descriptor.cell === 'C2'));
+  const ghostTownBonusMana =
+    session.state.players.north.mana - manaBeforeGhostTown - 1;
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.manaInstanceId
@@ -925,6 +958,7 @@ function runEarthRamp(
   const manaUnavailableWhileSick = !legalGameActions(session.state, 'north').some(({ descriptor }) =>
     descriptor.kind === 'activate-mana' && descriptor.unitInstanceId === opening.manaInstanceId);
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  const ghostTownUnusedManaExpired = session.state.players.north.mana === 0;
 
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
@@ -1007,6 +1041,9 @@ function runEarthRamp(
     genesisSiteDrawn:
       afterGenesis.atlas.length === beforeGenesis.atlas.length - 1
       && afterGenesis.hand.atlas.length === beforeGenesis.hand.atlas.length + 1,
+    ghostTown: opening.names.get(input.ghostTownSite.stableId) ?? input.ghostTownSite.stableId,
+    ghostTownBonusMana,
+    ghostTownUnusedManaExpired,
     manaGained,
     manaMinion: opening.names.get(input.manaMinion.stableId) ?? input.manaMinion.stableId,
     manaUnavailableWhileSick,
