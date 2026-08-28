@@ -86,6 +86,18 @@ type DeckList = Readonly<{
 
 export type PrivateGameCheck = Readonly<{
   acceptedActionCount: number;
+  airArcLightning: Readonly<{
+    acceptedActionCount: number;
+    arcLightning: string;
+    deck: DeckList;
+    farSameRegionUnitUnavailable: boolean;
+    manaPaid: number;
+    nearbyTargetAvailable: boolean;
+    replayVerified: boolean;
+    snowLeopard: string;
+    snowLeopardDied: boolean;
+    spellEnteredCemetery: boolean;
+  }>;
   airGenesisSpell: Readonly<{
     acceptedActionCount: number;
     deck: DeckList;
@@ -543,6 +555,7 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
 async function readPrivateInputs(path: string): Promise<Readonly<{
   airborneMinion: NormalizedCard;
   airborneTargetMinion: NormalizedCard;
+  arcLightning: NormalizedCard;
   authorityHash: Hash;
   burrowingMinion: NormalizedCard;
   cards: readonly NormalizedCard[];
@@ -598,6 +611,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     throw new Error('private normalized card artifact identity is invalid');
   }
   const snapshot = normalizedCardSnapshotSchema.parse(artifact.identity.payload);
+  const arcLightning = snapshot.cards.find(({ name }) => name === 'Arc Lightning');
+  if (!arcLightning
+    || arcLightning.cardType !== 'magic'
+    || ruleTextDigest(arcLightning.rulesText) !== 'sha256:f3d80bf3beb0888fda11c2f199b8ac9c788ab3113a055060c26b701b634e7d33'
+    || arcLightning.manaCost !== 4
+    || arcLightning.attack !== null
+    || arcLightning.defense !== null
+    || arcLightning.life !== null
+    || arcLightning.elements.length !== 1
+    || arcLightning.elements[0] !== 'air'
+    || arcLightning.thresholds.air !== 2
+    || arcLightning.thresholds.earth !== 0
+    || arcLightning.thresholds.fire !== 0
+    || arcLightning.thresholds.water !== 0
+    || arcLightning.rarity !== 'ordinary') {
+    throw new Error('private nearby target-unit damage Magic no longer matches its supported facts');
+  }
   const airborneMinion = snapshot.cards.find(({ name }) => name === 'Plumed Pegasus');
   if (!airborneMinion
     || airborneMinion.cardType !== 'minion'
@@ -1157,6 +1187,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   return {
     airborneMinion,
     airborneTargetMinion,
+    arcLightning,
     authorityHash: artifact.contentHash,
     burrowingMinion,
     cards: snapshot.cards,
@@ -1261,7 +1292,8 @@ function gameDefinition(
   movesOnlyForward = false,
   connectsBurrowedAllies = false,
   immobile = false,
-  damageTargetUnit: 0 | 1 = 0,
+  damageTargetUnit: 0 | 1 | 4 = 0,
+  targetNearby = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1286,11 +1318,12 @@ function gameDefinition(
   }
   if (card.cardType === 'magic'
     && card.manaCost !== null
-    && damageTargetUnit === 1) {
+    && damageTargetUnit !== 0) {
     return {
       cardType: 'magic',
       damageTargetUnit,
       manaCost: card.manaCost,
+      ...(targetNearby ? { targetNearby: true } : {}),
       thresholds: card.thresholds,
     };
   }
@@ -1342,7 +1375,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-genesis-spell' | 'air-leyline' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1474,6 +1507,7 @@ function buildManifest(
     input.movementTwoMinion,
   ] as const;
   const airborneDeck = elementalDeck('air', airMinions);
+  const airArcLightningDeck = elementalDeck('air', airMinions, [], [input.arcLightning]);
   const airZapDeck = elementalDeck('air', airMinions, [], [input.zap]);
   const airGenesisSpellDeck = elementalDeck('air', [...airMinions, input.genesisSpellMinion]);
   const airLeylineDeck = elementalDeck('air', airMinions, [input.leylineHenge]);
@@ -1515,6 +1549,8 @@ function buildManifest(
   const decks = {
     north: scenario === 'air-leyline'
       ? airLeylineDeck
+      : scenario === 'air-arc-lightning'
+      ? airArcLightningDeck
       : scenario === 'air-genesis-spell'
       ? airGenesisSpellDeck
       : scenario === 'air-voidwalk'
@@ -1552,6 +1588,8 @@ function buildManifest(
           : deck(false, true),
     south: scenario === 'air-leyline'
       ? airLeylineDeck
+      : scenario === 'air-arc-lightning'
+      ? airArcLightningDeck
       : scenario === 'air-genesis-spell'
       ? airGenesisSpellDeck
       : scenario === 'air-voidwalk'
@@ -1636,7 +1674,10 @@ function buildManifest(
       card.stableId === input.dalceanPhalanx.stableId,
       card.stableId === input.secretTunnel.stableId,
       card.stableId === input.pudgeButcher.stableId,
-      card.stableId === input.zap.stableId ? 1 : 0,
+      card.stableId === input.arcLightning.stableId
+        ? 4
+        : card.stableId === input.zap.stableId ? 1 : 0,
+      card.stableId === input.arcLightning.stableId,
     ),
   ]));
   return {
@@ -2368,6 +2409,70 @@ function findAirZapOpening(
     }
   }
   throw new Error('private Air target-unit damage Magic scenario no longer produces its supported opening');
+}
+
+function findAirArcLightningOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  arcLightningInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string, string];
+  session: GameSession;
+  snowLeopardInstanceId: string;
+  southSiteInstanceIds: readonly [string, string];
+}> {
+  // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const built = buildManifest(input, input.config.airSeed + offset, 'air-arc-lightning');
+    const session = createGameSession(built.manifest);
+    const northHandSites = session.state.players.north.hand.atlas;
+    const northDrawnSite = session.state.players.north.atlas[0];
+    const northSites = northDrawnSite ? [...northHandSites, northDrawnSite] : [];
+    const northAirSources = northSites.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('air');
+    }).length;
+    const southFirstSite = session.state.players.south.hand.atlas.find(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('air');
+    });
+    const southSecondSite = session.state.players.south.hand.atlas
+      .find(({ instanceId }) => instanceId !== southFirstSite?.instanceId);
+    const arcLightningInstanceId = availableMinionInstance(
+      session,
+      'north',
+      input.arcLightning.stableId,
+      2,
+    );
+    const snowLeopardInstanceId = availableMinionInstance(
+      session,
+      'south',
+      input.stealthTargetMinion.stableId,
+      1,
+    );
+    if (northSites.length === 4
+      && northAirSources >= 2
+      && southFirstSite
+      && southSecondSite
+      && arcLightningInstanceId
+      && snowLeopardInstanceId) {
+      return {
+        ...built,
+        arcLightningInstanceId,
+        northSiteInstanceIds: [
+          northSites[0]!.instanceId,
+          northSites[1]!.instanceId,
+          northSites[2]!.instanceId,
+          northSites[3]!.instanceId,
+        ],
+        session,
+        snowLeopardInstanceId,
+        southSiteInstanceIds: [southFirstSite.instanceId, southSecondSite.instanceId],
+      };
+    }
+  }
+  throw new Error('private Air nearby Magic scenario no longer produces its supported opening');
 }
 
 function findAirborneOpening(
@@ -3933,6 +4038,103 @@ function runAirZap(
   });
 }
 
+function runAirArcLightning(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airArcLightning'] {
+  const opening = findAirArcLightningOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.snowLeopardInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === opening.snowLeopardInstanceId
+    && descriptor.path.map(({ cell }) => cell).join(',') === 'C1,C2');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+    && descriptor.cell === 'B3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === opening.snowLeopardInstanceId
+    && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[3]
+    && descriptor.cell === 'B4');
+  const targets = legalGameActions(session.state, 'north');
+  const nearbyTargetAvailable = targets.some(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.arcLightningInstanceId
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === opening.snowLeopardInstanceId);
+  const southAvatarInstanceId = session.state.players.south.avatar.card.instanceId;
+  const farSameRegionUnitUnavailable = targets.every(({ descriptor }) =>
+    descriptor.kind !== 'cast-magic'
+      || descriptor.cardInstanceId !== opening.arcLightningInstanceId
+      || descriptor.target.instanceId !== southAvatarInstanceId);
+  const manaBefore = session.state.players.north.mana;
+  take(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.cardInstanceId === opening.arcLightningInstanceId
+    && descriptor.target.kind === 'minion'
+    && descriptor.target.instanceId === opening.snowLeopardInstanceId);
+  const manaPaid = manaBefore - session.state.players.north.mana;
+  const snowLeopardDied = session.state.realm.units
+    .every(({ instanceId }) => instanceId !== opening.snowLeopardInstanceId)
+    && session.state.players.south.cemetery
+      .some(({ instanceId }) => instanceId === opening.snowLeopardInstanceId);
+  const spellEnteredCemetery = session.state.players.north.hand.spellbook
+    .every(({ instanceId }) => instanceId !== opening.arcLightningInstanceId)
+    && session.state.players.north.cemetery
+      .some(({ instanceId }) => instanceId === opening.arcLightningInstanceId);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    arcLightning:
+      opening.names.get(input.arcLightning.stableId) ?? input.arcLightning.stableId,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    farSameRegionUnitUnavailable,
+    manaPaid,
+    nearbyTargetAvailable,
+    replayVerified: verifyGameReplay(session),
+    snowLeopard:
+      opening.names.get(input.stealthTargetMinion.stableId)
+        ?? input.stealthTargetMinion.stableId,
+    snowLeopardDied,
+    spellEnteredCemetery,
+  });
+}
+
 function runAirborne(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['airborne'] {
@@ -5176,6 +5378,7 @@ function runWaterHealing(
 export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<PrivateGameCheck> {
   const input = await readPrivateInputs(path);
   const airGenesisSpell = runAirGenesisSpell(input);
+  const airArcLightning = runAirArcLightning(input);
   const airLeyline = runAirLeyline(input);
   const airborne = runAirborne(input);
   const airMovement = runAirMovement(input);
@@ -5307,6 +5510,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
     airGenesisSpell,
+    airArcLightning,
     airLeyline,
     airborne,
     airMovement,

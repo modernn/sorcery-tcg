@@ -279,6 +279,19 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
     ...input,
     cards: {
       ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        damageTargetUnit: 1,
+        manaCost: 1,
+        targetNearby: 'yes',
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /targetNearby/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
       [firstSpell]: { ...cards[firstSpell]!, movementBonus: 3 } as unknown as GameCardDefinition,
     },
   }), /movementBonus/);
@@ -855,7 +868,11 @@ test('RULE-03/05 targeted Magic pays mana, damages any unit, resolves Deathrite,
 });
 
 test('RULE-03 Magic targets stay in the caster region and exclude enemy Stealth', () => {
-  const targetIsLegal = (spell: SpellFacts, region: 'surface' | 'underground'): boolean => {
+  const targetIsLegal = (
+    spell: SpellFacts,
+    region: 'surface' | 'underground',
+    targetNearby = false,
+  ): boolean => {
     const decks = { north: deck('target-north', 4, 6), south: deck('target-south', 4, 6) };
     const cards = cardsFor(decks, spell, undefined, { elements: ['air'] });
     for (const cardId of decks.north.spellbook) {
@@ -863,6 +880,7 @@ test('RULE-03 Magic targets stay in the caster region and exclude enemy Stealth'
         cardType: 'magic',
         damageTargetUnit: 1,
         manaCost: 1,
+        ...(targetNearby ? { targetNearby: true } : {}),
         thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
       };
     }
@@ -893,6 +911,12 @@ test('RULE-03 Magic targets stay in the caster region and exclude enemy Stealth'
     session = accept(session, action(session, ({ descriptor }) =>
       descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
     assert.equal(verifyGameReplay(session), true);
+    if (targetNearby) {
+      assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+        descriptor.kind === 'cast-magic'
+          && descriptor.target.kind === 'avatar'
+          && descriptor.target.seat === 'north'), true);
+    }
     return legalGameActions(session.state, 'north').some(({ descriptor }) =>
       descriptor.kind === 'cast-magic'
         && descriptor.target.kind === 'minion'
@@ -910,6 +934,10 @@ test('RULE-03 Magic targets stay in the caster region and exclude enemy Stealth'
     mustBeCastBurrowed: true,
     thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
   }, 'underground'), false);
+  assert.equal(targetIsLegal({
+    manaCost: 1,
+    thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+  }, 'surface', true), false);
 });
 
 test('RULE-03 explicit permission allows a minion to be summoned to any site', () => {
