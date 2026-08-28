@@ -1077,7 +1077,7 @@ function finishFight(
             { payload: { amount, direct: true, instanceId: ref.instanceId, seat: ref.seat }, type: 'damage-dealt' },
             { payload: { instanceId: ref.instanceId, seat: ref.seat }, type: 'death-blow' },
           );
-        } else {
+        } else if (amount > 0) {
           damageOutcomes.push({
             payload: {
               amount: 0,
@@ -1102,10 +1102,12 @@ function finishFight(
           life,
         },
       });
-      damageOutcomes.push(
-        { payload: { amount: lost, direct: true, instanceId: ref.instanceId, seat: ref.seat }, type: 'damage-dealt' },
-        { payload: { amount: lost, life, seat: ref.seat }, type: 'avatar-life-lost' },
-      );
+      if (amount > 0) {
+        damageOutcomes.push(
+          { payload: { amount, direct: true, instanceId: ref.instanceId, seat: ref.seat }, type: 'damage-dealt' },
+          { payload: { amount: lost, life, seat: ref.seat }, type: 'avatar-life-lost' },
+        );
+      }
       if (avatar.life > 0 && life === 0) {
         damageOutcomes.push({
           payload: { seat: ref.seat, turnNumber: state.turnNumber },
@@ -1263,7 +1265,9 @@ function strikeUndefendedSite(
         },
         type: 'undefended-site-struck',
       },
-      { payload: { amount: lost, life, seat: target.seat }, type: 'avatar-life-lost' },
+      ...(lost > 0
+        ? [{ payload: { amount: lost, life, seat: target.seat }, type: 'avatar-life-lost' }]
+        : []),
       ...(player.avatar.life > 0 && life === 0
         ? [{
           payload: { seat: target.seat, turnNumber: state.turnNumber },

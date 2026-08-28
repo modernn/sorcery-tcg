@@ -691,7 +691,7 @@ function northAvatarAttacksSouthAtC2(seed: number): Readonly<{
   southAvatarInstanceId: string;
 }> {
   let session = keep(createGameSession(manifest(seed, {
-    avatar: { attack: 1, defense: 1, drawSpell: false, life: 1 },
+    avatar: { attack: 2, defense: 1, drawSpell: false, life: 1 },
   })));
   session = keep(session);
   const northAvatarInstanceId = session.state.players.north.avatar.card.instanceId;
@@ -772,6 +772,21 @@ test("RULE-04 Death's Door prevents same-turn direct damage and later simultaneo
   assert.equal(session.state.players.north.avatar.deathDoorTurn, 7);
   assert.equal(session.state.players.south.avatar.deathDoorTurn, 7);
   assert.deepEqual(session.state.terminal, { status: 'active' });
+  const firstFightEvents = session.transcript.at(-1)?.events ?? [];
+  assert.deepEqual(
+    firstFightEvents.filter(({ type }) => type === 'damage-dealt').map(({ payload }) => payload),
+    [
+      { amount: 2, direct: true, instanceId: northAvatarInstanceId, seat: 'north' },
+      { amount: 2, direct: true, instanceId: southAvatarInstanceId, seat: 'south' },
+    ],
+  );
+  assert.deepEqual(
+    firstFightEvents.filter(({ type }) => type === 'avatar-life-lost').map(({ payload }) => payload),
+    [
+      { amount: 1, life: 0, seat: 'north' },
+      { amount: 1, life: 0, seat: 'south' },
+    ],
+  );
 
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
@@ -853,6 +868,7 @@ test("RULE-04 later undefended site strikes cannot deliver Death's Door death bl
   assert.equal(session.state.players.south.avatar.life, 0);
   assert.deepEqual(session.state.terminal, { status: 'active' });
   assert.equal(session.transcript.at(-1)?.events.some(({ type }) => type === 'death-blow'), false);
+  assert.equal(session.transcript.at(-1)?.events.some(({ type }) => type === 'avatar-life-lost'), false);
   assert.equal(verifyGameReplay(session), true);
 });
 
