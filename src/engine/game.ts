@@ -50,7 +50,7 @@ export type GameCardDefinition =
     genesisDrawSite?: boolean;
     lethal?: boolean;
     manaCost: number;
-    movementPlusOne?: boolean;
+    movementBonus?: 1 | 2;
     provides?: GameElement;
     ranged?: boolean;
     stealth?: boolean;
@@ -450,8 +450,11 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.genesisDrawSite !== undefined && typeof card.genesisDrawSite !== 'boolean') {
     throw new RangeError(`${path}.genesisDrawSite must be boolean`);
   }
-  if (card.movementPlusOne !== undefined && typeof card.movementPlusOne !== 'boolean') {
-    throw new RangeError(`${path}.movementPlusOne must be boolean`);
+  if (card.movementBonus !== undefined
+    && (!Number.isSafeInteger(card.movementBonus)
+      || card.movementBonus < 1
+      || card.movementBonus > 2)) {
+    throw new RangeError(`${path}.movementBonus must be a safe integer between 1 and 2`);
   }
   if (card.ranged !== undefined && typeof card.ranged !== 'boolean') {
     throw new RangeError(`${path}.ranged must be boolean`);
@@ -568,7 +571,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.genesisDrawSite === true ? { genesisDrawSite: true } : {}),
             ...(card.lethal === true ? { lethal: true } : {}),
             manaCost: card.manaCost,
-            ...(card.movementPlusOne === true ? { movementPlusOne: true } : {}),
+            ...(card.movementBonus ? { movementBonus: card.movementBonus } : {}),
             ...(card.provides ? { provides: card.provides } : {}),
             ...(card.ranged === true ? { ranged: true } : {}),
             ...(card.stealth === true ? { stealth: true } : {}),
@@ -899,7 +902,7 @@ function unitStatus(
   charge: boolean;
   lethal: boolean;
   location: RealmCell;
-  movementSteps: 1 | 2;
+  movementSteps: number;
   ranged: boolean;
   stealthed: boolean;
   strikesFirstWhileAttacking: boolean;
@@ -941,7 +944,7 @@ function unitStatus(
     charge: definition.charge === true,
     lethal: definition.lethal === true,
     location: unit.location,
-    movementSteps: definition.movementPlusOne ? 2 : 1,
+    movementSteps: 1 + (definition.movementBonus ?? 0),
     ranged: definition.ranged === true,
     stealthed: unit.stealthed,
     strikesFirstWhileAttacking: definition.strikesFirstWhileAttacking === true,
