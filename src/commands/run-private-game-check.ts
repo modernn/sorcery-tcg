@@ -222,6 +222,20 @@ export type PrivateGameCheck = Readonly<{
     sidewaysPathUnavailable: boolean;
     siteTargetAvailable: boolean;
   }>;
+  earthSecretTunnel: Readonly<{
+    acceptedActionCount: number;
+    avatarDirectUnavailable: boolean;
+    avatarPhysicalAvailable: boolean;
+    caveTrolls: string;
+    deck: DeckList;
+    directOpponentUnavailable: boolean;
+    directTunnelMoveAvailable: boolean;
+    movedUnderground: boolean;
+    physicalMoveAvailable: boolean;
+    replayVerified: boolean;
+    secretTunnel: string;
+    seed: number;
+  }>;
   earthRamp: Readonly<{
     acceptedActionCount: number;
     affinityAdded: boolean;
@@ -524,6 +538,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   providerMinion: NormalizedCard;
   rangedMinion: NormalizedCard;
   roamingMinion: NormalizedCard;
+  secretTunnel: NormalizedCard;
   sedgeCrabs: NormalizedCard;
   slyFox: NormalizedCard;
   stealthMinion: NormalizedCard;
@@ -720,6 +735,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || dalceanPhalanx.thresholds.water !== 0
     || dalceanPhalanx.rarity !== 'exceptional') {
     throw new Error('private forward-only minion no longer matches its supported facts');
+  }
+  const secretTunnel = snapshot.cards.find(({ name }) => name === 'Secret Tunnel');
+  if (!secretTunnel
+    || secretTunnel.cardType !== 'site'
+    || ruleTextDigest(secretTunnel.rulesText) !== 'sha256:d69214307caa44faedf702291e4b879036e07d3e2f97b1afc5bcae7a66afc2d0'
+    || secretTunnel.manaCost !== null
+    || secretTunnel.attack !== null
+    || secretTunnel.defense !== null
+    || secretTunnel.life !== null
+    || secretTunnel.elements.length !== 1
+    || secretTunnel.elements[0] !== 'earth'
+    || secretTunnel.thresholds.air !== 0
+    || secretTunnel.thresholds.earth !== 1
+    || secretTunnel.thresholds.fire !== 0
+    || secretTunnel.thresholds.water !== 0
+    || secretTunnel.rarity !== 'exceptional') {
+    throw new Error('private burrowed-allies connection site no longer matches its supported facts');
   }
   const voidwalkMinion = snapshot.cards.find(({ name }) => name === 'Spectral Stalker');
   if (!voidwalkMinion
@@ -1069,6 +1101,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     providerMinion,
     rangedMinion,
     roamingMinion,
+    secretTunnel,
     sedgeCrabs,
     slyFox,
     stealthMinion,
@@ -1135,6 +1168,7 @@ function gameDefinition(
   mustBeCastBurrowed = false,
   mustBeCastSubmerged = false,
   movesOnlyForward = false,
+  connectsBurrowedAllies = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1151,6 +1185,7 @@ function gameDefinition(
   if (card.cardType === 'site') {
     return {
       cardType: 'site',
+      ...(connectsBurrowedAllies ? { connectsBurrowedAllies: true } : {}),
       elements: card.elements,
       genesisDrawSpellPerAdjacentSameCard: siteGenesisDrawSpellPerAdjacentSameCard,
       ...(siteGenesisGainMana ? { genesisGainMana: siteGenesisGainMana } : {}),
@@ -1202,7 +1237,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-genesis-spell' | 'air-leyline' | 'air-voidwalk' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-genesis-spell' | 'air-leyline' | 'air-voidwalk' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1314,6 +1349,10 @@ function buildManifest(
     ...earthMinions,
     input.dalceanPhalanx,
   ], [input.ghostTownSite]);
+  const earthTunnelDeck = elementalDeck('earth', [
+    ...earthMinions,
+    input.burrowingMinion,
+  ], [input.secretTunnel]);
   const airMinions = [
     input.movementMinion,
     input.roamingMinion,
@@ -1367,6 +1406,8 @@ function buildManifest(
         ? earthEntombedDeck
       : scenario === 'earth-forward'
         ? earthForwardDeck
+      : scenario === 'earth-tunnel'
+        ? earthTunnelDeck
       : scenario === 'earth-burrowing'
         ? earthBurrowingDeck
       : scenario === 'earth' || scenario === 'earth-first-strike' || scenario === 'earth-ward'
@@ -1400,6 +1441,8 @@ function buildManifest(
         ? earthEntombedDeck
       : scenario === 'earth-forward'
         ? earthForwardDeck
+      : scenario === 'earth-tunnel'
+        ? earthTunnelDeck
       : scenario === 'earth-burrowing'
         ? earthBurrowingDeck
       : scenario === 'earth-first-strike' || scenario === 'earth-ward' ? earthDeck : deck(true, false),
@@ -1458,6 +1501,7 @@ function buildManifest(
       card.stableId === input.entombed.stableId,
       card.stableId === input.drowned.stableId,
       card.stableId === input.dalceanPhalanx.stableId,
+      card.stableId === input.secretTunnel.stableId,
     ),
   ]));
   return {
@@ -1982,6 +2026,57 @@ function findEarthForwardOpening(
     }
   }
   throw new Error('private Earth forward-only scenario no longer produces its supported opening');
+}
+
+function findEarthSecretTunnelOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  caveTrollsInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string];
+  secretTunnelInstanceId: string;
+  seed: number;
+  session: GameSession;
+  southSiteInstanceId: string;
+}> {
+  // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const seed = input.config.earthSeed + offset;
+    const built = buildManifest(input, seed, 'earth-tunnel');
+    const session = createGameSession(built.manifest);
+    const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return cardId !== input.secretTunnel.stableId
+        && definition?.cardType === 'site'
+        && definition.elements.includes('earth');
+    });
+    const secretTunnelInstanceId = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.secretTunnel.stableId)?.instanceId;
+    const caveTrollsInstanceId = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 2),
+    ].find(({ cardId }) => cardId === input.burrowingMinion.stableId)?.instanceId;
+    const southSiteInstanceId = session.state.players.south.hand.atlas.find(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && !definition.elements.includes('water');
+    })?.instanceId;
+    if (northSites.length >= 2
+      && secretTunnelInstanceId
+      && caveTrollsInstanceId
+      && southSiteInstanceId) {
+      return {
+        ...built,
+        caveTrollsInstanceId,
+        northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
+        secretTunnelInstanceId,
+        seed,
+        session,
+        southSiteInstanceId,
+      };
+    }
+  }
+  throw new Error('private Secret Tunnel scenario no longer produces its supported opening');
 }
 
 function findAirOpening(
@@ -2852,6 +2947,93 @@ function runEarthForwardMovement(
     seed: opening.seed,
     sidewaysPathUnavailable,
     siteTargetAvailable,
+  });
+}
+
+function runEarthSecretTunnel(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthSecretTunnel'] {
+  const opening = findEarthSecretTunnelOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.secretTunnelInstanceId
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.caveTrollsInstanceId
+    && descriptor.cell === 'C4'
+    && descriptor.region === 'underground');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const moves = legalGameActions(session.state, 'north');
+  const hasPath = (
+    unitInstanceId: string,
+    cells: string,
+    region: 'surface' | 'underground',
+  ): boolean => moves.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === unitInstanceId
+    && descriptor.path.map(({ cell }) => cell).join(',') === cells
+    && descriptor.path.every((step) => step.region === region));
+  const physicalMoveAvailable = hasPath(opening.caveTrollsInstanceId, 'C4,C3', 'underground');
+  const directTunnelMoveAvailable = hasPath(
+    opening.caveTrollsInstanceId,
+    'C4,C2',
+    'underground',
+  );
+  const directOpponentUnavailable = !hasPath(
+    opening.caveTrollsInstanceId,
+    'C4,C1',
+    'underground',
+  );
+  const avatarInstanceId = session.state.players.north.avatar.card.instanceId;
+  const avatarPhysicalAvailable = hasPath(avatarInstanceId, 'C4,C3', 'surface');
+  const avatarDirectUnavailable = !hasPath(avatarInstanceId, 'C4,C2', 'surface');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === opening.caveTrollsInstanceId
+    && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C2'
+    && descriptor.path.every((step) => step.region === 'underground'));
+  const movedUnderground = session.state.realm.units.some(({ instanceId, location, region }) =>
+    instanceId === opening.caveTrollsInstanceId && location === 'C2' && region === 'underground');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    avatarDirectUnavailable,
+    avatarPhysicalAvailable,
+    caveTrolls:
+      opening.names.get(input.burrowingMinion.stableId) ?? input.burrowingMinion.stableId,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    directOpponentUnavailable,
+    directTunnelMoveAvailable,
+    movedUnderground,
+    physicalMoveAvailable,
+    replayVerified: verifyGameReplay(session),
+    secretTunnel: opening.names.get(input.secretTunnel.stableId) ?? input.secretTunnel.stableId,
+    seed: opening.seed,
   });
 }
 
@@ -4469,6 +4651,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthForwardMovement = runEarthForwardMovement(input);
   const earthRamp = runEarthRamp(input);
   const earthRanged = runEarthRanged(input);
+  const earthSecretTunnel = runEarthSecretTunnel(input);
   const earthWard = runEarthWard(input);
   const fireResponse = runFireResponse(input);
   const stealth = runStealth(input);
@@ -4615,6 +4798,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthFirstStrike,
     earthForwardMovement,
     earthRanged,
+    earthSecretTunnel,
     earthWard,
     fireResponse,
     finalStateHash: hashGameState(session.state),

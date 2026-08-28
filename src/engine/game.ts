@@ -40,6 +40,7 @@ export type GameCardDefinition =
   | Readonly<{ attack: number; cardType: 'avatar'; defense: number; drawSpell: boolean; life: number }>
   | Readonly<{
     cardType: 'site';
+    connectsBurrowedAllies?: boolean;
     elements: readonly GameElement[];
     genesisDrawSpellPerAdjacentSameCard?: boolean;
     genesisGainMana?: number;
@@ -500,6 +501,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && typeof card.genesisDrawSpellPerAdjacentSameCard !== 'boolean') {
       throw new RangeError(`${path}.genesisDrawSpellPerAdjacentSameCard must be boolean`);
     }
+    if (card.connectsBurrowedAllies !== undefined && typeof card.connectsBurrowedAllies !== 'boolean') {
+      throw new RangeError(`${path}.connectsBurrowedAllies must be boolean`);
+    }
     return;
   }
   if (card.cardType !== 'minion') throw new RangeError(`${path}.cardType is unsupported`);
@@ -559,6 +563,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   }
   if (card.movesOnlyForward !== undefined && typeof card.movesOnlyForward !== 'boolean') {
     throw new RangeError(`${path}.movesOnlyForward must be boolean`);
+  }
+  if (card.movesOnlyForward && card.movesOnlySideways) {
+    throw new RangeError(`${path} cannot move only forward and only sideways`);
   }
   if (card.mustBeCastBurrowed !== undefined && typeof card.mustBeCastBurrowed !== 'boolean') {
     throw new RangeError(`${path}.mustBeCastBurrowed must be boolean`);
@@ -683,6 +690,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
         : card.cardType === 'site'
           ? {
             cardType: 'site' as const,
+            ...(card.connectsBurrowedAllies === true ? { connectsBurrowedAllies: true } : {}),
             elements: [...card.elements],
             ...(card.genesisDrawSpellPerAdjacentSameCard === true
               ? { genesisDrawSpellPerAdjacentSameCard: true }
@@ -1133,13 +1141,36 @@ function locationExists(state: GameState, location: GameLocation): boolean {
       || location.region === (isWaterSite(state, location.cell) ? 'underwater' : 'underground'));
 }
 
+function burrowedConnectionLocations(
+  state: GameState,
+  seat: GameSeat,
+  cell: RealmCell,
+  connectsTopBottom: boolean,
+  submerge: boolean,
+): readonly GameLocation[] {
+  const controlled = controlledSiteCells(state, seat);
+  if (!controlled.includes(cell)) return [];
+  const tunnels = controlled.filter((candidate) => {
+    const site = state.realm.sites[candidate];
+    const definition = site && cardDefinition(state, site.cardId);
+    return definition?.cardType === 'site' && definition.connectsBurrowedAllies === true;
+  });
+  const adjacent = new Set(borderingCells(cell, connectsTopBottom));
+  return (tunnels.includes(cell) ? controlled : tunnels)
+    .filter((candidate) => candidate !== cell && !adjacent.has(candidate))
+    .flatMap((candidate): readonly GameLocation[] => isWaterSite(state, candidate)
+      ? submerge ? [{ cell: candidate, region: 'underwater' as const }] : []
+      : [{ cell: candidate, region: 'underground' as const }]);
+}
+
 function movementPaths(
   state: GameState,
   start: GameLocation,
   maximumSteps: number,
+  seat: GameSeat,
   airborne = false,
   movesOnlySideways = false,
-  movesOnlyForwardFor: GameSeat | null = null,
+  movesOnlyForward = false,
   burrowing = false,
   submerge = false,
   voidwalk = false,
@@ -1151,6 +1182,9 @@ function movementPaths(
   for (let step = 0; step < maximumSteps; step += 1) {
     frontier = frontier.flatMap((path) => {
       const current = path.at(-1)!;
+      const tunnelHops = current.region === 'underground' && burrowing
+        ? burrowedConnectionLocations(state, seat, current.cell, connectsTopBottom, submerge)
+        : [];
       const candidates: GameLocation[] = current.region === 'surface'
         ? [
           ...borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'surface' as const })),
@@ -1171,6 +1205,7 @@ function movementPaths(
           ? [
             { cell: current.cell, region: 'surface' as const },
             ...borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'underground' as const })),
+            ...tunnelHops,
             ...(submerge
               ? borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'underwater' as const }))
               : []),
@@ -1202,20 +1237,25 @@ function movementPaths(
             ]
           : [];
       return candidates
-        .filter((candidate) => locationExists(state, candidate)
-          && (!movesOnlySideways
-            || candidate.region === current.region && candidate.cell[1] === current.cell[1])
-          && (!movesOnlyForwardFor
-            || candidate.region === current.region
-              && candidate.cell[0] === current.cell[0]
-              && (Number(candidate.cell[1]) - Number(current.cell[1])
-                === (movesOnlyForwardFor === 'north' ? -1 : 1)
-                || connectsTopBottom && (movesOnlyForwardFor === 'north'
-                  ? current.cell[1] === '1' && candidate.cell[1] === '4'
-                  : current.cell[1] === '4' && candidate.cell[1] === '1')))
-          && !path.some((from, index) =>
-            sameLocation(from, current) && path[index + 1] !== undefined
-              && sameLocation(path[index + 1]!, candidate)))
+        .filter((candidate) => {
+          const tunnelHop = tunnelHops.some((location) => sameLocation(location, candidate));
+          // ponytail: tunnel-hop direction stays implicit until direction-sensitive effects need path metadata.
+          return locationExists(state, candidate)
+            && (tunnelHop || (
+              (!movesOnlySideways
+                || candidate.region === current.region && candidate.cell[1] === current.cell[1])
+              && (!movesOnlyForward
+                || candidate.region === current.region
+                  && candidate.cell[0] === current.cell[0]
+                  && (Number(candidate.cell[1]) - Number(current.cell[1])
+                    === (seat === 'north' ? -1 : 1)
+                    || connectsTopBottom && (seat === 'north'
+                      ? current.cell[1] === '1' && candidate.cell[1] === '4'
+                      : current.cell[1] === '4' && candidate.cell[1] === '1')))))
+            && !path.some((from, index) =>
+              sameLocation(from, current) && path[index + 1] !== undefined
+                && sameLocation(path[index + 1]!, candidate));
+        })
         .sort((left, right) => left.cell === right.cell
           ? left.region < right.region ? -1 : left.region > right.region ? 1 : 0
           : left.cell < right.cell ? -1 : 1)
@@ -1247,9 +1287,10 @@ function defendPaths(
     state,
     { cell: unit.location, region: unit.region },
     unit.canMoveToDefend ? unit.movementSteps : 0,
+    ref.seat,
     unit.airborne,
     unit.movesOnlySideways,
-    unit.movesOnlyForward ? ref.seat : null,
+    unit.movesOnlyForward,
     unit.burrowing,
     unit.submerge,
     unit.voidwalk,
@@ -1266,9 +1307,10 @@ function movementDescriptors(state: GameState, seat: GameSeat): readonly GameAct
       state,
       { cell: unit.location, region: unit.region },
       unit.movementSteps,
+      ref.seat,
       unit.airborne,
       unit.movesOnlySideways,
-      unit.movesOnlyForward ? ref.seat : null,
+      unit.movesOnlyForward,
       unit.burrowing,
       unit.submerge,
       unit.voidwalk,
