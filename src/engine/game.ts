@@ -46,6 +46,7 @@ export type GameCardDefinition =
     genesisDrawSite?: boolean;
     lethal?: boolean;
     manaCost: number;
+    movementPlusOne?: boolean;
     provides?: GameElement;
     tapForMana?: number;
     thresholds: GameThresholds;
@@ -98,6 +99,8 @@ type GameUnitRef = Readonly<{
   kind: 'avatar' | 'minion';
   seat: GameSeat;
 }>;
+
+type GameLocation = Readonly<{ cell: RealmCell; region: GameRegion }>;
 
 type CombatTarget = GameUnitRef | Readonly<{
   instanceId: StateHash;
@@ -247,17 +250,19 @@ type GameActionDescriptor =
   }>
   | Readonly<{ kind: 'draw'; zone: DeckZone }>
   | Readonly<{
-    from: Readonly<{ cell: RealmCell; region: GameRegion }>;
+    from: GameLocation;
     kind: 'move-and-attack';
-    to: Readonly<{ cell: RealmCell; region: GameRegion }>;
+    path: readonly GameLocation[];
+    to: GameLocation;
     unitInstanceId: StateHash;
   }>
   | Readonly<{ kind: 'decline-attack' }>
   | Readonly<{ kind: 'declare-attack'; target: CombatTarget }>
   | Readonly<{
-    from: Readonly<{ cell: RealmCell; region: GameRegion }>;
+    from: GameLocation;
     kind: 'defend';
-    to: Readonly<{ cell: RealmCell; region: GameRegion }>;
+    path: readonly GameLocation[];
+    to: GameLocation;
     unitInstanceId: StateHash;
   }>
   | Readonly<{ kind: 'close-defend'; originalTargetParticipates: boolean }>
@@ -388,6 +393,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.genesisDrawSite !== undefined && typeof card.genesisDrawSite !== 'boolean') {
     throw new RangeError(`${path}.genesisDrawSite must be boolean`);
   }
+  if (card.movementPlusOne !== undefined && typeof card.movementPlusOne !== 'boolean') {
+    throw new RangeError(`${path}.movementPlusOne must be boolean`);
+  }
   if (card.tapForMana !== undefined
     && (!Number.isSafeInteger(card.tapForMana) || card.tapForMana < 1 || card.tapForMana > MAX_COMBAT_STAT)) {
     throw new RangeError(path + '.tapForMana must be a safe integer between 1 and ' + MAX_COMBAT_STAT);
@@ -480,6 +488,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.genesisDrawSite === true ? { genesisDrawSite: true } : {}),
             ...(card.lethal === true ? { lethal: true } : {}),
             manaCost: card.manaCost,
+            ...(card.movementPlusOne === true ? { movementPlusOne: true } : {}),
             ...(card.provides ? { provides: card.provides } : {}),
             ...(card.tapForMana ? { tapForMana: card.tapForMana } : {}),
             thresholds: { ...card.thresholds },
@@ -800,6 +809,7 @@ function unitStatus(
   charge: boolean;
   lethal: boolean;
   location: RealmCell;
+  movementSteps: 1 | 2;
   summoningSickness: boolean;
   tapped: boolean;
 }> {
@@ -814,6 +824,7 @@ function unitStatus(
       charge: false,
       lethal: false,
       location: avatar.location,
+      movementSteps: 1,
       summoningSickness: false,
       tapped: avatar.tapped,
     };
@@ -828,6 +839,7 @@ function unitStatus(
     charge: definition.charge === true,
     lethal: definition.lethal === true,
     location: unit.location,
+    movementSteps: definition.movementPlusOne ? 2 : 1,
     summoningSickness: unit.summoningSickness,
     tapped: unit.tapped,
   };
@@ -838,17 +850,57 @@ function readyUnit(state: GameState, ref: GameUnitRef): boolean {
   return !unit.tapped && (!unit.summoningSickness || unit.charge);
 }
 
+function surfacePaths(
+  state: GameState,
+  start: RealmCell,
+  maximumSteps: number,
+): readonly (readonly RealmCell[])[] {
+  if (!state.realm.sites[start]) return [];
+  const paths: RealmCell[][] = [[start]];
+  let frontier: RealmCell[][] = [[start]];
+  for (let step = 0; step < maximumSteps; step += 1) {
+    frontier = frontier.flatMap((path) => borderingCells(path.at(-1)!)
+      .filter((cell) => state.realm.sites[cell])
+      .sort()
+      .map((cell) => [...path, cell]));
+    paths.push(...frontier);
+  }
+  return paths;
+}
+
+function pathLocations(path: readonly RealmCell[]): readonly GameLocation[] {
+  return path.map((cell) => ({ cell, region: 'surface' }));
+}
+
+function samePath(left: readonly GameLocation[], right: readonly GameLocation[]): boolean {
+  return left.length === right.length
+    && left.every((location, index) =>
+      location.cell === right[index]?.cell && location.region === right[index]?.region);
+}
+
+function defendPaths(
+  state: GameState,
+  ref: GameUnitRef,
+  destination: RealmCell,
+): readonly (readonly RealmCell[])[] {
+  const unit = unitStatus(state, ref);
+  if (!readyUnit(state, ref)) return [];
+  return surfacePaths(
+    state,
+    unit.location,
+    unit.canMoveToDefend ? unit.movementSteps : 0,
+  ).filter((path) => path.at(-1) === destination);
+}
+
 function movementDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   return unitRefs(state, seat).flatMap((ref) => {
     const unit = unitStatus(state, ref);
     if (!readyUnit(state, ref) || !state.realm.sites[unit.location]) return [];
-    const destinations = [unit.location, ...borderingCells(unit.location)]
-      .filter((cell) => state.realm.sites[cell])
-      .sort();
-    return destinations.map((cell) => ({
+    return surfacePaths(state, unit.location, unit.movementSteps).map((path) => ({
       from: { cell: unit.location, region: 'surface' as const },
       kind: 'move-and-attack' as const,
-      to: { cell, region: 'surface' as const },
+      path: pathLocations(path),
+      to: { cell: path.at(-1)!, region: 'surface' as const },
       unitInstanceId: ref.instanceId,
     }));
   });
@@ -888,11 +940,10 @@ function responseUnitRefs(
   return unitRefs(state, respondingSeat).filter((ref) => {
     if (unavailable.has(ref.instanceId) || !readyUnit(state, ref)) return false;
     const unit = unitStatus(state, ref);
-    if (!intercept && !unit.canMoveToDefend && unit.location !== pending.cell) return false;
     const location = unit.location;
     return intercept
       ? location === pending.cell
-      : location === pending.cell || borderingCells(location).includes(pending.cell);
+      : defendPaths(state, ref, pending.cell).length > 0;
   });
 }
 
@@ -918,14 +969,15 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
   }
   if (state.phase === 'defend') {
     const pending = pendingCombat(state);
-    const defenders = responseUnitRefs(state, pending, false).map((ref) => {
+    const defenders = responseUnitRefs(state, pending, false).flatMap((ref) => {
       const from = unitStatus(state, ref).location;
-      return {
+      return defendPaths(state, ref, pending.cell).map((path) => ({
         from: { cell: from, region: 'surface' as const },
         kind: 'defend' as const,
+        path: pathLocations(path),
         to: { cell: pending.cell, region: 'surface' as const },
         unitInstanceId: ref.instanceId,
-      };
+      }));
     });
     const choices = pending.originalTarget?.kind === 'site' || pending.defenders.length === 0
       ? [pending.originalTarget?.kind !== 'site']
@@ -1004,13 +1056,15 @@ function actionLabel(descriptor: GameActionDescriptor): string {
     return `Summon ${descriptor.cardId} at ${descriptor.cell} (${descriptor.manaCost} mana)`;
   }
   if (descriptor.kind === 'move-and-attack') {
-    return descriptor.from.cell === descriptor.to.cell
+    return descriptor.path.length === 1
       ? `Tap ${descriptor.unitInstanceId.slice(0, 15)}… without moving`
-      : `Move ${descriptor.unitInstanceId.slice(0, 15)}… to ${descriptor.to.cell}`;
+      : `Move ${descriptor.unitInstanceId.slice(0, 15)}… ${descriptor.path.map(({ cell }) => cell).join(' → ')}`;
   }
   if (descriptor.kind === 'decline-attack') return 'Decline attack';
   if (descriptor.kind === 'declare-attack') return `Attack ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`;
-  if (descriptor.kind === 'defend') return `Defend with ${descriptor.unitInstanceId.slice(0, 15)}…`;
+  if (descriptor.kind === 'defend') {
+    return `Defend with ${descriptor.unitInstanceId.slice(0, 15)}… via ${descriptor.path.map(({ cell }) => cell).join(' → ')}`;
+  }
   if (descriptor.kind === 'close-defend') {
     return descriptor.originalTargetParticipates ? 'Close defend window; keep target' : 'Close defend window; remove target';
   }
@@ -1582,6 +1636,7 @@ function applyDescriptor(
         && candidate.unitInstanceId === descriptor.unitInstanceId
         && candidate.from.cell === descriptor.from.cell
         && candidate.from.region === descriptor.from.region
+        && samePath(candidate.path, descriptor.path)
         && candidate.to.cell === descriptor.to.cell
         && candidate.to.region === descriptor.to.region);
     const ref = unitRefs(state, seat).find(({ instanceId }) => instanceId === descriptor.unitInstanceId);
@@ -1607,8 +1662,9 @@ function applyDescriptor(
       [{
         payload: {
           from: descriptor.from,
+          path: descriptor.path,
           seat,
-          steps: descriptor.from.cell === descriptor.to.cell ? 0 : 1,
+          steps: descriptor.path.length - 1,
           to: descriptor.to,
           unitInstanceId: descriptor.unitInstanceId,
         },
@@ -1672,13 +1728,16 @@ function applyDescriptor(
 
   if (descriptor.kind === 'defend') {
     const pending = pendingCombat(state);
-    const ref = responseUnitRefs(state, pending, false)
-      .find(({ instanceId }) => instanceId === descriptor.unitInstanceId);
-    if (!ref
-      || descriptor.from.cell !== unitStatus(state, ref).location
-      || descriptor.from.region !== 'surface'
-      || descriptor.to.cell !== pending.cell
-      || descriptor.to.region !== 'surface') {
+    const legal = actionDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'defend'
+        && candidate.unitInstanceId === descriptor.unitInstanceId
+        && candidate.from.cell === descriptor.from.cell
+        && candidate.from.region === descriptor.from.region
+        && samePath(candidate.path, descriptor.path)
+        && candidate.to.cell === descriptor.to.cell
+        && candidate.to.region === descriptor.to.region);
+    const ref = unitRefs(state, seat).find(({ instanceId }) => instanceId === descriptor.unitInstanceId);
+    if (!legal || !ref) {
       throw new Error('unreachable illegal defender');
     }
     const moved = moveAndTapUnit(state, ref, pending.cell);
@@ -1698,7 +1757,9 @@ function applyDescriptor(
           payload: {
             from: descriptor.from,
             instanceId: ref.instanceId,
+            path: descriptor.path,
             seat,
+            steps: descriptor.path.length - 1,
             to: descriptor.to,
           },
           type: 'defender-joined',
