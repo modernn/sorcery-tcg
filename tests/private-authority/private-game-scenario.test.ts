@@ -42,6 +42,18 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthRamp.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
   assert.equal(result.earthRamp.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
   assert.equal(result.earthRamp.replayVerified, true);
+  assert.equal(result.earthFirstStrike.firstStrikeMinion, 'Albespine Pikemen');
+  assert.equal(result.earthFirstStrike.targetMinion, 'Bosk Troll');
+  assert.equal(result.earthFirstStrike.attackerSurvivedUndamaged, true);
+  assert.equal(result.earthFirstStrike.targetDiedBeforeReturn, true);
+  assert.equal(result.earthFirstStrike.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthFirstStrike.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthFirstStrike.deck.spellbook
+    .find(({ name }) => name === 'Albespine Pikemen')?.copies, 3);
+  assert.equal(result.earthFirstStrike.deck.spellbook
+    .find(({ name }) => name === 'Bosk Troll')?.copies, 4);
+  assert.deepEqual(result.earthFirstStrike.deck, result.earthRamp.deck);
+  assert.equal(result.earthFirstStrike.replayVerified, true);
   assert.equal(result.earthRanged.rangedMinion, 'Belmotte Longbowmen');
   assert.equal(result.earthRanged.rangedOneStep, true);
   assert.equal(result.earthRanged.rangedShooterStayedSafe, true);

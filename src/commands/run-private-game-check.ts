@@ -48,10 +48,13 @@ type ScenarioConfig = Readonly<{
   chargeMinionStableId: string;
   deathriteMinionStableId: string;
   earthProviderMinionStableId: string;
+  earthFirstStrikeSeed: number;
   earthRangedSeed: number;
   earthSeed: number;
   earthWardSeed: number;
   fireSeed: number;
+  firstStrikeMinionStableId: string;
+  firstStrikeTargetMinionStableId: string;
   genesisMinionStableId: string;
   ghostTownSiteStableId: string;
   healingMinionStableId: string;
@@ -130,6 +133,16 @@ export type PrivateGameCheck = Readonly<{
     replayVerified: boolean;
     seed: number;
   }>;
+  earthFirstStrike: Readonly<{
+    acceptedActionCount: number;
+    attackerSurvivedUndamaged: boolean;
+    deck: DeckList;
+    firstStrikeMinion: string;
+    replayVerified: boolean;
+    seed: number;
+    targetDiedBeforeReturn: boolean;
+    targetMinion: string;
+  }>;
   earthRanged: Readonly<{
     acceptedActionCount: number;
     deck: DeckList;
@@ -202,6 +215,9 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     || typeof value.chargeMinionStableId !== 'string'
     || typeof value.deathriteMinionStableId !== 'string'
     || typeof value.earthProviderMinionStableId !== 'string'
+    || !Number.isSafeInteger(value.earthFirstStrikeSeed)
+    || typeof value.earthFirstStrikeSeed !== 'number'
+    || value.earthFirstStrikeSeed < 0
     || !Number.isSafeInteger(value.earthRangedSeed)
     || typeof value.earthRangedSeed !== 'number'
     || value.earthRangedSeed < 0
@@ -214,6 +230,8 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     || !Number.isSafeInteger(value.fireSeed)
     || typeof value.fireSeed !== 'number'
     || value.fireSeed < 0
+    || typeof value.firstStrikeMinionStableId !== 'string'
+    || typeof value.firstStrikeTargetMinionStableId !== 'string'
     || typeof value.genesisMinionStableId !== 'string'
     || typeof value.ghostTownSiteStableId !== 'string'
     || typeof value.healingMinionStableId !== 'string'
@@ -236,7 +254,7 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     || typeof value.waterSeed !== 'number'
     || value.waterSeed < 0
     || typeof value.wardMinionStableId !== 'string'
-    || Object.keys(value).sort().join(',') !== 'airSeed,avatar,cannotDefendMinionStableId,chargeMinionStableId,deathriteMinionStableId,earthProviderMinionStableId,earthRangedSeed,earthSeed,earthWardSeed,fireSeed,genesisMinionStableId,ghostTownSiteStableId,healingMinionStableId,lethalMinionStableId,lumberingMinionStableId,manaMinionStableId,monstrousLionStableId,movementMinionStableId,providerMinionStableId,rangedMinionStableId,revisionId,roamingMinionStableId,roamingSeed,seed,wardMinionStableId,waterSeed'
+    || Object.keys(value).sort().join(',') !== 'airSeed,avatar,cannotDefendMinionStableId,chargeMinionStableId,deathriteMinionStableId,earthFirstStrikeSeed,earthProviderMinionStableId,earthRangedSeed,earthSeed,earthWardSeed,fireSeed,firstStrikeMinionStableId,firstStrikeTargetMinionStableId,genesisMinionStableId,ghostTownSiteStableId,healingMinionStableId,lethalMinionStableId,lumberingMinionStableId,manaMinionStableId,monstrousLionStableId,movementMinionStableId,providerMinionStableId,rangedMinionStableId,revisionId,roamingMinionStableId,roamingSeed,seed,wardMinionStableId,waterSeed'
     || Object.keys(avatar).sort().join(',') !== 'drawSpell,stableId') {
     throw new Error('private game scenario has an unsupported shape');
   }
@@ -246,11 +264,14 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     cannotDefendMinionStableId: value.cannotDefendMinionStableId,
     chargeMinionStableId: value.chargeMinionStableId,
     deathriteMinionStableId: value.deathriteMinionStableId,
+    earthFirstStrikeSeed: value.earthFirstStrikeSeed,
     earthProviderMinionStableId: value.earthProviderMinionStableId,
     earthRangedSeed: value.earthRangedSeed,
     earthSeed: value.earthSeed,
     earthWardSeed: value.earthWardSeed,
     fireSeed: value.fireSeed,
+    firstStrikeMinionStableId: value.firstStrikeMinionStableId,
+    firstStrikeTargetMinionStableId: value.firstStrikeTargetMinionStableId,
     genesisMinionStableId: value.genesisMinionStableId,
     ghostTownSiteStableId: value.ghostTownSiteStableId,
     healingMinionStableId: value.healingMinionStableId,
@@ -280,6 +301,8 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   earthProviderMinion: NormalizedCard;
   format: FormatDefinition;
   formatStableId: string;
+  firstStrikeMinion: NormalizedCard;
+  firstStrikeTargetMinion: NormalizedCard;
   genesisMinion: NormalizedCard;
   ghostTownSite: NormalizedCard;
   healingMinion: NormalizedCard;
@@ -471,6 +494,42 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || wardMinion.rarity !== 'ordinary') {
     throw new Error('private Ward minion no longer matches its supported facts');
   }
+  const firstStrikeMinion = snapshot.cards
+    .find(({ stableId }) => stableId === config.firstStrikeMinionStableId);
+  if (!firstStrikeMinion
+    || firstStrikeMinion.name !== 'Albespine Pikemen'
+    || firstStrikeMinion.cardType !== 'minion'
+    || ruleTextDigest(firstStrikeMinion.rulesText) !== 'sha256:3b875d6f0d654a614982a30692bcbdbb5a74d06f39d30a26377b913103e04bd7'
+    || firstStrikeMinion.manaCost !== 3
+    || firstStrikeMinion.attack !== 3
+    || firstStrikeMinion.defense !== 3
+    || firstStrikeMinion.elements.length !== 1
+    || firstStrikeMinion.elements[0] !== 'earth'
+    || firstStrikeMinion.thresholds.earth !== 2
+    || firstStrikeMinion.thresholds.air !== 0
+    || firstStrikeMinion.thresholds.fire !== 0
+    || firstStrikeMinion.thresholds.water !== 0
+    || firstStrikeMinion.rarity !== 'exceptional') {
+    throw new Error('private attacking first-strike minion no longer matches its supported facts');
+  }
+  const firstStrikeTargetMinion = snapshot.cards
+    .find(({ stableId }) => stableId === config.firstStrikeTargetMinionStableId);
+  if (!firstStrikeTargetMinion
+    || firstStrikeTargetMinion.name !== 'Bosk Troll'
+    || firstStrikeTargetMinion.cardType !== 'minion'
+    || firstStrikeTargetMinion.rulesText.trim() !== ''
+    || firstStrikeTargetMinion.manaCost !== 2
+    || firstStrikeTargetMinion.attack !== 3
+    || firstStrikeTargetMinion.defense !== 3
+    || firstStrikeTargetMinion.elements.length !== 1
+    || firstStrikeTargetMinion.elements[0] !== 'earth'
+    || firstStrikeTargetMinion.thresholds.earth !== 1
+    || firstStrikeTargetMinion.thresholds.air !== 0
+    || firstStrikeTargetMinion.thresholds.fire !== 0
+    || firstStrikeTargetMinion.thresholds.water !== 0
+    || firstStrikeTargetMinion.rarity !== 'ordinary') {
+    throw new Error('private first-strike target minion no longer matches its supported facts');
+  }
 
   const formatsValue = parseJsonWithDuplicateKeyCheck(await readFile(resolve(revisionRoot, 'formats.json'), 'utf8'));
   if (!isJsonRecord(formatsValue)
@@ -497,6 +556,8 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     earthProviderMinion,
     format: selected.identity.payload,
     formatStableId: selected.identity.stableId,
+    firstStrikeMinion,
+    firstStrikeTargetMinion,
     genesisMinion,
     ghostTownSite,
     healingMinion,
@@ -552,6 +613,7 @@ function gameDefinition(
   cannotDefendOrIntercept = false,
   cannotAttackSites = false,
   ranged = false,
+  strikesFirstWhileAttacking = false,
   ward = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
@@ -593,6 +655,7 @@ function gameDefinition(
       movementPlusOne,
       ...(provides ? { provides } : {}),
       ranged,
+      strikesFirstWhileAttacking,
       summonToAnySite,
       ...(tapForMana ? { tapForMana } : {}),
       thresholds: card.thresholds,
@@ -605,7 +668,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'combat' | 'earth' | 'earth-ward' | 'fire' | 'water' = 'combat',
+  scenario: 'air' | 'combat' | 'earth' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'water' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -668,6 +731,7 @@ function buildManifest(
     const elementSiteIds = new Set(elementSites.map(({ stableId }) => stableId));
     const featuredMinionCards = featuredMinions.flatMap((card) =>
       Array.from({ length: input.format.copyLimits[card.rarity!] }, () => card.stableId));
+    const featuredMinionIds = new Set(featuredMinions.map(({ stableId }) => stableId));
     return {
       atlas: [
         ...featuredSiteCards,
@@ -684,7 +748,7 @@ function buildManifest(
       spellbook: [
         ...featuredMinionCards,
         ...fillZone(
-          minions,
+          minions.filter(({ stableId }) => !featuredMinionIds.has(stableId)),
           input.format.spellbookMinimum - featuredMinionCards.length,
           input.format,
           false,
@@ -700,9 +764,11 @@ function buildManifest(
     input.cannotDefendMinion,
     input.rangedMinion,
     input.wardMinion,
+    input.firstStrikeMinion,
+    input.firstStrikeTargetMinion,
   ], [input.ghostTownSite]);
   const decks = {
-    north: scenario === 'earth' || scenario === 'earth-ward'
+    north: scenario === 'earth' || scenario === 'earth-first-strike' || scenario === 'earth-ward'
       ? earthDeck
       : scenario === 'air'
         ? elementalDeck('air', [input.movementMinion, input.roamingMinion])
@@ -711,7 +777,7 @@ function buildManifest(
         : scenario === 'water'
           ? elementalDeck('water', [input.healingMinion])
           : deck(false, true),
-    south: scenario === 'earth-ward' ? earthDeck : deck(true, false),
+    south: scenario === 'earth-first-strike' || scenario === 'earth-ward' ? earthDeck : deck(true, false),
   };
   const referenced = new Set([
     decks.north.avatar,
@@ -745,6 +811,7 @@ function buildManifest(
       card.stableId === input.lumberingMinion.stableId,
       card.stableId === input.monstrousLion.stableId,
       card.stableId === input.rangedMinion.stableId,
+      card.stableId === input.firstStrikeMinion.stableId,
       card.stableId === input.wardMinion.stableId,
     ),
   ]));
@@ -1015,34 +1082,50 @@ function findEarthOpening(
   throw new Error(`private Earth scenario seed ${seed} no longer produces its supported opening`);
 }
 
-function findEarthRangedOpening(
+function findEarthDuelOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-  ward = false,
+  mode: 'first-strike' | 'ranged' | 'ward' = 'ranged',
 ): Readonly<{
+  attackerInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   northSiteInstanceIds: readonly [string, string, string];
-  rangedInstanceId: string;
   seed: number;
   session: GameSession;
   southFirstSiteInstanceId: string;
   southSecondSiteInstanceId: string;
   targetInstanceId: string;
 }> {
-  const seed = ward ? input.config.earthWardSeed : input.config.earthRangedSeed;
-  const built = buildManifest(input, seed, ward ? 'earth-ward' : 'earth');
+  const seed = mode === 'ward'
+    ? input.config.earthWardSeed
+    : mode === 'first-strike'
+      ? input.config.earthFirstStrikeSeed
+      : input.config.earthRangedSeed;
+  const built = buildManifest(
+    input,
+    seed,
+    mode === 'ward' ? 'earth-ward' : mode === 'first-strike' ? 'earth-first-strike' : 'earth',
+  );
   const session = createGameSession(built.manifest);
   const northSites = session.state.players.north.hand.atlas.filter((site) => {
     const definition = session.state.cards[site.cardId];
     return definition?.cardType === 'site' && definition.elements.includes('earth');
   });
-  const rangedInstanceId = availableMinionInstance(
+  const attackerCardId = mode === 'first-strike'
+    ? input.firstStrikeMinion.stableId
+    : input.rangedMinion.stableId;
+  const attackerInstanceId = availableMinionInstance(
     session,
     'north',
-    input.rangedMinion.stableId,
+    attackerCardId,
     2,
   );
   const south = session.state.players.south;
+  const requiredTargetId = mode === 'ward'
+    ? input.wardMinion.stableId
+    : mode === 'first-strike'
+      ? input.firstStrikeTargetMinion.stableId
+      : undefined;
   for (const first of south.hand.atlas) {
     for (const second of south.hand.atlas) {
       if (first.instanceId === second.instanceId) continue;
@@ -1053,7 +1136,7 @@ function findEarthRangedOpening(
         definition.elements.forEach((element) => { affinity[element] += 1; });
       }
       const target = [...south.hand.spellbook, ...south.spellbook.slice(0, 2)].find((card) => {
-        if (ward && card.cardId !== input.wardMinion.stableId) return false;
+        if (requiredTargetId && card.cardId !== requiredTargetId) return false;
         const definition = session.state.cards[card.cardId];
         return definition?.cardType === 'minion'
           && definition.defense <= 3
@@ -1061,15 +1144,15 @@ function findEarthRangedOpening(
           && (['air', 'earth', 'fire', 'water'] as const)
             .every((element) => affinity[element] >= definition.thresholds[element]);
       });
-      if (northSites.length >= 3 && rangedInstanceId && target) {
+      if (northSites.length >= 3 && attackerInstanceId && target) {
         return {
           ...built,
+          attackerInstanceId,
           northSiteInstanceIds: [
             northSites[0]!.instanceId,
             northSites[1]!.instanceId,
             northSites[2]!.instanceId,
           ],
-          rangedInstanceId,
           seed,
           session,
           southFirstSiteInstanceId: first.instanceId,
@@ -1079,7 +1162,7 @@ function findEarthRangedOpening(
       }
     }
   }
-  throw new Error(`private Earth ${ward ? 'Ward' : 'Ranged'} scenario seed ${seed} no longer produces its supported opening`);
+  throw new Error(`private Earth ${mode} scenario seed ${seed} no longer produces its supported opening`);
 }
 
 function findAirOpening(
@@ -1495,7 +1578,7 @@ function runEarthRamp(
   });
 }
 
-function stageEarthRangedShot(opening: ReturnType<typeof findEarthRangedOpening>): GameSession {
+function stageEarthDuel(opening: ReturnType<typeof findEarthDuelOpening>): GameSession {
   let session = keep(opening.session);
   session = keep(session);
   const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
@@ -1536,7 +1619,7 @@ function stageEarthRangedShot(opening: ReturnType<typeof findEarthRangedOpening>
       && descriptor.cell === 'B4');
   take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === opening.rangedInstanceId
+      && descriptor.cardInstanceId === opening.attackerInstanceId
       && descriptor.cell === 'C3');
   take(({ descriptor }) => descriptor.kind === 'end-turn');
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
@@ -1549,19 +1632,19 @@ function stageEarthRangedShot(opening: ReturnType<typeof findEarthRangedOpening>
 function runEarthRanged(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['earthRanged'] {
-  const opening = findEarthRangedOpening(input);
-  let session = stageEarthRangedShot(opening);
+  const opening = findEarthDuelOpening(input);
+  let session = stageEarthDuel(opening);
 
   const shot = action(session, ({ descriptor }) =>
     descriptor.kind === 'shoot-projectile'
-      && descriptor.shooterInstanceId === opening.rangedInstanceId
+      && descriptor.shooterInstanceId === opening.attackerInstanceId
       && descriptor.direction === 'south'
       && descriptor.hit?.instanceId === opening.targetInstanceId);
   const rangedOneStep = shot.descriptor.kind === 'shoot-projectile'
     && shot.descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C2';
   session = accept(session, shot);
   const shooter = session.state.realm.units
-    .find(({ instanceId }) => instanceId === opening.rangedInstanceId);
+    .find(({ instanceId }) => instanceId === opening.attackerInstanceId);
 
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
@@ -1577,16 +1660,59 @@ function runEarthRanged(
   });
 }
 
+function runEarthFirstStrike(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthFirstStrike'] {
+  const opening = findEarthDuelOpening(input, 'first-strike');
+  let session = stageEarthDuel(opening);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.attackerInstanceId
+      && descriptor.from.cell === 'C3'
+      && descriptor.to.cell === 'C2');
+  take(({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === opening.targetInstanceId);
+  take(({ descriptor }) => descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
+  const attacker = session.state.realm.units
+    .find(({ instanceId }) => instanceId === opening.attackerInstanceId);
+  const fightEvents = session.transcript.at(-1)?.events ?? [];
+  const targetDied = session.state.players.south.cemetery
+    .some(({ instanceId }) => instanceId === opening.targetInstanceId);
+  const targetDiedBeforeReturn = targetDied && !fightEvents.some(({ payload, type }) =>
+    type === 'damage-dealt'
+      && isJsonRecord(payload)
+      && payload.instanceId === opening.attackerInstanceId
+      && payload.amount !== 0);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    attackerSurvivedUndamaged: attacker?.damage === 0 && attacker.location === 'C2' && attacker.tapped,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    firstStrikeMinion:
+      opening.names.get(input.firstStrikeMinion.stableId) ?? input.firstStrikeMinion.stableId,
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    targetDiedBeforeReturn,
+    targetMinion:
+      opening.names.get(input.firstStrikeTargetMinion.stableId) ?? input.firstStrikeTargetMinion.stableId,
+  });
+}
+
 function runEarthWard(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['earthWard'] {
-  const opening = findEarthRangedOpening(input, true);
-  let session = stageEarthRangedShot(opening);
+  const opening = findEarthDuelOpening(input, 'ward');
+  let session = stageEarthDuel(opening);
   const targetBefore = session.state.realm.units
     .find(({ instanceId }) => instanceId === opening.targetInstanceId);
   const firstShot = action(session, ({ descriptor }) =>
     descriptor.kind === 'shoot-projectile'
-      && descriptor.shooterInstanceId === opening.rangedInstanceId
+      && descriptor.shooterInstanceId === opening.attackerInstanceId
       && descriptor.direction === 'south'
       && descriptor.hit?.instanceId === opening.targetInstanceId);
   session = accept(session, firstShot);
@@ -1618,7 +1744,7 @@ function runEarthWard(
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   take(({ descriptor }) =>
     descriptor.kind === 'shoot-projectile'
-      && descriptor.shooterInstanceId === opening.rangedInstanceId
+      && descriptor.shooterInstanceId === opening.attackerInstanceId
       && descriptor.hit?.instanceId === opening.targetInstanceId);
 
   return Object.freeze({
@@ -2017,6 +2143,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const input = await readPrivateInputs(path);
   const airMovement = runAirMovement(input);
   const airSummoning = runAirSummoning(input);
+  const earthFirstStrike = runEarthFirstStrike(input);
   const earthRamp = runEarthRamp(input);
   const earthRanged = runEarthRanged(input);
   const earthWard = runEarthWard(input);
@@ -2149,6 +2276,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
       south: deckList(opening.manifest.decks.south, opening.names),
     },
     earthRamp,
+    earthFirstStrike,
     earthRanged,
     earthWard,
     fireResponse,

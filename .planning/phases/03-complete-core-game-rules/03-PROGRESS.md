@@ -31,8 +31,9 @@
 - Movement +1 uses engine-issued explicit surface paths for both Move and Attack and Defend, including exact two-step and legal returning routes.
 - Ranged issues cardinal one-step projectile paths, stops at the first occupied location, lets the controller choose among multiple hit units, never hits sites, and resolves a tapped one-way strike through the normal damage and death pipeline.
 - Minion Ward enters with one public mark, prevents one complete positive damage event through the shared combat/projectile path, then breaks before later damage resolves normally.
+- Attacking-only first strike resolves its attacker's allocations, deaths, Deathrites, and terminal results in an early window; only surviving defenders then make their normal return strikes.
 - A private-local actual-card adapter that verifies the normalized artifact and current Constructed format, builds legal 30/60 beginner decks under official rarity copy limits, and executes a deterministic real-card Charge and combat scenario without committing source data.
-- A second real-card Earth ramp deck that proves Ghost Town's site-entry temporary mana, provided Earth affinity, Field Laborers' readiness-gated temporary mana, Zombie Horde as a five-mana payoff with restricted Defend, Land Surveyor's Genesis draw, and Kettletop Leprechaun's Deathrite draw; short replays of the same deck prove Belmotte Longbowmen's one-step Ranged strike and Holy Warrior's one-use Ward against two consecutive shots.
+- A second real-card Earth ramp deck that proves Ghost Town's site-entry temporary mana, provided Earth affinity, Field Laborers' readiness-gated temporary mana, Zombie Horde as a five-mana payoff with restricted Defend, Land Surveyor's Genesis draw, and Kettletop Leprechaun's Deathrite draw; short replays of the same deck prove Belmotte Longbowmen's one-step Ranged strike, Holy Warrior's one-use Ward against two consecutive shots, and Albespine Pikemen killing Bosk Troll before its return strike.
 - A third legal 30/60 Air teaching deck that proves Snallygaster's exact two-step Movement +1 paths and Roaming Monster's permission to summon onto an enemy site while ordinary minions remain restricted.
 - A fourth legal 30/60 Water teaching deck that proves Muddy Pigs heals exactly 3 before entering its cemetery after a real simultaneous combat death.
 - A fifth legal 30/60 Fire teaching deck that proves Monstrous Lion can Charge into an opposing unit but cannot target its site, then proves Lumbering Giant cannot use Defend or Intercept while ready and in range.
@@ -50,17 +51,17 @@
 - `pnpm game:demo -- 23`: completes in 138 accepted actions over 56 turns with byte-exact replay.
 - `pnpm play`: serves the playable core at `http://127.0.0.1:4174/`.
 - Browser checkpoint: a 22-action match moved a minion, handed Defend to the non-active seat, resolved a simultaneous trade into both cemeteries, and replayed byte-identically.
-- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 22-action Earth Ranged, 27-action Earth Ward, 26-action Air movement, 25-action Air unrestricted-summon, 43-action Fire targeting/response, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
+- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 24-action Earth first strike, 22-action Earth Ranged, 27-action Earth Ward, 26-action Air movement, 25-action Air unrestricted-summon, 43-action Fire targeting/response, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
 - `pnpm game:verify-private`: one passing ignored-authority integration scenario.
 - Death's Door scenarios prove same-turn direct-damage immunity, later death blows, simultaneous-defeat draws, nonlethal site strikes, and exact replay.
-- `pnpm verify`: 221 passing public tests at this checkpoint.
+- `pnpm verify`: 222 passing public tests at this checkpoint.
 
 ## Still required for Phase 3
 
 - Rubble replacement, land/water regions, connection rules, control changes, and card-specific placement overrides.
 - Full start/main/end phase triggers and duration cleanup beyond the supported narrow Genesis/Deathrite effects, minion damage, and summoning sickness.
 - Additional costs, non-minion spells, movement beyond Movement +1, further activated abilities, and card-specific targets.
-- Combat tiers, projectile ranges and effects beyond Ranged 1, additional healing sources, prevention/modification beyond minion Ward, additional card-triggered damage/death behavior, and tournament ending overlays.
+- Combat tiers beyond attacking-only first strike, projectile ranges and effects beyond Ranged 1, additional healing sources, prevention/modification beyond minion Ward, additional card-triggered damage/death behavior, and tournament ending overlays.
 - Source-linked scenario and invariant coverage for every supported core mechanic.
 
 The runner is intentionally classified `unranked_partial_rules`; it proves the real engine loop and replay contract without claiming complete Sorcery behavior.
