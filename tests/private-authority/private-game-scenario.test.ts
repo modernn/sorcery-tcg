@@ -143,6 +143,26 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airLightningBolt.deck.spellbook
     .find(({ name }) => name === 'Snow Leopard')?.copies, 4);
   assert.equal(result.airLightningBolt.replayVerified, true);
+  assert.equal(result.airTeleport.teleport, 'Teleport');
+  assert.equal(result.airTeleport.snowLeopard, 'Snow Leopard');
+  assert.equal(result.airTeleport.acceptedActionCount, 11);
+  assert.equal(result.airTeleport.exactAllySitePair, true);
+  assert.equal(result.airTeleport.manaPaid, 2);
+  assert.equal(result.airTeleport.noPathTeleport, true);
+  assert.equal(result.airTeleport.teleportedToOpponentSiteSurface, true);
+  assert.equal(result.airTeleport.unitStatePreserved, true);
+  assert.equal(result.airTeleport.siteUnchanged, true);
+  assert.equal(result.airTeleport.spellEnteredCemetery, true);
+  assert.equal(result.airTeleport.causalEventsVerified, true);
+  assert.equal(result.airTeleport.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airTeleport.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airTeleport.deck.spellbook
+    .find(({ name }) => name === 'Teleport')?.copies, 4);
+  assert.equal(result.airTeleport.deck.spellbook
+    .find(({ name }) => name === 'Snow Leopard')?.copies, 4);
+  assert.equal(result.airTeleport.replayVerified, true);
   assert.equal(result.airLeyline.henge, 'Leyline Henge');
   assert.equal(result.airLeyline.acceptedActionCount, 9);
   assert.equal(result.airLeyline.firstHengeDrewNothing, true);

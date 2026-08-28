@@ -309,6 +309,36 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   }), /damageRandomUnitAtLocation/);
+  const teleportManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        manaCost: 2,
+        teleportAllyToTargetSite: true,
+        thresholds: { air: 2, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(teleportManifest.cards[firstSpell], {
+    cardType: 'magic',
+    manaCost: 2,
+    teleportAllyToTargetSite: true,
+    thresholds: { air: 2, earth: 0, fire: 0, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        manaCost: 2,
+        teleportAllyToTargetSite: false,
+        thresholds: { air: 2, earth: 0, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /teleportAllyToTargetSite/);
   assert.doesNotThrow(() => createGameManifest({
     ...input,
     cards: {
@@ -1205,6 +1235,143 @@ test('RULE-03 Lightning Bolt targets a location and deterministically damages on
   assert.equal(session.state.players.north.cemetery.some(({ instanceId }) => instanceId === bolt.instanceId), true);
   assert.equal(result.receipt.events.at(-1)?.type, 'magic-resolved');
   assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 Teleport forcefully moves a chosen ally to a target site surface', () => {
+  const allyFacts = {
+    defense: 5,
+    immobile: true,
+    manaCost: 0,
+    stealth: true,
+    submerge: true,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    ward: true,
+  } as const;
+  const base = manifest(154, {
+    northSpell: allyFacts,
+    site: { elements: ['water', 'air'] },
+  });
+  const preview = createGameSession(base);
+  const allyCardId = preview.state.players.north.hand.spellbook[0]?.cardId;
+  const teleportCardId = preview.state.players.north.hand.spellbook[1]?.cardId;
+  assert.ok(allyCardId);
+  assert.ok(teleportCardId);
+  const cards: Record<string, GameCardDefinition> = { ...base.cards };
+  for (const cardId of base.decks.north.spellbook) {
+    cards[cardId] = {
+      cardType: 'magic',
+      manaCost: 2,
+      teleportAllyToTargetSite: true,
+      thresholds: { air: 2, earth: 0, fire: 0, water: 0 },
+    };
+  }
+  cards[allyCardId] = base.cards[allyCardId]!;
+  const gameManifest = createGameManifest({
+    authority: base.authority,
+    cards,
+    decks: base.decks,
+    firstSeat: base.firstSeat,
+    seed: base.seed,
+  });
+  let session = keep(createGameSession(gameManifest));
+  session = keep(session);
+  const allyCard = session.state.players.north.hand.spellbook
+    .find(({ cardId }) => cardId === allyCardId);
+  const teleportCard = session.state.players.north.hand.spellbook
+    .find(({ cardId }) => cardId === teleportCardId);
+  assert.ok(allyCard);
+  assert.ok(teleportCard);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === allyCard.instanceId
+      && descriptor.cell === 'C4'
+      && descriptor.region === 'underwater'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C3'));
+
+  const checkpoint = session;
+  const casts = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === teleportCard.instanceId);
+  assert.equal(casts.length, 6);
+  assert.deepEqual([...new Set(casts.flatMap(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.ally
+    ? [descriptor.ally.instanceId]
+    : []))].sort(), [
+    allyCard.instanceId,
+    checkpoint.state.players.north.avatar.card.instanceId,
+  ].sort());
+  assert.deepEqual([...new Set(casts.flatMap(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.targetLocation
+    ? [descriptor.targetLocation.cell]
+    : []))].sort(), ['C1', 'C3', 'C4']);
+  assert.equal(casts.every(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.target === undefined
+      && descriptor.targetLocation?.region === 'surface'
+      && descriptor.targetSiteInstanceId !== undefined), true);
+
+  const noMove = accept(checkpoint, casts.find(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.ally?.kind === 'avatar'
+      && descriptor.targetLocation?.cell === 'C4')!);
+  assert.deepEqual(noMove.transcript.at(-1)?.events.map(({ type }) => type), [
+    'magic-cast',
+    'magic-resolved',
+  ]);
+  assert.equal(noMove.state.players.north.avatar.location, 'C4');
+  assert.equal(verifyGameReplay(noMove), true);
+
+  const destinationSite = checkpoint.state.realm.sites.C1;
+  assert.ok(destinationSite);
+  const teleported = accept(checkpoint, casts.find(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.ally?.instanceId === allyCard.instanceId
+      && descriptor.targetLocation?.cell === 'C1')!);
+  const moved = teleported.state.realm.units.find(({ instanceId }) => instanceId === allyCard.instanceId);
+  assert.deepEqual({
+    controller: moved?.controller,
+    damage: moved?.damage,
+    location: moved?.location,
+    owner: moved?.owner,
+    region: moved?.region,
+    stealthed: moved?.stealthed,
+    tapped: moved?.tapped,
+    warded: moved?.warded,
+  }, {
+    controller: 'north',
+    damage: 0,
+    location: 'C1',
+    owner: 'north',
+    region: 'surface',
+    stealthed: true,
+    tapped: false,
+    warded: true,
+  });
+  assert.deepEqual(teleported.transcript.at(-1)?.events.map(({ type }) => type), [
+    'magic-cast',
+    'unit-teleported',
+    'magic-resolved',
+  ]);
+  const teleportEvent = teleported.transcript.at(-1)?.events[1];
+  assert.equal(canonicalJson(teleportEvent?.payload ?? null).includes(
+    `\"sourceInstanceId\":\"${teleportCard.instanceId}\"`), true);
+  assert.equal(canonicalJson(teleportEvent?.payload ?? null).includes(
+    `\"targetSiteInstanceId\":\"${destinationSite.instanceId}\"`), true);
+  assert.equal(teleported.state.stateVersion, checkpoint.state.stateVersion + 1);
+  assert.equal(teleported.state.players.north.mana, 0);
+  assert.equal(teleported.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === teleportCard.instanceId), true);
+  assert.equal(verifyGameReplay(teleported), true);
 });
 
 test('RULE-03/04 Bury forcefully burrows minions if able and immediately resolves survival', () => {
