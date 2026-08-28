@@ -339,6 +339,49 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /teleportAllyToTargetSite/);
+  const rescueManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        manaCost: 3,
+        returnMinionFromOwnCemetery: true,
+        thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(rescueManifest.cards[firstSpell], {
+    cardType: 'magic',
+    manaCost: 3,
+    returnMinionFromOwnCemetery: true,
+    thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        manaCost: 3,
+        returnMinionFromOwnCemetery: false,
+        thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /returnMinionFromOwnCemetery/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        healController: 1,
+        manaCost: 3,
+        returnMinionFromOwnCemetery: true,
+        thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
   assert.doesNotThrow(() => createGameManifest({
     ...input,
     cards: {
@@ -1372,6 +1415,154 @@ test('RULE-03 Teleport forcefully moves a chosen ally to a target site surface',
   assert.equal(teleported.state.players.north.cemetery.some(({ instanceId }) =>
     instanceId === teleportCard.instanceId), true);
   assert.equal(verifyGameReplay(teleported), true);
+});
+
+test('RULE-03 Rescue returns a chosen own cemetery minion to hidden hand or resolves with none', () => {
+  const decks = {
+    north: deck('rescue-north', 4, 6),
+    south: deck('rescue-south', 4, 6),
+  };
+  const cards = cardsFor(decks);
+  for (const cardId of [...decks.north.atlas, ...decks.south.atlas]) {
+    cards[cardId] = { ...cards[cardId]!, genesisDiscardTopSpells: 2 } as GameCardDefinition;
+  }
+  for (const cardId of decks.north.spellbook.slice(2)) {
+    cards[cardId] = {
+      cardType: 'magic',
+      manaCost: 0,
+      returnMinionFromOwnCemetery: true,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    };
+  }
+  let gameManifest: GameManifest | undefined;
+  for (let seed = 155; seed < 175; seed += 1) {
+    const candidate = createGameManifest({
+      authority: {
+        contentHash: SYNTHETIC_AUTHORITY_HASH,
+        mode: 'synthetic',
+        revisionId: 'synthetic-rescue-fixture-v1',
+      },
+      cards,
+      decks,
+      firstSeat: 'north',
+      seed,
+    });
+    const preview = createGameSession(candidate).state.players.north;
+    const topTypes = preview.spellbook.slice(0, 2).map(({ cardId }) =>
+      candidate.cards[cardId]?.cardType);
+    if (topTypes.includes('minion')
+      && topTypes.includes('magic')
+      && preview.hand.spellbook.some(({ cardId }) => candidate.cards[cardId]?.cardType === 'magic')) {
+      gameManifest = candidate;
+      break;
+    }
+  }
+  assert.ok(gameManifest);
+  const checkpoint = keep(keep(createGameSession(gameManifest)));
+
+  const noChoiceCards = { ...cards };
+  for (const cardId of [...decks.north.atlas, ...decks.south.atlas]) {
+    noChoiceCards[cardId] = { cardType: 'site', elements: ['earth'] };
+  }
+  const noChoiceManifest = createGameManifest({
+    authority: gameManifest.authority,
+    cards: noChoiceCards,
+    decks,
+    firstSeat: 'north',
+    seed: gameManifest.seed,
+  });
+  let noChoiceSetup = keep(keep(createGameSession(noChoiceManifest)));
+  noChoiceSetup = accept(noChoiceSetup, action(noChoiceSetup, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+  const noChoiceCard = noChoiceSetup.state.players.north.hand.spellbook.find(({ cardId }) =>
+    noChoiceManifest.cards[cardId]?.cardType === 'magic');
+  assert.ok(noChoiceCard);
+  const noChoiceActions = legalGameActions(noChoiceSetup.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === noChoiceCard.instanceId);
+  assert.equal(noChoiceActions.length, 1);
+  assert.equal(noChoiceActions[0]?.descriptor.kind === 'cast-magic'
+    && noChoiceActions[0].descriptor.cemeteryMinionInstanceId, undefined);
+  assert.equal(noChoiceActions[0]?.descriptor.kind === 'cast-magic'
+    && noChoiceActions[0].descriptor.target, undefined);
+  const noChoice = accept(noChoiceSetup, noChoiceActions[0]!);
+  assert.deepEqual(noChoice.transcript.at(-1)?.events.map(({ type }) => type), [
+    'magic-cast',
+    'magic-resolved',
+  ]);
+  assert.equal(noChoice.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === noChoiceCard.instanceId), true);
+  assert.equal(verifyGameReplay(noChoice), true);
+
+  let session = accept(checkpoint, action(checkpoint, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+  const ownMinion = session.state.players.north.cemetery.find(({ cardId }) =>
+    gameManifest.cards[cardId]?.cardType === 'minion');
+  const ownMagic = session.state.players.north.cemetery.find(({ cardId }) =>
+    gameManifest.cards[cardId]?.cardType === 'magic');
+  assert.ok(ownMinion);
+  assert.ok(ownMagic);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
+  const opposingMinion = session.state.players.south.cemetery.find(({ cardId }) =>
+    gameManifest.cards[cardId]?.cardType === 'minion');
+  assert.ok(opposingMinion);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
+
+  const rescueCard = session.state.players.north.hand.spellbook.find(({ cardId }) =>
+    gameManifest.cards[cardId]?.cardType === 'magic');
+  assert.ok(rescueCard);
+  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === rescueCard.instanceId);
+  assert.deepEqual(choices.flatMap(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.cemeteryMinionInstanceId
+    ? [descriptor.cemeteryMinionInstanceId]
+    : []), [ownMinion.instanceId]);
+  assert.equal(choices.some(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.cemeteryMinionInstanceId === ownMagic.instanceId), false);
+  assert.equal(choices.some(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.cemeteryMinionInstanceId === opposingMinion.instanceId), false);
+
+  const before = session.state;
+  const result = stepGame(session, choices[0]!);
+  assert.equal(result.accepted, true);
+  if (!result.accepted) return;
+  session = result.session;
+  assert.equal(session.state.stateVersion, before.stateVersion + 1);
+  assert.equal(session.state.players.north.hand.spellbook.length, before.players.north.hand.spellbook.length);
+  assert.equal(session.state.players.north.hand.spellbook.some(({ instanceId }) =>
+    instanceId === ownMinion.instanceId), true);
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === ownMinion.instanceId), false);
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === rescueCard.instanceId), true);
+  assert.deepEqual(result.receipt.events.map(({ type }) => type), [
+    'magic-cast',
+    'minion-returned-to-hand',
+    'magic-resolved',
+  ]);
+  assert.deepEqual(result.receipt.events[1]?.payload, {
+    cardId: ownMinion.cardId,
+    instanceId: ownMinion.instanceId,
+    owner: 'north',
+    seat: 'north',
+    sourceInstanceId: rescueCard.instanceId,
+  });
+  assert.equal(canonicalJson(result.receipt.events[0]?.payload ?? null).includes(
+    `\"cemeteryMinionInstanceId\":\"${ownMinion.instanceId}\"`), true);
+  const northView = observeGame(session.state, 'north');
+  const southView = observeGame(session.state, 'south');
+  assert.equal(Array.isArray(northView.players.north.hand.spellbook)
+    && northView.players.north.hand.spellbook.some(({ instanceId }) =>
+      instanceId === ownMinion.instanceId), true);
+  assert.equal(southView.players.north.hand.spellbook, session.state.players.north.hand.spellbook.length);
+  assert.doesNotMatch(canonicalJson(southView), new RegExp(ownMinion.instanceId));
+  assert.doesNotMatch(canonicalJson(southView), new RegExp(ownMinion.cardId));
+  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-03/04 Bury forcefully burrows minions if able and immediately resolves survival', () => {

@@ -265,6 +265,20 @@ export type PrivateGameCheck = Readonly<{
     targetEnteredCemetery: boolean;
     targetLeftRealm: boolean;
   }>;
+  earthRescue: Readonly<{
+    acceptedActionCount: number;
+    boskTroll: string;
+    buryStayedNorthCemetery: boolean;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    hiddenFromNorthAfterReturn: boolean;
+    manaPaid: number;
+    onlyOwnCemeteryMinionChoice: boolean;
+    replayVerified: boolean;
+    rescue: string;
+    rescueEnteredSouthCemetery: boolean;
+    returnedToSouthHand: boolean;
+  }>;
   earthShallowGrave: Readonly<{
     acceptedActionCount: number;
     affinityProvided: boolean;
@@ -670,6 +684,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   movementTwoMinion: NormalizedCard;
   providerMinion: NormalizedCard;
   rangedMinion: NormalizedCard;
+  rescue: NormalizedCard;
   roamingMinion: NormalizedCard;
   secretTunnel: NormalizedCard;
   sedgeCrabs: NormalizedCard;
@@ -730,6 +745,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || bury.thresholds.water !== 0
     || bury.rarity !== 'ordinary') {
     throw new Error('private forced-burrow Magic no longer matches its supported facts');
+  }
+  const rescue = snapshot.cards.find(({ name }) => name === 'Rescue');
+  if (!rescue
+    || rescue.cardType !== 'magic'
+    || ruleTextDigest(rescue.rulesText) !== 'sha256:43015eb5b2996a1c9260a2344e60eb69f338f902bc93aff0c62646112d878f8b'
+    || rescue.manaCost !== 3
+    || rescue.attack !== null
+    || rescue.defense !== null
+    || rescue.life !== null
+    || rescue.elements.length !== 1
+    || rescue.elements[0] !== 'earth'
+    || rescue.thresholds.air !== 0
+    || rescue.thresholds.earth !== 2
+    || rescue.thresholds.fire !== 0
+    || rescue.thresholds.water !== 0
+    || rescue.rarity !== 'ordinary') {
+    throw new Error('private cemetery-to-hand Rescue no longer matches its supported facts');
   }
   const divineHealing = snapshot.cards.find(({ name }) => name === 'Divine Healing');
   if (!divineHealing
@@ -1394,6 +1426,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     pudgeButcher,
     providerMinion,
     rangedMinion,
+    rescue,
     roamingMinion,
     secretTunnel,
     sedgeCrabs,
@@ -1476,6 +1509,7 @@ function gameDefinition(
   shootsDragProjectile = false,
   damageRandomUnitAtLocation: 0 | 3 = 0,
   teleportAllyToTargetSite = false,
+  returnMinionFromOwnCemetery = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1504,6 +1538,7 @@ function gameDefinition(
   const supportedMagicEffects = Number(damageTargetUnit !== 0)
     + Number(damageRandomUnitAtLocation !== 0)
     + Number(teleportAllyToTargetSite)
+    + Number(returnMinionFromOwnCemetery)
     + Number(healController !== 0)
     + Number(burrowTargetMinion);
   if (card.cardType === 'magic'
@@ -1518,6 +1553,8 @@ function gameDefinition(
           ? { damageRandomUnitAtLocation }
           : teleportAllyToTargetSite
             ? { teleportAllyToTargetSite: true }
+            : returnMinionFromOwnCemetery
+              ? { returnMinionFromOwnCemetery: true }
         : healController !== 0 ? { healController } : {}),
       manaCost: card.manaCost,
       ...(targetNearby ? { targetNearby: true } : {}),
@@ -1573,7 +1610,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-shallow-grave' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1676,6 +1713,7 @@ function buildManifest(
   ] as const;
   const earthDeck = elementalDeck('earth', earthMinions, [input.ghostTownSite]);
   const earthBuryDeck = elementalDeck('earth', earthMinions, [], [input.bury]);
+  const earthRescueDeck = elementalDeck('earth', earthMinions, [], [input.bury, input.rescue]);
   const earthDivineHealingDeck = elementalDeck('earth', earthMinions, [], [input.divineHealing]);
   const earthShallowGraveDeck = elementalDeck('earth', earthMinions, [input.shallowGrave]);
   const earthBurrowingDeck = elementalDeck('earth', [
@@ -1770,6 +1808,8 @@ function buildManifest(
         ? earthEntombedDeck
       : scenario === 'earth-bury'
         ? earthBuryDeck
+      : scenario === 'earth-rescue'
+        ? earthRescueDeck
       : scenario === 'earth-divine-healing'
         ? earthDivineHealingDeck
       : scenario === 'earth-shallow-grave'
@@ -1825,6 +1865,8 @@ function buildManifest(
         ? earthEntombedDeck
       : scenario === 'earth-bury'
         ? earthBuryDeck
+      : scenario === 'earth-rescue'
+        ? earthRescueDeck
       : scenario === 'earth-divine-healing'
         ? earthDivineHealingDeck
       : scenario === 'earth-shallow-grave'
@@ -1907,6 +1949,7 @@ function buildManifest(
       card.stableId === input.pudgeButcher.stableId,
       card.stableId === input.lightningBolt.stableId ? 3 : 0,
       card.stableId === input.teleport.stableId,
+      card.stableId === input.rescue.stableId,
     ),
   ]));
   return {
@@ -2595,6 +2638,64 @@ function findEarthBuryOpening(
     }
   }
   throw new Error('private forced-burrow Magic scenario no longer produces its supported opening');
+}
+
+function findEarthRescueOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  boskTrollInstanceId: string;
+  buryInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string];
+  rescueInstanceId: string;
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string, string];
+}> {
+  // ponytail: bounded opening scan reuses Bury without adding private config.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const built = buildManifest(input, input.config.earthSeed + offset, 'earth-rescue');
+    const session = createGameSession(built.manifest);
+    const earthSites = (seat: GameSeat) => session.state.players[seat].hand.atlas
+      .filter(({ cardId }) => {
+        const definition = session.state.cards[cardId];
+        return definition?.cardType === 'site' && definition.elements.includes('earth');
+      });
+    const northSites = earthSites('north');
+    const southSites = earthSites('south');
+    const buryInstanceId = availableMinionInstance(session, 'north', input.bury.stableId, 2);
+    const boskTrollInstanceId = availableMinionInstance(
+      session,
+      'south',
+      input.firstStrikeTargetMinion.stableId,
+      2,
+    );
+    const rescueInstanceId = availableMinionInstance(session, 'south', input.rescue.stableId, 3);
+    if (northSites.length >= 3
+      && southSites.length >= 3
+      && buryInstanceId
+      && boskTrollInstanceId
+      && rescueInstanceId) {
+      return {
+        ...built,
+        boskTrollInstanceId,
+        buryInstanceId,
+        northSiteInstanceIds: [
+          northSites[0]!.instanceId,
+          northSites[1]!.instanceId,
+          northSites[2]!.instanceId,
+        ],
+        rescueInstanceId,
+        session,
+        southSiteInstanceIds: [
+          southSites[0]!.instanceId,
+          southSites[1]!.instanceId,
+          southSites[2]!.instanceId,
+        ],
+      };
+    }
+  }
+  throw new Error('private cemetery-to-hand Rescue scenario no longer produces its supported opening');
 }
 
 function findEarthShallowGraveOpening(
@@ -4098,6 +4199,115 @@ function runEarthBury(
       .some(({ instanceId }) => instanceId === opening.boskTrollInstanceId),
     targetLeftRealm: !session.state.realm.units
       .some(({ instanceId }) => instanceId === opening.boskTrollInstanceId),
+  });
+}
+
+function runEarthRescue(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthRescue'] {
+  const opening = findEarthRescueOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.boskTrollInstanceId
+    && descriptor.cell === 'C2'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+    && descriptor.cell === 'B3');
+  take(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.cardInstanceId === opening.buryInstanceId
+    && descriptor.target?.instanceId === opening.boskTrollInstanceId);
+
+  const northViewAfterBury = observeGame(session.state, 'north');
+  const southHandCountAfterBury = northViewAfterBury.players.south.hand.spellbook;
+  const boskWasPublic = northViewAfterBury.players.south.cemetery
+    .some(({ cardId, instanceId }) => cardId === input.firstStrikeTargetMinion.stableId
+      && instanceId === opening.boskTrollInstanceId);
+  const buryStayedNorthCemetery = session.state.players.north.cemetery
+    .some(({ instanceId }) => instanceId === opening.buryInstanceId);
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[2]
+    && descriptor.cell === 'B2');
+
+  const choices = legalGameActions(session.state, 'south').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.rescueInstanceId);
+  const selected = choices.find(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.cemeteryMinionInstanceId === opening.boskTrollInstanceId);
+  if (!selected) throw new Error('private Rescue cemetery choice is unavailable');
+  const manaBefore = session.state.players.south.mana;
+  session = accept(session, selected);
+
+  const northViewAfter = observeGame(session.state, 'north');
+  const events = session.transcript.at(-1)?.events ?? [];
+  const castPayload = events[0] && isJsonRecord(events[0].payload) ? events[0].payload : undefined;
+  const returnedPayload = events[1] && isJsonRecord(events[1].payload)
+    ? events[1].payload
+    : undefined;
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    boskTroll: input.firstStrikeTargetMinion.name,
+    buryStayedNorthCemetery: buryStayedNorthCemetery
+      && session.state.players.north.cemetery
+        .some(({ instanceId }) => instanceId === opening.buryInstanceId),
+    causalEventsVerified: events.map(({ type }) => type).join(',')
+      === 'magic-cast,minion-returned-to-hand,magic-resolved'
+      && castPayload?.cemeteryMinionInstanceId === opening.boskTrollInstanceId
+      && returnedPayload?.cardId === input.firstStrikeTargetMinion.stableId
+      && returnedPayload.instanceId === opening.boskTrollInstanceId
+      && returnedPayload.owner === 'south'
+      && returnedPayload.seat === 'south'
+      && returnedPayload.sourceInstanceId === opening.rescueInstanceId,
+    deck: deckList(opening.manifest.decks.south, opening.names),
+    hiddenFromNorthAfterReturn: boskWasPublic
+      && typeof southHandCountAfterBury === 'number'
+      && typeof northViewAfter.players.south.hand.spellbook === 'number'
+      && northViewAfter.players.south.hand.spellbook === southHandCountAfterBury + 1
+      && northViewAfter.players.south.cemetery
+        .every(({ instanceId }) => instanceId !== opening.boskTrollInstanceId),
+    manaPaid: manaBefore - session.state.players.south.mana,
+    onlyOwnCemeteryMinionChoice: choices.length === 1
+      && choices.every(({ descriptor }) => descriptor.kind === 'cast-magic'
+        && descriptor.cemeteryMinionInstanceId === opening.boskTrollInstanceId)
+      && session.state.players.north.cemetery
+        .every(({ instanceId }) => instanceId !== opening.boskTrollInstanceId),
+    replayVerified: verifyGameReplay(session),
+    rescue: input.rescue.name,
+    rescueEnteredSouthCemetery: session.state.players.south.cemetery
+      .some(({ instanceId }) => instanceId === opening.rescueInstanceId),
+    returnedToSouthHand: session.state.players.south.cemetery
+      .every(({ instanceId }) => instanceId !== opening.boskTrollInstanceId)
+      && session.state.players.south.hand.spellbook
+        .some(({ instanceId }) => instanceId === opening.boskTrollInstanceId),
   });
 }
 
@@ -6386,6 +6596,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airZap = runAirZap(input);
   const earthBurrowing = runEarthBurrowing(input);
   const earthBury = runEarthBury(input);
+  const earthRescue = runEarthRescue(input);
   const earthDivineHealing = runEarthDivineHealing(input);
   const earthShallowGrave = runEarthShallowGrave(input);
   const earthEntombed = runEarthEntombed(input);
@@ -6542,6 +6753,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     },
     earthBurrowing,
     earthBury,
+    earthRescue,
     earthDivineHealing,
     earthShallowGrave,
     earthEntombed,
