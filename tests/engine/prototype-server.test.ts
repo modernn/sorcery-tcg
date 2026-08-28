@@ -113,7 +113,12 @@ test('resubmitting a stale command rejects without changing state hash', async (
 
   assert.equal(stale.accepted, false);
   assert.equal('session' in stale, false);
-  assert.equal(stale.reason, 'stale_version');
+  assert.deepEqual(stale.reason, {
+    code: 'stale_version',
+    currentStateHash: accepted.stateHash,
+    currentStateVersion: 1,
+    message: 'That action belongs to an earlier game state.',
+  });
   assert.equal(stale.stateHash, accepted.stateHash);
   assert.deepEqual(stale.view, accepted.view);
 });

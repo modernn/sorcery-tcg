@@ -14,12 +14,12 @@
 
 ## Deterministic engine contract
 
-- [ ] **ENG-01**: Represent authoritative state as browser-safe JSON-compatible TypeScript data with no client-owned mutation path.
-- [ ] **ENG-02**: Own a versioned seeded PRNG whose serializable state never depends on time, scheduling, or global randomness.
-- [ ] **ENG-03**: Give each seat an observation that preserves public information and excludes opponent-private information.
-- [ ] **ENG-04**: Return stable ordered legal actions and accept only a current `{stateVersion, actionId}`; rejection does not mutate state.
-- [ ] **ENG-05**: Return ordered semantic events, canonical hashes, and exact replay evidence for every accepted action.
-- [ ] **ENG-06**: Use the same observation/legal-action/step contract for humans, deterministic agents, models, replays, and simulations.
+- [x] **ENG-01**: Represent authoritative state as browser-safe JSON-compatible TypeScript data with no client-owned mutation path.
+- [x] **ENG-02**: Own a versioned seeded PRNG whose serializable state never depends on time, scheduling, or global randomness.
+- [x] **ENG-03**: Give each seat an observation that preserves public information and excludes opponent-private information.
+- [x] **ENG-04**: Return stable ordered legal actions and accept only a current `{stateVersion, actionId}`; rejection does not mutate state.
+- [x] **ENG-05**: Return ordered semantic events, canonical hashes, and exact replay evidence for every accepted action.
+- [x] **ENG-06**: Use the same observation/legal-action/step contract for humans, deterministic agents, models, replays, and simulations.
 
 ## Core game rules
 
@@ -83,8 +83,8 @@
 ## Verification and release
 
 - [ ] **TEST-01**: Run unit, scenario, invariant, integration, replay, import, coverage, and end-to-end checks through one documented command.
-- [ ] **TEST-02**: Reproduce deterministic-agent transcripts byte-for-byte in fresh processes and supported environments.
-- [ ] **TEST-03**: Prove hidden opponent state cannot affect a seat's observation or legal actions until officially revealed.
+- [x] **TEST-02**: Reproduce deterministic-agent transcripts byte-for-byte in fresh processes and supported environments.
+- [x] **TEST-03**: Prove hidden opponent state cannot affect a seat's observation or legal actions until officially revealed.
 - [ ] **TEST-04**: Mark no result ranked unless pinned-input, legality, coverage, execution, replay, design, and reporting gates pass.
 - [ ] **TEST-05**: Account for every scheduled trial exactly once as completed, drawn, invalid, competitor failure, or infrastructure failure.
 

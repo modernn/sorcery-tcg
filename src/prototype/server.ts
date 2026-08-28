@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  createDemoManifest,
   createDemoSession,
   hashDemoState,
   legalDemoActions,
@@ -11,6 +12,7 @@ import {
   stepDemo,
   verifyDemoReplay,
   type DemoSeat,
+  type DemoManifest,
   type DemoSession,
 } from '../engine/demo-contract.ts';
 
@@ -122,8 +124,8 @@ function sendPage(response: ServerResponse): void {
 }
 
 export function createPrototypeServer(initialSeed = 1): Server {
-  let seed = initialSeed;
-  let session: DemoSession = createDemoSession(seed);
+  let manifest: DemoManifest = createDemoManifest(initialSeed);
+  let session: DemoSession = createDemoSession(manifest);
   const actionIds: string[] = [];
 
   function view(seat: DemoSeat): JsonRecord {
@@ -151,8 +153,8 @@ export function createPrototypeServer(initialSeed = 1): Server {
         if (!Number.isInteger(body.seed) || (body.seed as number) < 0 || (body.seed as number) > 0xffff_ffff) {
           return sendJson(response, 400, { error: 'seed must be an unsigned 32-bit integer' });
         }
-        seed = body.seed as number;
-        session = createDemoSession(seed);
+        manifest = createDemoManifest(body.seed as number);
+        session = createDemoSession(manifest);
         actionIds.length = 0;
         return sendJson(response, 200, view('north'));
       }
@@ -174,11 +176,11 @@ export function createPrototypeServer(initialSeed = 1): Server {
         });
       }
       if (request.method === 'POST' && url.pathname === '/api/replay') {
-        const replay = replayDemo(seed, actionIds);
+        const replay = replayDemo(manifest, actionIds);
         return sendJson(response, 200, {
           acceptedActionCount: actionIds.length,
           finalStateHash: hashDemoState(replay.state),
-          verified: verifyDemoReplay(seed, actionIds, session.transcript),
+          verified: verifyDemoReplay(manifest, actionIds, session.transcript),
         });
       }
       return sendJson(response, 404, { error: 'not found' });
