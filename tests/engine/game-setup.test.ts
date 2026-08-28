@@ -71,6 +71,7 @@ type AvatarFacts = Readonly<{
 }>;
 
 type SiteFacts = Readonly<{
+  connectsBurrowedAllies?: boolean;
   elements?: readonly ('air' | 'earth' | 'fire' | 'water')[];
   genesisDrawSpellPerAdjacentSameCard?: boolean;
   genesisGainMana?: number;
@@ -99,6 +100,7 @@ function cardsFor(
     playerDeck.atlas.forEach((cardId) => {
       cards[cardId] = {
         cardType: 'site',
+        connectsBurrowedAllies: site.connectsBurrowedAllies ?? false,
         elements: site.elements ?? ['earth'],
         genesisDrawSpellPerAdjacentSameCard:
           site.genesisDrawSpellPerAdjacentSameCard ?? false,
@@ -275,6 +277,17 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
     ...input,
     cards: {
       ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        movesOnlyForward: true,
+        movesOnlySideways: true,
+      } as GameCardDefinition,
+    },
+  }), /only forward and only sideways/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
       [firstSpell]: { ...cards[firstSpell]!, submerge: 'yes' } as unknown as GameCardDefinition,
     },
   }), /submerge/);
@@ -394,6 +407,16 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /genesisDrawSpellPerAdjacentSameCard/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSite]: {
+        ...cards[firstSite]!,
+        connectsBurrowedAllies: 'yes',
+      } as unknown as GameCardDefinition,
+    },
+  }), /connectsBurrowedAllies/);
 });
 
 test('TEST-03 different opponent hidden cards cannot change an observation or legal actions', () => {
@@ -1972,6 +1995,103 @@ test('RULE-04 Burrowing uses underground summons and movement only at land sites
   assert.equal(legalGameActions(water.state, 'north').some(({ descriptor }) =>
     descriptor.kind === 'summon-minion' && descriptor.region === 'underground'), false);
   assert.equal(verifyGameReplay(water), true);
+});
+
+test('RULE-04 Secret Tunnel connects burrowed allies only to the controller\'s other sites', () => {
+  const decks = { north: deck('tunnel-north', 3), south: deck('tunnel-south', 3) };
+  const cards = cardsFor(decks, {
+    attack: 3,
+    burrowing: true,
+    defense: 3,
+    manaCost: 1,
+    movementBonus: 1,
+    movesOnlyForward: true,
+    submerge: true,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  });
+  const tunnelCardId = decks.north.atlas[0]!;
+  const waterCardId = decks.north.atlas[2]!;
+  cards[tunnelCardId] = {
+    cardType: 'site',
+    connectsBurrowedAllies: true,
+    elements: ['earth'],
+  };
+  cards[waterCardId] = { cardType: 'site', elements: ['water'] };
+  const tunnelManifest = createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic',
+      revisionId: 'synthetic-secret-tunnel-v1',
+    },
+    cards,
+    decks,
+    firstSeat: 'north',
+    seed: 143,
+  });
+  let session = keep(createGameSession(tunnelManifest));
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  const tunnel = session.state.players.north.hand.atlas.find(({ cardId }) => cardId === tunnelCardId);
+  const land = session.state.players.north.hand.atlas.find(({ cardId }) =>
+    cardId !== tunnelCardId && cardId !== waterCardId);
+  const water = session.state.players.north.hand.atlas.find(({ cardId }) => cardId === waterCardId);
+  assert.ok(tunnel);
+  assert.ok(land);
+  assert.ok(water);
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === tunnel.instanceId && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cell === 'C4' && descriptor.region === 'underground');
+  const unitId = session.state.realm.units[0]?.instanceId;
+  assert.ok(unitId);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === land.instanceId && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === water.instanceId && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const pathFor = (candidate: GameLegalAction): string => candidate.descriptor.kind === 'move-and-attack'
+    ? candidate.descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+    : '';
+  const moves = legalGameActions(session.state, 'north');
+  const unitPaths = moves
+    .filter(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === unitId)
+    .map(pathFor);
+  assert.equal(unitPaths.filter((path) => path === 'C4/underground,C3/underground').length, 1);
+  assert.equal(unitPaths.includes('C4/underground,C2/underwater'), true);
+  assert.equal(unitPaths.includes('C4/underground,C1/underground'), false);
+  assert.equal(unitPaths.includes('C4/underground,C2/underwater,C4/underground'), false);
+  const avatarId = session.state.players.north.avatar.card.instanceId;
+  const avatarPaths = moves
+    .filter(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === avatarId)
+    .map(pathFor);
+  assert.equal(avatarPaths.includes('C4/surface,C3/surface'), true);
+  assert.equal(avatarPaths.includes('C4/surface,C2/surface'), false);
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === unitId
+    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+      === 'C4/underground,C2/underwater');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  assert.deepEqual(session.state.realm.units[0]?.location, 'C2');
+  assert.deepEqual(session.state.realm.units[0]?.region, 'underwater');
+  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-03 a must-be-burrowed cast restriction suppresses only non-underground casts', () => {

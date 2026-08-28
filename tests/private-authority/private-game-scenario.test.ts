@@ -165,6 +165,24 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthForwardMovement.deck.spellbook
     .find(({ name }) => name === 'Dalcean Phalanx')?.copies, 3);
   assert.equal(result.earthForwardMovement.replayVerified, true);
+  assert.equal(result.earthSecretTunnel.secretTunnel, 'Secret Tunnel');
+  assert.equal(result.earthSecretTunnel.caveTrolls, 'Cave Trolls');
+  assert.equal(result.earthSecretTunnel.acceptedActionCount, 21);
+  assert.equal(result.earthSecretTunnel.physicalMoveAvailable, true);
+  assert.equal(result.earthSecretTunnel.directTunnelMoveAvailable, true);
+  assert.equal(result.earthSecretTunnel.directOpponentUnavailable, true);
+  assert.equal(result.earthSecretTunnel.avatarPhysicalAvailable, true);
+  assert.equal(result.earthSecretTunnel.avatarDirectUnavailable, true);
+  assert.equal(result.earthSecretTunnel.movedUnderground, true);
+  assert.equal(result.earthSecretTunnel.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthSecretTunnel.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthSecretTunnel.deck.atlas
+    .find(({ name }) => name === 'Secret Tunnel')?.copies, 3);
+  assert.equal(result.earthSecretTunnel.deck.spellbook
+    .find(({ name }) => name === 'Cave Trolls')?.copies, 4);
+  assert.equal(result.earthSecretTunnel.replayVerified, true);
   assert.equal(result.earthRamp.affinityAdded, true);
   assert.equal(result.earthRamp.manaUnavailableWhileSick, true);
   assert.equal(result.earthRamp.manaGained, 2);
