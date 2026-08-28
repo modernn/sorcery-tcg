@@ -31,6 +31,7 @@
 - Movement +1 and +2 use engine-issued explicit surface paths for both Move and Attack and Defend, including exact bounded paths and legal returning routes without repeating a directed step; sideways-only basic movement excludes forward, backward, and diagonal steps from both actions.
 - Submerge minions can be summoned underwater at Water sites, move between surface and underwater at a Water site, and swim between adjacent Water sites; attacks, Defend, Intercept, and projectiles respect exact regions while sites remain surface targets.
 - Burrowing minions can be summoned underground at land sites, move between surface and underground at a land site, and travel between adjacent land sites; units with both Burrowing and Submerge cross directly between adjacent underground land and underwater Water locations.
+- Voidwalk minions can be summoned to any empty void, move between adjacent voids and adjacent site surfaces, and cross directly between void and eligible subsurface regions; playing a site into an occupied void places its units on the new surface without moving them.
 - Ranged issues cardinal one-step projectile paths, stops at the first occupied location, lets the controller choose among multiple hit units, never hits sites, and resolves a tapped one-way strike through the normal damage and death pipeline.
 - Minion Ward enters with one public mark, prevents one complete positive damage event through the shared combat/projectile path, then breaks before later damage resolves normally.
 - Attacking-only first strike resolves its attacker's allocations, deaths, Deathrites, and terminal results in an early window; only surviving defenders then make their normal return strikes.
@@ -40,6 +41,7 @@
 - A private-local actual-card adapter that verifies the normalized artifact and current Constructed format, builds legal 30/60 beginner decks under official rarity copy limits, and executes a deterministic real-card Charge and combat scenario without committing source data.
 - A second real-card Earth ramp deck that proves Ghost Town's site-entry temporary mana, provided Earth affinity, Field Laborers' readiness-gated temporary mana, Zombie Horde as a five-mana payoff with restricted Defend, Land Surveyor's Genesis draw, and Kettletop Leprechaun's Deathrite draw; short replays of the same deck prove Belmotte Longbowmen's one-step Ranged strike, Holy Warrior's one-use Ward against two consecutive shots, and Albespine Pikemen killing Bosk Troll before its return strike.
 - A third legal 30/60 Air teaching deck that proves Snallygaster's exact two-step Movement +1 paths and Roaming Monster's permission to summon onto an enemy site while ordinary minions remain restricted; variants prove Plumed Pegasus's diagonal flight and asymmetric attack/Intercept permissions, Band of Thieves's Stealth against Snow Leopard, and Cloud Spirit's legal return path, rejected repeated directed step, and exact three-step Airborne path ending with an available attack against Ghoul.
+- A legal 30/60 Air teaching-deck variant that proves Spectral Stalker can be summoned to an arbitrary real void, move through void, exit onto an enemy site's surface, and attack that site while a real non-Voidwalk minion has no void summon choice.
 - A fourth legal 30/60 Water teaching deck that proves Muddy Pigs heals exactly 3 before entering its cemetery after a real simultaneous combat death; variants prove Sly Fox's end-turn Stealth timing and Sedge Crabs' C3-to-B3 sideways movement while real C2/C4 paths remain unavailable.
 - A legal 30/60 Water teaching-deck variant that proves Coral-Reef Kelpie has distinct surface and underwater summon choices at a real Water site while a real non-Submerge minion has only the surface choice.
 - A legal 30/60 Earth teaching-deck variant that proves Cave Trolls has distinct surface and underground summon choices at a real land site, travels underground beneath an enemy land site without attacking it, then surfaces and can attack that site; a real non-Burrowing minion has only the surface summon choice.
@@ -58,10 +60,10 @@
 - `pnpm game:demo -- 23`: completes in 138 accepted actions over 56 turns with byte-exact replay.
 - `pnpm play`: serves the playable core at `http://127.0.0.1:4174/`.
 - Browser checkpoint: a 22-action match moved a minion, handed Defend to the non-active seat, resolved a simultaneous trade into both cemeteries, and replayed byte-identically.
-- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 28-action Earth Burrowing, 24-action Earth first strike, 22-action Earth Ranged, 27-action Earth Ward, 27-action Airborne, 26-action Air Stealth, 26-action Air movement, 24-action Air Movement +2, 25-action Air unrestricted-summon, 43-action Fire targeting/response, 23-action Water end-turn Stealth, 22-action Water sideways movement, 16-action Water Submerge, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
+- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 28-action Earth Burrowing, 24-action Earth first strike, 22-action Earth Ranged, 27-action Earth Ward, 27-action Airborne, 26-action Air Stealth, 26-action Air movement, 24-action Air Movement +2, 25-action Air unrestricted-summon, 17-action Air Voidwalk, 43-action Fire targeting/response, 23-action Water end-turn Stealth, 22-action Water sideways movement, 16-action Water Submerge, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
 - `pnpm game:verify-private`: one passing ignored-authority integration scenario.
 - Death's Door scenarios prove same-turn direct-damage immunity, later death blows, simultaneous-defeat draws, nonlethal site strikes, and exact replay.
-- `pnpm verify`: 230 passing public tests at this checkpoint.
+- `pnpm verify`: 231 passing public tests at this checkpoint.
 
 ## Still required for Phase 3
 
@@ -69,6 +71,7 @@
 - Full start/main/end phase triggers and duration cleanup beyond the supported narrow Genesis/Deathrite effects, minion damage, and summoning sickness.
 - Additional costs, non-minion spells, movement beyond bounded +1/+2 bonuses and sideways-only self-movement, further activated abilities, and card-specific targets.
 - Combat tiers beyond attacking-only first strike, projectile ranges and effects beyond Ranged 1, additional healing sources, prevention/modification beyond minion Ward, additional card-triggered damage/death behavior, and tournament ending overlays.
+- State-based banishment/death when forced movement, ability loss, or a deliberately suicidal step leaves a unit unable to survive in its region.
 - Source-linked scenario and invariant coverage for every supported core mechanic.
 
 The runner is intentionally classified `unranked_partial_rules`; it proves the real engine loop and replay contract without claiming complete Sorcery behavior.

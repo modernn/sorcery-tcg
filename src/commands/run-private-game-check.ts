@@ -123,6 +123,23 @@ export type PrivateGameCheck = Readonly<{
     seed: number;
     summonedAtEnemySite: boolean;
   }>;
+  airVoidwalk: Readonly<{
+    acceptedActionCount: number;
+    deck: DeckList;
+    nonVoidSurfaceAvailable: boolean;
+    nonVoidVoidUnavailable: boolean;
+    replayVerified: boolean;
+    seed: number;
+    siteTargetAvailableAfterExit: boolean;
+    subsurfaceExitUnavailable: boolean;
+    summonedInVoid: boolean;
+    surfaceExitAvailable: boolean;
+    surfaceSummonAvailable: boolean;
+    targetWasVoid: boolean;
+    voidMoveAvailable: boolean;
+    voidSummonAvailable: boolean;
+    voidwalkMinion: string;
+  }>;
   authorityHash: Hash;
   avatarSpellDrawn: boolean;
   charge: Readonly<{ activatedOnSummon: boolean; minion: string }>;
@@ -431,6 +448,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   stealthMinion: NormalizedCard;
   stealthTargetMinion: NormalizedCard;
   submergeMinion: NormalizedCard;
+  voidwalkMinion: NormalizedCard;
   wardMinion: NormalizedCard;
 }>> {
   const config = scenarioConfig(parseJsonWithDuplicateKeyCheck(await readFile(path, 'utf8')));
@@ -572,6 +590,22 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || burrowingMinion.thresholds.water !== 0
     || burrowingMinion.rarity !== 'ordinary') {
     throw new Error('private Burrowing minion no longer matches its supported facts');
+  }
+  const voidwalkMinion = snapshot.cards.find(({ name }) => name === 'Spectral Stalker');
+  if (!voidwalkMinion
+    || voidwalkMinion.cardType !== 'minion'
+    || voidwalkMinion.rulesText.trim() !== 'Voidwalk'
+    || voidwalkMinion.manaCost !== 2
+    || voidwalkMinion.attack !== 2
+    || voidwalkMinion.defense !== 2
+    || voidwalkMinion.elements.length !== 1
+    || voidwalkMinion.elements[0] !== 'air'
+    || voidwalkMinion.thresholds.air !== 1
+    || voidwalkMinion.thresholds.earth !== 0
+    || voidwalkMinion.thresholds.fire !== 0
+    || voidwalkMinion.thresholds.water !== 0
+    || voidwalkMinion.rarity !== 'ordinary') {
+    throw new Error('private Voidwalk minion no longer matches its supported facts');
   }
   const cannotDefendMinion = snapshot.cards
     .find(({ stableId }) => stableId === config.cannotDefendMinionStableId);
@@ -839,6 +873,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     stealthMinion,
     stealthTargetMinion,
     submergeMinion,
+    voidwalkMinion,
     wardMinion,
   };
 }
@@ -891,6 +926,7 @@ function gameDefinition(
   movesOnlySideways = false,
   submerge = false,
   burrowing = false,
+  voidwalk = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -941,6 +977,7 @@ function gameDefinition(
       summonToAnySite,
       ...(tapForMana ? { tapForMana } : {}),
       thresholds: card.thresholds,
+      voidwalk,
       ward,
     };
   }
@@ -950,7 +987,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-voidwalk' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1054,7 +1091,7 @@ function buildManifest(
     ...earthMinions,
     input.burrowingMinion,
   ], [input.ghostTownSite]);
-  const airborneDeck = elementalDeck('air', [
+  const airMinions = [
     input.movementMinion,
     input.roamingMinion,
     input.airborneMinion,
@@ -1062,7 +1099,9 @@ function buildManifest(
     input.stealthMinion,
     input.stealthTargetMinion,
     input.movementTwoMinion,
-  ]);
+  ] as const;
+  const airborneDeck = elementalDeck('air', airMinions);
+  const airVoidwalkDeck = elementalDeck('air', [...airMinions, input.voidwalkMinion]);
   const waterDeck = elementalDeck('water', [
     input.healingMinion,
     input.slyFox,
@@ -1075,7 +1114,9 @@ function buildManifest(
     input.submergeMinion,
   ]);
   const decks = {
-    north: scenario === 'airborne' || scenario === 'movement-two' || scenario === 'stealth'
+    north: scenario === 'air-voidwalk'
+      ? airVoidwalkDeck
+      : scenario === 'airborne' || scenario === 'movement-two' || scenario === 'stealth'
       ? airborneDeck
       : scenario === 'earth-burrowing'
         ? earthBurrowingDeck
@@ -1090,7 +1131,9 @@ function buildManifest(
         : scenario === 'water' || scenario === 'water-sideways' || scenario === 'water-stealth'
           ? waterDeck
           : deck(false, true),
-    south: scenario === 'airborne' || scenario === 'movement-two' || scenario === 'stealth'
+    south: scenario === 'air-voidwalk'
+      ? airVoidwalkDeck
+      : scenario === 'airborne' || scenario === 'movement-two' || scenario === 'stealth'
       ? airborneDeck
       : scenario === 'earth-burrowing'
         ? earthBurrowingDeck
@@ -1139,6 +1182,7 @@ function buildManifest(
       card.stableId === input.sedgeCrabs.stableId,
       card.stableId === input.submergeMinion.stableId,
       card.stableId === input.burrowingMinion.stableId,
+      card.stableId === input.voidwalkMinion.stableId,
     ),
   ]));
   return {
@@ -1679,6 +1723,62 @@ function findAirborneOpening(
       };
   }
   throw new Error(`private ${movementTwo ? 'Movement +2' : 'Airborne'} scenario seed ${seed} no longer produces its supported opening`);
+}
+
+function findAirVoidwalkOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  comparisonInstanceId: string;
+  featuredInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string];
+  seed: number;
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string];
+}> {
+  // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
+  for (let offset = 1; offset <= 64; offset += 1) {
+    const seed = input.config.airborneSeed + offset;
+    const built = buildManifest(input, seed, 'air-voidwalk');
+    const session = createGameSession(built.manifest);
+    const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('air');
+    });
+    const southSites = session.state.players.south.hand.atlas;
+    const available = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 1),
+    ];
+    const featuredInstanceId = available
+      .find(({ cardId }) => cardId === input.voidwalkMinion.stableId)?.instanceId;
+    const comparisonInstanceId = available.find(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'minion'
+        && definition.voidwalk !== true
+        && definition.manaCost <= 2
+        && definition.thresholds.air <= 2
+        && definition.thresholds.earth === 0
+        && definition.thresholds.fire === 0
+        && definition.thresholds.water === 0;
+    })?.instanceId;
+    if (northSites.length >= 2
+      && southSites.length >= 2
+      && featuredInstanceId
+      && comparisonInstanceId) {
+      return {
+        ...built,
+        comparisonInstanceId,
+        featuredInstanceId,
+        northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
+        seed,
+        session,
+        southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
+      };
+    }
+  }
+  throw new Error('private Air Voidwalk scenario no longer produces its supported opening');
 }
 
 function findStealthOpening(
@@ -2691,6 +2791,90 @@ function runAirMovementTwo(
   });
 }
 
+function runAirVoidwalk(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airVoidwalk'] {
+  const opening = findAirVoidwalkOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+
+  const targetWasVoid = session.state.realm.sites.B2 === undefined;
+  const summons = legalGameActions(session.state, 'north');
+  const matches = (cardInstanceId: string, cell: string, region: 'surface' | 'void'): boolean =>
+    summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === cardInstanceId
+      && descriptor.cell === cell
+      && (descriptor.region ?? 'surface') === region);
+  const surfaceSummonAvailable = matches(opening.featuredInstanceId, 'C3', 'surface');
+  const voidSummonAvailable = matches(opening.featuredInstanceId, 'B2', 'void');
+  const nonVoidSurfaceAvailable = matches(opening.comparisonInstanceId, 'C3', 'surface');
+  const nonVoidVoidUnavailable = !matches(opening.comparisonInstanceId, 'B2', 'void');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.featuredInstanceId
+    && descriptor.cell === 'B2'
+    && descriptor.region === 'void');
+  const summonedInVoid = session.state.realm.units.some(({ instanceId, location, region }) =>
+    instanceId === opening.featuredInstanceId && location === 'B2' && region === 'void');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const moves = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === opening.featuredInstanceId);
+  const hasPath = (path: string): boolean => moves.some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',') === path);
+  const voidMoveAvailable = hasPath('B2/void,B1/void');
+  const surfaceExitAvailable = hasPath('B2/void,C2/surface');
+  const subsurfaceExitUnavailable = !hasPath('B2/void,C2/underground')
+    && !hasPath('B2/void,C2/underwater');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === opening.featuredInstanceId
+    && descriptor.to.cell === 'C2'
+    && descriptor.to.region === 'surface');
+  const siteTargetAvailableAfterExit = legalGameActions(session.state, 'north')
+    .some(({ descriptor }) => descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    nonVoidSurfaceAvailable,
+    nonVoidVoidUnavailable,
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    siteTargetAvailableAfterExit,
+    subsurfaceExitUnavailable,
+    summonedInVoid,
+    surfaceExitAvailable,
+    surfaceSummonAvailable,
+    targetWasVoid,
+    voidMoveAvailable,
+    voidSummonAvailable,
+    voidwalkMinion: opening.names.get(input.voidwalkMinion.stableId) ?? input.voidwalkMinion.stableId,
+  });
+}
+
 function runStealth(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['stealth'] {
@@ -3359,6 +3543,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airMovement = runAirMovement(input);
   const airMovementTwo = runAirMovementTwo(input);
   const airSummoning = runAirSummoning(input);
+  const airVoidwalk = runAirVoidwalk(input);
   const earthBurrowing = runEarthBurrowing(input);
   const earthFirstStrike = runEarthFirstStrike(input);
   const earthRamp = runEarthRamp(input);
@@ -3479,6 +3664,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     airMovement,
     airMovementTwo,
     airSummoning,
+    airVoidwalk,
     authorityHash: input.authorityHash,
     avatarSpellDrawn,
     charge: {

@@ -58,6 +58,23 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airSummoning.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
   assert.deepEqual(result.airSummoning.deck, result.airMovement.deck);
   assert.equal(result.airSummoning.replayVerified, true);
+  assert.equal(result.airVoidwalk.voidwalkMinion, 'Spectral Stalker');
+  assert.equal(result.airVoidwalk.acceptedActionCount, 17);
+  assert.equal(result.airVoidwalk.targetWasVoid, true);
+  assert.equal(result.airVoidwalk.surfaceSummonAvailable, true);
+  assert.equal(result.airVoidwalk.voidSummonAvailable, true);
+  assert.equal(result.airVoidwalk.nonVoidSurfaceAvailable, true);
+  assert.equal(result.airVoidwalk.nonVoidVoidUnavailable, true);
+  assert.equal(result.airVoidwalk.summonedInVoid, true);
+  assert.equal(result.airVoidwalk.voidMoveAvailable, true);
+  assert.equal(result.airVoidwalk.surfaceExitAvailable, true);
+  assert.equal(result.airVoidwalk.subsurfaceExitUnavailable, true);
+  assert.equal(result.airVoidwalk.siteTargetAvailableAfterExit, true);
+  assert.equal(result.airVoidwalk.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airVoidwalk.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airVoidwalk.deck.spellbook
+    .find(({ name }) => name === 'Spectral Stalker')?.copies, 4);
+  assert.equal(result.airVoidwalk.replayVerified, true);
   assert.equal(result.avatarSpellDrawn, true);
   assert.equal(result.charge.activatedOnSummon, true);
   assert.equal(result.genesis.siteDrawn, true);
