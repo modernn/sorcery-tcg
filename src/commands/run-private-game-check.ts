@@ -222,6 +222,20 @@ export type PrivateGameCheck = Readonly<{
     targetIsLandSite: boolean;
     undergroundSummonAvailable: boolean;
   }>;
+  earthBury: Readonly<{
+    acceptedActionCount: number;
+    boskTroll: string;
+    buriedBeforeDeath: boolean;
+    bury: string;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    exactlyOneBuryTarget: boolean;
+    manaPaid: number;
+    replayVerified: boolean;
+    spellEnteredCemetery: boolean;
+    targetEnteredCemetery: boolean;
+    targetLeftRealm: boolean;
+  }>;
   earthDivineHealing: Readonly<{
     acceptedActionCount: number;
     actualLifeGained: number;
@@ -569,6 +583,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   airborneTargetMinion: NormalizedCard;
   arcLightning: NormalizedCard;
   authorityHash: Hash;
+  bury: NormalizedCard;
   burrowingMinion: NormalizedCard;
   cards: readonly NormalizedCard[];
   cannotDefendMinion: NormalizedCard;
@@ -624,6 +639,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     throw new Error('private normalized card artifact identity is invalid');
   }
   const snapshot = normalizedCardSnapshotSchema.parse(artifact.identity.payload);
+  const bury = snapshot.cards.find(({ name }) => name === 'Bury');
+  if (!bury
+    || bury.cardType !== 'magic'
+    || ruleTextDigest(bury.rulesText) !== 'sha256:e157c6d28447da731b3883137d00994d65a81d3da71d47f052a8b10d35b624d8'
+    || bury.manaCost !== 3
+    || bury.attack !== null
+    || bury.defense !== null
+    || bury.life !== null
+    || bury.elements.length !== 1
+    || bury.elements[0] !== 'earth'
+    || bury.thresholds.air !== 0
+    || bury.thresholds.earth !== 1
+    || bury.thresholds.fire !== 0
+    || bury.thresholds.water !== 0
+    || bury.rarity !== 'ordinary') {
+    throw new Error('private forced-burrow Magic no longer matches its supported facts');
+  }
   const divineHealing = snapshot.cards.find(({ name }) => name === 'Divine Healing');
   if (!divineHealing
     || divineHealing.cardType !== 'magic'
@@ -1219,6 +1251,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     airborneTargetMinion,
     arcLightning,
     authorityHash: artifact.contentHash,
+    bury,
     burrowingMinion,
     cards: snapshot.cards,
     cannotDefendMinion,
@@ -1326,6 +1359,7 @@ function gameDefinition(
   damageTargetUnit: 0 | 1 | 4 = 0,
   targetNearby = false,
   healController: 0 | 7 = 0,
+  burrowTargetMinion = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1348,13 +1382,18 @@ function gameDefinition(
       ...(siteGenesisGainMana ? { genesisGainMana: siteGenesisGainMana } : {}),
     };
   }
+  const supportedMagicEffects = Number(damageTargetUnit !== 0)
+    + Number(healController !== 0)
+    + Number(burrowTargetMinion);
   if (card.cardType === 'magic'
     && card.manaCost !== null
-    && (damageTargetUnit !== 0 || healController !== 0)
-    && !(damageTargetUnit !== 0 && healController !== 0)) {
+    && supportedMagicEffects === 1) {
     return {
+      ...(burrowTargetMinion ? { burrowTargetMinion: true } : {}),
       cardType: 'magic',
-      ...(damageTargetUnit !== 0 ? { damageTargetUnit } : { healController }),
+      ...(damageTargetUnit !== 0
+        ? { damageTargetUnit }
+        : healController !== 0 ? { healController } : {}),
       manaCost: card.manaCost,
       ...(targetNearby ? { targetNearby: true } : {}),
       thresholds: card.thresholds,
@@ -1408,7 +1447,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1510,6 +1549,7 @@ function buildManifest(
     input.firstStrikeTargetMinion,
   ] as const;
   const earthDeck = elementalDeck('earth', earthMinions, [input.ghostTownSite]);
+  const earthBuryDeck = elementalDeck('earth', earthMinions, [], [input.bury]);
   const earthDivineHealingDeck = elementalDeck('earth', earthMinions, [], [input.divineHealing]);
   const earthBurrowingDeck = elementalDeck('earth', [
     ...earthMinions,
@@ -1595,6 +1635,8 @@ function buildManifest(
       ? airborneDeck
       : scenario === 'earth-entombed'
         ? earthEntombedDeck
+      : scenario === 'earth-bury'
+        ? earthBuryDeck
       : scenario === 'earth-divine-healing'
         ? earthDivineHealingDeck
       : scenario === 'earth-forward'
@@ -1642,6 +1684,8 @@ function buildManifest(
         ? waterLugbogDeck
       : scenario === 'earth-entombed'
         ? earthEntombedDeck
+      : scenario === 'earth-bury'
+        ? earthBuryDeck
       : scenario === 'earth-divine-healing'
         ? earthDivineHealingDeck
       : scenario === 'earth-forward'
@@ -1717,6 +1761,7 @@ function buildManifest(
         : card.stableId === input.zap.stableId ? 1 : 0,
       card.stableId === input.arcLightning.stableId,
       card.stableId === input.divineHealing.stableId ? 7 : 0,
+      card.stableId === input.bury.stableId,
     ),
   ]));
   return {
@@ -2355,6 +2400,56 @@ function findEarthDivineHealingOpening(
     }
   }
   throw new Error('private Earth controller-healing Magic scenario no longer produces its supported opening');
+}
+
+function findEarthBuryOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  boskTrollInstanceId: string;
+  buryInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string];
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string];
+}> {
+  // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const built = buildManifest(input, input.config.earthSeed + offset, 'earth-bury');
+    const session = createGameSession(built.manifest);
+    const earthSites = (seat: GameSeat) => session.state.players[seat].hand.atlas
+      .filter(({ cardId }) => {
+        const definition = session.state.cards[cardId];
+        return definition?.cardType === 'site' && definition.elements.includes('earth');
+      });
+    const northSites = earthSites('north');
+    const southSites = earthSites('south');
+    const buryInstanceId = availableMinionInstance(session, 'north', input.bury.stableId, 2);
+    const boskTrollInstanceId = availableMinionInstance(
+      session,
+      'south',
+      input.firstStrikeTargetMinion.stableId,
+      2,
+    );
+    if (northSites.length >= 3
+      && southSites.length >= 2
+      && buryInstanceId
+      && boskTrollInstanceId) {
+      return {
+        ...built,
+        boskTrollInstanceId,
+        buryInstanceId,
+        northSiteInstanceIds: [
+          northSites[0]!.instanceId,
+          northSites[1]!.instanceId,
+          northSites[2]!.instanceId,
+        ],
+        session,
+        southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
+      };
+    }
+  }
+  throw new Error('private forced-burrow Magic scenario no longer produces its supported opening');
 }
 
 function findEarthSecretTunnelOpening(
@@ -3554,6 +3649,95 @@ function runEarthImmobile(
       opening.names.get(input.pudgeButcher.stableId) ?? input.pudgeButcher.stableId,
     replayVerified: verifyGameReplay(session),
     sameLocationAttackAvailable,
+  });
+}
+
+function runEarthBury(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthBury'] {
+  const opening = findEarthBuryOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.boskTrollInstanceId
+    && descriptor.cell === 'C2'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+    && descriptor.cell === 'B3');
+
+  const buryActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.buryInstanceId
+      && descriptor.target !== undefined
+      && descriptor.target.instanceId === opening.boskTrollInstanceId);
+  const exactlyOneBuryTarget = buryActions.length === 1;
+  const chosenBury = buryActions[0];
+  if (!chosenBury) throw new Error('private forced-burrow Magic target is unavailable');
+  const manaBefore = session.state.players.north.mana;
+  session = accept(session, chosenBury);
+
+  const finalEvents = session.transcript.at(-1)?.events ?? [];
+  const eventIndex = (type: string, instanceId: string): number =>
+    finalEvents.findIndex(({ payload, type: eventType }) =>
+      eventType === type && isJsonRecord(payload) && payload.instanceId === instanceId);
+  const castIndex = eventIndex('magic-cast', opening.buryInstanceId);
+  const burrowIndex = finalEvents.findIndex(({ payload, type }) =>
+    type === 'minion-burrowed'
+      && isJsonRecord(payload)
+      && payload.instanceId === opening.boskTrollInstanceId
+      && payload.sourceInstanceId === opening.buryInstanceId
+      && payload.cell === 'C2');
+  const deathIndex = eventIndex('minion-died', opening.boskTrollInstanceId);
+  const resolvedIndex = eventIndex('magic-resolved', opening.buryInstanceId);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    boskTroll:
+      opening.names.get(input.firstStrikeTargetMinion.stableId)
+        ?? input.firstStrikeTargetMinion.stableId,
+    buriedBeforeDeath: burrowIndex >= 0 && burrowIndex < deathIndex,
+    bury: opening.names.get(input.bury.stableId) ?? input.bury.stableId,
+    causalEventsVerified: castIndex >= 0
+      && castIndex < burrowIndex
+      && deathIndex === burrowIndex + 1
+      && deathIndex < resolvedIndex,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    exactlyOneBuryTarget,
+    manaPaid: manaBefore - session.state.players.north.mana,
+    replayVerified: verifyGameReplay(session),
+    spellEnteredCemetery: session.state.players.north.cemetery
+      .some(({ instanceId }) => instanceId === opening.buryInstanceId)
+      && !session.state.players.north.hand.spellbook
+        .some(({ instanceId }) => instanceId === opening.buryInstanceId),
+    targetEnteredCemetery: session.state.players.south.cemetery
+      .some(({ instanceId }) => instanceId === opening.boskTrollInstanceId),
+    targetLeftRealm: !session.state.realm.units
+      .some(({ instanceId }) => instanceId === opening.boskTrollInstanceId),
   });
 }
 
@@ -5572,6 +5756,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airVoidwalk = runAirVoidwalk(input);
   const airZap = runAirZap(input);
   const earthBurrowing = runEarthBurrowing(input);
+  const earthBury = runEarthBury(input);
   const earthDivineHealing = runEarthDivineHealing(input);
   const earthEntombed = runEarthEntombed(input);
   const earthFirstStrike = runEarthFirstStrike(input);
@@ -5724,6 +5909,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
       south: deckList(opening.manifest.decks.south, opening.names),
     },
     earthBurrowing,
+    earthBury,
     earthDivineHealing,
     earthEntombed,
     earthRamp,

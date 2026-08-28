@@ -31,6 +31,7 @@
 - Targeted unit-damage Magic pays mana and thresholds, issues same-region targets while respecting enemy Stealth, resolves through the shared Ward/damage/death/Deathrite pipeline, and enters its owner's cemetery before any terminal event.
 - Nearby Magic further restricts those legal targets to the caster's location and surrounding cardinal or diagonal locations without treating movement-only links as realm adjacency.
 - Targetless controller-healing Magic is a mutually exclusive supported spell shape, shares capped Avatar healing with Deathrite, cannot leave Death's Door, emits healing only for positive life gain, and still pays and resolves when the gain is zero.
+- Bury Magic targets same-region minions, breaks enemy Ward before resolution, forcefully moves surface targets underground at land sites, resolves as a no-op where burrowing is impossible, and immediately kills minions that cannot survive underground through the shared Deathrite/cemetery pipeline.
 - A minion that cannot move to Defend is excluded only when movement is required; stationary Defend and Intercept remain legal.
 - A minion prohibited from Defend and Intercept is excluded from both response abilities while a directly attacked unit may still participate without using Defend.
 - Movement +1 and +2 use engine-issued explicit surface paths for both Move and Attack and Defend, including exact bounded paths and legal returning routes without repeating a directed step; sideways-only basic movement excludes forward, backward, and diagonal steps from both actions.
@@ -68,6 +69,7 @@
 - A legal 30/60 Earth teaching-deck variant with three Pudge Butchers and four Bosk Trolls proves Pudge cannot move itself to nearby sites while retaining a co-located attack and same-location Defend.
 - A legal 30/60 Earth teaching-deck variant with three Secret Tunnels and four Cave Trolls proves a direct nonlocal underground move to another controlled site while ordinary physical movement, opponent exclusion, and surface adjacency remain intact.
 - A legal 30/60 Earth teaching-deck variant with three Divine Healings takes an undefended real site strike, then proves exactly one targetless cast, one mana payment, capped 17-to-20 healing, cemetery entry, and exact replay.
+- A legal 30/60 Earth teaching-deck variant with four Burys and four Bosk Trolls proves one real targeted cast, three mana payment, forced underground movement, immediate region-survival death, both owner cemeteries, and exact replay in 17 accepted actions.
 - A legal 30/60 Water teaching-deck variant with four Drowned proves its real Water-site cast exists only underwater while Sly Fox in the same opening can be cast only on the surface.
 - A legal 30/60 Water teaching-deck variant with three Lugbog Cats proves casting to an opponent-controlled Water site while excluding an opponent land site; Sly Fox in the same opening remains restricted to controlled sites.
 - A fifth legal 30/60 Fire teaching deck that proves Monstrous Lion can Charge into an opposing unit but cannot target its site, then proves Lumbering Giant cannot use Defend or Intercept while ready and in range.
@@ -85,10 +87,10 @@
 - `pnpm game:demo -- 23`: completes in 138 accepted actions over 56 turns with byte-exact replay.
 - `pnpm play`: serves the playable core at `http://127.0.0.1:4174/`.
 - Browser checkpoint: a 22-action match moved a minion, handed Defend to the non-active seat, resolved a simultaneous trade into both cemeteries, and replayed byte-identically.
-- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 28-action Earth Burrowing, 10-action Earth burrowed-only casting, 24-action Earth first strike, 22-action Earth forward movement, 30-action Earth Immobile, 21-action Earth Secret Tunnel, 24-action Earth Divine Healing, 22-action Earth Ranged, 27-action Earth Ward, 27-action Airborne, 26-action Air Stealth, 26-action Air movement, 24-action Air Movement +2, 25-action Air unrestricted-summon, 17-action Air Voidwalk/outer-column casting, 15-action Air Genesis spell-draw, 9-action Air Leyline Genesis, 10-action Air Zap Magic, 26-action Air Arc Lightning Magic, 43-action Fire targeting/response, 23-action Water end-turn Stealth, 22-action Water sideways movement, 16-action Water edge connection, 16-action Water Submerge, 10-action Water submerged-only casting, 16-action Water any-Water-site casting, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
+- `pnpm game:check-private`: 34-action combat, 38-action Earth ramp/Deathrite, 28-action Earth Burrowing, 17-action Earth Bury, 10-action Earth burrowed-only casting, 24-action Earth first strike, 22-action Earth forward movement, 30-action Earth Immobile, 21-action Earth Secret Tunnel, 24-action Earth Divine Healing, 22-action Earth Ranged, 27-action Earth Ward, 27-action Airborne, 26-action Air Stealth, 26-action Air movement, 24-action Air Movement +2, 25-action Air unrestricted-summon, 17-action Air Voidwalk/outer-column casting, 15-action Air Genesis spell-draw, 9-action Air Leyline Genesis, 10-action Air Zap Magic, 26-action Air Arc Lightning Magic, 43-action Fire targeting/response, 23-action Water end-turn Stealth, 22-action Water sideways movement, 16-action Water edge connection, 16-action Water Submerge, 10-action Water submerged-only casting, 16-action Water any-Water-site casting, and 35-action Water healing matches exercise five concrete real-card teaching decks with byte-exact replay.
 - `pnpm game:verify-private`: one passing ignored-authority integration scenario.
 - Death's Door scenarios prove same-turn direct-damage immunity, later death blows, simultaneous-defeat draws, nonlethal site strikes, and exact replay.
-- `pnpm verify`: 244 passing public tests at this checkpoint.
+- `pnpm verify`: 245 passing public tests at this checkpoint.
 
 ## Still required for Phase 3
 
@@ -96,7 +98,7 @@
 - Full start/main/end phase triggers and duration cleanup beyond the supported narrow Genesis/Deathrite effects, minion damage, and summoning sickness.
 - Additional costs, broader non-minion spells, movement beyond bounded +1/+2 bonuses and supported static restrictions, further activated abilities (including Pudge Butcher's projectile/drag), and card-specific targets.
 - Combat tiers beyond attacking-only first strike, projectile ranges and effects beyond Ranged 1, additional healing sources, prevention/modification beyond minion Ward, additional card-triggered damage/death behavior, and tournament ending overlays.
-- State-based banishment/death when forced movement, ability loss, or a deliberately suicidal step leaves a unit unable to survive in its region.
+- State-based banishment/death beyond supported forced burrowing, including other forced movement, ability loss, or a deliberately suicidal step that leaves a unit unable to survive in its region.
 - Source-linked scenario and invariant coverage for every supported core mechanic.
 
 The runner is intentionally classified `unranked_partial_rules`; it proves the real engine loop and replay contract without claiming complete Sorcery behavior.
