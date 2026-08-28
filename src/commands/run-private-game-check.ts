@@ -48,6 +48,7 @@ type ScenarioConfig = Readonly<{
   chargeMinionStableId: string;
   deathriteMinionStableId: string;
   earthProviderMinionStableId: string;
+  earthRangedSeed: number;
   earthSeed: number;
   fireSeed: number;
   genesisMinionStableId: string;
@@ -59,6 +60,7 @@ type ScenarioConfig = Readonly<{
   monstrousLionStableId: string;
   movementMinionStableId: string;
   providerMinionStableId: string;
+  rangedMinionStableId: string;
   revisionId: string;
   roamingMinionStableId: string;
   roamingSeed: number;
@@ -126,6 +128,16 @@ export type PrivateGameCheck = Readonly<{
     replayVerified: boolean;
     seed: number;
   }>;
+  earthRanged: Readonly<{
+    acceptedActionCount: number;
+    deck: DeckList;
+    rangedMinion: string;
+    rangedOneStep: boolean;
+    rangedShooterStayedSafe: boolean;
+    rangedTargetDied: boolean;
+    replayVerified: boolean;
+    seed: number;
+  }>;
   fireResponse: Readonly<{
     acceptedActionCount: number;
     chargeMoveAndAttack: boolean;
@@ -176,6 +188,9 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     || typeof value.chargeMinionStableId !== 'string'
     || typeof value.deathriteMinionStableId !== 'string'
     || typeof value.earthProviderMinionStableId !== 'string'
+    || !Number.isSafeInteger(value.earthRangedSeed)
+    || typeof value.earthRangedSeed !== 'number'
+    || value.earthRangedSeed < 0
     || !Number.isSafeInteger(value.earthSeed)
     || typeof value.earthSeed !== 'number'
     || value.earthSeed < 0
@@ -191,6 +206,7 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     || typeof value.monstrousLionStableId !== 'string'
     || typeof value.movementMinionStableId !== 'string'
     || typeof value.providerMinionStableId !== 'string'
+    || typeof value.rangedMinionStableId !== 'string'
     || typeof value.revisionId !== 'string'
     || typeof value.roamingMinionStableId !== 'string'
     || !Number.isSafeInteger(value.roamingSeed)
@@ -202,7 +218,7 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     || !Number.isSafeInteger(value.waterSeed)
     || typeof value.waterSeed !== 'number'
     || value.waterSeed < 0
-    || Object.keys(value).sort().join(',') !== 'airSeed,avatar,cannotDefendMinionStableId,chargeMinionStableId,deathriteMinionStableId,earthProviderMinionStableId,earthSeed,fireSeed,genesisMinionStableId,ghostTownSiteStableId,healingMinionStableId,lethalMinionStableId,lumberingMinionStableId,manaMinionStableId,monstrousLionStableId,movementMinionStableId,providerMinionStableId,revisionId,roamingMinionStableId,roamingSeed,seed,waterSeed'
+    || Object.keys(value).sort().join(',') !== 'airSeed,avatar,cannotDefendMinionStableId,chargeMinionStableId,deathriteMinionStableId,earthProviderMinionStableId,earthRangedSeed,earthSeed,fireSeed,genesisMinionStableId,ghostTownSiteStableId,healingMinionStableId,lethalMinionStableId,lumberingMinionStableId,manaMinionStableId,monstrousLionStableId,movementMinionStableId,providerMinionStableId,rangedMinionStableId,revisionId,roamingMinionStableId,roamingSeed,seed,waterSeed'
     || Object.keys(avatar).sort().join(',') !== 'drawSpell,stableId') {
     throw new Error('private game scenario has an unsupported shape');
   }
@@ -213,6 +229,7 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     chargeMinionStableId: value.chargeMinionStableId,
     deathriteMinionStableId: value.deathriteMinionStableId,
     earthProviderMinionStableId: value.earthProviderMinionStableId,
+    earthRangedSeed: value.earthRangedSeed,
     earthSeed: value.earthSeed,
     fireSeed: value.fireSeed,
     genesisMinionStableId: value.genesisMinionStableId,
@@ -224,6 +241,7 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     monstrousLionStableId: value.monstrousLionStableId,
     movementMinionStableId: value.movementMinionStableId,
     providerMinionStableId: value.providerMinionStableId,
+    rangedMinionStableId: value.rangedMinionStableId,
     revisionId: value.revisionId,
     roamingMinionStableId: value.roamingMinionStableId,
     roamingSeed: value.roamingSeed,
@@ -251,6 +269,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   monstrousLion: NormalizedCard;
   movementMinion: NormalizedCard;
   providerMinion: NormalizedCard;
+  rangedMinion: NormalizedCard;
   roamingMinion: NormalizedCard;
 }>> {
   const config = scenarioConfig(parseJsonWithDuplicateKeyCheck(await readFile(path, 'utf8')));
@@ -305,6 +324,16 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || providerMinion.manaCost === null
     || providerMinion.rarity === null) {
     throw new Error('private affinity provider no longer matches its supported facts');
+  }
+  const rangedMinion = snapshot.cards.find(({ stableId }) => stableId === config.rangedMinionStableId);
+  if (!rangedMinion
+    || rangedMinion.cardType !== 'minion'
+    || ruleTextDigest(rangedMinion.rulesText) !== 'sha256:95fb48373a18ac8f27d4825f331a8d262e5f6199d4873bce6ac876803514449b'
+    || rangedMinion.attack === null
+    || rangedMinion.defense === null
+    || rangedMinion.manaCost === null
+    || rangedMinion.rarity === null) {
+    throw new Error('private Ranged minion no longer matches its supported facts');
   }
   const lethalMinion = snapshot.cards.find(({ stableId }) => stableId === config.lethalMinionStableId);
   if (!lethalMinion
@@ -439,6 +468,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     monstrousLion,
     movementMinion,
     providerMinion,
+    rangedMinion,
     roamingMinion,
   };
 }
@@ -482,6 +512,7 @@ function gameDefinition(
   summonToAnySite = false,
   cannotDefendOrIntercept = false,
   cannotAttackSites = false,
+  ranged = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -521,6 +552,7 @@ function gameDefinition(
       manaCost: card.manaCost,
       movementPlusOne,
       ...(provides ? { provides } : {}),
+      ranged,
       summonToAnySite,
       ...(tapForMana ? { tapForMana } : {}),
       thresholds: card.thresholds,
@@ -627,6 +659,7 @@ function buildManifest(
         input.genesisMinion,
         input.deathriteMinion,
         input.cannotDefendMinion,
+        input.rangedMinion,
       ], [input.ghostTownSite])
       : scenario === 'air'
         ? elementalDeck('air', [input.movementMinion, input.roamingMinion])
@@ -668,6 +701,7 @@ function buildManifest(
       card.stableId === input.roamingMinion.stableId,
       card.stableId === input.lumberingMinion.stableId,
       card.stableId === input.monstrousLion.stableId,
+      card.stableId === input.rangedMinion.stableId,
     ),
   ]));
   return {
@@ -935,6 +969,71 @@ function findEarthOpening(
     };
   }
   throw new Error(`private Earth scenario seed ${seed} no longer produces its supported opening`);
+}
+
+function findEarthRangedOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string];
+  rangedInstanceId: string;
+  seed: number;
+  session: GameSession;
+  southFirstSiteInstanceId: string;
+  southSecondSiteInstanceId: string;
+  targetInstanceId: string;
+}> {
+  const seed = input.config.earthRangedSeed;
+  const built = buildManifest(input, seed, 'earth');
+  const session = createGameSession(built.manifest);
+  const northSites = session.state.players.north.hand.atlas.filter((site) => {
+    const definition = session.state.cards[site.cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('earth');
+  });
+  const rangedInstanceId = availableMinionInstance(
+    session,
+    'north',
+    input.rangedMinion.stableId,
+    2,
+  );
+  const south = session.state.players.south;
+  for (const first of south.hand.atlas) {
+    for (const second of south.hand.atlas) {
+      if (first.instanceId === second.instanceId) continue;
+      const affinity = { air: 0, earth: 0, fire: 0, water: 0 };
+      for (const site of [first, second]) {
+        const definition = session.state.cards[site.cardId];
+        if (definition?.cardType !== 'site') continue;
+        definition.elements.forEach((element) => { affinity[element] += 1; });
+      }
+      const target = [...south.hand.spellbook, ...south.spellbook.slice(0, 2)].find((card) => {
+        const definition = session.state.cards[card.cardId];
+        return definition?.cardType === 'minion'
+          && definition.defense <= 3
+          && definition.manaCost <= 2
+          && (['air', 'earth', 'fire', 'water'] as const)
+            .every((element) => affinity[element] >= definition.thresholds[element]);
+      });
+      if (northSites.length >= 3 && rangedInstanceId && target) {
+        return {
+          ...built,
+          northSiteInstanceIds: [
+            northSites[0]!.instanceId,
+            northSites[1]!.instanceId,
+            northSites[2]!.instanceId,
+          ],
+          rangedInstanceId,
+          seed,
+          session,
+          southFirstSiteInstanceId: first.instanceId,
+          southSecondSiteInstanceId: second.instanceId,
+          targetInstanceId: target.instanceId,
+        };
+      }
+    }
+  }
+  throw new Error(`private Earth Ranged scenario seed ${seed} no longer produces its supported opening`);
 }
 
 function findAirOpening(
@@ -1350,6 +1449,82 @@ function runEarthRamp(
   });
 }
 
+function runEarthRanged(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthRanged'] {
+  const opening = findEarthRangedOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.southFirstSiteInstanceId);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+      && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.southSecondSiteInstanceId
+      && descriptor.cell === 'C2');
+  take(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.targetInstanceId
+      && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+      && descriptor.cell === 'B4');
+  take(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.rangedInstanceId
+      && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const shot = action(session, ({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.shooterInstanceId === opening.rangedInstanceId
+      && descriptor.direction === 'south'
+      && descriptor.hit?.instanceId === opening.targetInstanceId);
+  const rangedOneStep = shot.descriptor.kind === 'shoot-projectile'
+    && shot.descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C2';
+  session = accept(session, shot);
+  const shooter = session.state.realm.units
+    .find(({ instanceId }) => instanceId === opening.rangedInstanceId);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    rangedMinion: opening.names.get(input.rangedMinion.stableId) ?? input.rangedMinion.stableId,
+    rangedOneStep,
+    rangedShooterStayedSafe:
+      shooter?.location === 'C3' && shooter.tapped && shooter.damage === 0,
+    rangedTargetDied: session.state.players.south.cemetery
+      .some(({ instanceId }) => instanceId === opening.targetInstanceId),
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+  });
+}
+
 function runAirMovement(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['airMovement'] {
@@ -1732,6 +1907,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airMovement = runAirMovement(input);
   const airSummoning = runAirSummoning(input);
   const earthRamp = runEarthRamp(input);
+  const earthRanged = runEarthRanged(input);
   const fireResponse = runFireResponse(input);
   const waterHealing = runWaterHealing(input);
   const opening = findOpening(input);
@@ -1861,6 +2037,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
       south: deckList(opening.manifest.decks.south, opening.names),
     },
     earthRamp,
+    earthRanged,
     fireResponse,
     finalStateHash: hashGameState(session.state),
     formatStableId: input.formatStableId,
