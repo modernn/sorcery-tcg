@@ -41,6 +41,7 @@ export type GameCardDefinition =
     cardType: 'minion';
     charge?: boolean;
     defense: number;
+    genesisDrawSite?: boolean;
     lethal?: boolean;
     manaCost: number;
     provides?: GameElement;
@@ -374,6 +375,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.lethal !== undefined && typeof card.lethal !== 'boolean') {
     throw new RangeError(`${path}.lethal must be boolean`);
   }
+  if (card.genesisDrawSite !== undefined && typeof card.genesisDrawSite !== 'boolean') {
+    throw new RangeError(`${path}.genesisDrawSite must be boolean`);
+  }
   if (card.provides !== undefined && !elements.includes(card.provides)) {
     throw new RangeError(`${path}.provides must be a supported element`);
   }
@@ -457,6 +461,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             cardType: 'minion' as const,
             ...(card.charge === true ? { charge: true } : {}),
             defense: card.defense,
+            ...(card.genesisDrawSite === true ? { genesisDrawSite: true } : {}),
             ...(card.lethal === true ? { lethal: true } : {}),
             manaCost: card.manaCost,
             ...(card.provides ? { provides: card.provides } : {}),
@@ -1427,22 +1432,56 @@ function applyDescriptor(
       },
       mana: player.mana - definition.manaCost,
     });
+    const realm = { ...state.realm, units: [...state.realm.units, unit] };
+    const summoned: GameOutcome = {
+      payload: {
+        cardId: card.cardId,
+        casterInstanceId: descriptor.casterInstanceId,
+        cell: descriptor.cell,
+        instanceId: card.instanceId,
+        manaPaid: definition.manaCost,
+        seat,
+      },
+      type: 'minion-summoned',
+    };
+    if (definition.genesisDrawSite) {
+      const [drawn, ...atlas] = updatedPlayer.atlas;
+      if (!drawn) {
+        const winner = otherSeat(seat);
+        return [
+          withStateVersion(state, {
+            phase: 'terminal',
+            players: replacePlayer(state, seat, updatedPlayer),
+            realm,
+            terminal: { loser: seat, reason: 'deck_empty', status: 'finished', winner },
+          }),
+          [summoned, { payload: { loser: seat, reason: 'deck_empty', winner }, type: 'game-ended' }],
+          [],
+        ];
+      }
+      const drawingPlayer = deepFreeze({
+        ...updatedPlayer,
+        atlas,
+        hand: { ...updatedPlayer.hand, atlas: [...updatedPlayer.hand.atlas, drawn] },
+      });
+      return [
+        withStateVersion(state, {
+          players: replacePlayer(state, seat, drawingPlayer),
+          realm,
+        }),
+        [
+          summoned,
+          { payload: { seat, sourceInstanceId: card.instanceId }, type: 'site-drawn' },
+        ],
+        [],
+      ];
+    }
     return [
       withStateVersion(state, {
         players: replacePlayer(state, seat, updatedPlayer),
-        realm: { ...state.realm, units: [...state.realm.units, unit] },
+        realm,
       }),
-      [{
-        payload: {
-          cardId: card.cardId,
-          casterInstanceId: descriptor.casterInstanceId,
-          cell: descriptor.cell,
-          instanceId: card.instanceId,
-          manaPaid: definition.manaCost,
-          seat,
-        },
-        type: 'minion-summoned',
-      }],
+      [summoned],
       [],
     ];
   }
