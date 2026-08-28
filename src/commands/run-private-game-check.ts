@@ -44,6 +44,7 @@ const DEFAULT_SCENARIO = resolve(
 type ScenarioConfig = Readonly<{
   avatar: Readonly<{ drawSpell: boolean; stableId: string }>;
   chargeMinionStableId: string;
+  deathriteMinionStableId: string;
   earthProviderMinionStableId: string;
   earthSeed: number;
   genesisMinionStableId: string;
@@ -80,6 +81,8 @@ export type PrivateGameCheck = Readonly<{
     acceptedActionCount: number;
     affinityAdded: boolean;
     deck: DeckList;
+    deathriteMinion: string;
+    deathriteSiteDrawnBeforeCemetery: boolean;
     genesisSiteDrawn: boolean;
     manaGained: number;
     manaMinion: string;
@@ -107,6 +110,7 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     || typeof avatar.stableId !== 'string'
     || typeof avatar.drawSpell !== 'boolean'
     || typeof value.chargeMinionStableId !== 'string'
+    || typeof value.deathriteMinionStableId !== 'string'
     || typeof value.earthProviderMinionStableId !== 'string'
     || !Number.isSafeInteger(value.earthSeed)
     || typeof value.earthSeed !== 'number'
@@ -119,13 +123,14 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
     || !Number.isSafeInteger(value.seed)
     || typeof value.seed !== 'number'
     || value.seed < 0
-    || Object.keys(value).sort().join(',') !== 'avatar,chargeMinionStableId,earthProviderMinionStableId,earthSeed,genesisMinionStableId,lethalMinionStableId,manaMinionStableId,providerMinionStableId,revisionId,seed'
+    || Object.keys(value).sort().join(',') !== 'avatar,chargeMinionStableId,deathriteMinionStableId,earthProviderMinionStableId,earthSeed,genesisMinionStableId,lethalMinionStableId,manaMinionStableId,providerMinionStableId,revisionId,seed'
     || Object.keys(avatar).sort().join(',') !== 'drawSpell,stableId') {
     throw new Error('private game scenario has an unsupported shape');
   }
   return {
     avatar: { drawSpell: avatar.drawSpell, stableId: avatar.stableId },
     chargeMinionStableId: value.chargeMinionStableId,
+    deathriteMinionStableId: value.deathriteMinionStableId,
     earthProviderMinionStableId: value.earthProviderMinionStableId,
     earthSeed: value.earthSeed,
     genesisMinionStableId: value.genesisMinionStableId,
@@ -142,6 +147,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   cards: readonly NormalizedCard[];
   chargeMinion: NormalizedCard;
   config: ScenarioConfig;
+  deathriteMinion: NormalizedCard;
   earthProviderMinion: NormalizedCard;
   format: FormatDefinition;
   formatStableId: string;
@@ -171,6 +177,16 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || chargeMinion.manaCost === null
     || chargeMinion.rarity === null) {
     throw new Error('private Charge minion no longer matches its supported facts');
+  }
+  const deathriteMinion = snapshot.cards.find(({ stableId }) => stableId === config.deathriteMinionStableId);
+  if (!deathriteMinion
+    || deathriteMinion.cardType !== 'minion'
+    || ruleTextDigest(deathriteMinion.rulesText) !== 'sha256:3684fafcb97b44bf47cb7fc4221a94e76445b17f77af6dc211c8e4dc92a56344'
+    || deathriteMinion.attack === null
+    || deathriteMinion.defense === null
+    || deathriteMinion.manaCost === null
+    || deathriteMinion.rarity === null) {
+    throw new Error('private Deathrite minion no longer matches its supported facts');
   }
   const providerMinion = snapshot.cards.find(({ stableId }) => stableId === config.providerMinionStableId);
   if (!providerMinion
@@ -244,6 +260,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     cards: snapshot.cards,
     chargeMinion,
     config,
+    deathriteMinion,
     earthProviderMinion,
     format: selected.identity.payload,
     formatStableId: selected.identity.stableId,
@@ -285,6 +302,7 @@ function gameDefinition(
   lethal = false,
   provides?: GameElement,
   tapForMana?: number,
+  deathriteDrawSite = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -307,6 +325,7 @@ function gameDefinition(
       attack: card.attack,
       cardType: 'minion',
       charge,
+      deathriteDrawSite,
       defense: card.defense,
       genesisDrawSite,
       lethal,
@@ -369,7 +388,12 @@ function buildManifest(
     };
   };
   const earthDeck = (): GameDeckSpec => {
-    const featured = [input.earthProviderMinion, input.manaMinion, input.genesisMinion];
+    const featured = [
+      input.earthProviderMinion,
+      input.manaMinion,
+      input.genesisMinion,
+      input.deathriteMinion,
+    ];
     const featuredCards = featured.flatMap((card) =>
       Array.from({ length: input.format.copyLimits[card.rarity!] }, () => card.stableId));
     const earthSites = sites.filter((card) => card.rarity && card.elements.includes('earth'));
@@ -426,6 +450,7 @@ function buildManifest(
           ? 'earth'
           : undefined,
       card.stableId === input.manaMinion.stableId ? 2 : undefined,
+      card.stableId === input.deathriteMinion.stableId,
     ),
   ]));
   return {
@@ -516,6 +541,41 @@ function openingSiteForMinion(
   })?.instanceId;
 }
 
+function earthOpponentOpening(session: GameSession): Readonly<{
+  firstSiteInstanceId: string;
+  minionInstanceId: string;
+  secondSiteInstanceId: string;
+}> | null {
+  const player = session.state.players.south;
+  for (const first of player.hand.atlas) {
+    for (const second of player.hand.atlas) {
+      if (first.instanceId === second.instanceId) continue;
+      const affinity = { air: 0, earth: 0, fire: 0, water: 0 };
+      for (const site of [first, second]) {
+        const definition = session.state.cards[site.cardId];
+        if (definition?.cardType !== 'site') continue;
+        definition.elements.forEach((element) => { affinity[element] += 1; });
+      }
+      const minion = [...player.hand.spellbook, ...player.spellbook.slice(0, 1)].find((card) => {
+        const definition = session.state.cards[card.cardId];
+        return definition?.cardType === 'minion'
+          && definition.attack >= 2
+          && definition.manaCost <= 2
+          && (['air', 'earth', 'fire', 'water'] as const)
+            .every((element) => affinity[element] >= definition.thresholds[element]);
+      });
+      if (minion) {
+        return {
+          firstSiteInstanceId: first.instanceId,
+          minionInstanceId: minion.instanceId,
+          secondSiteInstanceId: second.instanceId,
+        };
+      }
+    }
+  }
+  return null;
+}
+
 function findOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): Readonly<{
@@ -584,6 +644,7 @@ function findOpening(
 function findEarthOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): Readonly<{
+  deathriteInstanceId: string;
   genesisInstanceId: string;
   manaInstanceId: string;
   manifest: GameManifest;
@@ -592,7 +653,9 @@ function findEarthOpening(
   providerInstanceId: string;
   seed: number;
   session: GameSession;
-  southSiteInstanceId: string;
+  southFirstSiteInstanceId: string;
+  southMinionInstanceId: string;
+  southSecondSiteInstanceId: string;
 }> {
   const seed = input.config.earthSeed;
   const built = buildManifest(input, seed, 'earth');
@@ -609,14 +672,22 @@ function findEarthOpening(
   );
   const manaInstanceId = availableMinionInstance(session, 'north', input.manaMinion.stableId, 2);
   const genesisInstanceId = availableMinionInstance(session, 'north', input.genesisMinion.stableId, 3);
-  const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+  const deathriteInstanceId = availableMinionInstance(
+    session,
+    'north',
+    input.deathriteMinion.stableId,
+    3,
+  );
+  const south = earthOpponentOpening(session);
   if (northSites.length === 3
     && providerInstanceId
     && manaInstanceId
     && genesisInstanceId
-    && southSiteInstanceId) {
+    && deathriteInstanceId
+    && south) {
     return {
       ...built,
+      deathriteInstanceId,
       genesisInstanceId,
       manaInstanceId,
       northSiteInstanceIds: [
@@ -627,7 +698,9 @@ function findEarthOpening(
       providerInstanceId,
       seed,
       session,
-      southSiteInstanceId,
+      southFirstSiteInstanceId: south.firstSiteInstanceId,
+      southMinionInstanceId: south.minionInstanceId,
+      southSecondSiteInstanceId: south.secondSiteInstanceId,
     };
   }
   throw new Error(`private Earth scenario seed ${seed} no longer produces its supported opening`);
@@ -667,40 +740,58 @@ function runEarthRamp(
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
   session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cardInstanceId === opening.southSiteInstanceId));
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.southFirstSiteInstanceId));
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
 
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
-      && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]));
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+      && descriptor.cell === 'C3'));
   const affinityBeforeProvider = observeGame(session.state, 'north').players.north.affinity.earth;
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === opening.providerInstanceId));
+      && descriptor.cardInstanceId === opening.providerInstanceId
+      && descriptor.cell === 'C4'));
   const affinityAdded =
     observeGame(session.state, 'north').players.north.affinity.earth === affinityBeforeProvider + 1;
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
 
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.southSecondSiteInstanceId
+      && descriptor.cell === 'B1'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.southMinionInstanceId
+      && descriptor.cell === 'C1'));
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
 
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
-      && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]));
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+      && descriptor.cell === 'C2'));
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === opening.manaInstanceId));
+      && descriptor.cardInstanceId === opening.manaInstanceId
+      && descriptor.cell === 'C3'));
   const manaUnavailableWhileSick = !legalGameActions(session.state, 'north').some(({ descriptor }) =>
     descriptor.kind === 'activate-mana' && descriptor.unitInstanceId === opening.manaInstanceId);
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
 
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.southMinionInstanceId
+      && descriptor.to.cell === 'C2'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
 
   session = accept(session, action(session, ({ descriptor }) =>
@@ -712,13 +803,46 @@ function runEarthRamp(
   const beforeGenesis = session.state.players.north;
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === opening.genesisInstanceId));
+      && descriptor.cardInstanceId === opening.genesisInstanceId
+      && descriptor.cell === 'C4'));
   const afterGenesis = session.state.players.north;
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.deathriteInstanceId
+      && descriptor.cell === 'C2'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.southMinionInstanceId
+      && descriptor.to.cell === 'C2'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === opening.deathriteInstanceId));
+  const beforeDeathrite = session.state.players.north;
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  const afterDeathrite = session.state.players.north;
+  const finalEvents = session.transcript.at(-1)?.events ?? [];
+  const siteDrawIndex = finalEvents.findIndex(({ type }) => type === 'site-drawn');
+  const cemeteryIndex = finalEvents.findIndex(({ type }) => type === 'minion-died');
+  const deathriteSiteDrawnBeforeCemetery =
+    afterDeathrite.atlas.length === beforeDeathrite.atlas.length - 1
+    && afterDeathrite.hand.atlas.length === beforeDeathrite.hand.atlas.length + 1
+    && afterDeathrite.cemetery.some(({ instanceId }) => instanceId === opening.deathriteInstanceId)
+    && siteDrawIndex >= 0
+    && siteDrawIndex < cemeteryIndex;
 
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
     affinityAdded,
     deck: deckList(opening.manifest.decks.north, opening.names),
+    deathriteMinion:
+      opening.names.get(input.deathriteMinion.stableId) ?? input.deathriteMinion.stableId,
+    deathriteSiteDrawnBeforeCemetery,
     genesisSiteDrawn:
       afterGenesis.atlas.length === beforeGenesis.atlas.length - 1
       && afterGenesis.hand.atlas.length === beforeGenesis.hand.atlas.length + 1,
