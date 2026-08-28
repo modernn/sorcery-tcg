@@ -12,6 +12,9 @@ const STABLE_ID = `bundle:${REVISION_ID}`;
 const LOCK_PATH = join(REPOSITORY_ROOT, '.local', 'authority', 'locks', REVISION_ID, 'source-set-lock.json');
 const INPUT_ROOT = join(REPOSITORY_ROOT, '.local', 'authority', 'build-inputs', REVISION_ID, 'primary');
 const BOUNDARY_SCRIPT = join(REPOSITORY_ROOT, 'scripts', 'verify-private-authority-boundary.ts');
+const FINAL_REVISION_ID = 'official-2026-08-27-v3';
+const FINAL_LOCK_PATH = join(REPOSITORY_ROOT, '.local', 'authority', 'locks', FINAL_REVISION_ID, 'source-set-lock.json');
+const FINAL_RECEIPT_PATH = join(REPOSITORY_ROOT, 'data', 'authority', 'receipts', `${FINAL_REVISION_ID}.json`);
 
 type PrivateEntry = Readonly<{ relativePath: string; byteHash: string }>;
 type PrivateLock = Readonly<{
@@ -234,4 +237,10 @@ test('reachable history worktree index and package contain no private authority 
   assert.equal(result.signal, null);
   assert.equal(result.stdout, 'Private authority boundary verified.\n');
   assert.equal(result.stderr, '');
+});
+
+test('final v3 receipt and ignored revision pass the production boundary scanner', async () => {
+  await readFile(FINAL_LOCK_PATH, 'utf8');
+  await readFile(FINAL_RECEIPT_PATH, 'utf8');
+  assert.fail('final v3 boundary scan is not implemented');
 });
