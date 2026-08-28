@@ -11,7 +11,7 @@ Sorcery Simulator advances through one increasingly trustworthy evidence path: p
 - Integer phases (1, 2, 3): Planned milestone work
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
-- [ ] **Phase 1: Rules and Data Authority** - Pin the official sources, normalized card data, identities, provenance, and reuse boundary that every later result cites.
+- [x] **Phase 1: Rules and Data Authority** - Pin the official sources, normalized card data, identities, provenance, and reuse boundary that every later result cites. (completed 2026-08-28)
 - [ ] **Phase 2: Deterministic Engine Contract** - Establish the authoritative state, seeded randomness, private observations, legal actions, events, and replay-safe public API.
 - [ ] **Phase 3: Complete Core Game Rules** - Make complete games obey official setup, spatial, resource, movement, combat, damage, and ending rules.
 - [ ] **Phase 4: Storyline, Card Effects, and Coverage** - Execute supported card interactions through typed effects while proving eligibility and failing closed elsewhere.
@@ -83,7 +83,7 @@ Plans:
 
 **Wave 10** *(blocked on Wave 9 completion)*
 
-- [ ] 01-13-PLAN.md — Build and select the final immutable v3 authority revision from only the verified fresh roots, with complete release gates.
+- [x] 01-13-PLAN.md — Build and select the final immutable v3 authority revision from only the verified fresh roots, with complete release gates.
 
 **Research**: Required — audit current rulebook/Codex/FAQ/card-update precedence, official data and image terms, format policies, and the GPL/no-license boundary for Contested Realms and spells.bar before any reuse.
 
@@ -223,7 +223,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Rules and Data Authority | 14/15 | In Progress | - |
+| 1. Rules and Data Authority | 15/15 | Complete   | 2026-08-28 |
 | 2. Deterministic Engine Contract | 0/TBD | Not started | - |
 | 3. Complete Core Game Rules | 0/TBD | Not started | - |
 | 4. Storyline, Card Effects, and Coverage | 0/TBD | Not started | - |
