@@ -69,7 +69,11 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.deepEqual(result.airSummoning.deck, result.airMovement.deck);
   assert.equal(result.airSummoning.replayVerified, true);
   assert.equal(result.airVoidwalk.voidwalkMinion, 'Spectral Stalker');
+  assert.equal(result.airVoidwalk.forsaken, 'Forsaken');
   assert.equal(result.airVoidwalk.acceptedActionCount, 17);
+  assert.equal(result.airVoidwalk.forsakenOuterVoidAvailable, true);
+  assert.equal(result.airVoidwalk.forsakenInnerVoidUnavailable, true);
+  assert.equal(result.airVoidwalk.forsakenInnerSurfaceUnavailable, true);
   assert.equal(result.airVoidwalk.targetWasVoid, true);
   assert.equal(result.airVoidwalk.surfaceSummonAvailable, true);
   assert.equal(result.airVoidwalk.voidSummonAvailable, true);
@@ -84,6 +88,8 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airVoidwalk.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
   assert.equal(result.airVoidwalk.deck.spellbook
     .find(({ name }) => name === 'Spectral Stalker')?.copies, 4);
+  assert.equal(result.airVoidwalk.deck.spellbook
+    .find(({ name }) => name === 'Forsaken')?.copies, 4);
   assert.equal(result.airVoidwalk.replayVerified, true);
   assert.equal(result.waterEdgeConnection.polarBears, 'Polar Bears');
   assert.equal(result.waterEdgeConnection.acceptedActionCount, 16);

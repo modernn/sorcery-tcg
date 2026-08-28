@@ -53,6 +53,7 @@ type SpellFacts = Readonly<{
   strikesFirstWhileAttacking?: boolean;
   submerge?: boolean;
   summonToAnySite?: boolean;
+  mustBeCastToOuterColumn?: boolean;
   tapForMana?: number;
   thresholds: Readonly<{ air: number; earth: number; fire: number; water: number }>;
   voidwalk?: boolean;
@@ -125,6 +126,7 @@ function cardsFor(
         strikesFirstWhileAttacking: facts.strikesFirstWhileAttacking ?? false,
         submerge: facts.submerge ?? false,
         summonToAnySite: facts.summonToAnySite ?? false,
+        mustBeCastToOuterColumn: facts.mustBeCastToOuterColumn ?? false,
         ...(facts.tapForMana ? { tapForMana: facts.tapForMana } : {}),
         thresholds: { ...facts.thresholds },
         voidwalk: facts.voidwalk ?? false,
@@ -274,6 +276,16 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       [firstSpell]: { ...cards[firstSpell]!, voidwalk: 'yes' } as unknown as GameCardDefinition,
     },
   }), /voidwalk/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        mustBeCastToOuterColumn: 'yes',
+      } as unknown as GameCardDefinition,
+    },
+  }), /mustBeCastToOuterColumn/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -1808,6 +1820,67 @@ test('RULE-04 Voidwalk summons to any void and moves between adjacent void and s
   take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === unitId
     && descriptor.to.cell === 'B4' && descriptor.to.region === 'surface');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 an outer-column cast restriction filters surface and Voidwalk summons, not movement', () => {
+  let session = keep(createGameSession(manifest(135, {
+    northSpell: {
+      attack: 3,
+      defense: 3,
+      manaCost: 3,
+      mustBeCastToOuterColumn: true,
+      thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+      voidwalk: true,
+    },
+    site: { elements: ['air'] },
+  })));
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'A4');
+
+  const summons = legalGameActions(session.state, 'north')
+    .filter(({ descriptor }) => descriptor.kind === 'summon-minion');
+  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cell === 'A4' && descriptor.region === undefined), true);
+  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cell === 'B4' && descriptor.region === undefined), false);
+  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cell === 'C4' && descriptor.region === undefined), false);
+  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cell === 'E2' && descriptor.region === 'void'), true);
+  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cell === 'D2' && descriptor.region === 'void'), false);
+  assert.equal(summons.every(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && (descriptor.cell[0] === 'A' || descriptor.cell[0] === 'E')), true);
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cell === 'E2' && descriptor.region === 'void');
+  const unitId = session.state.realm.units.find(({ location }) => location === 'E2')?.instanceId;
+  assert.ok(unitId);
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === unitId
+    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+      === 'E2/void,D2/void');
   take(({ descriptor }) => descriptor.kind === 'decline-attack');
   assert.equal(verifyGameReplay(session), true);
 });
