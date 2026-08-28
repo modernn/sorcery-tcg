@@ -80,6 +80,7 @@ export type GameCardDefinition =
     deathriteHeal?: number;
     deathriteDrawSite?: boolean;
     defense: number;
+    discardRandomCardInsteadOfMana?: true;
     diesAtEndOfControllerTurn?: true;
     genesisDrawSpell?: boolean;
     genesisDrawSite?: boolean;
@@ -345,6 +346,7 @@ type GameActionDescriptor =
     cell: RealmCell;
     kind: 'summon-minion';
     manaCost: number;
+    paymentMode?: 'random-card-discard';
     region?: 'underground' | 'underwater' | 'void';
   }>
   | Readonly<{
@@ -503,12 +505,23 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
   return player.hand.spellbook.flatMap(({ cardId, instanceId }) => {
     const definition = cardDefinition(state, cardId);
     if (definition.cardType !== 'minion'
-      || player.mana < definition.manaCost
       || !meetsThresholds(state, seat, definition.thresholds)) return [];
+    const paymentOptions: readonly Readonly<{
+      manaCost: number;
+      paymentMode?: 'random-card-discard';
+    }>[] = [
+      ...(player.mana >= definition.manaCost ? [{ manaCost: definition.manaCost }] : []),
+      ...(definition.discardRandomCardInsteadOfMana === true
+        && (player.hand.atlas.length > 0
+          || player.hand.spellbook.some((candidate) => candidate.instanceId !== instanceId))
+        ? [{ manaCost: 0, paymentMode: 'random-card-discard' as const }]
+        : []),
+    ];
+    if (paymentOptions.length === 0) return [];
     const summonCells = (definition.summonToAnySite ? siteCells : controlledCells)
       .filter((cell) => !definition.mustBeCastToOuterColumn || cell[0] === 'A' || cell[0] === 'E')
       .filter((cell) => !definition.mustBeCastToWaterSite || isWaterSite(state, cell));
-    return casters.flatMap(({ instanceId: casterInstanceId }) => [
+    return casters.flatMap(({ instanceId: casterInstanceId }) => paymentOptions.flatMap((payment) => [
       ...summonCells.flatMap((cell) => [
       ...(!definition.mustBeCastBurrowed && !definition.mustBeCastSubmerged
         ? [{
@@ -517,7 +530,8 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
           casterInstanceId,
           cell,
           kind: 'summon-minion' as const,
-          manaCost: definition.manaCost,
+          manaCost: payment.manaCost,
+          ...(payment.paymentMode ? { paymentMode: payment.paymentMode } : {}),
         }]
         : []),
       ...(definition.burrowing && !definition.mustBeCastSubmerged && !isWaterSite(state, cell)
@@ -527,7 +541,8 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
           casterInstanceId,
           cell,
           kind: 'summon-minion' as const,
-          manaCost: definition.manaCost,
+          manaCost: payment.manaCost,
+          ...(payment.paymentMode ? { paymentMode: payment.paymentMode } : {}),
           region: 'underground' as const,
         }]
         : []),
@@ -538,7 +553,8 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
           casterInstanceId,
           cell,
           kind: 'summon-minion' as const,
-          manaCost: definition.manaCost,
+          manaCost: payment.manaCost,
+          ...(payment.paymentMode ? { paymentMode: payment.paymentMode } : {}),
           region: 'underwater' as const,
         }]
         : []),
@@ -553,11 +569,12 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
           casterInstanceId,
           cell,
           kind: 'summon-minion' as const,
-          manaCost: definition.manaCost,
+          manaCost: payment.manaCost,
+          ...(payment.paymentMode ? { paymentMode: payment.paymentMode } : {}),
           region: 'void' as const,
         }))
         : []),
-    ]);
+    ]));
   });
 }
 
@@ -862,6 +879,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.deathriteHeal > MAX_COMBAT_STAT)) {
     throw new RangeError(`${path}.deathriteHeal must be a safe integer between 1 and ${MAX_COMBAT_STAT}`);
   }
+  if (card.discardRandomCardInsteadOfMana !== undefined
+    && card.discardRandomCardInsteadOfMana !== true) {
+    throw new RangeError(`${path}.discardRandomCardInsteadOfMana must be true when defined`);
+  }
   if (card.lethal !== undefined && typeof card.lethal !== 'boolean') {
     throw new RangeError(`${path}.lethal must be boolean`);
   }
@@ -1123,6 +1144,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             defense: card.defense,
             ...(card.diesAtEndOfControllerTurn === true
               ? { diesAtEndOfControllerTurn: true as const }
+              : {}),
+            ...(card.discardRandomCardInsteadOfMana === true
+              ? { discardRandomCardInsteadOfMana: true as const }
               : {}),
             ...(card.genesisDrawSpell === true ? { genesisDrawSpell: true } : {}),
             ...(card.genesisDrawSite === true ? { genesisDrawSite: true } : {}),
@@ -2112,7 +2136,10 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
   if (descriptor.kind === 'summon-minion') {
     const caster = state.realm.units.find(({ instanceId }) =>
       instanceId === descriptor.casterInstanceId);
-    return `Summon ${descriptor.cardId} at ${descriptor.cell}${descriptor.region ? ` ${descriptor.region}` : ''} (${descriptor.manaCost} mana)`
+    const payment = descriptor.paymentMode === 'random-card-discard'
+      ? 'discard random card'
+      : `${descriptor.manaCost} mana`;
+    return `Summon ${descriptor.cardId} at ${descriptor.cell}${descriptor.region ? ` ${descriptor.region}` : ''} (${payment})`
       + (caster ? ` with minion ${caster.instanceId.slice(0, 15)}…` : '');
   }
   if (descriptor.kind === 'cast-magic') {
@@ -3895,12 +3922,50 @@ function applyDescriptor(
         && candidate.casterInstanceId === descriptor.casterInstanceId
         && candidate.cell === descriptor.cell
         && candidate.manaCost === descriptor.manaCost
+        && candidate.paymentMode === descriptor.paymentMode
         && (candidate.region ?? 'surface') === (descriptor.region ?? 'surface'));
     const caster = spellcasterRefs(state, seat).find(({ instanceId }) =>
       instanceId === descriptor.casterInstanceId);
     if (!card || !definition || definition.cardType !== 'minion' || !legal || !caster) {
       throw new Error('unreachable illegal minion summon');
     }
+    const discardCandidates = descriptor.paymentMode === 'random-card-discard'
+      ? [
+        ...player.hand.atlas.map((candidate) => ({ card: candidate, zone: 'atlas' as const })),
+        ...player.hand.spellbook
+          .filter(({ instanceId }) => instanceId !== card.instanceId)
+          .map((candidate) => ({ card: candidate, zone: 'spellbook' as const })),
+      ]
+      : [];
+    const randomCost = descriptor.paymentMode === 'random-card-discard'
+      ? drawCandidate(
+        state.engine,
+        discardCandidates.length,
+        'summon_random_card_discard_cost',
+        'card_index_candidate',
+      )
+      : undefined;
+    const discardedCard = randomCost ? discardCandidates[randomCost.index] : undefined;
+    if (descriptor.paymentMode === 'random-card-discard' && !discardedCard) {
+      throw new Error('unreachable random card discard cost without another card');
+    }
+    const paymentState = randomCost
+      ? deepFreeze({ ...state, engine: randomCost.engine })
+      : state;
+    const paymentOutcomes: readonly GameOutcome[] = discardedCard
+      ? [{
+        payload: {
+          cardId: discardedCard.card.cardId,
+          instanceId: discardedCard.card.instanceId,
+          owner: discardedCard.card.owner,
+          seat,
+          sourceInstanceId: card.instanceId,
+          zone: discardedCard.zone,
+        },
+        type: 'card-discarded',
+      }]
+      : [];
+    const paymentRandomDraws = randomCost?.randomDraws ?? [];
     const unit: UnitInstance = deepFreeze({
       ...card,
       controller: seat,
@@ -3914,29 +3979,34 @@ function applyDescriptor(
     });
     const updatedPlayer = deepFreeze({
       ...player,
+      cemetery: discardedCard ? [...player.cemetery, discardedCard.card] : player.cemetery,
       hand: {
         ...player.hand,
-        spellbook: player.hand.spellbook.filter(({ instanceId }) => instanceId !== card.instanceId),
+        atlas: player.hand.atlas.filter(({ instanceId }) =>
+          instanceId !== discardedCard?.card.instanceId),
+        spellbook: player.hand.spellbook.filter(({ instanceId }) =>
+          instanceId !== card.instanceId && instanceId !== discardedCard?.card.instanceId),
       },
-      mana: player.mana - definition.manaCost,
+      mana: player.mana - descriptor.manaCost,
     });
-    const [castingUnits, casterStealthOutcomes] = loseStealth(state.realm.units, [caster]);
-    const realm = { ...state.realm, units: [...castingUnits, unit] };
+    const [castingUnits, casterStealthOutcomes] = loseStealth(paymentState.realm.units, [caster]);
+    const realm = { ...paymentState.realm, units: [...castingUnits, unit] };
     const summoned: GameOutcome = {
       payload: {
         cardId: card.cardId,
         casterInstanceId: descriptor.casterInstanceId,
         cell: descriptor.cell,
         instanceId: card.instanceId,
-        manaPaid: definition.manaCost,
+        manaPaid: descriptor.manaCost,
         ...(descriptor.region ? { region: descriptor.region } : {}),
         seat,
       },
       type: 'minion-summoned',
     };
+    const summonOutcomes = [...paymentOutcomes, ...casterStealthOutcomes, summoned];
     const summonedState = deepFreeze({
-      ...state,
-      players: replacePlayer(state, seat, updatedPlayer),
+      ...paymentState,
+      players: replacePlayer(paymentState, seat, updatedPlayer),
       realm,
     });
     const settlement = settleRegionOccupancy(summonedState);
@@ -3945,8 +4015,8 @@ function applyDescriptor(
     if (!summonedUnitSurvived || settlement.state.terminal.status === 'finished') {
       return [
         withStateVersion(settlement.state, {}),
-        [...casterStealthOutcomes, summoned, ...settlement.outcomes],
-        [],
+        [...summonOutcomes, ...settlement.outcomes],
+        paymentRandomDraws,
       ];
     }
     const settledPlayer = settlement.state.players[seat];
@@ -3966,8 +4036,7 @@ function applyDescriptor(
           players: replacePlayer(settlement.state, seat, healed),
         }),
         [
-          ...casterStealthOutcomes,
-          summoned,
+          ...summonOutcomes,
           ...settlement.outcomes,
           ...(amount > 0
             ? [{
@@ -3982,7 +4051,7 @@ function applyDescriptor(
             }]
             : []),
         ],
-        [],
+        paymentRandomDraws,
       ];
     }
     if (definition.genesisLoseControllerLife === 2) {
@@ -3996,8 +4065,7 @@ function applyDescriptor(
           players: replacePlayer(settlement.state, seat, lifePlayer),
         }),
         [
-          ...casterStealthOutcomes,
-          summoned,
+          ...summonOutcomes,
           ...settlement.outcomes,
           ...(amount > 0
             ? [{
@@ -4017,7 +4085,7 @@ function applyDescriptor(
             }]
             : []),
         ],
-        [],
+        paymentRandomDraws,
       ];
     }
     if (genesisDrawZone) {
@@ -4031,12 +4099,11 @@ function applyDescriptor(
             terminal: { loser: seat, reason: 'deck_empty', status: 'finished', winner },
           }),
           [
-            ...casterStealthOutcomes,
-            summoned,
+            ...summonOutcomes,
             ...settlement.outcomes,
             { payload: { loser: seat, reason: 'deck_empty', winner }, type: 'game-ended' },
           ],
-          [],
+          paymentRandomDraws,
         ];
       }
       const drawingPlayer = deepFreeze({
@@ -4052,21 +4119,20 @@ function applyDescriptor(
           players: replacePlayer(settlement.state, seat, drawingPlayer),
         }),
         [
-          ...casterStealthOutcomes,
-          summoned,
+          ...summonOutcomes,
           ...settlement.outcomes,
           {
             payload: { seat, sourceInstanceId: card.instanceId },
             type: genesisDrawZone === 'atlas' ? 'site-drawn' : 'spell-drawn',
           },
         ],
-        [],
+        paymentRandomDraws,
       ];
     }
     return [
       withStateVersion(settlement.state, {}),
-      [...casterStealthOutcomes, summoned, ...settlement.outcomes],
-      [],
+      [...summonOutcomes, ...settlement.outcomes],
+      paymentRandomDraws,
     ];
   }
 

@@ -512,6 +512,22 @@ export type PrivateGameCheck = Readonly<{
     temporaryChargeRecorded: boolean;
     unitStatePreservedOnGrant: boolean;
   }>;
+  fireAramos: Readonly<{
+    acceptedActionCount: number;
+    aramosMercenaries: string;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    discardedNonCastingCard: boolean;
+    hiddenInformationVerified: boolean;
+    manaPaid: number;
+    normalManaSummonUnavailable: boolean;
+    paymentModeVerified: boolean;
+    raalDromedary: string;
+    randomDiscardVerified: boolean;
+    replayVerified: boolean;
+    summonedAtC3: boolean;
+    unrelatedStatePreserved: boolean;
+  }>;
   fireGenesisLifeLoss: Readonly<{
     acceptedActionCount: number;
     causalEventsVerified: boolean;
@@ -869,6 +885,7 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
 async function readPrivateInputs(path: string): Promise<Readonly<{
   airborneMinion: NormalizedCard;
   airborneTargetMinion: NormalizedCard;
+  aramosMercenaries: NormalizedCard;
   arcLightning: NormalizedCard;
   authorityHash: Hash;
   bury: NormalizedCard;
@@ -1150,6 +1167,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || elthamTownsfolk.thresholds.water !== 0
     || elthamTownsfolk.rarity !== 'ordinary') {
     throw new Error('private temporary power helper minion no longer matches its supported facts');
+  }
+  const aramosMercenaries = snapshot.cards.find(({ name }) => name === 'Aramos Mercenaries');
+  if (!aramosMercenaries
+    || aramosMercenaries.cardType !== 'minion'
+    || ruleTextDigest(aramosMercenaries.rulesText) !== 'sha256:bed5fdaf535be9e6d23bf4cae32e7b02d4cc0b71e499f7cc128dc89b71e95f2e'
+    || aramosMercenaries.manaCost !== 3
+    || aramosMercenaries.attack !== 3
+    || aramosMercenaries.defense !== 3
+    || aramosMercenaries.life !== null
+    || aramosMercenaries.elements.length !== 1
+    || aramosMercenaries.elements[0] !== 'fire'
+    || aramosMercenaries.thresholds.air !== 0
+    || aramosMercenaries.thresholds.earth !== 0
+    || aramosMercenaries.thresholds.fire !== 2
+    || aramosMercenaries.thresholds.water !== 0
+    || aramosMercenaries.rarity !== 'ordinary') {
+    throw new Error('private random-discard alternative-cost minion no longer matches its supported facts');
   }
   const lesserBloodDemon = snapshot.cards.find(({ name }) => name === 'Lesser Blood Demon');
   if (!lesserBloodDemon
@@ -1925,6 +1959,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   return {
     airborneMinion,
     airborneTargetMinion,
+    aramosMercenaries,
     arcLightning,
     authorityHash: artifact.contentHash,
     bury,
@@ -2076,6 +2111,7 @@ function gameDefinition(
   spellcaster = false,
   genesisHealController: 0 | 2 = 0,
   untapTargetMinionAfterDamage = false,
+  discardRandomCardInsteadOfMana = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -2164,6 +2200,7 @@ function gameDefinition(
       deathriteDrawSite,
       ...(deathriteHeal ? { deathriteHeal } : {}),
       defense: card.defense,
+      ...(discardRandomCardInsteadOfMana ? { discardRandomCardInsteadOfMana: true } : {}),
       ...(diesAtEndOfControllerTurn ? { diesAtEndOfControllerTurn: true } : {}),
       ...(genesisHealController ? { genesisHealController } : {}),
       genesisDrawSpell,
@@ -2201,7 +2238,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-immobile' | 'earth-overpower' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-immobile' | 'earth-overpower' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -2400,6 +2437,10 @@ function buildManifest(
     [],
     [input.minorExplosion],
   );
+  const fireAramosDeck = elementalDeck(
+    'fire',
+    [input.aramosMercenaries, input.raalDromedary],
+  );
   const fireChargeDeck = elementalDeck(
     'fire',
     [input.raalDromedary],
@@ -2513,6 +2554,8 @@ function buildManifest(
         ? elementalDeck('air', [input.movementMinion, input.roamingMinion])
         : scenario === 'fire'
           ? elementalDeck('fire', [input.lumberingMinion, input.monstrousLion])
+        : scenario === 'fire-aramos'
+          ? fireAramosDeck
         : scenario === 'fire-charge'
           ? fireChargeDeck
         : scenario === 'fire-genesis-life-loss'
@@ -2689,6 +2732,7 @@ function buildManifest(
       card.stableId === input.genesisSpellMinion.stableId,
       card.stableId === input.grainSparrow.stableId ? 2 : 0,
       card.stableId === input.lash.stableId,
+      card.stableId === input.aramosMercenaries.stableId,
     ),
   ]));
   return {
@@ -4012,6 +4056,46 @@ function findFireGenesisLifeLossOpening(
     }
   }
   throw new Error('private Genesis life-loss scenario no longer produces its supported opening');
+}
+
+function findFireAramosOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  aramosInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string];
+  session: GameSession;
+  southSiteInstanceId: string;
+}> {
+  // ponytail: bounded opening scan avoids another private seed/config field.
+  for (let offset = 1; offset <= 4096; offset += 1) {
+    const built = buildManifest(input, input.config.fireSeed + offset, 'fire-aramos');
+    const session = createGameSession(built.manifest);
+    const northFireSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('fire');
+    });
+    const accessibleSpells = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 1),
+    ];
+    const aramosInstanceId = accessibleSpells
+      .find(({ cardId }) => cardId === input.aramosMercenaries.stableId)?.instanceId;
+    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+    if (northFireSites.length >= 2
+      && aramosInstanceId
+      && southSiteInstanceId) {
+      return {
+        ...built,
+        aramosInstanceId,
+        northSiteInstanceIds: [northFireSites[0]!.instanceId, northFireSites[1]!.instanceId],
+        session,
+        southSiteInstanceId,
+      };
+    }
+  }
+  throw new Error('private Aramos random-discard alternative-cost scenario lacks its supported opening');
 }
 
 function findFireLashOpening(
@@ -8158,6 +8242,169 @@ function runFireGenesisLifeLoss(
   });
 }
 
+function runFireAramos(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['fireAramos'] {
+  const opening = findFireAramosOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+
+  const northBefore = session.state.players.north;
+  const southBefore = session.state.players.south;
+  const sitesBefore = canonicalJson(session.state.realm.sites as unknown as JsonValue);
+  const unitsBefore = canonicalJson(session.state.realm.units as unknown as JsonValue);
+  const eligibleCards = [
+    ...northBefore.hand.atlas.map((card) => ({ ...card, zone: 'atlas' as const })),
+    ...northBefore.hand.spellbook
+      .filter(({ instanceId }) => instanceId !== opening.aramosInstanceId)
+      .map((card) => ({ ...card, zone: 'spellbook' as const })),
+  ];
+  const northObservedBefore = observeGame(session.state, 'north').players.north.hand;
+  const southObservedBefore = observeGame(session.state, 'south').players.north.hand;
+  const summonActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.aramosInstanceId);
+  const alternative = summonActions.find(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.paymentMode === 'random-card-discard'
+      && descriptor.cell === 'C3');
+  if (!alternative) throw new Error('private Aramos alternative-cost summon is unavailable');
+  const normalManaSummonUnavailable = summonActions.every(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.paymentMode === 'random-card-discard');
+  const result = stepGame(session, alternative);
+  if (!result.accepted) throw new Error('private Aramos alternative-cost summon was rejected');
+  session = result.session;
+
+  const events = result.receipt.events;
+  const discardedEvent = events.find(({ type }) => type === 'card-discarded');
+  const summonedEvent = events.find(({ type }) => type === 'minion-summoned');
+  const discardedPayload = discardedEvent && isJsonRecord(discardedEvent.payload)
+    ? discardedEvent.payload
+    : undefined;
+  const summonedPayload = summonedEvent && isJsonRecord(summonedEvent.payload)
+    ? summonedEvent.payload
+    : undefined;
+  const discardedInstanceId = typeof discardedPayload?.instanceId === 'string'
+    ? discardedPayload.instanceId
+    : undefined;
+  const discardedCardId = typeof discardedPayload?.cardId === 'string'
+    ? discardedPayload.cardId
+    : undefined;
+  const discardedZone = discardedPayload?.zone === 'atlas'
+    || discardedPayload?.zone === 'spellbook'
+    ? discardedPayload.zone
+    : undefined;
+  const northAfter = session.state.players.north;
+  const aramos = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.aramosInstanceId);
+  const southObservedAfter = observeGame(session.state, 'south').players.north.hand;
+  const southObservedCemetery = observeGame(session.state, 'south').players.north.cemetery;
+  const random = result.receipt.randomDraws[0];
+  const randomDomain = random && isJsonRecord(random.domain) ? random.domain : undefined;
+  const expectedAtlasHand = northBefore.hand.atlas.filter(({ instanceId }) =>
+    instanceId !== discardedInstanceId);
+  const expectedSpellbookHand = northBefore.hand.spellbook.filter(({ instanceId }) =>
+    instanceId !== opening.aramosInstanceId && instanceId !== discardedInstanceId);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    aramosMercenaries: input.aramosMercenaries.name,
+    causalEventsVerified: events.map(({ type }) => type).join(',')
+      === 'card-discarded,minion-summoned'
+      && discardedPayload?.owner === 'north'
+      && discardedPayload.seat === 'north'
+      && discardedPayload.sourceInstanceId === opening.aramosInstanceId
+      && discardedZone !== undefined
+      && summonedPayload?.instanceId === opening.aramosInstanceId
+      && summonedPayload.manaPaid === 0
+      && discardedEvent!.eventSequence < summonedEvent!.eventSequence,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    discardedNonCastingCard: discardedInstanceId !== undefined
+      && discardedCardId !== undefined
+      && discardedZone !== undefined
+      && discardedInstanceId !== opening.aramosInstanceId
+      && eligibleCards.some(({ cardId, instanceId, zone }) =>
+        cardId === discardedCardId
+          && instanceId === discardedInstanceId
+          && zone === discardedZone)
+      && northAfter.hand[discardedZone]
+        .every(({ instanceId }) => instanceId !== discardedInstanceId)
+      && northAfter.cemetery.some(({ cardId, instanceId }) =>
+        cardId === discardedCardId && instanceId === discardedInstanceId),
+    hiddenInformationVerified: Array.isArray(northObservedBefore.atlas)
+      && Array.isArray(northObservedBefore.spellbook)
+      && northObservedBefore.spellbook
+        .some(({ instanceId }) => instanceId === opening.aramosInstanceId)
+      && typeof southObservedBefore.atlas === 'number'
+      && typeof southObservedBefore.spellbook === 'number'
+      && typeof southObservedAfter.atlas === 'number'
+      && typeof southObservedAfter.spellbook === 'number'
+      && southObservedAfter.atlas === southObservedBefore.atlas
+        - (discardedZone === 'atlas' ? 1 : 0)
+      && southObservedAfter.spellbook === southObservedBefore.spellbook
+        - 1
+        - (discardedZone === 'spellbook' ? 1 : 0)
+      && southObservedCemetery.some(({ cardId, instanceId }) =>
+        cardId === discardedCardId && instanceId === discardedInstanceId),
+    manaPaid: northBefore.mana - northAfter.mana,
+    normalManaSummonUnavailable: northBefore.mana === 2 && normalManaSummonUnavailable,
+    paymentModeVerified: alternative.descriptor.kind === 'summon-minion'
+      && alternative.descriptor.paymentMode === 'random-card-discard',
+    raalDromedary: input.raalDromedary.name,
+    randomDiscardVerified: result.receipt.randomDraws.length === 1
+      && random?.purpose === 'summon_random_card_discard_cost'
+      && randomDomain?.accepted === true
+      && randomDomain.kind === 'card_index_candidate'
+      && randomDomain.exclusiveMaximum === eligibleCards.length,
+    replayVerified: verifyGameReplay(session),
+    summonedAtC3: aramos?.cardId === input.aramosMercenaries.stableId
+      && aramos.controller === 'north'
+      && aramos.location === 'C3'
+      && aramos.owner === 'north'
+      && aramos.region === 'surface',
+    unrelatedStatePreserved: northAfter.mana === 2
+      && northAfter.cemetery.length === northBefore.cemetery.length + 1
+      && canonicalJson(northAfter.hand.atlas as unknown as JsonValue)
+        === canonicalJson(expectedAtlasHand as unknown as JsonValue)
+      && canonicalJson(northAfter.hand.spellbook as unknown as JsonValue)
+        === canonicalJson(expectedSpellbookHand as unknown as JsonValue)
+      && canonicalJson(northAfter.atlas as unknown as JsonValue)
+        === canonicalJson(northBefore.atlas as unknown as JsonValue)
+      && canonicalJson(northAfter.spellbook as unknown as JsonValue)
+        === canonicalJson(northBefore.spellbook as unknown as JsonValue)
+      && canonicalJson(northAfter.avatar as unknown as JsonValue)
+        === canonicalJson(northBefore.avatar as unknown as JsonValue)
+      && canonicalJson(session.state.players.south as unknown as JsonValue)
+        === canonicalJson(southBefore as unknown as JsonValue)
+      && canonicalJson(session.state.realm.sites as unknown as JsonValue) === sitesBefore
+      && unitsBefore === '[]'
+      && session.state.realm.units.length === 1
+      && session.state.terminal.status === 'active'
+      && events.every(({ type }) => type !== 'damage-dealt'
+        && type !== 'minion-died'
+        && type !== 'avatar-life-lost'
+        && type !== 'game-ended'),
+  });
+}
+
 function runFireIgnited(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['fireIgnited'] {
@@ -9995,6 +10242,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthRanged = runEarthRanged(input);
   const earthSecretTunnel = runEarthSecretTunnel(input);
   const earthWard = runEarthWard(input);
+  const fireAramos = runFireAramos(input);
   const fireCharge = runFireCharge(input);
   const fireGenesisLifeLoss = runFireGenesisLifeLoss(input);
   const fireIgnited = runFireIgnited(input);
@@ -10166,6 +10414,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthRanged,
     earthSecretTunnel,
     earthWard,
+    fireAramos,
     fireCharge,
     fireGenesisLifeLoss,
     fireIgnited,

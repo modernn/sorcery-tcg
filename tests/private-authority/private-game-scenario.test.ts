@@ -561,6 +561,27 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.fireCharge.deck.spellbook
     .find(({ name }) => name === 'Raal Dromedary')?.copies, 4);
   assert.equal(result.fireCharge.replayVerified, true);
+  assert.equal(result.fireAramos.aramosMercenaries, 'Aramos Mercenaries');
+  assert.equal(result.fireAramos.raalDromedary, 'Raal Dromedary');
+  assert.equal(result.fireAramos.acceptedActionCount, 10);
+  assert.equal(result.fireAramos.normalManaSummonUnavailable, true);
+  assert.equal(result.fireAramos.paymentModeVerified, true);
+  assert.equal(result.fireAramos.manaPaid, 0);
+  assert.equal(result.fireAramos.discardedNonCastingCard, true);
+  assert.equal(result.fireAramos.randomDiscardVerified, true);
+  assert.equal(result.fireAramos.summonedAtC3, true);
+  assert.equal(result.fireAramos.causalEventsVerified, true);
+  assert.equal(result.fireAramos.hiddenInformationVerified, true);
+  assert.equal(result.fireAramos.unrelatedStatePreserved, true);
+  assert.equal(result.fireAramos.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.fireAramos.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.fireAramos.deck.spellbook
+    .find(({ name }) => name === 'Aramos Mercenaries')?.copies, 4);
+  assert.equal(result.fireAramos.deck.spellbook
+    .find(({ name }) => name === 'Raal Dromedary')?.copies, 4);
+  assert.equal(result.fireAramos.replayVerified, true);
   assert.equal(result.fireLash.lash, 'Lash');
   assert.equal(result.fireLash.raalDromedary, 'Raal Dromedary');
   assert.equal(result.fireLash.acceptedActionCount, 13);
