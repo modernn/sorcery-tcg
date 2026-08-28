@@ -31,7 +31,7 @@ export type DeckZone = 'atlas' | 'spellbook';
 export type RealmCell = `${'A' | 'B' | 'C' | 'D' | 'E'}${1 | 2 | 3 | 4}`;
 export type GameElement = 'air' | 'earth' | 'fire' | 'water';
 export type GameThresholds = Readonly<Record<GameElement, number>>;
-export type GameRegion = 'surface';
+export type GameRegion = 'surface' | 'underwater';
 
 export type GameCardDefinition =
   | Readonly<{ attack: number; cardType: 'avatar'; defense: number; drawSpell: boolean; life: number }>
@@ -57,6 +57,7 @@ export type GameCardDefinition =
     ranged?: boolean;
     stealth?: boolean;
     strikesFirstWhileAttacking?: boolean;
+    submerge?: boolean;
     summonToAnySite?: boolean;
     tapForMana?: number;
     thresholds: GameThresholds;
@@ -131,6 +132,7 @@ type PendingCombat = Readonly<{
   combatants: readonly GameUnitRef[];
   defenders: readonly GameUnitRef[];
   originalTarget: CombatTarget | null;
+  region?: 'underwater';
   targetRemoved: boolean;
 }>;
 
@@ -264,6 +266,7 @@ type GameActionDescriptor =
     cell: RealmCell;
     kind: 'summon-minion';
     manaCost: number;
+    region?: 'underwater';
   }>
   | Readonly<{ kind: 'draw'; zone: DeckZone }>
   | Readonly<{
@@ -363,6 +366,14 @@ function controlledSiteCells(state: GameState, seat: GameSeat): readonly RealmCe
     .sort();
 }
 
+function isWaterSite(state: GameState, cell: RealmCell): boolean {
+  const site = state.realm.sites[cell];
+  if (!site) return false;
+  const definition = cardDefinition(state, site.cardId);
+  if (definition.cardType !== 'site') throw new Error('realm site lacks site definition');
+  return definition.elements.includes('water');
+}
+
 function meetsThresholds(state: GameState, seat: GameSeat, required: GameThresholds): boolean {
   const available = affinity(state, seat);
   return (['air', 'earth', 'fire', 'water'] as const)
@@ -378,14 +389,27 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     if (definition.cardType !== 'minion'
       || player.mana < definition.manaCost
       || !meetsThresholds(state, seat, definition.thresholds)) return [];
-    return (definition.summonToAnySite ? siteCells : controlledCells).map((cell) => ({
-      cardId,
-      cardInstanceId: instanceId,
-      casterInstanceId: player.avatar.card.instanceId,
-      cell,
-      kind: 'summon-minion' as const,
-      manaCost: definition.manaCost,
-    }));
+    return (definition.summonToAnySite ? siteCells : controlledCells).flatMap((cell) => [
+      {
+        cardId,
+        cardInstanceId: instanceId,
+        casterInstanceId: player.avatar.card.instanceId,
+        cell,
+        kind: 'summon-minion' as const,
+        manaCost: definition.manaCost,
+      },
+      ...(definition.submerge && isWaterSite(state, cell)
+        ? [{
+          cardId,
+          cardInstanceId: instanceId,
+          casterInstanceId: player.avatar.card.instanceId,
+          cell,
+          kind: 'summon-minion' as const,
+          manaCost: definition.manaCost,
+          region: 'underwater' as const,
+        }]
+        : []),
+    ]);
   });
 }
 
@@ -472,6 +496,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   }
   if (card.strikesFirstWhileAttacking !== undefined && typeof card.strikesFirstWhileAttacking !== 'boolean') {
     throw new RangeError(`${path}.strikesFirstWhileAttacking must be boolean`);
+  }
+  if (card.submerge !== undefined && typeof card.submerge !== 'boolean') {
+    throw new RangeError(`${path}.submerge must be boolean`);
   }
   if (card.ward !== undefined && typeof card.ward !== 'boolean') {
     throw new RangeError(`${path}.ward must be boolean`);
@@ -586,6 +613,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.ranged === true ? { ranged: true } : {}),
             ...(card.stealth === true ? { stealth: true } : {}),
             ...(card.strikesFirstWhileAttacking === true ? { strikesFirstWhileAttacking: true } : {}),
+            ...(card.submerge === true ? { submerge: true } : {}),
             ...(card.summonToAnySite === true ? { summonToAnySite: true } : {}),
             ...(card.tapForMana ? { tapForMana: card.tapForMana } : {}),
             thresholds: { ...card.thresholds },
@@ -915,8 +943,10 @@ function unitStatus(
   movementSteps: number;
   movesOnlySideways: boolean;
   ranged: boolean;
+  region: GameRegion;
   stealthed: boolean;
   strikesFirstWhileAttacking: boolean;
+  submerge: boolean;
   summoningSickness: boolean;
   tapped: boolean;
 }> {
@@ -937,8 +967,10 @@ function unitStatus(
       movementSteps: 1,
       movesOnlySideways: false,
       ranged: false,
+      region: avatar.region,
       stealthed: false,
       strikesFirstWhileAttacking: false,
+      submerge: false,
       summoningSickness: false,
       tapped: avatar.tapped,
     };
@@ -948,7 +980,7 @@ function unitStatus(
   const definition = cardDefinition(state, unit.cardId);
   if (definition.cardType !== 'minion') throw new Error('minion lacks minion definition');
   return {
-    airborne: definition.airborne === true,
+    airborne: definition.airborne === true && unit.region === 'surface',
     attack: definition.attack,
     canAttackSites: definition.cannotAttackSites !== true,
     canMoveToDefend: definition.cannotDefend !== true,
@@ -959,8 +991,10 @@ function unitStatus(
     movementSteps: 1 + (definition.movementBonus ?? 0),
     movesOnlySideways: definition.movesOnlySideways === true,
     ranged: definition.ranged === true,
+    region: unit.region,
     stealthed: unit.stealthed,
     strikesFirstWhileAttacking: definition.strikesFirstWhileAttacking === true,
+    submerge: definition.submerge === true,
     summoningSickness: unit.summoningSickness,
     tapped: unit.tapped,
   };
@@ -971,36 +1005,64 @@ function readyUnit(state: GameState, ref: GameUnitRef): boolean {
   return !unit.tapped && (!unit.summoningSickness || unit.charge);
 }
 
-function surfacePaths(
+function sameLocation(left: GameLocation, right: GameLocation): boolean {
+  return left.cell === right.cell && left.region === right.region;
+}
+
+function locationExists(state: GameState, location: GameLocation): boolean {
+  return state.realm.sites[location.cell] !== undefined
+    && (location.region === 'surface' || isWaterSite(state, location.cell));
+}
+
+function movementPaths(
   state: GameState,
-  start: RealmCell,
+  start: GameLocation,
   maximumSteps: number,
   airborne = false,
   movesOnlySideways = false,
-): readonly (readonly RealmCell[])[] {
-  if (!state.realm.sites[start]) return [];
-  const paths: RealmCell[][] = [[start]];
-  let frontier: RealmCell[][] = [[start]];
+  submerge = false,
+): readonly (readonly GameLocation[])[] {
+  if (!locationExists(state, start)) return [];
+  const paths: GameLocation[][] = [[start]];
+  let frontier: GameLocation[][] = [[start]];
   for (let step = 0; step < maximumSteps; step += 1) {
     frontier = frontier.flatMap((path) => {
       const current = path.at(-1)!;
-      return [
-        ...borderingCells(current),
-        ...(airborne ? diagonalCells(current) : []),
-      ]
-        .filter((cell) => state.realm.sites[cell]
-          && (!movesOnlySideways || cell[1] === current[1])
-          && !path.some((from, index) => from === current && path[index + 1] === cell))
-        .sort()
-        .map((cell) => [...path, cell]);
+      const candidates: GameLocation[] = current.region === 'surface'
+        ? [
+          ...borderingCells(current.cell).map((cell) => ({ cell, region: 'surface' as const })),
+          ...(airborne
+            ? diagonalCells(current.cell).map((cell) => ({ cell, region: 'surface' as const }))
+            : []),
+          ...(submerge && isWaterSite(state, current.cell)
+            ? [{ cell: current.cell, region: 'underwater' as const }]
+            : []),
+        ]
+        : submerge
+          ? [
+            { cell: current.cell, region: 'surface' as const },
+            ...borderingCells(current.cell).map((cell) => ({ cell, region: 'underwater' as const })),
+          ]
+          : [];
+      return candidates
+        .filter((candidate) => locationExists(state, candidate)
+          && (!movesOnlySideways
+            || candidate.region === current.region && candidate.cell[1] === current.cell[1])
+          && !path.some((from, index) =>
+            sameLocation(from, current) && path[index + 1] !== undefined
+              && sameLocation(path[index + 1]!, candidate)))
+        .sort((left, right) => left.cell === right.cell
+          ? left.region < right.region ? -1 : left.region > right.region ? 1 : 0
+          : left.cell < right.cell ? -1 : 1)
+        .map((candidate) => [...path, candidate]);
     });
     paths.push(...frontier);
   }
   return paths;
 }
 
-function pathLocations(path: readonly RealmCell[]): readonly GameLocation[] {
-  return path.map((cell) => ({ cell, region: 'surface' }));
+function pathLocations(path: readonly RealmCell[], region: GameRegion = 'surface'): readonly GameLocation[] {
+  return path.map((cell) => ({ cell, region }));
 }
 
 function samePath(left: readonly GameLocation[], right: readonly GameLocation[]): boolean {
@@ -1012,29 +1074,37 @@ function samePath(left: readonly GameLocation[], right: readonly GameLocation[])
 function defendPaths(
   state: GameState,
   ref: GameUnitRef,
-  destination: RealmCell,
-): readonly (readonly RealmCell[])[] {
+  destination: GameLocation,
+): readonly (readonly GameLocation[])[] {
   const unit = unitStatus(state, ref);
   if (!readyUnit(state, ref)) return [];
-  return surfacePaths(
+  return movementPaths(
     state,
-    unit.location,
+    { cell: unit.location, region: unit.region },
     unit.canMoveToDefend ? unit.movementSteps : 0,
     unit.airborne,
     unit.movesOnlySideways,
-  ).filter((path) => path.at(-1) === destination);
+    unit.submerge,
+  ).filter((path) => sameLocation(path.at(-1)!, destination));
 }
 
 function movementDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   return unitRefs(state, seat).flatMap((ref) => {
     const unit = unitStatus(state, ref);
     if (!readyUnit(state, ref) || !state.realm.sites[unit.location]) return [];
-    return surfacePaths(state, unit.location, unit.movementSteps, unit.airborne, unit.movesOnlySideways)
+    return movementPaths(
+      state,
+      { cell: unit.location, region: unit.region },
+      unit.movementSteps,
+      unit.airborne,
+      unit.movesOnlySideways,
+      unit.submerge,
+    )
       .map((path) => ({
-        from: { cell: unit.location, region: 'surface' as const },
+        from: { cell: unit.location, region: unit.region },
         kind: 'move-and-attack' as const,
-        path: pathLocations(path),
-        to: { cell: path.at(-1)!, region: 'surface' as const },
+        path,
+        to: path.at(-1)!,
         unitInstanceId: ref.instanceId,
       }));
   });
@@ -1057,7 +1127,10 @@ function rangedDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     const startingEnemies = allUnits
       .filter((ref) => {
         const target = unitStatus(state, ref);
-        return ref.seat !== seat && !target.stealthed && target.location === status.location;
+        return ref.seat !== seat
+          && !target.stealthed
+          && target.location === status.location
+          && target.region === status.region;
       })
       .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
     return directions.flatMap<GameActionDescriptor>((direction) => {
@@ -1066,20 +1139,23 @@ function rangedDescriptors(state: GameState, seat: GameSeat): readonly GameActio
           direction,
           hit,
           kind: 'shoot-projectile' as const,
-          path: pathLocations([status.location]),
+          path: pathLocations([status.location], status.region),
           shooterInstanceId: shooter.instanceId,
         }));
       }
       const next = projectileStep(status.location, direction);
+      const nextLocation = next ? { cell: next, region: status.region } : undefined;
       const path = pathLocations([
         status.location,
-        ...(next && state.realm.sites[next] ? [next] : []),
-      ]);
-      const hits = next && state.realm.sites[next]
+        ...(nextLocation && locationExists(state, nextLocation) ? [nextLocation.cell] : []),
+      ], status.region);
+      const hits = nextLocation && locationExists(state, nextLocation)
         ? allUnits
           .filter((ref) => {
             const target = unitStatus(state, ref);
-            return !target.stealthed && target.location === next;
+            return !target.stealthed
+              && target.location === nextLocation.cell
+              && target.region === nextLocation.region;
           })
           .sort((left, right) => left.instanceId.localeCompare(right.instanceId))
         : [];
@@ -1103,15 +1179,19 @@ function manaAbilityDescriptors(state: GameState, seat: GameSeat): readonly Game
 function attackTargets(state: GameState, pending: PendingCombat): readonly CombatTarget[] {
   const defendingSeat = otherSeat(pending.attackingSeat);
   const attackerAirborne = unitStatus(state, pending.attacker).airborne;
+  const region = pending.region ?? 'surface';
   const targets: CombatTarget[] = unitRefs(state, defendingSeat)
     .filter((ref) => {
       const target = unitStatus(state, ref);
       return target.location === pending.cell
+        && target.region === region
         && !target.stealthed
         && (!target.airborne || attackerAirborne);
     });
   const site = state.realm.sites[pending.cell];
-  if (site?.controller === defendingSeat && unitStatus(state, pending.attacker).canAttackSites) {
+  if (region === 'surface'
+    && site?.controller === defendingSeat
+    && unitStatus(state, pending.attacker).canAttackSites) {
     targets.push({ instanceId: site.instanceId, kind: 'site', seat: defendingSeat });
   }
   return targets;
@@ -1127,6 +1207,7 @@ function responseUnitRefs(
     ...pending.defenders.map(({ instanceId }) => instanceId),
     ...(pending.originalTarget?.kind === 'site' ? [] : [pending.originalTarget?.instanceId]),
   ].filter((value): value is StateHash => value !== undefined));
+  const pendingLocation: GameLocation = { cell: pending.cell, region: pending.region ?? 'surface' };
   return unitRefs(state, respondingSeat).filter((ref) => {
     if (unavailable.has(ref.instanceId) || !readyUnit(state, ref)) return false;
     const unit = unitStatus(state, ref);
@@ -1136,10 +1217,9 @@ function responseUnitRefs(
       && unitStatus(state, pending.attacker).airborne
       && !unit.airborne
       && !unit.ranged) return false;
-    const location = unit.location;
     return intercept
-      ? location === pending.cell
-      : defendPaths(state, ref, pending.cell).length > 0;
+      ? sameLocation({ cell: unit.location, region: unit.region }, pendingLocation)
+      : defendPaths(state, ref, pendingLocation).length > 0;
   });
 }
 
@@ -1165,13 +1245,14 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
   }
   if (state.phase === 'defend') {
     const pending = pendingCombat(state);
+    const destination: GameLocation = { cell: pending.cell, region: pending.region ?? 'surface' };
     const defenders = responseUnitRefs(state, pending, false).flatMap((ref) => {
-      const from = unitStatus(state, ref).location;
-      return defendPaths(state, ref, pending.cell).map((path) => ({
-        from: { cell: from, region: 'surface' as const },
+      const unit = unitStatus(state, ref);
+      return defendPaths(state, ref, destination).map((path) => ({
+        from: { cell: unit.location, region: unit.region },
         kind: 'defend' as const,
-        path: pathLocations(path),
-        to: { cell: pending.cell, region: 'surface' as const },
+        path,
+        to: destination,
         unitInstanceId: ref.instanceId,
       }));
     });
@@ -1250,12 +1331,12 @@ function actionLabel(descriptor: GameActionDescriptor): string {
   if (descriptor.kind === 'draw-spell') return 'Draw a spell with Avatar';
   if (descriptor.kind === 'play-site') return `Play ${descriptor.cardId} at ${descriptor.cell}`;
   if (descriptor.kind === 'summon-minion') {
-    return `Summon ${descriptor.cardId} at ${descriptor.cell} (${descriptor.manaCost} mana)`;
+    return `Summon ${descriptor.cardId} at ${descriptor.cell}${descriptor.region ? ` ${descriptor.region}` : ''} (${descriptor.manaCost} mana)`;
   }
   if (descriptor.kind === 'move-and-attack') {
     return descriptor.path.length === 1
-      ? `Tap ${descriptor.unitInstanceId.slice(0, 15)}… without moving`
-      : `Move ${descriptor.unitInstanceId.slice(0, 15)}… ${descriptor.path.map(({ cell }) => cell).join(' → ')}`;
+      ? `Tap ${descriptor.unitInstanceId.slice(0, 15)}… without moving${descriptor.to.region === 'underwater' ? ' underwater' : ''}`
+      : `Move ${descriptor.unitInstanceId.slice(0, 15)}… ${descriptor.path.map(({ cell, region }) => `${cell}${region === 'underwater' ? ' underwater' : ''}`).join(' → ')}`;
   }
   if (descriptor.kind === 'shoot-projectile') {
     const target = descriptor.hit
@@ -1266,7 +1347,7 @@ function actionLabel(descriptor: GameActionDescriptor): string {
   if (descriptor.kind === 'decline-attack') return 'Decline attack';
   if (descriptor.kind === 'declare-attack') return `Attack ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`;
   if (descriptor.kind === 'defend') {
-    return `Defend with ${descriptor.unitInstanceId.slice(0, 15)}… via ${descriptor.path.map(({ cell }) => cell).join(' → ')}`;
+    return `Defend with ${descriptor.unitInstanceId.slice(0, 15)}… via ${descriptor.path.map(({ cell, region }) => `${cell}${region === 'underwater' ? ' underwater' : ''}`).join(' → ')}`;
   }
   if (descriptor.kind === 'close-defend') {
     return descriptor.originalTargetParticipates ? 'Close defend window; keep target' : 'Close defend window; remove target';
@@ -1341,7 +1422,7 @@ function siteCount(state: GameState, seat: GameSeat): number {
 function moveAndTapUnit(
   state: GameState,
   ref: GameUnitRef,
-  location: RealmCell,
+  location: GameLocation,
 ): Readonly<{ players: GameState['players']; realm: GameState['realm'] }> {
   if (ref.kind === 'avatar') {
     const player = state.players[ref.seat];
@@ -1349,7 +1430,7 @@ function moveAndTapUnit(
     return {
       players: replacePlayer(state, ref.seat, deepFreeze({
         ...player,
-        avatar: { ...player.avatar, location, tapped: true },
+        avatar: { ...player.avatar, location: location.cell, region: location.region, tapped: true },
       })),
       realm: state.realm,
     };
@@ -1362,7 +1443,7 @@ function moveAndTapUnit(
     realm: {
       ...state.realm,
       units: state.realm.units.map((unit) => unit.instanceId === ref.instanceId
-        ? deepFreeze({ ...unit, location, tapped: true })
+        ? deepFreeze({ ...unit, location: location.cell, region: location.region, tapped: true })
         : unit),
     },
   };
@@ -1712,7 +1793,9 @@ function strikeUndefendedSite(
   outcomes: readonly GameOutcome[],
 ): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
   const target = pending.originalTarget;
-  if (!target || target.kind !== 'site') throw new Error('unreachable site strike target');
+  if (!target || target.kind !== 'site' || pending.region) {
+    throw new Error('unreachable site strike target');
+  }
   const site = state.realm.sites[pending.cell];
   if (!site || site.instanceId !== target.instanceId || site.controller !== target.seat) {
     throw new Error('unreachable missing site strike target');
@@ -1861,7 +1944,8 @@ function applyDescriptor(
         && candidate.cardInstanceId === descriptor.cardInstanceId
         && candidate.casterInstanceId === descriptor.casterInstanceId
         && candidate.cell === descriptor.cell
-        && candidate.manaCost === descriptor.manaCost);
+        && candidate.manaCost === descriptor.manaCost
+        && (candidate.region ?? 'surface') === (descriptor.region ?? 'surface'));
     if (!card || !definition || definition.cardType !== 'minion' || !legal) {
       throw new Error('unreachable illegal minion summon');
     }
@@ -1870,7 +1954,7 @@ function applyDescriptor(
       controller: seat,
       damage: 0,
       location: descriptor.cell,
-      region: 'surface',
+      region: descriptor.region ?? 'surface',
       stealthed: definition.stealth === true,
       summoningSickness: true,
       tapped: false,
@@ -1892,6 +1976,7 @@ function applyDescriptor(
         cell: descriptor.cell,
         instanceId: card.instanceId,
         manaPaid: definition.manaCost,
+        ...(descriptor.region ? { region: descriptor.region } : {}),
         seat,
       },
       type: 'minion-summoned',
@@ -1986,7 +2071,10 @@ function applyDescriptor(
       .find(({ instanceId }) => instanceId === descriptor.shooterInstanceId);
     if (!legal || !shooter) throw new Error('unreachable illegal Ranged projectile');
     const shooterStatus = unitStatus(state, shooter);
-    const tapped = moveAndTapUnit(state, shooter, shooterStatus.location);
+    const tapped = moveAndTapUnit(state, shooter, {
+      cell: shooterStatus.location,
+      region: shooterStatus.region,
+    });
     const [units, stealthOutcomes] = loseStealth(tapped.realm.units, [shooter]);
     const shotState = deepFreeze({
       ...state,
@@ -2023,6 +2111,7 @@ function applyDescriptor(
       combatants: [descriptor.hit],
       defenders: [],
       originalTarget: descriptor.hit,
+      ...(unitStatus(state, descriptor.hit).region === 'underwater' ? { region: 'underwater' as const } : {}),
       targetRemoved: false,
     }), [shot, ...stealthOutcomes, strike], false);
   }
@@ -2038,7 +2127,7 @@ function applyDescriptor(
         && candidate.to.region === descriptor.to.region);
     const ref = unitRefs(state, seat).find(({ instanceId }) => instanceId === descriptor.unitInstanceId);
     if (!legal || !ref) throw new Error('unreachable illegal Move and Attack');
-    const moved = moveAndTapUnit(state, ref, descriptor.to.cell);
+    const moved = moveAndTapUnit(state, ref, descriptor.to);
     const pending: PendingCombat = deepFreeze({
       allocations: [],
       attacker: ref,
@@ -2047,6 +2136,7 @@ function applyDescriptor(
       combatants: [],
       defenders: [],
       originalTarget: null,
+      ...(descriptor.to.region === 'underwater' ? { region: 'underwater' as const } : {}),
       targetRemoved: false,
     });
     return [
@@ -2109,6 +2199,7 @@ function applyDescriptor(
       payload: {
         attackerInstanceId: pending.attacker.instanceId,
         cell: pending.cell,
+        ...(pending.region ? { region: pending.region } : {}),
         seat: pending.attackingSeat,
         target: descriptor.target,
       },
@@ -2144,7 +2235,8 @@ function applyDescriptor(
     if (!legal || !ref) {
       throw new Error('unreachable illegal defender');
     }
-    const moved = moveAndTapUnit(state, ref, pending.cell);
+    const destination: GameLocation = { cell: pending.cell, region: pending.region ?? 'surface' };
+    const moved = moveAndTapUnit(state, ref, destination);
     const removesSite = pending.originalTarget?.kind === 'site' && !pending.targetRemoved;
     return [
       withStateVersion(state, {
@@ -2184,7 +2276,8 @@ function applyDescriptor(
     const ref = responseUnitRefs(state, pending, true)
       .find(({ instanceId }) => instanceId === descriptor.unitInstanceId);
     if (!ref) throw new Error('unreachable illegal interceptor');
-    const tapped = moveAndTapUnit(state, ref, pending.cell);
+    const destination: GameLocation = { cell: pending.cell, region: pending.region ?? 'surface' };
+    const tapped = moveAndTapUnit(state, ref, destination);
     return [
       withStateVersion(state, {
         pendingCombat: deepFreeze({ ...pending, defenders: [...pending.defenders, ref] }),
@@ -2192,7 +2285,12 @@ function applyDescriptor(
         realm: tapped.realm,
       }),
       [{
-        payload: { cell: pending.cell, instanceId: ref.instanceId, seat },
+        payload: {
+          cell: pending.cell,
+          instanceId: ref.instanceId,
+          ...(pending.region ? { region: pending.region } : {}),
+          seat,
+        },
         type: 'interceptor-joined',
       }],
       [],
