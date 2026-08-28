@@ -12,6 +12,11 @@
 - The Avatar's once-per-turn choice to play a site or privately draw one from the Atlas, including empty-Atlas defeat.
 - A deck-scoped, manifest-bound mechanical catalog that admits only Avatars, sites, and fully specified vanilla minions for this slice and rejects unsupported spell types before play.
 - Mana payment, controlled-site affinity thresholds, Avatar spellcasting, public minion placement, unlimited shared-site occupancy, and end-of-turn summoning-sickness cleanup.
+- Vanilla surface Move and Attack for Avatars and ready minions, including zero-step activation, one orthogonal site step, post-movement attack choice, and tap costs.
+- Separate turn-owner and decision-seat tracking for non-active-player Defend and Intercept windows.
+- Enemy-unit and enemy-site attack targets, any-number sequential defenders/interceptors, original-target retention/removal, and deterministic split-strike allocation.
+- Simultaneous minion damage, persistent turn damage, End Phase damage cleanup, immediate lethal checks, and owner cemeteries.
+- Avatar combat facts and life tracking, undefended-site life loss, Death's Door state, direct-damage immunity, death blows, Avatar defeat, and simultaneous-defeat draw state.
 - Observer-safe actions, rejections, causal events, hashes, exact replay, and a deterministic unranked match runner.
 - A no-dependency browser client that renders the authoritative 5x4 realm, scopes hidden information by seat, exposes only engine-issued actions, and verifies replay.
 
@@ -25,14 +30,15 @@
 - `tests/engine/game-server.test.ts`
 - `pnpm game:demo -- 23`: completes in 138 accepted actions over 56 turns with byte-exact replay.
 - `pnpm play`: serves the playable core at `http://127.0.0.1:4174/`.
-- `pnpm verify`: 199 passing tests at this checkpoint.
+- Browser checkpoint: a 22-action match moved a minion, handed Defend to the non-active seat, resolved a simultaneous trade into both cemeteries, and replayed byte-identically.
+- `pnpm verify`: 203 passing tests at this checkpoint.
 
 ## Still required for Phase 3
 
 - Rubble replacement, land/water regions, connection rules, control changes, and card-specific placement overrides.
-- Full start/main/end phase triggers and duration cleanup.
-- Additional costs, targets, non-minion spells, movement, and activated abilities.
-- Attack, defense, intercept, strikes, projectiles, damage, healing, death, Death's Door, and Avatar defeat.
+- Full start/main/end phase triggers and duration cleanup beyond vanilla minion damage and summoning sickness.
+- Additional costs, non-minion spells, card-provided movement, activated abilities, and card-specific targets.
+- Combat tiers, projectiles, healing, prevention/modification, card-triggered damage/death behavior, and tournament ending overlays.
 - Source-linked scenario and invariant coverage for every supported core mechanic.
 
 The runner is intentionally classified `unranked_partial_rules`; it proves the real engine loop and replay contract without claiming complete Sorcery behavior.

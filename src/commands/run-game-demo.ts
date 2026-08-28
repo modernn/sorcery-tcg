@@ -31,7 +31,7 @@ function demoDeck(prefix: string): GameDeckSpec {
 function demoCards(decks: Readonly<Record<'north' | 'south', GameDeckSpec>>): Record<string, GameCardDefinition> {
   const cards: Record<string, GameCardDefinition> = {};
   for (const deck of Object.values(decks)) {
-    cards[deck.avatar] = { cardType: 'avatar' };
+    cards[deck.avatar] = { attack: 1, cardType: 'avatar', defense: 1, life: 20 };
     deck.atlas.forEach((cardId) => {
       cards[cardId] = { cardType: 'site', elements: ['earth'] };
     });
@@ -64,7 +64,7 @@ export function createSyntheticDemoManifest(seed = 1): GameManifest {
 }
 
 function selectAction(session: GameSession): GameLegalAction {
-  const actions = legalGameActions(session.state, session.state.activeSeat);
+  const actions = legalGameActions(session.state, session.state.decisionSeat);
   const selected = actions.find(({ descriptor }) =>
     descriptor.kind === 'mulligan'
       && descriptor.atlasOrder.length === 0
@@ -95,6 +95,9 @@ export function runGameDemo(seed = 1): Readonly<{
     session = result.session;
   }
   if (session.state.terminal.status !== 'finished') throw new Error('deterministic demo exceeded action limit');
+  if (session.state.terminal.reason !== 'deck_empty') {
+    throw new Error(`deterministic demo ended unexpectedly: ${session.state.terminal.reason}`);
+  }
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
     classification: 'unranked_partial_rules',

@@ -22,6 +22,7 @@ import { createEngineState, drawUint32, type EngineState } from './determinism.t
 
 const UINT32_RANGE = 0x1_0000_0000;
 const MAX_DECK_CARDS = 200;
+const MAX_COMBAT_STAT = 100;
 const NORTH_START = 'C4';
 const SOUTH_START = 'C1';
 
@@ -30,9 +31,10 @@ export type DeckZone = 'atlas' | 'spellbook';
 export type RealmCell = `${'A' | 'B' | 'C' | 'D' | 'E'}${1 | 2 | 3 | 4}`;
 export type GameElement = 'air' | 'earth' | 'fire' | 'water';
 export type GameThresholds = Readonly<Record<GameElement, number>>;
+export type GameRegion = 'surface';
 
 export type GameCardDefinition =
-  | Readonly<{ cardType: 'avatar' }>
+  | Readonly<{ attack: number; cardType: 'avatar'; defense: number; life: number }>
   | Readonly<{ cardType: 'site'; elements: readonly GameElement[] }>
   | Readonly<{
     attack: number;
@@ -79,17 +81,45 @@ type UnitInstance = Readonly<CardInstance & {
   controller: GameSeat;
   damage: number;
   location: RealmCell;
+  region: GameRegion;
   summoningSickness: boolean;
   tapped: boolean;
+}>;
+
+type GameUnitRef = Readonly<{
+  instanceId: StateHash;
+  kind: 'avatar' | 'minion';
+  seat: GameSeat;
+}>;
+
+type CombatTarget = GameUnitRef | Readonly<{
+  instanceId: StateHash;
+  kind: 'site';
+  seat: GameSeat;
+}>;
+
+type PendingCombat = Readonly<{
+  allocations: readonly Readonly<{ amount: number; targetInstanceId: StateHash }>[];
+  attacker: GameUnitRef;
+  attackingSeat: GameSeat;
+  cell: RealmCell;
+  combatants: readonly GameUnitRef[];
+  defenders: readonly GameUnitRef[];
+  originalTarget: CombatTarget | null;
+  targetRemoved: boolean;
 }>;
 
 type PlayerState = Readonly<{
   atlas: readonly CardInstance[];
   avatar: Readonly<{
     card: CardInstance;
+    deathDoorTurn: number | null;
+    life: number;
     location: RealmCell;
+    region: GameRegion;
     tapped: boolean;
   }>;
+  cemetery: readonly CardInstance[];
   domainEstablished: boolean;
   hand: Readonly<Record<DeckZone, readonly CardInstance[]>>;
   mana: number;
@@ -101,16 +131,23 @@ export type GameTerminal =
   | Readonly<{ status: 'active' }>
   | Readonly<{
     loser: GameSeat;
-    reason: 'deck_empty';
+    reason: 'avatar_defeated' | 'deck_empty';
     status: 'finished';
     winner: GameSeat;
+  }>
+  | Readonly<{
+    reason: 'simultaneous_avatar_defeat';
+    result: 'draw';
+    status: 'finished';
   }>;
 
 export type GameState = Readonly<{
   activeSeat: GameSeat;
   cards: Readonly<Record<string, GameCardDefinition>>;
+  decisionSeat: GameSeat;
   engine: EngineState;
-  phase: 'draw' | 'main' | 'mulligan' | 'terminal';
+  pendingCombat: PendingCombat | null;
+  phase: 'allocate' | 'attack' | 'defend' | 'draw' | 'intercept' | 'main' | 'mulligan' | 'terminal';
   players: Readonly<Record<GameSeat, PlayerState>>;
   realm: Readonly<{
     sites: Readonly<Partial<Record<RealmCell, SiteInstance>>>;
@@ -126,11 +163,17 @@ type ObservedPlayer = Readonly<{
   affinity: GameThresholds;
   atlasCount: number;
   avatar: Readonly<{
+    attack: number;
     cardId: string;
+    deathDoorTurn: number | null;
+    defense: number;
     instanceId: StateHash;
+    life: number;
     location: RealmCell;
+    region: GameRegion;
     tapped: boolean;
   }>;
+  cemetery: readonly Readonly<{ cardId: string; instanceId: StateHash }>[];
   domainEstablished: boolean;
   hand: Readonly<{
     atlas: number | readonly Readonly<{ cardId: string; instanceId: StateHash }>[];
@@ -143,6 +186,8 @@ type ObservedPlayer = Readonly<{
 
 export type GameObservation = Readonly<{
   activeSeat: GameSeat;
+  decisionSeat: GameSeat;
+  pendingCombat: PendingCombat | null;
   phase: GameState['phase'];
   players: Readonly<Record<GameSeat, ObservedPlayer>>;
   realm: Readonly<{
@@ -162,6 +207,7 @@ export type GameObservation = Readonly<{
       instanceId: StateHash;
       location: RealmCell;
       owner: GameSeat;
+      region: GameRegion;
       summoningSickness: boolean;
       tapped: boolean;
     }>[];
@@ -192,6 +238,24 @@ type GameActionDescriptor =
     manaCost: number;
   }>
   | Readonly<{ kind: 'draw'; zone: DeckZone }>
+  | Readonly<{
+    from: Readonly<{ cell: RealmCell; region: GameRegion }>;
+    kind: 'move-and-attack';
+    to: Readonly<{ cell: RealmCell; region: GameRegion }>;
+    unitInstanceId: StateHash;
+  }>
+  | Readonly<{ kind: 'decline-attack' }>
+  | Readonly<{ kind: 'declare-attack'; target: CombatTarget }>
+  | Readonly<{
+    from: Readonly<{ cell: RealmCell; region: GameRegion }>;
+    kind: 'defend';
+    to: Readonly<{ cell: RealmCell; region: GameRegion }>;
+    unitInstanceId: StateHash;
+  }>
+  | Readonly<{ kind: 'close-defend'; originalTargetParticipates: boolean }>
+  | Readonly<{ kind: 'intercept'; unitInstanceId: StateHash }>
+  | Readonly<{ kind: 'close-intercept' }>
+  | Readonly<{ amount: number; kind: 'allocate-strike'; targetInstanceId: StateHash }>
   | Readonly<{ kind: 'end-turn' }>;
 
 export type GameLegalAction = EngineLegalAction<GameActionDescriptor>;
@@ -279,7 +343,16 @@ function requireCardId(value: string, path: string): void {
 
 function validateCardDefinition(card: GameCardDefinition, path: string): void {
   const elements: readonly GameElement[] = ['earth', 'fire', 'water', 'air'];
-  if (card.cardType === 'avatar') return;
+  if (card.cardType === 'avatar') {
+    for (const field of ['attack', 'defense', 'life'] as const) {
+      if (!Number.isSafeInteger(card[field])
+        || card[field] < (field === 'life' ? 1 : 0)
+        || card[field] > MAX_COMBAT_STAT) {
+        throw new RangeError(`${path}.${field} must be a safe integer between ${field === 'life' ? 1 : 0} and ${MAX_COMBAT_STAT}`);
+      }
+    }
+    return;
+  }
   if (card.cardType === 'site') {
     if (!Array.isArray(card.elements)
       || card.elements.some((element) => !elements.includes(element))
@@ -291,8 +364,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   }
   if (card.cardType !== 'minion') throw new RangeError(`${path}.cardType is unsupported`);
   for (const field of ['attack', 'defense', 'manaCost'] as const) {
-    if (!Number.isSafeInteger(card[field]) || card[field] < 0) {
-      throw new RangeError(`${path}.${field} must be a nonnegative safe integer`);
+    if (!Number.isSafeInteger(card[field])
+      || card[field] < 0
+      || ((field === 'attack' || field === 'defense') && card[field] > MAX_COMBAT_STAT)) {
+      throw new RangeError(`${path}.${field} must be a supported nonnegative safe integer`);
     }
   }
   for (const element of elements) {
@@ -354,7 +429,12 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
     authority: { ...input.authority },
     cards: Object.fromEntries(cardEntries.map(([cardId, card]) => [cardId,
       card.cardType === 'avatar'
-        ? { cardType: 'avatar' as const }
+        ? {
+          attack: card.attack,
+          cardType: 'avatar' as const,
+          defense: card.defense,
+          life: card.life,
+        }
         : card.cardType === 'site'
           ? { cardType: 'site' as const, elements: [...card.elements] }
           : {
@@ -467,15 +547,23 @@ function createPlayer(
   );
   const shuffledAtlas = shuffle(atlas, engine, `setup_${seat}_atlas_shuffle`);
   const shuffledSpellbook = shuffle(spellbook, shuffledAtlas.engine, `setup_${seat}_spellbook_shuffle`);
+  const avatarDefinition = manifest.cards[deck.avatar];
+  if (!avatarDefinition || avatarDefinition.cardType !== 'avatar') {
+    throw new Error('validated deck lacks Avatar definition');
+  }
   return deepFreeze({
     engine: shuffledSpellbook.engine,
     player: {
       atlas: shuffledAtlas.cards.slice(3),
       avatar: {
         card: cardInstance(manifest, seat, 'avatar', 0, deck.avatar),
+        deathDoorTurn: null,
+        life: avatarDefinition.life,
         location: seat === 'north' ? NORTH_START : SOUTH_START,
+        region: 'surface',
         tapped: false,
       },
+      cemetery: [],
       domainEstablished: false,
       hand: { atlas: shuffledAtlas.cards.slice(0, 3), spellbook: shuffledSpellbook.cards.slice(0, 3) },
       mana: 0,
@@ -493,7 +581,9 @@ export function createGameSession(manifest: GameManifest): GameSession {
   const state: GameState = deepFreeze({
     activeSeat: 'north',
     cards: manifest.cards,
+    decisionSeat: 'north',
     engine: south.engine,
+    pendingCombat: null,
     phase: 'mulligan',
     players: { north: north.player, south: south.player },
     realm: { sites: {}, units: [] },
@@ -541,15 +631,23 @@ function observedCard(card: CardInstance): Readonly<{ cardId: string; instanceId
 
 function observePlayer(state: GameState, player: PlayerState, owner: GameSeat, viewer: GameSeat): ObservedPlayer {
   const own = owner === viewer;
+  const avatarDefinition = cardDefinition(state, player.avatar.card.cardId);
+  if (avatarDefinition.cardType !== 'avatar') throw new Error('player Avatar lacks Avatar definition');
   return deepFreeze({
     affinity: affinity(state, owner),
     atlasCount: player.atlas.length,
     avatar: {
+      attack: avatarDefinition.attack,
       cardId: player.avatar.card.cardId,
+      deathDoorTurn: player.avatar.deathDoorTurn,
+      defense: avatarDefinition.defense,
       instanceId: player.avatar.card.instanceId,
+      life: player.avatar.life,
       location: player.avatar.location,
+      region: player.avatar.region,
       tapped: player.avatar.tapped,
     },
+    cemetery: player.cemetery.map(observedCard),
     domainEstablished: player.domainEstablished,
     hand: {
       atlas: own ? player.hand.atlas.map(observedCard) : player.hand.atlas.length,
@@ -587,12 +685,15 @@ export function observeGame(state: GameState, viewer: GameSeat): GameObservation
       instanceId: unit.instanceId,
       location: unit.location,
       owner: unit.owner,
+      region: unit.region,
       summoningSickness: unit.summoningSickness,
       tapped: unit.tapped,
     };
   });
   return deepFreeze({
     activeSeat: state.activeSeat,
+    decisionSeat: state.decisionSeat,
+    pendingCombat: state.pendingCombat,
     phase: state.phase,
     players: {
       north: observePlayer(state, state.players.north, 'north', viewer),
@@ -630,11 +731,169 @@ function mulliganDescriptors(player: PlayerState): readonly MulliganDescriptor[]
   return descriptors;
 }
 
+function unitRefs(state: GameState, seat: GameSeat): readonly GameUnitRef[] {
+  return [
+    {
+      instanceId: state.players[seat].avatar.card.instanceId,
+      kind: 'avatar',
+      seat,
+    },
+    ...state.realm.units
+      .filter((unit) => unit.controller === seat)
+      .map((unit) => ({ instanceId: unit.instanceId, kind: 'minion' as const, seat })),
+  ];
+}
+
+function unitStatus(
+  state: GameState,
+  ref: GameUnitRef,
+): Readonly<{
+  attack: number;
+  location: RealmCell;
+  summoningSickness: boolean;
+  tapped: boolean;
+}> {
+  if (ref.kind === 'avatar') {
+    const avatar = state.players[ref.seat].avatar;
+    if (avatar.card.instanceId !== ref.instanceId) throw new Error('unreachable Avatar reference');
+    const definition = cardDefinition(state, avatar.card.cardId);
+    if (definition.cardType !== 'avatar') throw new Error('Avatar lacks Avatar definition');
+    return {
+      attack: definition.attack,
+      location: avatar.location,
+      summoningSickness: false,
+      tapped: avatar.tapped,
+    };
+  }
+  const unit = state.realm.units.find(({ instanceId }) => instanceId === ref.instanceId);
+  if (!unit || unit.controller !== ref.seat) throw new Error('unreachable minion reference');
+  const definition = cardDefinition(state, unit.cardId);
+  if (definition.cardType !== 'minion') throw new Error('minion lacks minion definition');
+  return {
+    attack: definition.attack,
+    location: unit.location,
+    summoningSickness: unit.summoningSickness,
+    tapped: unit.tapped,
+  };
+}
+
+function readyUnit(state: GameState, ref: GameUnitRef): boolean {
+  const unit = unitStatus(state, ref);
+  return !unit.tapped && !unit.summoningSickness;
+}
+
+function movementDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
+  return unitRefs(state, seat).flatMap((ref) => {
+    const unit = unitStatus(state, ref);
+    if (!readyUnit(state, ref) || !state.realm.sites[unit.location]) return [];
+    const destinations = [unit.location, ...borderingCells(unit.location)]
+      .filter((cell) => state.realm.sites[cell])
+      .sort();
+    return destinations.map((cell) => ({
+      from: { cell: unit.location, region: 'surface' as const },
+      kind: 'move-and-attack' as const,
+      to: { cell, region: 'surface' as const },
+      unitInstanceId: ref.instanceId,
+    }));
+  });
+}
+
+function attackTargets(state: GameState, pending: PendingCombat): readonly CombatTarget[] {
+  const defendingSeat = otherSeat(pending.attackingSeat);
+  const targets: CombatTarget[] = unitRefs(state, defendingSeat)
+    .filter((ref) => unitStatus(state, ref).location === pending.cell);
+  const site = state.realm.sites[pending.cell];
+  if (site?.controller === defendingSeat) {
+    targets.push({ instanceId: site.instanceId, kind: 'site', seat: defendingSeat });
+  }
+  return targets;
+}
+
+function responseUnitRefs(
+  state: GameState,
+  pending: PendingCombat,
+  intercept: boolean,
+): readonly GameUnitRef[] {
+  const respondingSeat = otherSeat(pending.attackingSeat);
+  const unavailable = new Set([
+    ...pending.defenders.map(({ instanceId }) => instanceId),
+    ...(pending.originalTarget?.kind === 'site' ? [] : [pending.originalTarget?.instanceId]),
+  ].filter((value): value is StateHash => value !== undefined));
+  return unitRefs(state, respondingSeat).filter((ref) => {
+    if (unavailable.has(ref.instanceId) || !readyUnit(state, ref)) return false;
+    const location = unitStatus(state, ref).location;
+    return intercept
+      ? location === pending.cell
+      : location === pending.cell || borderingCells(location).includes(pending.cell);
+  });
+}
+
+function pendingCombat(state: GameState): PendingCombat {
+  if (!state.pendingCombat) throw new Error('unreachable missing pending combat');
+  return state.pendingCombat;
+}
+
 function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
-  if (state.terminal.status === 'finished' || state.phase === 'terminal' || seat !== state.activeSeat) return [];
+  if (state.terminal.status === 'finished' || state.phase === 'terminal' || seat !== state.decisionSeat) return [];
   const player = state.players[seat];
   if (state.phase === 'mulligan') return mulliganDescriptors(player);
   if (state.phase === 'draw') return [{ kind: 'draw', zone: 'atlas' }, { kind: 'draw', zone: 'spellbook' }];
+  if (state.phase === 'attack') {
+    const pending = pendingCombat(state);
+    return [
+      ...attackTargets(state, pending).map((target) => ({
+        kind: 'declare-attack' as const,
+        target,
+      })),
+      { kind: 'decline-attack' },
+    ];
+  }
+  if (state.phase === 'defend') {
+    const pending = pendingCombat(state);
+    const defenders = responseUnitRefs(state, pending, false).map((ref) => {
+      const from = unitStatus(state, ref).location;
+      return {
+        from: { cell: from, region: 'surface' as const },
+        kind: 'defend' as const,
+        to: { cell: pending.cell, region: 'surface' as const },
+        unitInstanceId: ref.instanceId,
+      };
+    });
+    const choices = pending.originalTarget?.kind === 'site' || pending.defenders.length === 0
+      ? [pending.originalTarget?.kind !== 'site']
+      : [true, false];
+    return [
+      ...defenders,
+      ...choices.map((originalTargetParticipates) => ({
+        kind: 'close-defend' as const,
+        originalTargetParticipates,
+      })),
+    ];
+  }
+  if (state.phase === 'intercept') {
+    const pending = pendingCombat(state);
+    return [
+      ...responseUnitRefs(state, pending, true).map((ref) => ({
+        kind: 'intercept' as const,
+        unitInstanceId: ref.instanceId,
+      })),
+      { kind: 'close-intercept' },
+    ];
+  }
+  if (state.phase === 'allocate') {
+    const pending = pendingCombat(state);
+    const target = pending.combatants[pending.allocations.length];
+    if (!target) throw new Error('unreachable completed strike allocation');
+    const assigned = pending.allocations.reduce((total, allocation) => total + allocation.amount, 0);
+    const remaining = unitStatus(state, pending.attacker).attack - assigned;
+    const last = pending.allocations.length === pending.combatants.length - 1;
+    const amounts = last ? [remaining] : Array.from({ length: remaining + 1 }, (_, amount) => amount);
+    return amounts.map((amount) => ({
+      amount,
+      kind: 'allocate-strike' as const,
+      targetInstanceId: target.instanceId,
+    }));
+  }
   if (!player.domainEstablished) {
     return player.hand.atlas.map(({ cardId, instanceId }) => ({
       cardId,
@@ -653,6 +912,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     }))),
     ...(player.avatar.tapped ? [] : [{ kind: 'draw-site' as const }]),
     ...summonDescriptors(state, seat),
+    ...movementDescriptors(state, seat),
     { kind: 'end-turn' },
   ];
 }
@@ -669,6 +929,22 @@ function actionLabel(descriptor: GameActionDescriptor): string {
   if (descriptor.kind === 'play-site') return `Play ${descriptor.cardId} at ${descriptor.cell}`;
   if (descriptor.kind === 'summon-minion') {
     return `Summon ${descriptor.cardId} at ${descriptor.cell} (${descriptor.manaCost} mana)`;
+  }
+  if (descriptor.kind === 'move-and-attack') {
+    return descriptor.from.cell === descriptor.to.cell
+      ? `Tap ${descriptor.unitInstanceId.slice(0, 15)}… without moving`
+      : `Move ${descriptor.unitInstanceId.slice(0, 15)}… to ${descriptor.to.cell}`;
+  }
+  if (descriptor.kind === 'decline-attack') return 'Decline attack';
+  if (descriptor.kind === 'declare-attack') return `Attack ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`;
+  if (descriptor.kind === 'defend') return `Defend with ${descriptor.unitInstanceId.slice(0, 15)}…`;
+  if (descriptor.kind === 'close-defend') {
+    return descriptor.originalTargetParticipates ? 'Close defend window; keep target' : 'Close defend window; remove target';
+  }
+  if (descriptor.kind === 'intercept') return `Intercept with ${descriptor.unitInstanceId.slice(0, 15)}…`;
+  if (descriptor.kind === 'close-intercept') return 'Close intercept window';
+  if (descriptor.kind === 'allocate-strike') {
+    return `Assign ${descriptor.amount} damage to ${descriptor.targetInstanceId.slice(0, 15)}…`;
   }
   return 'End turn';
 }
@@ -729,12 +1005,275 @@ function siteCount(state: GameState, seat: GameSeat): number {
   return Object.values(state.realm.sites).filter((site) => site.controller === seat).length;
 }
 
+function moveAndTapUnit(
+  state: GameState,
+  ref: GameUnitRef,
+  location: RealmCell,
+): Readonly<{ players: GameState['players']; realm: GameState['realm'] }> {
+  if (ref.kind === 'avatar') {
+    const player = state.players[ref.seat];
+    if (player.avatar.card.instanceId !== ref.instanceId) throw new Error('unreachable Avatar move');
+    return {
+      players: replacePlayer(state, ref.seat, deepFreeze({
+        ...player,
+        avatar: { ...player.avatar, location, tapped: true },
+      })),
+      realm: state.realm,
+    };
+  }
+  if (!state.realm.units.some(({ instanceId }) => instanceId === ref.instanceId)) {
+    throw new Error('unreachable minion move');
+  }
+  return {
+    players: state.players,
+    realm: {
+      ...state.realm,
+      units: state.realm.units.map((unit) => unit.instanceId === ref.instanceId
+        ? deepFreeze({ ...unit, location, tapped: true })
+        : unit),
+    },
+  };
+}
+
+function finishFight(
+  state: GameState,
+  pending: PendingCombat,
+  outcomes: readonly GameOutcome[],
+): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
+  const allocations = new Map(pending.allocations.map(({ amount, targetInstanceId }) =>
+    [targetInstanceId, amount]));
+  const damage = new Map<StateHash, number>();
+  damage.set(
+    pending.attacker.instanceId,
+    pending.combatants.reduce((total, ref) => total + unitStatus(state, ref).attack, 0),
+  );
+  pending.combatants.forEach((ref) => damage.set(ref.instanceId, allocations.get(ref.instanceId) ?? 0));
+
+  const players: Record<GameSeat, PlayerState> = {
+    north: state.players.north,
+    south: state.players.south,
+  };
+  let units = [...state.realm.units];
+  const defeatedAvatars = new Set<GameSeat>();
+  const deaths: UnitInstance[] = [];
+  const damageOutcomes: GameOutcome[] = [];
+
+  for (const ref of [pending.attacker, ...pending.combatants]) {
+    const amount = damage.get(ref.instanceId) ?? 0;
+    if (ref.kind === 'avatar') {
+      const player = players[ref.seat];
+      const avatar = player.avatar;
+      if (avatar.life === 0) {
+        if (amount > 0 && avatar.deathDoorTurn !== state.turnNumber) {
+          defeatedAvatars.add(ref.seat);
+          damageOutcomes.push(
+            { payload: { amount, direct: true, instanceId: ref.instanceId, seat: ref.seat }, type: 'damage-dealt' },
+            { payload: { instanceId: ref.instanceId, seat: ref.seat }, type: 'death-blow' },
+          );
+        } else {
+          damageOutcomes.push({
+            payload: {
+              amount: 0,
+              attemptedAmount: amount,
+              direct: true,
+              instanceId: ref.instanceId,
+              prevented: amount > 0,
+              seat: ref.seat,
+            },
+            type: 'damage-dealt',
+          });
+        }
+        continue;
+      }
+      const life = Math.max(0, avatar.life - amount);
+      const lost = avatar.life - life;
+      players[ref.seat] = deepFreeze({
+        ...player,
+        avatar: {
+          ...avatar,
+          ...(life === 0 ? { deathDoorTurn: state.turnNumber } : {}),
+          life,
+        },
+      });
+      damageOutcomes.push(
+        { payload: { amount: lost, direct: true, instanceId: ref.instanceId, seat: ref.seat }, type: 'damage-dealt' },
+        { payload: { amount: lost, life, seat: ref.seat }, type: 'avatar-life-lost' },
+      );
+      if (avatar.life > 0 && life === 0) {
+        damageOutcomes.push({
+          payload: { seat: ref.seat, turnNumber: state.turnNumber },
+          type: 'avatar-reached-deaths-door',
+        });
+      }
+      continue;
+    }
+
+    const index = units.findIndex(({ instanceId }) => instanceId === ref.instanceId);
+    const unit = units[index];
+    if (!unit) throw new Error('unreachable fight minion');
+    const accumulated = unit.damage + amount;
+    units[index] = deepFreeze({ ...unit, damage: accumulated });
+    damageOutcomes.push({
+      payload: { accumulated, amount, direct: true, instanceId: ref.instanceId, seat: ref.seat },
+      type: 'damage-dealt',
+    });
+    const definition = cardDefinition(state, unit.cardId);
+    if (definition.cardType !== 'minion') throw new Error('fight minion lacks minion definition');
+    if (accumulated > 0 && accumulated >= definition.defense) deaths.push(units[index]!);
+  }
+
+  const deadIds = new Set(deaths.map(({ instanceId }) => instanceId));
+  units = units.filter(({ instanceId }) => !deadIds.has(instanceId));
+  for (const dead of deaths) {
+    const owner = players[dead.owner];
+    players[dead.owner] = deepFreeze({
+      ...owner,
+      cemetery: [...owner.cemetery, {
+        cardId: dead.cardId,
+        instanceId: dead.instanceId,
+        owner: dead.owner,
+        source: dead.source,
+      }],
+    });
+    damageOutcomes.push({
+      payload: { cardId: dead.cardId, instanceId: dead.instanceId, owner: dead.owner },
+      type: 'minion-died',
+    });
+  }
+
+  let terminal: GameTerminal = { status: 'active' };
+  const endingOutcomes: GameOutcome[] = [];
+  if (defeatedAvatars.size === 2) {
+    terminal = { reason: 'simultaneous_avatar_defeat', result: 'draw', status: 'finished' };
+    endingOutcomes.push({
+      payload: { reason: 'simultaneous_avatar_defeat', result: 'draw' },
+      type: 'game-ended',
+    });
+  } else if (defeatedAvatars.size === 1) {
+    const loser = [...defeatedAvatars][0]!;
+    const winner = otherSeat(loser);
+    terminal = { loser, reason: 'avatar_defeated', status: 'finished', winner };
+    endingOutcomes.push({
+      payload: { loser, reason: 'avatar_defeated', winner },
+      type: 'game-ended',
+    });
+  }
+
+  return [
+    withStateVersion(state, {
+      decisionSeat: state.activeSeat,
+      pendingCombat: null,
+      phase: terminal.status === 'finished' ? 'terminal' : 'main',
+      players: deepFreeze(players),
+      realm: { ...state.realm, units },
+      terminal,
+    }),
+    [...outcomes, ...damageOutcomes, ...endingOutcomes],
+    [],
+  ];
+}
+
+function beginFight(
+  state: GameState,
+  pending: PendingCombat,
+  combatants: readonly GameUnitRef[],
+  outcomes: readonly GameOutcome[],
+): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
+  const ordered = [...combatants].sort((left, right) =>
+    left.instanceId < right.instanceId ? -1 : left.instanceId > right.instanceId ? 1 : 0);
+  const fight = deepFreeze({ ...pending, allocations: [], combatants: ordered });
+  const started: GameOutcome = {
+    payload: {
+      attackerInstanceId: pending.attacker.instanceId,
+      combatantInstanceIds: ordered.map(({ instanceId }) => instanceId),
+    },
+    type: 'fight-started',
+  };
+  if (ordered.length === 1) {
+    const amount = unitStatus(state, pending.attacker).attack;
+    const allocated = deepFreeze({
+      ...fight,
+      allocations: [{ amount, targetInstanceId: ordered[0]!.instanceId }],
+    });
+    return finishFight(state, allocated, [
+      ...outcomes,
+      started,
+      {
+        payload: { amount, strikerInstanceId: pending.attacker.instanceId, targetInstanceId: ordered[0]!.instanceId },
+        type: 'strike-damage-allocated',
+      },
+    ]);
+  }
+  return [
+    withStateVersion(state, {
+      decisionSeat: pending.attackingSeat,
+      pendingCombat: fight,
+      phase: 'allocate',
+    }),
+    [...outcomes, started],
+    [],
+  ];
+}
+
+function strikeUndefendedSite(
+  state: GameState,
+  pending: PendingCombat,
+  outcomes: readonly GameOutcome[],
+): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
+  const target = pending.originalTarget;
+  if (!target || target.kind !== 'site') throw new Error('unreachable site strike target');
+  const site = state.realm.sites[pending.cell];
+  if (!site || site.instanceId !== target.instanceId || site.controller !== target.seat) {
+    throw new Error('unreachable missing site strike target');
+  }
+  const amount = unitStatus(state, pending.attacker).attack;
+  const player = state.players[target.seat];
+  const life = Math.max(0, player.avatar.life - amount);
+  const lost = player.avatar.life - life;
+  const updatedPlayer = deepFreeze({
+    ...player,
+    avatar: {
+      ...player.avatar,
+      ...(player.avatar.life > 0 && life === 0 ? { deathDoorTurn: state.turnNumber } : {}),
+      life,
+    },
+  });
+  return [
+    withStateVersion(state, {
+      decisionSeat: state.activeSeat,
+      pendingCombat: null,
+      phase: 'main',
+      players: replacePlayer(state, target.seat, updatedPlayer),
+    }),
+    [
+      ...outcomes,
+      {
+        payload: {
+          amount,
+          attackerInstanceId: pending.attacker.instanceId,
+          cell: pending.cell,
+          siteInstanceId: target.instanceId,
+        },
+        type: 'undefended-site-struck',
+      },
+      { payload: { amount: lost, life, seat: target.seat }, type: 'avatar-life-lost' },
+      ...(player.avatar.life > 0 && life === 0
+        ? [{
+          payload: { seat: target.seat, turnNumber: state.turnNumber },
+          type: 'avatar-reached-deaths-door',
+        }]
+        : []),
+    ],
+    [],
+  ];
+}
+
 function applyDescriptor(
   state: GameState,
   descriptor: GameActionDescriptor,
   manifest: GameManifest,
 ): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
-  const seat = state.activeSeat;
+  const seat = state.decisionSeat;
   const player = state.players[seat];
   if (descriptor.kind === 'mulligan') {
     const atlas = resolveMulliganZone(player.hand.atlas, player.atlas, descriptor.atlasOrder);
@@ -756,13 +1295,14 @@ function applyDescriptor(
       type: 'mulligan-completed',
     };
     if (seat === 'north') {
-      return [withStateVersion(state, { activeSeat: 'south', players }), [outcome], []];
+      return [withStateVersion(state, { activeSeat: 'south', decisionSeat: 'south', players }), [outcome], []];
     }
     const firstPlayer = players[manifest.firstSeat];
     const startedPlayer = deepFreeze({ ...firstPlayer, mana: siteCount(state, manifest.firstSeat) });
     return [
       withStateVersion(state, {
         activeSeat: manifest.firstSeat,
+        decisionSeat: manifest.firstSeat,
         phase: 'main',
         players: deepFreeze({ ...players, [manifest.firstSeat]: startedPlayer }),
         turnNumber: 1,
@@ -824,6 +1364,7 @@ function applyDescriptor(
       controller: seat,
       damage: 0,
       location: descriptor.cell,
+      region: 'surface',
       summoningSickness: true,
       tapped: false,
     });
@@ -851,6 +1392,251 @@ function applyDescriptor(
         },
         type: 'minion-summoned',
       }],
+      [],
+    ];
+  }
+
+  if (descriptor.kind === 'move-and-attack') {
+    const legal = movementDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'move-and-attack'
+        && candidate.unitInstanceId === descriptor.unitInstanceId
+        && candidate.from.cell === descriptor.from.cell
+        && candidate.from.region === descriptor.from.region
+        && candidate.to.cell === descriptor.to.cell
+        && candidate.to.region === descriptor.to.region);
+    const ref = unitRefs(state, seat).find(({ instanceId }) => instanceId === descriptor.unitInstanceId);
+    if (!legal || !ref) throw new Error('unreachable illegal Move and Attack');
+    const moved = moveAndTapUnit(state, ref, descriptor.to.cell);
+    const pending: PendingCombat = deepFreeze({
+      allocations: [],
+      attacker: ref,
+      attackingSeat: seat,
+      cell: descriptor.to.cell,
+      combatants: [],
+      defenders: [],
+      originalTarget: null,
+      targetRemoved: false,
+    });
+    return [
+      withStateVersion(state, {
+        pendingCombat: pending,
+        phase: 'attack',
+        players: moved.players,
+        realm: moved.realm,
+      }),
+      [{
+        payload: {
+          from: descriptor.from,
+          seat,
+          steps: descriptor.from.cell === descriptor.to.cell ? 0 : 1,
+          to: descriptor.to,
+          unitInstanceId: descriptor.unitInstanceId,
+        },
+        type: 'move-and-attack-activated',
+      }],
+      [],
+    ];
+  }
+
+  if (descriptor.kind === 'decline-attack') {
+    const pending = pendingCombat(state);
+    const interceptors = responseUnitRefs(state, pending, true);
+    return [
+      withStateVersion(state, interceptors.length > 0
+        ? {
+          decisionSeat: otherSeat(pending.attackingSeat),
+          phase: 'intercept',
+        }
+        : {
+          decisionSeat: pending.attackingSeat,
+          pendingCombat: null,
+          phase: 'main',
+        }),
+      [{
+        payload: {
+          interceptWindowOpened: interceptors.length > 0,
+          seat: pending.attackingSeat,
+          unitInstanceId: pending.attacker.instanceId,
+        },
+        type: 'attack-declined',
+      }],
+      [],
+    ];
+  }
+
+  if (descriptor.kind === 'declare-attack') {
+    const pending = pendingCombat(state);
+    const legal = attackTargets(state, pending).some((target) =>
+      target.instanceId === descriptor.target.instanceId
+        && target.kind === descriptor.target.kind
+        && target.seat === descriptor.target.seat);
+    if (!legal) throw new Error('unreachable illegal attack target');
+    return [
+      withStateVersion(state, {
+        decisionSeat: otherSeat(pending.attackingSeat),
+        pendingCombat: deepFreeze({ ...pending, originalTarget: descriptor.target }),
+        phase: 'defend',
+      }),
+      [{
+        payload: {
+          attackerInstanceId: pending.attacker.instanceId,
+          cell: pending.cell,
+          seat: pending.attackingSeat,
+          target: descriptor.target,
+        },
+        type: 'attack-declared',
+      }],
+      [],
+    ];
+  }
+
+  if (descriptor.kind === 'defend') {
+    const pending = pendingCombat(state);
+    const ref = responseUnitRefs(state, pending, false)
+      .find(({ instanceId }) => instanceId === descriptor.unitInstanceId);
+    if (!ref
+      || descriptor.from.cell !== unitStatus(state, ref).location
+      || descriptor.from.region !== 'surface'
+      || descriptor.to.cell !== pending.cell
+      || descriptor.to.region !== 'surface') {
+      throw new Error('unreachable illegal defender');
+    }
+    const moved = moveAndTapUnit(state, ref, pending.cell);
+    const removesSite = pending.originalTarget?.kind === 'site' && !pending.targetRemoved;
+    return [
+      withStateVersion(state, {
+        pendingCombat: deepFreeze({
+          ...pending,
+          defenders: [...pending.defenders, ref],
+          targetRemoved: pending.targetRemoved || removesSite,
+        }),
+        players: moved.players,
+        realm: moved.realm,
+      }),
+      [
+        {
+          payload: {
+            from: descriptor.from,
+            instanceId: ref.instanceId,
+            seat,
+            to: descriptor.to,
+          },
+          type: 'defender-joined',
+        },
+        ...(removesSite
+          ? [{
+            payload: { instanceId: pending.originalTarget!.instanceId, kind: 'site' },
+            type: 'original-target-removed',
+          }]
+          : []),
+      ],
+      [],
+    ];
+  }
+
+  if (descriptor.kind === 'intercept') {
+    const pending = pendingCombat(state);
+    const ref = responseUnitRefs(state, pending, true)
+      .find(({ instanceId }) => instanceId === descriptor.unitInstanceId);
+    if (!ref) throw new Error('unreachable illegal interceptor');
+    const tapped = moveAndTapUnit(state, ref, pending.cell);
+    return [
+      withStateVersion(state, {
+        pendingCombat: deepFreeze({ ...pending, defenders: [...pending.defenders, ref] }),
+        players: tapped.players,
+        realm: tapped.realm,
+      }),
+      [{
+        payload: { cell: pending.cell, instanceId: ref.instanceId, seat },
+        type: 'interceptor-joined',
+      }],
+      [],
+    ];
+  }
+
+  if (descriptor.kind === 'close-defend') {
+    const pending = pendingCombat(state);
+    const legal = actionDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'close-defend'
+        && candidate.originalTargetParticipates === descriptor.originalTargetParticipates);
+    if (!legal || !pending.originalTarget) throw new Error('unreachable illegal defend close');
+    const outcomes: GameOutcome[] = [{
+      payload: {
+        defenderCount: pending.defenders.length,
+        originalTargetParticipates: descriptor.originalTargetParticipates,
+      },
+      type: 'defend-window-closed',
+    }];
+    if (pending.originalTarget.kind === 'site') {
+      return pending.defenders.length === 0
+        ? strikeUndefendedSite(state, pending, outcomes)
+        : beginFight(state, pending, pending.defenders, outcomes);
+    }
+    if (!descriptor.originalTargetParticipates) {
+      outcomes.push({
+        payload: { instanceId: pending.originalTarget.instanceId, kind: pending.originalTarget.kind },
+        type: 'original-target-removed',
+      });
+    }
+    return beginFight(
+      state,
+      deepFreeze({ ...pending, targetRemoved: !descriptor.originalTargetParticipates }),
+      [
+        ...pending.defenders,
+        ...(descriptor.originalTargetParticipates ? [pending.originalTarget] : []),
+      ],
+      outcomes,
+    );
+  }
+
+  if (descriptor.kind === 'close-intercept') {
+    const pending = pendingCombat(state);
+    const closed: GameOutcome = {
+      payload: { interceptorCount: pending.defenders.length },
+      type: 'intercept-window-closed',
+    };
+    if (pending.defenders.length === 0) {
+      return [
+        withStateVersion(state, {
+          decisionSeat: pending.attackingSeat,
+          pendingCombat: null,
+          phase: 'main',
+        }),
+        [closed],
+        [],
+      ];
+    }
+    return beginFight(state, pending, pending.defenders, [closed]);
+  }
+
+  if (descriptor.kind === 'allocate-strike') {
+    const pending = pendingCombat(state);
+    const legal = actionDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'allocate-strike'
+        && candidate.amount === descriptor.amount
+        && candidate.targetInstanceId === descriptor.targetInstanceId);
+    if (!legal) throw new Error('unreachable illegal strike allocation');
+    const updated = deepFreeze({
+      ...pending,
+      allocations: [...pending.allocations, {
+        amount: descriptor.amount,
+        targetInstanceId: descriptor.targetInstanceId,
+      }],
+    });
+    const allocated: GameOutcome = {
+      payload: {
+        amount: descriptor.amount,
+        strikerInstanceId: pending.attacker.instanceId,
+        targetInstanceId: descriptor.targetInstanceId,
+      },
+      type: 'strike-damage-allocated',
+    };
+    if (updated.allocations.length === updated.combatants.length) {
+      return finishFight(state, updated, [allocated]);
+    }
+    return [
+      withStateVersion(state, { pendingCombat: updated }),
+      [allocated],
       [],
     ];
   }
@@ -896,6 +1682,7 @@ function applyDescriptor(
     ];
   }
 
+  if (descriptor.kind !== 'end-turn') throw new Error('unreachable unsupported action');
   const nextSeat = otherSeat(seat);
   const endingPlayer = deepFreeze({ ...player, mana: 0 });
   const nextPlayer = state.players[nextSeat];
@@ -907,6 +1694,7 @@ function applyDescriptor(
   const players = deepFreeze({ ...state.players, [seat]: endingPlayer, [nextSeat]: startingPlayer });
   const units = state.realm.units.map((unit) => deepFreeze({
     ...unit,
+    damage: 0,
     ...(unit.controller === seat ? { summoningSickness: false } : {}),
     ...(unit.controller === nextSeat ? { tapped: false } : {}),
   }));
@@ -914,6 +1702,8 @@ function applyDescriptor(
   return [
     withStateVersion(state, {
       activeSeat: nextSeat,
+      decisionSeat: nextSeat,
+      pendingCombat: null,
       phase: 'draw',
       players,
       realm: { ...state.realm, units },
@@ -953,7 +1743,7 @@ export function stepGame(session: GameSession, request: GameActionRequest): Game
 
   if (state.terminal.status === 'finished') return reject('terminal_state');
   if (command.stateVersion !== state.stateVersion) return reject('stale_version');
-  if (command.seat !== state.activeSeat) return reject('wrong_seat');
+  if (command.seat !== state.decisionSeat) return reject('wrong_seat');
   const action = legalGameActions(state, command.seat).find(({ actionId }) => actionId === command.actionId);
   if (!action) return reject('unknown_action');
 
@@ -1001,7 +1791,7 @@ export function replayGame(manifest: GameManifest, actionIds: readonly string[])
   for (const actionId of actionIds) {
     const result = stepGame(session, {
       actionId,
-      seat: session.state.activeSeat,
+      seat: session.state.decisionSeat,
       stateVersion: session.state.stateVersion,
     });
     if (!result.accepted) throw new Error(`game replay rejected action: ${result.reason.code}`);
