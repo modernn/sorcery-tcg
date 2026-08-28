@@ -55,6 +55,7 @@ export type GameCardDefinition =
     damageRandomUnitAtLocation?: number;
     damageTargetUnit?: number;
     disableTargetNearbyMinionUntilNextTurn?: true;
+    fightAllyWithAdjacentEnemy?: true;
     grantChargeToAllyThisTurn?: true;
     grantPowerToAllyThisTurn?: 2;
     healController?: number;
@@ -602,6 +603,18 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
     if (definition.grantPowerToAllyThisTurn === 2) {
       return unitRefs(state, seat).map((ally) => ({ ...cast, ally }));
     }
+    if (definition.fightAllyWithAdjacentEnemy === true) {
+      return unitRefs(state, seat).flatMap((ally) => {
+        const allyStatus = unitStatus(state, ally);
+        return unitRefs(state, otherSeat(seat)).filter((target) => {
+          const targetStatus = unitStatus(state, target);
+          return targetStatus.region === allyStatus.region
+            && !targetStatus.stealthed
+            && (targetStatus.location === allyStatus.location
+              || borderingCells(allyStatus.location).includes(targetStatus.location));
+        }).map((target) => ({ ...cast, ally, target }));
+      });
+    }
     if (definition.lureEnemyMinionOneStepCloser === true) {
       const choices = unitRefs(state, seat).flatMap((ally) => {
         const allyStatus = unitStatus(state, ally);
@@ -782,6 +795,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.grantPowerToAllyThisTurn !== 2) {
       throw new RangeError(`${path}.grantPowerToAllyThisTurn must be 2`);
     }
+    if (card.fightAllyWithAdjacentEnemy !== undefined
+      && card.fightAllyWithAdjacentEnemy !== true) {
+      throw new RangeError(`${path}.fightAllyWithAdjacentEnemy must be true when defined`);
+    }
     if (card.lureEnemyMinionOneStepCloser !== undefined
       && card.lureEnemyMinionOneStepCloser !== true) {
       throw new RangeError(`${path}.lureEnemyMinionOneStepCloser must be true when defined`);
@@ -797,6 +814,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.damageRandomUnitAtLocation !== undefined)
       + Number(card.damageTargetUnit !== undefined)
       + Number(card.disableTargetNearbyMinionUntilNextTurn === true)
+      + Number(card.fightAllyWithAdjacentEnemy === true)
       + Number(card.grantChargeToAllyThisTurn === true)
       + Number(card.grantPowerToAllyThisTurn === 2)
       + Number(card.healController !== undefined)
@@ -1111,6 +1129,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                   ? { damageTargetUnit: card.damageTargetUnit }
                   : card.disableTargetNearbyMinionUntilNextTurn === true
                     ? { disableTargetNearbyMinionUntilNextTurn: true as const }
+                  : card.fightAllyWithAdjacentEnemy === true
+                    ? { fightAllyWithAdjacentEnemy: true as const }
                   : card.grantChargeToAllyThisTurn === true
                     ? { grantChargeToAllyThisTurn: true as const }
                   : card.grantPowerToAllyThisTurn === 2
@@ -2158,6 +2178,11 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
       );
     }
     if (descriptor.target) {
+      if (descriptor.ally) {
+        return withCaster(
+          `Cast ${descriptor.cardId}: ${descriptor.ally.kind} ${descriptor.ally.instanceId.slice(0, 15)}… fights ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`,
+        );
+      }
       return withCaster(
         `Cast ${descriptor.cardId} on ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`,
       );
@@ -3484,6 +3509,84 @@ function applyDescriptor(
         withStateVersion(poweredState, {}),
         [...castOutcomes, grantOutcome, resolved],
         [],
+      ];
+    }
+    if (definition.fightAllyWithAdjacentEnemy === true) {
+      if (!descriptor.ally || !descriptor.target) throw new Error('unreachable Duel cast');
+      const allyStatus = unitStatus(castState, descriptor.ally);
+      if (descriptor.target.kind === 'minion') {
+        const targetIndex = castState.realm.units.findIndex(({ controller, instanceId }) =>
+          controller === descriptor.target!.seat && instanceId === descriptor.target!.instanceId);
+        const target = castState.realm.units[targetIndex];
+        if (!target) throw new Error('unreachable Duel target');
+        if (target.warded) {
+          const wardedState = deepFreeze({
+            ...castState,
+            realm: {
+              ...castState.realm,
+              units: castState.realm.units.map((unit, index) => index === targetIndex
+                ? deepFreeze({ ...unit, warded: false })
+                : unit),
+            },
+          });
+          return [
+            withStateVersion(wardedState, {}),
+            [
+              ...castOutcomes,
+              { payload: { instanceId: target.instanceId, seat: target.controller }, type: 'ward-broken' },
+              resolved,
+            ],
+            [],
+          ];
+        }
+      }
+      const amount = allyStatus.attack;
+      const pending: PendingCombat = deepFreeze({
+        allocations: [{ amount, targetInstanceId: descriptor.target.instanceId }],
+        attacker: descriptor.ally,
+        attackingSeat: seat,
+        cell: allyStatus.location,
+        combatants: [descriptor.target],
+        defenders: [],
+        originalTarget: descriptor.target,
+        ...(allyStatus.region === 'surface' ? {} : { region: allyStatus.region }),
+        targetRemoved: false,
+      });
+      const [foughtState, fightOutcomes, randomDraws] = resolveFightWindow(
+        castState,
+        pending,
+        [
+          ...castOutcomes,
+          {
+            payload: {
+              attackerInstanceId: descriptor.ally.instanceId,
+              combatantInstanceIds: [descriptor.target.instanceId],
+            },
+            type: 'fight-started',
+          },
+          {
+            payload: {
+              amount,
+              strikerInstanceId: descriptor.ally.instanceId,
+              targetInstanceId: descriptor.target.instanceId,
+            },
+            type: 'strike-damage-allocated',
+          },
+        ],
+        true,
+        true,
+      );
+      const terminalIndex = fightOutcomes.findIndex(({ type }) => type === 'game-ended');
+      return [
+        withStateVersion(foughtState, {}),
+        terminalIndex < 0
+          ? [...fightOutcomes, resolved]
+          : [
+            ...fightOutcomes.slice(0, terminalIndex),
+            resolved,
+            ...fightOutcomes.slice(terminalIndex),
+          ],
+        randomDraws,
       ];
     }
     if (definition.lureEnemyMinionOneStepCloser === true) {
