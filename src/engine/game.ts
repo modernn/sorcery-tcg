@@ -52,6 +52,7 @@ export type GameCardDefinition =
     lethal?: boolean;
     manaCost: number;
     movementBonus?: 1 | 2;
+    movesOnlySideways?: boolean;
     provides?: GameElement;
     ranged?: boolean;
     stealth?: boolean;
@@ -460,6 +461,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.movementBonus > 2)) {
     throw new RangeError(`${path}.movementBonus must be a safe integer between 1 and 2`);
   }
+  if (card.movesOnlySideways !== undefined && typeof card.movesOnlySideways !== 'boolean') {
+    throw new RangeError(`${path}.movesOnlySideways must be boolean`);
+  }
   if (card.ranged !== undefined && typeof card.ranged !== 'boolean') {
     throw new RangeError(`${path}.ranged must be boolean`);
   }
@@ -577,6 +581,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.lethal === true ? { lethal: true } : {}),
             manaCost: card.manaCost,
             ...(card.movementBonus ? { movementBonus: card.movementBonus } : {}),
+            ...(card.movesOnlySideways === true ? { movesOnlySideways: true } : {}),
             ...(card.provides ? { provides: card.provides } : {}),
             ...(card.ranged === true ? { ranged: true } : {}),
             ...(card.stealth === true ? { stealth: true } : {}),
@@ -908,6 +913,7 @@ function unitStatus(
   lethal: boolean;
   location: RealmCell;
   movementSteps: number;
+  movesOnlySideways: boolean;
   ranged: boolean;
   stealthed: boolean;
   strikesFirstWhileAttacking: boolean;
@@ -929,6 +935,7 @@ function unitStatus(
       lethal: false,
       location: avatar.location,
       movementSteps: 1,
+      movesOnlySideways: false,
       ranged: false,
       stealthed: false,
       strikesFirstWhileAttacking: false,
@@ -950,6 +957,7 @@ function unitStatus(
     lethal: definition.lethal === true,
     location: unit.location,
     movementSteps: 1 + (definition.movementBonus ?? 0),
+    movesOnlySideways: definition.movesOnlySideways === true,
     ranged: definition.ranged === true,
     stealthed: unit.stealthed,
     strikesFirstWhileAttacking: definition.strikesFirstWhileAttacking === true,
@@ -968,6 +976,7 @@ function surfacePaths(
   start: RealmCell,
   maximumSteps: number,
   airborne = false,
+  movesOnlySideways = false,
 ): readonly (readonly RealmCell[])[] {
   if (!state.realm.sites[start]) return [];
   const paths: RealmCell[][] = [[start]];
@@ -977,7 +986,8 @@ function surfacePaths(
       ...borderingCells(path.at(-1)!),
       ...(airborne ? diagonalCells(path.at(-1)!) : []),
     ]
-      .filter((cell) => state.realm.sites[cell])
+      .filter((cell) => state.realm.sites[cell]
+        && (!movesOnlySideways || cell[1] === path.at(-1)![1]))
       .sort()
       .map((cell) => [...path, cell]));
     paths.push(...frontier);
@@ -1007,6 +1017,7 @@ function defendPaths(
     unit.location,
     unit.canMoveToDefend ? unit.movementSteps : 0,
     unit.airborne,
+    unit.movesOnlySideways,
   ).filter((path) => path.at(-1) === destination);
 }
 
@@ -1014,13 +1025,14 @@ function movementDescriptors(state: GameState, seat: GameSeat): readonly GameAct
   return unitRefs(state, seat).flatMap((ref) => {
     const unit = unitStatus(state, ref);
     if (!readyUnit(state, ref) || !state.realm.sites[unit.location]) return [];
-    return surfacePaths(state, unit.location, unit.movementSteps, unit.airborne).map((path) => ({
-      from: { cell: unit.location, region: 'surface' as const },
-      kind: 'move-and-attack' as const,
-      path: pathLocations(path),
-      to: { cell: path.at(-1)!, region: 'surface' as const },
-      unitInstanceId: ref.instanceId,
-    }));
+    return surfacePaths(state, unit.location, unit.movementSteps, unit.airborne, unit.movesOnlySideways)
+      .map((path) => ({
+        from: { cell: unit.location, region: 'surface' as const },
+        kind: 'move-and-attack' as const,
+        path: pathLocations(path),
+        to: { cell: path.at(-1)!, region: 'surface' as const },
+        unitInstanceId: ref.instanceId,
+      }));
   });
 }
 

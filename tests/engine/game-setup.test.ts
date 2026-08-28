@@ -43,6 +43,7 @@ type SpellFacts = Readonly<{
   lethal?: boolean;
   manaCost: number;
   movementBonus?: 1 | 2;
+  movesOnlySideways?: boolean;
   provides?: 'air' | 'earth' | 'fire' | 'water';
   ranged?: boolean;
   stealth?: boolean;
@@ -108,6 +109,7 @@ function cardsFor(
         lethal: facts.lethal ?? false,
         manaCost: facts.manaCost,
         ...(facts.movementBonus ? { movementBonus: facts.movementBonus } : {}),
+        movesOnlySideways: facts.movesOnlySideways ?? false,
         ...(facts.provides ? { provides: facts.provides } : {}),
         ranged: facts.ranged ?? false,
         stealth: facts.stealth ?? false,
@@ -1289,6 +1291,80 @@ test('RULE-04 Sly Fox gains Stealth once at the end of its controller turn', () 
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
   assert.equal(session.transcript.at(-1)?.events.some(({ type }) => type === 'stealth-gained'), false);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 Sedge Crabs can move themselves only sideways', () => {
+  const crab = {
+    attack: 3,
+    defense: 3,
+    manaCost: 1,
+    movementBonus: 1 as const,
+    movesOnlySideways: true,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  };
+  const defendSetup = northAttacksAtC2(128, undefined, undefined, false, crab);
+  const defendSession = accept(defendSetup.session, action(defendSetup.session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site'));
+  assert.equal(legalGameActions(defendSession.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'defend'
+      && descriptor.unitInstanceId === defendSetup.defenderInstanceId), false);
+  assert.equal(verifyGameReplay(defendSession), true);
+
+  let session = keep(createGameSession(manifest(127, {
+    spell: crab,
+  })));
+  session = keep(session);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C3'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C2'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'B3'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cell === 'C3'));
+  const crabInstanceId = session.state.realm.units[0]?.instanceId;
+  assert.ok(crabInstanceId);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  const moves = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === crabInstanceId);
+  const paths = moves.map(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    ? descriptor.path.map(({ cell }) => cell).join(',')
+    : '');
+  assert.equal(paths.includes('C3'), true);
+  assert.equal(paths.includes('C3,B3'), true);
+  assert.equal(paths.includes('C3,B3,C3'), true);
+  assert.equal(paths.includes('C3,C2'), false);
+  assert.equal(paths.includes('C3,C4'), false);
+  assert.equal(moves.every(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.path.every(({ cell }, index) =>
+      index === 0 || cell[1] === descriptor.path[index - 1]!.cell[1])), true);
+  const sideways = moves.find(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,B3');
+  assert.ok(sideways);
+  session = accept(session, sideways);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  assert.equal(session.state.realm.units[0]?.location, 'B3');
   assert.equal(verifyGameReplay(session), true);
 });
 
