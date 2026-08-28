@@ -455,6 +455,23 @@ export type PrivateGameCheck = Readonly<{
     siteTargetAvailable: boolean;
     wrapMoveAvailable: boolean;
   }>;
+  waterFreeze: Readonly<{
+    acceptedActionCount: number;
+    actionAvailableBefore: boolean;
+    actionReturnedOnNextTurn: boolean;
+    actionUnavailableWhileDisabled: boolean;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    disabledThroughOpponentTurn: boolean;
+    disabledStateRecorded: boolean;
+    expiredAtCasterStart: boolean;
+    freeze: string;
+    manaPaid: number;
+    replayVerified: boolean;
+    seravaTownsfolk: string;
+    spellEnteredCemetery: boolean;
+    unitStatePreserved: boolean;
+  }>;
   waterDrowned: Readonly<{
     acceptedActionCount: number;
     deck: DeckList;
@@ -665,6 +682,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   firstStrikeMinion: NormalizedCard;
   firstStrikeTargetMinion: NormalizedCard;
   forsaken: NormalizedCard;
+  freeze: NormalizedCard;
   genesisSpellMinion: NormalizedCard;
   genesisMinion: NormalizedCard;
   ghostTownSite: NormalizedCard;
@@ -684,6 +702,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   roamingMinion: NormalizedCard;
   secretTunnel: NormalizedCard;
   sedgeCrabs: NormalizedCard;
+  seravaTownsfolk: NormalizedCard;
   shallowGrave: NormalizedCard;
   slyFox: NormalizedCard;
   stealthMinion: NormalizedCard;
@@ -809,6 +828,40 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || lightningBolt.thresholds.water !== 0
     || lightningBolt.rarity !== 'ordinary') {
     throw new Error('private random location-damage Magic no longer matches its supported facts');
+  }
+  const freeze = snapshot.cards.find(({ name }) => name === 'Freeze');
+  if (!freeze
+    || freeze.cardType !== 'magic'
+    || freeze.rulesText.trim() !== 'Disable target nearby minion until your next turn.'
+    || freeze.manaCost !== 1
+    || freeze.attack !== null
+    || freeze.defense !== null
+    || freeze.life !== null
+    || freeze.elements.length !== 1
+    || freeze.elements[0] !== 'water'
+    || freeze.thresholds.air !== 0
+    || freeze.thresholds.earth !== 0
+    || freeze.thresholds.fire !== 0
+    || freeze.thresholds.water !== 1
+    || freeze.rarity !== 'ordinary') {
+    throw new Error('private timed-disable Magic no longer matches its supported facts');
+  }
+  const seravaTownsfolk = snapshot.cards.find(({ name }) => name === 'Serava Townsfolk');
+  if (!seravaTownsfolk
+    || seravaTownsfolk.cardType !== 'minion'
+    || seravaTownsfolk.rulesText.trim() !== ''
+    || seravaTownsfolk.manaCost !== 1
+    || seravaTownsfolk.attack !== 2
+    || seravaTownsfolk.defense !== 2
+    || seravaTownsfolk.life !== null
+    || seravaTownsfolk.elements.length !== 1
+    || seravaTownsfolk.elements[0] !== 'water'
+    || seravaTownsfolk.thresholds.air !== 0
+    || seravaTownsfolk.thresholds.earth !== 0
+    || seravaTownsfolk.thresholds.fire !== 0
+    || seravaTownsfolk.thresholds.water !== 1
+    || seravaTownsfolk.rarity !== 'ordinary') {
+    throw new Error('private timed-disable target minion no longer matches its supported facts');
   }
   const teleport = snapshot.cards.find(({ name }) => name === 'Teleport');
   if (!teleport
@@ -1411,6 +1464,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     firstStrikeMinion,
     firstStrikeTargetMinion,
     forsaken,
+    freeze,
     genesisSpellMinion,
     genesisMinion,
     ghostTownSite,
@@ -1432,6 +1486,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     roamingMinion,
     secretTunnel,
     sedgeCrabs,
+    seravaTownsfolk,
     shallowGrave,
     slyFox,
     stealthMinion,
@@ -1512,6 +1567,7 @@ function gameDefinition(
   damageRandomUnitAtLocation: 0 | 3 = 0,
   teleportAllyToTargetSite = false,
   returnMinionFromOwnCemetery = false,
+  disableTargetNearbyMinionUntilNextTurn = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1541,6 +1597,7 @@ function gameDefinition(
     + Number(damageRandomUnitAtLocation !== 0)
     + Number(teleportAllyToTargetSite)
     + Number(returnMinionFromOwnCemetery)
+    + Number(disableTargetNearbyMinionUntilNextTurn)
     + Number(healController !== 0)
     + Number(burrowTargetMinion);
   if (card.cardType === 'magic'
@@ -1557,6 +1614,8 @@ function gameDefinition(
             ? { teleportAllyToTargetSite: true }
             : returnMinionFromOwnCemetery
               ? { returnMinionFromOwnCemetery: true }
+              : disableTargetNearbyMinionUntilNextTurn
+                ? { disableTargetNearbyMinionUntilNextTurn: true }
         : healController !== 0 ? { healController } : {}),
       manaCost: card.manaCost,
       ...(targetNearby ? { targetNearby: true } : {}),
@@ -1612,7 +1671,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-immobile' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1764,6 +1823,12 @@ function buildManifest(
     input.slyFox,
     input.sedgeCrabs,
   ]);
+  const waterFreezeDeck = elementalDeck('water', [
+    input.healingMinion,
+    input.slyFox,
+    input.sedgeCrabs,
+    input.seravaTownsfolk,
+  ], [], [input.freeze]);
   const waterSubmergeDeck = elementalDeck('water', [
     input.healingMinion,
     input.slyFox,
@@ -1834,6 +1899,8 @@ function buildManifest(
           ? waterEdgeConnectionDeck
         : scenario === 'water-drowned'
           ? waterDrownedDeck
+        : scenario === 'water-freeze'
+          ? waterFreezeDeck
         : scenario === 'water-lugbog'
           ? waterLugbogDeck
         : scenario === 'water-submerge'
@@ -1861,6 +1928,8 @@ function buildManifest(
         ? waterEdgeConnectionDeck
       : scenario === 'water-drowned'
         ? waterDrownedDeck
+      : scenario === 'water-freeze'
+        ? waterFreezeDeck
       : scenario === 'water-lugbog'
         ? waterLugbogDeck
       : scenario === 'earth-entombed'
@@ -1952,6 +2021,7 @@ function buildManifest(
       card.stableId === input.lightningBolt.stableId ? 3 : 0,
       card.stableId === input.teleport.stableId,
       card.stableId === input.rescue.stableId,
+      card.stableId === input.freeze.stableId,
     ),
   ]));
   return {
@@ -3522,6 +3592,44 @@ function findWaterOpening(
     ? 'end-turn Stealth'
     : sideways ? 'sideways movement' : submerge ? 'Submerge' : 'healing';
   throw new Error(`private Water ${scenarioName} scenario no longer produces its supported opening`);
+}
+
+function findWaterFreezeOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  freezeInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string];
+  seravaInstanceId: string;
+  session: GameSession;
+  southSiteInstanceId: string;
+}> {
+  // ponytail: bounded opening scan avoids another private config field.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const built = buildManifest(input, input.config.waterSeed + offset, 'water-freeze');
+    const session = createGameSession(built.manifest);
+    const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('water');
+    });
+    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+    const freezeInstanceId = session.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === input.freeze.stableId)?.instanceId;
+    const seravaInstanceId = session.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === input.seravaTownsfolk.stableId)?.instanceId;
+    if (northSites.length >= 2 && southSiteInstanceId && freezeInstanceId && seravaInstanceId) {
+      return {
+        ...built,
+        freezeInstanceId,
+        northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
+        seravaInstanceId,
+        session,
+        southSiteInstanceId,
+      };
+    }
+  }
+  throw new Error('private timed-disable Magic scenario no longer produces its supported opening');
 }
 
 function findWaterEdgeConnectionOpening(
@@ -6485,6 +6593,160 @@ function runWaterEndTurnStealth(
   });
 }
 
+function runWaterFreeze(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['waterFreeze'] {
+  const opening = findWaterFreezeOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.seravaInstanceId
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+
+  const hasSeravaMove = (candidate: GameSession): boolean =>
+    legalGameActions(candidate.state, 'north').some(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === opening.seravaInstanceId
+        && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3');
+  const before = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.seravaInstanceId);
+  if (!before) throw new Error('private timed-disable setup lacks its ready minion');
+  const actionAvailableBefore = hasSeravaMove(session);
+  const freezeActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.freezeInstanceId
+      && descriptor.target?.kind === 'minion'
+      && descriptor.target.instanceId === opening.seravaInstanceId);
+  const chosenFreeze = freezeActions[0];
+  if (!chosenFreeze || freezeActions.length !== 1) {
+    throw new Error('private timed-disable Magic target is not exactly available');
+  }
+  const manaBefore = session.state.players.north.mana;
+  session = accept(session, chosenFreeze);
+  const manaPaid = manaBefore - session.state.players.north.mana;
+
+  const afterCast = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.seravaInstanceId);
+  const castEvents = session.transcript.at(-1)?.events ?? [];
+  const castPayload = castEvents[0] && isJsonRecord(castEvents[0].payload)
+    ? castEvents[0].payload
+    : undefined;
+  const disabledPayload = castEvents[1] && isJsonRecord(castEvents[1].payload)
+    ? castEvents[1].payload
+    : undefined;
+  const resolvedPayload = castEvents[2] && isJsonRecord(castEvents[2].payload)
+    ? castEvents[2].payload
+    : undefined;
+  const disabledStateRecorded = afterCast?.disableEffects?.length === 1
+    && afterCast.disableEffects[0]?.expiresAtSeat === 'north'
+    && afterCast.disableEffects[0].sourceInstanceId === opening.freezeInstanceId;
+  const actionUnavailableWhileDisabled = !hasSeravaMove(session);
+  const unitStatePreservedAfterCast = afterCast !== undefined
+    && afterCast.cardId === before.cardId
+    && afterCast.controller === before.controller
+    && afterCast.damage === before.damage
+    && afterCast.location === before.location
+    && afterCast.owner === before.owner
+    && afterCast.region === before.region
+    && afterCast.stealthed === before.stealthed
+    && afterCast.summoningSickness === before.summoningSickness
+    && afterCast.tapped === before.tapped
+    && afterCast.warded === before.warded;
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const duringOpponentTurn = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.seravaInstanceId);
+  const disabledThroughOpponentTurn = duringOpponentTurn?.disableEffects?.length === 1
+    && duringOpponentTurn.disableEffects[0]?.expiresAtSeat === 'north'
+    && duringOpponentTurn.disableEffects[0].sourceInstanceId === opening.freezeInstanceId;
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  const afterExpiry = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.seravaInstanceId);
+  const expiryEvents = session.transcript.at(-1)?.events ?? [];
+  const turnEndedIndex = expiryEvents.findIndex(({ payload, type }) =>
+    type === 'turn-ended' && isJsonRecord(payload) && payload.seat === 'south');
+  const expiryIndex = expiryEvents.findIndex(({ payload, type }) =>
+    type === 'minion-disable-expired'
+      && isJsonRecord(payload)
+      && payload.instanceId === opening.seravaInstanceId
+      && payload.seat === 'north'
+      && payload.sourceInstanceId === opening.freezeInstanceId);
+  const turnStartedIndex = expiryEvents.findIndex(({ payload, type }) =>
+    type === 'turn-started' && isJsonRecord(payload) && payload.seat === 'north');
+  const expiredAtCasterStart = afterExpiry !== undefined
+    && afterExpiry.disableEffects === undefined
+    && turnEndedIndex >= 0
+    && expiryIndex === turnEndedIndex + 1
+    && turnStartedIndex === expiryIndex + 1;
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    actionAvailableBefore,
+    actionReturnedOnNextTurn: hasSeravaMove(session),
+    actionUnavailableWhileDisabled,
+    causalEventsVerified: castEvents.map(({ type }) => type).join(',')
+      === 'magic-cast,minion-disabled,magic-resolved'
+      && castPayload?.instanceId === opening.freezeInstanceId
+      && castPayload.manaPaid === 1
+      && castPayload.seat === 'north'
+      && castPayload.targetInstanceId === opening.seravaInstanceId
+      && castPayload.targetSeat === 'north'
+      && disabledPayload?.expiresAtSeat === 'north'
+      && disabledPayload.instanceId === opening.seravaInstanceId
+      && disabledPayload.seat === 'north'
+      && disabledPayload.sourceInstanceId === opening.freezeInstanceId
+      && disabledPayload.stealthRemoved === false
+      && disabledPayload.wardRemoved === false
+      && resolvedPayload?.instanceId === opening.freezeInstanceId
+      && turnEndedIndex < expiryIndex
+      && expiryIndex < turnStartedIndex,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    disabledStateRecorded,
+    disabledThroughOpponentTurn,
+    expiredAtCasterStart,
+    freeze: input.freeze.name,
+    manaPaid,
+    replayVerified: verifyGameReplay(session),
+    seravaTownsfolk: input.seravaTownsfolk.name,
+    spellEnteredCemetery: session.state.players.north.hand.spellbook
+      .every(({ instanceId }) => instanceId !== opening.freezeInstanceId)
+      && session.state.players.north.cemetery
+        .some(({ instanceId }) => instanceId === opening.freezeInstanceId),
+    unitStatePreserved: unitStatePreservedAfterCast
+      && afterExpiry !== undefined
+      && afterExpiry.cardId === before.cardId
+      && afterExpiry.controller === before.controller
+      && afterExpiry.damage === before.damage
+      && afterExpiry.location === before.location
+      && afterExpiry.owner === before.owner
+      && afterExpiry.region === before.region
+      && afterExpiry.stealthed === before.stealthed
+      && afterExpiry.summoningSickness === before.summoningSickness
+      && afterExpiry.tapped === before.tapped
+      && afterExpiry.warded === before.warded,
+  });
+}
+
 function runWaterHealing(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['waterHealing'] {
@@ -6615,6 +6877,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const waterEdgeConnection = runWaterEdgeConnection(input);
   const waterLugbog = runWaterLugbog(input);
   const waterEndTurnStealth = runWaterEndTurnStealth(input);
+  const waterFreeze = runWaterFreeze(input);
   const waterHealing = runWaterHealing(input);
   const waterSidewaysMovement = runWaterSidewaysMovement(input);
   const waterSubmerge = runWaterSubmerge(input);
@@ -6795,6 +7058,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     waterEdgeConnection,
     waterLugbog,
     waterEndTurnStealth,
+    waterFreeze,
     waterHealing,
     waterSidewaysMovement,
     waterSubmerge,

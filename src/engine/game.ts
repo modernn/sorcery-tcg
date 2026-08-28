@@ -51,6 +51,7 @@ export type GameCardDefinition =
     cardType: 'magic';
     damageRandomUnitAtLocation?: number;
     damageTargetUnit?: number;
+    disableTargetNearbyMinionUntilNextTurn?: true;
     healController?: number;
     manaCost: number;
     returnMinionFromOwnCemetery?: true;
@@ -130,9 +131,15 @@ type CardInstance = Readonly<{
 
 type SiteInstance = Readonly<CardInstance & { controller: GameSeat }>;
 
+type DisableEffect = Readonly<{
+  expiresAtSeat: GameSeat;
+  sourceInstanceId: StateHash;
+}>;
+
 type UnitInstance = Readonly<CardInstance & {
   controller: GameSeat;
   damage: number;
+  disableEffects?: readonly DisableEffect[];
   location: RealmCell;
   region: GameRegion;
   stealthed: boolean;
@@ -264,6 +271,7 @@ export type GameObservation = Readonly<{
       controller: GameSeat;
       damage: number;
       defense: number;
+      disabled: boolean;
       instanceId: StateHash;
       location: RealmCell;
       owner: GameSeat;
@@ -555,9 +563,10 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
     return targets.filter((target) => {
       const status = unitStatus(state, target);
       return (!definition.burrowTargetMinion || target.kind === 'minion')
+        && (!definition.disableTargetNearbyMinionUntilNextTurn || target.kind === 'minion')
         && status.region === caster.region
         && (target.seat === seat || !status.stealthed)
-        && (!definition.targetNearby
+        && (!definition.targetNearby && !definition.disableTargetNearbyMinionUntilNextTurn
           || status.location === caster.location
           || borderingCells(caster.location).includes(status.location)
           || diagonalCells(caster.location).includes(status.location));
@@ -621,9 +630,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.returnMinionFromOwnCemetery !== true) {
       throw new RangeError(`${path}.returnMinionFromOwnCemetery must be true when defined`);
     }
+    if (card.disableTargetNearbyMinionUntilNextTurn !== undefined
+      && card.disableTargetNearbyMinionUntilNextTurn !== true) {
+      throw new RangeError(`${path}.disableTargetNearbyMinionUntilNextTurn must be true when defined`);
+    }
     const effectCount = Number(card.burrowTargetMinion === true)
       + Number(card.damageRandomUnitAtLocation !== undefined)
       + Number(card.damageTargetUnit !== undefined)
+      + Number(card.disableTargetNearbyMinionUntilNextTurn === true)
       + Number(card.healController !== undefined)
       + Number(card.returnMinionFromOwnCemetery === true)
       + Number(card.teleportAllyToTargetSite === true);
@@ -872,6 +886,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                   ? { damageRandomUnitAtLocation: card.damageRandomUnitAtLocation }
                 : card.damageTargetUnit !== undefined
                   ? { damageTargetUnit: card.damageTargetUnit }
+                  : card.disableTargetNearbyMinionUntilNextTurn === true
+                    ? { disableTargetNearbyMinionUntilNextTurn: true as const }
                   : card.healController !== undefined
                     ? { healController: card.healController }
                     : card.returnMinionFromOwnCemetery === true
@@ -1099,7 +1115,7 @@ function affinity(state: GameState, seat: GameSeat): GameThresholds {
       });
     });
   state.realm.units
-    .filter((unit) => unit.controller === seat)
+    .filter((unit) => unit.controller === seat && !unit.disableEffects?.length)
     .forEach((unit) => {
       const definition = cardDefinition(state, unit.cardId);
       if (definition.cardType !== 'minion') throw new Error('realm minion lacks minion definition');
@@ -1165,6 +1181,7 @@ export function observeGame(state: GameState, viewer: GameSeat): GameObservation
       controller: unit.controller,
       damage: unit.damage,
       defense: definition.defense,
+      disabled: Boolean(unit.disableEffects?.length),
       instanceId: unit.instanceId,
       location: unit.location,
       owner: unit.owner,
@@ -1241,6 +1258,7 @@ function unitStatus(
   canRespondToAttack: boolean;
   charge: boolean;
   connectsTopBottom: boolean;
+  disabled: boolean;
   immobile: boolean;
   lethal: boolean;
   location: RealmCell;
@@ -1270,6 +1288,7 @@ function unitStatus(
       canRespondToAttack: true,
       charge: false,
       connectsTopBottom: false,
+      disabled: false,
       immobile: false,
       lethal: false,
       location: avatar.location,
@@ -1290,35 +1309,37 @@ function unitStatus(
   if (!unit || unit.controller !== ref.seat) throw new Error('unreachable minion reference');
   const definition = cardDefinition(state, unit.cardId);
   if (definition.cardType !== 'minion') throw new Error('minion lacks minion definition');
+  const disabled = Boolean(unit.disableEffects?.length);
   return {
-    airborne: definition.airborne === true && unit.region === 'surface',
+    airborne: !disabled && definition.airborne === true && unit.region === 'surface',
     attack: definition.attack,
-    burrowing: definition.burrowing === true,
-    canAttackSites: definition.cannotAttackSites !== true,
-    canMoveToDefend: definition.cannotDefend !== true,
-    canRespondToAttack: definition.cannotDefendOrIntercept !== true,
-    charge: definition.charge === true,
-    connectsTopBottom: definition.connectsTopBottom === true,
-    immobile: definition.immobile === true,
-    lethal: definition.lethal === true,
+    burrowing: !disabled && definition.burrowing === true,
+    canAttackSites: !disabled && definition.cannotAttackSites !== true,
+    canMoveToDefend: !disabled && definition.cannotDefend !== true,
+    canRespondToAttack: !disabled && definition.cannotDefendOrIntercept !== true,
+    charge: !disabled && definition.charge === true,
+    connectsTopBottom: !disabled && definition.connectsTopBottom === true,
+    disabled,
+    immobile: !disabled && definition.immobile === true,
+    lethal: !disabled && definition.lethal === true,
     location: unit.location,
-    movementSteps: 1 + (definition.movementBonus ?? 0),
-    movesOnlyForward: definition.movesOnlyForward === true,
-    movesOnlySideways: definition.movesOnlySideways === true,
-    ranged: definition.ranged === true,
+    movementSteps: disabled ? 0 : 1 + (definition.movementBonus ?? 0),
+    movesOnlyForward: !disabled && definition.movesOnlyForward === true,
+    movesOnlySideways: !disabled && definition.movesOnlySideways === true,
+    ranged: !disabled && definition.ranged === true,
     region: unit.region,
-    stealthed: unit.stealthed,
-    strikesFirstWhileAttacking: definition.strikesFirstWhileAttacking === true,
-    submerge: definition.submerge === true,
+    stealthed: !disabled && unit.stealthed,
+    strikesFirstWhileAttacking: !disabled && definition.strikesFirstWhileAttacking === true,
+    submerge: !disabled && definition.submerge === true,
     summoningSickness: unit.summoningSickness,
     tapped: unit.tapped,
-    voidwalk: definition.voidwalk === true,
+    voidwalk: !disabled && definition.voidwalk === true,
   };
 }
 
 function readyUnit(state: GameState, ref: GameUnitRef): boolean {
   const unit = unitStatus(state, ref);
-  return !unit.tapped && (!unit.summoningSickness || unit.charge);
+  return !unit.disabled && !unit.tapped && (!unit.summoningSickness || unit.charge);
 }
 
 function sameLocation(left: GameLocation, right: GameLocation): boolean {
@@ -1588,6 +1609,7 @@ function dragProjectileDescriptors(state: GameState, seat: GameSeat): readonly G
     const status = unitStatus(state, shooter);
     if (definition.cardType !== 'minion'
       || !definition.shootsDragProjectile
+      || status.disabled
       || status.tapped
       || status.summoningSickness) return [];
     return directions.flatMap<GameActionDescriptor>((direction) => {
@@ -1630,7 +1652,10 @@ function dragProjectileDescriptors(state: GameState, seat: GameSeat): readonly G
 
 function manaAbilityDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   return state.realm.units.flatMap((unit) => {
-    if (unit.controller !== seat || unit.tapped || unit.summoningSickness) return [];
+    if (unit.controller !== seat
+      || unit.disableEffects?.length
+      || unit.tapped
+      || unit.summoningSickness) return [];
     const definition = cardDefinition(state, unit.cardId);
     return definition.cardType === 'minion' && definition.tapForMana
       ? [{ amount: definition.tapForMana, kind: 'activate-mana' as const, unitInstanceId: unit.instanceId }]
@@ -1997,7 +2022,7 @@ function resolveMinionDeaths(
   const deckLosers = new Set<GameSeat>();
   for (const dead of deaths) {
     const definition = cardDefinition(state, dead.cardId);
-    if (definition.cardType !== 'minion') continue;
+    if (definition.cardType !== 'minion' || dead.disableEffects?.length) continue;
     if (definition.deathriteHeal) {
       const controller = players[dead.controller];
       const avatarDefinition = cardDefinition(state, controller.avatar.card.cardId);
@@ -2087,19 +2112,25 @@ function resolveFightWindow(
   const damage = new Map<StateHash, number>();
   const lethalDamage = new Set<StateHash>();
   const attackerStatus = unitStatus(state, pending.attacker);
-  if (combatantsStrike) {
+  const attackerCanStrike = attackerStrikes && !attackerStatus.disabled;
+  const strikingCombatants = combatantsStrike
+    ? pending.combatants.filter((ref) => !unitStatus(state, ref).disabled)
+    : [];
+  if (strikingCombatants.length > 0) {
     damage.set(
       pending.attacker.instanceId,
-      pending.combatants.reduce((total, ref) => total + unitStatus(state, ref).attack, 0),
+      strikingCombatants.reduce((total, ref) => total + unitStatus(state, ref).attack, 0),
     );
   }
-  if (attackerStrikes) {
+  if (attackerCanStrike) {
     pending.combatants.forEach((ref) => damage.set(ref.instanceId, allocations.get(ref.instanceId) ?? 0));
   }
   pending.combatants.forEach((ref) => {
     const striker = unitStatus(state, ref);
-    if (combatantsStrike && striker.lethal && striker.attack > 0) lethalDamage.add(pending.attacker.instanceId);
-    if (attackerStrikes && attackerStatus.lethal && (allocations.get(ref.instanceId) ?? 0) > 0) {
+    if (strikingCombatants.some(({ instanceId }) => instanceId === ref.instanceId)
+      && striker.lethal
+      && striker.attack > 0) lethalDamage.add(pending.attacker.instanceId);
+    if (attackerCanStrike && attackerStatus.lethal && (allocations.get(ref.instanceId) ?? 0) > 0) {
       lethalDamage.add(ref.instanceId);
     }
   });
@@ -2110,8 +2141,8 @@ function resolveFightWindow(
   };
   let units = [...state.realm.units];
   const [interactedUnits, stealthOutcomes] = loseStealth(units, interactingRefs ?? [
-    ...(attackerStrikes ? [pending.attacker] : []),
-    ...(combatantsStrike ? pending.combatants : []),
+    ...(attackerCanStrike ? [pending.attacker] : []),
+    ...strikingCombatants,
   ]);
   units = [...interactedUnits];
   const defeatedAvatars = new Set<GameSeat>();
@@ -2119,8 +2150,8 @@ function resolveFightWindow(
   const damageOutcomes: GameOutcome[] = [];
 
   const damagedRefs = [
-    ...(combatantsStrike ? [pending.attacker] : []),
-    ...(attackerStrikes ? pending.combatants : []),
+    ...(strikingCombatants.length > 0 ? [pending.attacker] : []),
+    ...(attackerCanStrike ? pending.combatants : []),
   ];
   for (const ref of damagedRefs) {
     const amount = damage.get(ref.instanceId) ?? 0;
@@ -2646,6 +2677,69 @@ function applyDescriptor(
               sourceInstanceId: card.instanceId,
             },
             type: 'minion-returned-to-hand',
+          },
+          resolved,
+        ],
+        [],
+      ];
+    }
+    if (definition.disableTargetNearbyMinionUntilNextTurn === true) {
+      if (descriptor.target?.kind !== 'minion') throw new Error('unreachable Freeze cast');
+      const targetIndex = castState.realm.units.findIndex(({ instanceId, controller }) =>
+        instanceId === descriptor.target!.instanceId && controller === descriptor.target!.seat);
+      const target = castState.realm.units[targetIndex];
+      if (!target) throw new Error('unreachable Freeze target');
+      if (target.warded && target.controller !== seat) {
+        const wardedState = deepFreeze({
+          ...castState,
+          realm: {
+            ...castState.realm,
+            units: castState.realm.units.map((unit, index) => index === targetIndex
+              ? deepFreeze({ ...unit, warded: false })
+              : unit),
+          },
+        });
+        return [
+          withStateVersion(wardedState, {}),
+          [
+            castOutcome,
+            { payload: { instanceId: target.instanceId, seat: target.controller }, type: 'ward-broken' },
+            resolved,
+          ],
+          [],
+        ];
+      }
+      const effect: DisableEffect = deepFreeze({
+        expiresAtSeat: seat,
+        sourceInstanceId: card.instanceId,
+      });
+      const disabledUnit = deepFreeze({
+        ...target,
+        disableEffects: [...(target.disableEffects ?? []), effect],
+        stealthed: false,
+        warded: false,
+      });
+      const disabledState = deepFreeze({
+        ...castState,
+        realm: {
+          ...castState.realm,
+          units: castState.realm.units.map((unit, index) => index === targetIndex ? disabledUnit : unit),
+        },
+      });
+      return [
+        withStateVersion(disabledState, {}),
+        [
+          castOutcome,
+          {
+            payload: {
+              expiresAtSeat: seat,
+              instanceId: target.instanceId,
+              seat: target.controller,
+              sourceInstanceId: card.instanceId,
+              stealthRemoved: target.stealthed,
+              wardRemoved: target.warded,
+            },
+            type: 'minion-disabled',
           },
           resolved,
         ],
@@ -3461,18 +3555,28 @@ function applyDescriptor(
   });
   const players = deepFreeze({ ...state.players, [seat]: endingPlayer, [nextSeat]: startingPlayer });
   const stealthGained = state.realm.units.filter((unit) => {
-    if (unit.controller !== seat || unit.stealthed) return false;
+    if (unit.controller !== seat || unit.disableEffects?.length || unit.stealthed) return false;
     const definition = cardDefinition(state, unit.cardId);
     return definition.cardType === 'minion' && definition.gainsStealthAtEndOfTurn === true;
   });
   const stealthGainedIds = new Set(stealthGained.map(({ instanceId }) => instanceId));
-  const units = state.realm.units.map((unit) => deepFreeze({
-    ...unit,
-    damage: 0,
-    ...(stealthGainedIds.has(unit.instanceId) ? { stealthed: true } : {}),
-    ...(unit.controller === seat ? { summoningSickness: false } : {}),
-    ...(unit.controller === nextSeat ? { tapped: false } : {}),
-  }));
+  const expiredDisableEffects = state.realm.units.flatMap((unit) =>
+    (unit.disableEffects ?? [])
+      .filter(({ expiresAtSeat }) => expiresAtSeat === nextSeat)
+      .map((effect) => ({ effect, unit })));
+  const units = state.realm.units.map((unit) => {
+    const { disableEffects: previousDisableEffects, ...baseUnit } = unit;
+    const disableEffects = (previousDisableEffects ?? [])
+      .filter(({ expiresAtSeat }) => expiresAtSeat !== nextSeat);
+    return deepFreeze({
+      ...baseUnit,
+      ...(disableEffects.length > 0 ? { disableEffects } : {}),
+      damage: 0,
+      ...(stealthGainedIds.has(unit.instanceId) ? { stealthed: true } : {}),
+      ...(unit.controller === seat ? { summoningSickness: false } : {}),
+      ...(unit.controller === nextSeat ? { tapped: false } : {}),
+    });
+  });
   const turnNumber = state.turnNumber + 1;
   return [
     withStateVersion(state, {
@@ -3490,6 +3594,14 @@ function applyDescriptor(
         type: 'stealth-gained',
       })),
       { payload: { seat, turnNumber: state.turnNumber }, type: 'turn-ended' },
+      ...expiredDisableEffects.map(({ effect, unit }) => ({
+        payload: {
+          instanceId: unit.instanceId,
+          seat: unit.controller,
+          sourceInstanceId: effect.sourceInstanceId,
+        },
+        type: 'minion-disable-expired',
+      })),
       { payload: { drawSkipped: false, seat: nextSeat, turnNumber }, type: 'turn-started' },
     ],
     [],
