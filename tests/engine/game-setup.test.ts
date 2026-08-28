@@ -33,6 +33,7 @@ type SpellFacts = Readonly<{
   charge?: boolean;
   defense?: number;
   manaCost: number;
+  provides?: 'air' | 'earth' | 'fire' | 'water';
   thresholds: Readonly<{ air: number; earth: number; fire: number; water: number }>;
 }>;
 
@@ -70,6 +71,7 @@ function cardsFor(
         charge: spell.charge ?? false,
         defense: spell.defense ?? 1,
         manaCost: spell.manaCost,
+        ...(spell.provides ? { provides: spell.provides } : {}),
         thresholds: { ...spell.thresholds },
       };
     });
@@ -579,6 +581,28 @@ function northAttacksAtC2(
       && descriptor.to.cell === 'C2'));
   return { attackerInstanceId, defenderInstanceId, session, targetInstanceId };
 }
+
+test('RULE-03 a provider adds affinity until that minion dies', () => {
+  const setup = northAttacksAtC2(46, {
+    attack: 1,
+    defense: 1,
+    manaCost: 1,
+    provides: 'earth',
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  });
+  let { session } = setup;
+  assert.equal(observeGame(session.state, 'north').players.north.affinity.earth, 3);
+  assert.equal(observeGame(session.state, 'south').players.south.affinity.earth, 4);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === setup.targetInstanceId));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  assert.equal(observeGame(session.state, 'north').players.north.affinity.earth, 2);
+  assert.equal(observeGame(session.state, 'south').players.south.affinity.earth, 3);
+  assert.equal(verifyGameReplay(session), true);
+});
 
 test('RULE-04 Move and Attack stages movement before an undefended enemy-site strike', () => {
   const setup = northAttacksAtC2(47);

@@ -42,6 +42,7 @@ export type GameCardDefinition =
     charge?: boolean;
     defense: number;
     manaCost: number;
+    provides?: GameElement;
     thresholds: GameThresholds;
   }>;
 
@@ -369,6 +370,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.charge !== undefined && typeof card.charge !== 'boolean') {
     throw new RangeError(`${path}.charge must be boolean`);
   }
+  if (card.provides !== undefined && !elements.includes(card.provides)) {
+    throw new RangeError(`${path}.provides must be a supported element`);
+  }
   for (const field of ['attack', 'defense', 'manaCost'] as const) {
     if (!Number.isSafeInteger(card[field])
       || card[field] < 0
@@ -450,6 +454,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.charge === true ? { charge: true } : {}),
             defense: card.defense,
             manaCost: card.manaCost,
+            ...(card.provides ? { provides: card.provides } : {}),
             thresholds: { ...card.thresholds },
           },
     ])),
@@ -629,6 +634,13 @@ function affinity(state: GameState, seat: GameSeat): GameThresholds {
       definition.elements.forEach((element) => {
         total[element] += 1;
       });
+    });
+  state.realm.units
+    .filter((unit) => unit.controller === seat)
+    .forEach((unit) => {
+      const definition = cardDefinition(state, unit.cardId);
+      if (definition.cardType !== 'minion') throw new Error('realm minion lacks minion definition');
+      if (definition.provides) total[definition.provides] += 1;
     });
   return deepFreeze(total);
 }
