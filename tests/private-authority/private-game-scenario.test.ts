@@ -143,6 +143,28 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airLightningBolt.deck.spellbook
     .find(({ name }) => name === 'Snow Leopard')?.copies, 4);
   assert.equal(result.airLightningBolt.replayVerified, true);
+  assert.equal(result.airRainOfArrows.rainOfArrows, 'Rain of Arrows');
+  assert.equal(result.airRainOfArrows.snowLeopard, 'Snow Leopard');
+  assert.equal(result.airRainOfArrows.acceptedActionCount, 12);
+  assert.equal(result.airRainOfArrows.noTargetChoice, true);
+  assert.equal(result.airRainOfArrows.surfaceLeopardsDamagedAndSurvived, true);
+  assert.equal(result.airRainOfArrows.manaPaid, 2);
+  assert.equal(result.airRainOfArrows.spellEnteredCemetery, true);
+  assert.equal(result.airRainOfArrows.causalEventsVerified, true);
+  assert.equal(result.airRainOfArrows.noRandomDraws, true);
+  assert.equal(result.airRainOfArrows.avatarsPreserved, true);
+  assert.equal(result.airRainOfArrows.sitesPreserved, true);
+  assert.equal(result.airRainOfArrows.cemeteriesOtherwisePreserved, true);
+  assert.equal(result.airRainOfArrows.gameRemainedActive, true);
+  assert.equal(result.airRainOfArrows.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airRainOfArrows.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airRainOfArrows.deck.spellbook
+    .find(({ name }) => name === 'Rain of Arrows')?.copies, 4);
+  assert.equal(result.airRainOfArrows.deck.spellbook
+    .find(({ name }) => name === 'Snow Leopard')?.copies, 4);
+  assert.equal(result.airRainOfArrows.replayVerified, true);
   assert.equal(result.airTeleport.teleport, 'Teleport');
   assert.equal(result.airTeleport.snowLeopard, 'Snow Leopard');
   assert.equal(result.airTeleport.acceptedActionCount, 11);
