@@ -300,6 +300,19 @@ export type PrivateGameCheck = Readonly<{
     siteTargetAvailable: boolean;
     wrapMoveAvailable: boolean;
   }>;
+  waterDrowned: Readonly<{
+    acceptedActionCount: number;
+    deck: DeckList;
+    drowned: string;
+    drownedSurfaceUnavailable: boolean;
+    drownedUnderwaterAvailable: boolean;
+    replayVerified: boolean;
+    seed: number;
+    slyFox: string;
+    slyFoxSurfaceAvailable: boolean;
+    slyFoxUnderwaterUnavailable: boolean;
+    summonedUnderwater: boolean;
+  }>;
   waterEndTurnStealth: Readonly<{
     acceptedActionCount: number;
     attackSiteAvailable: boolean;
@@ -473,6 +486,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   chargeMinion: NormalizedCard;
   config: ScenarioConfig;
   deathriteMinion: NormalizedCard;
+  drowned: NormalizedCard;
   earthProviderMinion: NormalizedCard;
   entombed: NormalizedCard;
   format: FormatDefinition;
@@ -626,6 +640,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || submergeMinion.thresholds.water !== 1
     || submergeMinion.rarity !== 'ordinary') {
     throw new Error('private Submerge minion no longer matches its supported facts');
+  }
+  const drowned = snapshot.cards.find(({ name }) => name === 'Drowned');
+  if (!drowned
+    || drowned.cardType !== 'minion'
+    || drowned.rulesText.trim().replaceAll('\r\n', '\n')
+      !== 'Submerge\nMust be cast submerged.'
+    || drowned.manaCost !== 2
+    || drowned.attack !== 3
+    || drowned.defense !== 3
+    || drowned.elements.length !== 1
+    || drowned.elements[0] !== 'water'
+    || drowned.thresholds.air !== 0
+    || drowned.thresholds.earth !== 0
+    || drowned.thresholds.fire !== 0
+    || drowned.thresholds.water !== 1
+    || drowned.rarity !== 'ordinary') {
+    throw new Error('private submerged-only casting minion no longer matches its supported facts');
   }
   const burrowingMinion = snapshot.cards.find(({ name }) => name === 'Cave Trolls');
   if (!burrowingMinion
@@ -986,6 +1017,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     chargeMinion,
     config,
     deathriteMinion,
+    drowned,
     earthProviderMinion,
     entombed,
     format: selected.identity.payload,
@@ -1072,6 +1104,7 @@ function gameDefinition(
   mustBeCastToOuterColumn = false,
   siteGenesisDrawSpellPerAdjacentSameCard = false,
   mustBeCastBurrowed = false,
+  mustBeCastSubmerged = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -1116,6 +1149,7 @@ function gameDefinition(
       lethal,
       manaCost: card.manaCost,
       mustBeCastBurrowed,
+      mustBeCastSubmerged,
       mustBeCastToOuterColumn,
       ...(movementBonus ? { movementBonus } : {}),
       movesOnlySideways,
@@ -1137,7 +1171,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-genesis-spell' | 'air-leyline' | 'air-voidwalk' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-entombed' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-edge-connection' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-genesis-spell' | 'air-leyline' | 'air-voidwalk' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-entombed' | 'earth-first-strike' | 'earth-ward' | 'fire' | 'movement-two' | 'stealth' | 'water' | 'water-drowned' | 'water-edge-connection' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -1273,6 +1307,12 @@ function buildManifest(
     input.sedgeCrabs,
     input.submergeMinion,
   ]);
+  const waterDrownedDeck = elementalDeck('water', [
+    input.healingMinion,
+    input.slyFox,
+    input.sedgeCrabs,
+    input.drowned,
+  ]);
   const waterEdgeConnectionDeck = elementalDeck('water', [
     input.healingMinion,
     input.slyFox,
@@ -1300,6 +1340,8 @@ function buildManifest(
           ? elementalDeck('fire', [input.lumberingMinion, input.monstrousLion])
         : scenario === 'water-edge-connection'
           ? waterEdgeConnectionDeck
+        : scenario === 'water-drowned'
+          ? waterDrownedDeck
         : scenario === 'water-submerge'
           ? waterSubmergeDeck
         : scenario === 'water' || scenario === 'water-sideways' || scenario === 'water-stealth'
@@ -1315,6 +1357,8 @@ function buildManifest(
       ? airborneDeck
       : scenario === 'water-edge-connection'
         ? waterEdgeConnectionDeck
+      : scenario === 'water-drowned'
+        ? waterDrownedDeck
       : scenario === 'earth-entombed'
         ? earthEntombedDeck
       : scenario === 'earth-burrowing'
@@ -1362,7 +1406,8 @@ function buildManifest(
       card.stableId === input.stealthMinion.stableId,
       card.stableId === input.slyFox.stableId,
       card.stableId === input.sedgeCrabs.stableId,
-      card.stableId === input.submergeMinion.stableId,
+      card.stableId === input.submergeMinion.stableId
+        || card.stableId === input.drowned.stableId,
       card.stableId === input.burrowingMinion.stableId
         || card.stableId === input.entombed.stableId,
       card.stableId === input.voidwalkMinion.stableId
@@ -1372,6 +1417,7 @@ function buildManifest(
       card.stableId === input.forsaken.stableId,
       card.stableId === input.leylineHenge.stableId,
       card.stableId === input.entombed.stableId,
+      card.stableId === input.drowned.stableId,
     ),
   ]));
   return {
@@ -2423,6 +2469,54 @@ function keep(session: GameSession): GameSession {
     descriptor.kind === 'mulligan'
       && descriptor.atlasOrder.length === 0
       && descriptor.spellbookOrder.length === 0));
+}
+
+function findWaterDrownedOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  drownedInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string];
+  seed: number;
+  session: GameSession;
+  slyFoxInstanceId: string;
+  southSiteInstanceId: string;
+}> {
+  // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const seed = input.config.waterSeed + offset;
+    const built = buildManifest(input, seed, 'water-drowned');
+    const session = createGameSession(built.manifest);
+    const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('water');
+    });
+    const available = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 1),
+    ];
+    const drownedInstanceId = available
+      .find(({ cardId }) => cardId === input.drowned.stableId)?.instanceId;
+    const slyFoxInstanceId = available
+      .find(({ cardId }) => cardId === input.slyFox.stableId)?.instanceId;
+    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+    if (northSites.length >= 2
+      && drownedInstanceId
+      && slyFoxInstanceId
+      && southSiteInstanceId) {
+      return {
+        ...built,
+        drownedInstanceId,
+        northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
+        seed,
+        session,
+        slyFoxInstanceId,
+        southSiteInstanceId,
+      };
+    }
+  }
+  throw new Error('private Water Drowned scenario no longer produces its supported opening');
 }
 
 function deckList(deck: GameDeckSpec, names: ReadonlyMap<string, string>): DeckList {
@@ -3881,6 +3975,62 @@ function runWaterSubmerge(
   });
 }
 
+function runWaterDrowned(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['waterDrowned'] {
+  const opening = findWaterDrownedOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+
+  const summons = legalGameActions(session.state, 'north');
+  const matches = (cardInstanceId: string, region: 'surface' | 'underwater'): boolean =>
+    summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === cardInstanceId
+      && descriptor.cell === 'C3'
+      && (descriptor.region ?? 'surface') === region);
+  const drownedSurfaceUnavailable = !matches(opening.drownedInstanceId, 'surface');
+  const drownedUnderwaterAvailable = matches(opening.drownedInstanceId, 'underwater');
+  const slyFoxSurfaceAvailable = matches(opening.slyFoxInstanceId, 'surface');
+  const slyFoxUnderwaterUnavailable = !matches(opening.slyFoxInstanceId, 'underwater');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.drownedInstanceId
+    && descriptor.cell === 'C3'
+    && descriptor.region === 'underwater');
+  const summonedUnderwater = session.state.realm.units.some(({ instanceId, location, region }) =>
+    instanceId === opening.drownedInstanceId && location === 'C3' && region === 'underwater');
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    drowned: opening.names.get(input.drowned.stableId) ?? input.drowned.stableId,
+    drownedSurfaceUnavailable,
+    drownedUnderwaterAvailable,
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    slyFox: opening.names.get(input.slyFox.stableId) ?? input.slyFox.stableId,
+    slyFoxSurfaceAvailable,
+    slyFoxUnderwaterUnavailable,
+    summonedUnderwater,
+  });
+}
+
 function runWaterEdgeConnection(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['waterEdgeConnection'] {
@@ -4157,6 +4307,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthWard = runEarthWard(input);
   const fireResponse = runFireResponse(input);
   const stealth = runStealth(input);
+  const waterDrowned = runWaterDrowned(input);
   const waterEdgeConnection = runWaterEdgeConnection(input);
   const waterEndTurnStealth = runWaterEndTurnStealth(input);
   const waterHealing = runWaterHealing(input);
@@ -4324,6 +4475,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     revisionId: input.config.revisionId,
     seed: opening.seed,
     stealth,
+    waterDrowned,
     waterEdgeConnection,
     waterEndTurnStealth,
     waterHealing,

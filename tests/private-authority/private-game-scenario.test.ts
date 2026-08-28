@@ -208,6 +208,20 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.fireResponse.replayVerified, true);
   assert.equal(result.combat.northMinionDied, true);
   assert.equal(result.combat.southMinionDied, true);
+  assert.equal(result.waterDrowned.drowned, 'Drowned');
+  assert.equal(result.waterDrowned.slyFox, 'Sly Fox');
+  assert.equal(result.waterDrowned.acceptedActionCount, 10);
+  assert.equal(result.waterDrowned.drownedSurfaceUnavailable, true);
+  assert.equal(result.waterDrowned.drownedUnderwaterAvailable, true);
+  assert.equal(result.waterDrowned.slyFoxSurfaceAvailable, true);
+  assert.equal(result.waterDrowned.slyFoxUnderwaterUnavailable, true);
+  assert.equal(result.waterDrowned.summonedUnderwater, true);
+  assert.equal(result.waterDrowned.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.waterDrowned.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.waterDrowned.deck.spellbook
+    .find(({ name }) => name === 'Drowned')?.copies, 4);
+  assert.equal(result.waterDrowned.replayVerified, true);
   assert.equal(result.waterEndTurnStealth.slyFox, 'Sly Fox');
   assert.equal(result.waterEndTurnStealth.acceptedActionCount, 23);
   assert.equal(result.waterEndTurnStealth.summonedUnstealthed, true);
