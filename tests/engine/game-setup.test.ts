@@ -41,7 +41,7 @@ type SpellFacts = Readonly<{
   genesisDrawSite?: boolean;
   lethal?: boolean;
   manaCost: number;
-  movementPlusOne?: boolean;
+  movementBonus?: 1 | 2;
   provides?: 'air' | 'earth' | 'fire' | 'water';
   ranged?: boolean;
   stealth?: boolean;
@@ -105,7 +105,7 @@ function cardsFor(
         genesisDrawSite: facts.genesisDrawSite ?? false,
         lethal: facts.lethal ?? false,
         manaCost: facts.manaCost,
-        movementPlusOne: facts.movementPlusOne ?? false,
+        ...(facts.movementBonus ? { movementBonus: facts.movementBonus } : {}),
         ...(facts.provides ? { provides: facts.provides } : {}),
         ranged: facts.ranged ?? false,
         stealth: facts.stealth ?? false,
@@ -231,6 +231,13 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       [firstSpell]: { cardType: 'magic' } as unknown as GameCardDefinition,
     },
   }), /unsupported/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: { ...cards[firstSpell]!, movementBonus: 3 } as unknown as GameCardDefinition,
+    },
+  }), /movementBonus/);
 });
 
 test('TEST-03 different opponent hidden cards cannot change an observation or legal actions', () => {
@@ -1257,7 +1264,7 @@ test('RULE-04 Movement +1 issues exact two-step and returning Move and Attack pa
     attack: 2,
     defense: 2,
     manaCost: 1,
-    movementPlusOne: true,
+    movementBonus: 1,
     thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
   });
   let session = accept(setup.session, action(setup.session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
@@ -1292,7 +1299,7 @@ test('RULE-04 Movement +1 can take an exact two-step path to Defend', () => {
       attack: 2,
       defense: 2,
       manaCost: 1,
-      movementPlusOne: true,
+      movementBonus: 1,
       thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
     },
   })));
@@ -1341,6 +1348,43 @@ test('RULE-04 Movement +1 can take an exact two-step path to Defend', () => {
   session = accept(session, defend);
   assert.equal(session.state.realm.units.find(({ instanceId }) => instanceId === defenderInstanceId)?.location, 'C2');
   assert.match(canonicalJson(session.transcript.at(-1)?.events[0]?.payload ?? null), /\"steps\":2/);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 Movement +2 issues exact three-step paths and attacks after moving', () => {
+  const setup = northAttacksAtC2(125, {
+    attack: 2,
+    defense: 2,
+    manaCost: 1,
+    movementBonus: 2,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  });
+  let session = accept(setup.session, action(setup.session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'close-intercept'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  const actions = legalGameActions(session.state, 'north');
+  const threeStep = actions.find(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === setup.attackerInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3,C2,C1');
+  assert.ok(threeStep);
+  assert.equal(actions.some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === setup.attackerInstanceId
+      && descriptor.path.length > 4), false);
+  const result = stepGame(session, threeStep);
+  assert.equal(result.accepted, true);
+  session = result.session;
+  assert.match(canonicalJson(result.receipt.events[0]?.payload ?? null), /\"steps\":3/);
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === setup.defenderInstanceId), true);
   assert.equal(verifyGameReplay(session), true);
 });
 
