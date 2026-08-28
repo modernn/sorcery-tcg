@@ -47,6 +47,7 @@ type SpellFacts = Readonly<{
   manaCost: number;
   movementBonus?: 1 | 2;
   movesOnlySideways?: boolean;
+  mustBeCastBurrowed?: boolean;
   provides?: 'air' | 'earth' | 'fire' | 'water';
   ranged?: boolean;
   stealth?: boolean;
@@ -123,6 +124,7 @@ function cardsFor(
         manaCost: facts.manaCost,
         ...(facts.movementBonus ? { movementBonus: facts.movementBonus } : {}),
         movesOnlySideways: facts.movesOnlySideways ?? false,
+        mustBeCastBurrowed: facts.mustBeCastBurrowed ?? false,
         ...(facts.provides ? { provides: facts.provides } : {}),
         ranged: facts.ranged ?? false,
         stealth: facts.stealth ?? false,
@@ -289,6 +291,27 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /mustBeCastToOuterColumn/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        mustBeCastBurrowed: 'yes',
+      } as unknown as GameCardDefinition,
+    },
+  }), /mustBeCastBurrowed/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        burrowing: false,
+        mustBeCastBurrowed: true,
+      } as GameCardDefinition,
+    },
+  }), /requires Burrowing/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -1825,6 +1848,45 @@ test('RULE-04 Burrowing uses underground summons and movement only at land sites
   assert.equal(legalGameActions(water.state, 'north').some(({ descriptor }) =>
     descriptor.kind === 'summon-minion' && descriptor.region === 'underground'), false);
   assert.equal(verifyGameReplay(water), true);
+});
+
+test('RULE-03 a must-be-burrowed cast restriction suppresses only non-underground casts', () => {
+  let session = keep(createGameSession(manifest(139, {
+    northSpell: {
+      attack: 3,
+      burrowing: true,
+      defense: 3,
+      manaCost: 1,
+      mustBeCastBurrowed: true,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+  })));
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  const summons = legalGameActions(session.state, 'north');
+  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cell === 'C4' && descriptor.region === undefined), false);
+  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cell === 'C4' && descriptor.region === 'underground'), true);
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cell === 'C4' && descriptor.region === 'underground');
+  const unitId = session.state.realm.units[0]?.instanceId;
+  assert.ok(unitId);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === unitId
+    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+      === 'C4/underground,C4/surface');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-04 combined region abilities permit eligible cross-region adjacency steps', () => {

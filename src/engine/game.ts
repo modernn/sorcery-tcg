@@ -64,6 +64,7 @@ export type GameCardDefinition =
     manaCost: number;
     movementBonus?: 1 | 2;
     movesOnlySideways?: boolean;
+    mustBeCastBurrowed?: boolean;
     provides?: GameElement;
     ranged?: boolean;
     stealth?: boolean;
@@ -413,14 +414,16 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
         ? (definition.summonToAnySite ? siteCells : controlledCells)
           .filter((cell) => cell[0] === 'A' || cell[0] === 'E')
         : definition.summonToAnySite ? siteCells : controlledCells).flatMap((cell) => [
-      {
-        cardId,
-        cardInstanceId: instanceId,
-        casterInstanceId: player.avatar.card.instanceId,
-        cell,
-        kind: 'summon-minion' as const,
-        manaCost: definition.manaCost,
-      },
+      ...(!definition.mustBeCastBurrowed
+        ? [{
+          cardId,
+          cardInstanceId: instanceId,
+          casterInstanceId: player.avatar.card.instanceId,
+          cell,
+          kind: 'summon-minion' as const,
+          manaCost: definition.manaCost,
+        }]
+        : []),
       ...(definition.burrowing && !isWaterSite(state, cell)
         ? [{
           cardId,
@@ -432,7 +435,7 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
           region: 'underground' as const,
         }]
         : []),
-      ...(definition.submerge && isWaterSite(state, cell)
+      ...(definition.submerge && !definition.mustBeCastBurrowed && isWaterSite(state, cell)
         ? [{
           cardId,
           cardInstanceId: instanceId,
@@ -444,7 +447,7 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
         }]
         : []),
       ]),
-      ...(definition.voidwalk
+      ...(definition.voidwalk && !definition.mustBeCastBurrowed
         ? REALM_CELLS.filter((cell) => !state.realm.sites[cell]
           && (!definition.mustBeCastToOuterColumn || cell[0] === 'A' || cell[0] === 'E'))
           .map((cell) => ({
@@ -551,6 +554,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   }
   if (card.movesOnlySideways !== undefined && typeof card.movesOnlySideways !== 'boolean') {
     throw new RangeError(`${path}.movesOnlySideways must be boolean`);
+  }
+  if (card.mustBeCastBurrowed !== undefined && typeof card.mustBeCastBurrowed !== 'boolean') {
+    throw new RangeError(`${path}.mustBeCastBurrowed must be boolean`);
+  }
+  if (card.mustBeCastBurrowed && !card.burrowing) {
+    throw new RangeError(`${path}.mustBeCastBurrowed requires Burrowing`);
   }
   if (card.ranged !== undefined && typeof card.ranged !== 'boolean') {
     throw new RangeError(`${path}.ranged must be boolean`);
@@ -686,6 +695,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             manaCost: card.manaCost,
             ...(card.movementBonus ? { movementBonus: card.movementBonus } : {}),
             ...(card.movesOnlySideways === true ? { movesOnlySideways: true } : {}),
+            ...(card.mustBeCastBurrowed === true ? { mustBeCastBurrowed: true } : {}),
             ...(card.provides ? { provides: card.provides } : {}),
             ...(card.ranged === true ? { ranged: true } : {}),
             ...(card.stealth === true ? { stealth: true } : {}),
