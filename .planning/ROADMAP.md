@@ -79,7 +79,7 @@ Plans:
 
 **Wave 9** *(blocked on Wave 8 completion)*
 
-- [ ] 01-15-PLAN.md — Import the user-provided seven-file v3 manual inbox offline and prove both fresh roots complete, immutable, and non-disclosing.
+- [x] 01-15-PLAN.md — Import the user-provided seven-file v3 manual inbox offline and prove both fresh roots complete, immutable, and non-disclosing.
 
 **Wave 10** *(blocked on Wave 9 completion)*
 
@@ -223,7 +223,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Rules and Data Authority | 13/15 | In Progress | - |
+| 1. Rules and Data Authority | 14/15 | In Progress | - |
 | 2. Deterministic Engine Contract | 0/TBD | Not started | - |
 | 3. Complete Core Game Rules | 0/TBD | Not started | - |
 | 4. Storyline, Card Effects, and Coverage | 0/TBD | Not started | - |
