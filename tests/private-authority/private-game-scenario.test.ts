@@ -8,6 +8,8 @@ import {
   type PrivateStarterPreset,
   runPrivateGameCheck,
 } from '../../src/commands/run-private-game-check.ts';
+import { selectDeterministicGameAction } from '../../src/commands/run-game-demo.ts';
+import { createGameSession, stepGame } from '../../src/engine/game.ts';
 import { createGamePrototypeServer } from '../../src/prototype/game-server.ts';
 
 type JsonObject = Record<string, unknown>;
@@ -493,6 +495,9 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
       });
       let opponentActionCount = 0;
       let combatObserved = false;
+      const opponentActionKinds = new Set<string>();
+      let opponentPowerAwaitingAttack = false;
+      let opponentPowerUsed = false;
       for (let count = 0; count < 500; count += 1) {
         const currentView = current.view as JsonObject;
         const north = ((currentView.players as JsonObject).north as JsonObject);
@@ -505,12 +510,36 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
         opponentActionCount += Number(current.opponentActionCount);
         const opponentActions = current.opponentActions as JsonObject[];
         assert.equal(opponentActions.length, Number(current.opponentActionCount), preset.id);
+        opponentActions.forEach(({ events, kind }) => {
+          opponentActionKinds.add(String(kind));
+          const eventTypes = events as string[];
+          if (eventTypes.includes('power-granted')) {
+            opponentPowerAwaitingAttack = true;
+            opponentPowerUsed = false;
+          }
+          if (opponentPowerAwaitingAttack && eventTypes.includes('attack-declared')) {
+            opponentPowerUsed = true;
+          }
+          if (opponentPowerAwaitingAttack && eventTypes.includes('power-expired')) {
+            assert.equal(opponentPowerUsed, true, 'Earth computer wasted temporary power');
+            opponentPowerAwaitingAttack = false;
+          }
+        });
         assert.doesNotMatch(JSON.stringify(opponentActions), /card:|sha256:/, preset.id);
       }
       const terminal = ((current.view as JsonObject).terminal as JsonObject);
       assert.equal(current.opponent, 'south', preset.id);
       assert.ok(opponentActionCount > 0, preset.id);
       assert.equal(combatObserved, true, preset.id);
+      if (preset.id === 'air-vs-earth-lesson') {
+        assert.equal(opponentActionKinds.has('cast-magic'), true);
+        assert.equal(opponentActionKinds.has('shoot-projectile'), true);
+        assert.equal(opponentPowerUsed, true);
+        assert.equal(opponentPowerAwaitingAttack, false);
+      }
+      if (preset.id === 'earth-vs-air-lesson') {
+        assert.equal(opponentActionKinds.has('activate-sparkmage'), true);
+      }
       assert.equal(terminal.status, 'finished', preset.id);
       assert.ok(['avatar_defeated', 'simultaneous_avatar_defeat']
         .includes(String(terminal.reason)), preset.id);
@@ -926,6 +955,46 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Pudge Butcher': 1,
     'Wild Boars': 2,
   });
+  let tacticSession = createGameSession(airLesson.manifest);
+  let buffedAlly: string | undefined;
+  let buffedAllyMoved = false;
+  let buffedAllyAttacked = false;
+  let completedPowerUse = false;
+  while (tacticSession.state.terminal.status === 'active' && tacticSession.transcript.length < 500) {
+    const seat = tacticSession.state.decisionSeat;
+    const selected = selectDeterministicGameAction(tacticSession);
+    if (seat === 'south' && selected.descriptor.kind === 'cast-magic') {
+      const definition = tacticSession.state.cards[selected.descriptor.cardId];
+      if (definition?.cardType === 'magic' && definition.grantPowerToAllyThisTurn !== undefined) {
+        assert.ok(selected.descriptor.ally);
+        if (buffedAlly) assert.equal(selected.descriptor.ally.instanceId, buffedAlly);
+        buffedAlly = selected.descriptor.ally.instanceId;
+        buffedAllyMoved = false;
+        buffedAllyAttacked = false;
+      }
+    }
+    if (seat === 'south' && buffedAlly && !buffedAllyMoved
+      && selected.descriptor.kind === 'move-and-attack') {
+      assert.equal(selected.descriptor.unitInstanceId, buffedAlly);
+      buffedAllyMoved = true;
+    }
+    if (seat === 'south' && buffedAlly && buffedAllyMoved && !buffedAllyAttacked
+      && selected.descriptor.kind === 'declare-attack') {
+      assert.equal(tacticSession.state.pendingCombat?.attacker.instanceId, buffedAlly);
+      assert.equal(buffedAllyMoved, true);
+      buffedAllyAttacked = true;
+    }
+    const stepped = stepGame(tacticSession, selected);
+    assert.equal(stepped.accepted, true);
+    if (!stepped.accepted) break;
+    if (seat === 'south' && stepped.receipt.events.some(({ type }) => type === 'power-expired')) {
+      assert.equal(buffedAllyAttacked, true);
+      completedPowerUse = true;
+      buffedAlly = undefined;
+    }
+    tacticSession = stepped.session;
+  }
+  assert.equal(completedPowerUse, true);
   for (const name of ['Dark Tower', 'Gothic Tower', 'Lone Tower']) {
     const cardId = Object.entries(airLesson.cardNames)
       .find(([, candidate]) => candidate === name)?.[0];

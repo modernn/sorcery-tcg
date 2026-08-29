@@ -66,14 +66,14 @@ export function createSyntheticDemoManifest(seed = 1): GameManifest {
 
 export function selectDeterministicGameAction(session: GameSession): GameLegalAction {
   const actions = legalGameActions(session.state, session.state.decisionSeat);
-  const player = session.state.players[session.state.decisionSeat];
+  const seat = session.state.decisionSeat;
+  const player = session.state.players[seat];
+  const enemySeat = seat === 'north' ? 'south' : 'north';
   // ponytail: preserve one opening-hand-sized Atlas reserve; replace when opponent strategy exists.
   const drawZone = player.atlas.length > 3 || player.spellbook.length <= player.atlas.length
     ? 'atlas'
     : 'spellbook';
-  const enemyAvatar = session.state.players[
-    session.state.decisionSeat === 'north' ? 'south' : 'north'
-  ].avatar.location;
+  const enemyAvatar = session.state.players[enemySeat].avatar.location;
   const movement = actions
     .map((action) => {
       const inPlaceAvatarAttack = action.descriptor.kind === 'move-and-attack'
@@ -91,6 +91,44 @@ export function selectDeterministicGameAction(session: GameSession): GameLegalAc
       };
     })
     .sort((left, right) => left.distance - right.distance)[0];
+  // ponytail: exercise obviously beneficial supported tactics; add evaluation when the opponent needs strategy.
+  const tactic = actions.find(({ descriptor }) => {
+    if (descriptor.kind === 'cast-magic') {
+      const definition = session.state.cards[descriptor.cardId];
+      return definition?.cardType === 'magic'
+        && ((definition.damageTargetUnit !== undefined && descriptor.target?.seat === enemySeat)
+          || (definition.grantPowerToAllyThisTurn !== undefined
+            && descriptor.ally?.seat === seat
+            && movement?.action.descriptor.kind === 'move-and-attack'
+            && movement.action.descriptor.unitInstanceId === descriptor.ally.instanceId
+            && movement.action.descriptor.to.cell === enemyAvatar
+            && movement.action.descriptor.to.region === 'surface'));
+    }
+    if (descriptor.kind === 'shoot-projectile') return descriptor.hit?.seat === enemySeat;
+    if (descriptor.kind === 'shoot-drag-projectile') {
+      return descriptor.hit?.seat === enemySeat && !descriptor.fightOnArrival;
+    }
+    if (descriptor.kind !== 'activate-sparkmage'
+      || (player.airThresholdsCastThisTurn ?? 0) === 0) return false;
+    const targetControllers = [
+      ...(['north', 'south'] as const).flatMap((targetSeat) => {
+        const avatar = session.state.players[targetSeat].avatar;
+        return avatar.card.instanceId !== descriptor.sourceInstanceId
+          && avatar.location === descriptor.targetLocation.cell
+          && avatar.region === descriptor.targetLocation.region
+          ? [targetSeat]
+          : [];
+      }),
+      ...session.state.realm.units
+        .filter(({ instanceId, location, region }) =>
+          instanceId !== descriptor.sourceInstanceId
+            && location === descriptor.targetLocation.cell
+            && region === descriptor.targetLocation.region)
+        .map(({ controller }) => controller),
+    ];
+    return targetControllers.length > 0
+      && targetControllers.every((controller) => controller === enemySeat);
+  });
   const selected = actions.find(({ descriptor }) =>
     descriptor.kind === 'mulligan'
       && descriptor.atlasOrder.length === 0
@@ -99,6 +137,7 @@ export function selectDeterministicGameAction(session: GameSession): GameLegalAc
     ?? actions.find(({ descriptor }) => descriptor.kind === 'summon-minion')
     ?? actions.find(({ descriptor }) =>
       descriptor.kind === 'draw' && descriptor.zone === drawZone)
+    ?? tactic
     ?? (movement && Number.isFinite(movement.distance) ? movement.action : undefined)
     ?? actions.find(({ descriptor }) => descriptor.kind === 'end-turn')
     ?? actions[0];
