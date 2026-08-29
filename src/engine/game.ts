@@ -130,6 +130,7 @@ export type GameCardDefinition =
     tapToDamageEachUnitAtAdjacentLocation?: 2;
     tapForMana?: number;
     thresholds: GameThresholds;
+    untapsAtEndOfControllerTurn?: true;
     voidwalk?: boolean;
     waterbound?: boolean;
     ward?: boolean;
@@ -1233,6 +1234,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && (!Number.isSafeInteger(card.tapForMana) || card.tapForMana < 1 || card.tapForMana > MAX_COMBAT_STAT)) {
     throw new RangeError(path + '.tapForMana must be a safe integer between 1 and ' + MAX_COMBAT_STAT);
   }
+  if (card.untapsAtEndOfControllerTurn !== undefined
+    && card.untapsAtEndOfControllerTurn !== true) {
+    throw new RangeError(`${path}.untapsAtEndOfControllerTurn must be true when defined`);
+  }
   if (card.tapToDamageEachUnitAtAdjacentLocation !== undefined
     && card.tapToDamageEachUnitAtAdjacentLocation !== 2) {
     throw new RangeError(`${path}.tapToDamageEachUnitAtAdjacentLocation must be 2`);
@@ -1439,6 +1444,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               : {}),
             ...(card.tapForMana ? { tapForMana: card.tapForMana } : {}),
             thresholds: { ...card.thresholds },
+            ...(card.untapsAtEndOfControllerTurn === true
+              ? { untapsAtEndOfControllerTurn: true as const }
+              : {}),
             ...(card.voidwalk === true ? { voidwalk: true } : {}),
             ...(card.waterbound === true ? { waterbound: true } : {}),
             ...(card.ward === true ? { ward: true } : {}),
@@ -5755,6 +5763,13 @@ function applyDescriptor(
     return definition.cardType === 'minion' && definition.gainsStealthAtEndOfTurn === true;
   });
   const stealthGainedIds = new Set(stealthGained.map(({ instanceId }) => instanceId));
+  const endPhaseUntapped = endState.realm.units.filter((unit) => {
+    if (unit.controller !== seat || !unit.tapped || minionDisabled(endState, unit)) return false;
+    const definition = cardDefinition(endState, unit.cardId);
+    return definition.cardType === 'minion'
+      && definition.untapsAtEndOfControllerTurn === true;
+  });
+  const endPhaseUntappedIds = new Set(endPhaseUntapped.map(({ instanceId }) => instanceId));
   const expiredDisableEffects = endState.realm.units.flatMap((unit) =>
     (unit.disableEffects ?? [])
       .filter(({ expiresAtSeat }) => expiresAtSeat === nextSeat)
@@ -5792,7 +5807,9 @@ function applyDescriptor(
       damage: 0,
       ...(stealthGainedIds.has(unit.instanceId) ? { stealthed: true } : {}),
       ...(unit.controller === seat ? { summoningSickness: false } : {}),
-      ...(unit.controller === nextSeat ? { tapped: false } : {}),
+      ...(unit.controller === nextSeat || endPhaseUntappedIds.has(unit.instanceId)
+        ? { tapped: false }
+        : {}),
     });
   });
   const turnNumber = endState.turnNumber + 1;
@@ -5808,6 +5825,10 @@ function applyDescriptor(
     }),
     [
       ...endOfTurnDeaths.outcomes,
+      ...endPhaseUntapped.map(({ controller, instanceId }) => ({
+        payload: { instanceId, seat: controller, sourceInstanceId: instanceId },
+        type: 'minion-untapped',
+      })),
       ...stealthGained.map(({ controller, instanceId }) => ({
         payload: { instanceId, seat: controller },
         type: 'stealth-gained',

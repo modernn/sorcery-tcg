@@ -69,6 +69,7 @@ type SpellFacts = Readonly<{
   mustBeCastToOuterColumn?: boolean;
   tapForMana?: number;
   thresholds: Readonly<{ air: number; earth: number; fire: number; water: number }>;
+  untapsAtEndOfControllerTurn?: true;
   voidwalk?: boolean;
   waterbound?: boolean;
   ward?: boolean;
@@ -175,6 +176,9 @@ function cardsFor(
         mustBeCastToOuterColumn: facts.mustBeCastToOuterColumn ?? false,
         ...(facts.tapForMana ? { tapForMana: facts.tapForMana } : {}),
         thresholds: { ...facts.thresholds },
+        ...(facts.untapsAtEndOfControllerTurn === true
+          ? { untapsAtEndOfControllerTurn: true as const }
+          : {}),
         voidwalk: facts.voidwalk ?? false,
         waterbound: facts.waterbound ?? false,
         ward: facts.ward ?? false,
@@ -7183,6 +7187,218 @@ test('RULE-04 Sly Fox gains Stealth once at the end of its controller turn', () 
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
   assert.equal(session.transcript.at(-1)?.events.some(({ type }) => type === 'stealth-gained'), false);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 Malakhim untaps at its controller End Phase unless Disabled', () => {
+  const gameManifest = manifest(159, {
+    northSpell: {
+      airborne: true,
+      attack: 4,
+      defense: 4,
+      manaCost: 1,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      untapsAtEndOfControllerTurn: true,
+      ward: true,
+    },
+    southSpell: {
+      attack: 1,
+      defense: 1,
+      manaCost: 1,
+      movementBonus: 1,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+  });
+  const malakhimCardId = gameManifest.decks.north.spellbook[0]!;
+  const canonicalMalakhim = gameManifest.cards[malakhimCardId];
+  assert.equal(canonicalMalakhim?.cardType === 'minion'
+    && canonicalMalakhim.airborne
+    && canonicalMalakhim.untapsAtEndOfControllerTurn
+    && canonicalMalakhim.ward, true);
+  assert.throws(() => createGameManifest({
+    authority: gameManifest.authority,
+    cards: {
+      ...gameManifest.cards,
+      [malakhimCardId]: {
+        ...canonicalMalakhim,
+        untapsAtEndOfControllerTurn: false,
+      } as unknown as GameCardDefinition,
+    },
+    decks: gameManifest.decks,
+    firstSeat: gameManifest.firstSeat,
+    seed: gameManifest.seed,
+  }), /untapsAtEndOfControllerTurn must be true when defined/);
+
+  let session = keep(createGameSession(gameManifest));
+  session = keep(session);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cell === 'C4'));
+  const malakhim = session.state.realm.units[0];
+  assert.ok(malakhim);
+  const readyEnd = stepGame(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  assert.equal(readyEnd.accepted, true);
+  if (!readyEnd.accepted) return;
+  assert.equal(readyEnd.receipt.events.some(({ type }) => type === 'minion-untapped'), false);
+  assert.deepEqual(readyEnd.receipt.randomDraws, []);
+  session = readyEnd.session;
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cell === 'C1'));
+  const attackerInstanceId = session.state.realm.units
+    .find(({ controller }) => controller === 'south')?.instanceId;
+  assert.ok(attackerInstanceId);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C3'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === malakhim.instanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  const tappedMalakhim = session.state.realm.units
+    .find(({ instanceId }) => instanceId === malakhim.instanceId);
+  assert.deepEqual({
+    controller: tappedMalakhim?.controller,
+    location: tappedMalakhim?.location,
+    owner: tappedMalakhim?.owner,
+    region: tappedMalakhim?.region,
+    tapped: tappedMalakhim?.tapped,
+    warded: tappedMalakhim?.warded,
+  }, {
+    controller: 'north',
+    location: 'C3',
+    owner: 'north',
+    region: 'surface',
+    tapped: true,
+    warded: true,
+  });
+
+  const damagedCheckpoint: GameSession = {
+    ...session,
+    state: {
+      ...session.state,
+      realm: {
+        ...session.state.realm,
+        units: session.state.realm.units.map((unit) => unit.instanceId === malakhim.instanceId
+          ? { ...unit, damage: 2 }
+          : unit),
+      },
+    },
+  };
+  const damagedEnd = stepGame(damagedCheckpoint, action(damagedCheckpoint, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  assert.equal(damagedEnd.accepted, true);
+  if (!damagedEnd.accepted) return;
+  assert.deepEqual(damagedEnd.receipt.events.map(({ type }) => type), [
+    'minion-untapped',
+    'turn-ended',
+    'turn-started',
+  ]);
+  assert.deepEqual(damagedEnd.session.state.realm.units
+    .filter(({ instanceId }) => instanceId === malakhim.instanceId)
+    .map(({ damage, tapped, warded }) => ({ damage, tapped, warded })), [{
+    damage: 0,
+    tapped: false,
+    warded: true,
+  }]);
+
+  const disabledCheckpoint: GameSession = {
+    ...session,
+    state: {
+      ...session.state,
+      realm: {
+        ...session.state.realm,
+        units: session.state.realm.units.map((unit) => unit.instanceId === malakhim.instanceId
+          ? {
+            ...unit,
+            damage: 2,
+            disableEffects: [{
+              expiresAtSeat: 'south' as const,
+              sourceInstanceId: unit.instanceId,
+            }],
+          }
+          : unit),
+      },
+    },
+  };
+  const disabledEnd = stepGame(disabledCheckpoint, action(disabledCheckpoint, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  assert.equal(disabledEnd.accepted, true);
+  if (!disabledEnd.accepted) return;
+  assert.equal(disabledEnd.receipt.events.some(({ type }) => type === 'minion-untapped'), false);
+  assert.deepEqual(disabledEnd.session.state.realm.units
+    .filter(({ instanceId }) => instanceId === malakhim.instanceId)
+    .map(({ damage, disableEffects, tapped, warded }) => ({
+      damage,
+      disableEffects,
+      tapped,
+      warded,
+    })), [{
+    damage: 0,
+    disableEffects: undefined,
+    tapped: true,
+    warded: true,
+  }]);
+
+  const ended = stepGame(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  assert.equal(ended.accepted, true);
+  if (!ended.accepted) return;
+  assert.deepEqual(ended.receipt.events.map(({ type }) => type), [
+    'minion-untapped',
+    'turn-ended',
+    'turn-started',
+  ]);
+  assert.deepEqual(ended.receipt.events[0]?.payload, {
+    instanceId: malakhim.instanceId,
+    seat: 'north',
+    sourceInstanceId: malakhim.instanceId,
+  });
+  assert.equal(ended.receipt.events[0]?.type, 'minion-untapped');
+  assert.deepEqual(ended.receipt.randomDraws, []);
+  assert.deepEqual(ended.session.state.realm.units
+    .filter(({ instanceId }) => instanceId === malakhim.instanceId)
+    .map(({ controller, damage, location, owner, region, tapped, warded }) => ({
+      controller,
+      damage,
+      location,
+      owner,
+      region,
+      tapped,
+      warded,
+    })), [{
+    controller: 'north',
+    damage: 0,
+    location: 'C3',
+    owner: 'north',
+    region: 'surface',
+    tapped: false,
+    warded: true,
+  }]);
+  assert.equal(observeGame(ended.session.state, 'south').realm.units
+    .find(({ instanceId }) => instanceId === malakhim.instanceId)?.warded, true);
+  session = ended.session;
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C2'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === attackerInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C1,C2,C3'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'defend' && descriptor.unitInstanceId === malakhim.instanceId));
   assert.equal(verifyGameReplay(session), true);
 });
 

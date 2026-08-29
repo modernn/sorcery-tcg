@@ -575,6 +575,20 @@ export type PrivateGameCheck = Readonly<{
     replayVerified: boolean;
     seed: number;
   }>;
+  earthMalakhim: Readonly<{
+    acceptedActionCount: number;
+    airborneAndWard: boolean;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    earthAffinityThree: boolean;
+    endPhaseUntapped: boolean;
+    malakhim: string;
+    manaPaid: number;
+    noRandomDraws: boolean;
+    normalActionTapped: boolean;
+    opponentTurnReady: boolean;
+    replayVerified: boolean;
+  }>;
   earthFirstStrike: Readonly<{
     acceptedActionCount: number;
     attackerSurvivedUndamaged: boolean;
@@ -1120,6 +1134,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   lightningBolt: NormalizedCard;
   lugbogCat: NormalizedCard;
   lure: NormalizedCard;
+  malakhim: NormalizedCard;
   mesmerism: NormalizedCard;
   lumberingMinion: NormalizedCard;
   manaMinion: NormalizedCard;
@@ -2323,6 +2338,25 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || manaMinion.rarity === null) {
     throw new Error('private mana minion no longer matches its supported facts');
   }
+  const malakhim = snapshot.cards.find(({ name }) => name === 'Malakhim');
+  if (!malakhim
+    || malakhim.stableId !== 'card:bae390c28ebe0ec9adbcb37ba77572ac944c54a3de1957a3ab56b8b78f297b33'
+    || malakhim.cardType !== 'minion'
+    || malakhim.rulesText.trim().replaceAll('\r\n', '\n')
+      !== 'Airborne, Ward\n\nAt the end of your turn, untap Malakhim.'
+    || malakhim.manaCost !== 6
+    || malakhim.attack !== 4
+    || malakhim.defense !== 4
+    || malakhim.life !== null
+    || malakhim.elements.length !== 1
+    || malakhim.elements[0] !== 'earth'
+    || malakhim.thresholds.air !== 0
+    || malakhim.thresholds.earth !== 3
+    || malakhim.thresholds.fire !== 0
+    || malakhim.thresholds.water !== 0
+    || malakhim.rarity !== 'elite') {
+    throw new Error('private end-turn untap minion no longer matches its supported facts');
+  }
   const movementMinion = snapshot.cards.find(({ stableId }) => stableId === config.movementMinionStableId);
   if (!movementMinion
     || movementMinion.cardType !== 'minion'
@@ -2473,6 +2507,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     lightningBolt,
     lugbogCat,
     lure,
+    malakhim,
     mesmerism,
     lumberingMinion,
     manaMinion,
@@ -2611,6 +2646,7 @@ function gameDefinition(
   siteGenesisEnemiesLoseStealth = false,
   tapToDamageEachUnitAtAdjacentLocation = false,
   gainControlOfTargetNearbyMinion = false,
+  untapsAtEndOfControllerTurn = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -2751,6 +2787,7 @@ function gameDefinition(
       strikesFirstWhileAttacking,
       submerge,
       summonToAnySite,
+      ...(untapsAtEndOfControllerTurn ? { untapsAtEndOfControllerTurn: true } : {}),
       ...(tapToDamageEachUnitAtAdjacentLocation
         ? { tapToDamageEachUnitAtAdjacentLocation: 2 as const }
         : {}),
@@ -2767,7 +2804,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -2870,6 +2907,11 @@ function buildManifest(
     input.firstStrikeTargetMinion,
   ] as const;
   const earthDeck = elementalDeck('earth', earthMinions, [input.ghostTownSite]);
+  const earthMalakhimDeck = elementalDeck(
+    'earth',
+    [input.malakhim, input.elthamTownsfolk],
+    [input.ghostTownSite, input.valley],
+  );
   const earthOverpowerDeck = elementalDeck(
     'earth',
     [...earthMinions, input.elthamTownsfolk],
@@ -3154,6 +3196,8 @@ function buildManifest(
         ? earthForwardDeck
       : scenario === 'earth-immobile'
         ? earthImmobileDeck
+      : scenario === 'earth-malakhim'
+        ? earthMalakhimDeck
       : scenario === 'earth-overpower'
         ? earthOverpowerDeck
       : scenario === 'earth-tunnel'
@@ -3285,6 +3329,8 @@ function buildManifest(
         ? earthForwardDeck
       : scenario === 'earth-immobile'
         ? earthImmobileDeck
+      : scenario === 'earth-malakhim'
+        ? earthMalakhimDeck
       : scenario === 'earth-overpower'
         ? earthOverpowerDeck
       : scenario === 'earth-tunnel'
@@ -3330,11 +3376,13 @@ function buildManifest(
       card.stableId === input.monstrousLion.stableId,
       card.stableId === input.rangedMinion.stableId,
       card.stableId === input.firstStrikeMinion.stableId,
-      card.stableId === input.wardMinion.stableId,
+      card.stableId === input.wardMinion.stableId
+        || card.stableId === input.malakhim.stableId,
       card.stableId === input.airborneMinion.stableId
         || card.stableId === input.movementTwoMinion.stableId
         || card.stableId === input.grainSparrow.stableId
-        || card.stableId === input.bladderblimp.stableId,
+        || card.stableId === input.bladderblimp.stableId
+        || card.stableId === input.malakhim.stableId,
       card.stableId === input.stealthMinion.stableId,
       card.stableId === input.slyFox.stableId,
       card.stableId === input.sedgeCrabs.stableId,
@@ -3393,6 +3441,7 @@ function buildManifest(
       card.stableId === input.huntersLodge.stableId,
       card.stableId === input.vikings.stableId,
       card.stableId === input.mesmerism.stableId,
+      card.stableId === input.malakhim.stableId,
     ),
   ]));
   return {
@@ -3660,6 +3709,59 @@ function findEarthOpening(
     };
   }
   throw new Error(`private Earth scenario seed ${seed} no longer produces its supported opening`);
+}
+
+function findEarthMalakhimOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  malakhimInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  siteInstanceIds: readonly [string, string, string, string, string];
+  southSiteInstanceId: string;
+  session: GameSession;
+}> {
+  // ponytail: bounded opening scan avoids another private seed field.
+  for (let offset = 1; offset <= 8192; offset += 1) {
+    const built = buildManifest(input, input.config.earthSeed + offset, 'earth-malakhim');
+    const session = createGameSession(built.manifest);
+    const accessibleSites = [
+      ...session.state.players.north.hand.atlas,
+      ...session.state.players.north.atlas.slice(0, 2),
+    ];
+    const playedSites = accessibleSites.slice(0, 5);
+    const earthSites = playedSites.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('earth');
+    });
+    const ghostTowns = playedSites.filter(({ cardId }) =>
+      cardId === input.ghostTownSite.stableId);
+    const malakhimInstanceId = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 2),
+    ].find(({ cardId }) => cardId === input.malakhim.stableId)?.instanceId;
+    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+    if (earthSites.length >= 3
+      && ghostTowns.length >= 2
+      && playedSites[4]?.cardId === input.ghostTownSite.stableId
+      && malakhimInstanceId
+      && southSiteInstanceId) {
+      return {
+        ...built,
+        malakhimInstanceId,
+        siteInstanceIds: [
+          playedSites[0]!.instanceId,
+          playedSites[1]!.instanceId,
+          playedSites[2]!.instanceId,
+          playedSites[3]!.instanceId,
+          playedSites[4]!.instanceId,
+        ],
+        southSiteInstanceId,
+        session,
+      };
+    }
+  }
+  throw new Error('private Malakhim scenario lacks its supported opening');
 }
 
 function findEarthDuelOpening(
@@ -8558,6 +8660,135 @@ function runEarthRamp(
   });
 }
 
+function runEarthMalakhimSetup(
+  opening: ReturnType<typeof findEarthMalakhimOpening>,
+): GameSession {
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.siteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.siteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.siteInstanceIds[2]
+    && descriptor.cell === 'B3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.siteInstanceIds[3]
+    && descriptor.cell === 'A3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.siteInstanceIds[4]
+    && descriptor.cell === 'A2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.malakhimInstanceId
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  return session;
+}
+
+function runEarthMalakhim(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthMalakhim'] {
+  const opening = findEarthMalakhimOpening(input);
+  let session = runEarthMalakhimSetup(opening);
+  const definition = session.state.cards[input.malakhim.stableId];
+  const before = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.malakhimInstanceId);
+  if (!before) throw new Error('private Malakhim setup did not summon Malakhim');
+  const summonEvent = session.transcript.flatMap(({ events }) => events)
+    .find(({ payload, type }) => type === 'minion-summoned'
+      && isJsonRecord(payload)
+      && payload.instanceId === opening.malakhimInstanceId);
+  const summonPayload = summonEvent && isJsonRecord(summonEvent.payload)
+    ? summonEvent.payload
+    : undefined;
+  const affinity = observeGame(session.state, 'north').players.north.affinity.earth;
+  const move = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.malakhimInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,B3'
+      && descriptor.path.every(({ region }) => region === 'surface')));
+  if (!move.accepted) throw new Error('private Malakhim normal action was rejected');
+  session = move.session;
+  const moved = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.malakhimInstanceId);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  const ended = stepGame(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  if (!ended.accepted) throw new Error('private Malakhim end phase was rejected');
+  session = ended.session;
+  const after = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.malakhimInstanceId);
+  const events = ended.receipt.events;
+  const untapPayload = events[0] && isJsonRecord(events[0].payload)
+    ? events[0].payload
+    : undefined;
+  const untapIndex = events.findIndex(({ type }) => type === 'minion-untapped');
+  const turnEndedIndex = events.findIndex(({ type }) => type === 'turn-ended');
+  const airborneAndWard = definition?.cardType === 'minion'
+    && definition.airborne === true
+    && definition.ward === true
+    && before.warded;
+  const normalActionTapped = moved?.tapped === true
+    && moved.location === 'B3'
+    && moved.region === 'surface';
+  const endPhaseUntapped = moved?.tapped === true && after?.tapped === false;
+  const opponentTurnReady = session.state.decisionSeat === 'south'
+    && session.state.phase === 'draw'
+    && after?.controller === 'north'
+    && after.owner === 'north'
+    && !after.summoningSickness
+    && !after.tapped;
+  const causalEventsVerified = events.map(({ type }) => type).join(',')
+    === 'minion-untapped,turn-ended,turn-started'
+    && untapPayload?.instanceId === opening.malakhimInstanceId
+    && untapPayload.seat === 'north'
+    && untapPayload.sourceInstanceId === opening.malakhimInstanceId
+    && untapIndex >= 0
+    && untapIndex < turnEndedIndex;
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    airborneAndWard,
+    causalEventsVerified,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    earthAffinityThree: affinity === 3,
+    endPhaseUntapped,
+    malakhim: input.malakhim.name,
+    manaPaid: typeof summonPayload?.manaPaid === 'number' ? summonPayload.manaPaid : -1,
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    normalActionTapped,
+    opponentTurnReady,
+    replayVerified: verifyGameReplay(session),
+  });
+}
+
 function stageEarthDuel(opening: ReturnType<typeof findEarthDuelOpening>): GameSession {
   let session = keep(opening.session);
   session = keep(session);
@@ -13446,6 +13677,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthForwardMovement = runEarthForwardMovement(input);
   const earthImmobile = runEarthImmobile(input);
   const earthRamp = runEarthRamp(input);
+  const earthMalakhim = runEarthMalakhim(input);
   const earthRanged = runEarthRanged(input);
   const earthSecretTunnel = runEarthSecretTunnel(input);
   const earthWard = runEarthWard(input);
@@ -13642,6 +13874,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthSinkhole,
     earthEntombed,
     earthRamp,
+    earthMalakhim,
     earthFirstStrike,
     earthForwardMovement,
     earthImmobile,
