@@ -1258,6 +1258,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   autumnUnicorn: NormalizedCard;
   authorityHash: Hash;
   bladderblimp: NormalizedCard;
+  blink: NormalizedCard;
   bury: NormalizedCard;
   borderMilitia: NormalizedCard;
   burrowingMinion: NormalizedCard;
@@ -1775,6 +1776,30 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || vantageHills.thresholds.water !== 0
     || vantageHills.rarity !== 'exceptional') {
     throw new Error('private ranged-range site no longer matches its supported facts');
+  }
+  const blink = snapshot.cards.find(({ name }) => name === 'Blink');
+  const blinkTokens = blink?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
+  if (!blink
+    || blink.stableId
+      !== 'card:1bdd0f0cff4c955b574d7774e65d1f9233dee338fd7aa9d142df2f73d62be961'
+    || blink.officialSourceId !== '001-blink-b-f'
+    || blink.cardType !== 'magic'
+    || blinkTokens.length !== 12
+    || blinkTokens.filter((token) => token === 'a').length !== 2
+    || !['an', 'ally', 'teleports', 'to', 'a', 'location', 'it', 's', 'nearby', 'draw', 'card']
+      .every((token) => blinkTokens.includes(token))
+    || blink.manaCost !== 2
+    || blink.attack !== null
+    || blink.defense !== null
+    || blink.life !== null
+    || blink.elements.length !== 1
+    || blink.elements[0] !== 'air'
+    || blink.thresholds.air !== 1
+    || blink.thresholds.earth !== 0
+    || blink.thresholds.fire !== 0
+    || blink.thresholds.water !== 0
+    || blink.rarity !== 'ordinary') {
+    throw new Error('private nearby-ally teleport draw Magic no longer matches its supported facts');
   }
   const wildBoars = snapshot.cards.find(({ name }) => name === 'Wild Boars');
   if (!wildBoars
@@ -3119,6 +3144,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     autumnUnicorn,
     authorityHash: artifact.contentHash,
     bladderblimp,
+    blink,
     borderMilitia,
     bury,
     burrowingMinion,
@@ -3334,6 +3360,7 @@ function gameDefinition(
   tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn = false,
   otherNearbyAlliesPowerBonus = false,
   rangedUnitsHereRangeBonus = false,
+  teleportNearbyAllyThenDrawCard = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -3399,6 +3426,7 @@ function gameDefinition(
     + Number(grantPowerToAllyThisTurn !== 0)
     + Number(lureEnemyMinionOneStepCloser)
     + Number(teleportAllyToTargetSite)
+    + Number(teleportNearbyAllyThenDrawCard)
     + Number(returnMinionFromOwnCemetery)
     + Number(disableTargetNearbyMinionUntilNextTurn)
     + Number(submergeTargetMinion)
@@ -3425,6 +3453,7 @@ function gameDefinition(
       ...(summonTokenToEachControlledSiteBorderingEnemySite
         ? { summonTokenToEachControlledSiteBorderingEnemySite }
         : {}),
+      ...(teleportNearbyAllyThenDrawCard ? { teleportNearbyAllyThenDrawCard: true } : {}),
       ...(damageTargetUnit !== 0
         ? { damageTargetUnit }
         : damageEachUnitAtLocationWithinTwoSteps !== 0
@@ -3705,6 +3734,7 @@ function buildManifest(
       input.highlandClansmen.stableId,
       input.roamingMinion.stableId,
       input.teleport.stableId,
+      ...Array(2).fill(input.blink.stableId),
       ...Array(3).fill(input.lightningBolt.stableId),
     ],
   };
@@ -4342,6 +4372,7 @@ function buildManifest(
       card.stableId === input.sparkmage.stableId,
       card.stableId === input.houseArnBannerman.stableId,
       card.stableId === input.vantageHills.stableId,
+      card.stableId === input.blink.stableId,
     ),
   ]));
   return {

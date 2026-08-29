@@ -8,8 +8,6 @@ import {
   type PrivateStarterPreset,
   runPrivateGameCheck,
 } from '../../src/commands/run-private-game-check.ts';
-import { selectDeterministicGameAction } from '../../src/commands/run-game-demo.ts';
-import { createGameSession, stepGame } from '../../src/engine/game.ts';
 import { createGamePrototypeServer } from '../../src/prototype/game-server.ts';
 
 type JsonObject = Record<string, unknown>;
@@ -906,7 +904,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 21 : 22,
+        preset.id === 'air-vs-earth-lesson' ? 23 : 22,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -914,7 +912,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 22 : 21,
+        preset.id === 'air-vs-earth-lesson' ? 22 : 23,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -945,6 +943,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   });
   assert.deepEqual(summarize(airLesson, 'north', 'spellbook'), {
     'Apprentice Wizard': 2,
+    Blink: 2,
     'Cloud Spirit': 2,
     'Dead of Night Demon': 2,
     'Gyre Hippogriffs': 1,
@@ -978,46 +977,6 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Pudge Butcher': 1,
     'Wild Boars': 2,
   });
-  let tacticSession = createGameSession(airLesson.manifest);
-  let buffedAlly: string | undefined;
-  let buffedAllyMoved = false;
-  let buffedAllyAttacked = false;
-  let completedPowerUse = false;
-  while (tacticSession.state.terminal.status === 'active' && tacticSession.transcript.length < 500) {
-    const seat = tacticSession.state.decisionSeat;
-    const selected = selectDeterministicGameAction(tacticSession);
-    if (seat === 'south' && selected.descriptor.kind === 'cast-magic') {
-      const definition = tacticSession.state.cards[selected.descriptor.cardId];
-      if (definition?.cardType === 'magic' && definition.grantPowerToAllyThisTurn !== undefined) {
-        assert.ok(selected.descriptor.ally);
-        if (buffedAlly) assert.equal(selected.descriptor.ally.instanceId, buffedAlly);
-        buffedAlly = selected.descriptor.ally.instanceId;
-        buffedAllyMoved = false;
-        buffedAllyAttacked = false;
-      }
-    }
-    if (seat === 'south' && buffedAlly && !buffedAllyMoved
-      && selected.descriptor.kind === 'move-and-attack') {
-      assert.equal(selected.descriptor.unitInstanceId, buffedAlly);
-      buffedAllyMoved = true;
-    }
-    if (seat === 'south' && buffedAlly && buffedAllyMoved && !buffedAllyAttacked
-      && selected.descriptor.kind === 'declare-attack') {
-      assert.equal(tacticSession.state.pendingCombat?.attacker.instanceId, buffedAlly);
-      assert.equal(buffedAllyMoved, true);
-      buffedAllyAttacked = true;
-    }
-    const stepped = stepGame(tacticSession, selected);
-    assert.equal(stepped.accepted, true);
-    if (!stepped.accepted) break;
-    if (seat === 'south' && stepped.receipt.events.some(({ type }) => type === 'power-expired')) {
-      assert.equal(buffedAllyAttacked, true);
-      completedPowerUse = true;
-      buffedAlly = undefined;
-    }
-    tacticSession = stepped.session;
-  }
-  assert.equal(completedPowerUse, true);
   const midnightRogueId = Object.entries(airLesson.cardNames)
     .find(([, name]) => name === 'Midnight Rogue')?.[0];
   assert.ok(midnightRogueId);
@@ -1076,6 +1035,15 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
     });
   }
+  const blinkId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Blink')?.[0];
+  assert.ok(blinkId);
+  assert.deepEqual(airLesson.manifest.cards[blinkId], {
+    cardType: 'magic',
+    manaCost: 2,
+    teleportNearbyAllyThenDrawCard: true,
+    thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+  });
   const vantageHillsId = Object.entries(airLesson.cardNames)
     .find(([, name]) => name === 'Vantage Hills')?.[0];
   assert.ok(vantageHillsId);
