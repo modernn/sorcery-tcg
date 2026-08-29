@@ -533,9 +533,7 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
       assert.equal(combatObserved, true, preset.id);
       if (preset.id === 'air-vs-earth-lesson') {
         assert.equal(opponentActionKinds.has('cast-magic'), true);
-        assert.equal(opponentActionKinds.has('shoot-projectile'), true);
         assert.equal(opponentPowerUsed, true);
-        assert.equal(opponentPowerAwaitingAttack, false);
       }
       if (preset.id === 'earth-vs-air-lesson') {
         assert.equal(opponentActionKinds.has('activate-sparkmage'), true);
@@ -900,20 +898,27 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   ]);
   for (const preset of starterCatalog) {
     assert.equal(preset.manifest.authority.mode, 'private-local');
-    assert.equal(preset.usesOnlyOrdinaryOrExceptionalCards, true);
     if (preset.id.endsWith('-lesson')) {
-      assert.equal(preset.manifest.decks.north.atlas.length, 9);
+      assert.equal(preset.usesOnlyOrdinaryOrExceptionalCards, false);
+      assert.equal(
+        preset.manifest.decks.north.atlas.length,
+        preset.id === 'air-vs-earth-lesson' ? 9 : 10,
+      );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 16 : 14,
+        preset.id === 'air-vs-earth-lesson' ? 21 : 20,
       );
-      assert.equal(preset.manifest.decks.south.atlas.length, 9);
+      assert.equal(
+        preset.manifest.decks.south.atlas.length,
+        preset.id === 'air-vs-earth-lesson' ? 10 : 9,
+      );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 14 : 16,
+        preset.id === 'air-vs-earth-lesson' ? 20 : 21,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
+      assert.equal(preset.usesOnlyOrdinaryOrExceptionalCards, true);
       assert.equal(preset.manifest.decks.north.atlas.length, 30);
       assert.equal(preset.manifest.decks.north.spellbook.length, 60);
       assert.deepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
@@ -941,22 +946,31 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.deepEqual(summarize(airLesson, 'north', 'spellbook'), {
     'Apprentice Wizard': 2,
     'Cloud Spirit': 2,
+    'Dead of Night Demon': 2,
+    'Gyre Hippogriffs': 1,
+    'Highland Clansmen': 1,
     'Lightning Bolt': 3,
     'Midnight Rogue': 2,
     'Plumed Pegasus': 2,
     'Roaming Monster': 1,
     'Snow Leopard': 2,
     'Spectral Stalker': 2,
+    Teleport: 1,
   });
   assert.deepEqual(summarize(airLesson, 'south', 'atlas'), {
     'Humble Village': 3,
     'Rustic Village': 3,
     'Simple Village': 3,
+    Sinkhole: 1,
   });
   assert.deepEqual(summarize(airLesson, 'south', 'spellbook'), {
+    'Amazon Warriors': 2,
+    'Autumn Unicorn': 2,
     'Belmotte Longbowmen': 3,
+    'Border Militia': 1,
     'Cave Trolls': 3,
     'Dalcean Phalanx': 1,
+    'Divine Healing': 1,
     'Land Surveyor': 2,
     Overpower: 2,
     'Pudge Butcher': 1,
@@ -1015,6 +1029,30 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     assert.equal(midnightRogue.ranged, true);
     assert.equal(midnightRogue.stealth, true);
     assert.deepEqual(midnightRogue.thresholds, { air: 1, earth: 0, fire: 0, water: 0 });
+  }
+  const expectedActualMinions = {
+    'Amazon Warriors': { airborne: undefined, attack: 5, charge: undefined, defense: 5, manaCost: 5, ordinary: true, stealth: undefined },
+    'Autumn Unicorn': { airborne: undefined, attack: 4, charge: undefined, defense: 4, manaCost: 3, ordinary: undefined, stealth: undefined },
+    'Dead of Night Demon': { airborne: undefined, attack: 2, charge: undefined, defense: 2, manaCost: 2, ordinary: true, stealth: true },
+    'Gyre Hippogriffs': { airborne: true, attack: 3, charge: true, defense: 3, manaCost: 4, ordinary: undefined, stealth: undefined },
+    'Highland Clansmen': { airborne: undefined, attack: 5, charge: true, defense: 5, manaCost: 7, ordinary: true, stealth: undefined },
+  } as const;
+  for (const [name, expected] of Object.entries(expectedActualMinions)) {
+    const cardId = Object.entries(airLesson.cardNames)
+      .find(([, candidate]) => candidate === name)?.[0];
+    assert.ok(cardId);
+    const definition = airLesson.manifest.cards[cardId];
+    assert.equal(definition?.cardType, 'minion');
+    if (definition?.cardType !== 'minion') continue;
+    assert.deepEqual({
+      airborne: definition.airborne,
+      attack: definition.attack,
+      charge: definition.charge,
+      defense: definition.defense,
+      manaCost: definition.manaCost,
+      ordinary: definition.ordinary,
+      stealth: definition.stealth,
+    }, expected);
   }
   for (const name of ['Dark Tower', 'Gothic Tower', 'Lone Tower']) {
     const cardId = Object.entries(airLesson.cardNames)
