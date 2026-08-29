@@ -46,6 +46,11 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
       && (descriptor.spellbookOrder as unknown[]).length === 0);
   const deterministicAction = (response: JsonObject): JsonObject => {
     const candidates = response.actions as JsonObject[];
+    const player = ((((response.view as JsonObject).players as JsonObject).north as JsonObject));
+    const drawZone = Number(player.atlasCount) > 3
+      || Number(player.spellbookCount) <= Number(player.atlasCount)
+      ? 'atlas'
+      : 'spellbook';
     const enemyCell = String(((((response.view as JsonObject).players as JsonObject)
       .south as JsonObject).avatar as JsonObject).location);
     const movement = candidates
@@ -78,7 +83,7 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
       ?? candidates.find(({ descriptor }) => (descriptor as JsonObject).kind === 'summon-minion')
       ?? candidates.find(({ descriptor }) => {
         const value = descriptor as JsonObject;
-        return value.kind === 'draw' && value.zone === 'atlas';
+        return value.kind === 'draw' && value.zone === drawZone;
       })
       ?? (movement && Number.isFinite(movement.distance) ? movement.candidate : undefined)
       ?? candidates.find(({ descriptor }) => (descriptor as JsonObject).kind === 'end-turn')
@@ -98,6 +103,11 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
       'Sparkmage');
     assert.equal(defaultNames[(((defaultPlayers.south as JsonObject).avatar as JsonObject).cardId as string)],
       'Geomancer');
+    const hiddenSouthCardIds = [
+      ...catalog[0]!.manifest.decks.south.atlas,
+      ...catalog[0]!.manifest.decks.south.spellbook,
+    ];
+    assert.equal(hiddenSouthCardIds.every((cardId) => defaultNames[cardId] === undefined), true);
     const airSandbox = catalog.find(({ id }) => id === 'air-starter');
     assert.ok(airSandbox);
     current = await json('/api/reset', {
@@ -502,12 +512,9 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
       assert.ok(opponentActionCount > 0, preset.id);
       assert.equal(combatObserved, true, preset.id);
       assert.equal(terminal.status, 'finished', preset.id);
-      assert.ok([
-        'avatar_defeated',
-        'simultaneous_avatar_defeat',
-        ...(preset.id.endsWith('-lesson') ? ['deck_empty'] : []),
-      ].includes(String(terminal.reason)), preset.id);
-      if (terminal.reason === 'avatar_defeated' || terminal.reason === 'deck_empty') {
+      assert.ok(['avatar_defeated', 'simultaneous_avatar_defeat']
+        .includes(String(terminal.reason)), preset.id);
+      if (terminal.reason === 'avatar_defeated') {
         assert.notEqual(terminal.winner, terminal.loser, preset.id);
       } else {
         assert.equal(terminal.result, 'draw', preset.id);
@@ -919,6 +926,16 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Pudge Butcher': 1,
     'Wild Boars': 2,
   });
+  for (const name of ['Dark Tower', 'Gothic Tower', 'Lone Tower']) {
+    const cardId = Object.entries(airLesson.cardNames)
+      .find(([, candidate]) => candidate === name)?.[0];
+    assert.ok(cardId);
+    assert.deepEqual(airLesson.manifest.cards[cardId], {
+      cardType: 'site',
+      elements: ['air'],
+      genesisGainManaIfOnlyControlledCopy: 1,
+    });
+  }
   const earthLesson = starterCatalog[1]!;
   assert.deepEqual(earthLesson.manifest.decks.north, airLesson.manifest.decks.south);
   assert.deepEqual(earthLesson.manifest.decks.south, airLesson.manifest.decks.north);

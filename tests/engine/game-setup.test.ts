@@ -6567,25 +6567,38 @@ test('RULE-03 site Genesis grants temporary mana once, pays a summon, and expire
 test('RULE-03 Tower Genesis grants mana only for the first controlled copy', () => {
   const north = deck('tower-north');
   let session = keep(keep(createGameSession(manifest(56, {
-    north: { ...north, atlas: Array(4).fill('tower') },
+    north: { ...north, atlas: ['dark-tower', 'gothic-tower', 'dark-tower'] },
     site: { genesisGainManaIfOnlyControlledCopy: 1 },
   }))));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  assert.equal(session.state.players.north.mana, 2);
-  assert.deepEqual(session.transcript.at(-1)?.events.map(({ type }) => type), [
-    'site-played',
-    'mana-gained',
-  ]);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  assert.equal(session.state.players.north.mana, 2);
-  assert.deepEqual(session.transcript.at(-1)?.events.map(({ type }) => type), ['site-played']);
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  const playNorthSite = (cardId: string, gainsBonus: boolean): void => {
+    const instanceId = session.state.players.north.hand.atlas
+      .find((card) => card.cardId === cardId)?.instanceId;
+    assert.ok(instanceId);
+    const manaBefore = session.state.players.north.mana;
+    take(({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cardInstanceId === instanceId);
+    assert.equal(session.state.players.north.mana - manaBefore, gainsBonus ? 2 : 1);
+    assert.deepEqual(session.transcript.at(-1)?.events.map(({ type }) => type), [
+      'site-played',
+      ...(gainsBonus ? ['mana-gained'] : []),
+    ]);
+  };
+  playNorthSite('dark-tower', true);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playNorthSite('gothic-tower', true);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playNorthSite('dark-tower', false);
   assert.equal(verifyGameReplay(session), true);
 });
 
