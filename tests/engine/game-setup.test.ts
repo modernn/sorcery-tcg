@@ -1848,6 +1848,172 @@ test('RULE-03 Gnarled Wendigo sacrifices local minions before paying its discoun
   assert.equal(verifyGameReplay(session), true);
 });
 
+test('RULE-03 Hamlet reduces only Ordinary minion mana payments at that site', () => {
+  type MinionDefinition = Extract<GameCardDefinition, Readonly<{ cardType: 'minion' }>>;
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const minion = (manaCost: number, facts: Partial<MinionDefinition> = {}): MinionDefinition => ({
+    attack: 1,
+    cardType: 'minion',
+    defense: 1,
+    manaCost,
+    thresholds,
+    ...facts,
+  });
+  const north: GameDeckSpec = {
+    atlas: ['hamlet', 'hamlet', 'ordinary-site', 'ordinary-site'],
+    avatar: 'north-avatar',
+    spellbook: [
+      'ordinary-one', 'nonordinary-one', 'aramos', 'gnarled', 'roaming',
+      'helper', 'helper', 'helper',
+    ],
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(4).fill('hamlet'),
+    avatar: 'south-avatar',
+    spellbook: Array(4).fill('filler'),
+  };
+  const cards: Record<string, GameCardDefinition> = {
+    aramos: minion(3, { discardRandomCardInsteadOfMana: true, ordinary: true }),
+    filler: minion(0),
+    gnarled: minion(6, { sacrificeMinionAtSummoningLocationForManaDiscount: 2 }),
+    hamlet: { cardType: 'site', elements: ['earth'], ordinaryMinionManaDiscount: 1 },
+    helper: minion(0),
+    'nonordinary-one': minion(1),
+    'north-avatar': { attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20 },
+    'ordinary-one': minion(1, { ordinary: true }),
+    'ordinary-site': { cardType: 'site', elements: ['earth'] },
+    roaming: minion(1, { ordinary: true, summonToAnySite: true }),
+    'south-avatar': { attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20 },
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-hamlet-cost-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north' as const,
+  };
+  const invalid = (cardId: string, facts: Record<string, unknown>) => createGameManifest({
+    ...input,
+    cards: { ...cards, [cardId]: { ...cards[cardId], ...facts } as GameCardDefinition },
+    seed: 1,
+  });
+  assert.throws(() => invalid('hamlet', { ordinaryMinionManaDiscount: 0 }),
+    /ordinaryMinionManaDiscount must be 1/);
+  assert.throws(() => invalid('ordinary-one', { ordinary: false }), /ordinary must be true/);
+
+  let gameManifest: GameManifest | undefined;
+  for (let seed = 1; seed <= 512; seed += 1) {
+    const candidate = createGameManifest({ ...input, seed });
+    const opening = createGameSession(candidate).state.players.north;
+    if (opening.hand.spellbook.some(({ cardId }) => cardId === 'ordinary-one')) {
+      gameManifest = candidate;
+      break;
+    }
+  }
+  assert.ok(gameManifest);
+  assert.deepEqual(gameManifest.cards.hamlet,
+    { cardType: 'site', elements: ['earth'], ordinaryMinionManaDiscount: 1 });
+  assert.equal(gameManifest.cards['ordinary-one']?.cardType === 'minion'
+    && gameManifest.cards['ordinary-one'].ordinary, true);
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardId === 'hamlet' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardId === 'hamlet' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardId === 'ordinary-site' && descriptor.cell === 'C3');
+
+  const summons = (checkpoint: GameSession, cardId: string) =>
+    legalGameActions(checkpoint.state, 'north').flatMap(({ descriptor }) =>
+      descriptor.kind === 'summon-minion' && descriptor.cardId === cardId ? [descriptor] : []);
+  const ordinary = summons(session, 'ordinary-one');
+  assert.deepEqual(ordinary.map(({ cell, manaCost }) => ({ cell, manaCost })), [
+    { cell: 'C3', manaCost: 1 },
+    { cell: 'C4', manaCost: 0 },
+  ]);
+
+  const northSpells = [
+    ...session.state.players.north.hand.spellbook,
+    ...session.state.players.north.spellbook,
+  ];
+  const helperCards = northSpells.filter(({ cardId }) => cardId === 'helper');
+  const paymentCheckpoint = (mana: number, sacrificeHelpers = false): GameSession => ({
+    ...session,
+    state: {
+      ...session.state,
+      players: {
+        ...session.state.players,
+        north: {
+          ...session.state.players.north,
+          hand: {
+            ...session.state.players.north.hand,
+            spellbook: northSpells.filter(({ cardId }) => !sacrificeHelpers || cardId !== 'helper'),
+          },
+          mana,
+          spellbook: [],
+        },
+      },
+      realm: {
+        ...session.state.realm,
+        units: sacrificeHelpers ? helperCards.map((card) => ({
+          ...card,
+          controller: 'north' as const,
+          damage: 0,
+          location: 'C4' as const,
+          region: 'surface' as const,
+          stealthed: false,
+          summoningSickness: false,
+          tapped: false,
+          warded: false,
+        })) : session.state.realm.units,
+      },
+    },
+  });
+  const twoMana = paymentCheckpoint(2);
+  assert.deepEqual(summons(twoMana, 'nonordinary-one').map(({ cell, manaCost }) => ({ cell, manaCost })), [
+    { cell: 'C3', manaCost: 1 },
+    { cell: 'C4', manaCost: 1 },
+  ]);
+  assert.equal(summons(twoMana, 'ordinary-one').some(({ cell }) => cell === 'C1'), false);
+  assert.equal(summons(twoMana, 'roaming').some(({ cell, manaCost }) =>
+    cell === 'C1' && manaCost === 0), true);
+  assert.deepEqual(summons(twoMana, 'aramos')
+    .map(({ cell, manaCost, paymentMode }) => `${cell}:${manaCost}:${paymentMode ?? 'mana'}`), [
+    'C3:0:random-card-discard',
+    'C4:0:random-card-discard',
+    'C4:2:mana',
+  ]);
+  assert.deepEqual([...new Set(summons(paymentCheckpoint(6, true), 'gnarled')
+    .filter(({ cell }) => cell === 'C4')
+    .map(({ manaCost, sacrificedMinionInstanceIds }) =>
+      `${sacrificedMinionInstanceIds?.length ?? 0}:${manaCost}`))].sort(), [
+    '0:6', '1:4', '2:2', '3:0',
+  ]);
+
+  const zeroCost = action(session, ({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'ordinary-one' && descriptor.cell === 'C4');
+  const manaBefore = session.state.players.north.mana;
+  const cast = stepGame(session, zeroCost);
+  assert.equal(cast.accepted, true);
+  if (!cast.accepted) throw new Error('expected Hamlet-discounted summon to be accepted');
+  const summoned = cast.receipt.events.find(({ type }) => type === 'minion-summoned');
+  assert.ok(summoned && typeof summoned.payload === 'object' && !Array.isArray(summoned.payload));
+  assert.equal((summoned.payload as Readonly<Record<string, unknown>>).manaPaid, 0);
+  assert.equal(cast.session.state.players.north.mana, manaBefore);
+  assert.equal(verifyGameReplay(cast.session), true);
+});
+
 test('RULE-03 printed Spellcasters cast while tapped or summoning sick from their own location', () => {
   const decks = {
     north: deck('spellcaster-north', 6, 8),

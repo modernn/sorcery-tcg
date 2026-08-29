@@ -60,6 +60,7 @@ export type GameCardDefinition =
     genesisDrawSpellPerAdjacentSameCard?: boolean;
     genesisEnemiesLoseStealth?: true;
     genesisGainMana?: number;
+    ordinaryMinionManaDiscount?: 1;
     sacrificeToDestroyNearbySite?: true;
   }>
   | Readonly<{
@@ -118,6 +119,7 @@ export type GameCardDefinition =
     mustBeCastBurrowed?: boolean;
     mustBeCastSubmerged?: boolean;
     mustBeCastToWaterSite?: boolean;
+    ordinary?: true;
     provides?: GameElement;
     ranged?: boolean;
     sacrificeMinionAtSummoningLocationForManaDiscount?: 2;
@@ -583,6 +585,21 @@ function nonemptyCombinations(
   return combinations;
 }
 
+function minionManaCostAtSite(
+  state: GameState,
+  definition: Extract<GameCardDefinition, Readonly<{ cardType: 'minion' }>>,
+  cell: RealmCell,
+): number {
+  const site = state.realm.sites[cell];
+  const siteDefinition = site && !isRubble(site) ? cardDefinition(state, site.cardId) : undefined;
+  const discount = definition.ordinary === true
+    && siteDefinition?.cardType === 'site'
+    && siteDefinition.ordinaryMinionManaDiscount === 1
+    ? 1
+    : 0;
+  return Math.max(0, definition.manaCost - discount);
+}
+
 function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   const player = state.players[seat];
   const casters = spellcasterRefs(state, seat);
@@ -592,17 +609,6 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     const definition = cardDefinition(state, cardId);
     if (definition.cardType !== 'minion'
       || !meetsThresholds(state, seat, definition.thresholds)) return [];
-    const basePaymentOptions: readonly Readonly<{
-      manaCost: number;
-      paymentMode?: 'random-card-discard';
-    }>[] = [
-      ...(player.mana >= definition.manaCost ? [{ manaCost: definition.manaCost }] : []),
-      ...(definition.discardRandomCardInsteadOfMana === true
-        && (player.hand.atlas.length > 0
-          || player.hand.spellbook.some((candidate) => candidate.instanceId !== instanceId))
-        ? [{ manaCost: 0, paymentMode: 'random-card-discard' as const }]
-        : []),
-    ];
     const summonCells = (definition.summonToAnySite ? siteCells : controlledCells)
       .filter((cell) => !definition.mustBeCastToOuterColumn || cell[0] === 'A' || cell[0] === 'E')
       .filter((cell) => !definition.mustBeCastToWaterSite || isWaterSite(state, cell));
@@ -631,6 +637,18 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     return casters.flatMap(({ instanceId: casterInstanceId }) =>
       summonLocations.flatMap(({ cell, region }) => {
         const exactRegion: GameRegion = region ?? 'surface';
+        const baseManaCost = minionManaCostAtSite(state, definition, cell);
+        const basePaymentOptions: readonly Readonly<{
+          manaCost: number;
+          paymentMode?: 'random-card-discard';
+        }>[] = [
+          ...(player.mana >= baseManaCost ? [{ manaCost: baseManaCost }] : []),
+          ...(definition.discardRandomCardInsteadOfMana === true
+            && (player.hand.atlas.length > 0
+              || player.hand.spellbook.some((candidate) => candidate.instanceId !== instanceId))
+            ? [{ manaCost: 0, paymentMode: 'random-card-discard' as const }]
+            : []),
+        ];
         const sacrificeCandidates = state.realm.units
           .filter((unit) => unit.controller === seat
             && unit.location === cell
@@ -641,11 +659,11 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
         // gratuitous sacrifices after a spell's mana cost has already reached zero.
         const maximumSacrifices = definition
           .sacrificeMinionAtSummoningLocationForManaDiscount === 2
-          ? Math.min(sacrificeCandidates.length, Math.ceil(definition.manaCost / 2))
+          ? Math.min(sacrificeCandidates.length, Math.ceil(baseManaCost / 2))
           : 0;
         const sacrificePayments = nonemptyCombinations(sacrificeCandidates, maximumSacrifices)
           .map((sacrificedMinionInstanceIds) => ({
-            manaCost: Math.max(0, definition.manaCost - (2 * sacrificedMinionInstanceIds.length)),
+            manaCost: Math.max(0, baseManaCost - (2 * sacrificedMinionInstanceIds.length)),
             sacrificedMinionInstanceIds,
           }))
           .filter(({ manaCost }) => player.mana >= manaCost);
@@ -964,6 +982,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.sacrificeToDestroyNearbySite !== true) {
       throw new RangeError(`${path}.sacrificeToDestroyNearbySite must be true when defined`);
     }
+    if (card.ordinaryMinionManaDiscount !== undefined
+      && card.ordinaryMinionManaDiscount !== 1) {
+      throw new RangeError(`${path}.ordinaryMinionManaDiscount must be 1`);
+    }
     return;
   }
   if (card.cardType === 'artifact') {
@@ -1135,6 +1157,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.discardRandomCardInsteadOfMana !== undefined
     && card.discardRandomCardInsteadOfMana !== true) {
     throw new RangeError(`${path}.discardRandomCardInsteadOfMana must be true when defined`);
+  }
+  if (card.ordinary !== undefined && card.ordinary !== true) {
+    throw new RangeError(`${path}.ordinary must be true when defined`);
   }
   if (card.sacrificeMinionAtSummoningLocationForManaDiscount !== undefined
     && card.sacrificeMinionAtSummoningLocationForManaDiscount !== 2) {
@@ -1390,6 +1415,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? { genesisEnemiesLoseStealth: true as const }
               : {}),
             ...(card.genesisGainMana ? { genesisGainMana: card.genesisGainMana } : {}),
+            ...(card.ordinaryMinionManaDiscount === 1
+              ? { ordinaryMinionManaDiscount: 1 as const }
+              : {}),
             ...(card.sacrificeToDestroyNearbySite === true
               ? { sacrificeToDestroyNearbySite: true as const }
               : {}),
@@ -1477,6 +1505,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.mustBeCastBurrowed === true ? { mustBeCastBurrowed: true } : {}),
             ...(card.mustBeCastSubmerged === true ? { mustBeCastSubmerged: true } : {}),
             ...(card.mustBeCastToWaterSite === true ? { mustBeCastToWaterSite: true } : {}),
+            ...(card.ordinary === true ? { ordinary: true as const } : {}),
             ...(card.provides ? { provides: card.provides } : {}),
             ...(card.ranged === true ? { ranged: true } : {}),
             ...(card.sacrificeMinionAtSummoningLocationForManaDiscount === 2
