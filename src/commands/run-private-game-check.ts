@@ -176,6 +176,7 @@ export type PrivateGameCheck = Readonly<{
     avatarsPreserved: boolean;
     causalEventsVerified: boolean;
     cemeteriesOtherwisePreserved: boolean;
+    damageReductionVerified: boolean;
     deck: DeckList;
     gameRemainedActive: boolean;
     manaPaid: number;
@@ -183,10 +184,12 @@ export type PrivateGameCheck = Readonly<{
     noTargetChoice: boolean;
     rainOfArrows: string;
     replayVerified: boolean;
+    seed: number;
+    shellycoat: string;
     sitesPreserved: boolean;
     snowLeopard: string;
     spellEnteredCemetery: boolean;
-    surfaceLeopardsDamagedAndSurvived: boolean;
+    surfaceMinionsComparedAndSurvived: boolean;
   }>;
   airStaticServant: Readonly<{
     acceptedActionCount: number;
@@ -1232,6 +1235,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   secretTunnel: NormalizedCard;
   sedgeCrabs: NormalizedCard;
   seravaTownsfolk: NormalizedCard;
+  shellycoat: NormalizedCard;
   shallowGrave: NormalizedCard;
   sinkhole: NormalizedCard;
   slyFox: NormalizedCard;
@@ -1586,6 +1590,24 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || rainOfArrows.thresholds.water !== 0
     || rainOfArrows.rarity !== 'ordinary') {
     throw new Error('private aboveground-minion damage Magic no longer matches its supported facts');
+  }
+  const shellycoat = snapshot.cards.find(({ name }) => name === 'Shellycoat');
+  if (!shellycoat
+    || shellycoat.stableId !== 'card:deb2bac179433719233b6e569a960329ca2a5ad0a983b076fffdb11e09645d47'
+    || shellycoat.cardType !== 'minion'
+    || shellycoat.rulesText.trim() !== 'Submerge\r\n\r\nTakes 1 less damage.'
+    || shellycoat.manaCost !== 2
+    || shellycoat.attack !== 2
+    || shellycoat.defense !== 2
+    || shellycoat.life !== null
+    || shellycoat.elements.length !== 1
+    || shellycoat.elements[0] !== 'water'
+    || shellycoat.thresholds.air !== 0
+    || shellycoat.thresholds.earth !== 0
+    || shellycoat.thresholds.fire !== 0
+    || shellycoat.thresholds.water !== 1
+    || shellycoat.rarity !== 'ordinary') {
+    throw new Error('private damage-reduction minion no longer matches its supported facts');
   }
   const staticServant = snapshot.cards.find(({ name }) => name === 'Static Servant');
   if (!staticServant
@@ -2672,6 +2694,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     secretTunnel,
     sedgeCrabs,
     seravaTownsfolk,
+    shellycoat,
     shallowGrave,
     sinkhole,
     slyFox,
@@ -2790,6 +2813,7 @@ function gameDefinition(
   killTargetWoundedMinion = false,
   ordinaryMinionManaDiscount: 0 | 1 = 0,
   siteProvidesNoThreshold = false,
+  takesLessDamage: 0 | 1 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -2940,6 +2964,7 @@ function gameDefinition(
         ? { tapToDamageEachUnitAtAdjacentLocation: 2 as const }
         : {}),
       ...(tapForMana ? { tapForMana } : {}),
+      ...(takesLessDamage ? { takesLessDamage } : {}),
       thresholds: card.thresholds,
       voidwalk,
       waterbound,
@@ -3153,7 +3178,12 @@ function buildManifest(
     [input.lightningBolt],
   );
   const airLightningBoltDeck = elementalDeck('air', airMinions, [], [input.lightningBolt]);
-  const airRainOfArrowsDeck = elementalDeck('air', airMinions, [], [input.rainOfArrows]);
+  const airRainOfArrowsDeck = elementalDeck(
+    'air',
+    [input.shellycoat, input.stealthTargetMinion],
+    [input.spire, input.stream],
+    [input.rainOfArrows],
+  );
   const airStaticServantDeck = elementalDeck(
     'air',
     [input.staticServant, input.stealthTargetMinion],
@@ -3570,7 +3600,8 @@ function buildManifest(
       card.stableId === input.slyFox.stableId,
       card.stableId === input.sedgeCrabs.stableId,
       card.stableId === input.submergeMinion.stableId
-        || card.stableId === input.drowned.stableId,
+        || card.stableId === input.drowned.stableId
+        || card.stableId === input.shellycoat.stableId,
       card.stableId === input.burrowingMinion.stableId
         || card.stableId === input.entombed.stableId,
       card.stableId === input.voidwalkMinion.stableId
@@ -3628,6 +3659,7 @@ function buildManifest(
       card.stableId === input.fatality.stableId,
       card.stableId === input.hamlet.stableId ? 1 : 0,
       card.stableId === input.granaryRats.stableId,
+      card.stableId === input.shellycoat.stableId ? 1 : 0,
     ),
   ]));
   return {
@@ -5219,56 +5251,64 @@ function findAirRainOfArrowsOpening(
 ): Readonly<{
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
-  northSiteInstanceIds: readonly [string, string];
-  northSnowLeopardInstanceId: string;
+  northSpireInstanceId: string;
+  northStreamInstanceId: string;
   rainOfArrowsInstanceId: string;
+  seed: number;
   session: GameSession;
-  southSiteInstanceId: string;
+  shellycoatInstanceId: string;
   southSnowLeopardInstanceId: string;
+  southSpireInstanceId: string;
 }> {
-  // ponytail: bounded opening scan avoids another private config field.
-  for (let offset = 1; offset <= 256; offset += 1) {
-    const built = buildManifest(input, input.config.airSeed + offset, 'air-rain-of-arrows');
+  // ponytail: bounded opening scan avoids another private scenario config field.
+  for (let offset = 1; offset <= 4096; offset += 1) {
+    const seed = input.config.airSeed + offset;
+    const built = buildManifest(input, seed, 'air-rain-of-arrows');
     const session = createGameSession(built.manifest);
-    const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
-      const definition = session.state.cards[cardId];
-      return definition?.cardType === 'site' && definition.elements.includes('air');
-    });
-    const southSiteInstanceId = session.state.players.south.hand.atlas.find(({ cardId }) => {
-      const definition = session.state.cards[cardId];
-      return definition?.cardType === 'site' && definition.elements.includes('air');
-    })?.instanceId;
-    const northSnowLeopardInstanceId = session.state.players.north.hand.spellbook
-      .find(({ cardId }) => cardId === input.stealthTargetMinion.stableId)?.instanceId;
-    const southSnowLeopardInstanceId = availableMinionInstance(
+    const northSpireInstanceId = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.spire.stableId)?.instanceId;
+    const northStreamInstanceId = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.stream.stableId)?.instanceId;
+    const southSpireInstanceId = session.state.players.south.hand.atlas
+      .find(({ cardId }) => cardId === input.spire.stableId)?.instanceId;
+    const shellycoatInstanceId = availableMinionInstance(
       session,
-      'south',
-      input.stealthTargetMinion.stableId,
+      'north',
+      input.shellycoat.stableId,
       1,
     );
     const rainOfArrowsInstanceId = availableMinionInstance(
       session,
       'north',
       input.rainOfArrows.stableId,
+      2,
+    );
+    const southSnowLeopardInstanceId = availableMinionInstance(
+      session,
+      'south',
+      input.stealthTargetMinion.stableId,
       1,
     );
-    if (northSites.length >= 2
-      && northSnowLeopardInstanceId
+    if (northSpireInstanceId
+      && northStreamInstanceId
+      && southSpireInstanceId
+      && shellycoatInstanceId
       && rainOfArrowsInstanceId
-      && southSiteInstanceId
       && southSnowLeopardInstanceId) {
       return {
         ...built,
-        northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
-        northSnowLeopardInstanceId,
+        northSpireInstanceId,
+        northStreamInstanceId,
         rainOfArrowsInstanceId,
+        seed,
         session,
-        southSiteInstanceId,
+        shellycoatInstanceId,
         southSnowLeopardInstanceId,
+        southSpireInstanceId,
       };
     }
   }
-  throw new Error('private aboveground-minion damage Magic no longer produces its supported opening');
+  throw new Error('private Rain of Arrows damage-reduction scenario lacks its supported opening');
 }
 
 function findAirStaticServantOpening(
@@ -10431,15 +10471,12 @@ function runAirRainOfArrows(
   };
 
   take(({ descriptor }) => descriptor.kind === 'play-site'
-    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
-    && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardInstanceId === opening.northSnowLeopardInstanceId
+    && descriptor.cardInstanceId === opening.northSpireInstanceId
     && descriptor.cell === 'C4');
   take(({ descriptor }) => descriptor.kind === 'end-turn');
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   take(({ descriptor }) => descriptor.kind === 'play-site'
-    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cardInstanceId === opening.southSpireInstanceId
     && descriptor.cell === 'C1');
   take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.southSnowLeopardInstanceId
@@ -10447,15 +10484,23 @@ function runAirRainOfArrows(
   take(({ descriptor }) => descriptor.kind === 'end-turn');
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   take(({ descriptor }) => descriptor.kind === 'play-site'
-    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cardInstanceId === opening.northStreamInstanceId
     && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.shellycoatInstanceId
+    && descriptor.cell === 'C3'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
-  const northBefore = session.state.realm.units.find(({ instanceId }) =>
-    instanceId === opening.northSnowLeopardInstanceId);
-  const southBefore = session.state.realm.units.find(({ instanceId }) =>
+  const shellycoatBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.shellycoatInstanceId);
+  const snowLeopardBefore = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.southSnowLeopardInstanceId);
-  if (!northBefore || !southBefore) {
-    throw new Error('private Rain of Arrows setup lacks both surface Snow Leopards');
+  if (!shellycoatBefore || !snowLeopardBefore) {
+    throw new Error('private Rain of Arrows setup lacks both surface comparison minions');
   }
   const avatarsBefore = canonicalJson({
     north: observeGame(session.state, 'north').players.north.avatar,
@@ -10483,27 +10528,37 @@ function runAirRainOfArrows(
     && selected.descriptor.temptedEnemy === undefined
     && selected.descriptor.temptedDestination === undefined;
   const manaBefore = session.state.players.north.mana;
-  session = accept(session, selected);
+  const castResult = stepGame(session, selected);
+  if (!castResult.accepted) throw new Error('private Rain of Arrows was rejected');
+  session = castResult.session;
 
-  const northAfter = session.state.realm.units.find(({ instanceId }) =>
-    instanceId === opening.northSnowLeopardInstanceId);
-  const southAfter = session.state.realm.units.find(({ instanceId }) =>
+  const shellycoatAfter = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.shellycoatInstanceId);
+  const snowLeopardAfter = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.southSnowLeopardInstanceId);
-  const receipt = session.transcript.at(-1);
-  const events = receipt?.events ?? [];
+  const events = castResult.receipt.events;
+  const allocations = events.filter(({ type }) => type === 'magic-damage-allocated');
+  const damages = events.filter(({ type }) => type === 'damage-dealt');
+  const shellycoatDamage = damages.find(({ payload }) => isJsonRecord(payload)
+    && payload.instanceId === opening.shellycoatInstanceId);
+  const snowLeopardDamage = damages.find(({ payload }) => isJsonRecord(payload)
+    && payload.instanceId === opening.southSnowLeopardInstanceId);
+  const shellycoatDamagePayload = shellycoatDamage && isJsonRecord(shellycoatDamage.payload)
+    ? shellycoatDamage.payload
+    : undefined;
+  const snowLeopardDamagePayload = snowLeopardDamage && isJsonRecord(snowLeopardDamage.payload)
+    ? snowLeopardDamage.payload
+    : undefined;
   const castPayload = events[0] && isJsonRecord(events[0].payload)
     ? events[0].payload
     : undefined;
-  const resolvedEvent = events.at(-1);
-  const resolvedPayload = resolvedEvent && isJsonRecord(resolvedEvent.payload)
-    ? resolvedEvent.payload
-    : undefined;
+  const resolved = events.at(-1);
+  const resolvedPayload = resolved && isJsonRecord(resolved.payload) ? resolved.payload : undefined;
   const targetIds = [
-    opening.northSnowLeopardInstanceId,
+    opening.shellycoatInstanceId,
     opening.southSnowLeopardInstanceId,
   ].sort();
-  const allocations = events.filter(({ type }) => type === 'magic-damage-allocated');
-  const damageEvents = events.filter(({ type }) => type === 'damage-dealt');
+  const definition = session.state.cards[input.shellycoat.stableId];
   const northOtherCemetery = session.state.players.north.cemetery.filter(({ instanceId }) =>
     instanceId !== opening.rainOfArrowsInstanceId);
 
@@ -10524,45 +10579,66 @@ function runAirRainOfArrows(
       && allocations.every(({ payload }) => isJsonRecord(payload)
         && payload.amount === 1
         && payload.sourceInstanceId === opening.rainOfArrowsInstanceId)
-      && damageEvents.map(({ payload }) => isJsonRecord(payload)
-        ? String(payload.instanceId)
-        : '').join(',') === targetIds.join(',')
-      && damageEvents.every(({ payload }) => isJsonRecord(payload) && payload.amount === 1)
-      && resolvedEvent?.type === 'magic-resolved'
+      && shellycoatDamagePayload !== undefined
+      && canonicalJson(shellycoatDamagePayload) === canonicalJson({
+        accumulated: 0,
+        amount: 0,
+        attemptedAmount: 1,
+        direct: true,
+        instanceId: opening.shellycoatInstanceId,
+        prevented: true,
+        seat: 'north',
+      })
+      && snowLeopardDamagePayload !== undefined
+      && canonicalJson(snowLeopardDamagePayload) === canonicalJson({
+        accumulated: 1,
+        amount: 1,
+        direct: true,
+        instanceId: opening.southSnowLeopardInstanceId,
+        seat: 'south',
+      })
+      && resolved?.type === 'magic-resolved'
       && resolvedPayload?.instanceId === opening.rainOfArrowsInstanceId,
     cemeteriesOtherwisePreserved:
       canonicalJson(northOtherCemetery as unknown as JsonValue) === northCemeteryBefore
       && canonicalJson(session.state.players.south.cemetery as unknown as JsonValue)
         === southCemeteryBefore,
+    damageReductionVerified: definition?.cardType === 'minion'
+      && definition.submerge === true
+      && definition.takesLessDamage === 1
+      && shellycoatBefore.damage === 0
+      && shellycoatAfter?.damage === 0
+      && shellycoatAfter.cardId === input.shellycoat.stableId
+      && shellycoatAfter.controller === 'north'
+      && shellycoatAfter.owner === 'north'
+      && shellycoatAfter.location === 'C3'
+      && shellycoatAfter.region === 'surface'
+      && snowLeopardBefore.damage === 0
+      && snowLeopardAfter?.damage === 1
+      && snowLeopardAfter.cardId === input.stealthTargetMinion.stableId
+      && snowLeopardAfter.controller === 'south'
+      && snowLeopardAfter.owner === 'south'
+      && snowLeopardAfter.location === 'C1'
+      && snowLeopardAfter.region === 'surface',
     deck: deckList(opening.manifest.decks.north, opening.names),
     gameRemainedActive: session.state.terminal.status === 'active',
     manaPaid: manaBefore - session.state.players.north.mana,
-    noRandomDraws: receipt?.randomDraws.length === 0,
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
     noTargetChoice,
     rainOfArrows: input.rainOfArrows.name,
     replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    shellycoat: input.shellycoat.name,
     sitesPreserved: canonicalJson(session.state.realm.sites as unknown as JsonValue) === sitesBefore,
     snowLeopard: input.stealthTargetMinion.name,
     spellEnteredCemetery: session.state.players.north.hand.spellbook
       .every(({ instanceId }) => instanceId !== opening.rainOfArrowsInstanceId)
       && session.state.players.north.cemetery
         .some(({ instanceId }) => instanceId === opening.rainOfArrowsInstanceId),
-    surfaceLeopardsDamagedAndSurvived: northBefore.damage === 0
-      && southBefore.damage === 0
-      && northAfter?.damage === 1
-      && southAfter?.damage === 1
-      && northAfter.cardId === northBefore.cardId
-      && northAfter.controller === northBefore.controller
-      && northAfter.location === 'C4'
-      && northAfter.owner === northBefore.owner
-      && northAfter.region === 'surface'
-      && northAfter.tapped === northBefore.tapped
-      && southAfter.cardId === southBefore.cardId
-      && southAfter.controller === southBefore.controller
-      && southAfter.location === 'C1'
-      && southAfter.owner === southBefore.owner
-      && southAfter.region === 'surface'
-      && southAfter.tapped === southBefore.tapped
+    surfaceMinionsComparedAndSurvived: shellycoatBefore.damage === 0
+      && snowLeopardBefore.damage === 0
+      && shellycoatAfter?.damage === 0
+      && snowLeopardAfter?.damage === 1
       && events.every(({ type }) => type !== 'minion-died'),
   });
 }
