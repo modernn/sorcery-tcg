@@ -1283,6 +1283,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   genesisSpellMinion: NormalizedCard;
   genesisMinion: NormalizedCard;
   geomancer: NormalizedCard;
+  sparkmage: NormalizedCard;
   granaryRats: NormalizedCard;
   grainSparrow: NormalizedCard;
   gnarledWendigo: NormalizedCard;
@@ -1524,6 +1525,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || geomancer.thresholds.water !== 0
     || geomancer.rulesText.trim().length !== 169) {
     throw new Error('private Geomancer no longer matches its supported facts');
+  }
+  const sparkmage = snapshot.cards.find(({ name }) => name === 'Sparkmage');
+  if (!sparkmage
+    || sparkmage.stableId !== 'card:15f5ffe507d7baba2cf45ce714a03287feb825581d7f2a10ae7baebb93b6c3f7'
+    || sparkmage.officialSourceId !== '002-sparkmage-b-f'
+    || sparkmage.cardType !== 'avatar'
+    || sparkmage.attack !== 1
+    || sparkmage.defense !== 1
+    || sparkmage.life !== 20
+    || sparkmage.rarity !== null
+    || sparkmage.elements.length !== 0
+    || sparkmage.thresholds.air !== 0
+    || sparkmage.thresholds.earth !== 0
+    || sparkmage.thresholds.fire !== 0
+    || sparkmage.thresholds.water !== 0
+    || sparkmage.rulesText.trim().length !== 157) {
+    throw new Error('private Sparkmage no longer matches its supported facts');
   }
   const wildBoars = snapshot.cards.find(({ name }) => name === 'Wild Boars');
   if (!wildBoars
@@ -2876,6 +2894,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     genesisSpellMinion,
     genesisMinion,
     geomancer,
+    sparkmage,
     granaryRats,
     grainSparrow,
     gnarledWendigo,
@@ -3047,6 +3066,7 @@ function gameDefinition(
   siteGenesisMayBottomNextSpell = false,
   earthSitePlayCreatesAdjacentRubble = false,
   replaceAdjacentRubbleWithTopAtlasSite = false,
+  tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -3063,6 +3083,9 @@ function gameDefinition(
       life: card.life,
       ...(replaceAdjacentRubbleWithTopAtlasSite
         ? { replaceAdjacentRubbleWithTopAtlasSite: true as const }
+        : {}),
+      ...(tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn
+        ? { tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn: true as const }
         : {}),
     };
   }
@@ -3232,7 +3255,11 @@ function buildManifest(
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
     throw new Error('private scenario Avatar is missing');
   }
-  const avatar = scenario === 'earth-starter' ? input.geomancer : configuredAvatar;
+  const avatar = scenario === 'earth-starter'
+    ? input.geomancer
+    : scenario === 'air-starter' || scenario === 'air-zap'
+      ? input.sparkmage
+      : configuredAvatar;
   const sites = input.cards.filter((card) =>
     card.cardType === 'site' && card.rulesText.trim() === '' && card.life === null);
   const minions = input.cards.filter((card) =>
@@ -3970,6 +3997,7 @@ function buildManifest(
       card.stableId === input.autumnRiver.stableId,
       card.stableId === input.geomancer.stableId,
       card.stableId === input.geomancer.stableId,
+      card.stableId === input.sparkmage.stableId,
     ),
   ]));
   return {
@@ -5170,7 +5198,7 @@ export async function loadPrivateStarterCatalog(
 ): Promise<readonly PrivateStarterPreset[]> {
   const input = await readPrivateInputs(path);
   const starters = [
-    ['air-starter', 'Air — Spire + Snow Leopard + Zap!', input.config.airSeed, input.spire, input.stealthTargetMinion, input.zap],
+    ['air-starter', 'Air Beta precon card lesson — Sparkmage + Snow Leopard', input.config.airSeed, input.spire, input.stealthTargetMinion, input.zap],
     ['earth-starter', 'Earth Beta precon opening — Geomancer + Humble Village + Wild Boars', input.config.earthSeed, input.humbleVillage, input.wildBoars],
     ['fire-starter', 'Fire — Wasteland + Raal Dromedary + Charge', input.config.fireSeed, input.wasteland, input.raalDromedary, input.chargeMagic],
     ['water-starter', 'Water — Autumn River + Serava Townsfolk', input.config.waterSeed, input.autumnRiver, input.seravaTownsfolk],

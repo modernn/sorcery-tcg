@@ -45,6 +45,7 @@ export type GameCardDefinition =
     earthSitePlayCreatesAdjacentRubble?: true;
     life: number;
     replaceAdjacentRubbleWithTopAtlasSite?: true;
+    tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn?: true;
   }>
   | Readonly<{
     cardType: 'artifact';
@@ -264,6 +265,7 @@ type PendingGenesisToken = Readonly<{
 }>;
 
 type PlayerState = Readonly<{
+  airThresholdsCastThisTurn?: number;
   atlas: readonly CardInstance[];
   avatar: Readonly<{
     card: CardInstance;
@@ -322,6 +324,7 @@ export type GameState = Readonly<{
 
 type ObservedPlayer = Readonly<{
   affinity: GameThresholds;
+  airThresholdsCastThisTurn?: number;
   atlasCount: number;
   avatar: Readonly<{
     attack: number;
@@ -524,6 +527,11 @@ type GameActionDescriptor =
   | Readonly<{ amount: number; kind: 'allocate-strike'; targetInstanceId: StateHash }>
   | Readonly<{
     kind: 'activate-area-damage';
+    sourceInstanceId: StateHash;
+    targetLocation: GameLocation;
+  }>
+  | Readonly<{
+    kind: 'activate-sparkmage';
     sourceInstanceId: StateHash;
     targetLocation: GameLocation;
   }>
@@ -1067,6 +1075,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     if (card.replaceAdjacentRubbleWithTopAtlasSite !== undefined
       && card.replaceAdjacentRubbleWithTopAtlasSite !== true) {
       throw new RangeError(`${path}.replaceAdjacentRubbleWithTopAtlasSite must be true when defined`);
+    }
+    if (card.tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn !== undefined
+      && card.tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn !== true) {
+      throw new RangeError(
+        `${path}.tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn must be true when defined`,
+      );
     }
     for (const field of ['attack', 'defense', 'life'] as const) {
       if (!Number.isSafeInteger(card[field])
@@ -1612,6 +1626,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
           ...(card.replaceAdjacentRubbleWithTopAtlasSite === true
             ? { replaceAdjacentRubbleWithTopAtlasSite: true as const }
             : {}),
+          ...(card.tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn === true
+            ? { tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn: true as const }
+            : {}),
         }
         : card.cardType === 'artifact'
           ? {
@@ -1917,6 +1934,9 @@ function createPlayer(
   return deepFreeze({
     engine: shuffledSpellbook.engine,
     player: {
+      ...(avatarDefinition.tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn === true
+        ? { airThresholdsCastThisTurn: 0 }
+        : {}),
       atlas: shuffledAtlas.cards.slice(3),
       avatar: {
         card: cardInstance(manifest, seat, 'avatar', 0, deck.avatar),
@@ -2030,6 +2050,9 @@ function observePlayer(state: GameState, player: PlayerState, owner: GameSeat, v
   });
   return deepFreeze({
     affinity: affinity(state, owner),
+    ...(player.airThresholdsCastThisTurn !== undefined
+      ? { airThresholdsCastThisTurn: player.airThresholdsCastThisTurn }
+      : {}),
     atlasCount: player.atlas.length,
     avatar: {
       attack: status.attack,
@@ -2670,6 +2693,27 @@ function areaDamageAbilityDescriptors(state: GameState, seat: GameSeat): readonl
   });
 }
 
+function sparkmageDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
+  const player = state.players[seat];
+  const avatarDefinition = cardDefinition(state, player.avatar.card.cardId);
+  if (avatarDefinition.cardType !== 'avatar'
+    || avatarDefinition.tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn !== true
+    || player.avatar.tapped) return [];
+  return [
+    player.avatar.location,
+    ...borderingCells(player.avatar.location),
+    ...diagonalCells(player.avatar.location),
+  ]
+    .map((cell): GameLocation => ({ cell, region: player.avatar.region }))
+    .filter((targetLocation) => locationExists(state, targetLocation))
+    .sort((left, right) => left.cell.localeCompare(right.cell))
+    .map((targetLocation) => ({
+      kind: 'activate-sparkmage' as const,
+      sourceInstanceId: player.avatar.card.instanceId,
+      targetLocation,
+    }));
+}
+
 function siteDestructionDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   return REALM_CELLS.flatMap((sourceCell) => {
     const source = state.realm.sites[sourceCell];
@@ -2878,6 +2922,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     ...dropArtifactDescriptors(state, seat),
     ...siteDestructionDescriptors(state, seat),
     ...areaDamageAbilityDescriptors(state, seat),
+    ...sparkmageDescriptors(state, seat),
     ...manaAbilityDescriptors(state, seat),
     ...movementDescriptors(state, seat),
     ...dragProjectileDescriptors(state, seat),
@@ -3044,6 +3089,10 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
   }
   if (descriptor.kind === 'activate-area-damage') {
     return `Tap ${descriptor.sourceInstanceId.slice(0, 15)}… to damage every unit at ${descriptor.targetLocation.cell}`;
+  }
+  if (descriptor.kind === 'activate-sparkmage') {
+    const amount = state.players[state.decisionSeat].airThresholdsCastThisTurn ?? 0;
+    return `Tap Sparkmage to deal ${amount} to a random other unit at ${descriptor.targetLocation.cell}`;
   }
   if (descriptor.kind === 'activate-mana') {
     return 'Tap ' + descriptor.unitInstanceId.slice(0, 15) + '… for ' + descriptor.amount + ' mana';
@@ -4517,6 +4566,12 @@ function applyDescriptor(
     }
     const paidPlayer = deepFreeze({
       ...player,
+      ...(player.airThresholdsCastThisTurn !== undefined
+        ? {
+          airThresholdsCastThisTurn:
+            player.airThresholdsCastThisTurn + definition.thresholds.air,
+        }
+        : {}),
       hand: {
         ...player.hand,
         spellbook: player.hand.spellbook.filter(({ instanceId }) => instanceId !== card.instanceId),
@@ -4742,6 +4797,12 @@ function applyDescriptor(
     }
     const paidPlayer = deepFreeze({
       ...player,
+      ...(player.airThresholdsCastThisTurn !== undefined
+        ? {
+          airThresholdsCastThisTurn:
+            player.airThresholdsCastThisTurn + definition.thresholds.air,
+        }
+        : {}),
       hand: {
         ...player.hand,
         spellbook: player.hand.spellbook.filter(({ instanceId }) => instanceId !== card.instanceId),
@@ -5824,6 +5885,12 @@ function applyDescriptor(
     });
     const updatedPlayer = deepFreeze({
       ...player,
+      ...(player.airThresholdsCastThisTurn !== undefined
+        ? {
+          airThresholdsCastThisTurn:
+            player.airThresholdsCastThisTurn + definition.thresholds.air,
+        }
+        : {}),
       cemetery: discardedCard ? [...player.cemetery, discardedCard.card] : player.cemetery,
       hand: {
         ...player.hand,
@@ -6269,6 +6336,121 @@ function applyDescriptor(
       true,
     );
     return [withStateVersion(damaged, {}), outcomes, randomDraws];
+  }
+
+  if (descriptor.kind === 'activate-sparkmage') {
+    const legal = sparkmageDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'activate-sparkmage'
+        && candidate.sourceInstanceId === descriptor.sourceInstanceId
+        && sameLocation(candidate.targetLocation, descriptor.targetLocation));
+    const avatarDefinition = cardDefinition(state, player.avatar.card.cardId);
+    if (!legal
+      || descriptor.sourceInstanceId !== player.avatar.card.instanceId
+      || avatarDefinition.cardType !== 'avatar'
+      || avatarDefinition.tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn !== true) {
+      throw new Error('unreachable illegal Sparkmage activation');
+    }
+    const amount = player.airThresholdsCastThisTurn ?? 0;
+    const sourceRef: GameUnitRef = {
+      instanceId: player.avatar.card.instanceId,
+      kind: 'avatar',
+      seat,
+    };
+    const interaction = recordInteraction(state, [sourceRef]);
+    const interactedPlayer = interaction.players[seat];
+    const activatedState = deepFreeze({
+      ...state,
+      players: deepFreeze({
+        ...interaction.players,
+        [seat]: deepFreeze({
+          ...interactedPlayer,
+          avatar: { ...interactedPlayer.avatar, tapped: true },
+        }),
+      }),
+      realm: { ...state.realm, units: interaction.units },
+    });
+    const candidates = (['north', 'south'] as const)
+      .flatMap((targetSeat) => unitRefs(activatedState, targetSeat))
+      .filter((target) => {
+        if (target.instanceId === sourceRef.instanceId) return false;
+        const status = unitStatus(activatedState, target);
+        return status.location === descriptor.targetLocation.cell
+          && status.region === descriptor.targetLocation.region;
+      })
+      .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+    if (candidates.length === 0) {
+      return [
+        withStateVersion(activatedState, {}),
+        [{
+          payload: {
+            amount,
+            seat,
+            sourceInstanceId: sourceRef.instanceId,
+            targetLocation: descriptor.targetLocation,
+          },
+          type: 'sparkmage-activated',
+        }, ...interaction.outcomes],
+        [],
+      ];
+    }
+    const selected = drawCandidate(
+      activatedState.engine,
+      candidates.length,
+      'sparkmage_random_other_unit_at_nearby_location',
+      'unit_index_candidate',
+    );
+    const targetRef = candidates[selected.index]!;
+    const randomizedState = deepFreeze({ ...activatedState, engine: selected.engine });
+    const activated: GameOutcome = {
+      payload: {
+        amount,
+        seat,
+        sourceInstanceId: sourceRef.instanceId,
+        targetInstanceId: targetRef.instanceId,
+        targetKind: targetRef.kind,
+        targetLocation: descriptor.targetLocation,
+        targetSeat: targetRef.seat,
+      },
+      type: 'sparkmage-activated',
+    };
+    if (amount === 0) {
+      return [
+        withStateVersion(randomizedState, {}),
+        [activated, ...interaction.outcomes],
+        selected.randomDraws,
+      ];
+    }
+    const pending: PendingCombat = deepFreeze({
+      allocations: [{
+        amount,
+        targetInstanceId: targetRef.instanceId,
+      }],
+      attacker: sourceRef,
+      attackingSeat: seat,
+      cell: descriptor.targetLocation.cell,
+      combatants: [targetRef],
+      defenders: [],
+      originalTarget: targetRef,
+      ...(descriptor.targetLocation.region === 'surface'
+        ? {}
+        : { region: descriptor.targetLocation.region }),
+      targetRemoved: false,
+    });
+    const [damaged, outcomes, randomDraws] = resolveFightWindow(
+      randomizedState,
+      pending,
+      [activated, ...interaction.outcomes],
+      true,
+      false,
+      [],
+      false,
+      true,
+    );
+    return [
+      withStateVersion(damaged, {}),
+      outcomes,
+      [...selected.randomDraws, ...randomDraws],
+    ];
   }
 
   if (descriptor.kind === 'activate-mana') {
@@ -6843,12 +7025,18 @@ function applyDescriptor(
   }));
   const endingPlayer = deepFreeze({
     ...endState.players[seat],
+    ...(endState.players[seat].airThresholdsCastThisTurn !== undefined
+      ? { airThresholdsCastThisTurn: 0 }
+      : {}),
     avatar: deepFreeze(endingAvatar),
     mana: 0,
   });
   const nextPlayer = endState.players[nextSeat];
   const startingPlayer = deepFreeze({
     ...nextPlayer,
+    ...(nextPlayer.airThresholdsCastThisTurn !== undefined
+      ? { airThresholdsCastThisTurn: 0 }
+      : {}),
     avatar: { ...nextPlayer.avatar, tapped: false },
     mana: siteCount(endState, nextSeat),
   });

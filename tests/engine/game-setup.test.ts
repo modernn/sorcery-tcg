@@ -85,6 +85,7 @@ type AvatarFacts = Readonly<{
   earthSitePlayCreatesAdjacentRubble?: true;
   life: number;
   replaceAdjacentRubbleWithTopAtlasSite?: true;
+  tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn?: true;
 }>;
 
 type SiteFacts = Readonly<{
@@ -121,6 +122,9 @@ function cardsFor(
       life: avatar.life,
       ...(avatar.replaceAdjacentRubbleWithTopAtlasSite === true
         ? { replaceAdjacentRubbleWithTopAtlasSite: true as const }
+        : {}),
+      ...(avatar.tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn === true
+        ? { tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn: true as const }
         : {}),
     };
     playerDeck.atlas.forEach((cardId) => {
@@ -11629,4 +11633,306 @@ test('RULE-03 Fatality kills only a wounded minion in the caster region', () => 
   assert.equal(killed.session.state.players.north.cemetery.some(({ instanceId }) =>
     instanceId === sourceInstanceId), true);
   assert.equal(verifyGameReplay(killed.session), true);
+});
+
+test('RULE-03 Sparkmage may tap for zero damage at a nearby location with no other unit', () => {
+  let session = keep(keep(createGameSession(manifest(417, {
+    avatar: {
+      attack: 1,
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+      tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn: true,
+    },
+    site: { elements: ['air'] },
+    spell: {
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+  }))));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
+
+  const activation = action(session, ({ descriptor }) =>
+    descriptor.kind === 'activate-sparkmage'
+      && descriptor.targetLocation.cell === 'C4'
+      && descriptor.targetLocation.region === 'surface');
+  assert.match(activation.label, /deal 0 to a random other unit at C4/);
+  const result = stepGame(session, activation);
+  assert.equal(result.accepted, true);
+  if (!result.accepted) return;
+  session = result.session;
+
+  assert.equal(session.state.players.north.avatar.tapped, true);
+  assert.equal(session.state.players.north.airThresholdsCastThisTurn, 0);
+  assert.deepEqual(result.receipt.randomDraws, []);
+  assert.deepEqual(result.receipt.events.map(({ type }) => type), ['sparkmage-activated']);
+  assert.doesNotMatch(canonicalJson(result.receipt.events[0]!.payload), /targetInstanceId/);
+  assert.equal(observeGame(session.state, 'south').players.north.airThresholdsCastThisTurn, 0);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 Sparkmage counts every player-cast spell source, resets, and damages one other unit', () => {
+  const north: GameDeckSpec = {
+    atlas: Array(6).fill('sparkmage-air-site'),
+    avatar: 'sparkmage-avatar',
+    spellbook: [
+      'sparkmage-caster', 'sparkmage-artifact', 'sparkmage-magic',
+      'sparkmage-caster', 'sparkmage-artifact', 'sparkmage-magic',
+      'sparkmage-caster', 'sparkmage-artifact', 'sparkmage-magic',
+    ],
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(6).fill('sparkmage-south-site'),
+    avatar: 'sparkmage-south-avatar',
+    spellbook: Array(6).fill('sparkmage-south-dummy'),
+  };
+  const cards = cardsFor(
+    { north, south },
+    { defense: 4, manaCost: 0, thresholds: { air: 1, earth: 0, fire: 0, water: 0 } },
+    {
+      attack: 1,
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+      tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn: true,
+    },
+    { elements: ['air'], genesisGainMana: 6 },
+    {
+      south: {
+        manaCost: 0,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  );
+  cards['sparkmage-caster'] = {
+    ...cards['sparkmage-caster']!,
+    defense: 4,
+    spellcaster: true,
+  } as GameCardDefinition;
+  cards['sparkmage-artifact'] = {
+    cardType: 'artifact',
+    grantsBearerPower: 2,
+    manaCost: 0,
+    thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+  };
+  cards['sparkmage-magic'] = {
+    cardType: 'magic',
+    healController: 1,
+    manaCost: 0,
+    thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-sparkmage-cast-counter-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north' as const,
+  };
+  const gameManifest = createGameManifest({ ...input, seed: 20 });
+  const preview = createGameSession(gameManifest).state.players.north;
+  const opening = preview.hand.spellbook.map(({ cardId }) => cardId);
+  assert.equal(['sparkmage-caster', 'sparkmage-artifact', 'sparkmage-magic']
+    .every((cardId) => opening.includes(cardId)), true);
+  assert.equal(preview.spellbook[0]?.cardId, 'sparkmage-magic');
+  assert.deepEqual(gameManifest.cards['sparkmage-avatar'], {
+    attack: 1,
+    cardType: 'avatar',
+    defense: 1,
+    drawSpell: false,
+    life: 20,
+    tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn: true,
+  });
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'sparkmage-caster' && descriptor.cell === 'C4');
+  const caster = session.state.realm.units.find(({ cardId }) => cardId === 'sparkmage-caster');
+  assert.ok(caster);
+  assert.equal(session.state.players.north.airThresholdsCastThisTurn, 1);
+  take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+    && descriptor.cardId === 'sparkmage-artifact'
+    && descriptor.casterInstanceId === caster.instanceId
+    && descriptor.bearer?.instanceId === caster.instanceId);
+  assert.equal(session.state.players.north.airThresholdsCastThisTurn, 2);
+  take(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.cardId === 'sparkmage-magic'
+    && descriptor.casterInstanceId === caster.instanceId);
+  assert.equal(session.state.players.north.airThresholdsCastThisTurn, 3);
+  const opponentView = observeGame(session.state, 'south');
+  assert.equal(opponentView.players.north.airThresholdsCastThisTurn, 3);
+  assert.equal(typeof opponentView.players.north.hand.spellbook, 'number');
+
+  const resetCheckpoint: GameSession = {
+    ...session,
+    state: {
+      ...session.state,
+      players: {
+        ...session.state.players,
+        south: { ...session.state.players.south, airThresholdsCastThisTurn: 2 },
+      },
+    },
+  };
+  const reset = stepGame(resetCheckpoint, action(resetCheckpoint, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  assert.equal(reset.accepted, true);
+  if (!reset.accepted) return;
+  assert.equal(reset.session.state.players.north.airThresholdsCastThisTurn, 0);
+  assert.equal(reset.session.state.players.south.airThresholdsCastThisTurn, 0);
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  assert.equal(session.state.players.north.airThresholdsCastThisTurn, 0);
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.cardId === 'sparkmage-magic'
+    && descriptor.casterInstanceId === caster.instanceId);
+  assert.equal(session.state.players.north.airThresholdsCastThisTurn, 1);
+
+  const activation = action(session, ({ descriptor }) =>
+    descriptor.kind === 'activate-sparkmage'
+      && descriptor.targetLocation.cell === 'C4'
+      && descriptor.targetLocation.region === 'surface');
+  assert.doesNotMatch(canonicalJson(activation.descriptor), new RegExp(caster.instanceId));
+  const result = stepGame(session, activation);
+  assert.equal(result.accepted, true);
+  if (!result.accepted) return;
+  session = result.session;
+
+  assert.equal(session.state.players.north.avatar.tapped, true);
+  assert.equal(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === caster.instanceId)?.damage, 1);
+  assert.equal(result.receipt.randomDraws.length, 1);
+  assert.equal(
+    result.receipt.randomDraws[0]?.purpose,
+    'sparkmage_random_other_unit_at_nearby_location',
+  );
+  assert.deepEqual(result.receipt.events.map(({ type }) => type), [
+    'sparkmage-activated',
+    'damage-dealt',
+  ]);
+  assert.match(canonicalJson(result.receipt.events[0]!.payload), new RegExp(caster.instanceId));
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 Sparkmage chooses among multiple other units with deterministic private RNG', () => {
+  const north: GameDeckSpec = {
+    atlas: Array(6).fill('sparkmage-many-site'),
+    avatar: 'sparkmage-many-avatar',
+    spellbook: [
+      'sparkmage-many-target', 'sparkmage-many-target', 'sparkmage-many-target',
+      'sparkmage-many-magic', 'sparkmage-many-magic', 'sparkmage-many-magic',
+    ],
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(6).fill('sparkmage-many-south-site'),
+    avatar: 'sparkmage-many-south-avatar',
+    spellbook: Array(6).fill('sparkmage-many-south-dummy'),
+  };
+  const cards = cardsFor(
+    { north, south },
+    { defense: 3, manaCost: 0, thresholds: { air: 1, earth: 0, fire: 0, water: 0 } },
+    {
+      attack: 1,
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+      tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn: true,
+    },
+    { elements: ['air'], genesisGainMana: 6 },
+    {
+      south: {
+        manaCost: 0,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  );
+  cards['sparkmage-many-magic'] = {
+    cardType: 'magic',
+    healController: 1,
+    manaCost: 0,
+    thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-sparkmage-many-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north' as const,
+  };
+  const gameManifest = createGameManifest({ ...input, seed: 7 });
+  const preview = createGameSession(gameManifest).state.players.north;
+  assert.ok(preview.hand.spellbook.filter(({ cardId }) =>
+    cardId === 'sparkmage-many-target').length >= 2);
+  assert.equal(preview.spellbook[0]?.cardId, 'sparkmage-many-magic');
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  const targets = session.state.players.north.hand.spellbook
+    .filter(({ cardId }) => cardId === 'sparkmage-many-target')
+    .slice(0, 2);
+  assert.equal(targets.length, 2);
+  for (const target of targets) {
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === target.instanceId
+      && descriptor.cell === 'C4');
+  }
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.cardId === 'sparkmage-many-magic');
+
+  const activation = action(session, ({ descriptor }) =>
+    descriptor.kind === 'activate-sparkmage'
+      && descriptor.targetLocation.cell === 'C4'
+      && descriptor.targetLocation.region === 'surface');
+  for (const target of targets) {
+    assert.doesNotMatch(canonicalJson(activation.descriptor), new RegExp(target.instanceId));
+  }
+  const result = stepGame(session, activation);
+  assert.equal(result.accepted, true);
+  if (!result.accepted) return;
+  session = result.session;
+
+  assert.ok(result.receipt.randomDraws.length >= 1);
+  assert.ok(result.receipt.randomDraws.every(({ purpose }) =>
+    purpose === 'sparkmage_random_other_unit_at_nearby_location'));
+  const activated = result.receipt.events.find(({ type }) => type === 'sparkmage-activated');
+  const damaged = result.receipt.events.filter(({ type }) => type === 'damage-dealt');
+  assert.ok(activated);
+  assert.equal(damaged.length, 1);
+  const activatedJson = canonicalJson(activated.payload);
+  const damagedJson = canonicalJson(damaged[0]!.payload);
+  const selected = targets.find(({ instanceId }) => activatedJson.includes(instanceId));
+  assert.ok(selected);
+  assert.match(damagedJson, new RegExp(selected.instanceId));
+  assert.equal(session.state.realm.units.filter(({ damage }) => damage === 1).length, 1);
+  assert.equal(session.state.players.north.airThresholdsCastThisTurn, 1);
+  assert.equal(verifyGameReplay(session), true);
 });
