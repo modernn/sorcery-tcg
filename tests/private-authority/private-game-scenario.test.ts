@@ -58,6 +58,22 @@ function assertPoisonousDagger(result: PrivateGameCheck['earthPoisonousDagger'])
   assert.equal(result.replayVerified, true);
 }
 
+function assertHuntersLodge(result: PrivateGameCheck['earthHuntersLodge']): void {
+  assert.equal(result.hunterLodge, "Hunter's Lodge");
+  assert.equal(result.slyFox, 'Sly Fox');
+  assert.equal(result.acceptedActionCount, 7);
+  assert.equal(result.slyFoxGainedStealthFirst, true);
+  assert.equal(result.enemyStealthRemoved, true);
+  assert.equal(result.causalEventsVerified, true);
+  assert.equal(result.statePreserved, true);
+  assert.equal(result.noRandomDraws, true);
+  assert.equal(result.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.deck.atlas.find(({ name }) => name === "Hunter's Lodge")?.copies, 4);
+  assert.equal(result.deck.spellbook.find(({ name }) => name === 'Sly Fox')?.copies, 4);
+  assert.equal(result.replayVerified, true);
+}
+
 test('private actual-card decks complete deterministic combat, Earth, Air, Fire, and Water scenarios', async () => {
   const result = await runPrivateGameCheck();
   assert.equal(result.classification, 'private-local_actual-cards_unranked-partial-rules');
@@ -343,6 +359,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthOverpower.replayVerified, true);
   assertSwordAndShield(result.earthSwordAndShield);
   assertPoisonousDagger(result.earthPoisonousDagger);
+  assertHuntersLodge(result.earthHuntersLodge);
   assert.equal(result.waterEdgeConnection.polarBears, 'Polar Bears');
   assert.equal(result.waterEdgeConnection.acceptedActionCount, 16);
   assert.equal(result.waterEdgeConnection.wrapMoveAvailable, true);

@@ -364,6 +364,18 @@ export type PrivateGameCheck = Readonly<{
     replayVerified: boolean;
     stateAndCemeteriesVerified: boolean;
   }>;
+  earthHuntersLodge: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    enemyStealthRemoved: boolean;
+    hunterLodge: string;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    slyFox: string;
+    slyFoxGainedStealthFirst: boolean;
+    statePreserved: boolean;
+  }>;
   earthBury: Readonly<{
     acceptedActionCount: number;
     boskTroll: string;
@@ -1047,6 +1059,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   gnarledWendigo: NormalizedCard;
   ghostTownSite: NormalizedCard;
   healingMinion: NormalizedCard;
+  huntersLodge: NormalizedCard;
   lethalMinion: NormalizedCard;
   leylineHenge: NormalizedCard;
   lesserBloodDemon: NormalizedCard;
@@ -1134,6 +1147,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || poisonousDagger.thresholds.water !== 0
     || poisonousDagger.rarity !== 'exceptional') {
     throw new Error('private bearer Lethal Artifact no longer matches its supported facts');
+  }
+  const huntersLodge = snapshot.cards.find(({ name }) => name === "Hunter's Lodge");
+  if (!huntersLodge
+    || huntersLodge.cardType !== 'site'
+    || huntersLodge.rulesText.trim() !== 'Genesis → Enemies lose Stealth.'
+    || huntersLodge.manaCost !== null
+    || huntersLodge.attack !== null
+    || huntersLodge.defense !== null
+    || huntersLodge.life !== null
+    || huntersLodge.elements.length !== 1
+    || huntersLodge.elements[0] !== 'earth'
+    || huntersLodge.thresholds.air !== 0
+    || huntersLodge.thresholds.earth !== 1
+    || huntersLodge.thresholds.fire !== 0
+    || huntersLodge.thresholds.water !== 0
+    || huntersLodge.rarity !== 'ordinary') {
+    throw new Error('private enemy Stealth-removing site no longer matches its supported facts');
   }
   const shallowGrave = snapshot.cards.find(({ name }) => name === 'Shallow Grave');
   if (!shallowGrave
@@ -2275,6 +2305,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     gnarledWendigo,
     ghostTownSite,
     healingMinion,
+    huntersLodge,
     lethalMinion,
     leylineHenge,
     lesserBloodDemon,
@@ -2412,6 +2443,7 @@ function gameDefinition(
   lanceCount: 0 | 1 = 0,
   grantsBearerPower: 0 | 2 = 0,
   grantsBearerLethal = false,
+  siteGenesisEnemiesLoseStealth = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -2448,6 +2480,7 @@ function gameDefinition(
       genesisDrawSpellPerAdjacentSameCard: siteGenesisDrawSpellPerAdjacentSameCard,
       ...(siteGenesisGainMana ? { genesisGainMana: siteGenesisGainMana } : {}),
       ...(sacrificeToDestroyNearbySite ? { sacrificeToDestroyNearbySite: true } : {}),
+      ...(siteGenesisEnemiesLoseStealth ? { genesisEnemiesLoseStealth: true } : {}),
     };
   }
   const supportedMagicEffects = Number(damageTargetUnit !== 0)
@@ -2562,7 +2595,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-immobile' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -2691,6 +2724,11 @@ function buildManifest(
     [input.ghostTownSite],
     [],
     [input.poisonousDagger],
+  );
+  const earthHuntersLodgeDeck = elementalDeck(
+    'water',
+    [input.slyFox],
+    [input.huntersLodge],
   );
   const earthRescueDeck = elementalDeck('earth', earthMinions, [], [input.bury, input.rescue]);
   const earthDivineHealingDeck = elementalDeck('earth', earthMinions, [], [input.divineHealing]);
@@ -2909,6 +2947,8 @@ function buildManifest(
         ? earthSwordAndShieldDeck
       : scenario === 'earth-poisonous-dagger'
         ? earthPoisonousDaggerDeck
+      : scenario === 'earth-hunters-lodge'
+        ? earthHuntersLodgeDeck
       : scenario === 'earth-rescue'
         ? earthRescueDeck
       : scenario === 'earth-divine-healing'
@@ -3026,6 +3066,8 @@ function buildManifest(
         ? earthSwordAndShieldDeck
       : scenario === 'earth-poisonous-dagger'
         ? earthPoisonousDaggerDeck
+      : scenario === 'earth-hunters-lodge'
+        ? earthHuntersLodgeDeck
       : scenario === 'earth-rescue'
         ? earthRescueDeck
       : scenario === 'earth-divine-healing'
@@ -3145,6 +3187,7 @@ function buildManifest(
       card.stableId === input.recklessSquire.stableId ? 1 : 0,
       card.stableId === input.swordAndShield.stableId ? 2 : 0,
       card.stableId === input.poisonousDagger.stableId,
+      card.stableId === input.huntersLodge.stableId,
     ),
   ]));
   return {
@@ -5527,6 +5570,41 @@ function findFireOpening(
     }
   }
   throw new Error(`private Fire scenario seed ${input.config.fireSeed} no longer produces its supported opening`);
+}
+
+function findHuntersLodgeOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  hunterLodgeInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northWaterSiteInstanceId: string;
+  session: GameSession;
+  slyFoxInstanceId: string;
+}> {
+  // ponytail: bounded reuse of the Sly Fox seed avoids another private config field.
+  for (let offset = 1; offset <= 4096; offset += 1) {
+    const built = buildManifest(input, input.config.slyFoxSeed + offset, 'earth-hunters-lodge');
+    const session = createGameSession(built.manifest);
+    const northWaterSiteInstanceId = session.state.players.north.hand.atlas.find(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('water');
+    })?.instanceId;
+    const slyFoxInstanceId = session.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === input.slyFox.stableId)?.instanceId;
+    const hunterLodgeInstanceId = session.state.players.south.hand.atlas
+      .find(({ cardId }) => cardId === input.huntersLodge.stableId)?.instanceId;
+    if (northWaterSiteInstanceId && slyFoxInstanceId && hunterLodgeInstanceId) {
+      return {
+        ...built,
+        hunterLodgeInstanceId,
+        northWaterSiteInstanceId,
+        session,
+        slyFoxInstanceId,
+      };
+    }
+  }
+  throw new Error("private Hunter's Lodge scenario no longer produces its supported opening");
 }
 
 function findWaterOpening(
@@ -11749,6 +11827,125 @@ function runWaterEdgeConnection(
   });
 }
 
+function runEarthHuntersLodge(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthHuntersLodge'] {
+  const opening = findHuntersLodgeOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northWaterSiteInstanceId
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.slyFoxInstanceId
+    && descriptor.cell === 'C4');
+  const summonedFox = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.slyFoxInstanceId);
+  const endResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  if (!endResult.accepted) throw new Error("private Sly Fox end turn before Hunter's Lodge was rejected");
+  session = endResult.session;
+  const endEvents = endResult.receipt.events;
+  const stealthGainedIndex = endEvents.findIndex(({ payload, type }) =>
+    type === 'stealth-gained'
+      && isJsonRecord(payload)
+      && payload.instanceId === opening.slyFoxInstanceId
+      && payload.seat === 'north');
+  const turnEndedIndex = endEvents.findIndex(({ type }) => type === 'turn-ended');
+  const stealthedFox = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.slyFoxInstanceId);
+  const slyFoxGainedStealthFirst: boolean = summonedFox?.stealthed === false
+    && stealthedFox?.stealthed === true
+    && stealthGainedIndex >= 0
+    && stealthGainedIndex < turnEndedIndex;
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const northAvatarBefore = session.state.players.north.avatar;
+  const southAvatarBefore = session.state.players.south.avatar;
+  const northSiteBefore = canonicalJson(
+    session.state.realm.sites.C4 as unknown as JsonValue,
+  );
+  const lodgeResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.hunterLodgeInstanceId
+      && descriptor.cell === 'C1'));
+  if (!lodgeResult.accepted) throw new Error("private Hunter's Lodge play was rejected");
+  session = lodgeResult.session;
+
+  const events = lodgeResult.receipt.events;
+  const sitePlayedIndex = events.findIndex(({ type }) => type === 'site-played');
+  const stealthLostIndex = events.findIndex(({ payload, type }) =>
+    type === 'stealth-lost'
+      && isJsonRecord(payload)
+      && payload.instanceId === opening.slyFoxInstanceId);
+  const sitePlayedPayload = sitePlayedIndex >= 0 && isJsonRecord(events[sitePlayedIndex]!.payload)
+    ? events[sitePlayedIndex]!.payload
+    : undefined;
+  const stealthLostPayload = stealthLostIndex >= 0 && isJsonRecord(events[stealthLostIndex]!.payload)
+    ? events[stealthLostIndex]!.payload
+    : undefined;
+  const revealedFox = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.slyFoxInstanceId);
+  const lodgeSite = session.state.realm.sites.C1;
+  const causalEventsVerified: boolean = events.length === 2
+    && sitePlayedIndex === 0
+    && stealthLostIndex === 1
+    && sitePlayedPayload?.cardId === input.huntersLodge.stableId
+    && sitePlayedPayload.cell === 'C1'
+    && sitePlayedPayload.instanceId === opening.hunterLodgeInstanceId
+    && sitePlayedPayload.seat === 'south'
+    && stealthLostPayload?.instanceId === opening.slyFoxInstanceId
+    && stealthLostPayload.seat === 'north'
+    && stealthLostPayload.sourceInstanceId === opening.hunterLodgeInstanceId;
+  const enemyStealthRemoved: boolean = stealthedFox?.stealthed === true
+    && revealedFox?.stealthed === false;
+  const statePreserved: boolean = summonedFox !== undefined
+    && stealthedFox !== undefined
+    && revealedFox !== undefined
+    && revealedFox.cardId === stealthedFox.cardId
+    && revealedFox.owner === stealthedFox.owner
+    && revealedFox.controller === stealthedFox.controller
+    && revealedFox.location === stealthedFox.location
+    && revealedFox.region === stealthedFox.region
+    && revealedFox.damage === stealthedFox.damage
+    && revealedFox.tapped === stealthedFox.tapped
+    && revealedFox.summoningSickness === stealthedFox.summoningSickness
+    && revealedFox.warded === stealthedFox.warded
+    && session.state.players.north.avatar.life === northAvatarBefore.life
+    && session.state.players.north.avatar.location === northAvatarBefore.location
+    && session.state.players.north.avatar.region === northAvatarBefore.region
+    && session.state.players.north.avatar.tapped === northAvatarBefore.tapped
+    && session.state.players.south.avatar.life === southAvatarBefore.life
+    && session.state.players.south.avatar.location === southAvatarBefore.location
+    && session.state.players.south.avatar.region === southAvatarBefore.region
+    && !southAvatarBefore.tapped
+    && session.state.players.south.avatar.tapped
+    && canonicalJson(session.state.realm.sites.C4 as unknown as JsonValue) === northSiteBefore
+    && lodgeSite !== undefined
+    && lodgeSite.controller === 'south'
+    && lodgeSite.instanceId === opening.hunterLodgeInstanceId
+    && session.state.players.north.cemetery.length === 0
+    && session.state.players.south.cemetery.length === 0
+    && session.state.terminal.status === 'active';
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    enemyStealthRemoved,
+    hunterLodge: input.huntersLodge.name,
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    replayVerified: verifyGameReplay(session),
+    slyFox: input.slyFox.name,
+    slyFoxGainedStealthFirst,
+    statePreserved,
+  });
+}
+
 function runWaterEndTurnStealth(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['waterEndTurnStealth'] {
@@ -12447,6 +12644,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthOverpower = runEarthOverpower(input);
   const earthBury = runEarthBury(input);
   const earthDuel = runEarthDuel(input);
+  const earthHuntersLodge = runEarthHuntersLodge(input);
   const earthPoisonousDagger = runEarthPoisonousDagger(input);
   const earthSwordAndShield = runEarthSwordAndShield(input);
   const earthRescue = runEarthRescue(input);
@@ -12627,6 +12825,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthOverpower,
     earthBury,
     earthDuel,
+    earthHuntersLodge,
     earthPoisonousDagger,
     earthSwordAndShield,
     earthRescue,
