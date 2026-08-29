@@ -107,6 +107,20 @@ export type PrivateGameCheck = Readonly<{
   airStarter: StarterCheck;
   earthStarter: StarterCheck;
   fireStarter: StarterCheck;
+  waterRiver: Readonly<{
+    acceptedActionCount: number;
+    bottomedNextSpell: boolean;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    exactChoices: boolean;
+    hiddenFromOpponent: boolean;
+    keptNextSpell: boolean;
+    legalLowRarityDeck: true;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    river: string;
+    seed: number;
+  }>;
   fireGranaryRats: Readonly<{
     acceptedActionCount: number;
     causalEventsVerified: boolean;
@@ -1238,6 +1252,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   airborneTargetMinion: NormalizedCard;
   aramosMercenaries: NormalizedCard;
   arcLightning: NormalizedCard;
+  autumnRiver: NormalizedCard;
   authorityHash: Hash;
   bladderblimp: NormalizedCard;
   bury: NormalizedCard;
@@ -1423,6 +1438,26 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     'card:8959e87bfe778fd2bdec4f6355e16d79085fa498040562cabf6f31af40801b6d',
     'water',
   );
+  const autumnRiver = snapshot.cards.find(({ name }) => name === 'Autumn River');
+  if (!autumnRiver
+    || autumnRiver.stableId
+      !== 'card:1831cd59a3795825f34b108a1e7bb97173e269d12ec2f8d5664a985ec61cc5da'
+    || autumnRiver.cardType !== 'site'
+    || autumnRiver.rulesText.trim()
+      !== 'Genesis → Look at your next spell. You may put it on the bottom of your spellbook.'
+    || autumnRiver.manaCost !== null
+    || autumnRiver.attack !== null
+    || autumnRiver.defense !== null
+    || autumnRiver.life !== null
+    || autumnRiver.elements.length !== 1
+    || autumnRiver.elements[0] !== 'water'
+    || autumnRiver.thresholds.air !== 0
+    || autumnRiver.thresholds.earth !== 0
+    || autumnRiver.thresholds.fire !== 0
+    || autumnRiver.thresholds.water !== 1
+    || autumnRiver.rarity !== 'ordinary') {
+    throw new Error('private seasonal River no longer matches its supported facts');
+  }
   const swordAndShield = snapshot.cards.find(({ name }) => name === 'Sword and Shield');
   if (!swordAndShield
     || swordAndShield.cardType !== 'artifact'
@@ -2792,6 +2827,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     airborneTargetMinion,
     aramosMercenaries,
     arcLightning,
+    autumnRiver,
     authorityHash: artifact.contentHash,
     bladderblimp,
     borderMilitia,
@@ -2989,6 +3025,7 @@ function gameDefinition(
   siteGenesisPayOneManaToSummonToken?: string,
   summonTokenToEachControlledSiteBorderingEnemySite?: string,
   token = false,
+  siteGenesisMayBottomNextSpell = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -3027,6 +3064,7 @@ function gameDefinition(
       ...(siteGenesisPayOneManaToSummonToken
         ? { genesisPayOneManaToSummonToken: siteGenesisPayOneManaToSummonToken }
         : {}),
+      ...(siteGenesisMayBottomNextSpell ? { genesisMayBottomNextSpell: true } : {}),
       ...(ordinaryMinionManaDiscount ? { ordinaryMinionManaDiscount } : {}),
       ...(sacrificeToDestroyNearbySite ? { sacrificeToDestroyNearbySite: true } : {}),
       ...(siteGenesisEnemiesLoseStealth ? { genesisEnemiesLoseStealth: true } : {}),
@@ -3161,7 +3199,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -3326,6 +3364,11 @@ function buildManifest(
     [input.hamlet, input.wasteland],
   );
   const waterStarterDeck = elementalDeck('water', [input.seravaTownsfolk], [input.stream]);
+  const waterRiverDeck = elementalDeck(
+    'water',
+    [input.seravaTownsfolk],
+    [input.autumnRiver, input.stream],
+  );
   const earthBurrowingDeck = elementalDeck('earth', [
     ...earthMinions,
     input.burrowingMinion,
@@ -3651,6 +3694,8 @@ function buildManifest(
           ? waterMesmerismDeck
         : scenario === 'water-pirate-ship'
           ? waterPirateShipDeck
+        : scenario === 'water-river'
+          ? waterRiverDeck
         : scenario === 'water-lugbog'
           ? waterLugbogDeck
         : scenario === 'water-submerge'
@@ -3708,6 +3753,8 @@ function buildManifest(
         ? waterMesmerismDeck
       : scenario === 'water-pirate-ship'
         ? waterPirateShipDeck
+      : scenario === 'water-river'
+        ? waterRiverDeck
       : scenario === 'water-lugbog'
         ? waterLugbogDeck
       : scenario === 'earth-entombed'
@@ -3879,6 +3926,7 @@ function buildManifest(
       card.stableId === input.humbleVillage.stableId ? input.footSoldier.stableId : undefined,
       card.stableId === input.borderMilitia.stableId ? input.footSoldier.stableId : undefined,
       card.stableId === input.footSoldier.stableId,
+      card.stableId === input.autumnRiver.stableId,
     ),
   ]));
   return {
@@ -14155,6 +14203,106 @@ function runFireResponse(
   });
 }
 
+function findWaterRiverOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  riverInstanceId: string;
+  seed: number;
+  session: GameSession;
+}> {
+  // ponytail: bounded seed scan avoids another private config field.
+  for (let offset = 1; offset <= 64; offset += 1) {
+    const seed = input.config.waterSeed + offset;
+    const built = buildManifest(input, seed, 'water-river');
+    const session = createGameSession(built.manifest);
+    const river = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.autumnRiver.stableId);
+    if (river && session.state.players.north.spellbook.length > 1) {
+      return {
+        ...built,
+        riverInstanceId: river.instanceId,
+        seed,
+        session,
+      };
+    }
+  }
+  throw new Error('private seasonal River scenario no longer produces its supported opening');
+}
+
+function runWaterRiver(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['waterRiver'] {
+  const opening = findWaterRiverOpening(input);
+  let checkpoint = keep(opening.session);
+  checkpoint = keep(checkpoint);
+  const before = checkpoint.state.players.north.spellbook;
+  const top = before[0];
+  if (!top) throw new Error('private seasonal River scenario lacks a next spell');
+  const choices = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.riverInstanceId
+      && descriptor.cell === 'C4');
+  const keepChoice = choices.find(({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.genesisSpellChoice === 'keep-next');
+  const bottomChoice = choices.find(({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.genesisSpellChoice === 'bottom-next');
+  if (!keepChoice || !bottomChoice) throw new Error('private seasonal River choices are unavailable');
+  const kept = stepGame(checkpoint, keepChoice);
+  const bottomed = stepGame(checkpoint, bottomChoice);
+  if (!kept.accepted || !bottomed.accepted) {
+    throw new Error('private seasonal River choice was rejected');
+  }
+  const beforeOrder = before.map(({ instanceId }) => instanceId);
+  const keptOrder = kept.session.state.players.north.spellbook.map(({ instanceId }) => instanceId);
+  const bottomedOrder = bottomed.session.state.players.north.spellbook
+    .map(({ instanceId }) => instanceId);
+  const keepEvents = kept.receipt.events.map(({ type }) => type).join(',');
+  const bottomEvents = bottomed.receipt.events.map(({ type }) => type).join(',');
+  const bottomEvent = bottomed.receipt.events[1];
+  const privateIdentity = [top.cardId, top.instanceId];
+  const publicEvents = canonicalJson(bottomed.receipt.events as unknown as JsonValue);
+  const deckCardIds = [
+    ...opening.manifest.decks.north.atlas,
+    ...opening.manifest.decks.north.spellbook,
+  ];
+  const cardsById = new Map(input.cards.map((card) => [card.stableId, card]));
+  if (!deckCardIds.every((cardId) => {
+    const rarity = cardsById.get(cardId)?.rarity;
+    return rarity === 'ordinary' || rarity === 'exceptional';
+  })) {
+    throw new Error('private seasonal River teaching deck no longer uses only entry-level rarities');
+  }
+  return Object.freeze({
+    acceptedActionCount: bottomed.session.transcript.length,
+    bottomedNextSpell: bottomedOrder.join(',')
+      === [...beforeOrder.slice(1), beforeOrder[0]!].join(','),
+    causalEventsVerified: keepEvents === 'site-played'
+      && bottomEvents === 'site-played,spell-bottomed'
+      && bottomEvent?.type === 'spell-bottomed'
+      && isJsonRecord(bottomEvent.payload)
+      && bottomEvent.payload.seat === 'north'
+      && bottomEvent.payload.sourceInstanceId === opening.riverInstanceId,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    exactChoices: choices.length === 2
+      && new Set(choices.map(({ actionId }) => actionId)).size === 2
+      && privateIdentity.every((identity) =>
+        !canonicalJson(choices.map(({ descriptor }) => descriptor) as unknown as JsonValue)
+          .includes(identity)),
+    hiddenFromOpponent: canonicalJson(observeGame(kept.session.state, 'south') as unknown as JsonValue)
+      === canonicalJson(observeGame(bottomed.session.state, 'south') as unknown as JsonValue)
+      && privateIdentity.every((identity) => !publicEvents.includes(identity)),
+    keptNextSpell: keptOrder.join(',') === beforeOrder.join(','),
+    legalLowRarityDeck: true,
+    noRandomDraws: kept.receipt.randomDraws.length === 0
+      && bottomed.receipt.randomDraws.length === 0,
+    replayVerified: verifyGameReplay(kept.session) && verifyGameReplay(bottomed.session),
+    river: input.autumnRiver.name,
+    seed: opening.seed,
+  });
+}
+
 function runWaterSidewaysMovement(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['waterSidewaysMovement'] {
@@ -15908,6 +16056,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const waterFreeze = runWaterFreeze(input);
   const waterGnarledWendigo = runWaterGnarledWendigo(input);
   const waterHealing = runWaterHealing(input);
+  const waterRiver = runWaterRiver(input);
   const waterSidewaysMovement = runWaterSidewaysMovement(input);
   const waterSubmerge = runWaterSubmerge(input);
   const waterStarter = runStarter(
@@ -16132,6 +16281,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     waterFreeze,
     waterGnarledWendigo,
     waterHealing,
+    waterRiver,
     waterSidewaysMovement,
     waterSubmerge,
     waterStarter,

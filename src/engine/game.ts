@@ -60,6 +60,7 @@ export type GameCardDefinition =
     genesisDrawSpellPerAdjacentSameCard?: boolean;
     genesisEnemiesLoseStealth?: true;
     genesisGainMana?: number;
+    genesisMayBottomNextSpell?: true;
     genesisPayOneManaToSummonToken?: string;
     ordinaryMinionManaDiscount?: 1;
     sacrificeToDestroyNearbySite?: true;
@@ -394,6 +395,7 @@ type GameActionDescriptor =
     cardId: string;
     cardInstanceId: string;
     cell: RealmCell;
+    genesisSpellChoice?: 'bottom-next' | 'keep-next';
     genesisTokenChoice?: 'decline' | 'pay-one-mana';
     kind: 'play-site';
   }>
@@ -1055,7 +1057,8 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && (card.genesisDiscardTopSpells !== undefined
         || card.genesisDrawSpellPerAdjacentSameCard
         || card.genesisEnemiesLoseStealth
-        || card.genesisGainMana !== undefined)) {
+        || card.genesisGainMana !== undefined
+        || card.genesisMayBottomNextSpell !== undefined)) {
       throw new RangeError(`${path} simultaneous paid-token and another site Genesis are unsupported`);
     }
     if (card.genesisDrawSpellPerAdjacentSameCard !== undefined
@@ -1070,6 +1073,18 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     }
     if (card.genesisEnemiesLoseStealth !== undefined && card.genesisEnemiesLoseStealth !== true) {
       throw new RangeError(`${path}.genesisEnemiesLoseStealth must be true`);
+    }
+    if (card.genesisMayBottomNextSpell !== undefined
+      && card.genesisMayBottomNextSpell !== true) {
+      throw new RangeError(`${path}.genesisMayBottomNextSpell must be true`);
+    }
+    if (card.genesisMayBottomNextSpell === true
+      && (card.genesisDiscardTopSpells !== undefined
+        || card.genesisDrawSpellPerAdjacentSameCard
+        || card.genesisEnemiesLoseStealth
+        || card.genesisGainMana !== undefined
+        || card.genesisPayOneManaToSummonToken !== undefined)) {
+      throw new RangeError(`${path} simultaneous next-spell and another site Genesis are unsupported`);
     }
     if (card.connectsBurrowedAllies !== undefined && typeof card.connectsBurrowedAllies !== 'boolean') {
       throw new RangeError(`${path}.connectsBurrowedAllies must be boolean`);
@@ -1571,6 +1586,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? { genesisEnemiesLoseStealth: true as const }
               : {}),
             ...(card.genesisGainMana ? { genesisGainMana: card.genesisGainMana } : {}),
+            ...(card.genesisMayBottomNextSpell === true
+              ? { genesisMayBottomNextSpell: true as const }
+              : {}),
             ...(card.genesisPayOneManaToSummonToken
               ? { genesisPayOneManaToSummonToken: card.genesisPayOneManaToSummonToken }
               : {}),
@@ -2743,11 +2761,17 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     player.hand.atlas.flatMap(({ cardId, instanceId }) => cells.flatMap((cell) => {
       const base = { cardId, cardInstanceId: instanceId, cell, kind: 'play-site' as const };
       const definition = cardDefinition(state, cardId);
-      return definition.cardType === 'site'
-        && definition.genesisPayOneManaToSummonToken !== undefined
-        ? [
+      if (definition.cardType !== 'site') return [base];
+      if (definition.genesisPayOneManaToSummonToken !== undefined) {
+        return [
           { ...base, genesisTokenChoice: 'decline' as const },
           { ...base, genesisTokenChoice: 'pay-one-mana' as const },
+        ];
+      }
+      return definition.genesisMayBottomNextSpell === true && player.spellbook.length > 0
+        ? [
+          { ...base, genesisSpellChoice: 'keep-next' as const },
+          { ...base, genesisSpellChoice: 'bottom-next' as const },
         ]
         : [base];
     }));
@@ -2786,7 +2810,12 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
   if (descriptor.kind === 'draw-spell') return 'Draw a spell with Avatar';
   if (descriptor.kind === 'play-site') {
     const definition = cardDefinition(state, descriptor.cardId);
-    const choice = definition.cardType === 'site'
+    const nextSpell = state.players[state.decisionSeat].spellbook[0];
+    const choice = definition.cardType === 'site' && definition.genesisMayBottomNextSpell === true
+      ? descriptor.genesisSpellChoice === 'bottom-next'
+        ? ` (put ${nextSpell?.cardId ?? 'next spell'} on bottom)`
+        : ` (keep ${nextSpell?.cardId ?? 'next spell'} on top)`
+      : definition.cardType === 'site'
       && definition.genesisPayOneManaToSummonToken !== undefined
       ? descriptor.genesisTokenChoice === 'pay-one-mana'
         ? ' (pay 1 for Genesis)'
@@ -4036,6 +4065,10 @@ function applyDescriptor(
     const genesisSpellDiscards = definition.genesisDiscardTopSpells
       ? player.spellbook.slice(0, definition.genesisDiscardTopSpells)
       : [];
+    const genesisBottomedSpell = definition.genesisMayBottomNextSpell === true
+      && descriptor.genesisSpellChoice === 'bottom-next'
+      ? player.spellbook[0]
+      : undefined;
     const genesisDrawFailed = genesisSpellDraws.length < genesisSpellDrawCount;
     const updatedPlayer = deepFreeze({
       ...player,
@@ -4049,7 +4082,9 @@ function applyDescriptor(
       },
       mana: player.mana + 1 + (definition.genesisGainMana ?? 0)
         - Number(descriptor.genesisTokenChoice === 'pay-one-mana'),
-      spellbook: player.spellbook.slice(genesisSpellDraws.length + genesisSpellDiscards.length),
+      spellbook: genesisBottomedSpell
+        ? [...player.spellbook.slice(1), genesisBottomedSpell]
+        : player.spellbook.slice(genesisSpellDraws.length + genesisSpellDiscards.length),
     });
     const winner = otherSeat(seat);
     const placedUnits = state.realm.units.map((unit) => {
@@ -4132,6 +4167,12 @@ function applyDescriptor(
           }]
           : []),
         { payload: { cardId: card.cardId, cell: descriptor.cell, instanceId: card.instanceId, seat }, type: 'site-played' },
+        ...(genesisBottomedSpell
+          ? [{
+            payload: { seat, sourceInstanceId: card.instanceId },
+            type: 'spell-bottomed' as const,
+          }]
+          : []),
         ...(definition.genesisGainMana
           ? [{
             payload: { amount: definition.genesisGainMana, seat, sourceInstanceId: card.instanceId },

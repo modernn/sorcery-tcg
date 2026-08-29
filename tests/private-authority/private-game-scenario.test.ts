@@ -542,6 +542,22 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assertHamlet(result.fireHamlet);
   assertVoidArtifact(result.airVoidArtifact);
   assertStarter(result.waterStarter, 'Stream', 'Serava Townsfolk');
+  assert.equal(result.waterRiver.river, 'Autumn River');
+  assert.equal(result.waterRiver.acceptedActionCount, 3);
+  assert.equal(result.waterRiver.exactChoices, true);
+  assert.equal(result.waterRiver.keptNextSpell, true);
+  assert.equal(result.waterRiver.bottomedNextSpell, true);
+  assert.equal(result.waterRiver.hiddenFromOpponent, true);
+  assert.equal(result.waterRiver.causalEventsVerified, true);
+  assert.equal(result.waterRiver.legalLowRarityDeck, true);
+  assert.equal(result.waterRiver.noRandomDraws, true);
+  assert.equal(result.waterRiver.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.waterRiver.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.waterRiver.deck.atlas
+    .find(({ name }) => name === 'Autumn River')?.copies, 4);
+  assert.equal(result.waterRiver.deck.atlas
+    .find(({ name }) => name === 'Stream')?.copies, 4);
+  assert.equal(result.waterRiver.replayVerified, true);
   assertVikings(result.fireVikings);
   assert.equal(result.classification, 'private-local_actual-cards_unranked-partial-rules');
   assert.equal(result.airGenesisSpell.genesisMinion, 'Apprentice Wizard');
