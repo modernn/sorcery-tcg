@@ -906,7 +906,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 21 : 20,
+        preset.id === 'air-vs-earth-lesson' ? 21 : 22,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -914,7 +914,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 20 : 21,
+        preset.id === 'air-vs-earth-lesson' ? 22 : 21,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -971,6 +971,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Cave Trolls': 3,
     'Dalcean Phalanx': 1,
     'Divine Healing': 1,
+    'House Arn Bannerman': 2,
     'Land Surveyor': 2,
     Overpower: 2,
     'Pudge Butcher': 1,
@@ -1053,6 +1054,26 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       ordinary: definition.ordinary,
       stealth: definition.stealth,
     }, expected);
+  }
+  const houseArnId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'House Arn Bannerman')?.[0];
+  assert.ok(houseArnId);
+  const houseArn = airLesson.manifest.cards[houseArnId];
+  assert.equal(houseArn?.cardType, 'minion');
+  if (houseArn?.cardType === 'minion') {
+    assert.deepEqual({
+      attack: houseArn.attack,
+      defense: houseArn.defense,
+      manaCost: houseArn.manaCost,
+      otherNearbyAlliesPowerBonus: houseArn.otherNearbyAlliesPowerBonus,
+      thresholds: houseArn.thresholds,
+    }, {
+      attack: 2,
+      defense: 2,
+      manaCost: 4,
+      otherNearbyAlliesPowerBonus: 1,
+      thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+    });
   }
   for (const name of ['Dark Tower', 'Gothic Tower', 'Lone Tower']) {
     const cardId = Object.entries(airLesson.cardNames)

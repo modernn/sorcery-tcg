@@ -134,6 +134,7 @@ export type GameCardDefinition =
     mustBeCastSubmerged?: boolean;
     mustBeCastToWaterSite?: boolean;
     ordinary?: true;
+    otherNearbyAlliesPowerBonus?: 1;
     provides?: GameElement;
     ranged?: boolean;
     sacrificeMinionAtSummoningLocationForManaDiscount?: 2;
@@ -1433,6 +1434,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.movementBonus > 2)) {
     throw new RangeError(`${path}.movementBonus must be a safe integer between 1 and 2`);
   }
+  if (card.otherNearbyAlliesPowerBonus !== undefined
+    && card.otherNearbyAlliesPowerBonus !== 1) {
+    throw new RangeError(`${path}.otherNearbyAlliesPowerBonus must be 1`);
+  }
   if (card.movesOnlySideways !== undefined && typeof card.movesOnlySideways !== 'boolean') {
     throw new RangeError(`${path}.movesOnlySideways must be boolean`);
   }
@@ -1771,6 +1776,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.mustBeCastSubmerged === true ? { mustBeCastSubmerged: true } : {}),
             ...(card.mustBeCastToWaterSite === true ? { mustBeCastToWaterSite: true } : {}),
             ...(card.ordinary === true ? { ordinary: true as const } : {}),
+            ...(card.otherNearbyAlliesPowerBonus === 1
+              ? { otherNearbyAlliesPowerBonus: 1 as const }
+              : {}),
             ...(card.provides ? { provides: card.provides } : {}),
             ...(card.ranged === true ? { ranged: true } : {}),
             ...(card.sacrificeMinionAtSummoningLocationForManaDiscount === 2
@@ -2053,6 +2061,26 @@ function temporaryPowerBonus(sources: readonly StateHash[] | undefined): number 
   return 2 * (sources?.length ?? 0);
 }
 
+function nearbyAlliesPowerBonus(state: GameState, ref: GameUnitRef): number {
+  const target = ref.kind === 'avatar'
+    ? state.players[ref.seat].avatar
+    : state.realm.units.find(({ controller, instanceId }) =>
+      controller === ref.seat && instanceId === ref.instanceId);
+  if (!target) throw new Error('unreachable nearby-power target');
+  return state.realm.units.filter((source) => {
+    if (source.controller !== ref.seat
+      || source.instanceId === ref.instanceId
+      || source.region !== target.region
+      || minionDisabled(state, source)) return false;
+    const definition = cardDefinition(state, source.cardId);
+    return definition.cardType === 'minion'
+      && definition.otherNearbyAlliesPowerBonus === 1
+      && (source.location === target.location
+        || borderingCells(source.location).includes(target.location)
+        || diagonalCells(source.location).includes(target.location));
+  }).length;
+}
+
 function observePlayer(state: GameState, player: PlayerState, owner: GameSeat, viewer: GameSeat): ObservedPlayer {
   const own = owner === viewer;
   const avatarDefinition = cardDefinition(state, player.avatar.card.cardId);
@@ -2262,7 +2290,9 @@ function unitStatus(
     if (avatar.card.instanceId !== ref.instanceId) throw new Error('unreachable Avatar reference');
     const definition = cardDefinition(state, avatar.card.cardId);
     if (definition.cardType !== 'avatar') throw new Error('Avatar lacks Avatar definition');
-    const powerBonus = temporaryPowerBonus(avatar.temporaryPowerSources) + bearerPowerBonus(state, ref);
+    const powerBonus = temporaryPowerBonus(avatar.temporaryPowerSources)
+      + bearerPowerBonus(state, ref)
+      + nearbyAlliesPowerBonus(state, ref);
     return {
       airborne: false,
       attack: definition.attack + powerBonus,
@@ -2296,7 +2326,9 @@ function unitStatus(
   const definition = cardDefinition(state, unit.cardId);
   if (definition.cardType !== 'minion') throw new Error('minion lacks minion definition');
   const disabled = minionDisabled(state, unit);
-  const powerBonus = temporaryPowerBonus(unit.temporaryPowerSources) + bearerPowerBonus(state, ref);
+  const powerBonus = temporaryPowerBonus(unit.temporaryPowerSources)
+    + bearerPowerBonus(state, ref)
+    + nearbyAlliesPowerBonus(state, ref);
   return {
     airborne: !disabled && definition.airborne === true && unit.region === 'surface',
     attack: definition.attack + powerBonus,
@@ -3360,10 +3392,30 @@ function resolveMinionDeaths(
   };
   const deathOutcomes: GameOutcome[] = [];
   let artifacts = state.realm.artifacts;
-  const deadIds = new Set(deaths.map(({ instanceId }) => instanceId));
-  const survivingUnits = units.filter(({ instanceId }) => !deadIds.has(instanceId));
+  const resolvedDeaths = [...deaths];
+  const deadIds = new Set(resolvedDeaths.map(({ instanceId }) => instanceId));
+  let survivingUnits = units.filter(({ instanceId }) => !deadIds.has(instanceId));
+  while (true) {
+    const projectedState = deepFreeze({
+      ...state,
+      players: startingPlayers,
+      realm: { ...state.realm, units: survivingUnits },
+    });
+    const newlyLethal = survivingUnits.filter((unit) => unit.damage > 0
+      && unit.damage >= unitStatus(projectedState, {
+        instanceId: unit.instanceId,
+        kind: 'minion',
+        seat: unit.controller,
+      }).defense);
+    if (newlyLethal.length === 0) break;
+    newlyLethal.forEach((unit) => {
+      deadIds.add(unit.instanceId);
+      resolvedDeaths.push(unit);
+    });
+    survivingUnits = survivingUnits.filter(({ instanceId }) => !deadIds.has(instanceId));
+  }
   const deckLosers = new Set<GameSeat>();
-  for (const dead of deaths) {
+  for (const dead of resolvedDeaths) {
     const definition = cardDefinition(state, dead.cardId);
     if (definition.cardType !== 'minion' || minionDisabled(state, dead)) continue;
     if (definition.deathriteHeal) {
@@ -3438,7 +3490,7 @@ function resolveMinionDeaths(
       type: 'site-drawn',
     });
   }
-  for (const dead of deaths) {
+  for (const dead of resolvedDeaths) {
     const definition = cardDefinition(state, dead.cardId);
     const token = definition.cardType === 'minion' && definition.token === true;
     if (!token) {
@@ -3488,6 +3540,60 @@ function resolveMinionDeaths(
     players: deepFreeze(players),
     terminal,
     units: survivingUnits,
+  };
+}
+
+function settleStaticPowerDeaths(
+  state: GameState,
+): Readonly<{ outcomes: readonly GameOutcome[]; state: GameState }> {
+  const deaths = state.realm.units.filter((unit) => unit.damage > 0
+    && unit.damage >= unitStatus(state, {
+      instanceId: unit.instanceId,
+      kind: 'minion',
+      seat: unit.controller,
+    }).defense);
+  if (deaths.length === 0) return { outcomes: [], state };
+  const resolution = resolveMinionDeaths(
+    state,
+    state.players,
+    state.realm.units,
+    deaths,
+    new Set<GameSeat>(),
+  );
+  const survivingIds = new Set(resolution.units.map(({ instanceId }) => instanceId));
+  const unitSurvives = (ref: GameUnitRef): boolean =>
+    ref.kind === 'avatar' || survivingIds.has(ref.instanceId);
+  const pendingInvalid = state.pendingCombat !== null
+    && (!unitSurvives(state.pendingCombat.attacker)
+      || (state.pendingCombat.originalTarget?.kind === 'minion'
+        && !unitSurvives(state.pendingCombat.originalTarget)));
+  const pendingCombat = state.pendingCombat === null || pendingInvalid
+    ? null
+    : deepFreeze({
+      ...state.pendingCombat,
+      combatants: state.pendingCombat.combatants.filter(unitSurvives),
+      defenders: state.pendingCombat.defenders.filter(unitSurvives),
+    });
+  const terminal = state.terminal.status === 'finished'
+    ? state.terminal
+    : resolution.terminal;
+  return {
+    outcomes: resolution.outcomes,
+    state: deepFreeze({
+      ...state,
+      ...(terminal.status === 'finished'
+        ? { pendingCombat: null, phase: 'terminal' as const }
+        : pendingInvalid
+          ? { decisionSeat: state.activeSeat, pendingCombat: null, phase: 'main' as const }
+          : { pendingCombat }),
+      players: resolution.players,
+      realm: {
+        ...state.realm,
+        ...(resolution.artifacts ? { artifacts: resolution.artifacts } : {}),
+        units: resolution.units,
+      },
+      terminal,
+    }),
   };
 }
 
@@ -3659,6 +3765,9 @@ function resolveDeclaredPath(
     current = settlement.state;
     outcomes.push(...settlement.outcomes);
     removals.push(...settlement.removals);
+    const powerSettlement = settleStaticPowerDeaths(current);
+    current = powerSettlement.state;
+    outcomes.push(...powerSettlement.outcomes);
     if (settlement.removals.some(({ instanceId }) => instanceId === ref.instanceId)
       || current.terminal.status === 'finished') break;
   }
@@ -6804,7 +6913,10 @@ function applyDescriptor(
         && path.state.players[ref.seat].avatar.region === destination.region
       : path.state.realm.units.some(({ instanceId, location, region }) =>
         instanceId === ref.instanceId && location === destination.cell && region === destination.region);
-    if (!defenderArrived || path.state.terminal.status === 'finished') {
+    const reconciledPending = path.state.pendingCombat;
+    if (!defenderArrived
+      || path.state.terminal.status === 'finished'
+      || reconciledPending === null) {
       return [
         withStateVersion(path.state, {}),
         [{
@@ -6821,13 +6933,14 @@ function applyDescriptor(
         [],
       ];
     }
-    const removesSite = pending.originalTarget?.kind === 'site' && !pending.targetRemoved;
+    const removesSite = reconciledPending.originalTarget?.kind === 'site'
+      && !reconciledPending.targetRemoved;
     return [
       withStateVersion(path.state, {
         pendingCombat: deepFreeze({
-          ...pending,
-          defenders: [...pending.defenders, ref],
-          targetRemoved: pending.targetRemoved || removesSite,
+          ...reconciledPending,
+          defenders: [...reconciledPending.defenders, ref],
+          targetRemoved: reconciledPending.targetRemoved || removesSite,
         }),
       }),
       [
@@ -6845,7 +6958,7 @@ function applyDescriptor(
         ...path.outcomes,
         ...(removesSite
           ? [{
-            payload: { instanceId: pending.originalTarget!.instanceId, kind: 'site' },
+            payload: { instanceId: reconciledPending.originalTarget!.instanceId, kind: 'site' },
             type: 'original-target-removed',
           }]
           : []),
@@ -7186,7 +7299,33 @@ export function stepGame(session: GameSession, request: GameActionRequest): Game
 
   const receiptSequence = session.transcript.length + 1;
   const firstEventSequence = session.transcript.reduce((count, receipt) => count + receipt.events.length, 0) + 1;
-  const [nextState, outcomes, randomDraws] = applyDescriptor(state, action.descriptor, session.manifest);
+  const [appliedState, appliedOutcomes, randomDraws] = applyDescriptor(
+    state,
+    action.descriptor,
+    session.manifest,
+  );
+  const powerSettlement = settleStaticPowerDeaths(appliedState);
+  const completionIndex = appliedOutcomes.findIndex(({ type }) =>
+    type === 'game-ended' || type === 'magic-resolved' || type === 'turn-ended');
+  const settlementEndIndex = powerSettlement.outcomes.findIndex(({ type }) =>
+    type === 'game-ended');
+  const settlementBeforeCompletion = settlementEndIndex < 0
+    ? powerSettlement.outcomes
+    : powerSettlement.outcomes.slice(0, settlementEndIndex);
+  const settlementAfterCompletion = settlementEndIndex < 0
+    ? []
+    : powerSettlement.outcomes.slice(settlementEndIndex);
+  const outcomes = powerSettlement.outcomes.length === 0
+    ? appliedOutcomes
+    : completionIndex < 0
+      ? [...appliedOutcomes, ...powerSettlement.outcomes]
+      : [
+        ...appliedOutcomes.slice(0, completionIndex),
+        ...settlementBeforeCompletion,
+        ...appliedOutcomes.slice(completionIndex),
+        ...settlementAfterCompletion,
+      ];
+  const nextState = powerSettlement.state;
   const events: readonly EngineEvent[] = createEvents(
     command.actionId,
     receiptSequence,

@@ -1297,6 +1297,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   ghostTownSite: NormalizedCard;
   hamlet: NormalizedCard;
   healingMinion: NormalizedCard;
+  houseArnBannerman: NormalizedCard;
   huntersLodge: NormalizedCard;
   highlandClansmen: NormalizedCard;
   humbleVillage: NormalizedCard;
@@ -1727,6 +1728,29 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || amazonWarriors.thresholds.water !== 0
     || amazonWarriors.rarity !== 'ordinary') {
     throw new Error('private blank Earth Warriors no longer match their supported facts');
+  }
+  const houseArnBannerman = snapshot.cards.find(({ name }) => name === 'House Arn Bannerman');
+  const houseArnTokens = houseArnBannerman?.rulesText.toLowerCase().match(/[a-z]+|\+\d+/g) ?? [];
+  if (!houseArnBannerman
+    || houseArnBannerman.stableId
+      !== 'card:9fa6d2e0dc750c94b8db4b2a313fba09c67ef44798c17baa18db35225de69c69'
+    || houseArnBannerman.officialSourceId !== '001-house_arn_bannerman-b-f'
+    || houseArnBannerman.cardType !== 'minion'
+    || houseArnTokens.length !== 6
+    || !['other', 'nearby', 'allies', 'have', '+1', 'power']
+      .every((token) => houseArnTokens.includes(token))
+    || houseArnBannerman.manaCost !== 4
+    || houseArnBannerman.attack !== 2
+    || houseArnBannerman.defense !== 2
+    || houseArnBannerman.life !== null
+    || houseArnBannerman.elements.length !== 1
+    || houseArnBannerman.elements[0] !== 'earth'
+    || houseArnBannerman.thresholds.air !== 0
+    || houseArnBannerman.thresholds.earth !== 2
+    || houseArnBannerman.thresholds.fire !== 0
+    || houseArnBannerman.thresholds.water !== 0
+    || houseArnBannerman.rarity !== 'exceptional') {
+    throw new Error('private nearby-allies power minion no longer matches its supported facts');
   }
   const wildBoars = snapshot.cards.find(({ name }) => name === 'Wild Boars');
   if (!wildBoars
@@ -3110,6 +3134,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     ghostTownSite,
     hamlet,
     healingMinion,
+    houseArnBannerman,
     huntersLodge,
     highlandClansmen,
     humbleVillage,
@@ -3282,6 +3307,7 @@ function gameDefinition(
   earthSitePlayCreatesAdjacentRubble = false,
   replaceAdjacentRubbleWithTopAtlasSite = false,
   tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn = false,
+  otherNearbyAlliesPowerBonus = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -3436,6 +3462,7 @@ function gameDefinition(
       ...(movementBonus ? { movementBonus } : {}),
       movesOnlySideways,
       ...(card.rarity === 'ordinary' ? { ordinary: true as const } : {}),
+      ...(otherNearbyAlliesPowerBonus ? { otherNearbyAlliesPowerBonus: 1 as const } : {}),
       ...(provides ? { provides } : {}),
       ranged,
       ...(sacrificeMinionAtSummoningLocationForManaDiscount
@@ -3671,6 +3698,7 @@ function buildManifest(
       input.dalceanPhalanx.stableId,
       input.pudgeButcher.stableId,
       ...Array(2).fill(input.amazonWarriors.stableId),
+      ...Array(2).fill(input.houseArnBannerman.stableId),
       input.borderMilitia.stableId,
       input.divineHealing.stableId,
       ...Array(2).fill(input.overpower.stableId),
@@ -4284,6 +4312,7 @@ function buildManifest(
       card.stableId === input.geomancer.stableId,
       card.stableId === input.geomancer.stableId,
       card.stableId === input.sparkmage.stableId,
+      card.stableId === input.houseArnBannerman.stableId,
     ),
   ]));
   return {
