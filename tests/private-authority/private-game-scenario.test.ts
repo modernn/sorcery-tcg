@@ -6,6 +6,21 @@ import {
   runPrivateGameCheck,
 } from '../../src/commands/run-private-game-check.ts';
 
+function assertEarthStarter(result: PrivateGameCheck['earthStarter']): void {
+  assert.equal(result.valley, 'Valley');
+  assert.equal(result.wildBoars, 'Wild Boars');
+  assert.equal(result.acceptedActionCount, 4);
+  assert.equal(result.manaPaid, 1);
+  assert.equal(result.siteAndMinionStateVerified, true);
+  assert.equal(result.causalEventsVerified, true);
+  assert.equal(result.noRandomDraws, true);
+  assert.equal(result.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.deck.atlas.find(({ name }) => name === 'Valley')?.copies, 4);
+  assert.equal(result.deck.spellbook.find(({ name }) => name === 'Wild Boars')?.copies, 4);
+  assert.equal(result.replayVerified, true);
+}
+
 function assertSwordAndShield(result: PrivateGameCheck['earthSwordAndShield']): void {
   assert.equal(result.swordAndShield, 'Sword and Shield');
   assert.equal(result.elthamTownsfolk, 'Eltham Townsfolk');
@@ -153,6 +168,7 @@ function assertFireCharge(result: PrivateGameCheck['fireCharge']): void {
 
 test('private actual-card decks complete deterministic combat, Earth, Air, Fire, and Water scenarios', async () => {
   const result = await runPrivateGameCheck();
+  assertEarthStarter(result.earthStarter);
   assertVikings(result.fireVikings);
   assert.equal(result.classification, 'private-local_actual-cards_unranked-partial-rules');
   assert.equal(result.airGenesisSpell.genesisMinion, 'Apprentice Wizard');
