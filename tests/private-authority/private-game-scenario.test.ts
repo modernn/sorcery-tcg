@@ -154,9 +154,11 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
       descriptor.kind === 'cast-magic'
         && descriptor.cardInstanceId === zap.instanceId
         && (descriptor.target as JsonObject | undefined)?.instanceId === leopard.instanceId);
-    assert.match(String(castZap.label), /Cast Zap!.*Snow Leopard/);
+    assert.match(String(castZap.label), /Cast Zap!.*Snow Leopard.*attempt to deal 1 damage/);
     assert.doesNotMatch(String(castZap.label), /card:|sha256:/);
     current = await submit(castZap);
+    assert.match(String(current.playerAction), /Cast Zap!.*Snow Leopard.*attempt to deal 1 damage/);
+    assert.doesNotMatch(String(current.playerAction), /card:|sha256:/);
     const replay = await json('/api/replay', { method: 'POST' });
     assert.equal(replay.acceptedActionCount, 10);
     assert.equal(replay.verified, true);
@@ -197,8 +199,16 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
       String(label).includes('Humble Village') && !/card:|sha256:/.test(String(label))), true);
     const paidVillage = villageChoices.find(({ descriptor }) =>
       (descriptor as JsonObject).genesisTokenChoice === 'pay-one-mana');
+    const declinedVillage = villageChoices.find(({ descriptor }) =>
+      (descriptor as JsonObject).genesisTokenChoice === 'decline');
     assert.ok(paidVillage);
+    assert.ok(declinedVillage);
+    assert.match(String(paidVillage.label), /spend 1 mana to summon Foot Soldier there/);
+    assert.match(String(declinedVillage.label), /keep 1 mana and summon no Foot Soldier/);
+    assert.doesNotMatch(String(paidVillage.label), /Genesis|card:|sha256:/);
     current = await submit(paidVillage);
+    assert.match(String(current.playerAction), /spend 1 mana to summon Foot Soldier there/);
+    assert.doesNotMatch(String(current.playerAction), /Genesis|card:|sha256:/);
     const paidView = current.view as JsonObject;
     const paidRealm = paidView.realm as JsonObject;
     const paidNames = current.cardNames as Record<string, string>;
@@ -243,9 +253,11 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
         && value.cell === 'C4';
     });
     assert.equal(riverPlays.length, 1);
-    assert.match(String(riverPlays[0]!.label), /Play Autumn River at C4/);
+    assert.match(String(riverPlays[0]!.label), /Play Autumn River at C4.*then inspect the next spell/);
     assert.doesNotMatch(String(riverPlays[0]!.label), /put .* on bottom|keep .* on top|card:|sha256:/i);
     current = await submit(riverPlays[0]!);
+    assert.match(String(current.playerAction), /Play Autumn River at C4.*then inspect the next spell/);
+    assert.doesNotMatch(String(current.playerAction), /put .* on bottom|keep .* on top|card:|sha256:/i);
     assert.equal(((current.view as JsonObject).phase), 'genesis');
     const southPending = await json('/api/view?seat=south');
     assert.deepEqual(southPending.actions, []);

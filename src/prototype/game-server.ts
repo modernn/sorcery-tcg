@@ -47,7 +47,7 @@ const PAGE = String.raw`<!doctype html>
   <meta name="viewport" content="initial-scale=1,width=device-width">
   <title>Sorcery Simulator — Playable Core</title>
   <style>
-    :root{color-scheme:dark;--bg:#0d171d;--panel:#14262f;--line:#45606b;--ink:#e1e9e6;--muted:#91a7a9;--north:#3984a1;--south:#bd5949;--site:#718458;--focus:#ffc96b;font-family:Bahnschrift,"Segoe UI",sans-serif;background:var(--bg);color:var(--ink)}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 45% 10%,#294853,transparent 38%),var(--bg);min-height:100vh}button,input,select{font:inherit}button{background:#243d48;border:1px solid #5b7b87;border-radius:.35rem;color:var(--ink);cursor:pointer;padding:.58rem .72rem}button:hover{background:#315362}button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid var(--focus);outline-offset:2px}button:disabled{opacity:.45;cursor:not-allowed}header,.toolbar{display:flex;gap:.7rem;align-items:center;flex-wrap:wrap;padding:1rem clamp(1rem,4vw,3rem);border-bottom:1px solid var(--line);background:#0c171ddd}header{justify-content:space-between}h1{margin:0;font-size:clamp(1.35rem,3vw,2.15rem);letter-spacing:.06em;text-transform:uppercase}.eyebrow,.badge,label{font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}.eyebrow,label{color:var(--muted)}.badge{border:1px solid #d29b55;border-radius:999px;color:#ffd89c;padding:.35rem .55rem}.toolbar label{display:grid;gap:.25rem}.toolbar input,.toolbar select{background:#091318;border:1px solid #52707b;border-radius:.3rem;color:var(--ink);padding:.55rem}.toolbar input{width:10rem}.toolbar select{max-width:22rem}.seat-switch{display:flex;margin-left:auto}.seat-switch button{border-radius:0}.seat-switch button:first-child{border-radius:.35rem 0 0 .35rem}.seat-switch button:last-child{border-radius:0 .35rem .35rem 0}.seat-switch [aria-pressed=true]{background:#2f7189}.layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(19rem,26rem);gap:1rem;padding:1rem clamp(1rem,4vw,3rem) 2rem;max-width:1600px;margin:auto}.table{position:relative;min-height:43rem;border:1px solid var(--line);border-radius:.65rem;background:#142a33;box-shadow:inset 0 0 5rem #0008}.realm{position:absolute;inset:19% 10%;display:grid;grid-template-columns:repeat(5,1fr);grid-template-rows:repeat(4,1fr);gap:.4rem}.cell{position:relative;border:1px solid #78949b;background:#0d2028;display:grid;place-items:center;align-content:center;gap:.2rem;min-width:0}.cell:after{content:attr(data-cell);position:absolute;right:.2rem;bottom:.15rem;color:#71888e;font:600 .62rem "Cascadia Mono",monospace}.piece{display:grid;gap:.15rem;text-align:center;max-width:95%;font:700 .68rem "Cascadia Mono",monospace}.site{background:#34432c;border:1px solid #879b68;border-radius:.25rem;padding:.35rem}.unit{background:#263f4a;border:1px solid #73a3b4;border-radius:.25rem;padding:.2rem}.avatar{border:2px solid var(--north);border-radius:999px;padding:.2rem .35rem}.avatar.south{border-color:var(--south)}.player{position:absolute;left:1rem;right:1rem;display:grid;grid-template-columns:auto 1fr;gap:.8rem;padding:.65rem .8rem;background:#09151bdc;border:1px solid var(--line);border-radius:.4rem;z-index:2}.player.north{bottom:1rem;border-left:4px solid var(--north)}.player.south{top:1rem;border-left:4px solid var(--south)}.player h2{font-size:.8rem;text-transform:uppercase;margin:0}.player p{color:var(--muted);font:.72rem/1.4 "Cascadia Mono",monospace;margin:.2rem 0}.hand{display:flex;gap:.3rem;flex-wrap:wrap;justify-content:flex-end}.card{border:1px solid #78949b;background:#1c343e;border-radius:.2rem;padding:.28rem;max-width:10rem;overflow:hidden;text-overflow:ellipsis;font:.64rem "Cascadia Mono",monospace}.sidebar{display:grid;gap:1rem;align-content:start}.panel{border:1px solid var(--line);border-radius:.55rem;background:var(--panel);overflow:hidden}.panel h2{font-size:.76rem;letter-spacing:.12em;text-transform:uppercase;margin:0;padding:.7rem .8rem;border-bottom:1px solid var(--line)}.panel-body{padding:.75rem}.status{display:grid;grid-template-columns:repeat(2,1fr);gap:.45rem}.datum{background:#0b1920;border:1px solid #314a54;border-radius:.3rem;padding:.45rem;min-width:0}.datum b{display:block;color:var(--muted);font-size:.62rem;text-transform:uppercase}.datum span{display:block;overflow:hidden;text-overflow:ellipsis;font:700 .72rem "Cascadia Mono",monospace;margin-top:.18rem}.actions{display:grid;gap:.45rem;max-height:20rem;overflow:auto}.action{text-align:left;border-left:3px solid var(--north)}details{border-top:1px solid var(--line);margin-top:.55rem;padding-top:.55rem}summary{cursor:pointer;color:#c6d3d2}.receipt{white-space:pre-wrap;word-break:break-word;max-height:13rem;overflow:auto;margin:0;font:.7rem/1.45 "Cascadia Mono",monospace;color:#bed0ce}.ok{border-left:3px solid var(--site);padding:.5rem}.error{border-left:3px solid var(--south);padding:.5rem}.empty{color:var(--muted);font-size:.82rem}.footnote{color:#81979a;font-size:.72rem;line-height:1.45}.hidden{display:none}@media(max-width:900px){.layout{grid-template-columns:1fr}.table{min-height:38rem}.realm{inset:22% 4%}.seat-switch{margin-left:0}}@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+    :root{color-scheme:dark;--bg:#0d171d;--panel:#14262f;--line:#45606b;--ink:#e1e9e6;--muted:#91a7a9;--north:#3984a1;--south:#bd5949;--site:#718458;--focus:#ffc96b;font-family:Bahnschrift,"Segoe UI",sans-serif;background:var(--bg);color:var(--ink)}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 45% 10%,#294853,transparent 38%),var(--bg);min-height:100vh}button,input,select{font:inherit}button{background:#243d48;border:1px solid #5b7b87;border-radius:.35rem;color:var(--ink);cursor:pointer;padding:.58rem .72rem}button:hover{background:#315362}button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid var(--focus);outline-offset:2px}button:disabled{opacity:.45;cursor:not-allowed}header,.toolbar{display:flex;gap:.7rem;align-items:center;flex-wrap:wrap;padding:1rem clamp(1rem,4vw,3rem);border-bottom:1px solid var(--line);background:#0c171ddd}header{justify-content:space-between}h1{margin:0;font-size:clamp(1.35rem,3vw,2.15rem);letter-spacing:.06em;text-transform:uppercase}.eyebrow,.badge,label{font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}.eyebrow,label{color:var(--muted)}.badge{border:1px solid #d29b55;border-radius:999px;color:#ffd89c;padding:.35rem .55rem}.toolbar label{display:grid;gap:.25rem}.toolbar input,.toolbar select{background:#091318;border:1px solid #52707b;border-radius:.3rem;color:var(--ink);padding:.55rem}.toolbar input{width:10rem}.toolbar select{max-width:22rem}.seat-switch{display:flex;margin-left:auto}.seat-switch button{border-radius:0}.seat-switch button:first-child{border-radius:.35rem 0 0 .35rem}.seat-switch button:last-child{border-radius:0 .35rem .35rem 0}.seat-switch [aria-pressed=true]{background:#2f7189}.layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(19rem,26rem);gap:1rem;padding:1rem clamp(1rem,4vw,3rem) 2rem;max-width:1600px;margin:auto}.table{position:relative;min-height:43rem;border:1px solid var(--line);border-radius:.65rem;background:#142a33;box-shadow:inset 0 0 5rem #0008}.realm{position:absolute;inset:19% 10%;display:grid;grid-template-columns:repeat(5,1fr);grid-template-rows:repeat(4,1fr);gap:.4rem}.cell{position:relative;border:1px solid #78949b;background:#0d2028;display:grid;place-items:center;align-content:center;gap:.2rem;min-width:0}.cell:after{content:attr(data-cell);position:absolute;right:.2rem;bottom:.15rem;color:#71888e;font:600 .62rem "Cascadia Mono",monospace}.piece{display:grid;gap:.15rem;text-align:center;max-width:95%;font:700 .68rem "Cascadia Mono",monospace}.site{background:#34432c;border:1px solid #879b68;border-radius:.25rem;padding:.35rem}.unit{background:#263f4a;border:1px solid #73a3b4;border-radius:.25rem;padding:.2rem}.avatar{border:2px solid var(--north);border-radius:999px;padding:.2rem .35rem}.avatar.south{border-color:var(--south)}.player{position:absolute;left:1rem;right:1rem;display:grid;grid-template-columns:auto 1fr;gap:.8rem;padding:.65rem .8rem;background:#09151bdc;border:1px solid var(--line);border-radius:.4rem;z-index:2}.player.north{bottom:1rem;border-left:4px solid var(--north)}.player.south{top:1rem;border-left:4px solid var(--south)}.player h2{font-size:.8rem;text-transform:uppercase;margin:0}.player p{color:var(--muted);font:.72rem/1.4 "Cascadia Mono",monospace;margin:.2rem 0}.hand{display:flex;gap:.3rem;flex-wrap:wrap;justify-content:flex-end}.card{border:1px solid #78949b;background:#1c343e;border-radius:.2rem;padding:.28rem;max-width:10rem;overflow:hidden;text-overflow:ellipsis;font:.64rem "Cascadia Mono",monospace}.sidebar{display:grid;gap:1rem;align-content:start}.panel{border:1px solid var(--line);border-radius:.55rem;background:var(--panel);overflow:hidden}.panel h2{font-size:.76rem;letter-spacing:.12em;text-transform:uppercase;margin:0;padding:.7rem .8rem;border-bottom:1px solid var(--line)}.panel-body{padding:.75rem}.status{display:grid;grid-template-columns:repeat(2,1fr);gap:.45rem}.datum{background:#0b1920;border:1px solid #314a54;border-radius:.3rem;padding:.45rem;min-width:0}.datum b{display:block;color:var(--muted);font-size:.62rem;text-transform:uppercase}.datum span{display:block;overflow:hidden;text-overflow:ellipsis;font:700 .72rem "Cascadia Mono",monospace;margin-top:.18rem}.actions{display:grid;gap:.45rem;max-height:20rem;overflow:auto}.action{text-align:left;border-left:3px solid var(--north)}details{border-top:1px solid var(--line);margin-top:.55rem;padding-top:.55rem}details:not([open])>:not(summary){display:none}summary{cursor:pointer;color:#c6d3d2}.receipt{white-space:pre-wrap;word-break:break-word;max-height:13rem;overflow:auto;margin:0;font:.7rem/1.45 "Cascadia Mono",monospace;color:#bed0ce}.ok{border-left:3px solid var(--site);padding:.5rem}.error{border-left:3px solid var(--south);padding:.5rem}.empty{color:var(--muted);font-size:.82rem}.footnote{color:#81979a;font-size:.72rem;line-height:1.45}.hidden{display:none}@media(max-width:900px){.layout{grid-template-columns:1fr}.table{min-height:38rem}.realm{inset:22% 4%}.seat-switch{margin-left:0}}@media(prefers-reduced-motion:reduce){*{transition:none!important}}
   </style>
 </head>
 <body>
@@ -62,12 +62,13 @@ const PAGE = String.raw`<!doctype html>
     <aside class="sidebar">
       <section class="panel"><h2>Match state</h2><div class="panel-body status"><div class="datum"><b>Observer</b><span id="observer">north</span></div><div class="datum"><b>Active</b><span id="active">—</span></div><div class="datum"><b>Turn / phase</b><span id="phase">—</span></div><div class="datum"><b>Version</b><span id="version">—</span></div><div class="datum" style="grid-column:1/-1"><b>State hash</b><span id="hash">—</span></div></div></section>
       <section class="panel"><h2>Engine-issued actions</h2><div class="panel-body"><div class="actions" id="actions"><p class="empty">Loading…</p></div><p class="footnote">During mulligan, “Keep opening hand” is the simplest path. Every alternative below is a fully bound legal choice.</p></div></section>
-      <section class="panel"><h2>Receipt / events</h2><div class="panel-body"><div id="notice" aria-live="polite"></div><pre id="receipt" class="receipt" aria-live="polite">Starting match…</pre></div></section>
+      <section class="panel"><h2>Action result</h2><div class="panel-body"><div id="notice" aria-live="polite"></div><p id="opponent-summary" class="footnote"></p><details><summary>Technical receipt</summary><pre id="receipt" class="receipt">Starting match…</pre></details></div></section>
     </aside>
   </main>
   <script>
     var seat='north',snapshot,lastCommand;var byId=function(id){return document.getElementById(id)};
     async function request(path,options){var response=await fetch(path,options);var body=await response.json();if(!response.ok)throw new Error(body.error||('HTTP '+response.status));return body}
+    function clearActionResult(){byId('notice').textContent='';byId('opponent-summary').textContent='';byId('receipt').textContent=''}
     function escapeHtml(value){return String(value).replace(/[&<>"']/g,function(character){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]})}
     function cardName(cardId){return snapshot&&snapshot.cardNames&&snapshot.cardNames[cardId]||cardId}
     function cardFactText(cardId){var fact=snapshot&&snapshot.cardFacts&&snapshot.cardFacts[cardId];if(!fact)return '';var parts=[fact.cardType[0].toUpperCase()+fact.cardType.slice(1)];if(fact.elements)parts.push(fact.elements.map(function(value){return value[0].toUpperCase()+value.slice(1)}).join('/'));if(Number.isFinite(fact.manaCost))parts.push(fact.manaCost+' mana');if(fact.thresholds){var short={air:'A',earth:'E',fire:'F',water:'W'},threshold=Object.keys(short).filter(function(key){return fact.thresholds[key]}).map(function(key){return short[key]+fact.thresholds[key]}).join('');if(threshold)parts.push(threshold)}if(fact.cardType==='minion')parts.push(fact.attack+'/'+fact.defense);if(fact.cardType==='avatar')parts.push(fact.attack+' atk · '+fact.life+' life');if(fact.keywords)parts.push(fact.keywords.join(', '));return parts.join(' · ')}
@@ -75,18 +76,18 @@ const PAGE = String.raw`<!doctype html>
     function cardChip(card){var name=escapeHtml(cardName(card.cardId)),facts=escapeHtml(cardFactText(card.cardId));return '<span class="card">'+name+(facts?'<small>'+facts+'</small>':'')+'</span>'}
     function renderPlayer(view,owner){var player=view.players[owner],hand=player.hand,affinity=player.affinity;byId(owner+'-stats').textContent='Life '+player.avatar.life+' · Atlas '+player.atlasCount+' · Spellbook '+player.spellbookCount+' · Cemetery '+player.cemetery.length+' · Mana '+player.mana+' · Affinity E'+affinity.earth+' F'+affinity.fire+' W'+affinity.water+' A'+affinity.air+(player.domainEstablished?' · Domain established':' · Domain pending');var cards=[];['atlas','spellbook'].forEach(function(zone){var value=hand[zone];if(Array.isArray(value)){value.forEach(function(card){cards.push(cardChip(card))})}else{cards.push('<span class="card">'+value+' hidden '+zone+'</span>')}});byId(owner+'-hand').innerHTML=cards.join('')}
     function renderRealm(view){document.querySelectorAll('[data-cell]').forEach(function(cell){cell.innerHTML=''});Object.entries(view.realm.sites||{}).forEach(function(entry){var cell=document.querySelector('[data-cell="'+entry[0]+'"]'),facts=escapeHtml(cardFactText(entry[1].cardId));if(cell)cell.innerHTML+='<span class="piece site">'+escapeHtml(cardName(entry[1].cardId))+(facts?'<small>'+facts+'</small>':'')+'</span>'});(view.realm.units||[]).forEach(function(unit){var cell=document.querySelector('[data-cell="'+unit.location+'"]'),facts=escapeHtml(cardFactText(unit.cardId));if(cell)cell.innerHTML+='<span class="piece unit">'+escapeHtml(cardName(unit.cardId))+(facts?'<small>'+facts+'</small>':'')+'<small>Now '+unit.attack+'/'+unit.defense+(unit.damage?' · '+unit.damage+' dmg':'')+(unit.tapped?' · tapped':'')+(unit.summoningSickness?' · new':'')+'</small></span>'});['north','south'].forEach(function(owner){var avatar=view.players[owner].avatar,cell=document.querySelector('[data-cell="'+avatar.location+'"]');if(cell)cell.innerHTML+='<span class="piece avatar '+owner+'">'+escapeHtml(cardName(avatar.cardId))+'<small>'+owner+' · now '+avatar.attack+' atk · '+avatar.life+' life'+(avatar.tapped?' · tapped':'')+'</small></span>'})}
-    function actionButton(candidate){var button=document.createElement('button');button.type='button';button.className='action';button.textContent=displayText(candidate.label);button.title=JSON.stringify(candidate.descriptor);button.addEventListener('click',function(){submit(candidate.actionId)});return button}
+    function actionButton(candidate){var button=document.createElement('button');button.type='button';button.className='action';button.textContent=displayText(candidate.label);button.addEventListener('click',function(){submit(candidate.actionId)});return button}
     function renderActions(actions,view){var dock=byId('actions');dock.innerHTML='';if(view.terminal.status==='finished'){var terminal=view.terminal,outcome=terminal.result==='draw'?'Draw':'Winner: '+escapeHtml(terminal.winner)+' · Loser: '+escapeHtml(terminal.loser);dock.innerHTML='<div class="ok" role="status" aria-live="polite"><strong>Game over</strong><p>'+outcome+' · Reason: '+escapeHtml(terminal.reason.replaceAll('_',' '))+'</p></div>';return}if(!actions.length){dock.innerHTML='<p class="empty">No legal actions for this observer.</p>';return}if(view.phase==='mulligan'){var keep=actions.filter(function(a){return a.descriptor.kind==='mulligan'&&!a.descriptor.atlasOrder.length&&!a.descriptor.spellbookOrder.length});keep.forEach(function(a){dock.appendChild(actionButton(a))});var rest=actions.filter(function(a){return keep.indexOf(a)<0});var details=document.createElement('details'),summary=document.createElement('summary'),list=document.createElement('div');summary.textContent='Show '+rest.length+' mulligan alternatives';list.className='actions';rest.forEach(function(a){list.appendChild(actionButton(a))});details.append(summary,list);dock.appendChild(details);return}actions.forEach(function(a){dock.appendChild(actionButton(a))})}
     function render(data){snapshot=data;var view=data.view,picker=byId('preset');if(picker.options.length!==data.presets.length){picker.innerHTML=data.presets.map(function(preset){return '<option value="'+escapeHtml(preset.id)+'">'+escapeHtml(preset.label)+'</option>'}).join('')}picker.value=data.presetId;byId('opponent').value=data.opponent;byId('seed').value=String(data.seed);byId('mode').textContent=(data.mode==='private-local'?'Private-local actual cards · unranked':'Synthetic fallback · unranked')+(data.opponent==='south'?' · vs computer':' · hot seat');byId('observer').textContent=seat;byId('active').textContent=view.activeSeat+(view.decisionSeat===view.activeSeat?'':' · '+view.decisionSeat+' deciding');byId('phase').textContent='Turn '+view.turnNumber+' · '+view.phase;byId('version').textContent=view.stateVersion;byId('hash').textContent=data.stateHash;renderPlayer(view,'north');renderPlayer(view,'south');renderRealm(view);renderActions(data.actions,view);syncSeatButtons()}
     function syncSeatButtons(){document.querySelectorAll('[data-seat]').forEach(function(button){button.disabled=Boolean(snapshot&&snapshot.opponent==='south'&&button.dataset.seat==='south');button.setAttribute('aria-pressed',String(button.dataset.seat===seat))})}
     async function refresh(){render(await request('/api/view?seat='+seat))}
-    async function submit(actionId,command){try{var next=command||{actionId:actionId,seat:seat,stateVersion:snapshot.view.stateVersion};if(!command)lastCommand=next;var result=await request('/api/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(next)});byId('notice').className=result.accepted?'ok':'error';byId('notice').textContent=result.accepted?'Action accepted'+(result.opponentActionCount?' · South computer took '+result.opponentActionCount+' action'+(result.opponentActionCount===1?'':'s'):''):'Rejected: '+result.reason.code;var detail=JSON.stringify(result.receipt||result.reason,null,2);if(result.opponentActions&&result.opponentActions.length){detail='South actions\n'+result.opponentActions.map(function(item,index){return (index+1)+'. '+item.kind.replaceAll('-',' ')+(item.events.length?' — '+item.events.join(' → '):'')}).join('\n')+'\n\nYour receipt\n'+detail}byId('receipt').textContent=detail;render(result);byId('stale').disabled=!lastCommand;if(result.accepted&&result.opponent==='manual'&&result.view.decisionSeat!==seat){seat=result.view.decisionSeat;syncSeatButtons();await refresh()}}catch(error){showError(error)}}
+    async function submit(actionId,command){try{var next=command||{actionId:actionId,seat:seat,stateVersion:snapshot.view.stateVersion};if(!command)lastCommand=next;var result=await request('/api/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(next)});byId('notice').className=result.accepted?'ok':'error';byId('notice').textContent=result.accepted?'Action accepted: '+result.playerAction:'Rejected: '+result.reason.message;byId('opponent-summary').textContent=result.opponentActions&&result.opponentActions.length?'South actions: '+result.opponentActions.map(function(item){return item.kind.replaceAll('-',' ')+(item.events.length?' — '+item.events.join(' → '):'')}).join('; '):'';byId('receipt').textContent=JSON.stringify(result.receipt||result.reason,null,2);render(result);byId('stale').disabled=!lastCommand;if(result.accepted&&result.opponent==='manual'&&result.view.decisionSeat!==seat){clearActionResult();seat=result.view.decisionSeat;syncSeatButtons();await refresh()}}catch(error){showError(error)}}
     function showError(error){byId('notice').className='error';byId('notice').textContent=error.message}
-    document.querySelectorAll('[data-seat]').forEach(function(button){button.addEventListener('click',function(){if(button.disabled)return;seat=button.dataset.seat;syncSeatButtons();refresh().catch(showError)})});
+    document.querySelectorAll('[data-seat]').forEach(function(button){button.addEventListener('click',function(){if(button.disabled)return;clearActionResult();seat=button.dataset.seat;syncSeatButtons();refresh().catch(showError)})});
     byId('preset').addEventListener('change',function(){var selected=snapshot.presets.find(function(preset){return preset.id===byId('preset').value});if(selected)byId('seed').value=String(selected.seed)});
-    byId('reset-form').addEventListener('submit',async function(event){event.preventDefault();try{seat='north';lastCommand=undefined;syncSeatButtons();byId('stale').disabled=true;var data=await request('/api/reset',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({opponent:byId('opponent').value,presetId:byId('preset').value,seed:Number(byId('seed').value)})});byId('notice').className='ok';byId('notice').textContent='Match reset';byId('receipt').textContent=JSON.stringify({stateHash:data.stateHash},null,2);render(data)}catch(error){showError(error)}});
+    byId('reset-form').addEventListener('submit',async function(event){event.preventDefault();try{seat='north';lastCommand=undefined;syncSeatButtons();byId('stale').disabled=true;var data=await request('/api/reset',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({opponent:byId('opponent').value,presetId:byId('preset').value,seed:Number(byId('seed').value)})});clearActionResult();byId('notice').className='ok';byId('notice').textContent='Match reset';byId('receipt').textContent=JSON.stringify({stateHash:data.stateHash},null,2);render(data)}catch(error){showError(error)}});
     byId('stale').addEventListener('click',function(){if(lastCommand)submit(lastCommand.actionId,lastCommand)});
-    byId('replay').addEventListener('click',async function(){try{var data=await request('/api/replay',{method:'POST'});byId('notice').className=data.verified?'ok':'error';byId('notice').textContent=data.verified?'Replay byte-identical':'Replay mismatch';byId('receipt').textContent=JSON.stringify(data,null,2)}catch(error){showError(error)}});
+    byId('replay').addEventListener('click',async function(){try{var data=await request('/api/replay',{method:'POST'});clearActionResult();byId('notice').className=data.verified?'ok':'error';byId('notice').textContent=data.verified?'Replay byte-identical':'Replay mismatch';byId('receipt').textContent=JSON.stringify(data,null,2)}catch(error){showError(error)}});
     refresh().catch(showError);
   </script>
 </body>
@@ -159,6 +160,7 @@ function displayActionLabel(
   action: GameLegalAction,
   observation: GameObservation,
   cardNames: Readonly<Record<string, string>>,
+  cards: GameManifest['cards'],
 ): string {
   const ownHand = observation.players[observation.viewer].hand;
   const handCards = [
@@ -199,6 +201,17 @@ function displayActionLabel(
       `${cardNames[site.cardId] ?? site.cardId} · ${site.controller ?? 'neutral'} · ${cell} surface`,
     );
   }
+  for (const seat of ['north', 'south'] as const) {
+    for (const card of observation.players[seat].cemetery) {
+      references.set(card.instanceId, `${cardNames[card.cardId] ?? card.cardId} · ${seat} cemetery`);
+    }
+  }
+  for (const artifact of observation.realm.artifacts ?? []) {
+    references.set(
+      artifact.instanceId,
+      `${cardNames[artifact.cardId] ?? artifact.cardId} · ${artifact.location} ${artifact.region}`,
+    );
+  }
 
   let label = action.label;
   for (const [instanceId, display] of references) {
@@ -209,6 +222,27 @@ function displayActionLabel(
   for (const [cardId, name] of Object.entries(cardNames)
     .sort(([left], [right]) => right.length - left.length)) {
     label = label.replaceAll(cardId, name);
+  }
+  const descriptor = action.descriptor;
+  if (descriptor.kind === 'play-site') {
+    const definition = cards[descriptor.cardId];
+    if (definition?.cardType === 'site'
+      && definition.genesisPayOneManaToSummonToken !== undefined) {
+      const siteName = cardNames[descriptor.cardId] ?? 'this site';
+      const tokenName = cardNames[definition.genesisPayOneManaToSummonToken] ?? 'a token';
+      return descriptor.genesisTokenChoice === 'pay-one-mana'
+        ? `Play ${siteName} at ${descriptor.cell} — spend 1 mana to summon ${tokenName} there`
+        : `Play ${siteName} at ${descriptor.cell} — keep 1 mana and summon no ${tokenName}`;
+    }
+    if (definition?.cardType === 'site' && definition.genesisMayBottomNextSpell === true) {
+      return `${label} — then inspect the next spell`;
+    }
+  }
+  if (descriptor.kind === 'cast-magic') {
+    const definition = cards[descriptor.cardId];
+    if (definition?.cardType === 'magic' && definition.damageTargetUnit !== undefined) {
+      return `${label} — attempt to deal ${definition.damageTargetUnit} damage`;
+    }
   }
   return label;
 }
@@ -312,7 +346,12 @@ export function createGamePrototypeServer(
     return {
       actions: actions.map((action) => ({
         ...action,
-        label: displayActionLabel(action, observation, selectedPreset.cardNames ?? {}),
+        label: displayActionLabel(
+          action,
+          observation,
+          selectedPreset.cardNames ?? {},
+          session.manifest.cards,
+        ),
       })),
       cardFacts,
       cardNames,
@@ -370,11 +409,25 @@ export function createGamePrototypeServer(
         if (opponent === 'south' && seat === 'south') {
           return sendJson(response, 400, { error: 'south is controlled by the deterministic opponent' });
         }
+        const observation = observeGame(session.state, seat);
+        const selectedAction = legalGameActions(session.state, seat)
+          .find(({ actionId }) => actionId === body.actionId);
+        const playerAction = selectedAction
+          ? displayActionLabel(
+            selectedAction,
+            observation,
+            selectedPreset.cardNames ?? {},
+            session.manifest.cards,
+          )
+          : undefined;
         const result = stepGame(session, {
           actionId: body.actionId,
           seat,
           stateVersion: body.stateVersion as number,
         });
+        if (result.accepted && playerAction === undefined) {
+          throw new Error('accepted action lacks a legal action summary');
+        }
         const advanced = result.accepted && opponent === 'south'
           ? advanceOpponent(result.session)
           : { count: 0, session: result.session, summaries: [] };
@@ -384,7 +437,9 @@ export function createGamePrototypeServer(
           accepted: result.accepted,
           opponentActionCount: advanced.count,
           opponentActions: advanced.summaries,
-          ...(result.accepted ? { receipt: result.receipt } : { reason: result.reason }),
+          ...(result.accepted
+            ? { playerAction, receipt: result.receipt }
+            : { reason: result.reason }),
         });
       }
       if (request.method === 'POST' && url.pathname === '/api/replay') {
