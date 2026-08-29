@@ -904,7 +904,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 23 : 22,
+        preset.id === 'air-vs-earth-lesson' ? 23 : 24,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -912,7 +912,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 22 : 23,
+        preset.id === 'air-vs-earth-lesson' ? 24 : 23,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -975,6 +975,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Land Surveyor': 2,
     Overpower: 2,
     'Pudge Butcher': 1,
+    'Scent Hounds': 2,
     'Wild Boars': 2,
   });
   const midnightRogueId = Object.entries(airLesson.cardNames)
@@ -1033,6 +1034,29 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       manaCost: 4,
       otherNearbyAlliesPowerBonus: 1,
       thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+    });
+  }
+  const scentHoundsId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Scent Hounds')?.[0];
+  assert.ok(scentHoundsId);
+  const scentHounds = airLesson.manifest.cards[scentHoundsId];
+  assert.equal(scentHounds?.cardType, 'minion');
+  if (scentHounds?.cardType === 'minion') {
+    assert.deepEqual({
+      attack: scentHounds.attack,
+      defense: scentHounds.defense,
+      manaCost: scentHounds.manaCost,
+      nearbyEnemiesPermanentlyLoseStealth:
+        scentHounds.nearbyEnemiesPermanentlyLoseStealth,
+      ordinary: scentHounds.ordinary,
+      thresholds: scentHounds.thresholds,
+    }, {
+      attack: 2,
+      defense: 2,
+      manaCost: 2,
+      nearbyEnemiesPermanentlyLoseStealth: true,
+      ordinary: true,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
     });
   }
   const blinkId = Object.entries(airLesson.cardNames)

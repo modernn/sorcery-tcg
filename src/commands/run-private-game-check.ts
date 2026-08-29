@@ -1334,6 +1334,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   rusticVillage: NormalizedCard;
   roamingMinion: NormalizedCard;
   secretTunnel: NormalizedCard;
+  scentHounds: NormalizedCard;
   sedgeCrabs: NormalizedCard;
   seravaTownsfolk: NormalizedCard;
   shellycoat: NormalizedCard;
@@ -1756,6 +1757,29 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || houseArnBannerman.thresholds.water !== 0
     || houseArnBannerman.rarity !== 'exceptional') {
     throw new Error('private nearby-allies power minion no longer matches its supported facts');
+  }
+  const scentHounds = snapshot.cards.find(({ name }) => name === 'Scent Hounds');
+  const scentHoundsTokens = scentHounds?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
+  if (!scentHounds
+    || scentHounds.stableId
+      !== 'card:653e19df72e2191fa7f37f5b4858005d54fd4d401f2e4e03ff0e9b4065b87e05'
+    || scentHounds.officialSourceId !== '001-scent_hounds-b-f'
+    || scentHounds.cardType !== 'minion'
+    || scentHoundsTokens.length !== 5
+    || !['nearby', 'enemies', 'permanently', 'lose', 'stealth']
+      .every((token) => scentHoundsTokens.includes(token))
+    || scentHounds.manaCost !== 2
+    || scentHounds.attack !== 2
+    || scentHounds.defense !== 2
+    || scentHounds.life !== null
+    || scentHounds.elements.length !== 1
+    || scentHounds.elements[0] !== 'earth'
+    || scentHounds.thresholds.air !== 0
+    || scentHounds.thresholds.earth !== 1
+    || scentHounds.thresholds.fire !== 0
+    || scentHounds.thresholds.water !== 0
+    || scentHounds.rarity !== 'ordinary') {
+    throw new Error('private permanent nearby Stealth-loss minion no longer matches its supported facts');
   }
   const vantageHills = snapshot.cards.find(({ name }) => name === 'Vantage Hills');
   const vantageHillsTokens = vantageHills?.rulesText.toLowerCase().match(/[a-z]+|\+\d+/g) ?? [];
@@ -3211,6 +3235,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     rusticVillage,
     roamingMinion,
     secretTunnel,
+    scentHounds,
     sedgeCrabs,
     seravaTownsfolk,
     shellycoat,
@@ -3349,6 +3374,7 @@ function gameDefinition(
   otherNearbyAlliesPowerBonus = false,
   rangedUnitsHereRangeBonus = false,
   teleportNearbyAllyThenDrawCard = false,
+  nearbyEnemiesPermanentlyLoseStealth = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -3503,6 +3529,9 @@ function gameDefinition(
       mustBeCastSubmerged,
       mustBeCastToOuterColumn,
       mustBeCastToWaterSite,
+      ...(nearbyEnemiesPermanentlyLoseStealth
+        ? { nearbyEnemiesPermanentlyLoseStealth: true as const }
+        : {}),
       ...(movementBonus ? { movementBonus } : {}),
       movesOnlySideways,
       ...(card.rarity === 'ordinary' ? { ordinary: true as const } : {}),
@@ -3745,6 +3774,7 @@ function buildManifest(
       input.pudgeButcher.stableId,
       ...Array(2).fill(input.amazonWarriors.stableId),
       ...Array(2).fill(input.houseArnBannerman.stableId),
+      ...Array(2).fill(input.scentHounds.stableId),
       input.borderMilitia.stableId,
       input.divineHealing.stableId,
       ...Array(2).fill(input.overpower.stableId),
@@ -4361,6 +4391,7 @@ function buildManifest(
       card.stableId === input.houseArnBannerman.stableId,
       card.stableId === input.vantageHills.stableId,
       card.stableId === input.blink.stableId,
+      card.stableId === input.scentHounds.stableId,
     ),
   ]));
   return {
