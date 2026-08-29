@@ -44,6 +44,24 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
     descriptor.kind === 'mulligan'
       && (descriptor.atlasOrder as unknown[]).length === 0
       && (descriptor.spellbookOrder as unknown[]).length === 0);
+  const deterministicAction = (response: JsonObject): JsonObject => {
+    const candidates = response.actions as JsonObject[];
+    const selected = candidates.find((candidate) => {
+      const descriptor = candidate.descriptor as JsonObject;
+      return descriptor.kind === 'mulligan'
+        && (descriptor.atlasOrder as unknown[]).length === 0
+        && (descriptor.spellbookOrder as unknown[]).length === 0;
+    })
+      ?? candidates.find(({ descriptor }) => (descriptor as JsonObject).kind === 'play-site')
+      ?? candidates.find(({ descriptor }) => (descriptor as JsonObject).kind === 'summon-minion')
+      ?? candidates.find(({ descriptor }) => {
+        const value = descriptor as JsonObject;
+        return value.kind === 'draw' && value.zone === 'atlas';
+      })
+      ?? candidates.find(({ descriptor }) => (descriptor as JsonObject).kind === 'end-turn');
+    assert.ok(selected, 'expected deterministic actual-card action');
+    return selected;
+  };
 
   try {
     let current = await json('/api/view?seat=north');
@@ -83,6 +101,30 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
     assert.equal(replay.acceptedActionCount, 4);
     assert.equal(replay.verified, true);
     assert.equal(replay.finalStateHash, current.stateHash);
+
+    for (const preset of catalog) {
+      current = await json('/api/reset', {
+        body: JSON.stringify({ presetId: preset.id, seed: preset.manifest.seed }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      });
+      for (let count = 0; count < 500; count += 1) {
+        const currentView = current.view as JsonObject;
+        if ((currentView.terminal as JsonObject).status === 'finished') break;
+        if ((current.actions as JsonObject[]).length === 0) {
+          current = await json('/api/view?seat=' + String(currentView.decisionSeat));
+        }
+        current = await submit(deterministicAction(current));
+      }
+      const terminal = ((current.view as JsonObject).terminal as JsonObject);
+      assert.equal(terminal.status, 'finished', preset.id);
+      assert.equal(terminal.reason, 'deck_empty', preset.id);
+      assert.notEqual(terminal.winner, terminal.loser, preset.id);
+      assert.deepEqual(current.actions, [], preset.id);
+      const fullReplay = await json('/api/replay', { method: 'POST' });
+      assert.equal(fullReplay.verified, true, preset.id);
+      assert.equal(fullReplay.finalStateHash, current.stateHash, preset.id);
+    }
   } finally {
     await new Promise<void>((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
@@ -414,6 +456,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   ]);
   for (const preset of starterCatalog) {
     assert.equal(preset.manifest.authority.mode, 'private-local');
+    assert.equal(preset.usesOnlyOrdinaryOrExceptionalCards, true);
     assert.equal(preset.manifest.decks.north.atlas.length, 30);
     assert.equal(preset.manifest.decks.north.spellbook.length, 60);
     assert.deepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
