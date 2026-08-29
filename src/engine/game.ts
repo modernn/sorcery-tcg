@@ -5803,24 +5803,20 @@ function applyDescriptor(
       if (!canMove) {
         return [withStateVersion(castState, {}), [...castOutcomes, resolved], []];
       }
-      const dropped = 'bearer' in artifact
-        ? dropArtifactsCarriedBy(
-          castState.realm.artifacts,
-          {
-            instanceId: artifact.bearer.instanceId,
-            location: location.location,
-            region: location.region,
-          },
-          new Set([artifact.instanceId]),
-        )
-        : { artifacts: castState.realm.artifacts, outcomes: [] };
       const movedState = deepFreeze({
         ...castState,
         realm: {
           ...castState.realm,
-          artifacts: dropped.artifacts!.map((candidate) =>
+          artifacts: castState.realm.artifacts!.map((candidate) =>
             candidate.instanceId === artifact.instanceId
-              ? deepFreeze({ ...candidate, region: 'underground' as const })
+              ? deepFreeze({
+                cardId: candidate.cardId,
+                instanceId: candidate.instanceId,
+                location: location.location,
+                owner: candidate.owner,
+                region: 'underground' as const,
+                source: candidate.source,
+              })
               : candidate),
         },
       });
@@ -5828,7 +5824,6 @@ function applyDescriptor(
         withStateVersion(movedState, {}),
         [
           ...castOutcomes,
-          ...dropped.outcomes,
           {
             payload: {
               cell: location.location,
