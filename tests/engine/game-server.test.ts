@@ -76,12 +76,18 @@ function deterministicAction(response: JsonObject): JsonObject {
     .map((candidate) => {
       const value = descriptor(candidate);
       const cell = String((value.to as JsonObject | undefined)?.cell);
+      const inPlaceAvatarAttack = value.kind === 'move-and-attack'
+        && (value.path as unknown[]).length === 1
+        && cell === enemyCell
+        && (value.to as JsonObject).region === 'surface';
       return {
         candidate,
-        distance: value.kind === 'move-and-attack' && (value.path as unknown[]).length > 1
-          ? Math.abs(cell.charCodeAt(0) - enemyCell.charCodeAt(0))
-            + Math.abs(Number(cell[1]) - Number(enemyCell[1]))
-          : Number.POSITIVE_INFINITY,
+        distance: inPlaceAvatarAttack
+          ? -1
+          : value.kind === 'move-and-attack' && (value.path as unknown[]).length > 1
+            ? Math.abs(cell.charCodeAt(0) - enemyCell.charCodeAt(0))
+              + Math.abs(Number(cell[1]) - Number(enemyCell[1]))
+            : Number.POSITIVE_INFINITY,
       };
     })
     .sort((left, right) => left.distance - right.distance)[0];
