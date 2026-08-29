@@ -46,6 +46,22 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
       && (descriptor.spellbookOrder as unknown[]).length === 0);
   const deterministicAction = (response: JsonObject): JsonObject => {
     const candidates = response.actions as JsonObject[];
+    const enemyCell = String(((((response.view as JsonObject).players as JsonObject)
+      .south as JsonObject).avatar as JsonObject).location);
+    const movement = candidates
+      .map((candidate) => {
+        const descriptor = candidate.descriptor as JsonObject;
+        const cell = String((descriptor.to as JsonObject | undefined)?.cell);
+        return {
+          candidate,
+          distance: descriptor.kind === 'move-and-attack'
+            && (descriptor.path as unknown[]).length > 1
+            ? Math.abs(cell.charCodeAt(0) - enemyCell.charCodeAt(0))
+              + Math.abs(Number(cell[1]) - Number(enemyCell[1]))
+            : Number.POSITIVE_INFINITY,
+        };
+      })
+      .sort((left, right) => left.distance - right.distance)[0];
     const selected = candidates.find((candidate) => {
       const descriptor = candidate.descriptor as JsonObject;
       return descriptor.kind === 'mulligan'
@@ -58,7 +74,9 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
         const value = descriptor as JsonObject;
         return value.kind === 'draw' && value.zone === 'atlas';
       })
-      ?? candidates.find(({ descriptor }) => (descriptor as JsonObject).kind === 'end-turn');
+      ?? (movement && Number.isFinite(movement.distance) ? movement.candidate : undefined)
+      ?? candidates.find(({ descriptor }) => (descriptor as JsonObject).kind === 'end-turn')
+      ?? candidates[0];
     assert.ok(selected, 'expected deterministic actual-card action');
     return selected;
   };
@@ -113,8 +131,12 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
         method: 'POST',
       });
       let opponentActionCount = 0;
+      let combatObserved = false;
       for (let count = 0; count < 500; count += 1) {
         const currentView = current.view as JsonObject;
+        const north = ((currentView.players as JsonObject).north as JsonObject);
+        combatObserved ||= Number((north.avatar as JsonObject).life) < 20
+          || (north.cemetery as unknown[]).length > 0;
         if ((currentView.terminal as JsonObject).status === 'finished') break;
         assert.equal(currentView.decisionSeat, 'north', preset.id);
         assert.ok((current.actions as JsonObject[]).length > 0, preset.id);
@@ -124,8 +146,12 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
       const terminal = ((current.view as JsonObject).terminal as JsonObject);
       assert.equal(current.opponent, 'south', preset.id);
       assert.ok(opponentActionCount > 0, preset.id);
+      assert.equal(combatObserved, true, preset.id);
       assert.equal(terminal.status, 'finished', preset.id);
-      assert.equal(terminal.reason, 'deck_empty', preset.id);
+      assert.ok(
+        terminal.reason === 'avatar_defeated' || terminal.reason === 'deck_empty',
+        preset.id,
+      );
       assert.notEqual(terminal.winner, terminal.loser, preset.id);
       assert.deepEqual(current.actions, [], preset.id);
       const fullReplay = await json('/api/replay', { method: 'POST' });
