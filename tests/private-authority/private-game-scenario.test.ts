@@ -137,6 +137,27 @@ function assertMesmerism(result: PrivateGameCheck['waterMesmerism']): void {
   assert.equal(result.replayVerified, true);
 }
 
+function assertMalakhim(result: PrivateGameCheck['earthMalakhim']): void {
+  assert.equal(result.malakhim, 'Malakhim');
+  assert.equal(result.acceptedActionCount, 32);
+  assert.equal(result.airborneAndWard, true);
+  assert.equal(result.earthAffinityThree, true);
+  assert.equal(result.manaPaid, 6);
+  assert.equal(result.normalActionTapped, true);
+  assert.equal(result.endPhaseUntapped, true);
+  assert.equal(result.opponentTurnReady, true);
+  assert.equal(result.causalEventsVerified, true);
+  assert.equal(result.noRandomDraws, true);
+  assert.equal(result.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.deck.atlas.find(({ name }) => name === 'Ghost Town')?.copies, 3);
+  assert.equal(result.deck.atlas.find(({ name }) => name === 'Valley')?.copies, 4);
+  assert.equal(result.deck.spellbook.find(({ name }) => name === 'Malakhim')?.copies, 2);
+  assert.equal(result.deck.spellbook
+    .find(({ name }) => name === 'Eltham Townsfolk')?.copies, 4);
+  assert.equal(result.replayVerified, true);
+}
+
 function assertMinorExplosion(result: PrivateGameCheck['fireMinorExplosion']): void {
   assert.equal(result.minorExplosion, 'Minor Explosion');
   assert.equal(result.raalDromedary, 'Raal Dromedary');
@@ -197,6 +218,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   const result = await runPrivateGameCheck();
   assertStarter(result.airStarter, 'Spire', 'Snow Leopard');
   assertStarter(result.earthStarter, 'Valley', 'Wild Boars');
+  assertMalakhim(result.earthMalakhim);
   assertStarter(result.fireStarter, 'Wasteland', 'Raal Dromedary');
   assertStarter(result.waterStarter, 'Stream', 'Serava Townsfolk');
   assertVikings(result.fireVikings);
