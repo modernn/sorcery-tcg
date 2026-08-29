@@ -98,7 +98,9 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
     const spire = (hand.atlas as JsonObject[]).find(({ cardId }) => names[cardId as string] === 'Spire');
     const leopard = (hand.spellbook as JsonObject[])
       .find(({ cardId }) => names[cardId as string] === 'Snow Leopard');
-    assert.ok(spire && leopard, 'known-good Air seed must expose its teaching pair');
+    const zap = (hand.spellbook as JsonObject[])
+      .find(({ cardId }) => names[cardId as string] === 'Zap!');
+    assert.ok(spire && leopard && zap, 'known-good Air seed must expose its teaching cards');
 
     current = await submit(keep(current));
     current = await json('/api/view?seat=south');
@@ -121,8 +123,24 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
     const visibleNames = current.cardNames as Record<string, string>;
     assert.equal(visibleNames[site.cardId as string], 'Spire');
     assert.equal(visibleNames[unit.cardId as string], 'Snow Leopard');
+    current = await submit(findAction(current, (descriptor) => descriptor.kind === 'end-turn'));
+    current = await json('/api/view?seat=south');
+    current = await submit(findAction(current, (descriptor) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
+    current = await submit(findAction(current, (descriptor) => descriptor.kind === 'play-site'));
+    current = await submit(findAction(current, (descriptor) => descriptor.kind === 'end-turn'));
+    current = await json('/api/view?seat=north');
+    current = await submit(findAction(current, (descriptor) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    const castZap = findAction(current, (descriptor) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === zap.instanceId
+        && (descriptor.target as JsonObject | undefined)?.instanceId === leopard.instanceId);
+    assert.match(String(castZap.label), /Cast Zap!.*Snow Leopard/);
+    assert.doesNotMatch(String(castZap.label), /card:|sha256:/);
+    current = await submit(castZap);
     const replay = await json('/api/replay', { method: 'POST' });
-    assert.equal(replay.acceptedActionCount, 4);
+    assert.equal(replay.acceptedActionCount, 10);
     assert.equal(replay.verified, true);
     assert.equal(replay.finalStateHash, current.stateHash);
 
@@ -558,6 +576,8 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(Object.values(starterCatalog[3]!.cardNames).includes('Autumn River'), true);
   await verifyPrivateStarterHttp(starterCatalog);
   assertStarter(result.airStarter, 'Spire', 'Snow Leopard');
+  assert.equal(result.airStarter.deck.spellbook
+    .find(({ name }) => name === 'Zap!')?.copies, 4);
   assertFatality(result.airFireFatality);
   assertStarter(result.earthStarter, 'Valley', 'Wild Boars');
   assertMalakhim(result.earthMalakhim);
