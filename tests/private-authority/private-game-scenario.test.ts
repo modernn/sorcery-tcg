@@ -158,6 +158,35 @@ function assertMalakhim(result: PrivateGameCheck['earthMalakhim']): void {
   assert.equal(result.replayVerified, true);
 }
 
+function assertFatality(result: PrivateGameCheck['airFireFatality']): void {
+  assert.equal(result.fatality, 'Fatality');
+  assert.equal(result.zap, 'Zap!');
+  assert.equal(result.snowLeopard, 'Snow Leopard');
+  assert.equal(result.acceptedActionCount, 22);
+  assert.equal(result.airFireAffinity, true);
+  assert.equal(result.healthyTargetUnavailable, true);
+  assert.equal(result.zapDamageExactlyOne, true);
+  assert.equal(result.zapManaPaid, 1);
+  assert.equal(result.exactWoundedTarget, true);
+  assert.equal(result.manaPaid, 3);
+  assert.equal(result.fatalityDealtNoDamage, true);
+  assert.equal(result.targetLeftRealm, true);
+  assert.equal(result.targetEnteredOwnerCemetery, true);
+  assert.equal(result.zapEnteredCemetery, true);
+  assert.equal(result.fatalityEnteredCemetery, true);
+  assert.equal(result.causalEventsVerified, true);
+  assert.equal(result.noRandomDraws, true);
+  assert.equal(result.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.deck.atlas.find(({ name }) => name === 'Spire')?.copies, 4);
+  assert.equal(result.deck.atlas.find(({ name }) => name === 'Wasteland')?.copies, 4);
+  assert.equal(result.deck.spellbook.find(({ name }) => name === 'Fatality')?.copies, 3);
+  assert.equal(result.deck.spellbook.find(({ name }) => name === 'Zap!')?.copies, 4);
+  assert.equal(result.deck.spellbook.find(({ name }) => name === 'Snow Leopard')?.copies, 4);
+  assert.equal(result.deck.spellbook.find(({ name }) => name === 'Raal Dromedary')?.copies, 4);
+  assert.equal(result.replayVerified, true);
+}
+
 function assertMinorExplosion(result: PrivateGameCheck['fireMinorExplosion']): void {
   assert.equal(result.minorExplosion, 'Minor Explosion');
   assert.equal(result.raalDromedary, 'Raal Dromedary');
@@ -217,6 +246,7 @@ function assertFireCharge(result: PrivateGameCheck['fireCharge']): void {
 test('private actual-card decks complete deterministic combat, Earth, Air, Fire, and Water scenarios', async () => {
   const result = await runPrivateGameCheck();
   assertStarter(result.airStarter, 'Spire', 'Snow Leopard');
+  assertFatality(result.airFireFatality);
   assertStarter(result.earthStarter, 'Valley', 'Wild Boars');
   assertMalakhim(result.earthMalakhim);
   assertStarter(result.fireStarter, 'Wasteland', 'Raal Dromedary');

@@ -75,6 +75,7 @@ export type GameCardDefinition =
     grantChargeToAllyThisTurn?: true;
     grantPowerToAllyThisTurn?: 2;
     healController?: number;
+    killTargetWoundedMinion?: true;
     leapAttackAlly?: true;
     lureEnemyMinionOneStepCloser?: true;
     manaCost: number;
@@ -766,6 +767,18 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
           && (target.seat === seat || !status.stealthed);
       }).map((target) => ({ ...cast, target }));
     }
+    if (definition.killTargetWoundedMinion === true) {
+      return targets.filter((target) => {
+        if (target.kind !== 'minion') return false;
+        const targetUnit = state.realm.units.find(({ instanceId }) =>
+          instanceId === target.instanceId);
+        const status = unitStatus(state, target);
+        return targetUnit !== undefined
+          && targetUnit.damage > 0
+          && status.region === caster.region
+          && (target.seat === seat || !status.stealthed);
+      }).map((target) => ({ ...cast, target }));
+    }
     if (definition.lureEnemyMinionOneStepCloser === true) {
       const choices = unitRefs(state, seat).flatMap((ally) => {
         const allyStatus = unitStatus(state, ally);
@@ -980,6 +993,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.gainControlOfTargetNearbyMinion !== true) {
       throw new RangeError(`${path}.gainControlOfTargetNearbyMinion must be true when defined`);
     }
+    if (card.killTargetWoundedMinion !== undefined
+      && card.killTargetWoundedMinion !== true) {
+      throw new RangeError(`${path}.killTargetWoundedMinion must be true when defined`);
+    }
     if (card.lureEnemyMinionOneStepCloser !== undefined
       && card.lureEnemyMinionOneStepCloser !== true) {
       throw new RangeError(`${path}.lureEnemyMinionOneStepCloser must be true when defined`);
@@ -1000,6 +1017,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.grantChargeToAllyThisTurn === true)
       + Number(card.grantPowerToAllyThisTurn === 2)
       + Number(card.healController !== undefined)
+      + Number(card.killTargetWoundedMinion === true)
       + Number(card.leapAttackAlly === true)
       + Number(card.lureEnemyMinionOneStepCloser === true)
       + Number(card.returnMinionFromOwnCemetery === true)
@@ -1371,6 +1389,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? { grantChargeToAllyThisTurn: true as const }
                   : card.grantPowerToAllyThisTurn === 2
                     ? { grantPowerToAllyThisTurn: 2 as const }
+                  : card.killTargetWoundedMinion === true
+                    ? { killTargetWoundedMinion: true as const }
                   : card.leapAttackAlly === true
                     ? { leapAttackAlly: true as const }
                   : card.lureEnemyMinionOneStepCloser === true
@@ -4352,6 +4372,75 @@ function applyDescriptor(
           },
           resolved,
         ],
+        [],
+      ];
+    }
+    if (definition.killTargetWoundedMinion === true) {
+      if (descriptor.target?.kind !== 'minion') throw new Error('unreachable Fatality cast');
+      const targetIndex = castState.realm.units.findIndex(({ instanceId, controller }) =>
+        instanceId === descriptor.target!.instanceId && controller === descriptor.target!.seat);
+      const target = castState.realm.units[targetIndex];
+      if (!target) throw new Error('unreachable Fatality target');
+      if (target.warded) {
+        const wardedState = deepFreeze({
+          ...castState,
+          realm: {
+            ...castState.realm,
+            units: castState.realm.units.map((unit, index) => index === targetIndex
+              ? deepFreeze({ ...unit, warded: false })
+              : unit),
+          },
+        });
+        return [
+          withStateVersion(wardedState, {}),
+          [
+            ...castOutcomes,
+            { payload: { instanceId: target.instanceId, seat: target.controller }, type: 'ward-broken' },
+            resolved,
+          ],
+          [],
+        ];
+      }
+      const deathResolution = resolveMinionDeaths(
+        castState,
+        castState.players,
+        castState.realm.units,
+        [target],
+        new Set<GameSeat>(),
+      );
+      const killedState = deepFreeze({
+        ...castState,
+        ...(deathResolution.terminal.status === 'finished'
+          ? { pendingCombat: null, phase: 'terminal' as const }
+          : {}),
+        players: deathResolution.players,
+        realm: {
+          ...castState.realm,
+          ...(deathResolution.artifacts ? { artifacts: deathResolution.artifacts } : {}),
+          units: deathResolution.units,
+        },
+        terminal: deathResolution.terminal,
+      });
+      const outcomes: readonly GameOutcome[] = [
+        ...castOutcomes,
+        {
+          payload: {
+            cardId: target.cardId,
+            instanceId: target.instanceId,
+            owner: target.owner,
+            seat: target.controller,
+            sourceInstanceId: card.instanceId,
+          },
+          type: 'minion-killed',
+        },
+        ...deathResolution.outcomes,
+      ];
+      const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
+      return [
+        withStateVersion(killedState, {}),
+        terminalIndex < 0
+          ? [...outcomes, resolved]
+          : [...outcomes.slice(0, terminalIndex), resolved, ...outcomes.slice(terminalIndex)],
         [],
       ];
     }

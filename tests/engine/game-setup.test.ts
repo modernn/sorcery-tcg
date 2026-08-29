@@ -9512,3 +9512,212 @@ test('RULE-03 Mesmerism gains permanent control of a nearby minion', () => {
   assert.equal(observeGame(session.state, 'north').realm.artifacts?.[0]?.controller, null);
   assert.equal(verifyGameReplay(session), true);
 });
+
+test('RULE-03 Fatality kills only a wounded minion in the caster region', () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const north: GameDeckSpec = {
+    atlas: Array(4).fill('fatality-north-site'),
+    avatar: 'fatality-north-avatar',
+    spellbook: Array(4).fill('fatality'),
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(4).fill('fatality-south-site'),
+    avatar: 'fatality-south-avatar',
+    spellbook: Array(4).fill('fatality-target'),
+  };
+  const cards: Record<string, GameCardDefinition> = {
+    fatality: {
+      cardType: 'magic',
+      killTargetWoundedMinion: true,
+      manaCost: 1,
+      thresholds,
+    },
+    'fatality-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'fatality-north-site': { cardType: 'site', elements: ['earth'] },
+    'fatality-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'fatality-south-site': { cardType: 'site', elements: ['earth'] },
+    'fatality-target': {
+      attack: 0,
+      cardType: 'minion',
+      defense: 3,
+      manaCost: 0,
+      summonToAnySite: true,
+      thresholds,
+    },
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-fatality-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north' as const,
+    seed: 212,
+  };
+  const gameManifest = createGameManifest(input);
+  assert.deepEqual(gameManifest.cards.fatality, cards.fatality);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      fatality: {
+        cardType: 'magic',
+        killTargetWoundedMinion: false,
+        manaCost: 1,
+        thresholds,
+      } as unknown as GameCardDefinition,
+    },
+  }), /killTargetWoundedMinion must be true/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      fatality: {
+        cardType: 'magic',
+        healController: 1,
+        killTargetWoundedMinion: true,
+        manaCost: 1,
+        thresholds,
+      },
+    },
+  }), /exactly one supported Magic effect/);
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'fatality-target' && descriptor.cell === 'C4');
+  const target = session.state.realm.units.find(({ cardId }) => cardId === 'fatality-target');
+  assert.ok(target);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === session.state.players.north.avatar.card.instanceId
+    && descriptor.path.length === 1);
+  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+    && descriptor.target.kind === 'minion'
+    && descriptor.target.instanceId === target.instanceId);
+  take(({ descriptor }) => descriptor.kind === 'close-defend'
+    && descriptor.originalTargetParticipates);
+  const checkpoint = session;
+  const wounded = checkpoint.state.realm.units.find(({ instanceId }) =>
+    instanceId === target.instanceId);
+  const fatality = checkpoint.state.players.north.hand.spellbook
+    .find(({ cardId }) => cardId === 'fatality');
+  assert.equal(wounded?.damage, 1);
+  assert.ok(fatality);
+
+  const healthyId = 'sha256:2222222222222222222222222222222222222222222222222222222222222222' as const;
+  const hiddenId = 'sha256:3333333333333333333333333333333333333333333333333333333333333333' as const;
+  const undergroundId = 'sha256:4444444444444444444444444444444444444444444444444444444444444444' as const;
+  const alliedId = 'sha256:5555555555555555555555555555555555555555555555555555555555555555' as const;
+  const filteredState = {
+    ...checkpoint.state,
+    realm: {
+      ...checkpoint.state.realm,
+      units: [
+        ...checkpoint.state.realm.units,
+        { ...target, damage: 0, instanceId: healthyId },
+        { ...target, damage: 1, instanceId: hiddenId, stealthed: true },
+        { ...target, damage: 1, instanceId: undergroundId, region: 'underground' as const },
+        {
+          ...target,
+          controller: 'north' as const,
+          damage: 1,
+          instanceId: alliedId,
+          owner: 'north' as const,
+          stealthed: true,
+        },
+      ],
+    },
+  };
+  const targetRefs = legalGameActions(filteredState, 'north').flatMap(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === fatality.instanceId
+      && descriptor.target
+      ? [descriptor.target]
+      : []);
+  assert.equal(targetRefs.some(({ kind }) => kind === 'avatar'), false);
+  assert.deepEqual(targetRefs.map(({ instanceId }) => instanceId).sort(), [
+    alliedId,
+    target.instanceId,
+  ].sort());
+
+  const wardedCheckpoint: GameSession = {
+    ...checkpoint,
+    state: {
+      ...checkpoint.state,
+      realm: {
+        ...checkpoint.state.realm,
+        units: checkpoint.state.realm.units.map((unit) => unit.instanceId === target.instanceId
+          ? { ...unit, warded: true }
+          : unit),
+      },
+    },
+  };
+  const warded = stepGame(wardedCheckpoint, action(wardedCheckpoint, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.target?.instanceId === target.instanceId));
+  assert.equal(warded.accepted, true);
+  if (!warded.accepted) return;
+  assert.deepEqual(warded.receipt.events.map(({ type }) => type), [
+    'magic-cast',
+    'ward-broken',
+    'magic-resolved',
+  ]);
+  assert.deepEqual(warded.session.state.realm.units
+    .filter(({ instanceId }) => instanceId === target.instanceId)
+    .map(({ damage, warded: hasWard }) => ({ damage, warded: hasWard })), [{
+    damage: 1,
+    warded: false,
+  }]);
+
+  const cast = action(checkpoint, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.target?.instanceId === target.instanceId);
+  const sourceInstanceId = cast.descriptor.kind === 'cast-magic'
+    ? cast.descriptor.cardInstanceId
+    : '';
+  const killed = stepGame(checkpoint, cast);
+  assert.equal(killed.accepted, true);
+  if (!killed.accepted) return;
+  assert.deepEqual(killed.receipt.events.map(({ type }) => type), [
+    'magic-cast',
+    'minion-killed',
+    'minion-died',
+    'magic-resolved',
+  ]);
+  assert.deepEqual(killed.receipt.events[1]?.payload, {
+    cardId: target.cardId,
+    instanceId: target.instanceId,
+    owner: 'south',
+    seat: 'south',
+    sourceInstanceId,
+  });
+  assert.equal(killed.receipt.events.some(({ type }) => type === 'damage-dealt'), false);
+  assert.deepEqual(killed.receipt.randomDraws, []);
+  assert.equal(killed.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === target.instanceId), false);
+  assert.equal(killed.session.state.players.south.cemetery.some(({ instanceId }) =>
+    instanceId === target.instanceId), true);
+  assert.equal(killed.session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === sourceInstanceId), true);
+  assert.equal(verifyGameReplay(killed.session), true);
+});
