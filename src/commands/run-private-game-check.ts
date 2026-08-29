@@ -601,6 +601,22 @@ export type PrivateGameCheck = Readonly<{
     survivedWithOneDamage: boolean;
     tappedThenUntapped: boolean;
   }>;
+  fireLeapAttack: Readonly<{
+    acceptedActionCount: number;
+    allySteppedWithoutTapOrDamage: boolean;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    exactOptionalStepChoices: boolean;
+    gameRemainedActive: boolean;
+    leapAttack: string;
+    manaPaid: number;
+    noAttackResponseOrRandomness: boolean;
+    raalDromedary: string;
+    replayVerified: boolean;
+    sitesAndAvatarsPreserved: boolean;
+    spellEnteredCemetery: boolean;
+    struckAndKilledEveryEnemy: boolean;
+  }>;
   fireMinorExplosion: Readonly<{
     acceptedActionCount: number;
     avatarTookThreeDamage: boolean;
@@ -951,6 +967,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   lesserBloodDemon: NormalizedCard;
   ignited: NormalizedCard;
   lash: NormalizedCard;
+  leapAttack: NormalizedCard;
   lightningBolt: NormalizedCard;
   lugbogCat: NormalizedCard;
   lure: NormalizedCard;
@@ -1339,6 +1356,24 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || lash.thresholds.water !== 0
     || lash.rarity !== 'ordinary') {
     throw new Error('private nearby damage-and-untap Magic no longer matches its supported facts');
+  }
+  const leapAttack = snapshot.cards.find(({ name }) => name === 'Leap Attack');
+  if (!leapAttack
+    || leapAttack.cardType !== 'magic'
+    || leapAttack.rulesText.trim()
+      !== 'An ally may take a step, and then it strikes each enemy at its location.'
+    || leapAttack.manaCost !== 4
+    || leapAttack.attack !== null
+    || leapAttack.defense !== null
+    || leapAttack.life !== null
+    || leapAttack.elements.length !== 1
+    || leapAttack.elements[0] !== 'fire'
+    || leapAttack.thresholds.air !== 0
+    || leapAttack.thresholds.earth !== 0
+    || leapAttack.thresholds.fire !== 1
+    || leapAttack.thresholds.water !== 0
+    || leapAttack.rarity !== 'exceptional') {
+    throw new Error('private optional-step strike-all Leap Attack Magic no longer matches its supported facts');
   }
   const freeze = snapshot.cards.find(({ name }) => name === 'Freeze');
   if (!freeze
@@ -2071,6 +2106,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     lesserBloodDemon,
     ignited,
     lash,
+    leapAttack,
     lightningBolt,
     lugbogCat,
     lure,
@@ -2192,6 +2228,7 @@ function gameDefinition(
   discardRandomCardInsteadOfMana = false,
   fightAllyWithAdjacentEnemy = false,
   deathriteLoseLifePerNearbySiteControlled = false,
+  leapAttackAlly = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -2231,7 +2268,8 @@ function gameDefinition(
     + Number(submergeTargetMinion)
     + Number(healController !== 0)
     + Number(burrowTargetMinion)
-    + Number(fightAllyWithAdjacentEnemy);
+    + Number(fightAllyWithAdjacentEnemy)
+    + Number(leapAttackAlly);
   if (card.cardType === 'magic'
     && card.manaCost !== null
     && supportedMagicEffects === 1) {
@@ -2241,6 +2279,7 @@ function gameDefinition(
       ...(damageEachAbovegroundMinion !== 0 ? { damageEachAbovegroundMinion } : {}),
       ...(fightAllyWithAdjacentEnemy ? { fightAllyWithAdjacentEnemy: true } : {}),
       ...(grantPowerToAllyThisTurn !== 0 ? { grantPowerToAllyThisTurn } : {}),
+      ...(leapAttackAlly ? { leapAttackAlly: true } : {}),
       ...(submergeTargetMinion ? { submergeTargetMinion: true } : {}),
       ...(damageTargetUnit !== 0
         ? { damageTargetUnit }
@@ -2323,7 +2362,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-immobile' | 'earth-overpower' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-immobile' | 'earth-overpower' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -2552,6 +2591,12 @@ function buildManifest(
     [input.ghostTownSite],
     [input.lash],
   );
+  const fireLeapAttackDeck = elementalDeck(
+    'fire',
+    [input.raalDromedary],
+    [input.ghostTownSite],
+    [input.leapAttack],
+  );
   const waterDeck = elementalDeck('water', [
     input.healingMinion,
     input.slyFox,
@@ -2665,6 +2710,8 @@ function buildManifest(
           ? fireIgnitedDeck
         : scenario === 'fire-lash'
           ? fireLashDeck
+        : scenario === 'fire-leap-attack'
+          ? fireLeapAttackDeck
         : scenario === 'fire-minor-explosion'
           ? fireMinorExplosionDeck
         : scenario === 'water-edge-connection'
@@ -2724,6 +2771,8 @@ function buildManifest(
         ? waterLugbogDeck
       : scenario === 'earth-entombed'
         ? earthEntombedDeck
+      : scenario === 'fire-leap-attack'
+        ? fireLeapAttackDeck
       : scenario === 'earth-bury'
         ? earthBuryDeck
       : scenario === 'earth-duel'
@@ -2841,6 +2890,7 @@ function buildManifest(
       card.stableId === input.aramosMercenaries.stableId,
       card.stableId === input.duel.stableId,
       card.stableId === input.bladderblimp.stableId,
+      card.stableId === input.leapAttack.stableId,
     ),
   ]));
   return {
@@ -4390,6 +4440,70 @@ function findFireLashOpening(
     }
   }
   throw new Error('private Lash damage-and-untap scenario no longer produces its supported opening');
+}
+
+function findFireLeapAttackOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  ghostTownInstanceId: string;
+  leapAttackInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northRaalInstanceId: string;
+  northSiteInstanceIds: readonly [string, string];
+  session: GameSession;
+  southRaalInstanceIds: readonly [string, string];
+  southSiteInstanceIds: readonly [string, string];
+}> {
+  // ponytail: this bounded deterministic scan avoids another private seed field.
+  for (let offset = 1; offset <= 4096; offset += 1) {
+    const built = buildManifest(input, input.config.fireSeed + offset, 'fire-leap-attack');
+    const session = createGameSession(built.manifest);
+    const fireSites = (seat: GameSeat) => session.state.players[seat].hand.atlas
+      .filter(({ cardId }) => {
+        const definition = session.state.cards[cardId];
+        return definition?.cardType === 'site' && definition.elements.includes('fire');
+      });
+    const northSites = fireSites('north');
+    const southSites = fireSites('south');
+    const ghostTownInstanceId = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.ghostTownSite.stableId)?.instanceId;
+    const northRaalInstanceId = availableMinionInstance(
+      session,
+      'north',
+      input.raalDromedary.stableId,
+      1,
+    );
+    const leapAttackInstanceId = availableMinionInstance(
+      session,
+      'north',
+      input.leapAttack.stableId,
+      2,
+    );
+    const southRaalInstanceIds = [
+      ...session.state.players.south.hand.spellbook,
+      ...session.state.players.south.spellbook.slice(0, 1),
+    ].filter(({ cardId }) => cardId === input.raalDromedary.stableId)
+      .map(({ instanceId }) => instanceId);
+    if (northSites.length >= 2
+      && southSites.length >= 2
+      && ghostTownInstanceId
+      && northRaalInstanceId
+      && leapAttackInstanceId
+      && southRaalInstanceIds.length >= 2) {
+      return {
+        ...built,
+        ghostTownInstanceId,
+        leapAttackInstanceId,
+        northRaalInstanceId,
+        northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
+        session,
+        southRaalInstanceIds: [southRaalInstanceIds[0]!, southRaalInstanceIds[1]!],
+        southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
+      };
+    }
+  }
+  throw new Error('private Leap Attack optional-step strike-all scenario lacks its supported opening');
 }
 
 function findFireIgnitedOpening(
@@ -9377,6 +9491,166 @@ function runFireLash(
   });
 }
 
+function runFireLeapAttack(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['fireLeapAttack'] {
+  const opening = findFireLeapAttackOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.northRaalInstanceId
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  for (const instanceId of opening.southRaalInstanceIds) {
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === instanceId
+      && descriptor.cell === 'C2');
+  }
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.ghostTownInstanceId
+    && descriptor.cell === 'B3');
+
+  const allyBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.northRaalInstanceId);
+  if (!allyBefore) throw new Error('private Leap Attack setup lacks its allied Raal Dromedary');
+  const sitesBefore = session.state.realm.sites;
+  const northAvatarBefore = session.state.players.north.avatar;
+  const southAvatarBefore = session.state.players.south.avatar;
+  const leapActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.leapAttackInstanceId
+      && descriptor.ally?.kind === 'minion'
+      && descriptor.ally.instanceId === opening.northRaalInstanceId
+      && descriptor.ally.seat === 'north'
+      && descriptor.target === undefined);
+  const noStepActions = leapActions.filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.allyDestination?.cell === 'C3'
+      && descriptor.allyDestination.region === 'surface');
+  const stepActions = leapActions.filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.allyDestination?.cell === 'C2'
+      && descriptor.allyDestination.region === 'surface');
+  const stepAction = stepActions[0];
+  if (!stepAction || stepActions.length !== 1 || noStepActions.length !== 1) {
+    throw new Error('private Leap Attack optional C3 and stepped C2 choices are not exactly available');
+  }
+  const manaBefore = session.state.players.north.mana;
+  const leapResult = stepGame(session, stepAction);
+  if (!leapResult.accepted) throw new Error('private Leap Attack cast was rejected');
+  session = leapResult.session;
+
+  const allyAfter = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.northRaalInstanceId);
+  const events = leapResult.receipt.events;
+  const castPayload = events[0] && isJsonRecord(events[0].payload) ? events[0].payload : undefined;
+  const stepPayload = events[1] && isJsonRecord(events[1].payload) ? events[1].payload : undefined;
+  const stepFrom = stepPayload && isJsonRecord(stepPayload.from) ? stepPayload.from : undefined;
+  const stepTo = stepPayload && isJsonRecord(stepPayload.to) ? stepPayload.to : undefined;
+  const allocationEvents = events.filter(({ type }) => type === 'strike-damage-allocated');
+  const allocationPayloads = allocationEvents.flatMap(({ payload }) =>
+    isJsonRecord(payload) ? [payload] : []);
+  const damagePayloads = events.filter(({ type }) => type === 'damage-dealt')
+    .flatMap(({ payload }) => isJsonRecord(payload) ? [payload] : []);
+  const deathPayloads = events.filter(({ type }) => type === 'minion-died')
+    .flatMap(({ payload }) => isJsonRecord(payload) ? [payload] : []);
+  const enemyIds = [...opening.southRaalInstanceIds].sort((left, right) =>
+    left.localeCompare(right));
+  const allocationIds = allocationPayloads.map(({ targetInstanceId }) => targetInstanceId);
+  const damageIds = damagePayloads.map(({ instanceId }) => instanceId).sort();
+  const deathIds = deathPayloads.map(({ instanceId }) => instanceId).sort();
+  const eventTypes = events.map(({ type }) => type);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    allySteppedWithoutTapOrDamage: allyAfter?.cardId === allyBefore.cardId
+      && allyAfter.controller === allyBefore.controller
+      && allyAfter.damage === 0
+      && allyAfter.location === 'C2'
+      && allyAfter.owner === allyBefore.owner
+      && allyAfter.region === 'surface'
+      && allyAfter.summoningSickness === allyBefore.summoningSickness
+      && !allyAfter.tapped,
+    causalEventsVerified: eventTypes.join(',')
+      === 'magic-cast,unit-stepped,strike-damage-allocated,strike-damage-allocated,damage-dealt,damage-dealt,minion-died,minion-died,magic-resolved'
+      && castPayload?.instanceId === opening.leapAttackInstanceId
+      && castPayload.manaPaid === 4
+      && castPayload.allyInstanceId === opening.northRaalInstanceId
+      && castPayload.allySeat === 'north'
+      && isJsonRecord(castPayload.allyDestination)
+      && castPayload.allyDestination.cell === 'C2'
+      && castPayload.allyDestination.region === 'surface'
+      && stepPayload?.instanceId === opening.northRaalInstanceId
+      && stepPayload.seat === 'north'
+      && stepPayload.sourceInstanceId === opening.leapAttackInstanceId
+      && stepPayload.steps === 1
+      && stepFrom?.cell === 'C3'
+      && stepFrom.region === 'surface'
+      && stepTo?.cell === 'C2'
+      && stepTo.region === 'surface'
+      && allocationPayloads.length === 2
+      && allocationPayloads.every(({ amount, strikerInstanceId }) =>
+        amount === 2 && strikerInstanceId === opening.northRaalInstanceId)
+      && allocationIds.join(',') === enemyIds.join(','),
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    exactOptionalStepChoices: noStepActions.length === 1 && stepActions.length === 1,
+    gameRemainedActive: session.state.terminal.status === 'active',
+    leapAttack: input.leapAttack.name,
+    manaPaid: manaBefore - session.state.players.north.mana,
+    noAttackResponseOrRandomness: leapResult.receipt.randomDraws.length === 0
+      && events.every(({ type }) =>
+        type !== 'fight-started'
+          && type !== 'attack-declared'
+          && type !== 'defend-window-opened'
+          && type !== 'intercept-window-opened')
+      && session.state.pendingCombat === null
+      && session.state.phase === 'main'
+      && session.state.decisionSeat === 'north',
+    raalDromedary: input.raalDromedary.name,
+    replayVerified: verifyGameReplay(session),
+    sitesAndAvatarsPreserved:
+      canonicalJson(session.state.realm.sites as unknown as JsonValue)
+        === canonicalJson(sitesBefore as unknown as JsonValue)
+      && canonicalJson(session.state.players.north.avatar as unknown as JsonValue)
+        === canonicalJson(northAvatarBefore as unknown as JsonValue)
+      && canonicalJson(session.state.players.south.avatar as unknown as JsonValue)
+        === canonicalJson(southAvatarBefore as unknown as JsonValue),
+    spellEnteredCemetery: session.state.players.north.hand.spellbook
+      .every(({ instanceId }) => instanceId !== opening.leapAttackInstanceId)
+      && session.state.players.north.cemetery
+        .some(({ instanceId }) => instanceId === opening.leapAttackInstanceId),
+    struckAndKilledEveryEnemy: allocationIds.join(',') === enemyIds.join(',')
+      && damageIds.join(',') === enemyIds.join(',')
+      && deathIds.join(',') === enemyIds.join(',')
+      && opening.southRaalInstanceIds.every((instanceId) =>
+        session.state.realm.units.every((unit) => unit.instanceId !== instanceId)
+          && session.state.players.south.cemetery.some((card) => card.instanceId === instanceId)),
+  });
+}
+
 function runFireMinorExplosion(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['fireMinorExplosion'] {
@@ -10785,6 +11059,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const fireGenesisLifeLoss = runFireGenesisLifeLoss(input);
   const fireIgnited = runFireIgnited(input);
   const fireLash = runFireLash(input);
+  const fireLeapAttack = runFireLeapAttack(input);
   const fireMinorExplosion = runFireMinorExplosion(input);
   const fireResponse = runFireResponse(input);
   const stealth = runStealth(input);
@@ -10959,6 +11234,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     fireGenesisLifeLoss,
     fireIgnited,
     fireLash,
+    fireLeapAttack,
     fireMinorExplosion,
     fireResponse,
     finalStateHash: hashGameState(session.state),
