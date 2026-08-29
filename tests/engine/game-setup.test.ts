@@ -1678,6 +1678,171 @@ test('RULE-03/04 a Spellcaster pays mana and summons a minion atop a controlled 
   assert.equal(verifyGameReplay(session), true);
 });
 
+test('RULE-03/04 token Magic summons deterministically and tokens banish instead of entering a cemetery', () => {
+  const decks = {
+    north: deck('token-north', 6, 6),
+    south: deck('token-south', 6, 6),
+  };
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const tokenCardId = 'synthetic-foot-soldier-token';
+  const tokenDefinition = {
+    attack: 1,
+    cardType: 'minion',
+    defense: 1,
+    manaCost: 0,
+    thresholds,
+    token: true,
+  } as const satisfies GameCardDefinition;
+  const cards = cardsFor(decks, { manaCost: 0, thresholds });
+  decks.north.spellbook.forEach((cardId) => {
+    cards[cardId] = {
+      cardType: 'magic',
+      manaCost: 0,
+      summonTokenToEachControlledSiteBorderingEnemySite: tokenCardId,
+      thresholds,
+    };
+  });
+  cards[tokenCardId] = tokenDefinition;
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-token-magic-v1',
+    },
+    cards,
+    decks,
+    firstSeat: 'north' as const,
+    seed: 218,
+  };
+  const gameManifest = createGameManifest(input);
+  assert.deepEqual(gameManifest.cards[tokenCardId], tokenDefinition);
+  const missingTokenCards = { ...cards };
+  delete missingTokenCards[tokenCardId];
+  assert.throws(() => createGameManifest({ ...input, cards: missingTokenCards }),
+    /must reference a token minion/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: { ...cards, 'unreferenced-token': tokenDefinition },
+  }), /exactly the deck-referenced definitions/);
+  const replacedSpellId = decks.north.spellbook[0]!;
+  const deckTokenCards = { ...cards };
+  delete deckTokenCards[replacedSpellId];
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: deckTokenCards,
+    decks: {
+      ...decks,
+      north: {
+        ...decks.north,
+        spellbook: [tokenCardId, ...decks.north.spellbook.slice(1)],
+      },
+    },
+  }), /unsupported spell/);
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  const emptyCast = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.target === undefined));
+  assert.equal(emptyCast.accepted, true);
+  if (!emptyCast.accepted) return;
+  session = emptyCast.session;
+  assert.deepEqual(emptyCast.receipt.events.map(({ type }) => type), ['magic-cast', 'magic-resolved']);
+  assert.equal(session.state.realm.units.some(({ source }) => source === 'token'), false);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'B2');
+  const attacker = session.state.realm.units.find(({ controller, location }) =>
+    controller === 'south' && location === 'B2');
+  assert.ok(attacker);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+
+  const tokenCast = action(session, ({ descriptor }) => descriptor.kind === 'cast-magic');
+  assert.equal(tokenCast.descriptor.kind === 'cast-magic' && tokenCast.descriptor.target, undefined);
+  const sourceInstanceId = tokenCast.descriptor.kind === 'cast-magic'
+    ? tokenCast.descriptor.cardInstanceId
+    : '';
+  const summoned = stepGame(session, tokenCast);
+  assert.equal(summoned.accepted, true);
+  if (!summoned.accepted) return;
+  session = summoned.session;
+  const summonEvents = summoned.receipt.events.filter(({ payload, type }) =>
+    type === 'minion-summoned'
+      && (payload as { sourceInstanceId?: string }).sourceInstanceId === sourceInstanceId);
+  assert.deepEqual(summonEvents.map(({ payload }) =>
+    (payload as { cell: string }).cell), ['B3', 'C3']);
+  const tokens = session.state.realm.units
+    .filter(({ source }) => source === 'token')
+    .sort((left, right) => left.location.localeCompare(right.location));
+  assert.deepEqual(tokens.map(({ controller, damage, location, owner, region, source,
+    summoningSickness, tapped }) => ({
+    controller, damage, location, owner, region, source, summoningSickness, tapped,
+  })), [
+    {
+      controller: 'north', damage: 0, location: 'B3', owner: 'north', region: 'surface',
+      source: 'token', summoningSickness: true, tapped: false,
+    },
+    {
+      controller: 'north', damage: 0, location: 'C3', owner: 'north', region: 'surface',
+      source: 'token', summoningSickness: true, tapped: false,
+    },
+  ]);
+  assert.equal(new Set(tokens.map(({ instanceId }) => instanceId)).size, 2);
+  assert.deepEqual(observeGame(session.state, 'south').realm.units
+    .filter(({ token }) => token)
+    .map(({ attack, defense, instanceId }) => ({ attack, defense, instanceId })),
+  tokens.map(({ instanceId }) => ({ attack: 1, defense: 1, instanceId })));
+  assert.deepEqual(summonEvents.map(({ payload }) =>
+    (payload as { instanceId: string }).instanceId), tokens.map(({ instanceId }) => instanceId));
+  assert.deepEqual(summoned.receipt.randomDraws, []);
+  const killed = tokens[0]!;
+  const survivor = tokens[1]!;
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === attacker.instanceId
+    && descriptor.to.cell === 'B3');
+  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+    && descriptor.target.kind === 'minion'
+    && descriptor.target.instanceId === killed.instanceId);
+  const fight = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  assert.equal(fight.accepted, true);
+  if (!fight.accepted) return;
+  session = fight.session;
+  const tokenExitEvents = fight.receipt.events.filter(({ payload, type }) =>
+    (type === 'minion-died' || type === 'minion-banished')
+      && (payload as { instanceId?: string }).instanceId === killed.instanceId);
+  assert.deepEqual(tokenExitEvents.map(({ type }) => type), ['minion-died', 'minion-banished']);
+  const diedIndex = fight.receipt.events.indexOf(tokenExitEvents[0]!);
+  assert.equal(fight.receipt.events[diedIndex + 1], tokenExitEvents[1]);
+  assert.equal(session.state.realm.units.some(({ instanceId }) => instanceId === killed.instanceId), false);
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === killed.instanceId), false);
+  assert.equal(session.state.players.south.cemetery.some(({ instanceId }) =>
+    instanceId === killed.instanceId), false);
+  assert.equal(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === survivor.instanceId)?.instanceId, survivor.instanceId);
+  assert.equal(verifyGameReplay(session), true);
+});
+
 test('RULE-03 Aramos Mercenaries may discard a deterministic random hand card instead of paying mana', () => {
   const decks = {
     north: deck('aramos-north', 6, 8),

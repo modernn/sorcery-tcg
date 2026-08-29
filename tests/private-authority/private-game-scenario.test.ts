@@ -657,6 +657,23 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthBury.deck.spellbook
     .find(({ name }) => name === 'Bosk Troll')?.copies, 4);
   assert.equal(result.earthBury.replayVerified, true);
+  assert.equal(result.earthBorderMilitia.borderMilitia, 'Border Militia');
+  assert.equal(result.earthBorderMilitia.footSoldier, 'Foot Soldier');
+  assert.equal(result.earthBorderMilitia.seed, 7688);
+  assert.equal(result.earthBorderMilitia.acceptedActionCount, 21);
+  assert.equal(result.earthBorderMilitia.manaPaid, 3);
+  assert.equal(result.earthBorderMilitia.tokensVerified, true);
+  assert.equal(result.earthBorderMilitia.spellEnteredCemetery, true);
+  assert.equal(result.earthBorderMilitia.noRandomDraws, true);
+  assert.equal(result.earthBorderMilitia.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthBorderMilitia.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthBorderMilitia.deck.spellbook
+    .find(({ name }) => name === 'Border Militia')?.copies, 4);
+  assert.equal(result.earthBorderMilitia.deck.spellbook
+    .some(({ name }) => name === 'Foot Soldier'), false);
+  assert.equal(result.earthBorderMilitia.replayVerified, true);
   assert.equal(result.earthDuel.duel, 'Duel');
   assert.equal(result.earthDuel.boskTroll, 'Bosk Troll');
   assert.equal(result.earthDuel.elthamTownsfolk, 'Eltham Townsfolk');
