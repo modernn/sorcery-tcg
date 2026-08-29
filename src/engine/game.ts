@@ -82,6 +82,7 @@ export type GameCardDefinition =
     manaCost: number;
     returnMinionFromOwnCemetery?: true;
     submergeTargetMinion?: true;
+    summonTokenToEachControlledSiteBorderingEnemySite?: string;
     targetNearby?: boolean;
     teleportAllyToTargetSite?: true;
     thresholds: GameThresholds;
@@ -135,6 +136,7 @@ export type GameCardDefinition =
     tapForMana?: number;
     takesLessDamage?: 1;
     thresholds: GameThresholds;
+    token?: true;
     untapsAtEndOfControllerTurn?: true;
     voidwalk?: boolean;
     waterbound?: boolean;
@@ -169,7 +171,7 @@ type CardInstance = Readonly<{
   cardId: string;
   instanceId: StateHash;
   owner: GameSeat;
-  source: 'atlas' | 'avatar' | 'spellbook';
+  source: 'atlas' | 'avatar' | 'spellbook' | 'token';
 }>;
 
 type SiteInstance = Readonly<CardInstance & { controller: GameSeat }>;
@@ -365,6 +367,7 @@ export type GameObservation = Readonly<{
       stealthed: boolean;
       summoningSickness: boolean;
       tapped: boolean;
+      token?: true;
       warded: boolean;
     }>[];
   }>;
@@ -926,6 +929,9 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
         }))
         : [cast];
     }
+    if (definition.summonTokenToEachControlledSiteBorderingEnemySite !== undefined) {
+      return [cast];
+    }
     if (definition.teleportAllyToTargetSite === true) {
       if (caster.region !== 'surface') return [];
       const targetSites = REALM_CELLS.flatMap((cell) => {
@@ -1066,6 +1072,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.returnMinionFromOwnCemetery !== true) {
       throw new RangeError(`${path}.returnMinionFromOwnCemetery must be true when defined`);
     }
+    if (card.summonTokenToEachControlledSiteBorderingEnemySite !== undefined) {
+      requireCardId(
+        card.summonTokenToEachControlledSiteBorderingEnemySite,
+        `${path}.summonTokenToEachControlledSiteBorderingEnemySite`,
+      );
+    }
     if (card.disableTargetNearbyMinionUntilNextTurn !== undefined
       && card.disableTargetNearbyMinionUntilNextTurn !== true) {
       throw new RangeError(`${path}.disableTargetNearbyMinionUntilNextTurn must be true when defined`);
@@ -1117,6 +1129,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.leapAttackAlly === true)
       + Number(card.lureEnemyMinionOneStepCloser === true)
       + Number(card.returnMinionFromOwnCemetery === true)
+      + Number(card.summonTokenToEachControlledSiteBorderingEnemySite !== undefined)
       + Number(card.teleportAllyToTargetSite === true);
     if (effectCount !== 1) {
       throw new RangeError(`${path} must define exactly one supported Magic effect`);
@@ -1326,6 +1339,16 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.takesLessDamage !== undefined && card.takesLessDamage !== 1) {
     throw new RangeError(`${path}.takesLessDamage must be 1`);
   }
+  if (card.token !== undefined && card.token !== true) {
+    throw new RangeError(`${path}.token must be true when defined`);
+  }
+  if (card.token === true
+    && (card.genesisDrawSite || card.genesisDrawSpell
+      || card.genesisDamageEachOtherUnitHere === 1
+      || card.genesisHealController !== undefined
+      || card.genesisLoseControllerLife !== undefined)) {
+    throw new RangeError(`${path} token Genesis effects are unsupported`);
+  }
   if (card.ward !== undefined && typeof card.ward !== 'boolean') {
     throw new RangeError(`${path}.ward must be boolean`);
   }
@@ -1402,9 +1425,11 @@ function validateDeck(
     if (cards[cardId]?.cardType !== 'site') throw new RangeError(`${path}.atlas[${index}] must reference a site`);
   });
   deck.spellbook.forEach((cardId, index) => {
-    if (cards[cardId]?.cardType !== 'artifact'
-      && cards[cardId]?.cardType !== 'minion'
-      && cards[cardId]?.cardType !== 'magic') {
+    const definition = cards[cardId];
+    if ((definition?.cardType !== 'artifact'
+      && definition?.cardType !== 'minion'
+      && definition?.cardType !== 'magic')
+      || definition?.cardType === 'minion' && definition.token === true) {
       throw new RangeError(`${path}.spellbook[${index}] references an unsupported spell`);
     }
   });
@@ -1424,6 +1449,17 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
     const deck = input.decks[seat];
     return [deck.avatar, ...deck.atlas, ...deck.spellbook];
   }));
+  for (const cardId of referencedCardIds) {
+    const definition = input.cards[cardId];
+    if (definition?.cardType !== 'magic'
+      || definition.summonTokenToEachControlledSiteBorderingEnemySite === undefined) continue;
+    const tokenCardId = definition.summonTokenToEachControlledSiteBorderingEnemySite;
+    const token = input.cards[tokenCardId];
+    if (token?.cardType !== 'minion' || token.token !== true) {
+      throw new RangeError(`cards.${cardId}.summonTokenToEachControlledSiteBorderingEnemySite must reference a token minion`);
+    }
+    referencedCardIds.add(tokenCardId);
+  }
   if (cardEntries.length !== referencedCardIds.size
     || cardEntries.some(([cardId]) => !referencedCardIds.has(cardId))) {
     throw new RangeError('cards must contain exactly the deck-referenced definitions');
@@ -1510,7 +1546,12 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? { healController: card.healController }
                     : card.returnMinionFromOwnCemetery === true
                       ? { returnMinionFromOwnCemetery: true as const }
-                      : { teleportAllyToTargetSite: true as const }),
+                      : card.summonTokenToEachControlledSiteBorderingEnemySite !== undefined
+                        ? {
+                          summonTokenToEachControlledSiteBorderingEnemySite:
+                            card.summonTokenToEachControlledSiteBorderingEnemySite,
+                        }
+                        : { teleportAllyToTargetSite: true as const }),
               manaCost: card.manaCost,
               ...(card.targetNearby === true ? { targetNearby: true } : {}),
               thresholds: { ...card.thresholds },
@@ -1580,6 +1621,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.tapForMana ? { tapForMana: card.tapForMana } : {}),
             ...(card.takesLessDamage === 1 ? { takesLessDamage: 1 as const } : {}),
             thresholds: { ...card.thresholds },
+            ...(card.token === true ? { token: true as const } : {}),
             ...(card.untapsAtEndOfControllerTurn === true
               ? { untapsAtEndOfControllerTurn: true as const }
               : {}),
@@ -1632,6 +1674,43 @@ function cardInstance(
     }),
     owner,
     source,
+  });
+}
+
+function tokenUnit(
+  state: GameState,
+  owner: GameSeat,
+  cardId: string,
+  sourceInstanceId: StateHash,
+  cell: RealmCell,
+  ordinal: number,
+): UnitInstance {
+  const definition = cardDefinition(state, cardId);
+  if (definition.cardType !== 'minion' || definition.token !== true) {
+    throw new Error('token effect lacks its referenced token minion definition');
+  }
+  return deepFreeze({
+    cardId,
+    ...(definition.lanceCount ? { carriedLanceCount: definition.lanceCount } : {}),
+    controller: owner,
+    damage: 0,
+    instanceId: identityHash({
+      cardId,
+      cell,
+      ordinal,
+      owner,
+      source: 'token',
+      sourceInstanceId,
+      stateVersion: state.stateVersion,
+    }),
+    location: cell,
+    owner,
+    region: 'surface',
+    source: 'token',
+    stealthed: definition.stealth === true,
+    summoningSickness: true,
+    tapped: false,
+    warded: definition.ward === true,
   });
 }
 
@@ -1903,6 +1982,7 @@ export function observeGame(state: GameState, viewer: GameSeat): GameObservation
       stealthed: unit.stealthed,
       summoningSickness: unit.summoningSickness,
       tapped: unit.tapped,
+      ...(definition.token === true ? { token: true as const } : {}),
       warded: unit.warded,
     };
   });
@@ -3077,22 +3157,32 @@ function resolveMinionDeaths(
     });
   }
   for (const dead of deaths) {
-    const owner = players[dead.owner];
-    players[dead.owner] = deepFreeze({
-      ...owner,
-      cemetery: [...owner.cemetery, {
-        cardId: dead.cardId,
-        instanceId: dead.instanceId,
-        owner: dead.owner,
-        source: dead.source,
-      }],
-    });
+    const definition = cardDefinition(state, dead.cardId);
+    const token = definition.cardType === 'minion' && definition.token === true;
+    if (!token) {
+      const owner = players[dead.owner];
+      players[dead.owner] = deepFreeze({
+        ...owner,
+        cemetery: [...owner.cemetery, {
+          cardId: dead.cardId,
+          instanceId: dead.instanceId,
+          owner: dead.owner,
+          source: dead.source,
+        }],
+      });
+    }
     const drop = dropArtifactsCarriedBy(artifacts, dead);
     artifacts = drop.artifacts;
     deathOutcomes.push(...drop.outcomes, {
       payload: { cardId: dead.cardId, instanceId: dead.instanceId, owner: dead.owner },
       type: 'minion-died',
     });
+    if (token) {
+      deathOutcomes.push({
+        payload: { cardId: dead.cardId, instanceId: dead.instanceId, owner: dead.owner },
+        type: 'minion-banished',
+      });
+    }
   }
 
   let terminal: GameTerminal = { status: 'active' };
@@ -4315,6 +4405,37 @@ function applyDescriptor(
             },
             type: 'minion-returned-to-hand',
           },
+          resolved,
+        ],
+        [],
+      ];
+    }
+    if (definition.summonTokenToEachControlledSiteBorderingEnemySite !== undefined) {
+      const tokenCardId = definition.summonTokenToEachControlledSiteBorderingEnemySite;
+      const enemySeat = otherSeat(seat);
+      const cells = controlledSiteCells(castState, seat).filter((cell) =>
+        borderingCells(cell).some((borderingCell) =>
+          castState.realm.sites[borderingCell]?.controller === enemySeat));
+      const tokens = cells.map((cell, ordinal) =>
+        tokenUnit(castState, seat, tokenCardId, card.instanceId, cell, ordinal));
+      return [
+        withStateVersion(castState, {
+          realm: { ...castState.realm, units: [...castState.realm.units, ...tokens] },
+        }),
+        [
+          ...castOutcomes,
+          ...tokens.map((token) => ({
+            payload: {
+              cardId: token.cardId,
+              cell: token.location,
+              instanceId: token.instanceId,
+              owner: token.owner,
+              seat: token.controller,
+              sourceInstanceId: card.instanceId,
+              token: true,
+            },
+            type: 'minion-summoned' as const,
+          })),
           resolved,
         ],
         [],

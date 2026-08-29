@@ -548,6 +548,18 @@ export type PrivateGameCheck = Readonly<{
     replayVerified: boolean;
     spellEnteredCemetery: boolean;
   }>;
+  earthBorderMilitia: Readonly<{
+    acceptedActionCount: number;
+    borderMilitia: string;
+    deck: DeckList;
+    footSoldier: string;
+    manaPaid: number;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    seed: number;
+    spellEnteredCemetery: boolean;
+    tokensVerified: boolean;
+  }>;
   earthDuel: Readonly<{
     acceptedActionCount: number;
     allySurvivedWithTwoDamage: boolean;
@@ -1181,6 +1193,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   authorityHash: Hash;
   bladderblimp: NormalizedCard;
   bury: NormalizedCard;
+  borderMilitia: NormalizedCard;
   burrowingMinion: NormalizedCard;
   cards: readonly NormalizedCard[];
   cannotDefendMinion: NormalizedCard;
@@ -1200,6 +1213,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   formatStableId: string;
   firstStrikeMinion: NormalizedCard;
   firstStrikeTargetMinion: NormalizedCard;
+  footSoldier: NormalizedCard;
   forsaken: NormalizedCard;
   freeze: NormalizedCard;
   fatality: NormalizedCard;
@@ -1491,6 +1505,41 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || duel.thresholds.water !== 0
     || duel.rarity !== 'ordinary') {
     throw new Error('private ally-versus-adjacent-enemy Duel Magic no longer matches its supported facts');
+  }
+  const borderMilitia = snapshot.cards.find(({ name }) => name === 'Border Militia');
+  if (!borderMilitia
+    || borderMilitia.stableId !== 'card:30d6aacf5064c002c058a7a6d5d0b2e3834243fa335c303acb2e9269167281f4'
+    || borderMilitia.cardType !== 'magic'
+    || ruleTextDigest(borderMilitia.rulesText) !== 'sha256:4e300709a8d9de7910ad5822bce2de9d6793f1d49f2cfa06901c8e8aa069d241'
+    || borderMilitia.manaCost !== 3
+    || borderMilitia.attack !== null
+    || borderMilitia.defense !== null
+    || borderMilitia.life !== null
+    || borderMilitia.elements.length !== 1
+    || borderMilitia.elements[0] !== 'earth'
+    || borderMilitia.thresholds.air !== 0
+    || borderMilitia.thresholds.earth !== 1
+    || borderMilitia.thresholds.fire !== 0
+    || borderMilitia.thresholds.water !== 0
+    || borderMilitia.rarity !== 'ordinary') {
+    throw new Error('private Border Militia no longer matches its supported facts');
+  }
+  const footSoldier = snapshot.cards.find(({ name }) => name === 'Foot Soldier');
+  if (!footSoldier
+    || footSoldier.stableId !== 'card:064b7fb4b8ef0fcf60aa28f2d6562f70e22bb7f023adfe32353a7a188b79e0a7'
+    || footSoldier.cardType !== 'minion'
+    || footSoldier.rulesText.trim() !== ''
+    || footSoldier.manaCost !== null
+    || footSoldier.attack !== 1
+    || footSoldier.defense !== 1
+    || footSoldier.life !== null
+    || footSoldier.elements.length !== 0
+    || footSoldier.thresholds.air !== 0
+    || footSoldier.thresholds.earth !== 0
+    || footSoldier.thresholds.fire !== 0
+    || footSoldier.thresholds.water !== 0
+    || footSoldier.rarity !== 'ordinary') {
+    throw new Error('private Foot Soldier token no longer matches its supported facts');
   }
   const rescue = snapshot.cards.find(({ name }) => name === 'Rescue');
   if (!rescue
@@ -2619,6 +2668,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     arcLightning,
     authorityHash: artifact.contentHash,
     bladderblimp,
+    borderMilitia,
     bury,
     burrowingMinion,
     cards: snapshot.cards,
@@ -2639,6 +2689,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     formatStableId: selected.identity.stableId,
     firstStrikeMinion,
     firstStrikeTargetMinion,
+    footSoldier,
     forsaken,
     freeze,
     fatality,
@@ -2805,6 +2856,8 @@ function gameDefinition(
   ordinaryMinionManaDiscount: 0 | 1 = 0,
   siteProvidesNoThreshold = false,
   takesLessDamage: 0 | 1 = 0,
+  summonTokenToEachControlledSiteBorderingEnemySite?: string,
+  token = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -2861,7 +2914,8 @@ function gameDefinition(
     + Number(fightAllyWithAdjacentEnemy)
     + Number(gainControlOfTargetNearbyMinion)
     + Number(killTargetWoundedMinion)
-    + Number(leapAttackAlly);
+    + Number(leapAttackAlly)
+    + Number(Boolean(summonTokenToEachControlledSiteBorderingEnemySite));
   if (card.cardType === 'magic'
     && card.manaCost !== null
     && supportedMagicEffects === 1) {
@@ -2875,6 +2929,9 @@ function gameDefinition(
       ...(grantPowerToAllyThisTurn !== 0 ? { grantPowerToAllyThisTurn } : {}),
       ...(leapAttackAlly ? { leapAttackAlly: true } : {}),
       ...(submergeTargetMinion ? { submergeTargetMinion: true } : {}),
+      ...(summonTokenToEachControlledSiteBorderingEnemySite
+        ? { summonTokenToEachControlledSiteBorderingEnemySite }
+        : {}),
       ...(damageTargetUnit !== 0
         ? { damageTargetUnit }
         : damageEachUnitAtLocationWithinTwoSteps !== 0
@@ -2901,7 +2958,7 @@ function gameDefinition(
   if (card.cardType === 'minion'
     && card.attack !== null
     && card.defense !== null
-    && card.manaCost !== null) {
+    && (card.manaCost !== null || token)) {
     return {
       airborne,
       attack: card.attack,
@@ -2929,7 +2986,7 @@ function gameDefinition(
       immobile,
       lethal,
       ...(lanceCount ? { lanceCount } : {}),
-      manaCost: card.manaCost,
+      manaCost: card.manaCost ?? 0,
       movesOnlyForward,
       mustBeCastBurrowed,
       mustBeCastSubmerged,
@@ -2957,6 +3014,7 @@ function gameDefinition(
       ...(tapForMana ? { tapForMana } : {}),
       ...(takesLessDamage ? { takesLessDamage } : {}),
       thresholds: card.thresholds,
+      ...(token ? { token: true as const } : {}),
       voidwalk,
       waterbound,
       ward,
@@ -2968,7 +3026,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -3083,6 +3141,7 @@ function buildManifest(
     [input.overpower],
   );
   const earthBuryDeck = elementalDeck('earth', earthMinions, [], [input.bury]);
+  const earthBorderMilitiaDeck = elementalDeck('earth', [], [], [input.borderMilitia]);
   const earthDuelDeck = elementalDeck(
     'earth',
     [...earthMinions, input.elthamTownsfolk],
@@ -3366,6 +3425,8 @@ function buildManifest(
       ? airborneDeck
       : scenario === 'earth-entombed'
         ? earthEntombedDeck
+      : scenario === 'earth-border-militia'
+        ? earthBorderMilitiaDeck
       : scenario === 'earth-bury'
         ? earthBuryDeck
       : scenario === 'earth-duel'
@@ -3509,6 +3570,8 @@ function buildManifest(
         ? fireRecklessSquireDeck
       : scenario === 'fire-vikings'
         ? fireVikingsDeck
+      : scenario === 'earth-border-militia'
+        ? earthBorderMilitiaDeck
       : scenario === 'earth-bury'
         ? earthBuryDeck
       : scenario === 'earth-duel'
@@ -3549,6 +3612,7 @@ function buildManifest(
     ...decks.north.spellbook,
     ...decks.south.atlas,
     ...decks.south.spellbook,
+    ...(scenario === 'earth-border-militia' ? [input.footSoldier.stableId] : []),
   ]);
   const selectedCards = input.cards.filter(({ stableId }) => referenced.has(stableId));
   const definitions = Object.fromEntries(selectedCards.map((card) => [
@@ -3651,6 +3715,8 @@ function buildManifest(
       card.stableId === input.hamlet.stableId ? 1 : 0,
       card.stableId === input.granaryRats.stableId,
       card.stableId === input.shellycoat.stableId ? 1 : 0,
+      card.stableId === input.borderMilitia.stableId ? input.footSoldier.stableId : undefined,
+      card.stableId === input.footSoldier.stableId,
     ),
   ]));
   return {
@@ -4124,6 +4190,51 @@ function findEarthDuelMagicOpening(
   throw new Error('private Duel Magic scenario no longer produces its supported opening');
 }
 
+function findEarthBorderMilitiaOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  borderMilitiaInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string];
+  seed: number;
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string, string];
+}> {
+  const seed = 7688;
+  const built = buildManifest(input, seed, 'earth-border-militia');
+  const session = createGameSession(built.manifest);
+  const earthSites = (seat: GameSeat) => session.state.players[seat].hand.atlas
+    .filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('earth');
+    });
+  const northSites = earthSites('north');
+  const southSites = earthSites('south');
+  const borderMilitiaInstanceId = [
+    ...session.state.players.north.hand.spellbook,
+    ...session.state.players.north.spellbook.slice(0, 3),
+  ].find(({ cardId }) => cardId === input.borderMilitia.stableId)?.instanceId;
+  if (northSites.length < 3 || southSites.length < 3 || !borderMilitiaInstanceId) {
+    throw new Error('private Border Militia seed no longer produces its supported opening');
+  }
+  return {
+    ...built,
+    borderMilitiaInstanceId,
+    northSiteInstanceIds: [
+      northSites[0]!.instanceId,
+      northSites[1]!.instanceId,
+      northSites[2]!.instanceId,
+    ],
+    seed,
+    session,
+    southSiteInstanceIds: [
+      southSites[0]!.instanceId,
+      southSites[1]!.instanceId,
+      southSites[2]!.instanceId,
+    ],
+  };
+}
 function findEarthArtifactOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   artifact: NormalizedCard,
@@ -7946,6 +8057,138 @@ function runEarthBury(
       .some(({ instanceId }) => instanceId === opening.boskTrollInstanceId),
     targetLeftRealm: !session.state.realm.units
       .some(({ instanceId }) => instanceId === opening.boskTrollInstanceId),
+  });
+}
+
+function runEarthBorderMilitia(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthBorderMilitia'] {
+  const opening = findEarthBorderMilitiaOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'B4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+    && descriptor.cell === 'B3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[2]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const manaBefore = session.state.players.north.mana;
+  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.borderMilitiaInstanceId);
+  const chosen = choices[0];
+  if (!chosen) throw new Error('private Border Militia targetless cast is unavailable');
+  const castResult = stepGame(session, chosen);
+  if (!castResult.accepted) throw new Error('private Border Militia cast was rejected');
+  session = castResult.session;
+
+  const tokens = session.state.realm.units
+    .filter(({ cardId }) => cardId === input.footSoldier.stableId)
+    .sort((left, right) => left.location.localeCompare(right.location));
+  const [b3Token, c4Token] = tokens;
+  if (!b3Token || !c4Token) throw new Error('private Border Militia did not summon two tokens');
+  const events = castResult.receipt.events;
+  const castPayload = events[0] && isJsonRecord(events[0].payload)
+    ? events[0].payload
+    : undefined;
+  const summonPayloads = events.filter(({ type }) => type === 'minion-summoned')
+    .map(({ payload }) => payload);
+  const tokenDefinition = session.state.cards[input.footSoldier.stableId];
+  const spellEnteredCemetery = session.state.players.north.hand.spellbook
+    .every(({ instanceId }) => instanceId !== opening.borderMilitiaInstanceId)
+    && session.state.players.north.cemetery.some(({ instanceId }) =>
+      instanceId === opening.borderMilitiaInstanceId);
+  const tokensVerified: boolean = choices.length === 1
+    && events.map(({ type }) => type).join(',')
+      === 'magic-cast,minion-summoned,minion-summoned,magic-resolved'
+    && castPayload?.cardId === input.borderMilitia.stableId
+    && castPayload.instanceId === opening.borderMilitiaInstanceId
+    && castPayload.manaPaid === 3
+    && castPayload.seat === 'north'
+    && canonicalJson(summonPayloads) === canonicalJson([
+      {
+        cardId: input.footSoldier.stableId,
+        cell: 'B3',
+        instanceId: b3Token.instanceId,
+        owner: 'north',
+        seat: 'north',
+        sourceInstanceId: opening.borderMilitiaInstanceId,
+        token: true,
+      },
+      {
+        cardId: input.footSoldier.stableId,
+        cell: 'C4',
+        instanceId: c4Token.instanceId,
+        owner: 'north',
+        seat: 'north',
+        sourceInstanceId: opening.borderMilitiaInstanceId,
+        token: true,
+      },
+    ])
+    && tokens.length === 2
+    && b3Token.location === 'B3'
+    && c4Token.location === 'C4'
+    && tokens.every(({ controller, damage, owner, region, source, summoningSickness, tapped }) =>
+      controller === 'north'
+        && damage === 0
+        && owner === 'north'
+        && region === 'surface'
+        && source === 'token'
+        && summoningSickness
+        && !tapped)
+    && session.state.realm.units.every(({ location }) => location !== 'B4')
+    && session.state.realm.sites.B3?.controller === 'north'
+    && session.state.realm.sites.B4?.controller === 'north'
+    && session.state.realm.sites.C4?.controller === 'north'
+    && session.state.realm.sites.C3?.controller === 'south'
+    && tokenDefinition?.cardType === 'minion'
+    && tokenDefinition.token === true
+    && tokenDefinition.attack === 1
+    && tokenDefinition.defense === 1
+    && tokenDefinition.manaCost === 0
+    && (['north', 'south'] as const).every((seat) => session.state.players[seat].cemetery
+      .every(({ cardId }) => cardId !== input.footSoldier.stableId));
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    borderMilitia: input.borderMilitia.name,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    footSoldier: input.footSoldier.name,
+    manaPaid: manaBefore - session.state.players.north.mana,
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    spellEnteredCemetery,
+    tokensVerified,
   });
 }
 
@@ -14814,6 +15057,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   );
   const earthOverpower = runEarthOverpower(input);
   const earthBury = runEarthBury(input);
+  const earthBorderMilitia = runEarthBorderMilitia(input);
   const earthDuel = runEarthDuel(input);
   const earthHuntersLodge = runEarthHuntersLodge(input);
   const earthPoisonousDagger = runEarthPoisonousDagger(input);
@@ -15018,6 +15262,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthStarter,
     earthOverpower,
     earthBury,
+    earthBorderMilitia,
     earthDuel,
     earthHuntersLodge,
     earthPoisonousDagger,
