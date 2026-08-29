@@ -240,6 +240,10 @@ function displayActionLabel(
   }
   if (descriptor.kind === 'cast-magic') {
     const definition = cards[descriptor.cardId];
+    if (definition?.cardType === 'magic'
+      && definition.grantChargeToAllyThisTurn === true) {
+      return `${label} — the ally can move and attack this turn`;
+    }
     if (definition?.cardType === 'magic' && definition.damageTargetUnit !== undefined) {
       return `${label} — attempt to deal ${definition.damageTargetUnit} damage`;
     }
