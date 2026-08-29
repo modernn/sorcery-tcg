@@ -3338,7 +3338,12 @@ function buildManifest(
   );
   const earthShallowGraveDeck = elementalDeck('earth', earthMinions, [input.shallowGrave]);
   const earthSinkholeDeck = elementalDeck('earth', earthMinions, [input.sinkhole]);
-  const airStarterDeck = elementalDeck('air', [input.stealthTargetMinion], [input.spire]);
+  const airStarterDeck = elementalDeck(
+    'air',
+    [input.stealthTargetMinion],
+    [input.spire],
+    [input.zap],
+  );
   const earthStarterDeck = elementalDeck('earth', [input.wildBoars], [input.valley]);
   const fireStarterDeck = elementalDeck('fire', [input.raalDromedary], [input.wasteland]);
   const fireGranaryRatsDeck = elementalDeck(
@@ -5072,6 +5077,7 @@ function findStarterOpening(
   baseSeed: number,
   site: NormalizedCard,
   minion: NormalizedCard,
+  featuredSpell?: NormalizedCard,
 ): Readonly<{
   manifest: GameManifest;
   minionInstanceId: string;
@@ -5087,7 +5093,11 @@ function findStarterOpening(
       .find(({ cardId }) => cardId === site.stableId)?.instanceId;
     const minionInstanceId = session.state.players.north.hand.spellbook
       .find(({ cardId }) => cardId === minion.stableId)?.instanceId;
-    if (siteInstanceId && minionInstanceId) {
+    const featuredSpellInstanceId = featuredSpell
+      ? session.state.players.north.hand.spellbook
+        .find(({ cardId }) => cardId === featuredSpell.stableId)?.instanceId
+      : undefined;
+    if (siteInstanceId && minionInstanceId && (!featuredSpell || featuredSpellInstanceId)) {
       return { ...built, minionInstanceId, session, siteInstanceId };
     }
   }
@@ -5099,14 +5109,14 @@ export async function loadPrivateStarterCatalog(
 ): Promise<readonly PrivateStarterPreset[]> {
   const input = await readPrivateInputs(path);
   const starters = [
-    ['air-starter', 'Air — Spire + Snow Leopard', input.config.airSeed, input.spire, input.stealthTargetMinion],
+    ['air-starter', 'Air — Spire + Snow Leopard + Zap!', input.config.airSeed, input.spire, input.stealthTargetMinion, input.zap],
     ['earth-starter', 'Earth — Valley + Wild Boars', input.config.earthSeed, input.valley, input.wildBoars],
     ['fire-starter', 'Fire — Wasteland + Raal Dromedary', input.config.fireSeed, input.wasteland, input.raalDromedary],
     ['water-starter', 'Water — Autumn River + Serava Townsfolk', input.config.waterSeed, input.autumnRiver, input.seravaTownsfolk],
   ] as const;
   const cardsById = new Map(input.cards.map((card) => [card.stableId, card]));
-  return Object.freeze(starters.map(([id, label, seed, site, minion]) => {
-    const opening = findStarterOpening(input, id, seed, site, minion);
+  return Object.freeze(starters.map(([id, label, seed, site, minion, featuredSpell]) => {
+    const opening = findStarterOpening(input, id, seed, site, minion, featuredSpell);
     const deckCardIds = [
       ...opening.manifest.decks.north.atlas,
       ...opening.manifest.decks.north.spellbook,
