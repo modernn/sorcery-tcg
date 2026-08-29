@@ -743,6 +743,24 @@ export type PrivateGameCheck = Readonly<{
     sitesUnchanged: boolean;
     unitStatePreserved: boolean;
   }>;
+  waterGnarledWendigo: Readonly<{
+    acceptedActionCount: number;
+    canonicalSacrificeChoice: boolean;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    exactDiscountedSummonAvailable: boolean;
+    gameRemainedActive: boolean;
+    ghostTownManaConsumed: boolean;
+    gnarledWendigo: string;
+    handRealmCemeteryVerified: boolean;
+    manaPaid: number;
+    noNormalManaSummon: boolean;
+    noRandomOrUnrelatedEffects: boolean;
+    replayVerified: boolean;
+    seravaTownsfolk: string;
+    stateVersionAdvancedOnce: boolean;
+    summonedAtC4: boolean;
+  }>;
   waterDrown: Readonly<{
     acceptedActionCount: number;
     causalEventsVerified: boolean;
@@ -979,6 +997,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   genesisSpellMinion: NormalizedCard;
   genesisMinion: NormalizedCard;
   grainSparrow: NormalizedCard;
+  gnarledWendigo: NormalizedCard;
   ghostTownSite: NormalizedCard;
   healingMinion: NormalizedCard;
   lethalMinion: NormalizedCard;
@@ -1475,6 +1494,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || seravaTownsfolk.thresholds.water !== 1
     || seravaTownsfolk.rarity !== 'ordinary') {
     throw new Error('private timed-disable target minion no longer matches its supported facts');
+  }
+  const gnarledWendigo = snapshot.cards.find(({ name }) => name === 'Gnarled Wendigo');
+  if (!gnarledWendigo
+    || gnarledWendigo.cardType !== 'minion'
+    || ruleTextDigest(gnarledWendigo.rulesText) !== 'sha256:2f1fdf22086e8d044081a9ce33d3f7b5b041a4a708373369788ba4575da30ace'
+    || gnarledWendigo.manaCost !== 6
+    || gnarledWendigo.attack !== 5
+    || gnarledWendigo.defense !== 5
+    || gnarledWendigo.life !== null
+    || gnarledWendigo.elements.length !== 1
+    || gnarledWendigo.elements[0] !== 'water'
+    || gnarledWendigo.thresholds.air !== 0
+    || gnarledWendigo.thresholds.earth !== 0
+    || gnarledWendigo.thresholds.fire !== 0
+    || gnarledWendigo.thresholds.water !== 1
+    || gnarledWendigo.rarity !== 'exceptional') {
+    throw new Error('private summon-location sacrifice-discount minion no longer matches its supported facts');
   }
   const raalDromedary = snapshot.cards.find(({ name }) => name === 'Raal Dromedary');
   if (!raalDromedary
@@ -2125,6 +2161,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     genesisSpellMinion,
     genesisMinion,
     grainSparrow,
+    gnarledWendigo,
     ghostTownSite,
     healingMinion,
     lethalMinion,
@@ -2257,6 +2294,7 @@ function gameDefinition(
   deathriteLoseLifePerNearbySiteControlled = false,
   leapAttackAlly = false,
   genesisDamageEachOtherUnitHere: 0 | 1 = 0,
+  sacrificeMinionAtSummoningLocationForManaDiscount: 0 | 2 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -2372,6 +2410,9 @@ function gameDefinition(
       movesOnlySideways,
       ...(provides ? { provides } : {}),
       ranged,
+      ...(sacrificeMinionAtSummoningLocationForManaDiscount
+        ? { sacrificeMinionAtSummoningLocationForManaDiscount }
+        : {}),
       shootsDragProjectile,
       spellcaster,
       stealth,
@@ -2391,7 +2432,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-immobile' | 'earth-overpower' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-immobile' | 'earth-overpower' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -2647,6 +2688,11 @@ function buildManifest(
     [input.pirateShip],
     [input.ghostTownSite],
   );
+  const waterGnarledWendigoDeck = elementalDeck(
+    'water',
+    [input.gnarledWendigo, input.seravaTownsfolk],
+    [input.ghostTownSite],
+  );
   const waterDrownDeck = elementalDeck('water', [
     input.healingMinion,
     input.slyFox,
@@ -2757,6 +2803,8 @@ function buildManifest(
           ? waterDrownDeck
         : scenario === 'water-freeze'
           ? waterFreezeDeck
+        : scenario === 'water-gnarled-wendigo'
+          ? waterGnarledWendigoDeck
         : scenario === 'water-lure'
           ? waterLureDeck
         : scenario === 'water-pirate-ship'
@@ -2800,6 +2848,8 @@ function buildManifest(
         ? waterDrownDeck
       : scenario === 'water-freeze'
         ? waterFreezeDeck
+      : scenario === 'water-gnarled-wendigo'
+        ? waterGnarledWendigoDeck
       : scenario === 'water-lure'
         ? waterLureDeck
       : scenario === 'water-pirate-ship'
@@ -2929,6 +2979,7 @@ function buildManifest(
       card.stableId === input.bladderblimp.stableId,
       card.stableId === input.leapAttack.stableId,
       card.stableId === input.staticServant.stableId ? 1 : 0,
+      card.stableId === input.gnarledWendigo.stableId ? 2 : 0,
     ),
   ]));
   return {
@@ -5329,6 +5380,63 @@ function findWaterDrownOpening(
     }
   }
   throw new Error('private forced-submerge Magic scenario no longer produces its supported opening');
+}
+
+function findWaterGnarledWendigoOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  ghostTownInstanceId: string;
+  gnarledWendigoInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northWaterSiteInstanceIds: readonly [string, string];
+  seravaInstanceId: string;
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string];
+}> {
+  // ponytail: bounded seed scan avoids another private config field; lock one only if runtime matters.
+  for (let offset = 1; offset <= 4096; offset += 1) {
+    const built = buildManifest(
+      input,
+      input.config.waterSeed + offset,
+      'water-gnarled-wendigo',
+    );
+    const session = createGameSession(built.manifest);
+    const northWaterSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return cardId !== input.ghostTownSite.stableId
+        && definition?.cardType === 'site'
+        && definition.elements.includes('water');
+    });
+    const ghostTownInstanceId = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.ghostTownSite.stableId)?.instanceId;
+    const seravaInstanceId = session.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === input.seravaTownsfolk.stableId)?.instanceId;
+    const gnarledWendigoInstanceId = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 2),
+    ].find(({ cardId }) => cardId === input.gnarledWendigo.stableId)?.instanceId;
+    const southSites = session.state.players.south.hand.atlas;
+    if (northWaterSites.length >= 2
+      && ghostTownInstanceId
+      && seravaInstanceId
+      && gnarledWendigoInstanceId
+      && southSites.length >= 2) {
+      return {
+        ...built,
+        ghostTownInstanceId,
+        gnarledWendigoInstanceId,
+        northWaterSiteInstanceIds: [
+          northWaterSites[0]!.instanceId,
+          northWaterSites[1]!.instanceId,
+        ],
+        seravaInstanceId,
+        session,
+        southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
+      };
+    }
+  }
+  throw new Error('private summon-location sacrifice-discount scenario lacks its supported opening');
 }
 
 function findWaterLureOpening(
@@ -10393,6 +10501,168 @@ function runWaterDrown(
   });
 }
 
+function runWaterGnarledWendigo(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['waterGnarledWendigo'] {
+  const opening = findWaterGnarledWendigoOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northWaterSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.seravaInstanceId
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northWaterSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+    && descriptor.cell === 'B1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const manaBeforeGhostTown = session.state.players.north.mana;
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.ghostTownInstanceId
+    && descriptor.cell === 'C2');
+  const ghostTownEvents = session.transcript.at(-1)?.events ?? [];
+  const ghostTownManaPayload = ghostTownEvents[1] && isJsonRecord(ghostTownEvents[1].payload)
+    ? ghostTownEvents[1].payload
+    : undefined;
+  const northBefore = session.state.players.north;
+  const southBefore = session.state.players.south;
+  const sitesBefore = session.state.realm.sites;
+  const otherUnitsBefore = session.state.realm.units.filter(({ instanceId }) =>
+    instanceId !== opening.seravaInstanceId);
+  const stateVersionBefore = session.state.stateVersion;
+  const allSummons = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.gnarledWendigoInstanceId
+      && descriptor.cell === 'C4'
+      && (descriptor.region ?? 'surface') === 'surface');
+  const normalSummons = allSummons.filter(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.sacrificedMinionInstanceIds === undefined);
+  const discountedSummons = allSummons.filter(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.manaCost === 4
+      && descriptor.sacrificedMinionInstanceIds?.length === 1
+      && descriptor.sacrificedMinionInstanceIds[0] === opening.seravaInstanceId);
+  const selected = discountedSummons[0];
+  if (!selected || discountedSummons.length !== 1) {
+    throw new Error('private Gnarled Wendigo sacrifice-discount summon is not exactly available');
+  }
+  const summoned = stepGame(session, selected);
+  if (!summoned.accepted) throw new Error('private Gnarled Wendigo summon was rejected');
+  session = summoned.session;
+
+  const northAfter = session.state.players.north;
+  const events = summoned.receipt.events;
+  const sacrificedPayload = events[0] && isJsonRecord(events[0].payload)
+    ? events[0].payload
+    : undefined;
+  const deathPayload = events[1] && isJsonRecord(events[1].payload)
+    ? events[1].payload
+    : undefined;
+  const summonPayload = events[2] && isJsonRecord(events[2].payload)
+    ? events[2].payload
+    : undefined;
+  const wendigo = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.gnarledWendigoInstanceId);
+  const wendigoDefinition = wendigo ? session.state.cards[wendigo.cardId] : undefined;
+  const expectedNorthSpellHand = northBefore.hand.spellbook.filter(({ instanceId }) =>
+    instanceId !== opening.gnarledWendigoInstanceId);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    canonicalSacrificeChoice: selected.descriptor.kind === 'summon-minion'
+      && selected.descriptor.sacrificedMinionInstanceIds?.length === 1
+      && selected.descriptor.sacrificedMinionInstanceIds[0] === opening.seravaInstanceId,
+    causalEventsVerified: events.map(({ type }) => type).join(',')
+      === 'minion-sacrificed,minion-died,minion-summoned'
+      && sacrificedPayload?.cardId === input.seravaTownsfolk.stableId
+      && sacrificedPayload.instanceId === opening.seravaInstanceId
+      && sacrificedPayload.owner === 'north'
+      && sacrificedPayload.seat === 'north'
+      && sacrificedPayload.sourceInstanceId === opening.gnarledWendigoInstanceId
+      && deathPayload?.cardId === input.seravaTownsfolk.stableId
+      && deathPayload.instanceId === opening.seravaInstanceId
+      && deathPayload.owner === 'north'
+      && summonPayload?.instanceId === opening.gnarledWendigoInstanceId
+      && summonPayload.manaPaid === 4
+      && summonPayload.seat === 'north'
+      && events[0]!.eventSequence < events[1]!.eventSequence
+      && events[1]!.eventSequence < events[2]!.eventSequence,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    exactDiscountedSummonAvailable: discountedSummons.length === 1,
+    gameRemainedActive: session.state.terminal.status === 'active',
+    ghostTownManaConsumed: manaBeforeGhostTown === 2
+      && northBefore.mana === 4
+      && northAfter.mana === 0
+      && ghostTownEvents.map(({ type }) => type).join(',') === 'site-played,mana-gained'
+      && ghostTownManaPayload?.amount === 1
+      && ghostTownManaPayload.seat === 'north'
+      && ghostTownManaPayload.sourceInstanceId === opening.ghostTownInstanceId,
+    gnarledWendigo: input.gnarledWendigo.name,
+    handRealmCemeteryVerified: canonicalJson(
+      northAfter.hand.spellbook as unknown as JsonValue,
+    ) === canonicalJson(expectedNorthSpellHand as unknown as JsonValue)
+      && northAfter.cemetery.length === northBefore.cemetery.length + 1
+      && northAfter.cemetery.some(({ cardId, instanceId }) =>
+        cardId === input.seravaTownsfolk.stableId
+          && instanceId === opening.seravaInstanceId)
+      && session.state.realm.units.every(({ instanceId }) =>
+        instanceId !== opening.seravaInstanceId)
+      && wendigo !== undefined,
+    manaPaid: northBefore.mana - northAfter.mana,
+    noNormalManaSummon: normalSummons.length === 0
+      && allSummons.every(({ descriptor }) =>
+        descriptor.kind === 'summon-minion' && descriptor.manaCost !== 6),
+    noRandomOrUnrelatedEffects: summoned.receipt.randomDraws.length === 0
+      && canonicalJson(session.state.players.south as unknown as JsonValue)
+        === canonicalJson(southBefore as unknown as JsonValue)
+      && canonicalJson(session.state.realm.sites as unknown as JsonValue)
+        === canonicalJson(sitesBefore as unknown as JsonValue)
+      && canonicalJson(session.state.realm.units.filter(({ instanceId }) =>
+        instanceId !== opening.gnarledWendigoInstanceId) as unknown as JsonValue)
+        === canonicalJson(otherUnitsBefore.filter(({ instanceId }) =>
+          instanceId !== opening.seravaInstanceId) as unknown as JsonValue)
+      && canonicalJson(northAfter.atlas as unknown as JsonValue)
+        === canonicalJson(northBefore.atlas as unknown as JsonValue)
+      && canonicalJson(northAfter.spellbook as unknown as JsonValue)
+        === canonicalJson(northBefore.spellbook as unknown as JsonValue)
+      && canonicalJson(northAfter.hand.atlas as unknown as JsonValue)
+        === canonicalJson(northBefore.hand.atlas as unknown as JsonValue)
+      && canonicalJson(northAfter.avatar as unknown as JsonValue)
+        === canonicalJson(northBefore.avatar as unknown as JsonValue),
+    replayVerified: verifyGameReplay(session),
+    seravaTownsfolk: input.seravaTownsfolk.name,
+    stateVersionAdvancedOnce: session.state.stateVersion === stateVersionBefore + 1,
+    summonedAtC4: wendigo?.cardId === input.gnarledWendigo.stableId
+      && wendigo.controller === 'north'
+      && wendigo.location === 'C4'
+      && wendigo.owner === 'north'
+      && wendigo.region === 'surface'
+      && wendigoDefinition?.cardType === 'minion'
+      && wendigoDefinition.attack === 5
+      && wendigoDefinition.defense === 5,
+  });
+}
+
 function runWaterDrowned(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['waterDrowned'] {
@@ -11304,6 +11574,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const waterPirateShip = runWaterPirateShip(input);
   const waterEndTurnStealth = runWaterEndTurnStealth(input);
   const waterFreeze = runWaterFreeze(input);
+  const waterGnarledWendigo = runWaterGnarledWendigo(input);
   const waterHealing = runWaterHealing(input);
   const waterSidewaysMovement = runWaterSidewaysMovement(input);
   const waterSubmerge = runWaterSubmerge(input);
@@ -11503,6 +11774,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     waterPirateShip,
     waterEndTurnStealth,
     waterFreeze,
+    waterGnarledWendigo,
     waterHealing,
     waterSidewaysMovement,
     waterSubmerge,

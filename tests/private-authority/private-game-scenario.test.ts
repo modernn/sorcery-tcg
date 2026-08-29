@@ -845,6 +845,31 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.waterFreeze.deck.spellbook
     .find(({ name }) => name === 'Serava Townsfolk')?.copies, 4);
   assert.equal(result.waterFreeze.replayVerified, true);
+  assert.equal(result.waterGnarledWendigo.gnarledWendigo, 'Gnarled Wendigo');
+  assert.equal(result.waterGnarledWendigo.seravaTownsfolk, 'Serava Townsfolk');
+  assert.equal(result.waterGnarledWendigo.acceptedActionCount, 17);
+  assert.equal(result.waterGnarledWendigo.noNormalManaSummon, true);
+  assert.equal(result.waterGnarledWendigo.exactDiscountedSummonAvailable, true);
+  assert.equal(result.waterGnarledWendigo.canonicalSacrificeChoice, true);
+  assert.equal(result.waterGnarledWendigo.causalEventsVerified, true);
+  assert.equal(result.waterGnarledWendigo.manaPaid, 4);
+  assert.equal(result.waterGnarledWendigo.ghostTownManaConsumed, true);
+  assert.equal(result.waterGnarledWendigo.handRealmCemeteryVerified, true);
+  assert.equal(result.waterGnarledWendigo.summonedAtC4, true);
+  assert.equal(result.waterGnarledWendigo.stateVersionAdvancedOnce, true);
+  assert.equal(result.waterGnarledWendigo.noRandomOrUnrelatedEffects, true);
+  assert.equal(result.waterGnarledWendigo.gameRemainedActive, true);
+  assert.equal(result.waterGnarledWendigo.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.waterGnarledWendigo.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.waterGnarledWendigo.deck.atlas
+    .find(({ name }) => name === 'Ghost Town')?.copies, 3);
+  assert.equal(result.waterGnarledWendigo.deck.spellbook
+    .find(({ name }) => name === 'Gnarled Wendigo')?.copies, 3);
+  assert.equal(result.waterGnarledWendigo.deck.spellbook
+    .find(({ name }) => name === 'Serava Townsfolk')?.copies, 4);
+  assert.equal(result.waterGnarledWendigo.replayVerified, true);
   assert.equal(result.waterLure.lure, 'Lure');
   assert.equal(result.waterLure.seravaTownsfolk, 'Serava Townsfolk');
   assert.equal(result.waterLure.acceptedActionCount, 17);
