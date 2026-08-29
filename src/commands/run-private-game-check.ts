@@ -99,6 +99,21 @@ export type PrivateGameCheck = Readonly<{
   airStarter: StarterCheck;
   earthStarter: StarterCheck;
   fireStarter: StarterCheck;
+  fireHamlet: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    exactDestinationCosts: boolean;
+    fireAffinityVerified: boolean;
+    hamlet: string;
+    manaPaid: number;
+    noRandomDraws: boolean;
+    raalDromedary: string;
+    replayVerified: boolean;
+    seed: number;
+    siteAndMinionStateVerified: boolean;
+    wasteland: string;
+  }>;
   waterStarter: StarterCheck;
   airBladderblimp: Readonly<{
     acceptedActionCount: number;
@@ -1147,6 +1162,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   grainSparrow: NormalizedCard;
   gnarledWendigo: NormalizedCard;
   ghostTownSite: NormalizedCard;
+  hamlet: NormalizedCard;
   healingMinion: NormalizedCard;
   huntersLodge: NormalizedCard;
   lethalMinion: NormalizedCard;
@@ -1251,6 +1267,24 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     'card:12ac69ed727419b132b094e28a149e9d81f6af17f00408e52f700fddce0c9740',
     'fire',
   );
+  const hamlet = snapshot.cards.find(({ name }) => name === 'Hamlet');
+  if (!hamlet
+    || hamlet.stableId
+      !== 'card:06566302e2605c4a0dc477e8f1c25eae66c740e566fbd227abd31a526cee4bb7'
+    || hamlet.cardType !== 'site'
+    || hamlet.rulesText.trim() !== 'Ordinary minions cost (1) less to cast to this site.'
+    || hamlet.manaCost !== null
+    || hamlet.attack !== null
+    || hamlet.defense !== null
+    || hamlet.life !== null
+    || hamlet.elements.length !== 0
+    || hamlet.thresholds.air !== 0
+    || hamlet.thresholds.earth !== 0
+    || hamlet.thresholds.fire !== 0
+    || hamlet.thresholds.water !== 0
+    || hamlet.rarity !== 'ordinary') {
+    throw new Error('private ordinary-minion discount Site no longer matches its supported facts');
+  }
   const stream = blankOrdinarySite(
     'Stream',
     'card:8959e87bfe778fd2bdec4f6355e16d79085fa498040562cabf6f31af40801b6d',
@@ -2540,6 +2574,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     grainSparrow,
     gnarledWendigo,
     ghostTownSite,
+    hamlet,
     healingMinion,
     huntersLodge,
     lethalMinion,
@@ -2692,6 +2727,7 @@ function gameDefinition(
   gainControlOfTargetNearbyMinion = false,
   untapsAtEndOfControllerTurn = false,
   killTargetWoundedMinion = false,
+  ordinaryMinionManaDiscount: 0 | 1 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -2727,6 +2763,7 @@ function gameDefinition(
         : {}),
       genesisDrawSpellPerAdjacentSameCard: siteGenesisDrawSpellPerAdjacentSameCard,
       ...(siteGenesisGainMana ? { genesisGainMana: siteGenesisGainMana } : {}),
+      ...(ordinaryMinionManaDiscount ? { ordinaryMinionManaDiscount } : {}),
       ...(sacrificeToDestroyNearbySite ? { sacrificeToDestroyNearbySite: true } : {}),
       ...(siteGenesisEnemiesLoseStealth ? { genesisEnemiesLoseStealth: true } : {}),
     };
@@ -2823,6 +2860,7 @@ function gameDefinition(
       mustBeCastToWaterSite,
       ...(movementBonus ? { movementBonus } : {}),
       movesOnlySideways,
+      ...(card.rarity === 'ordinary' ? { ordinary: true as const } : {}),
       ...(provides ? { provides } : {}),
       ranged,
       ...(sacrificeMinionAtSummoningLocationForManaDiscount
@@ -2851,7 +2889,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -3003,6 +3041,11 @@ function buildManifest(
   const airStarterDeck = elementalDeck('air', [input.stealthTargetMinion], [input.spire]);
   const earthStarterDeck = elementalDeck('earth', [input.wildBoars], [input.valley]);
   const fireStarterDeck = elementalDeck('fire', [input.raalDromedary], [input.wasteland]);
+  const fireHamletDeck = elementalDeck(
+    'fire',
+    [input.raalDromedary],
+    [input.hamlet, input.wasteland],
+  );
   const waterStarterDeck = elementalDeck('water', [input.seravaTownsfolk], [input.stream]);
   const earthBurrowingDeck = elementalDeck('earth', [
     ...earthMinions,
@@ -3267,6 +3310,8 @@ function buildManifest(
           ? elementalDeck('fire', [input.lumberingMinion, input.monstrousLion])
         : scenario === 'fire-starter'
           ? fireStarterDeck
+        : scenario === 'fire-hamlet'
+          ? fireHamletDeck
         : scenario === 'fire-aramos'
           ? fireAramosDeck
         : scenario === 'fire-charge'
@@ -3500,6 +3545,7 @@ function buildManifest(
       card.stableId === input.mesmerism.stableId,
       card.stableId === input.malakhim.stableId,
       card.stableId === input.fatality.stableId,
+      card.stableId === input.hamlet.stableId ? 1 : 0,
     ),
   ]));
   return {
@@ -4583,6 +4629,45 @@ function findStarterOpening(
     }
   }
   throw new Error(`private ${scenario} scenario no longer produces its supported opening`);
+}
+
+function findFireHamletOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  hamletInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  raalInstanceId: string;
+  seed: number;
+  session: GameSession;
+  southSiteInstanceId: string;
+  wastelandInstanceId: string;
+}> {
+  // ponytail: bounded seed scan avoids another strict private config field.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const seed = input.config.fireSeed + offset;
+    const built = buildManifest(input, seed, 'fire-hamlet');
+    const session = createGameSession(built.manifest);
+    const hamletInstanceId = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.hamlet.stableId)?.instanceId;
+    const wastelandInstanceId = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.wasteland.stableId)?.instanceId;
+    const raalInstanceId = session.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === input.raalDromedary.stableId)?.instanceId;
+    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+    if (hamletInstanceId && wastelandInstanceId && raalInstanceId && southSiteInstanceId) {
+      return {
+        ...built,
+        hamletInstanceId,
+        raalInstanceId,
+        seed,
+        session,
+        southSiteInstanceId,
+        wastelandInstanceId,
+      };
+    }
+  }
+  throw new Error('private Hamlet scenario no longer produces its supported opening');
 }
 
 function findEarthSinkholeOpening(
@@ -6779,6 +6864,142 @@ function runStarter(
       && minion.damage === 0
       && !minion.tapped
       && minion.summoningSickness,
+  });
+}
+
+function runFireHamlet(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['fireHamlet'] {
+  const opening = findFireHamletOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  const wastelandResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.wastelandInstanceId
+      && descriptor.cell === 'C4'));
+  if (!wastelandResult.accepted) throw new Error('private Wasteland play was rejected');
+  session = wastelandResult.session;
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const hamletResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.hamletInstanceId
+      && descriptor.cell === 'C3'));
+  if (!hamletResult.accepted) throw new Error('private Hamlet play was rejected');
+  session = hamletResult.session;
+
+  const beforeSummon = observeGame(session.state, 'north');
+  const manaBeforeSummon = session.state.players.north.mana;
+  const raalSummons = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.raalInstanceId
+      && descriptor.region === undefined
+      && (descriptor.cell === 'C3' || descriptor.cell === 'C4'));
+  const hamletSummon = raalSummons.find(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'C3'
+      && descriptor.manaCost === 0);
+  const wastelandSummon = raalSummons.find(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'C4'
+      && descriptor.manaCost === 1);
+  if (!hamletSummon || !wastelandSummon) {
+    throw new Error('private Hamlet and Wasteland destination costs are unavailable');
+  }
+  const summonResult = stepGame(session, hamletSummon);
+  if (!summonResult.accepted) throw new Error('private zero-cost Raal summon was rejected');
+  session = summonResult.session;
+
+  const wastelandPayload = wastelandResult.receipt.events[0]
+    && isJsonRecord(wastelandResult.receipt.events[0].payload)
+    ? wastelandResult.receipt.events[0].payload
+    : undefined;
+  const hamletPayload = hamletResult.receipt.events[0]
+    && isJsonRecord(hamletResult.receipt.events[0].payload)
+    ? hamletResult.receipt.events[0].payload
+    : undefined;
+  const summonPayload = summonResult.receipt.events[0]
+    && isJsonRecord(summonResult.receipt.events[0].payload)
+    ? summonResult.receipt.events[0].payload
+    : undefined;
+  const wastelandSite = session.state.realm.sites.C4;
+  const hamletSite = session.state.realm.sites.C3;
+  const raal = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
+    instanceId === opening.raalInstanceId);
+  const sameCaster = hamletSummon.descriptor.kind === 'summon-minion'
+    && wastelandSummon.descriptor.kind === 'summon-minion'
+    && hamletSummon.descriptor.casterInstanceId === wastelandSummon.descriptor.casterInstanceId;
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified: wastelandResult.receipt.events.length === 1
+      && wastelandResult.receipt.events[0]?.type === 'site-played'
+      && canonicalJson(wastelandPayload ?? null) === canonicalJson({
+        cardId: input.wasteland.stableId,
+        cell: 'C4',
+        instanceId: opening.wastelandInstanceId,
+        seat: 'north',
+      })
+      && hamletResult.receipt.events.length === 1
+      && hamletResult.receipt.events[0]?.type === 'site-played'
+      && canonicalJson(hamletPayload ?? null) === canonicalJson({
+        cardId: input.hamlet.stableId,
+        cell: 'C3',
+        instanceId: opening.hamletInstanceId,
+        seat: 'north',
+      })
+      && summonResult.receipt.events.length === 1
+      && summonResult.receipt.events[0]?.type === 'minion-summoned'
+      && hamletSummon.descriptor.kind === 'summon-minion'
+      && canonicalJson(summonPayload ?? null) === canonicalJson({
+        cardId: input.raalDromedary.stableId,
+        casterInstanceId: hamletSummon.descriptor.casterInstanceId,
+        cell: 'C3',
+        instanceId: opening.raalInstanceId,
+        manaPaid: 0,
+        seat: 'north',
+      }),
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    exactDestinationCosts: raalSummons.length === 2 && sameCaster,
+    fireAffinityVerified: beforeSummon.players.north.affinity.fire === 1
+      && beforeSummon.players.north.affinity.air === 0
+      && beforeSummon.players.north.affinity.earth === 0
+      && beforeSummon.players.north.affinity.water === 0
+      && manaBeforeSummon === 2,
+    hamlet: input.hamlet.name,
+    manaPaid: manaBeforeSummon - session.state.players.north.mana,
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    raalDromedary: input.raalDromedary.name,
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    siteAndMinionStateVerified: wastelandSite !== undefined
+      && 'cardId' in wastelandSite
+      && wastelandSite.cardId === input.wasteland.stableId
+      && wastelandSite.controller === 'north'
+      && hamletSite !== undefined
+      && 'cardId' in hamletSite
+      && hamletSite.cardId === input.hamlet.stableId
+      && hamletSite.controller === 'north'
+      && raal?.cardId === input.raalDromedary.stableId
+      && raal.controller === 'north'
+      && raal.owner === 'north'
+      && raal.location === 'C3'
+      && raal.region === 'surface'
+      && raal.attack === 2
+      && raal.defense === 2
+      && raal.damage === 0
+      && !raal.tapped
+      && raal.summoningSickness,
+    wasteland: input.wasteland.name,
   });
 }
 
@@ -14027,6 +14248,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     input.wasteland,
     input.raalDromedary,
   );
+  const fireHamlet = runFireHamlet(input);
   const fireAramos = runFireAramos(input);
   const fireCharge = runFireCharge(input);
   const fireGenesisLifeLoss = runFireGenesisLifeLoss(input);
@@ -14224,6 +14446,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     fireAramos,
     fireCharge,
     fireGenesisLifeLoss,
+    fireHamlet,
     fireIgnited,
     fireLash,
     fireLeapAttack,
