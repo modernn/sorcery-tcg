@@ -73,6 +73,7 @@ export type GameCardDefinition =
     genesisMayBottomNextSpell?: true;
     genesisPayOneManaToSummonToken?: string;
     ordinaryMinionManaDiscount?: 1;
+    rangedUnitsHereRangeBonus?: 1;
     sacrificeToDestroyNearbySite?: true;
   }>
   | Readonly<{
@@ -1166,6 +1167,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.ordinaryMinionManaDiscount !== 1) {
       throw new RangeError(`${path}.ordinaryMinionManaDiscount must be 1`);
     }
+    if (card.rangedUnitsHereRangeBonus !== undefined
+      && card.rangedUnitsHereRangeBonus !== 1) {
+      throw new RangeError(`${path}.rangedUnitsHereRangeBonus must be 1`);
+    }
     return;
   }
   if (card.cardType === 'artifact') {
@@ -1679,6 +1684,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               : {}),
             ...(card.ordinaryMinionManaDiscount === 1
               ? { ordinaryMinionManaDiscount: 1 as const }
+              : {}),
+            ...(card.rangedUnitsHereRangeBonus === 1
+              ? { rangedUnitsHereRangeBonus: 1 as const }
               : {}),
             ...(card.sacrificeToDestroyNearbySite === true
               ? { sacrificeToDestroyNearbySite: true as const }
@@ -2606,12 +2614,25 @@ function projectileStep(cell: RealmCell, direction: ProjectileDirection): RealmC
     : undefined;
 }
 
+function rangedProjectileRange(
+  state: GameState,
+  location: RealmCell,
+  region: GameRegion,
+): number {
+  if (region !== 'surface') return 1;
+  const site = state.realm.sites[location];
+  if (!site || isRubble(site)) return 1;
+  const definition = cardDefinition(state, site.cardId);
+  return definition.cardType === 'site' && definition.rangedUnitsHereRangeBonus === 1 ? 2 : 1;
+}
+
 function rangedDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   const directions = ['east', 'north', 'south', 'west'] as const;
   const allUnits = [...unitRefs(state, 'north'), ...unitRefs(state, 'south')];
   return unitRefs(state, seat).flatMap((shooter) => {
     const status = unitStatus(state, shooter);
     if (!status.ranged || status.tapped || status.summoningSickness) return [];
+    const range = rangedProjectileRange(state, status.location, status.region);
     const startingEnemies = allUnits
       .filter((ref) => {
         const target = unitStatus(state, ref);
@@ -2631,25 +2652,39 @@ function rangedDescriptors(state: GameState, seat: GameSeat): readonly GameActio
           shooterInstanceId: shooter.instanceId,
         }));
       }
-      const next = projectileStep(status.location, direction);
-      const nextLocation = next ? { cell: next, region: status.region } : undefined;
-      const path = pathLocations([
-        status.location,
-        ...(nextLocation && locationExists(state, nextLocation) ? [nextLocation.cell] : []),
-      ], status.region);
-      const hits = nextLocation && locationExists(state, nextLocation)
-        ? allUnits
+      const cells: RealmCell[] = [status.location];
+      let current = status.location;
+      for (let step = 0; step < range; step += 1) {
+        const next = projectileStep(current, direction);
+        if (!next || !locationExists(state, { cell: next, region: status.region })) break;
+        cells.push(next);
+        const hits = allUnits
           .filter((ref) => {
             const target = unitStatus(state, ref);
             return !target.stealthed
-              && target.location === nextLocation.cell
-              && target.region === nextLocation.region;
+              && target.location === next
+              && target.region === status.region;
           })
-          .sort((left, right) => left.instanceId.localeCompare(right.instanceId))
-        : [];
-      return hits.length > 0
-        ? hits.map((hit) => ({ direction, hit, kind: 'shoot-projectile' as const, path, shooterInstanceId: shooter.instanceId }))
-        : [{ direction, hit: null, kind: 'shoot-projectile' as const, path, shooterInstanceId: shooter.instanceId }];
+          .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+        const path = pathLocations(cells, status.region);
+        if (hits.length > 0) {
+          return hits.map((hit) => ({
+            direction,
+            hit,
+            kind: 'shoot-projectile' as const,
+            path,
+            shooterInstanceId: shooter.instanceId,
+          }));
+        }
+        current = next;
+      }
+      return [{
+        direction,
+        hit: null,
+        kind: 'shoot-projectile' as const,
+        path: pathLocations(cells, status.region),
+        shooterInstanceId: shooter.instanceId,
+      }];
     });
   });
 }

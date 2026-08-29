@@ -1349,6 +1349,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   seaWitch: NormalizedCard;
   teleport: NormalizedCard;
   valley: NormalizedCard;
+  vantageHills: NormalizedCard;
   vileImp: NormalizedCard;
   vikings: NormalizedCard;
   voidwalkMinion: NormalizedCard;
@@ -1754,6 +1755,29 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || houseArnBannerman.thresholds.water !== 0
     || houseArnBannerman.rarity !== 'exceptional') {
     throw new Error('private nearby-allies power minion no longer matches its supported facts');
+  }
+  const vantageHills = snapshot.cards.find(({ name }) => name === 'Vantage Hills');
+  const vantageHillsTokens = vantageHills?.rulesText.toLowerCase().match(/[a-z]+|\+\d+/g) ?? [];
+  if (!vantageHills
+    || vantageHills.stableId
+      !== 'card:ffad3f7811b0a248365ed35feeb5659af565973db1e4272a93e3d1f1bc4e7a1f'
+    || vantageHills.officialSourceId !== '001-vantage_hills-b-f'
+    || vantageHills.cardType !== 'site'
+    || vantageHillsTokens.length !== 8
+    || !['ranged', 'units', 'atop', 'this', 'site', 'have', '+1', 'range']
+      .every((token) => vantageHillsTokens.includes(token))
+    || vantageHills.manaCost !== null
+    || vantageHills.attack !== null
+    || vantageHills.defense !== null
+    || vantageHills.life !== null
+    || vantageHills.elements.length !== 1
+    || vantageHills.elements[0] !== 'earth'
+    || vantageHills.thresholds.air !== 0
+    || vantageHills.thresholds.earth !== 1
+    || vantageHills.thresholds.fire !== 0
+    || vantageHills.thresholds.water !== 0
+    || vantageHills.rarity !== 'exceptional') {
+    throw new Error('private ranged-range site no longer matches its supported facts');
   }
   const wildBoars = snapshot.cards.find(({ name }) => name === 'Wild Boars');
   if (!wildBoars
@@ -3177,6 +3201,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     seaWitch,
     teleport,
     valley,
+    vantageHills,
     vileImp,
     vikings,
     voidwalkMinion,
@@ -3296,6 +3321,7 @@ function gameDefinition(
   replaceAdjacentRubbleWithTopAtlasSite = false,
   tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn = false,
   otherNearbyAlliesPowerBonus = false,
+  rangedUnitsHereRangeBonus = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -3348,6 +3374,7 @@ function gameDefinition(
         : {}),
       ...(siteGenesisMayBottomNextSpell ? { genesisMayBottomNextSpell: true } : {}),
       ...(ordinaryMinionManaDiscount ? { ordinaryMinionManaDiscount } : {}),
+      ...(rangedUnitsHereRangeBonus ? { rangedUnitsHereRangeBonus: 1 as const } : {}),
       ...(sacrificeToDestroyNearbySite ? { sacrificeToDestroyNearbySite: true } : {}),
       ...(siteGenesisEnemiesLoseStealth ? { genesisEnemiesLoseStealth: true } : {}),
     };
@@ -3675,6 +3702,7 @@ function buildManifest(
       ...Array(3).fill(input.rusticVillage.stableId),
       ...Array(3).fill(input.simpleVillage.stableId),
       input.sinkhole.stableId,
+      ...Array(2).fill(input.vantageHills.stableId),
     ],
     avatar: input.geomancer.stableId,
     spellbook: [
@@ -4301,6 +4329,7 @@ function buildManifest(
       card.stableId === input.geomancer.stableId,
       card.stableId === input.sparkmage.stableId,
       card.stableId === input.houseArnBannerman.stableId,
+      card.stableId === input.vantageHills.stableId,
     ),
   ]));
   return {

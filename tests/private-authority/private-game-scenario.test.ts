@@ -902,7 +902,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       assert.equal(preset.usesOnlyOrdinaryOrExceptionalCards, false);
       assert.equal(
         preset.manifest.decks.north.atlas.length,
-        preset.id === 'air-vs-earth-lesson' ? 9 : 10,
+        preset.id === 'air-vs-earth-lesson' ? 9 : 12,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
@@ -910,7 +910,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
-        preset.id === 'air-vs-earth-lesson' ? 10 : 9,
+        preset.id === 'air-vs-earth-lesson' ? 12 : 9,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
@@ -962,6 +962,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Rustic Village': 3,
     'Simple Village': 3,
     Sinkhole: 1,
+    'Vantage Hills': 2,
   });
   assert.deepEqual(summarize(airLesson, 'south', 'spellbook'), {
     'Amazon Warriors': 2,
@@ -1075,6 +1076,14 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
     });
   }
+  const vantageHillsId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Vantage Hills')?.[0];
+  assert.ok(vantageHillsId);
+  assert.deepEqual(airLesson.manifest.cards[vantageHillsId], {
+    cardType: 'site',
+    elements: ['earth'],
+    rangedUnitsHereRangeBonus: 1,
+  });
   for (const name of ['Dark Tower', 'Gothic Tower', 'Lone Tower']) {
     const cardId = Object.entries(airLesson.cardNames)
       .find(([, candidate]) => candidate === name)?.[0];
