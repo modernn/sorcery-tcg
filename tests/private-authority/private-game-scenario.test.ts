@@ -485,6 +485,26 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assertStarter(result.earthStarter, 'Valley', 'Wild Boars');
   assertMalakhim(result.earthMalakhim);
   assertStarter(result.fireStarter, 'Wasteland', 'Raal Dromedary');
+  assert.equal(result.fireVileImp.vileImp, 'Vile Imp');
+  assert.equal(result.fireVileImp.wasteland, 'Wasteland');
+  assert.equal(result.fireVileImp.acceptedActionCount, 10);
+  assert.equal(result.fireVileImp.avatarTookTwoDamage, true);
+  assert.equal(result.fireVileImp.causalEventsVerified, true);
+  assert.equal(result.fireVileImp.declinePreservedAvatar, true);
+  assert.equal(result.fireVileImp.exactChoices, true);
+  assert.equal(result.fireVileImp.legalLowRarityDeck, true);
+  assert.equal(result.fireVileImp.manaPaid, 2);
+  assert.equal(result.fireVileImp.noRandomDraws, true);
+  assert.equal(result.fireVileImp.seed, 141);
+  assert.equal(result.fireVileImp.summonedAtC3, true);
+  assert.equal(result.fireVileImp.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.fireVileImp.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.fireVileImp.deck.atlas
+    .find(({ name }) => name === 'Wasteland')?.copies, 4);
+  assert.equal(result.fireVileImp.deck.spellbook
+    .find(({ name }) => name === 'Vile Imp')?.copies, 4);
+  assert.equal(result.fireVileImp.replayVerified, true);
   assertGranaryRats(result.fireGranaryRats);
   assertHamlet(result.fireHamlet);
   assertVoidArtifact(result.airVoidArtifact);

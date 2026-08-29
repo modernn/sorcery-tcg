@@ -49,6 +49,7 @@ type SpellFacts = Readonly<{
   genesisDrawSite?: boolean;
   genesisHealController?: 2;
   genesisLoseControllerLife?: 2;
+  genesisMayDamageTargetAdjacentUnit?: 2;
   immobile?: boolean;
   lanceCount?: 1 | 2 | 3;
   lethal?: boolean;
@@ -155,6 +156,9 @@ function cardsFor(
         genesisDrawSite: facts.genesisDrawSite ?? false,
         ...(facts.genesisHealController === 2 ? { genesisHealController: 2 as const } : {}),
         ...(facts.genesisLoseControllerLife === 2 ? { genesisLoseControllerLife: 2 as const } : {}),
+        ...(facts.genesisMayDamageTargetAdjacentUnit === 2
+          ? { genesisMayDamageTargetAdjacentUnit: 2 as const }
+          : {}),
         immobile: facts.immobile ?? false,
         ...(facts.lanceCount ? { lanceCount: facts.lanceCount } : {}),
         lethal: facts.lethal ?? false,
@@ -6254,6 +6258,114 @@ test('RULE-03/04 Static Servant Genesis simultaneously damages every other unit 
   assert.equal(result.session.state.pendingCombat, null);
   assert.equal(result.session.state.terminal.status, 'active');
   assert.equal(verifyGameReplay(result.session), true);
+});
+
+test('RULE-03/04 Vile Imp may deal 2 damage to one adjacent unit or decline', () => {
+  const gameManifest = manifest(391, {
+    northSpell: {
+      attack: 2,
+      defense: 2,
+      genesisMayDamageTargetAdjacentUnit: 2,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+    southSpell: {
+      defense: 2,
+      manaCost: 0,
+      summonToAnySite: true,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      ward: true,
+    },
+  });
+  let checkpoint = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    checkpoint = accept(checkpoint, action(checkpoint, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const card = checkpoint.state.players.north.hand.spellbook[0];
+  assert.ok(card);
+  assert.equal((gameManifest.cards[card.cardId] as unknown as
+    Readonly<Record<string, unknown>>).genesisMayDamageTargetAdjacentUnit, 2);
+  const avatar = checkpoint.state.players.north.avatar.card;
+  const wardedTarget = checkpoint.state.realm.units[0];
+  assert.ok(wardedTarget);
+  assert.equal(wardedTarget.warded, true);
+  const summons = legalGameActions(checkpoint.state, 'north')
+    .flatMap(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === card.instanceId
+      && descriptor.cell === 'C4' ? [descriptor] : []);
+  assert.deepEqual(summons.map((descriptor) => ({
+    choice: descriptor.genesisDamageChoice,
+    target: descriptor.genesisDamageTarget?.instanceId,
+  })).sort((left, right) => (left.target ?? '').localeCompare(right.target ?? '')), [
+    { choice: 'decline', target: undefined },
+    { choice: 'target', target: card.instanceId },
+    { choice: 'target', target: avatar.instanceId },
+    { choice: 'target', target: wardedTarget.instanceId },
+  ].sort((left, right) => (left.target ?? '').localeCompare(right.target ?? '')));
+
+  const decline = stepGame(checkpoint, action(checkpoint, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === card.instanceId
+      && descriptor.cell === 'C4'
+      && descriptor.genesisDamageChoice === 'decline'));
+  assert.equal(decline.accepted, true);
+  assert.equal(decline.session.state.players.north.avatar.life, 20);
+  assert.deepEqual(decline.receipt.events.map(({ type }) => type), ['minion-summoned']);
+  assert.equal(verifyGameReplay(decline.session), true);
+
+  const targeted = stepGame(checkpoint, action(checkpoint, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === card.instanceId
+      && descriptor.cell === 'C4'
+      && descriptor.genesisDamageChoice === 'target'
+      && descriptor.genesisDamageTarget?.instanceId === avatar.instanceId));
+  assert.equal(targeted.accepted, true);
+  const source = targeted.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === card.instanceId);
+  assert.ok(source);
+  assert.equal(source.damage, 0);
+  assert.equal(targeted.session.state.players.north.avatar.life, 18);
+  assert.deepEqual(targeted.receipt.events.map(({ type }) => type), [
+    'minion-summoned',
+    'genesis-damage-allocated',
+    'damage-dealt',
+    'avatar-life-lost',
+  ]);
+  assert.deepEqual(targeted.receipt.events[1]?.payload, {
+    amount: 2,
+    sourceInstanceId: source.instanceId,
+    targetInstanceId: avatar.instanceId,
+  });
+  assert.equal(targeted.receipt.randomDraws.length, 0);
+  assert.equal(targeted.session.state.stateVersion, checkpoint.state.stateVersion + 1);
+  assert.equal(verifyGameReplay(targeted.session), true);
+
+  const warded = stepGame(checkpoint, action(checkpoint, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === card.instanceId
+      && descriptor.cell === 'C4'
+      && descriptor.genesisDamageChoice === 'target'
+      && descriptor.genesisDamageTarget?.instanceId === wardedTarget.instanceId));
+  assert.equal(warded.accepted, true);
+  const wardedSurvivor = warded.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === wardedTarget.instanceId);
+  assert.ok(wardedSurvivor);
+  assert.equal(wardedSurvivor.damage, 0);
+  assert.equal(wardedSurvivor.warded, false);
+  assert.deepEqual(warded.receipt.events.map(({ type }) => type), [
+    'minion-summoned',
+    'genesis-damage-allocated',
+    'damage-dealt',
+    'ward-broken',
+  ]);
+  assert.equal(verifyGameReplay(warded.session), true);
 });
 
 test("RULE-03 Genesis life loss reaches but cannot cross Death's Door", () => {
