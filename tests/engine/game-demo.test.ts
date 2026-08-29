@@ -7,24 +7,28 @@ import { runGameDemo } from '../../src/commands/run-game-demo.ts';
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
 
-test('RULE-01 deterministic agents complete a skeletal match from setup to deck-out', () => {
-  const result = runGameDemo(23);
+test('RULE-01 deterministic agents move, fight, and complete a match', () => {
+  const result = runGameDemo(31);
   assert.deepEqual(result, {
-    acceptedActionCount: 138,
+    acceptedActionCount: 230,
     classification: 'unranked_partial_rules',
-    finalStateHash: 'sha256:ccc6577fbb4316e0760a81af0cca8f7e6011d376620b317d3e59ee35f9b69bbc',
-    loser: 'south',
-    reason: 'deck_empty',
+    finalStateHash: 'sha256:aafadc589f200dbd0e3a7d6a40f8913dc0bcadd075af03a28598ca86c6aa0a2a',
+    fightCount: 6,
     replayVerified: true,
-    turnCount: 56,
-    winner: 'north',
+    terminal: {
+      loser: 'north',
+      reason: 'avatar_defeated',
+      status: 'finished',
+      winner: 'south',
+    },
+    turnCount: 27,
   });
 });
 
-test('TEST-02 fresh processes emit byte-identical skeletal match results', () => {
+test('TEST-02 fresh processes emit byte-identical combat match results', () => {
   const command = resolve(REPOSITORY_ROOT, 'src', 'commands', 'run-game-demo.ts');
   const run = (): Buffer => {
-    const result = spawnSync(process.execPath, [command, '23'], {
+    const result = spawnSync(process.execPath, [command, '31'], {
       cwd: REPOSITORY_ROOT,
       maxBuffer: 1_048_576,
     });
@@ -36,5 +40,7 @@ test('TEST-02 fresh processes emit byte-identical skeletal match results', () =>
   const first = run();
   const second = run();
   assert.deepEqual(first, second);
-  assert.equal(JSON.parse(first.toString('utf8')).replayVerified, true);
+  const parsed = JSON.parse(first.toString('utf8'));
+  assert.equal(parsed.replayVerified, true);
+  assert.equal(parsed.terminal.reason, 'avatar_defeated');
 });

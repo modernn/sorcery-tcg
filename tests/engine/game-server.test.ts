@@ -69,6 +69,21 @@ function keep(response: JsonObject): JsonObject {
 
 function deterministicAction(response: JsonObject): JsonObject {
   const candidates = actions(response);
+  const enemyCell = String(((((response.view as JsonObject).players as JsonObject)
+    .south as JsonObject).avatar as JsonObject).location);
+  const movement = candidates
+    .map((candidate) => {
+      const value = descriptor(candidate);
+      const cell = String((value.to as JsonObject | undefined)?.cell);
+      return {
+        candidate,
+        distance: value.kind === 'move-and-attack' && (value.path as unknown[]).length > 1
+          ? Math.abs(cell.charCodeAt(0) - enemyCell.charCodeAt(0))
+            + Math.abs(Number(cell[1]) - Number(enemyCell[1]))
+          : Number.POSITIVE_INFINITY,
+      };
+    })
+    .sort((left, right) => left.distance - right.distance)[0];
   const selected = candidates.find((candidate) => {
     const value = descriptor(candidate);
     return value.kind === 'mulligan'
@@ -81,7 +96,9 @@ function deterministicAction(response: JsonObject): JsonObject {
       const value = descriptor(candidate);
       return value.kind === 'draw' && value.zone === 'atlas';
     })
-    ?? candidates.find((candidate) => descriptor(candidate).kind === 'end-turn');
+    ?? (movement && Number.isFinite(movement.distance) ? movement.candidate : undefined)
+    ?? candidates.find((candidate) => descriptor(candidate).kind === 'end-turn')
+    ?? candidates[0];
   assert.ok(selected, 'expected deterministic legal action');
   return selected;
 }
@@ -253,8 +270,12 @@ test('browser API lets North play a deterministic South opponent through termina
   });
   assert.equal((await json('/api/view?seat=north')).stateHash, current.stateHash);
   let opponentActionCount = 0;
+  let combatObserved = false;
   for (let count = 0; count < 500; count += 1) {
     const view = current.view as JsonObject;
+    const north = ((view.players as JsonObject).north as JsonObject);
+    combatObserved ||= Number((north.avatar as JsonObject).life) < 20
+      || (north.cemetery as unknown[]).length > 0;
     if ((view.terminal as JsonObject).status === 'finished') break;
     assert.equal(view.decisionSeat, 'north');
     assert.ok(actions(current).length > 0);
@@ -264,10 +285,11 @@ test('browser API lets North play a deterministic South opponent through termina
 
   const terminal = (current.view as JsonObject).terminal as JsonObject;
   assert.equal(terminal.status, 'finished');
-  assert.equal(terminal.reason, 'deck_empty');
+  assert.equal(terminal.reason, 'avatar_defeated');
   assert.notEqual(terminal.winner, terminal.loser);
   assert.deepEqual(actions(current), []);
   assert.ok(opponentActionCount > 0);
+  assert.equal(combatObserved, true);
   const replay = await post('/api/replay');
   assert.equal(replay.verified, true);
   assert.equal(replay.finalStateHash, current.stateHash);

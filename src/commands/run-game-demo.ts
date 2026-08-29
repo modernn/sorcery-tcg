@@ -14,6 +14,7 @@ import {
   type GameLegalAction,
   type GameManifest,
   type GameSession,
+  type GameTerminal,
 } from '../engine/game.ts';
 
 const SYNTHETIC_AUTHORITY_HASH =
@@ -65,6 +66,18 @@ export function createSyntheticDemoManifest(seed = 1): GameManifest {
 
 export function selectDeterministicGameAction(session: GameSession): GameLegalAction {
   const actions = legalGameActions(session.state, session.state.decisionSeat);
+  const enemyAvatar = session.state.players[
+    session.state.decisionSeat === 'north' ? 'south' : 'north'
+  ].avatar.location;
+  const movement = actions
+    .map((action) => ({
+      action,
+      distance: action.descriptor.kind === 'move-and-attack' && action.descriptor.path.length > 1
+        ? Math.abs(action.descriptor.to.cell.charCodeAt(0) - enemyAvatar.charCodeAt(0))
+          + Math.abs(Number(action.descriptor.to.cell[1]) - Number(enemyAvatar[1]))
+        : Number.POSITIVE_INFINITY,
+    }))
+    .sort((left, right) => left.distance - right.distance)[0];
   const selected = actions.find(({ descriptor }) =>
     descriptor.kind === 'mulligan'
       && descriptor.atlasOrder.length === 0
@@ -72,6 +85,7 @@ export function selectDeterministicGameAction(session: GameSession): GameLegalAc
     ?? actions.find(({ descriptor }) => descriptor.kind === 'play-site')
     ?? actions.find(({ descriptor }) => descriptor.kind === 'summon-minion')
     ?? actions.find(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas')
+    ?? (movement && Number.isFinite(movement.distance) ? movement.action : undefined)
     ?? actions.find(({ descriptor }) => descriptor.kind === 'end-turn')
     ?? actions[0];
   if (!selected) throw new Error('deterministic demo agent has no supported legal action');
@@ -82,11 +96,10 @@ export function runGameDemo(seed = 1): Readonly<{
   acceptedActionCount: number;
   classification: 'unranked_partial_rules';
   finalStateHash: ReturnType<typeof hashGameState>;
-  loser: 'north' | 'south';
-  reason: 'deck_empty';
+  fightCount: number;
   replayVerified: boolean;
+  terminal: Extract<GameTerminal, { status: 'finished' }>;
   turnCount: number;
-  winner: 'north' | 'south';
 }> {
   const manifest = createSyntheticDemoManifest(seed);
   let session = createGameSession(manifest);
@@ -96,18 +109,15 @@ export function runGameDemo(seed = 1): Readonly<{
     session = result.session;
   }
   if (session.state.terminal.status !== 'finished') throw new Error('deterministic demo exceeded action limit');
-  if (session.state.terminal.reason !== 'deck_empty') {
-    throw new Error(`deterministic demo ended unexpectedly: ${session.state.terminal.reason}`);
-  }
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
     classification: 'unranked_partial_rules',
     finalStateHash: hashGameState(session.state),
-    loser: session.state.terminal.loser,
-    reason: session.state.terminal.reason,
+    fightCount: session.transcript.flatMap(({ events }) => events)
+      .filter(({ type }) => type === 'fight-started').length,
     replayVerified: verifyGameReplay(session),
+    terminal: session.state.terminal,
     turnCount: session.state.turnNumber,
-    winner: session.state.terminal.winner,
   });
 }
 
