@@ -900,7 +900,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       assert.equal(preset.usesOnlyOrdinaryOrExceptionalCards, false);
       assert.equal(
         preset.manifest.decks.north.atlas.length,
-        preset.id === 'air-vs-earth-lesson' ? 9 : 12,
+        preset.id === 'air-vs-earth-lesson' ? 11 : 12,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
@@ -908,7 +908,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
-        preset.id === 'air-vs-earth-lesson' ? 12 : 9,
+        preset.id === 'air-vs-earth-lesson' ? 12 : 11,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
@@ -940,6 +940,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Dark Tower': 3,
     'Gothic Tower': 3,
     'Lone Tower': 3,
+    'Mountain Pass': 2,
   });
   assert.deepEqual(summarize(airLesson, 'north', 'spellbook'), {
     'Apprentice Wizard': 2,
@@ -1075,6 +1076,14 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     cardType: 'site',
     elements: ['earth'],
     rangedUnitsHereRangeBonus: 1,
+  });
+  const mountainPassId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Mountain Pass')?.[0];
+  assert.ok(mountainPassId);
+  assert.deepEqual(airLesson.manifest.cards[mountainPassId], {
+    blocksGroundMinionEntryWhileMinionAtop: true,
+    cardType: 'site',
+    elements: ['air'],
   });
   for (const name of ['Dark Tower', 'Gothic Tower', 'Lone Tower']) {
     const cardId = Object.entries(airLesson.cardNames)

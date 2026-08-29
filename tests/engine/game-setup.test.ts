@@ -91,6 +91,7 @@ type AvatarFacts = Readonly<{
 }>;
 
 type SiteFacts = Readonly<{
+  blocksGroundMinionEntryWhileMinionAtop?: true;
   connectsBurrowedAllies?: boolean;
   elements?: readonly ('air' | 'earth' | 'fire' | 'water')[];
   genesisDiscardTopSpells?: 2;
@@ -133,6 +134,9 @@ function cardsFor(
     };
     playerDeck.atlas.forEach((cardId) => {
       cards[cardId] = {
+        ...(site.blocksGroundMinionEntryWhileMinionAtop === true
+          ? { blocksGroundMinionEntryWhileMinionAtop: true as const }
+          : {}),
         cardType: 'site',
         connectsBurrowedAllies: site.connectsBurrowedAllies ?? false,
         elements: site.elements ?? ['earth'],
@@ -9185,6 +9189,142 @@ test('RULE-04 Airborne moves diagonally and restricts attacks and Intercept', ()
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === groundMovement.attackerInstanceId
       && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,B3'), false);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 Mountain Pass blocks only occupied ground-minion entry', () => {
+  const base = manifest(161, {
+    site: { blocksGroundMinionEntryWhileMinionAtop: true },
+    spell: {
+      attack: 2,
+      defense: 2,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+  });
+  const preview = createGameSession(base);
+  const northGroundCardId = preview.state.players.north.hand.spellbook[0]?.cardId;
+  const northAirborneCardId = preview.state.players.north.hand.spellbook[1]?.cardId;
+  const southGroundCardId = preview.state.players.south.hand.spellbook[0]?.cardId;
+  const southAirborneCardId = preview.state.players.south.hand.spellbook[1]?.cardId;
+  assert.ok(northGroundCardId);
+  assert.ok(northAirborneCardId);
+  assert.ok(southGroundCardId);
+  assert.ok(southAirborneCardId);
+  const siteCardId = base.decks.north.atlas[0]!;
+  assert.throws(() => createGameManifest({
+    authority: base.authority,
+    cards: {
+      ...base.cards,
+      [siteCardId]: {
+        ...base.cards[siteCardId],
+        blocksGroundMinionEntryWhileMinionAtop: false,
+      } as unknown as GameCardDefinition,
+    },
+    decks: base.decks,
+    firstSeat: base.firstSeat,
+    seed: base.seed,
+  }), /blocksGroundMinionEntryWhileMinionAtop must be true when defined/);
+  const airborne = (cardId: string): GameCardDefinition => ({
+    ...base.cards[cardId],
+    airborne: true,
+  } as GameCardDefinition);
+  const gameManifest = createGameManifest({
+    authority: base.authority,
+    cards: {
+      ...base.cards,
+      [northAirborneCardId]: airborne(northAirborneCardId),
+      [southAirborneCardId]: airborne(southAirborneCardId),
+    },
+    decks: base.decks,
+    firstSeat: base.firstSeat,
+    seed: base.seed,
+  });
+  assert.equal(gameManifest.cards[siteCardId]?.cardType === 'site'
+    && gameManifest.cards[siteCardId].blocksGroundMinionEntryWhileMinionAtop, true);
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  const northGround = session.state.players.north.hand.spellbook
+    .find(({ cardId }) => cardId === northGroundCardId);
+  const northAirborne = session.state.players.north.hand.spellbook
+    .find(({ cardId }) => cardId === northAirborneCardId);
+  assert.ok(northGround);
+  assert.ok(northAirborne);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cardInstanceId === northGround.instanceId));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cardInstanceId === northAirborne.instanceId));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  const southGround = session.state.players.south.hand.spellbook
+    .find(({ cardId }) => cardId === southGroundCardId);
+  assert.ok(southGround);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cardInstanceId === southGround.instanceId));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C3'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === northGround.instanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === northAirborne.instanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  const southAirborne = session.state.players.south.hand.spellbook
+    .find(({ cardId }) => cardId === southAirborneCardId);
+  assert.ok(southAirborne);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C2'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === southAirborne.instanceId
+      && descriptor.cell === 'C2'));
+  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cell === 'C2'), true);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  const moves = legalGameActions(session.state, 'north');
+  const entersC2 = (instanceId: string): boolean => moves.some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === instanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C2');
+  assert.equal(entersC2(northGround.instanceId), false);
+  assert.equal(entersC2(northAirborne.instanceId), true);
+  assert.equal(moves.some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === session.state.players.north.avatar.card.instanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3'), true);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === northAirborne.instanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C2'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === southAirborne.instanceId));
+  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'defend' && descriptor.unitInstanceId === southGround.instanceId), false);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
   assert.equal(verifyGameReplay(session), true);
 });
 

@@ -106,7 +106,12 @@ function displayCardFacts(card: GameCardDefinition): JsonRecord {
     facts.defense = card.defense;
   }
   if (card.cardType === 'avatar') facts.life = card.life;
-  if (card.cardType === 'site') facts.elements = card.elements;
+  if (card.cardType === 'site') {
+    facts.elements = card.elements;
+    if (card.blocksGroundMinionEntryWhileMinionAtop === true) {
+      facts.keywords = ['Occupied: blocks ground minion entry'];
+    }
+  }
   if (card.cardType === 'minion') {
     const keywords = [
       card.airborne && 'Airborne',
