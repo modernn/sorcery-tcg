@@ -127,6 +127,9 @@ test('playable-core page renders the authoritative 5x4 checkpoint without artwor
   assert.match(page, /South actions/);
   assert.match(page, /Technical receipt/);
   assert.match(page, /details:not\(\[open\]\)>:not\(summary\)\{display:none\}/);
+  assert.match(page, /function actionGroup/);
+  assert.match(page, /items\.length<=3/);
+  assert.match(page, /items\.length\+' choices'/);
   assert.match(page, /function cardFactText/);
   assert.doesNotMatch(page, /class=\"card\" title=/);
   assert.doesNotMatch(page, /button\.title=JSON\.stringify/);
