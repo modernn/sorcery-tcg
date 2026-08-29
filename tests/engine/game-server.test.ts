@@ -125,6 +125,8 @@ test('playable-core page renders the authoritative 5x4 checkpoint without artwor
   assert.match(page, /role="status" aria-live="polite"><strong>Game over<\/strong>/);
   assert.match(page, /Winner:.*Loser:.*Reason:/);
   assert.match(page, /South actions/);
+  assert.match(page, /function cardFactText/);
+  assert.doesNotMatch(page, /class=\"card\" title=/);
 });
 
 test('browser API switches injected starter presets and replays the selected match', async () => {
@@ -172,6 +174,24 @@ test('browser API switches injected starter presets and replays the selected mat
     assert.equal(current.mode, 'synthetic');
     assert.equal((current.cardNames as JsonObject)['north-avatar'], 'Earth Avatar');
     assert.doesNotMatch(JSON.stringify(current), /South Secret/);
+    const visibleFacts = current.cardFacts as Record<string, JsonObject>;
+    assert.deepEqual(visibleFacts['north-avatar'], {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      life: 20,
+    });
+    const northHand = ((((current.view as JsonObject).players as JsonObject)
+      .north as JsonObject).hand as JsonObject);
+    const firstMinion = (northHand.spellbook as JsonObject[])[0]!;
+    assert.deepEqual(visibleFacts[firstMinion.cardId as string], {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 1,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    });
+    assert.equal(visibleFacts['south-spell-1'], undefined);
     assert.deepEqual((current.presets as JsonObject[]).map(({ id, seed }) => ({ id, seed })), [
       { id: 'air-starter', seed: 11 },
       { id: 'earth-starter', seed: 19 },

@@ -14,6 +14,7 @@ import {
   observeGame,
   stepGame,
   verifyGameReplay,
+  type GameCardDefinition,
   type GameLegalAction,
   type GameObservation,
   type GameSeat,
@@ -69,10 +70,11 @@ const PAGE = String.raw`<!doctype html>
     async function request(path,options){var response=await fetch(path,options);var body=await response.json();if(!response.ok)throw new Error(body.error||('HTTP '+response.status));return body}
     function escapeHtml(value){return String(value).replace(/[&<>"']/g,function(character){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]})}
     function cardName(cardId){return snapshot&&snapshot.cardNames&&snapshot.cardNames[cardId]||cardId}
+    function cardFactText(cardId){var fact=snapshot&&snapshot.cardFacts&&snapshot.cardFacts[cardId];if(!fact)return '';var parts=[fact.cardType[0].toUpperCase()+fact.cardType.slice(1)];if(fact.elements)parts.push(fact.elements.map(function(value){return value[0].toUpperCase()+value.slice(1)}).join('/'));if(Number.isFinite(fact.manaCost))parts.push(fact.manaCost+' mana');if(fact.thresholds){var short={air:'A',earth:'E',fire:'F',water:'W'},threshold=Object.keys(short).filter(function(key){return fact.thresholds[key]}).map(function(key){return short[key]+fact.thresholds[key]}).join('');if(threshold)parts.push(threshold)}if(fact.cardType==='minion')parts.push(fact.attack+'/'+fact.defense);if(fact.cardType==='avatar')parts.push(fact.attack+' atk · '+fact.life+' life');if(fact.keywords)parts.push(fact.keywords.join(', '));return parts.join(' · ')}
     function displayText(value){var result=String(value);Object.entries(snapshot&&snapshot.cardNames||{}).forEach(function(entry){result=result.replaceAll(entry[0],entry[1])});return result}
-    function cardChip(card){var id=escapeHtml(card.cardId),name=escapeHtml(cardName(card.cardId));return '<span class="card" title="'+id+'">'+name+'</span>'}
+    function cardChip(card){var name=escapeHtml(cardName(card.cardId)),facts=escapeHtml(cardFactText(card.cardId));return '<span class="card">'+name+(facts?'<small>'+facts+'</small>':'')+'</span>'}
     function renderPlayer(view,owner){var player=view.players[owner],hand=player.hand,affinity=player.affinity;byId(owner+'-stats').textContent='Life '+player.avatar.life+' · Atlas '+player.atlasCount+' · Spellbook '+player.spellbookCount+' · Cemetery '+player.cemetery.length+' · Mana '+player.mana+' · Affinity E'+affinity.earth+' F'+affinity.fire+' W'+affinity.water+' A'+affinity.air+(player.domainEstablished?' · Domain established':' · Domain pending');var cards=[];['atlas','spellbook'].forEach(function(zone){var value=hand[zone];if(Array.isArray(value)){value.forEach(function(card){cards.push(cardChip(card))})}else{cards.push('<span class="card">'+value+' hidden '+zone+'</span>')}});byId(owner+'-hand').innerHTML=cards.join('')}
-    function renderRealm(view){document.querySelectorAll('[data-cell]').forEach(function(cell){cell.innerHTML=''});Object.entries(view.realm.sites||{}).forEach(function(entry){var cell=document.querySelector('[data-cell="'+entry[0]+'"]');if(cell)cell.innerHTML+='<span class="piece site">'+escapeHtml(cardName(entry[1].cardId))+'</span>'});(view.realm.units||[]).forEach(function(unit){var cell=document.querySelector('[data-cell="'+unit.location+'"]');if(cell)cell.innerHTML+='<span class="piece unit">'+escapeHtml(cardName(unit.cardId))+' · '+unit.attack+'/'+unit.defense+(unit.damage?' · '+unit.damage+' dmg':'')+(unit.tapped?' · tapped':'')+(unit.summoningSickness?' · new':'')+'</span>'});['north','south'].forEach(function(owner){var avatar=view.players[owner].avatar,cell=document.querySelector('[data-cell="'+avatar.location+'"]');if(cell)cell.innerHTML+='<span class="piece avatar '+owner+'">'+owner+' avatar · '+avatar.attack+' atk · '+avatar.life+' life'+(avatar.tapped?' · tapped':'')+'</span>'})}
+    function renderRealm(view){document.querySelectorAll('[data-cell]').forEach(function(cell){cell.innerHTML=''});Object.entries(view.realm.sites||{}).forEach(function(entry){var cell=document.querySelector('[data-cell="'+entry[0]+'"]'),facts=escapeHtml(cardFactText(entry[1].cardId));if(cell)cell.innerHTML+='<span class="piece site">'+escapeHtml(cardName(entry[1].cardId))+(facts?'<small>'+facts+'</small>':'')+'</span>'});(view.realm.units||[]).forEach(function(unit){var cell=document.querySelector('[data-cell="'+unit.location+'"]'),facts=escapeHtml(cardFactText(unit.cardId));if(cell)cell.innerHTML+='<span class="piece unit">'+escapeHtml(cardName(unit.cardId))+(facts?'<small>'+facts+'</small>':'')+'<small>Now '+unit.attack+'/'+unit.defense+(unit.damage?' · '+unit.damage+' dmg':'')+(unit.tapped?' · tapped':'')+(unit.summoningSickness?' · new':'')+'</small></span>'});['north','south'].forEach(function(owner){var avatar=view.players[owner].avatar,cell=document.querySelector('[data-cell="'+avatar.location+'"]');if(cell)cell.innerHTML+='<span class="piece avatar '+owner+'">'+escapeHtml(cardName(avatar.cardId))+'<small>'+owner+' · now '+avatar.attack+' atk · '+avatar.life+' life'+(avatar.tapped?' · tapped':'')+'</small></span>'})}
     function actionButton(candidate){var button=document.createElement('button');button.type='button';button.className='action';button.textContent=displayText(candidate.label);button.title=JSON.stringify(candidate.descriptor);button.addEventListener('click',function(){submit(candidate.actionId)});return button}
     function renderActions(actions,view){var dock=byId('actions');dock.innerHTML='';if(view.terminal.status==='finished'){var terminal=view.terminal,outcome=terminal.result==='draw'?'Draw':'Winner: '+escapeHtml(terminal.winner)+' · Loser: '+escapeHtml(terminal.loser);dock.innerHTML='<div class="ok" role="status" aria-live="polite"><strong>Game over</strong><p>'+outcome+' · Reason: '+escapeHtml(terminal.reason.replaceAll('_',' '))+'</p></div>';return}if(!actions.length){dock.innerHTML='<p class="empty">No legal actions for this observer.</p>';return}if(view.phase==='mulligan'){var keep=actions.filter(function(a){return a.descriptor.kind==='mulligan'&&!a.descriptor.atlasOrder.length&&!a.descriptor.spellbookOrder.length});keep.forEach(function(a){dock.appendChild(actionButton(a))});var rest=actions.filter(function(a){return keep.indexOf(a)<0});var details=document.createElement('details'),summary=document.createElement('summary'),list=document.createElement('div');summary.textContent='Show '+rest.length+' mulligan alternatives';list.className='actions';rest.forEach(function(a){list.appendChild(actionButton(a))});details.append(summary,list);dock.appendChild(details);return}actions.forEach(function(a){dock.appendChild(actionButton(a))})}
     function render(data){snapshot=data;var view=data.view,picker=byId('preset');if(picker.options.length!==data.presets.length){picker.innerHTML=data.presets.map(function(preset){return '<option value="'+escapeHtml(preset.id)+'">'+escapeHtml(preset.label)+'</option>'}).join('')}picker.value=data.presetId;byId('opponent').value=data.opponent;byId('seed').value=String(data.seed);byId('mode').textContent=(data.mode==='private-local'?'Private-local actual cards · unranked':'Synthetic fallback · unranked')+(data.opponent==='south'?' · vs computer':' · hot seat');byId('observer').textContent=seat;byId('active').textContent=view.activeSeat+(view.decisionSeat===view.activeSeat?'':' · '+view.decisionSeat+' deciding');byId('phase').textContent='Turn '+view.turnNumber+' · '+view.phase;byId('version').textContent=view.stateVersion;byId('hash').textContent=data.stateHash;renderPlayer(view,'north');renderPlayer(view,'south');renderRealm(view);renderActions(data.actions,view);syncSeatButtons()}
@@ -91,6 +93,53 @@ const PAGE = String.raw`<!doctype html>
 </html>`;
 
 type JsonRecord = Record<string, unknown>;
+
+function displayCardFacts(card: GameCardDefinition): JsonRecord {
+  const facts: JsonRecord = { cardType: card.cardType };
+  if ('manaCost' in card) {
+    facts.manaCost = card.manaCost;
+    facts.thresholds = card.thresholds;
+  }
+  if ('attack' in card) {
+    facts.attack = card.attack;
+    facts.defense = card.defense;
+  }
+  if (card.cardType === 'avatar') facts.life = card.life;
+  if (card.cardType === 'site') facts.elements = card.elements;
+  if (card.cardType === 'minion') {
+    const keywords = [
+      card.airborne && 'Airborne',
+      card.burrowing && 'Burrowing',
+      card.charge && 'Charge',
+      card.immobile && 'Immobile',
+      card.lethal && 'Lethal',
+      card.ranged && 'Ranged',
+      card.spellcaster && 'Spellcaster',
+      card.stealth && 'Stealth',
+      card.submerge && 'Submerge',
+      card.voidwalk && 'Voidwalk',
+      card.waterbound && 'Waterbound',
+      card.ward && 'Ward',
+    ].filter((keyword): keyword is string => Boolean(keyword));
+    if (keywords.length > 0) facts.keywords = keywords;
+  }
+  return facts;
+}
+
+function visibleCardIds(observation: GameObservation): ReadonlySet<string> {
+  const players = Object.values(observation.players);
+  return new Set([
+    ...players.flatMap((player) => [
+      player.avatar.cardId,
+      ...player.cemetery.map(({ cardId }) => cardId),
+      ...(Array.isArray(player.hand.atlas) ? player.hand.atlas.map(({ cardId }) => cardId) : []),
+      ...(Array.isArray(player.hand.spellbook) ? player.hand.spellbook.map(({ cardId }) => cardId) : []),
+    ]),
+    ...Object.values(observation.realm.sites).map(({ cardId }) => cardId),
+    ...observation.realm.units.map(({ cardId }) => cardId),
+    ...(observation.realm.artifacts ?? []).map(({ cardId }) => cardId),
+  ]);
+}
 
 function isSeat(value: string | null): value is GameSeat {
   return value === 'north' || value === 'south';
@@ -253,15 +302,19 @@ export function createGamePrototypeServer(
 
   function view(seat: GameSeat): JsonRecord {
     const observation = observeGame(session.state, seat);
-    const visibleObservation = JSON.stringify(observation);
+    const visible = visibleCardIds(observation);
     const cardNames = Object.fromEntries(Object.entries(selectedPreset.cardNames ?? {})
-      .filter(([cardId]) => visibleObservation.includes(JSON.stringify(cardId))));
+      .filter(([cardId]) => visible.has(cardId)));
+    const cardFacts = Object.fromEntries(Object.entries(session.manifest.cards)
+      .filter(([cardId]) => visible.has(cardId))
+      .map(([cardId, card]) => [cardId, displayCardFacts(card)]));
     const actions = legalGameActions(session.state, seat);
     return {
       actions: actions.map((action) => ({
         ...action,
         label: displayActionLabel(action, observation, selectedPreset.cardNames ?? {}),
       })),
+      cardFacts,
       cardNames,
       mode: session.manifest.authority.mode,
       opponent,

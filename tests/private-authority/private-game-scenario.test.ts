@@ -101,6 +101,24 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
     const zap = (hand.spellbook as JsonObject[])
       .find(({ cardId }) => names[cardId as string] === 'Zap!');
     assert.ok(spire && leopard && zap, 'known-good Air seed must expose its teaching cards');
+    const facts = current.cardFacts as Record<string, JsonObject>;
+    assert.deepEqual(facts[spire.cardId as string], {
+      cardType: 'site',
+      elements: ['air'],
+    });
+    assert.deepEqual(facts[leopard.cardId as string], {
+      attack: 2,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 1,
+      thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+    });
+    assert.deepEqual(facts[zap.cardId as string], {
+      cardType: 'magic',
+      manaCost: 1,
+      thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+    });
+    assert.doesNotMatch(JSON.stringify(facts), /rulesText|Deal 1 damage/);
 
     current = await submit(keep(current));
     current = await json('/api/view?seat=south');
