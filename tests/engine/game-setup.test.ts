@@ -94,6 +94,7 @@ type SiteFacts = Readonly<{
   genesisDiscardTopSpells?: 2;
   genesisDrawSpellPerAdjacentSameCard?: boolean;
   genesisGainMana?: number;
+  genesisGainManaIfOnlyControlledCopy?: 1;
   genesisMayBottomNextSpell?: true;
   sacrificeToDestroyNearbySite?: true;
 }>;
@@ -136,6 +137,9 @@ function cardsFor(
         genesisDrawSpellPerAdjacentSameCard:
           site.genesisDrawSpellPerAdjacentSameCard ?? false,
         ...(site.genesisGainMana ? { genesisGainMana: site.genesisGainMana } : {}),
+        ...(site.genesisGainManaIfOnlyControlledCopy
+          ? { genesisGainManaIfOnlyControlledCopy: site.genesisGainManaIfOnlyControlledCopy }
+          : {}),
         ...(site.genesisMayBottomNextSpell === true
           ? { genesisMayBottomNextSpell: true as const }
           : {}),
@@ -1050,6 +1054,17 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
   }), /shootsDragProjectile/);
   const firstSite = decks.north.atlas[0];
   assert.ok(firstSite);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSite]: {
+        ...cards[firstSite]!,
+        genesisGainMana: 1,
+        genesisGainManaIfOnlyControlledCopy: 1,
+      } as GameCardDefinition,
+    },
+  }), /simultaneous unconditional and conditional Genesis mana/);
   const shallowGraveManifest = createGameManifest({
     ...input,
     cards: {
@@ -6546,6 +6561,31 @@ test('RULE-03 site Genesis grants temporary mana once, pays a summon, and expire
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
   assert.equal(session.state.players.north.mana, 1);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 Tower Genesis grants mana only for the first controlled copy', () => {
+  const north = deck('tower-north');
+  let session = keep(keep(createGameSession(manifest(56, {
+    north: { ...north, atlas: Array(4).fill('tower') },
+    site: { genesisGainManaIfOnlyControlledCopy: 1 },
+  }))));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  assert.equal(session.state.players.north.mana, 2);
+  assert.deepEqual(session.transcript.at(-1)?.events.map(({ type }) => type), [
+    'site-played',
+    'mana-gained',
+  ]);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  assert.equal(session.state.players.north.mana, 2);
+  assert.deepEqual(session.transcript.at(-1)?.events.map(({ type }) => type), ['site-played']);
   assert.equal(verifyGameReplay(session), true);
 });
 
