@@ -304,6 +304,27 @@ export type PrivateGameCheck = Readonly<{
     spellLeftHand: boolean;
     zap: string;
   }>;
+  airFireFatality: Readonly<{
+    acceptedActionCount: number;
+    airFireAffinity: boolean;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    exactWoundedTarget: boolean;
+    fatality: string;
+    fatalityDealtNoDamage: boolean;
+    fatalityEnteredCemetery: boolean;
+    healthyTargetUnavailable: boolean;
+    manaPaid: number;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    snowLeopard: string;
+    targetEnteredOwnerCemetery: boolean;
+    targetLeftRealm: boolean;
+    zap: string;
+    zapDamageExactlyOne: boolean;
+    zapEnteredCemetery: boolean;
+    zapManaPaid: number;
+  }>;
   authorityHash: Hash;
   avatarSpellDrawn: boolean;
   charge: Readonly<{ activatedOnSummon: boolean; minion: string }>;
@@ -1122,6 +1143,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   firstStrikeTargetMinion: NormalizedCard;
   forsaken: NormalizedCard;
   freeze: NormalizedCard;
+  fatality: NormalizedCard;
   genesisSpellMinion: NormalizedCard;
   genesisMinion: NormalizedCard;
   grainSparrow: NormalizedCard;
@@ -2191,6 +2213,25 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || zap.rarity !== 'ordinary') {
     throw new Error('private target-unit damage Magic no longer matches its supported facts');
   }
+  const fatality = snapshot.cards.find(({ name }) => name === 'Fatality');
+  if (!fatality
+    || fatality.stableId !== 'card:37c0aadb42753d7d4bab3e2155e5f10c7e2537b5fe3cfa16714e5a24ad740cde'
+    || fatality.cardType !== 'magic'
+    || ruleTextDigest(fatality.rulesText) !== 'sha256:dd3349088f8cc8aaefd2f2f865f28aba4b22f50239cb2f6f5616a2ba908a3958'
+    || fatality.manaCost !== 3
+    || fatality.attack !== null
+    || fatality.defense !== null
+    || fatality.life !== null
+    || fatality.elements.length !== 2
+    || fatality.elements[0] !== 'fire'
+    || fatality.elements[1] !== 'air'
+    || fatality.thresholds.air !== 1
+    || fatality.thresholds.earth !== 0
+    || fatality.thresholds.fire !== 1
+    || fatality.thresholds.water !== 0
+    || fatality.rarity !== 'exceptional') {
+    throw new Error('private wounded-minion kill Magic no longer matches its supported facts');
+  }
   const cannotDefendMinion = snapshot.cards
     .find(({ stableId }) => stableId === config.cannotDefendMinionStableId);
   if (!cannotDefendMinion
@@ -2482,6 +2523,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     firstStrikeTargetMinion,
     forsaken,
     freeze,
+    fatality,
     genesisSpellMinion,
     genesisMinion,
     grainSparrow,
@@ -2638,6 +2680,7 @@ function gameDefinition(
   tapToDamageEachUnitAtAdjacentLocation = false,
   gainControlOfTargetNearbyMinion = false,
   untapsAtEndOfControllerTurn = false,
+  killTargetWoundedMinion = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -2692,6 +2735,7 @@ function gameDefinition(
     + Number(burrowTargetMinion)
     + Number(fightAllyWithAdjacentEnemy)
     + Number(gainControlOfTargetNearbyMinion)
+    + Number(killTargetWoundedMinion)
     + Number(leapAttackAlly);
   if (card.cardType === 'magic'
     && card.manaCost !== null
@@ -2702,6 +2746,7 @@ function gameDefinition(
       ...(damageEachAbovegroundMinion !== 0 ? { damageEachAbovegroundMinion } : {}),
       ...(fightAllyWithAdjacentEnemy ? { fightAllyWithAdjacentEnemy: true } : {}),
       ...(gainControlOfTargetNearbyMinion ? { gainControlOfTargetNearbyMinion: true } : {}),
+      ...(killTargetWoundedMinion ? { killTargetWoundedMinion: true } : {}),
       ...(grantPowerToAllyThisTurn !== 0 ? { grantPowerToAllyThisTurn } : {}),
       ...(leapAttackAlly ? { leapAttackAlly: true } : {}),
       ...(submergeTargetMinion ? { submergeTargetMinion: true } : {}),
@@ -2795,7 +2840,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -2993,6 +3038,12 @@ function buildManifest(
   );
   const airTeleportDeck = elementalDeck('air', airMinions, [], [input.teleport]);
   const airZapDeck = elementalDeck('air', airMinions, [], [input.zap]);
+  const airFireFatalityDeck = elementalDeck(
+    'air',
+    [input.stealthTargetMinion, input.raalDromedary],
+    [input.spire, input.wasteland],
+    [input.zap, input.fatality],
+  );
   const airGenesisSpellDeck = elementalDeck('air', [...airMinions, input.genesisSpellMinion]);
   const airLeylineDeck = elementalDeck('air', airMinions, [input.leylineHenge]);
   const airVoidwalkDeck = elementalDeck('air', [
@@ -3155,6 +3206,8 @@ function buildManifest(
       ? airGenesisSpellDeck
       : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
+      : scenario === 'air-fire-fatality'
+      ? airFireFatalityDeck
       : scenario === 'air-zap'
       ? airZapDeck
       : scenario === 'airborne' || scenario === 'movement-two' || scenario === 'stealth'
@@ -3266,6 +3319,8 @@ function buildManifest(
       ? airGenesisSpellDeck
       : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
+      : scenario === 'air-fire-fatality'
+      ? airFireFatalityDeck
       : scenario === 'air-zap'
       ? airZapDeck
       : scenario === 'airborne' || scenario === 'movement-two' || scenario === 'stealth'
@@ -3433,6 +3488,7 @@ function buildManifest(
       card.stableId === input.vikings.stableId,
       card.stableId === input.mesmerism.stableId,
       card.stableId === input.malakhim.stableId,
+      card.stableId === input.fatality.stableId,
     ),
   ]));
   return {
@@ -4702,6 +4758,69 @@ function findAirZapOpening(
     }
   }
   throw new Error('private Air target-unit damage Magic scenario no longer produces its supported opening');
+}
+
+function findAirFireFatalityOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  fatalityInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string, string];
+  session: GameSession;
+  snowLeopardInstanceId: string;
+  southSpireInstanceId: string;
+  zapInstanceId: string;
+}> {
+  // ponytail: bounded opening scan avoids another private seed field.
+  for (let offset = 1; offset <= 4096; offset += 1) {
+    const built = buildManifest(input, input.config.airSeed + offset, 'air-fire-fatality');
+    const session = createGameSession(built.manifest);
+    const northSites = [
+      ...session.state.players.north.hand.atlas,
+      ...session.state.players.north.atlas.slice(0, 1),
+    ].slice(0, 4);
+    const northHasSpire = northSites.some(({ cardId }) => cardId === input.spire.stableId);
+    const northHasWasteland = northSites.some(({ cardId }) => cardId === input.wasteland.stableId);
+    const southSpireInstanceId = session.state.players.south.hand.atlas
+      .find(({ cardId }) => cardId === input.spire.stableId)?.instanceId;
+    const fatalityInstanceId = availableMinionInstance(
+      session,
+      'north',
+      input.fatality.stableId,
+      2,
+    );
+    const zapInstanceId = availableMinionInstance(session, 'north', input.zap.stableId, 2);
+    const snowLeopardInstanceId = availableMinionInstance(
+      session,
+      'south',
+      input.stealthTargetMinion.stableId,
+      1,
+    );
+    if (northSites.length === 4
+      && northHasSpire
+      && northHasWasteland
+      && southSpireInstanceId
+      && fatalityInstanceId
+      && zapInstanceId
+      && snowLeopardInstanceId) {
+      return {
+        ...built,
+        fatalityInstanceId,
+        northSiteInstanceIds: [
+          northSites[0]!.instanceId,
+          northSites[1]!.instanceId,
+          northSites[2]!.instanceId,
+          northSites[3]!.instanceId,
+        ],
+        session,
+        snowLeopardInstanceId,
+        southSpireInstanceId,
+        zapInstanceId,
+      };
+    }
+  }
+  throw new Error('private Fatality scenario lacks its supported mixed opening');
 }
 
 function findAirArcLightningOpening(
@@ -9106,6 +9225,156 @@ function runAirZap(
     spellEnteredCemetery,
     spellLeftHand,
     zap: opening.names.get(input.zap.stableId) ?? input.zap.stableId,
+  });
+}
+
+function runAirFireFatalitySetup(
+  opening: ReturnType<typeof findAirFireFatalityOpening>,
+): GameSession {
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSpireInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.snowLeopardInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+    && descriptor.cell === 'B3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[3]
+    && descriptor.cell === 'A3');
+  return session;
+}
+
+function runAirFireFatality(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airFireFatality'] {
+  const opening = findAirFireFatalityOpening(input);
+  let session = runAirFireFatalitySetup(opening);
+  const targetBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.snowLeopardInstanceId);
+  if (!targetBefore) throw new Error('private Fatality setup lacks its healthy Snow Leopard');
+  const healthyChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.fatalityInstanceId);
+  const affinity = observeGame(session.state, 'north').players.north.affinity;
+  const manaBeforeZap = session.state.players.north.mana;
+  const zap = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.zapInstanceId
+      && descriptor.target?.kind === 'minion'
+      && descriptor.target.instanceId === opening.snowLeopardInstanceId
+      && descriptor.target.seat === 'south'));
+  if (!zap.accepted) throw new Error('private Fatality setup Zap was rejected');
+  session = zap.session;
+  const targetAfterZap = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.snowLeopardInstanceId);
+  if (!targetAfterZap) throw new Error('private Fatality setup Zap killed its target');
+  const fatalityChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.fatalityInstanceId);
+  const chosen = fatalityChoices.find(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.target?.kind === 'minion'
+    && descriptor.target.instanceId === opening.snowLeopardInstanceId
+    && descriptor.target.seat === 'south');
+  if (!chosen || fatalityChoices.length !== 1) {
+    throw new Error('private Fatality wounded target is not exactly available');
+  }
+  const manaBeforeFatality = session.state.players.north.mana;
+  const killed = stepGame(session, chosen);
+  if (!killed.accepted) throw new Error('private Fatality cast was rejected');
+  session = killed.session;
+
+  const zapEvents = zap.receipt.events;
+  const zapCastPayload = zapEvents[0] && isJsonRecord(zapEvents[0].payload)
+    ? zapEvents[0].payload
+    : undefined;
+  const fatalityEvents = killed.receipt.events;
+  const castPayload = fatalityEvents[0] && isJsonRecord(fatalityEvents[0].payload)
+    ? fatalityEvents[0].payload
+    : undefined;
+  const killedPayload = fatalityEvents[1] && isJsonRecord(fatalityEvents[1].payload)
+    ? fatalityEvents[1].payload
+    : undefined;
+  const deathPayload = fatalityEvents[2] && isJsonRecord(fatalityEvents[2].payload)
+    ? fatalityEvents[2].payload
+    : undefined;
+  const resolvedPayload = fatalityEvents[3] && isJsonRecord(fatalityEvents[3].payload)
+    ? fatalityEvents[3].payload
+    : undefined;
+  const causalEventsVerified = zapEvents.map(({ type }) => type).join(',')
+    === 'magic-cast,magic-damage-allocated,damage-dealt,magic-resolved'
+    && zapCastPayload?.instanceId === opening.zapInstanceId
+    && zapCastPayload.manaPaid === 1
+    && zapCastPayload.seat === 'north'
+    && zapCastPayload.targetInstanceId === opening.snowLeopardInstanceId
+    && zapCastPayload.targetSeat === 'south'
+    && fatalityEvents.map(({ type }) => type).join(',')
+      === 'magic-cast,minion-killed,minion-died,magic-resolved'
+    && castPayload?.instanceId === opening.fatalityInstanceId
+    && castPayload.manaPaid === 3
+    && castPayload.seat === 'north'
+    && castPayload.targetInstanceId === opening.snowLeopardInstanceId
+    && castPayload.targetSeat === 'south'
+    && killedPayload?.cardId === input.stealthTargetMinion.stableId
+    && killedPayload.instanceId === opening.snowLeopardInstanceId
+    && killedPayload.owner === 'south'
+    && killedPayload.seat === 'south'
+    && killedPayload.sourceInstanceId === opening.fatalityInstanceId
+    && deathPayload?.cardId === input.stealthTargetMinion.stableId
+    && deathPayload.instanceId === opening.snowLeopardInstanceId
+    && deathPayload.owner === 'south'
+    && resolvedPayload?.instanceId === opening.fatalityInstanceId;
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    airFireAffinity: affinity.air >= 1 && affinity.fire >= 1,
+    causalEventsVerified,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    exactWoundedTarget: targetAfterZap.damage === 1 && fatalityChoices.length === 1,
+    fatality: input.fatality.name,
+    fatalityDealtNoDamage: fatalityEvents.every(({ type }) =>
+      type !== 'magic-damage-allocated' && type !== 'damage-dealt'),
+    fatalityEnteredCemetery: session.state.players.north.cemetery
+      .some(({ instanceId }) => instanceId === opening.fatalityInstanceId),
+    healthyTargetUnavailable: targetBefore.damage === 0 && healthyChoices.length === 0,
+    manaPaid: manaBeforeFatality - session.state.players.north.mana,
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    replayVerified: verifyGameReplay(session),
+    snowLeopard: input.stealthTargetMinion.name,
+    targetEnteredOwnerCemetery: session.state.players.south.cemetery
+      .some(({ instanceId }) => instanceId === opening.snowLeopardInstanceId),
+    targetLeftRealm: session.state.realm.units
+      .every(({ instanceId }) => instanceId !== opening.snowLeopardInstanceId),
+    zap: input.zap.name,
+    zapDamageExactlyOne: targetAfterZap.damage - targetBefore.damage === 1,
+    zapEnteredCemetery: session.state.players.north.cemetery
+      .some(({ instanceId }) => instanceId === opening.zapInstanceId),
+    zapManaPaid: manaBeforeZap - zap.session.state.players.north.mana,
   });
 }
 
@@ -13629,6 +13898,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     input.spire,
     input.stealthTargetMinion,
   );
+  const airFireFatality = runAirFireFatality(input);
   const airBladderblimp = runAirBladderblimp(input);
   const airGenesisSpell = runAirGenesisSpell(input);
   const airSpellcasterFreeze = runAirSpellcasterFreeze(input);
@@ -13831,6 +14101,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     airSummoning,
     airVoidwalk,
     airZap,
+    airFireFatality,
     authorityHash: input.authorityHash,
     avatarSpellDrawn,
     charge: {
