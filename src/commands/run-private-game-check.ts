@@ -369,16 +369,18 @@ export type PrivateGameCheck = Readonly<{
   }>;
   earthSwordAndShield: Readonly<{
     acceptedActionCount: number;
-    artifactCastAndCarried: boolean;
+    artifactCastUncarried: boolean;
+    artifactPickedUpAndCarried: boolean;
     boskTroll: string;
     causalEventsVerified: boolean;
     combatDamageAndSurvivalVerified: boolean;
     deck: DeckList;
     elthamTownsfolk: string;
-    exactBearerChoice: boolean;
+    exactPickupChoice: boolean;
     gameRemainedActive: boolean;
     manaPaid: number;
     noRandomDraws: boolean;
+    pickupSideEffectsAbsent: boolean;
     replayVerified: boolean;
     swordAndShield: string;
     swordFollowedBearer: boolean;
@@ -7681,13 +7683,13 @@ function runEarthSwordAndShield(
     },
   };
   const manaBefore = session.state.players.north.mana;
-  const bearerChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const uncarriedCastChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
     descriptor.kind === 'cast-artifact'
       && descriptor.cardInstanceId === opening.artifactInstanceId
-      && descriptor.bearer?.kind === 'minion'
-      && descriptor.bearer.instanceId === opening.elthamTownsfolkInstanceId);
-  const chosenArtifact = bearerChoices[0];
-  if (!chosenArtifact) throw new Error('private Sword and Shield bearer cast is unavailable');
+      && descriptor.bearer === undefined
+      && descriptor.cell === 'C3');
+  const chosenArtifact = uncarriedCastChoices[0];
+  if (!chosenArtifact) throw new Error('private uncarried Sword and Shield cast is unavailable');
   const castResult = stepGame(session, chosenArtifact);
   if (!castResult.accepted) throw new Error('private Sword and Shield cast was rejected');
   session = castResult.session;
@@ -7697,7 +7699,28 @@ function runEarthSwordAndShield(
     instanceId === opening.artifactInstanceId);
   const castArtifactView = castView.realm.artifacts?.find(({ instanceId }) =>
     instanceId === opening.artifactInstanceId);
-  const poweredEltham = castView.realm.units.find(({ instanceId }) =>
+  const unpoweredEltham = castView.realm.units.find(({ instanceId }) =>
+    instanceId === opening.elthamTownsfolkInstanceId);
+  const manaBeforePickup = session.state.players.north.mana;
+  const pickupChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'pick-up-artifacts'
+      && descriptor.unit.kind === 'minion'
+      && descriptor.unit.instanceId === opening.elthamTownsfolkInstanceId
+      && descriptor.artifactInstanceIds.length === 1
+      && descriptor.artifactInstanceIds[0] === opening.artifactInstanceId);
+  const chosenPickup = pickupChoices[0];
+  if (!chosenPickup) throw new Error('private Sword and Shield Pick Up is unavailable');
+  const pickupResult = stepGame(session, chosenPickup);
+  if (!pickupResult.accepted) throw new Error('private Sword and Shield Pick Up was rejected');
+  session = pickupResult.session;
+  const manaAfterPickup = session.state.players.north.mana;
+
+  const pickedView = observeGame(session.state, 'north');
+  const pickedArtifactState = session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === opening.artifactInstanceId);
+  const pickedArtifactView = pickedView.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === opening.artifactInstanceId);
+  const poweredEltham = pickedView.realm.units.find(({ instanceId }) =>
     instanceId === opening.elthamTownsfolkInstanceId);
 
   const moveResult = stepGame(session, action(session, ({ descriptor }) =>
@@ -7723,6 +7746,10 @@ function runEarthSwordAndShield(
 
   const castEvent = castResult.receipt.events.find(({ type }) => type === 'artifact-conjured');
   const castPayload = castEvent && isJsonRecord(castEvent.payload) ? castEvent.payload : undefined;
+  const pickupEvent = pickupResult.receipt.events.find(({ type }) => type === 'artifacts-picked-up');
+  const pickupPayload = pickupEvent && isJsonRecord(pickupEvent.payload)
+    ? pickupEvent.payload
+    : undefined;
   const fightEvents = fightResult.receipt.events;
   const allocations = fightEvents.filter(({ type }) => type === 'strike-damage-allocated')
     .flatMap(({ payload }) => isJsonRecord(payload) ? [payload] : []);
@@ -7747,26 +7774,61 @@ function runEarthSwordAndShield(
   const artifactAbsentFromCemeteries = (['north', 'south'] as const).every((seat) =>
     session.state.players[seat].cemetery.every(({ instanceId }) =>
       instanceId !== opening.artifactInstanceId));
-  const artifactCastAndCarried: boolean = castArtifactState !== undefined
-    && 'bearer' in castArtifactState
-    && castArtifactState.bearer.kind === 'minion'
-    && castArtifactState.bearer.instanceId === opening.elthamTownsfolkInstanceId
-    && castArtifactView?.bearer?.instanceId === opening.elthamTownsfolkInstanceId
-    && castArtifactView.controller === 'north'
+  const artifactCastUncarried: boolean = uncarriedCastChoices.length === 1
+    && castArtifactState !== undefined
+    && !('bearer' in castArtifactState)
+    && castArtifactState.location === 'C3'
+    && castArtifactState.region === 'surface'
+    && castArtifactState.owner === 'north'
+    && castArtifactView !== undefined
+    && castArtifactView.bearer === undefined
+    && castArtifactView.controller === null
+    && castArtifactView.owner === 'north'
     && castArtifactView.location === 'C3'
     && castArtifactView.region === 'surface'
-    && poweredEltham?.attack === 4
-    && poweredEltham.defense === 4;
+    && unpoweredEltham?.attack === 2
+    && unpoweredEltham.defense === 2;
   const castEventVerified: boolean = castResult.receipt.events.length === 1
     && castResult.receipt.events[0]?.type === 'artifact-conjured'
-    && castPayload?.cardId === input.swordAndShield.stableId
-    && castPayload.instanceId === opening.artifactInstanceId
-    && castPayload.manaPaid === 3
-    && castPayload.owner === 'north'
-    && castPayload.seat === 'north'
-    && castPayload.bearerInstanceId === opening.elthamTownsfolkInstanceId
-    && castPayload.bearerKind === 'minion'
-    && castPayload.bearerSeat === 'north';
+    && castPayload !== undefined
+    && chosenArtifact.descriptor.kind === 'cast-artifact'
+    && canonicalJson(castPayload) === canonicalJson({
+      cardId: input.swordAndShield.stableId,
+      casterInstanceId: chosenArtifact.descriptor.casterInstanceId,
+      cell: 'C3',
+      instanceId: opening.artifactInstanceId,
+      manaPaid: 3,
+      owner: 'north',
+      region: 'surface',
+      seat: 'north',
+    });
+  const pickupEventVerified: boolean = pickupResult.receipt.events.length === 1
+    && pickupResult.receipt.events[0]?.type === 'artifacts-picked-up'
+    && pickupPayload !== undefined
+    && canonicalJson(pickupPayload) === canonicalJson({
+      artifactInstanceIds: [opening.artifactInstanceId],
+      seat: 'north',
+      unitInstanceId: opening.elthamTownsfolkInstanceId,
+      unitKind: 'minion',
+    });
+  const artifactPickedUpAndCarried: boolean = pickedArtifactState !== undefined
+    && 'bearer' in pickedArtifactState
+    && pickedArtifactState.bearer.kind === 'minion'
+    && pickedArtifactState.bearer.instanceId === opening.elthamTownsfolkInstanceId
+    && pickedArtifactState.bearer.seat === 'north'
+    && pickedArtifactState.owner === 'north'
+    && pickedArtifactView?.bearer?.instanceId === opening.elthamTownsfolkInstanceId
+    && pickedArtifactView.controller === 'north'
+    && pickedArtifactView.owner === 'north'
+    && pickedArtifactView.location === 'C3'
+    && pickedArtifactView.region === 'surface'
+    && poweredEltham?.attack === 4
+    && poweredEltham.defense === 4;
+  const pickupSideEffectsAbsent: boolean = manaAfterPickup === manaBeforePickup
+    && unpoweredEltham !== undefined
+    && poweredEltham !== undefined
+    && poweredEltham.tapped === unpoweredEltham.tapped
+    && poweredEltham.stealthed === unpoweredEltham.stealthed;
   const fightEventOrderVerified: boolean = fightStartedIndex >= 0
     && fightStartedIndex < firstAllocationIndex
     && firstAllocationIndex < firstDamageIndex
@@ -7796,10 +7858,15 @@ function runEarthSwordAndShield(
     && session.state.realm.units.every(({ instanceId }) =>
       instanceId !== opening.boskTrollInstanceId)
     && boskInCemetery;
-  const exactBearerChoice: boolean = bearerChoices.length === 1
-    && chosenArtifact.descriptor.kind === 'cast-artifact'
-    && chosenArtifact.descriptor.bearer?.seat === 'north';
+  const exactPickupChoice: boolean = pickupChoices.length === 1
+    && chosenPickup.descriptor.kind === 'pick-up-artifacts'
+    && chosenPickup.descriptor.unit.kind === 'minion'
+    && chosenPickup.descriptor.unit.instanceId === opening.elthamTownsfolkInstanceId
+    && chosenPickup.descriptor.unit.seat === 'north'
+    && chosenPickup.descriptor.artifactInstanceIds.length === 1
+    && chosenPickup.descriptor.artifactInstanceIds[0] === opening.artifactInstanceId;
   const noRandomDraws: boolean = castResult.receipt.randomDraws.length === 0
+    && pickupResult.receipt.randomDraws.length === 0
     && moveResult.receipt.randomDraws.length === 0
     && fightResult.receipt.randomDraws.length === 0;
   const swordFollowedBearer: boolean = movedArtifact?.bearer?.instanceId
@@ -7841,16 +7908,18 @@ function runEarthSwordAndShield(
 
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
-    artifactCastAndCarried,
+    artifactCastUncarried,
+    artifactPickedUpAndCarried,
     boskTroll: input.firstStrikeTargetMinion.name,
-    causalEventsVerified: castEventVerified && fightEventOrderVerified,
+    causalEventsVerified: castEventVerified && pickupEventVerified && fightEventOrderVerified,
     combatDamageAndSurvivalVerified,
     deck: deckList(opening.manifest.decks.north, opening.names),
     elthamTownsfolk: input.elthamTownsfolk.name,
-    exactBearerChoice,
+    exactPickupChoice,
     gameRemainedActive: session.state.terminal.status === 'active',
     manaPaid: manaBefore - session.state.players.north.mana,
     noRandomDraws,
+    pickupSideEffectsAbsent,
     replayVerified: verifyGameReplay(session),
     swordAndShield: input.swordAndShield.name,
     swordFollowedBearer,

@@ -29,10 +29,12 @@ function assertSwordAndShield(result: PrivateGameCheck['earthSwordAndShield']): 
   assert.equal(result.swordAndShield, 'Sword and Shield');
   assert.equal(result.elthamTownsfolk, 'Eltham Townsfolk');
   assert.equal(result.boskTroll, 'Bosk Troll');
-  assert.equal(result.acceptedActionCount, 21);
-  assert.equal(result.exactBearerChoice, true);
+  assert.equal(result.acceptedActionCount, 22);
+  assert.equal(result.exactPickupChoice, true);
   assert.equal(result.manaPaid, 3);
-  assert.equal(result.artifactCastAndCarried, true);
+  assert.equal(result.artifactCastUncarried, true);
+  assert.equal(result.artifactPickedUpAndCarried, true);
+  assert.equal(result.pickupSideEffectsAbsent, true);
   assert.equal(result.swordFollowedBearer, true);
   assert.equal(result.combatDamageAndSurvivalVerified, true);
   assert.equal(result.swordRemainedCarried, true);

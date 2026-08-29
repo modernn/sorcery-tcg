@@ -8941,14 +8941,14 @@ test('RULE-01 attempting to draw from an empty deck immediately loses', () => {
   assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-03/04 a carried Artifact follows its bearer, grants power, and drops when the bearer dies', () => {
+test('RULE-04 Pick Up carries any local Artifact once per unit turn and preserves bearer rules', () => {
   const north: GameDeckSpec = {
-    atlas: Array(4).fill('artifact-north-site'),
+    atlas: Array(6).fill('artifact-north-site'),
     avatar: 'artifact-north-avatar',
-    spellbook: ['sword-and-shield', 'sword-and-shield', 'artifact-bearer', 'artifact-bearer'],
+    spellbook: ['sword-and-shield', 'sword-and-shield', 'sword-and-shield', 'artifact-bearer'],
   };
   const south: GameDeckSpec = {
-    atlas: Array(5).fill('artifact-south-site'),
+    atlas: Array(6).fill('artifact-south-site'),
     avatar: 'artifact-south-avatar',
     spellbook: Array(4).fill('artifact-enemy'),
   };
@@ -8958,10 +8958,12 @@ test('RULE-03/04 a carried Artifact follows its bearer, grants power, and drops 
       cardType: 'minion',
       defense: 1,
       manaCost: 1,
+      spellcaster: true,
+      stealth: true,
       thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
     },
     'artifact-enemy': {
-      attack: 3,
+      attack: 7,
       cardType: 'minion',
       charge: true,
       defense: 2,
@@ -8976,7 +8978,7 @@ test('RULE-03/04 a carried Artifact follows its bearer, grants power, and drops 
     'sword-and-shield': {
       cardType: 'artifact',
       grantsBearerPower: 2,
-      manaCost: 3,
+      manaCost: 2,
       thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
     },
   };
@@ -8989,18 +8991,28 @@ test('RULE-03/04 a carried Artifact follows its bearer, grants power, and drops 
     cards,
     decks: { north, south },
     firstSeat: 'north' as const,
-    seed: 83,
   };
-  const gameManifest = createGameManifest(input);
+  let gameManifest: GameManifest | undefined;
+  for (let seed = 83; seed < 256; seed += 1) {
+    const candidate = createGameManifest({ ...input, seed });
+    const opening = createGameSession(candidate).state.players.north.hand.spellbook;
+    if (opening.filter(({ cardId }) => cardId === 'sword-and-shield').length >= 2
+      && opening.some(({ cardId }) => cardId === 'artifact-bearer')) {
+      gameManifest = candidate;
+      break;
+    }
+  }
+  assert.ok(gameManifest);
   assert.deepEqual(gameManifest.cards['sword-and-shield'], cards['sword-and-shield']);
   assert.throws(() => createGameManifest({
     ...input,
+    seed: 83,
     cards: {
       ...cards,
       'sword-and-shield': {
         cardType: 'artifact',
         grantsBearerPower: 1 as unknown as 2,
-        manaCost: 3,
+        manaCost: 2,
         thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
       },
     },
@@ -9016,53 +9028,200 @@ test('RULE-03/04 a carried Artifact follows its bearer, grants power, and drops 
   take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardId === 'artifact-bearer' && descriptor.cell === 'C4');
   const bearer = session.state.realm.units.find(({ cardId }) => cardId === 'artifact-bearer')!;
+  assert.equal(bearer.summoningSickness, true);
+  assert.equal(session.state.players.north.avatar.tapped, true);
+  take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+    && descriptor.cardId === 'sword-and-shield'
+    && descriptor.casterInstanceId === session.state.players.north.avatar.card.instanceId
+    && descriptor.cell === 'C4'
+    && descriptor.bearer === undefined);
+  take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+    && descriptor.cardId === 'sword-and-shield'
+    && descriptor.casterInstanceId === session.state.players.north.avatar.card.instanceId
+    && descriptor.cell === 'C4'
+    && descriptor.bearer === undefined);
+
+  const surfaceArtifacts = (session.state.realm.artifacts ?? [])
+    .flatMap((artifact) => 'bearer' in artifact ? [] : [artifact]);
+  assert.equal(surfaceArtifacts.length, 2);
+  const artifactInstanceIds = surfaceArtifacts.map(({ instanceId }) => instanceId).sort();
+  const pickupDescriptors = (checkpoint: GameSession) =>
+    legalGameActions(checkpoint.state, checkpoint.state.decisionSeat)
+      .flatMap(({ descriptor }) => descriptor.kind === 'pick-up-artifacts' ? [descriptor] : []);
+  const expectedSubsets = [
+    artifactInstanceIds[0],
+    artifactInstanceIds[1],
+    artifactInstanceIds.join(','),
+  ].sort();
+  const initialPickups = pickupDescriptors(session);
+  assert.equal(initialPickups.length, 6);
+  assert.deepEqual(initialPickups
+    .filter(({ unit }) => unit.kind === 'avatar')
+    .map(({ artifactInstanceIds: ids }) => ids.join(','))
+    .sort(), expectedSubsets);
+  assert.deepEqual(initialPickups
+    .filter(({ unit }) => unit.kind === 'minion')
+    .map(({ artifactInstanceIds: ids }) => ids.join(','))
+    .sort(), expectedSubsets);
+  assert.equal(initialPickups.every(({ artifactInstanceIds: ids }) =>
+    ids.length > 0 && canonicalJson(ids) === canonicalJson([...ids].sort())), true);
+
+  const remoteId = 'sha256:2222222222222222222222222222222222222222222222222222222222222222' as const;
+  const underwaterId = 'sha256:3333333333333333333333333333333333333333333333333333333333333333' as const;
+  const carriedId = 'sha256:4444444444444444444444444444444444444444444444444444444444444444' as const;
+  const firstArtifact = surfaceArtifacts.find(({ instanceId }) =>
+    instanceId === artifactInstanceIds[0])!;
+  const filteredCheckpoint: GameSession = {
+    ...session,
+    state: {
+      ...session.state,
+      realm: {
+        ...session.state.realm,
+        artifacts: [
+          ...surfaceArtifacts.map((artifact) => artifact.instanceId === artifactInstanceIds[0]
+            ? { ...artifact, owner: 'south' as const }
+            : artifact),
+          { ...firstArtifact, instanceId: remoteId, location: 'C3' as const },
+          { ...firstArtifact, instanceId: underwaterId, region: 'underwater' as const },
+          {
+            bearer: {
+              instanceId: session.state.players.north.avatar.card.instanceId,
+              kind: 'avatar' as const,
+              seat: 'north' as const,
+            },
+            cardId: firstArtifact.cardId,
+            instanceId: carriedId,
+            owner: firstArtifact.owner,
+            source: firstArtifact.source,
+          },
+        ],
+        units: session.state.realm.units.map((unit) => unit.instanceId === bearer.instanceId
+          ? { ...unit, tapped: true }
+          : unit),
+      },
+    },
+  };
+  const filteredPickups = pickupDescriptors(filteredCheckpoint);
+  assert.equal(filteredPickups.length, 6);
+  assert.equal(filteredPickups.every(({ artifactInstanceIds: ids }) =>
+    ids.every((instanceId) => artifactInstanceIds.includes(instanceId))), true);
+  const enemyOwnedPick = stepGame(filteredCheckpoint, action(filteredCheckpoint, ({ descriptor }) =>
+    descriptor.kind === 'pick-up-artifacts'
+      && descriptor.unit.kind === 'minion'
+      && descriptor.artifactInstanceIds.length === 1
+      && descriptor.artifactInstanceIds[0] === artifactInstanceIds[0]));
+  assert.equal(enemyOwnedPick.accepted, true);
+  if (!enemyOwnedPick.accepted) throw new Error('expected enemy-owned Artifact Pick Up to be accepted');
+  assert.equal(enemyOwnedPick.session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === artifactInstanceIds[0])?.owner, 'south');
+  assert.equal(enemyOwnedPick.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === bearer.instanceId)?.tapped, true);
+
+  const disabledCheckpoint: GameSession = {
+    ...session,
+    state: {
+      ...session.state,
+      realm: {
+        ...session.state.realm,
+        units: session.state.realm.units.map((unit) => unit.instanceId === bearer.instanceId
+          ? {
+            ...unit,
+            disableEffects: [{ expiresAtSeat: 'south' as const, sourceInstanceId: unit.instanceId }],
+          }
+          : unit),
+      },
+    },
+  };
+  assert.deepEqual(pickupDescriptors(disabledCheckpoint).map(({ unit }) => unit.kind),
+    ['avatar', 'avatar', 'avatar']);
+
+  const beforeForge = hashGameState(session.state);
+  const forged = stepGame(session, {
+    actionId: 'sha256:9999999999999999999999999999999999999999999999999999999999999999',
+    seat: 'north',
+    stateVersion: session.state.stateVersion,
+  });
+  assert.equal(forged.accepted, false);
+  assert.equal(forged.reason.code, 'unknown_action');
+  assert.equal(hashGameState(forged.session.state), beforeForge);
+
+  const manaBeforePickUp = session.state.players.north.mana;
+  const picked = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'pick-up-artifacts'
+      && descriptor.unit.kind === 'minion'
+      && descriptor.artifactInstanceIds.length === 1
+      && descriptor.artifactInstanceIds[0] === artifactInstanceIds[0]));
+  assert.equal(picked.accepted, true);
+  if (!picked.accepted) throw new Error('expected Artifact Pick Up to be accepted');
+  session = picked.session;
+  assert.deepEqual(picked.receipt.events.map(({ payload, type }) => ({ payload, type })), [{
+    payload: {
+      artifactInstanceIds: [artifactInstanceIds[0]],
+      seat: 'north',
+      unitInstanceId: bearer.instanceId,
+      unitKind: 'minion',
+    },
+    type: 'artifacts-picked-up',
+  }]);
+  assert.deepEqual(picked.receipt.randomDraws, []);
+  assert.equal(session.state.players.north.mana, manaBeforePickUp);
+  assert.equal(session.state.players.north.avatar.tapped, true);
+  assert.deepEqual(session.state.realm.units
+    .filter(({ instanceId }) => instanceId === bearer.instanceId)
+    .map(({ stealthed, summoningSickness, tapped }) => ({ stealthed, summoningSickness, tapped })), [{
+    stealthed: true,
+    summoningSickness: true,
+    tapped: false,
+  }]);
+  assert.equal(session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === artifactInstanceIds[0])?.owner, 'north');
+  assert.equal(pickupDescriptors(session).some(({ unit }) => unit.kind === 'minion'), false);
+  assert.equal(pickupDescriptors(session).some(({ unit }) => unit.kind === 'avatar'), true);
+  let northView = observeGame(session.state, 'north');
+  assert.equal(northView.realm.units.find(({ instanceId }) =>
+    instanceId === bearer.instanceId)?.attack, 3);
+
   take(({ descriptor }) => descriptor.kind === 'end-turn');
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
   take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
   take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
-
-  const casts = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
-    descriptor.kind === 'cast-artifact' && descriptor.cardId === 'sword-and-shield');
-  assert.equal(casts.length, 4);
-  assert.deepEqual(casts.flatMap(({ descriptor }) =>
-    descriptor.kind === 'cast-artifact' && descriptor.cell ? [descriptor.cell] : []).sort(), ['C3', 'C4']);
-  assert.deepEqual(casts.flatMap(({ descriptor }) =>
-    descriptor.kind === 'cast-artifact' && descriptor.bearer ? [descriptor.bearer.kind] : []).sort(),
-  ['avatar', 'minion']);
-  assert.equal(casts.some(({ descriptor }) =>
-    descriptor.kind === 'cast-artifact' && descriptor.bearer?.seat === 'south'), false);
-
-  const spellbookHandBeforeCast = session.state.players.north.hand.spellbook.length;
-  const castAction = action(session, ({ descriptor }) =>
-    descriptor.kind === 'cast-artifact'
-      && descriptor.bearer?.instanceId === bearer.instanceId);
-  const castInstanceId = castAction.descriptor.kind === 'cast-artifact'
-    ? castAction.descriptor.cardInstanceId
-    : '';
-  const cast = stepGame(session, castAction);
-  assert.equal(cast.accepted, true);
-  session = cast.session;
-  assert.deepEqual(cast.receipt.events.map(({ type }) => type), ['artifact-conjured']);
-  assert.equal(session.state.players.north.mana, 5);
-  assert.equal(session.state.players.north.hand.spellbook.length, spellbookHandBeforeCast - 1);
-  assert.equal(session.state.players.north.hand.spellbook.some(({ instanceId }) => instanceId === castInstanceId), false);
-  let northView = observeGame(session.state, 'north');
-  assert.deepEqual(northView.realm.artifacts?.map((artifact) => ({
-    bearer: artifact.bearer?.instanceId,
-    controller: artifact.controller,
-    location: artifact.location,
-    region: artifact.region,
-  })), [{ bearer: bearer.instanceId, controller: 'north', location: 'C4', region: 'surface' }]);
+  assert.equal(pickupDescriptors(session).some(({ unit }) => unit.kind === 'minion'), true);
+  const pickedAgain = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'pick-up-artifacts'
+      && descriptor.unit.instanceId === bearer.instanceId
+      && descriptor.artifactInstanceIds.length === 1
+      && descriptor.artifactInstanceIds[0] === artifactInstanceIds[1]));
+  assert.equal(pickedAgain.accepted, true);
+  if (!pickedAgain.accepted) throw new Error('expected next-turn Artifact Pick Up to be accepted');
+  session = pickedAgain.session;
+  assert.deepEqual(pickedAgain.receipt.randomDraws, []);
+  northView = observeGame(session.state, 'north');
   const observedBearer = northView.realm.units.find(({ instanceId }) => instanceId === bearer.instanceId);
-  assert.equal(observedBearer?.attack, 3);
-  assert.equal(observedBearer?.defense, 3);
+  assert.equal(observedBearer?.attack, 5);
+  assert.equal(observedBearer?.defense, 5);
 
+  take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+    && descriptor.cardId === 'sword-and-shield'
+    && descriptor.casterInstanceId === bearer.instanceId
+    && descriptor.cell === 'C3'
+    && descriptor.bearer === undefined);
+  assert.equal(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === bearer.instanceId)?.stealthed, false);
   take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === bearer.instanceId && descriptor.to.cell === 'C3');
   northView = observeGame(session.state, 'north');
-  assert.equal(northView.realm.artifacts?.[0]?.location, 'C3');
+  assert.deepEqual(northView.realm.artifacts?.map(({ bearer: artifactBearer, controller, location, region }) => ({
+    bearer: artifactBearer?.instanceId,
+    controller,
+    location,
+    region,
+  })), [
+    { bearer: bearer.instanceId, controller: 'north', location: 'C3', region: 'surface' },
+    { bearer: bearer.instanceId, controller: 'north', location: 'C3', region: 'surface' },
+    { bearer: undefined, controller: null, location: 'C3', region: 'surface' },
+  ]);
   take(({ descriptor }) => descriptor.kind === 'decline-attack');
   take(({ descriptor }) => descriptor.kind === 'end-turn');
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
@@ -9079,21 +9238,23 @@ test('RULE-03/04 a carried Artifact follows its bearer, grants power, and drops 
   assert.equal(fought.accepted, true);
   session = fought.session;
   const events = fought.receipt.events;
-  const swordDamage = events.find(({ payload, type }) => type === 'damage-dealt'
-    && canonicalJson(payload).includes(enemy.instanceId));
-  assert.ok(swordDamage);
-  assert.match(canonicalJson(swordDamage.payload), /"amount":3/);
-  const dropIndex = events.findIndex(({ type }) => type === 'artifact-dropped');
+  const dropIndexes = events.flatMap(({ type }, index) => type === 'artifact-dropped' ? [index] : []);
   const deathIndex = events.findIndex(({ payload, type }) => type === 'minion-died'
     && canonicalJson(payload).includes(bearer.instanceId));
-  assert.ok(dropIndex >= 0 && dropIndex < deathIndex);
+  assert.equal(dropIndexes.length, 2);
+  assert.equal(dropIndexes.every((index) => index < deathIndex), true);
   northView = observeGame(session.state, 'north');
   assert.deepEqual(northView.realm.artifacts?.map((artifact) => ({
     bearer: artifact.bearer,
     controller: artifact.controller,
     location: artifact.location,
+    owner: artifact.owner,
     region: artifact.region,
-  })), [{ bearer: undefined, controller: null, location: 'C3', region: 'surface' }]);
+  })), [
+    { bearer: undefined, controller: null, location: 'C3', owner: 'north', region: 'surface' },
+    { bearer: undefined, controller: null, location: 'C3', owner: 'north', region: 'surface' },
+    { bearer: undefined, controller: null, location: 'C3', owner: 'north', region: 'surface' },
+  ]);
   assert.equal(session.state.players.north.cemetery.some(({ instanceId }) => instanceId === bearer.instanceId), true);
   assert.equal(session.state.players.north.cemetery.some(({ cardId }) => cardId === 'sword-and-shield'), false);
   assert.equal(verifyGameReplay(session), true);
