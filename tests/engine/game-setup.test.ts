@@ -10337,6 +10337,126 @@ test('RULE-04 Pick Up and Drop manage local carried Artifacts once per unit turn
   assert.equal(verifyGameReplay(session), true);
 });
 
+test('RULE-04 dropping a power Artifact immediately kills a lethally wounded bearer', () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const north: GameDeckSpec = {
+    atlas: Array(3).fill('drop-north-site'),
+    avatar: 'drop-north-avatar',
+    spellbook: ['drop-bearer', 'drop-sword', 'drop-static-servant'],
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(3).fill('drop-south-site'),
+    avatar: 'drop-south-avatar',
+    spellbook: Array(3).fill('drop-south-minion'),
+  };
+  const cards: Record<string, GameCardDefinition> = {
+    'drop-bearer': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'drop-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'drop-north-site': { cardType: 'site', elements: [] },
+    'drop-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'drop-south-minion': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'drop-south-site': { cardType: 'site', elements: [] },
+    'drop-static-servant': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      genesisDamageEachOtherUnitHere: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'drop-sword': {
+      cardType: 'artifact',
+      grantsBearerPower: 2,
+      manaCost: 0,
+      thresholds,
+    },
+  };
+  let session = keep(createGameSession(createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic',
+      revisionId: 'synthetic-drop-state-based-death-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north',
+    seed: 214,
+  })));
+  session = keep(session);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cardId === 'drop-bearer'));
+  const bearer = session.state.realm.units.find(({ cardId }) => cardId === 'drop-bearer');
+  assert.ok(bearer);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-artifact'
+      && descriptor.cardId === 'drop-sword'
+      && descriptor.bearer?.instanceId === bearer.instanceId));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cardId === 'drop-static-servant'));
+  assert.deepEqual(observeGame(session.state, 'north').realm.units
+    .filter(({ instanceId }) => instanceId === bearer.instanceId)
+    .map(({ damage, defense }) => ({ damage, defense })), [{ damage: 1, defense: 3 }]);
+
+  const beforeDropVersion = session.state.stateVersion;
+  const dropped = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'drop-artifacts'
+      && descriptor.unit.instanceId === bearer.instanceId
+      && descriptor.artifactInstanceIds.length === 1));
+  assert.equal(dropped.accepted, true);
+  if (!dropped.accepted) return;
+  session = dropped.session;
+
+  assert.equal(session.state.stateVersion, beforeDropVersion + 1);
+  assert.deepEqual(dropped.receipt.events.map(({ type }) => type), [
+    'artifacts-dropped',
+    'minion-died',
+  ]);
+  assert.deepEqual(dropped.receipt.randomDraws, []);
+  assert.equal(session.state.realm.units.some(({ instanceId }) => instanceId === bearer.instanceId), false);
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === bearer.instanceId), true);
+  assert.deepEqual(observeGame(session.state, 'north').realm.artifacts?.map((artifact) => ({
+    bearer: artifact.bearer,
+    controller: artifact.controller,
+    location: artifact.location,
+    owner: artifact.owner,
+    region: artifact.region,
+  })), [{
+    bearer: undefined,
+    controller: null,
+    location: 'C4',
+    owner: 'north',
+    region: 'surface',
+  }]);
+  assert.equal(verifyGameReplay(session), true);
+});
+
 test('RULE-04 a carried Lethal Artifact kills on positive strike damage and drops with its bearer', () => {
   const north: GameDeckSpec = {
     atlas: Array(4).fill('dagger-north-site'),
