@@ -28,6 +28,7 @@ import {
   type GameSeat,
   type GameSession,
 } from '../engine/game.ts';
+import { runCounterfactualRollouts } from '../simulator/counterfactual.ts';
 
 function ruleTextDigest(rulesText: string): Hash {
   return identityHash(rulesText as JsonValue);
@@ -588,6 +589,7 @@ export type PrivateGameCheck = Readonly<{
   }>;
   earthHumbleVillage: Readonly<{
     acceptedActionCount: number;
+    counterfactualRootCoverage: boolean;
     deck: DeckList;
     declinedKeptManaAndSummonedNothing: boolean;
     exactChoices: boolean;
@@ -9189,7 +9191,8 @@ function runEarthHumbleVillage(
 ): PrivateGameCheck['earthHumbleVillage'] {
   const opening = findEarthHumbleVillageOpening(input);
   const checkpoint = keep(keep(opening.session));
-  const choices = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+  const rootActions = legalGameActions(checkpoint.state, 'north');
+  const choices = rootActions.filter(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.humbleVillageInstanceId
       && descriptor.cell === 'C4');
@@ -9214,6 +9217,18 @@ function runEarthHumbleVillage(
   const exactChoices = choices.length === 2
     && declined.actionId !== paid.actionId
     && new Set(choices.map(({ label }) => label)).size === 2;
+  const counterfactual = runCounterfactualRollouts(checkpoint, 0);
+  const counterfactualRootCoverage = counterfactual.status === 'complete'
+    && counterfactual.rootActionCount === rootActions.length
+    && counterfactual.branches.length === rootActions.length
+    && counterfactual.branches.every((branch, index) =>
+      branch.rootActionId === rootActions[index]?.actionId
+        && branch.outcome === 'unknown'
+        && branch.reason === 'horizon'
+        && branch.decisionCount === 1)
+    && choices.every(({ actionId }) => counterfactual.branches.some((branch) =>
+      branch.rootActionId === actionId))
+    && counterfactual.recommendation === null;
   const declinedKeptManaAndSummonedNothing = declinedSession.state.players.north.mana === 1
     && declinedSession.state.players.north.domainEstablished
     && declinedSession.state.players.north.avatar.tapped
@@ -9279,6 +9294,7 @@ function runEarthHumbleVillage(
 
   return Object.freeze({
     acceptedActionCount: paidSession.transcript.length,
+    counterfactualRootCoverage,
     deck: deckList(opening.manifest.decks.north, opening.names),
     declinedKeptManaAndSummonedNothing,
     exactChoices,

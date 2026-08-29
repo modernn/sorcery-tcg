@@ -1530,6 +1530,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthHumbleVillage.footSoldier, 'Foot Soldier');
   assert.equal(result.earthHumbleVillage.seed, 7383);
   assert.equal(result.earthHumbleVillage.acceptedActionCount, 3);
+  assert.equal(result.earthHumbleVillage.counterfactualRootCoverage, true);
   assert.equal(result.earthHumbleVillage.exactChoices, true);
   assert.equal(result.earthHumbleVillage.declinedKeptManaAndSummonedNothing, true);
   assert.equal(result.earthHumbleVillage.paidSpentManaAndSummonedToken, true);
