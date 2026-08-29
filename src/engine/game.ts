@@ -37,7 +37,15 @@ const REALM_CELLS = (['A', 'B', 'C', 'D', 'E'] as const)
   .flatMap((file) => ([1, 2, 3, 4] as const).map((rank) => `${file}${rank}` as RealmCell));
 
 export type GameCardDefinition =
-  | Readonly<{ attack: number; cardType: 'avatar'; defense: number; drawSpell: boolean; life: number }>
+  | Readonly<{
+    attack: number;
+    cardType: 'avatar';
+    defense: number;
+    drawSpell: boolean;
+    earthSitePlayCreatesAdjacentRubble?: true;
+    life: number;
+    replaceAdjacentRubbleWithTopAtlasSite?: true;
+  }>
   | Readonly<{
     cardType: 'artifact';
     grantsBearerLethal?: never;
@@ -249,6 +257,12 @@ type PendingGenesisSpell = Readonly<{
   sourceInstanceId: StateHash;
 }>;
 
+type PendingGenesisToken = Readonly<{
+  cell: RealmCell;
+  seat: GameSeat;
+  sourceInstanceId: StateHash;
+}>;
+
 type PlayerState = Readonly<{
   atlas: readonly CardInstance[];
   avatar: Readonly<{
@@ -292,6 +306,7 @@ export type GameState = Readonly<{
   engine: EngineState;
   pendingCombat: PendingCombat | null;
   pendingGenesisSpell?: PendingGenesisSpell | null;
+  pendingGenesisToken?: PendingGenesisToken | null;
   phase: 'allocate' | 'attack' | 'defend' | 'draw' | 'genesis' | 'intercept' | 'main' | 'mulligan' | 'terminal';
   players: Readonly<Record<GameSeat, PlayerState>>;
   realm: Readonly<{
@@ -401,8 +416,19 @@ type GameActionDescriptor =
     cardId: string;
     cardInstanceId: string;
     cell: RealmCell;
-    genesisTokenChoice?: 'decline' | 'pay-one-mana';
+    createRubbleAt?: RealmCell;
+    fromTopAtlas?: true;
+    genesisTokenChoice?: 'decline' | 'defer' | 'pay-one-mana';
     kind: 'play-site';
+  }>
+  | Readonly<{
+    kind: 'replace-rubble-with-top-atlas-site';
+    targetCell: RealmCell;
+    targetRubbleInstanceId: StateHash;
+  }>
+  | Readonly<{
+    choice: 'decline' | 'pay-one-mana';
+    kind: 'resolve-genesis-token';
   }>
   | Readonly<{
     choice: 'bottom-next' | 'keep-next';
@@ -1034,6 +1060,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   const elements: readonly GameElement[] = ['earth', 'fire', 'water', 'air'];
   if (card.cardType === 'avatar') {
     if (typeof card.drawSpell !== 'boolean') throw new RangeError(`${path}.drawSpell must be boolean`);
+    if (card.earthSitePlayCreatesAdjacentRubble !== undefined
+      && card.earthSitePlayCreatesAdjacentRubble !== true) {
+      throw new RangeError(`${path}.earthSitePlayCreatesAdjacentRubble must be true when defined`);
+    }
+    if (card.replaceAdjacentRubbleWithTopAtlasSite !== undefined
+      && card.replaceAdjacentRubbleWithTopAtlasSite !== true) {
+      throw new RangeError(`${path}.replaceAdjacentRubbleWithTopAtlasSite must be true when defined`);
+    }
     for (const field of ['attack', 'defense', 'life'] as const) {
       if (!Number.isSafeInteger(card[field])
         || card[field] < (field === 'life' ? 1 : 0)
@@ -1571,7 +1605,13 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
           cardType: 'avatar' as const,
           defense: card.defense,
           drawSpell: card.drawSpell,
+          ...(card.earthSitePlayCreatesAdjacentRubble === true
+            ? { earthSitePlayCreatesAdjacentRubble: true as const }
+            : {}),
           life: card.life,
+          ...(card.replaceAdjacentRubbleWithTopAtlasSite === true
+            ? { replaceAdjacentRubbleWithTopAtlasSite: true as const }
+            : {}),
         }
         : card.cardType === 'artifact'
           ? {
@@ -2709,6 +2749,14 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
   if (state.phase === 'mulligan') return mulliganDescriptors(player);
   if (state.phase === 'draw') return [{ kind: 'draw', zone: 'atlas' }, { kind: 'draw', zone: 'spellbook' }];
   if (state.phase === 'genesis') {
+    if (state.pendingGenesisToken?.seat === seat) {
+      return [
+        { choice: 'decline', kind: 'resolve-genesis-token' },
+        ...(player.mana > 0
+          ? [{ choice: 'pay-one-mana' as const, kind: 'resolve-genesis-token' as const }]
+          : []),
+      ];
+    }
     if (!state.pendingGenesisSpell
       || state.pendingGenesisSpell.seat !== seat
       || player.spellbook.length === 0) {
@@ -2777,25 +2825,50 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
       targetInstanceId: target.instanceId,
     }));
   }
+  const avatarDefinition = cardDefinition(state, player.avatar.card.cardId);
+  if (avatarDefinition.cardType !== 'avatar') throw new Error('player Avatar lacks Avatar definition');
   const siteDescriptors = (cells: readonly RealmCell[]): readonly GameActionDescriptor[] =>
     player.hand.atlas.flatMap(({ cardId, instanceId }) => cells.flatMap((cell) => {
       const base = { cardId, cardInstanceId: instanceId, cell, kind: 'play-site' as const };
       const definition = cardDefinition(state, cardId);
-      if (definition.cardType !== 'site') return [base];
-      if (definition.genesisPayOneManaToSummonToken !== undefined) {
-        return [
+      const choices = definition.cardType === 'site'
+        && definition.genesisPayOneManaToSummonToken !== undefined
+        ? [
           { ...base, genesisTokenChoice: 'decline' as const },
           { ...base, genesisTokenChoice: 'pay-one-mana' as const },
-        ];
-      }
-      return [base];
+        ]
+        : [base];
+      if (definition.cardType !== 'site'
+        || !definition.elements.includes('earth')
+        || avatarDefinition.earthSitePlayCreatesAdjacentRubble !== true) return choices;
+      const rubbleCells = borderingCells(player.avatar.location)
+        .filter((rubbleCell) => rubbleCell !== cell && state.realm.sites[rubbleCell] === undefined);
+      return rubbleCells.length === 0
+        ? choices
+        : choices.flatMap((choice) => rubbleCells.map((createRubbleAt) => ({
+          ...choice,
+          createRubbleAt,
+        })));
     }));
   if (!player.domainEstablished) return siteDescriptors([player.avatar.location]);
   const cells = player.avatar.tapped ? [] : legalSiteCells(state, seat);
-  const avatarDefinition = cardDefinition(state, player.avatar.card.cardId);
-  if (avatarDefinition.cardType !== 'avatar') throw new Error('player Avatar lacks Avatar definition');
+  const rubbleReplacementDescriptors: readonly GameActionDescriptor[] = player.avatar.tapped
+    || avatarDefinition.replaceAdjacentRubbleWithTopAtlasSite !== true
+    || player.atlas.length === 0
+    ? []
+    : borderingCells(player.avatar.location).flatMap((cell) => {
+      const site = state.realm.sites[cell];
+      return site && isRubble(site)
+        ? [{
+          kind: 'replace-rubble-with-top-atlas-site' as const,
+          targetCell: cell,
+          targetRubbleInstanceId: site.instanceId,
+        }]
+        : [];
+    });
   return [
     ...siteDescriptors(cells),
+    ...rubbleReplacementDescriptors,
     ...(player.avatar.tapped ? [] : [{ kind: 'draw-site' as const }]),
     ...(!player.avatar.tapped && avatarDefinition.drawSpell ? [{ kind: 'draw-spell' as const }] : []),
     ...summonDescriptors(state, seat),
@@ -2823,6 +2896,20 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
   if (descriptor.kind === 'draw') return `Draw from ${descriptor.zone}`;
   if (descriptor.kind === 'draw-site') return 'Draw a site with Avatar';
   if (descriptor.kind === 'draw-spell') return 'Draw a spell with Avatar';
+  if (descriptor.kind === 'replace-rubble-with-top-atlas-site') {
+    return `Replace Rubble at ${descriptor.targetCell} with the top site of your Atlas`;
+  }
+  if (descriptor.kind === 'resolve-genesis-token') {
+    const pending = state.pendingGenesisToken;
+    const source = pending && state.realm.sites[pending.cell];
+    const definition = source && !isRubble(source) ? cardDefinition(state, source.cardId) : undefined;
+    const token = definition?.cardType === 'site'
+      ? definition.genesisPayOneManaToSummonToken
+      : undefined;
+    return descriptor.choice === 'pay-one-mana'
+      ? `Pay 1 to summon ${token ?? 'the Genesis token'}`
+      : 'Decline the optional Genesis token';
+  }
   if (descriptor.kind === 'play-site') {
     const definition = cardDefinition(state, descriptor.cardId);
     const choice = definition.cardType === 'site'
@@ -2831,7 +2918,9 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
         ? ' (pay 1 for Genesis)'
         : ' (decline Genesis)'
       : '';
-    return `Play ${descriptor.cardId} at ${descriptor.cell}${choice}`;
+    return `Play ${descriptor.cardId} at ${descriptor.cell}${choice}`
+      + (descriptor.createRubbleAt ? ` — create Rubble at ${descriptor.createRubbleAt}` : '')
+      + (descriptor.fromTopAtlas ? ' from the top of your Atlas' : '');
   }
   if (descriptor.kind === 'resolve-genesis-spell') {
     const nextSpell = state.players[state.decisionSeat].spellbook[0];
@@ -4081,15 +4170,104 @@ function applyDescriptor(
     ];
   }
 
+  if (descriptor.kind === 'resolve-genesis-token') {
+    const pending = state.pendingGenesisToken;
+    const source = pending && state.realm.sites[pending.cell];
+    const definition = source && !isRubble(source) ? cardDefinition(state, source.cardId) : undefined;
+    const tokenCardId = definition?.cardType === 'site'
+      ? definition.genesisPayOneManaToSummonToken
+      : undefined;
+    if (state.phase !== 'genesis'
+      || !pending
+      || pending.seat !== seat
+      || !source
+      || isRubble(source)
+      || source.instanceId !== pending.sourceInstanceId
+      || !tokenCardId
+      || descriptor.choice === 'pay-one-mana' && player.mana < 1) {
+      throw new Error('unreachable illegal Genesis token choice');
+    }
+    const token = descriptor.choice === 'pay-one-mana'
+      ? tokenUnit(state, seat, tokenCardId, source.instanceId, pending.cell, 0)
+      : undefined;
+    return [
+      withStateVersion(state, {
+        pendingGenesisToken: null,
+        phase: state.pendingGenesisSpell ? 'genesis' : 'main',
+        players: token
+          ? replacePlayer(state, seat, deepFreeze({ ...player, mana: player.mana - 1 }))
+          : state.players,
+        realm: token
+          ? deepFreeze({ ...state.realm, units: [...state.realm.units, token] })
+          : state.realm,
+      }),
+      token
+        ? [{
+          payload: {
+            cardId: token.cardId,
+            cell: token.location,
+            instanceId: token.instanceId,
+            manaPaid: 1,
+            owner: token.owner,
+            seat: token.controller,
+            sourceInstanceId: source.instanceId,
+            token: true,
+          },
+          type: 'minion-summoned',
+        }]
+        : [],
+      [],
+    ];
+  }
+
+  if (descriptor.kind === 'replace-rubble-with-top-atlas-site') {
+    const avatarDefinition = cardDefinition(state, player.avatar.card.cardId);
+    const target = state.realm.sites[descriptor.targetCell];
+    const card = player.atlas[0];
+    const definition = card && cardDefinition(state, card.cardId);
+    if (avatarDefinition.cardType !== 'avatar'
+      || avatarDefinition.replaceAdjacentRubbleWithTopAtlasSite !== true
+      || player.avatar.tapped
+      || !target
+      || !isRubble(target)
+      || target.instanceId !== descriptor.targetRubbleInstanceId
+      || !borderingCells(player.avatar.location).includes(descriptor.targetCell)
+      || !card
+      || definition?.cardType !== 'site') {
+      throw new Error('unreachable illegal Rubble replacement');
+    }
+    return applyDescriptor(state, {
+      cardId: card.cardId,
+      cardInstanceId: card.instanceId,
+      cell: descriptor.targetCell,
+      fromTopAtlas: true,
+      ...(definition.genesisPayOneManaToSummonToken
+        ? { genesisTokenChoice: 'defer' as const }
+        : {}),
+      kind: 'play-site',
+    }, manifest);
+  }
+
   if (descriptor.kind === 'play-site') {
-    const card = player.hand.atlas.find(({ cardId, instanceId }) =>
-      instanceId === descriptor.cardInstanceId && cardId === descriptor.cardId);
-    if (!card) throw new Error('unreachable site card');
+    const avatarDefinition = cardDefinition(state, player.avatar.card.cardId);
+    if (avatarDefinition.cardType !== 'avatar') throw new Error('player Avatar lacks Avatar definition');
+    const card = descriptor.fromTopAtlas
+      ? player.atlas[0]
+      : player.hand.atlas.find(({ cardId, instanceId }) =>
+        instanceId === descriptor.cardInstanceId && cardId === descriptor.cardId);
+    if (card?.instanceId !== descriptor.cardInstanceId || card.cardId !== descriptor.cardId) {
+      throw new Error('unreachable site card');
+    }
     const definition = cardDefinition(state, card.cardId);
     if (definition.cardType !== 'site') throw new Error('unreachable non-site card');
     const previousSite = state.realm.sites[descriptor.cell];
     const replacingRubble = previousSite !== undefined && isRubble(previousSite);
-    const legalCell = !player.domainEstablished
+    const legalCell = descriptor.fromTopAtlas
+      ? !player.avatar.tapped
+        && avatarDefinition.replaceAdjacentRubbleWithTopAtlasSite === true
+        && replacingRubble
+        && borderingCells(player.avatar.location).includes(descriptor.cell)
+      : !player.domainEstablished
       ? !player.avatar.tapped
         && descriptor.cell === player.avatar.location
         && (!previousSite || replacingRubble)
@@ -4115,11 +4293,14 @@ function applyDescriptor(
       domainEstablished: true,
       hand: {
         ...player.hand,
-        atlas: player.hand.atlas.filter(({ instanceId }) => instanceId !== card.instanceId),
+        atlas: descriptor.fromTopAtlas
+          ? player.hand.atlas
+          : player.hand.atlas.filter(({ instanceId }) => instanceId !== card.instanceId),
         spellbook: [...player.hand.spellbook, ...genesisSpellDraws],
       },
       mana: player.mana + 1 + (definition.genesisGainMana ?? 0)
         - Number(descriptor.genesisTokenChoice === 'pay-one-mana'),
+      atlas: descriptor.fromTopAtlas ? player.atlas.slice(1) : player.atlas,
       spellbook: player.spellbook.slice(genesisSpellDraws.length + genesisSpellDiscards.length),
     });
     const winner = otherSeat(seat);
@@ -4186,12 +4367,20 @@ function applyDescriptor(
       && settlement.state.players[seat].spellbook.length > 0
       ? deepFreeze({ seat, sourceInstanceId: card.instanceId })
       : undefined;
-    return [
-      withStateVersion(state, {
+    const pendingGenesisToken = terminal.status === 'active'
+      && descriptor.genesisTokenChoice === 'defer'
+      && definition.genesisPayOneManaToSummonToken !== undefined
+      ? deepFreeze({ cell: descriptor.cell, seat, sourceInstanceId: card.instanceId })
+      : undefined;
+    const resolvedState = deepFreeze({
         ...(terminal.status === 'finished'
           ? { phase: 'terminal' as const }
-          : pendingGenesisSpell
-            ? { pendingGenesisSpell, phase: 'genesis' as const }
+          : pendingGenesisToken || pendingGenesisSpell
+            ? {
+              ...(pendingGenesisSpell ? { pendingGenesisSpell } : {}),
+              ...(pendingGenesisToken ? { pendingGenesisToken } : {}),
+              phase: 'genesis' as const,
+            }
             : {}),
         players: settlement.state.players,
         realm: {
@@ -4199,7 +4388,45 @@ function applyDescriptor(
           units: [...genesisUnits, ...(genesisToken ? [genesisToken] : [])],
         },
         terminal,
-      }),
+      });
+    const createRubbleAt = terminal.status === 'active' ? descriptor.createRubbleAt : undefined;
+    const rubble = createRubbleAt
+      ? deepFreeze({
+        controller: null,
+        instanceId: identityHash(asJson({
+          cell: createRubbleAt,
+          kind: 'rubble',
+          sourceInstanceId: player.avatar.card.instanceId,
+          stateVersion: state.stateVersion,
+        })),
+        rubble: true as const,
+      })
+      : undefined;
+    const finalState = rubble && createRubbleAt
+      ? deepFreeze({
+        ...resolvedState,
+        realm: {
+          ...resolvedState.realm,
+          ...(resolvedState.realm.artifacts
+            ? {
+              artifacts: resolvedState.realm.artifacts.map((artifact) =>
+                !('bearer' in artifact)
+                  && artifact.location === createRubbleAt
+                  && artifact.region === 'void'
+                  ? deepFreeze({ ...artifact, region: 'surface' as const })
+                  : artifact),
+            }
+            : {}),
+          sites: { ...resolvedState.realm.sites, [createRubbleAt]: rubble },
+          units: resolvedState.realm.units.map((unit) =>
+            unit.location === createRubbleAt && unit.region === 'void'
+              ? deepFreeze({ ...unit, region: 'surface' as const })
+              : unit),
+        },
+      })
+      : resolvedState;
+    return [
+      withStateVersion(state, finalState),
       [
         ...(replacingRubble
           ? [{
@@ -4251,6 +4478,16 @@ function applyDescriptor(
         ...settlementOutcomes,
         ...(genesisDrawFailed
           ? [{ payload: { loser: seat, reason: 'deck_empty', winner }, type: 'game-ended' }]
+          : []),
+        ...(rubble && createRubbleAt
+          ? [{
+            payload: {
+              cell: createRubbleAt,
+              instanceId: rubble.instanceId,
+              sourceInstanceId: player.avatar.card.instanceId,
+            },
+            type: 'rubble-created',
+          }]
           : []),
       ],
       [],

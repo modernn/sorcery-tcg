@@ -166,6 +166,7 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
 
     const earthPreset = catalog.find(({ id }) => id === 'earth-starter');
     assert.ok(earthPreset);
+    assert.equal(earthPreset.cardNames[earthPreset.manifest.decks.north.avatar], 'Geomancer');
     current = await json('/api/reset', {
       body: JSON.stringify({
         opponent: 'manual',
@@ -176,8 +177,8 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
       method: 'POST',
     });
     const earthNames = current.cardNames as Record<string, string>;
-    const earthHand = ((((current.view as JsonObject).players as JsonObject)
-      .north as JsonObject).hand as JsonObject);
+    let earthNorth = (((current.view as JsonObject).players as JsonObject).north as JsonObject);
+    const earthHand = earthNorth.hand as JsonObject;
     const village = (earthHand.atlas as JsonObject[])
       .find(({ cardId }) => earthNames[cardId as string] === 'Humble Village');
     const boars = (earthHand.spellbook as JsonObject[])
@@ -193,12 +194,26 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
         && value.cardInstanceId === village.instanceId
         && value.cell === 'C4';
     });
-    assert.deepEqual(villageChoices.map(({ descriptor }) =>
-      (descriptor as JsonObject).genesisTokenChoice).sort(), ['decline', 'pay-one-mana']);
+    assert.deepEqual(villageChoices.map(({ descriptor }) => {
+      const value = descriptor as JsonObject;
+      return `${value.createRubbleAt}:${value.genesisTokenChoice}`;
+    }).sort(), [
+      'B4:decline',
+      'B4:pay-one-mana',
+      'C3:decline',
+      'C3:pay-one-mana',
+      'D4:decline',
+      'D4:pay-one-mana',
+    ]);
     assert.equal(villageChoices.every(({ label }) =>
       String(label).includes('Humble Village') && !/card:|sha256:/.test(String(label))), true);
-    const paidVillage = villageChoices.find(({ descriptor }) =>
-      (descriptor as JsonObject).genesisTokenChoice === 'pay-one-mana');
+    assert.equal(new Set(villageChoices.map(({ label }) => label)).size, 6);
+    assert.equal(villageChoices.every(({ descriptor, label }) =>
+      String(label).includes(`create Rubble at ${(descriptor as JsonObject).createRubbleAt}`)), true);
+    const paidVillage = villageChoices.find(({ descriptor }) => {
+      const value = descriptor as JsonObject;
+      return value.genesisTokenChoice === 'pay-one-mana' && value.createRubbleAt === 'C3';
+    });
     const declinedVillage = villageChoices.find(({ descriptor }) =>
       (descriptor as JsonObject).genesisTokenChoice === 'decline');
     assert.ok(paidVillage);
@@ -218,10 +233,50 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
     assert.equal(footSoldiers[0]!.location, 'C4');
     assert.equal(footSoldiers[0]!.controller, 'north');
     assert.deepEqual(((current.receipt as JsonObject).events as JsonObject[])
-      .map(({ type }) => type), ['site-played', 'minion-summoned']);
+      .map(({ type }) => type), ['site-played', 'minion-summoned', 'rubble-created']);
+    assert.equal(((paidRealm.sites as JsonObject).C3 as JsonObject).cardId, 'rubble');
     assert.equal((((paidView.players as JsonObject).north as JsonObject).mana), 0);
+
+    current = await submit(findAction(current, (descriptor) => descriptor.kind === 'end-turn'));
+    current = await json('/api/view?seat=south');
+    current = await submit(findAction(current, (descriptor) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    current = await submit(findAction(current, (descriptor) => descriptor.kind === 'play-site'));
+    current = await submit(findAction(current, (descriptor) => descriptor.kind === 'end-turn'));
+    const southBeforeReplacement = JSON.stringify(await json('/api/view?seat=south'));
+    current = await json('/api/view?seat=north');
+    current = await submit(findAction(current, (descriptor) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    earthNorth = (((current.view as JsonObject).players as JsonObject).north as JsonObject);
+    const atlasBefore = earthNorth.atlasCount as number;
+    const handBefore = ((earthNorth.hand as JsonObject).atlas as unknown[]).length;
+    const replaceRubble = findAction(current, (descriptor) =>
+      descriptor.kind === 'replace-rubble-with-top-atlas-site'
+        && descriptor.targetCell === 'C3');
+    assert.equal(replaceRubble.label,
+      'Replace Rubble at C3 with the top site of your Atlas');
+    assert.deepEqual(Object.keys(replaceRubble.descriptor as JsonObject).sort(), [
+      'kind',
+      'targetCell',
+      'targetRubbleInstanceId',
+    ]);
+    current = await submit(replaceRubble);
+    const replacement = current;
+    const replacementView = replacement.view as JsonObject;
+    const replacementNorth = ((replacementView.players as JsonObject).north as JsonObject);
+    const replacementSite = ((replacementView.realm as JsonObject).sites as JsonObject).C3 as JsonObject;
+    assert.equal(southBeforeReplacement.includes(String(replacementSite.instanceId)), false);
+    assert.equal(replacementNorth.atlasCount, atlasBefore - 1);
+    assert.equal(((replacementNorth.hand as JsonObject).atlas as unknown[]).length, handBefore);
+    assert.deepEqual(((replacement.receipt as JsonObject).events as JsonObject[])
+      .map(({ type }) => type), ['rubble-replaced', 'site-played']);
+    const deferredGenesis = replacementView.phase === 'genesis';
+    if (deferredGenesis) {
+      current = await submit(findAction(current, (descriptor) =>
+        descriptor.kind === 'resolve-genesis-token' && descriptor.choice === 'decline'));
+    }
     const villageReplay = await json('/api/replay', { method: 'POST' });
-    assert.equal(villageReplay.acceptedActionCount, 3);
+    assert.equal(villageReplay.acceptedActionCount, deferredGenesis ? 10 : 9);
     assert.equal(villageReplay.verified, true);
     assert.equal(villageReplay.finalStateHash, current.stateHash);
 

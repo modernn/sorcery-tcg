@@ -142,7 +142,13 @@ test('browser API switches injected starter presets and replays the selected mat
     authority: earthBase.authority,
     cards: Object.fromEntries(Object.entries(earthBase.cards).map(([cardId, card]) => [
       cardId,
-      cardId.startsWith('north-site-') && card.cardType === 'site'
+      cardId === 'north-avatar' && card.cardType === 'avatar'
+        ? {
+          ...card,
+          earthSitePlayCreatesAdjacentRubble: true as const,
+          replaceAdjacentRubbleWithTopAtlasSite: true as const,
+        }
+        : cardId.startsWith('north-site-') && card.cardType === 'site'
         ? { ...card, genesisMayBottomNextSpell: true as const }
         : card,
     ])),
