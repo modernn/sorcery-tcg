@@ -114,6 +114,29 @@ function assertVikings(result: PrivateGameCheck['fireVikings']): void {
   assert.equal(result.replayVerified, true);
 }
 
+function assertMesmerism(result: PrivateGameCheck['waterMesmerism']): void {
+  assert.equal(result.mesmerism, 'Mesmerism');
+  assert.equal(result.seravaTownsfolk, 'Serava Townsfolk');
+  assert.equal(result.acceptedActionCount, 31);
+  assert.equal(result.waterAffinityFour, true);
+  assert.equal(result.exactNearbyTarget, true);
+  assert.equal(result.farTargetUnavailable, true);
+  assert.equal(result.manaPaid, 4);
+  assert.equal(result.controlTransferred, true);
+  assert.equal(result.oldControllerHadAction, true);
+  assert.equal(result.newControllerGainedAction, true);
+  assert.equal(result.oldControllerLostAction, true);
+  assert.equal(result.causalEventsVerified, true);
+  assert.equal(result.noRandomDraws, true);
+  assert.equal(result.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.deck.atlas.find(({ name }) => name === 'Stream')?.copies, 4);
+  assert.equal(result.deck.spellbook.find(({ name }) => name === 'Mesmerism')?.copies, 1);
+  assert.equal(result.deck.spellbook
+    .find(({ name }) => name === 'Serava Townsfolk')?.copies, 4);
+  assert.equal(result.replayVerified, true);
+}
+
 function assertMinorExplosion(result: PrivateGameCheck['fireMinorExplosion']): void {
   assert.equal(result.minorExplosion, 'Minor Explosion');
   assert.equal(result.raalDromedary, 'Raal Dromedary');
@@ -1037,6 +1060,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.waterLure.deck.spellbook
     .find(({ name }) => name === 'Serava Townsfolk')?.copies, 4);
   assert.equal(result.waterLure.replayVerified, true);
+  assertMesmerism(result.waterMesmerism);
   assert.equal(result.waterPirateShip.pirateShip, 'Pirate Ship');
   assert.equal(result.waterPirateShip.ghostTown, 'Ghost Town');
   assert.equal(result.waterPirateShip.acceptedActionCount, 25);
