@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -21,11 +22,17 @@ import {
   type GameManifest,
   type GameSession,
 } from '../engine/game.ts';
+import {
+  createGameCheckpoint,
+  resumeGameCheckpoint,
+  type GameCheckpoint,
+} from '../engine/checkpoint.ts';
 
 const HOST = '127.0.0.1';
 const DEFAULT_PORT = 4174;
 const MAX_BODY_BYTES = 65_536;
 const MAX_OPPONENT_ACTIONS = 500;
+const MAX_SAVED_CHECKPOINTS = 32;
 
 type GameOpponent = 'manual' | 'south';
 
@@ -52,7 +59,7 @@ const PAGE = String.raw`<!doctype html>
 </head>
 <body>
   <header><div><div class="eyebrow">Authoritative rules checkpoint</div><h1>Sorcery Playable Core</h1></div><span class="badge" id="mode">Unranked · partial rules</span></header>
-  <form class="toolbar" id="reset-form"><label>Starter matchup<select id="preset" aria-label="Starter matchup"></select></label><label>Opponent<select id="opponent" aria-label="Opponent"><option value="south">South computer</option><option value="manual">Hot seat</option></select></label><label>Seed<input id="seed" inputmode="numeric" min="0" max="4294967295" step="1" value="1" required></label><button>Reset match</button><button type="button" id="replay">Verify replay</button><button type="button" id="stale" disabled>Resubmit stale</button><div class="seat-switch" role="group" aria-label="Observed seat"><button type="button" data-seat="north" aria-pressed="true">North</button><button type="button" data-seat="south" aria-pressed="false">South</button></div></form>
+  <form class="toolbar" id="reset-form"><label>Starter matchup<select id="preset" aria-label="Starter matchup"></select></label><label>Opponent<select id="opponent" aria-label="Opponent"><option value="south">South computer</option><option value="manual">Hot seat</option></select></label><label>Seed<input id="seed" inputmode="numeric" min="0" max="4294967295" step="1" value="1" required></label><button>Reset match</button><button type="button" id="save">Save position</button><button type="button" id="resume" disabled>Resume position</button><button type="button" id="replay">Verify replay</button><button type="button" id="stale" disabled>Resubmit stale</button><div class="seat-switch" role="group" aria-label="Observed seat"><button type="button" data-seat="north" aria-pressed="true">North</button><button type="button" data-seat="south" aria-pressed="false">South</button></div></form>
   <main class="layout">
     <section class="table" aria-label="Five by four realm">
       <article class="player south"><div><h2>South</h2><p id="south-stats"></p></div><div class="hand" id="south-hand"></div></article>
@@ -66,7 +73,7 @@ const PAGE = String.raw`<!doctype html>
     </aside>
   </main>
   <script>
-    var seat='north',snapshot,lastCommand;var byId=function(id){return document.getElementById(id)};
+    var seat='north',snapshot,lastCommand,savedPositionId;var byId=function(id){return document.getElementById(id)};
     async function request(path,options){var response=await fetch(path,options);var body=await response.json();if(!response.ok)throw new Error(body.error||('HTTP '+response.status));return body}
     function clearActionResult(){byId('notice').textContent='';byId('opponent-summary').textContent='';byId('receipt').textContent=''}
     function escapeHtml(value){return String(value).replace(/[&<>"']/g,function(character){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]})}
@@ -89,6 +96,8 @@ const PAGE = String.raw`<!doctype html>
     byId('preset').addEventListener('change',function(){var selected=snapshot.presets.find(function(preset){return preset.id===byId('preset').value});if(selected)byId('seed').value=String(selected.seed)});
     byId('reset-form').addEventListener('submit',async function(event){event.preventDefault();try{seat='north';lastCommand=undefined;syncSeatButtons();byId('stale').disabled=true;var data=await request('/api/reset',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({opponent:byId('opponent').value,presetId:byId('preset').value,seed:Number(byId('seed').value)})});clearActionResult();byId('notice').className='ok';byId('notice').textContent='Match reset';byId('receipt').textContent=JSON.stringify({stateHash:data.stateHash},null,2);render(data)}catch(error){showError(error)}});
     byId('stale').addEventListener('click',function(){if(lastCommand)submit(lastCommand.actionId,lastCommand)});
+    byId('save').addEventListener('click',async function(){try{var data=await request('/api/checkpoint',{method:'POST'});savedPositionId=data.saveId;byId('resume').disabled=false;clearActionResult();byId('notice').className='ok';byId('notice').textContent='Position saved at turn '+data.turnNumber;byId('receipt').textContent=JSON.stringify(data,null,2)}catch(error){showError(error)}});
+    byId('resume').addEventListener('click',async function(){if(!savedPositionId)return;try{var data=await request('/api/resume',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({saveId:savedPositionId,seat:seat})});lastCommand=undefined;byId('stale').disabled=true;clearActionResult();byId('notice').className='ok';byId('notice').textContent='Saved position restored';byId('receipt').textContent=JSON.stringify({saveId:savedPositionId,stateHash:data.stateHash},null,2);render(data)}catch(error){showError(error)}});
     byId('replay').addEventListener('click',async function(){try{var data=await request('/api/replay',{method:'POST'});clearActionResult();byId('notice').className=data.verified?'ok':'error';byId('notice').textContent=data.verified?'Replay byte-identical':'Replay mismatch';byId('receipt').textContent=JSON.stringify(data,null,2)}catch(error){showError(error)}});
     refresh().catch(showError);
   </script>
@@ -325,6 +334,12 @@ export function createGamePrototypeServer(
     selectedPreset.manifest,
     initialSeed ?? selectedPreset.manifest.seed,
   ));
+  // ponytail: same-process saves only; persist canonical checkpoints if restart survival is requested.
+  const checkpoints = new Map<string, Readonly<{
+    checkpoint: GameCheckpoint;
+    opponent: GameOpponent;
+    presetId: string;
+  }>>();
 
   function advanceOpponent(start: GameSession): Readonly<{
     count: number;
@@ -462,6 +477,42 @@ export function createGamePrototypeServer(
             ? { playerAction, receipt: result.receipt }
             : { reason: result.reason }),
         });
+      }
+      if (request.method === 'POST' && url.pathname === '/api/checkpoint') {
+        const saveId = randomUUID();
+        checkpoints.set(saveId, {
+          checkpoint: createGameCheckpoint(session),
+          opponent,
+          presetId: selectedPreset.id,
+        });
+        if (checkpoints.size > MAX_SAVED_CHECKPOINTS) {
+          checkpoints.delete(checkpoints.keys().next().value!);
+        }
+        return sendJson(response, 200, {
+          saveId,
+          stateHash: hashGameState(session.state),
+          turnNumber: session.state.turnNumber,
+        });
+      }
+      if (request.method === 'POST' && url.pathname === '/api/resume') {
+        const body = await readJson(request);
+        const seat = typeof body.seat === 'string' ? body.seat : null;
+        const saved = typeof body.saveId === 'string' ? checkpoints.get(body.saveId) : undefined;
+        if (!isSeat(seat) || !saved) {
+          return sendJson(response, 404, { error: 'saved position not found' });
+        }
+        if (saved.opponent === 'south' && seat === 'south') {
+          return sendJson(response, 403, {
+            error: 'south is hidden while controlled by the deterministic opponent',
+          });
+        }
+        const preset = presets.find(({ id }) => id === saved.presetId);
+        if (!preset) throw new Error('saved position preset is unavailable');
+        const restored = resumeGameCheckpoint(saved.checkpoint);
+        selectedPreset = preset;
+        opponent = saved.opponent;
+        session = restored;
+        return sendJson(response, 200, view(seat));
       }
       if (request.method === 'POST' && url.pathname === '/api/replay') {
         return sendJson(response, 200, {
