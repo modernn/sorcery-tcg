@@ -46,6 +46,25 @@ function assertHamlet(result: PrivateGameCheck['fireHamlet']): void {
   assert.equal(result.replayVerified, true);
 }
 
+function assertGranaryRats(result: PrivateGameCheck['fireGranaryRats']): void {
+  assert.equal(result.granaryRats, 'Granary Rats');
+  assert.equal(result.wasteland, 'Wasteland');
+  assert.equal(result.acceptedActionCount, 4);
+  assert.equal(result.seed, 102);
+  assert.equal(result.fireAffinityBeforeSummon, true);
+  assert.equal(result.siteThresholdSuppressed, true);
+  assert.equal(result.manaPaid, 1);
+  assert.equal(result.siteAndMinionStateVerified, true);
+  assert.equal(result.causalEventsVerified, true);
+  assert.equal(result.noRandomDraws, true);
+  assert.equal(result.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.deck.atlas.find(({ name }) => name === 'Wasteland')?.copies, 4);
+  assert.equal(result.deck.spellbook
+    .find(({ name }) => name === 'Granary Rats')?.copies, 4);
+  assert.equal(result.replayVerified, true);
+}
+
 function assertSwordAndShield(result: PrivateGameCheck['earthSwordAndShield']): void {
   assert.equal(result.swordAndShield, 'Sword and Shield');
   assert.equal(result.elthamTownsfolk, 'Eltham Townsfolk');
@@ -273,6 +292,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assertStarter(result.earthStarter, 'Valley', 'Wild Boars');
   assertMalakhim(result.earthMalakhim);
   assertStarter(result.fireStarter, 'Wasteland', 'Raal Dromedary');
+  assertGranaryRats(result.fireGranaryRats);
   assertHamlet(result.fireHamlet);
   assertStarter(result.waterStarter, 'Stream', 'Serava Townsfolk');
   assertVikings(result.fireVikings);

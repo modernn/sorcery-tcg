@@ -124,6 +124,7 @@ export type GameCardDefinition =
     ranged?: boolean;
     sacrificeMinionAtSummoningLocationForManaDiscount?: 2;
     shootsDragProjectile?: boolean;
+    siteProvidesNoThreshold?: true;
     spellcaster?: boolean;
     stealth?: boolean;
     strikesFirstWhileAttacking?: boolean;
@@ -1264,6 +1265,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.shootsDragProjectile !== undefined && typeof card.shootsDragProjectile !== 'boolean') {
     throw new RangeError(`${path}.shootsDragProjectile must be boolean`);
   }
+  if (card.siteProvidesNoThreshold !== undefined && card.siteProvidesNoThreshold !== true) {
+    throw new RangeError(`${path}.siteProvidesNoThreshold must be true when defined`);
+  }
   if (card.spellcaster !== undefined && typeof card.spellcaster !== 'boolean') {
     throw new RangeError(`${path}.spellcaster must be boolean`);
   }
@@ -1512,6 +1516,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? { sacrificeMinionAtSummoningLocationForManaDiscount: 2 as const }
               : {}),
             ...(card.shootsDragProjectile === true ? { shootsDragProjectile: true } : {}),
+            ...(card.siteProvidesNoThreshold === true
+              ? { siteProvidesNoThreshold: true as const }
+              : {}),
             ...(card.spellcaster === true ? { spellcaster: true } : {}),
             ...(card.stealth === true ? { stealth: true } : {}),
             ...(card.strikesFirstWhileAttacking === true ? { strikesFirstWhileAttacking: true } : {}),
@@ -1707,10 +1714,18 @@ function minionDisabled(state: GameState, unit: UnitInstance): boolean {
 
 function affinity(state: GameState, seat: GameSeat): GameThresholds {
   const total: Record<GameElement, number> = { air: 0, earth: 0, fire: 0, water: 0 };
-  Object.values(state.realm.sites)
-    .filter((site) => site.controller === seat)
-    .forEach((site) => {
+  const sitesProvidingNoThreshold = new Set(state.realm.units
+    .filter((unit) => unit.region !== 'void' && !minionDisabled(state, unit))
+    .filter((unit) => {
+      const definition = cardDefinition(state, unit.cardId);
+      return definition.cardType === 'minion' && definition.siteProvidesNoThreshold === true;
+    })
+    .map((unit) => unit.location));
+  Object.entries(state.realm.sites)
+    .filter(([, site]) => site.controller === seat)
+    .forEach(([cell, site]) => {
       if (isRubble(site)) return;
+      if (sitesProvidingNoThreshold.has(cell as RealmCell)) return;
       const definition = cardDefinition(state, site.cardId);
       if (definition.cardType !== 'site') throw new Error('realm site lacks site definition');
       definition.elements.forEach((element) => {

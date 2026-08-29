@@ -99,6 +99,20 @@ export type PrivateGameCheck = Readonly<{
   airStarter: StarterCheck;
   earthStarter: StarterCheck;
   fireStarter: StarterCheck;
+  fireGranaryRats: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    fireAffinityBeforeSummon: boolean;
+    granaryRats: string;
+    manaPaid: number;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    seed: number;
+    siteAndMinionStateVerified: boolean;
+    siteThresholdSuppressed: boolean;
+    wasteland: string;
+  }>;
   fireHamlet: Readonly<{
     acceptedActionCount: number;
     causalEventsVerified: boolean;
@@ -1159,6 +1173,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   fatality: NormalizedCard;
   genesisSpellMinion: NormalizedCard;
   genesisMinion: NormalizedCard;
+  granaryRats: NormalizedCard;
   grainSparrow: NormalizedCard;
   gnarledWendigo: NormalizedCard;
   ghostTownSite: NormalizedCard;
@@ -1267,6 +1282,26 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     'card:12ac69ed727419b132b094e28a149e9d81f6af17f00408e52f700fddce0c9740',
     'fire',
   );
+  const granaryRats = snapshot.cards.find(({ name }) => name === 'Granary Rats');
+  if (!granaryRats
+    || granaryRats.stableId
+      !== 'card:d19d5b90a7be41b58e9d21e557f7f09065f33ba4a993d0f6909392c6838df6a0'
+    || granaryRats.officialSourceId !== '006-granary_rats-b-f'
+    || granaryRats.cardType !== 'minion'
+    || granaryRats.rulesText !== "This site doesn't provide threshold."
+    || granaryRats.manaCost !== 1
+    || granaryRats.attack !== 1
+    || granaryRats.defense !== 1
+    || granaryRats.life !== null
+    || granaryRats.elements.length !== 1
+    || granaryRats.elements[0] !== 'fire'
+    || granaryRats.thresholds.air !== 0
+    || granaryRats.thresholds.earth !== 0
+    || granaryRats.thresholds.fire !== 1
+    || granaryRats.thresholds.water !== 0
+    || granaryRats.rarity !== 'ordinary') {
+    throw new Error('private Granary Rats no longer matches its supported facts');
+  }
   const hamlet = snapshot.cards.find(({ name }) => name === 'Hamlet');
   if (!hamlet
     || hamlet.stableId
@@ -2571,6 +2606,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     fatality,
     genesisSpellMinion,
     genesisMinion,
+    granaryRats,
     grainSparrow,
     gnarledWendigo,
     ghostTownSite,
@@ -2728,6 +2764,7 @@ function gameDefinition(
   untapsAtEndOfControllerTurn = false,
   killTargetWoundedMinion = false,
   ordinaryMinionManaDiscount: 0 | 1 = 0,
+  siteProvidesNoThreshold = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -2867,6 +2904,7 @@ function gameDefinition(
         ? { sacrificeMinionAtSummoningLocationForManaDiscount }
         : {}),
       shootsDragProjectile,
+      ...(siteProvidesNoThreshold ? { siteProvidesNoThreshold: true } : {}),
       spellcaster,
       stealth,
       strikesFirstWhileAttacking,
@@ -2889,7 +2927,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -3041,6 +3079,11 @@ function buildManifest(
   const airStarterDeck = elementalDeck('air', [input.stealthTargetMinion], [input.spire]);
   const earthStarterDeck = elementalDeck('earth', [input.wildBoars], [input.valley]);
   const fireStarterDeck = elementalDeck('fire', [input.raalDromedary], [input.wasteland]);
+  const fireGranaryRatsDeck = elementalDeck(
+    'fire',
+    [input.granaryRats],
+    [input.wasteland],
+  );
   const fireHamletDeck = elementalDeck(
     'fire',
     [input.raalDromedary],
@@ -3310,6 +3353,8 @@ function buildManifest(
           ? elementalDeck('fire', [input.lumberingMinion, input.monstrousLion])
         : scenario === 'fire-starter'
           ? fireStarterDeck
+        : scenario === 'fire-granary-rats'
+          ? fireGranaryRatsDeck
         : scenario === 'fire-hamlet'
           ? fireHamletDeck
         : scenario === 'fire-aramos'
@@ -3546,6 +3591,7 @@ function buildManifest(
       card.stableId === input.malakhim.stableId,
       card.stableId === input.fatality.stableId,
       card.stableId === input.hamlet.stableId ? 1 : 0,
+      card.stableId === input.granaryRats.stableId,
     ),
   ]));
   return {
@@ -4605,7 +4651,7 @@ function findEarthShallowGraveOpening(
 
 function findStarterOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-  scenario: StarterScenario,
+  scenario: StarterScenario | 'fire-granary-rats',
   baseSeed: number,
   site: NormalizedCard,
   minion: NormalizedCard,
@@ -6864,6 +6910,104 @@ function runStarter(
       && minion.damage === 0
       && !minion.tapped
       && minion.summoningSickness,
+  });
+}
+
+function runFireGranaryRats(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['fireGranaryRats'] {
+  const opening = findStarterOpening(
+    input,
+    'fire-granary-rats',
+    input.config.fireSeed,
+    input.wasteland,
+    input.granaryRats,
+  );
+  let session = keep(opening.session);
+  session = keep(session);
+
+  const siteResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.siteInstanceId
+      && descriptor.cell === 'C4'));
+  if (!siteResult.accepted) throw new Error('private Granary Rats Wasteland play was rejected');
+  session = siteResult.session;
+  const beforeSummon = observeGame(session.state, 'north');
+  const manaBeforeSummon = session.state.players.north.mana;
+  const summonAction = action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.minionInstanceId
+      && descriptor.cell === 'C4');
+  if (summonAction.descriptor.kind !== 'summon-minion') {
+    throw new Error('private Granary Rats summon action has the wrong kind');
+  }
+  const summonResult = stepGame(session, summonAction);
+  if (!summonResult.accepted) throw new Error('private Granary Rats summon was rejected');
+  session = summonResult.session;
+
+  const sitePayload = siteResult.receipt.events[0]
+    && isJsonRecord(siteResult.receipt.events[0].payload)
+    ? siteResult.receipt.events[0].payload
+    : undefined;
+  const summonPayload = summonResult.receipt.events[0]
+    && isJsonRecord(summonResult.receipt.events[0].payload)
+    ? summonResult.receipt.events[0].payload
+    : undefined;
+  const afterSummon = observeGame(session.state, 'north');
+  const site = session.state.realm.sites.C4;
+  const rats = afterSummon.realm.units.find(({ instanceId }) =>
+    instanceId === opening.minionInstanceId);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified: siteResult.receipt.events.length === 1
+      && siteResult.receipt.events[0]?.type === 'site-played'
+      && canonicalJson(sitePayload ?? null) === canonicalJson({
+        cardId: input.wasteland.stableId,
+        cell: 'C4',
+        instanceId: opening.siteInstanceId,
+        seat: 'north',
+      })
+      && summonResult.receipt.events.length === 1
+      && summonResult.receipt.events[0]?.type === 'minion-summoned'
+      && canonicalJson(summonPayload ?? null) === canonicalJson({
+        cardId: input.granaryRats.stableId,
+        casterInstanceId: summonAction.descriptor.casterInstanceId,
+        cell: 'C4',
+        instanceId: opening.minionInstanceId,
+        manaPaid: 1,
+        seat: 'north',
+      }),
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    fireAffinityBeforeSummon: beforeSummon.players.north.affinity.fire === 1
+      && beforeSummon.players.north.affinity.air === 0
+      && beforeSummon.players.north.affinity.earth === 0
+      && beforeSummon.players.north.affinity.water === 0,
+    granaryRats: input.granaryRats.name,
+    manaPaid: manaBeforeSummon - session.state.players.north.mana,
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    replayVerified: verifyGameReplay(session),
+    seed: opening.manifest.seed,
+    siteAndMinionStateVerified: site !== undefined
+      && 'cardId' in site
+      && site.cardId === input.wasteland.stableId
+      && site.instanceId === opening.siteInstanceId
+      && site.controller === 'north'
+      && rats?.cardId === input.granaryRats.stableId
+      && rats.attack === 1
+      && rats.defense === 1
+      && rats.controller === 'north'
+      && rats.owner === 'north'
+      && rats.location === 'C4'
+      && rats.region === 'surface'
+      && rats.damage === 0
+      && !rats.tapped
+      && rats.summoningSickness,
+    siteThresholdSuppressed: afterSummon.players.north.affinity.fire === 0
+      && afterSummon.players.north.affinity.air === 0
+      && afterSummon.players.north.affinity.earth === 0
+      && afterSummon.players.north.affinity.water === 0,
+    wasteland: input.wasteland.name,
   });
 }
 
@@ -14248,6 +14392,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     input.wasteland,
     input.raalDromedary,
   );
+  const fireGranaryRats = runFireGranaryRats(input);
   const fireHamlet = runFireHamlet(input);
   const fireAramos = runFireAramos(input);
   const fireCharge = runFireCharge(input);
@@ -14446,6 +14591,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     fireAramos,
     fireCharge,
     fireGenesisLifeLoss,
+    fireGranaryRats,
     fireHamlet,
     fireIgnited,
     fireLash,
