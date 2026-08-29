@@ -6737,11 +6737,11 @@ test('RULE-03 site Genesis discards up to two top spells publicly without deck-o
   assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-03/04 Vikings taps to damage every unit at an adjacent location', () => {
+test('RULE-03/04 Vikings area damage uses bearer Lethal without becoming a strike', () => {
   const north: GameDeckSpec = {
     atlas: Array(6).fill('vikings-north-site'),
     avatar: 'vikings-north-avatar',
-    spellbook: ['vikings', 'disabled-vikings', 'vikings-ally'],
+    spellbook: ['vikings', 'disabled-vikings', 'vikings-ally', 'poisonous-dagger'],
   };
   const south: GameDeckSpec = {
     atlas: Array(6).fill('vikings-south-site'),
@@ -6757,6 +6757,12 @@ test('RULE-03/04 Vikings taps to damage every unit at an adjacent location', () 
       tapToDamageEachUnitAtAdjacentLocation: 2,
       thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
       waterbound: true,
+    },
+    'poisonous-dagger': {
+      cardType: 'artifact',
+      grantsBearerLethal: true,
+      manaCost: 2,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
     },
     'vikings': {
       attack: 4,
@@ -6783,7 +6789,7 @@ test('RULE-03/04 Vikings taps to damage every unit at an adjacent location', () 
     'vikings-stealthed-enemy': {
       attack: 1,
       cardType: 'minion',
-      defense: 2,
+      defense: 3,
       manaCost: 1,
       stealth: true,
       thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
@@ -6839,13 +6845,16 @@ test('RULE-03/04 Vikings taps to damage every unit at an adjacent location', () 
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
   take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
   take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
   take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardId === 'vikings' && descriptor.cell === 'C3');
   const vikings = session.state.realm.units.find(({ cardId }) => cardId === 'vikings')!;
   assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
     descriptor.kind === 'activate-area-damage' && descriptor.sourceInstanceId === vikings.instanceId), false);
+  take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+    && descriptor.cardId === 'poisonous-dagger'
+    && descriptor.bearer?.instanceId === vikings.instanceId);
   take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardId === 'disabled-vikings' && descriptor.cell === 'C3');
   const disabled = session.state.realm.units.find(({ cardId }) => cardId === 'disabled-vikings')!;
@@ -6897,6 +6906,7 @@ test('RULE-03/04 Vikings taps to damage every unit at an adjacent location', () 
   assert.equal(result.accepted, true);
   session = result.session;
   const events = result.receipt.events;
+  assert.equal(events.some(({ type }) => type === 'strike-damage-allocated'), false);
   assert.deepEqual(events.slice(0, 2).map(({ type }) => type), ['area-damage-activated', 'stealth-lost']);
   assert.equal(events.slice(2, 6).every(({ type }) => type === 'area-damage-allocated'), true);
   assert.deepEqual(events.filter(({ type }) => type === 'area-damage-allocated')
@@ -6908,8 +6918,13 @@ test('RULE-03/04 Vikings taps to damage every unit at an adjacent location', () 
     warded.instanceId,
   ].sort());
   assert.equal(events.filter(({ type }) => type === 'minion-died').length, 2);
+  assert.equal(events.some(({ payload, type }) => type === 'damage-dealt'
+    && (payload as unknown as Readonly<Record<string, unknown>>).instanceId === stealthed.instanceId
+    && (payload as unknown as Readonly<Record<string, unknown>>).amount === 2), true);
   assert.equal(session.state.realm.units.some(({ instanceId }) => instanceId === ally.instanceId), false);
   assert.equal(session.state.realm.units.some(({ instanceId }) => instanceId === stealthed.instanceId), false);
+  assert.equal(session.state.realm.artifacts?.some((artifact) =>
+    'bearer' in artifact && artifact.bearer.instanceId === vikings.instanceId), true);
   const wardedAfter = session.state.realm.units.find(({ instanceId }) => instanceId === warded.instanceId)!;
   assert.deepEqual({ damage: wardedAfter.damage, warded: wardedAfter.warded }, { damage: 0, warded: false });
   const submergedAfter = session.state.realm.units.find(({ instanceId }) => instanceId === submerged.instanceId)!;

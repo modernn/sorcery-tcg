@@ -295,9 +295,13 @@ function assertHuntersLodge(result: PrivateGameCheck['earthHuntersLodge']): void
 
 function assertVikings(result: PrivateGameCheck['fireVikings']): void {
   assert.equal(result.vikings, 'Vikings');
-  assert.equal(result.raalDromedary, 'Raal Dromedary');
-  assert.equal(result.acceptedActionCount, 29);
+  assert.equal(result.boskTroll, 'Bosk Troll');
+  assert.equal(result.poisonousDagger, 'Poisonous Dagger');
+  assert.equal(result.acceptedActionCount, 30);
   assert.equal(result.activationUnavailableWhileSickAndTapped, true);
+  assert.equal(result.artifactCastAndCarried, true);
+  assert.equal(result.abilityLethalVerified, true);
+  assert.equal(result.daggerManaPaid, 2);
   assert.equal(result.exactAdjacentTarget, true);
   assert.equal(result.summonManaPaid, 5);
   assert.equal(result.simultaneousDamageVerified, true);
@@ -309,8 +313,10 @@ function assertVikings(result: PrivateGameCheck['fireVikings']): void {
   assert.equal(result.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
   assert.equal(result.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
   assert.equal(result.deck.atlas.find(({ name }) => name === 'Ghost Town')?.copies, 3);
+  assert.equal(result.deck.atlas.find(({ name }) => name === 'Valley')?.copies, 4);
   assert.equal(result.deck.spellbook.find(({ name }) => name === 'Vikings')?.copies, 4);
-  assert.equal(result.deck.spellbook.find(({ name }) => name === 'Raal Dromedary')?.copies, 4);
+  assert.equal(result.deck.spellbook.find(({ name }) => name === 'Bosk Troll')?.copies, 4);
+  assert.equal(result.deck.spellbook.find(({ name }) => name === 'Poisonous Dagger')?.copies, 3);
   assert.equal(result.replayVerified, true);
 }
 
