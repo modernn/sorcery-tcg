@@ -3479,6 +3479,7 @@ function resolveFightWindow(
   combatantsStrike: boolean | readonly GameUnitRef[],
   interactingRefs?: readonly GameUnitRef[],
   allocationsAreStrikes = true,
+  allocationsUseAttackerLethal = allocationsAreStrikes,
 ): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
   const allocations = new Map(pending.allocations.map(({ amount, targetInstanceId }) =>
     [targetInstanceId, amount]));
@@ -3509,7 +3510,7 @@ function resolveFightWindow(
       lethalDamage.add(pending.attacker.instanceId);
     }
     if (attackerCanStrike
-      && allocationsAreStrikes
+      && allocationsUseAttackerLethal
       && attackerStatus.lethal
       && (allocations.get(ref.instanceId) ?? 0) > unitStatus(state, ref).takesLessDamage) {
       lethalDamage.add(ref.instanceId);
@@ -5558,6 +5559,7 @@ function applyDescriptor(
         false,
         [source],
         false,
+        true,
       );
       return [
         withStateVersion(damaged, {}),
@@ -5759,6 +5761,7 @@ function applyDescriptor(
       false,
       [],
       false,
+      true,
     );
     return [withStateVersion(damaged, {}), outcomes, randomDraws];
   }

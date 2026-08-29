@@ -854,12 +854,16 @@ export type PrivateGameCheck = Readonly<{
   fireVikings: Readonly<{
     acceptedActionCount: number;
     activationUnavailableWhileSickAndTapped: boolean;
+    artifactCastAndCarried: boolean;
+    abilityLethalVerified: boolean;
+    boskTroll: string;
     causalEventsVerified: boolean;
+    daggerManaPaid: number;
     deck: DeckList;
     exactAdjacentTarget: boolean;
     noCombatOrReturnDamage: boolean;
     noRandomDraws: boolean;
-    raalDromedary: string;
+    poisonousDagger: string;
     replayVerified: boolean;
     simultaneousDamageVerified: boolean;
     summonManaPaid: number;
@@ -3340,8 +3344,10 @@ function buildManifest(
   );
   const fireVikingsDeck = elementalDeck(
     'fire',
-    [input.vikings, input.raalDromedary],
-    [input.ghostTownSite],
+    [input.vikings, input.firstStrikeTargetMinion],
+    [input.ghostTownSite, input.valley],
+    [],
+    [input.poisonousDagger],
   );
   const fireAramosDeck = elementalDeck(
     'fire',
@@ -6009,11 +6015,12 @@ function findFireMinorExplosionOpening(
 function findFireVikingsOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): Readonly<{
+  daggerInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   northSiteInstanceIds: readonly [string, string, string, string];
   session: GameSession;
-  southRaalInstanceId: string;
+  southBoskTrollInstanceId: string;
   southSiteInstanceIds: readonly [string, string];
   vikingsInstanceId: string;
 }> {
@@ -6029,10 +6036,12 @@ function findFireVikingsOpening(
     const ghostTownInstanceId = northHandSites
       .find(({ cardId }) => cardId === input.ghostTownSite.stableId)?.instanceId;
     const thirdNorthSiteInstanceId = session.state.players.north.atlas[0]?.instanceId;
-    const southFireSites = session.state.players.south.hand.atlas.filter(({ cardId }) => {
+    const southFireSite = session.state.players.south.hand.atlas.find(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('fire');
     });
+    const southValleyInstanceId = session.state.players.south.hand.atlas
+      .find(({ cardId }) => cardId === input.valley.stableId)?.instanceId;
     const northAccessibleSpells = [
       ...session.state.players.north.hand.spellbook,
       ...session.state.players.north.spellbook.slice(0, 2),
@@ -6043,16 +6052,21 @@ function findFireVikingsOpening(
     ];
     const vikingsInstanceId = northAccessibleSpells
       .find(({ cardId }) => cardId === input.vikings.stableId)?.instanceId;
-    const southRaals = southAccessibleSpells
-      .filter(({ cardId }) => cardId === input.raalDromedary.stableId);
+    const daggerInstanceId = northAccessibleSpells
+      .find(({ cardId }) => cardId === input.poisonousDagger.stableId)?.instanceId;
+    const southBoskTrollInstanceId = southAccessibleSpells
+      .find(({ cardId }) => cardId === input.firstStrikeTargetMinion.stableId)?.instanceId;
     if (northFireSites.length >= 2
       && ghostTownInstanceId
       && thirdNorthSiteInstanceId
-      && southFireSites.length >= 2
+      && southFireSite
+      && southValleyInstanceId
       && vikingsInstanceId
-      && southRaals.length >= 1) {
+      && daggerInstanceId
+      && southBoskTrollInstanceId) {
       return {
         ...built,
+        daggerInstanceId,
         northSiteInstanceIds: [
           northFireSites[0]!.instanceId,
           northFireSites[1]!.instanceId,
@@ -6060,10 +6074,10 @@ function findFireVikingsOpening(
           ghostTownInstanceId,
         ],
         session,
-        southRaalInstanceId: southRaals[0]!.instanceId,
+        southBoskTrollInstanceId,
         southSiteInstanceIds: [
-          southFireSites[0]!.instanceId,
-          southFireSites[1]!.instanceId,
+          southFireSite.instanceId,
+          southValleyInstanceId,
         ],
         vikingsInstanceId,
       };
@@ -13226,7 +13240,7 @@ function runFireVikingsSetup(
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
   take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardInstanceId === opening.southRaalInstanceId
+    && descriptor.cardInstanceId === opening.southBoskTrollInstanceId
     && descriptor.cell === 'C2');
   take(({ descriptor }) => descriptor.kind === 'end-turn');
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
@@ -13276,6 +13290,20 @@ function runFireVikings(
   take(({ descriptor }) => descriptor.kind === 'end-turn');
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
+  const boskBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.southBoskTrollInstanceId);
+  const manaBeforeDagger = session.state.players.north.mana;
+  const castResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-artifact'
+      && descriptor.cardInstanceId === opening.daggerInstanceId
+      && descriptor.bearer?.instanceId === opening.vikingsInstanceId));
+  if (!castResult.accepted) throw new Error('private Poisonous Dagger cast on Vikings was rejected');
+  session = castResult.session;
+  const castPayload = castResult.receipt.events[0]
+    && isJsonRecord(castResult.receipt.events[0].payload)
+    ? castResult.receipt.events[0].payload
+    : undefined;
+
   const activations = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
     descriptor.kind === 'activate-area-damage'
       && descriptor.sourceInstanceId === opening.vikingsInstanceId);
@@ -13299,9 +13327,9 @@ function runFireVikings(
   const activatedPayload = events[0] && isJsonRecord(events[0].payload)
     ? events[0].payload
     : undefined;
-  const raalTargetId = opening.southRaalInstanceId;
+  const boskTargetId = opening.southBoskTrollInstanceId;
   const southAvatarInstanceId = session.state.players.south.avatar.card.instanceId;
-  const targetIds = [raalTargetId, southAvatarInstanceId].sort();
+  const targetIds = [boskTargetId, southAvatarInstanceId].sort();
   const allocations = events.filter(({ payload, type }) => type === 'area-damage-allocated'
     && isJsonRecord(payload)
     && targetIds.includes(String(payload.targetInstanceId)));
@@ -13310,7 +13338,7 @@ function runFireVikings(
     && targetIds.includes(String(payload.instanceId)));
   const deaths = events.filter(({ payload, type }) => type === 'minion-died'
     && isJsonRecord(payload)
-    && payload.instanceId === raalTargetId);
+    && payload.instanceId === boskTargetId);
   const lastAllocationIndex = Math.max(...allocations.map((event) => events.indexOf(event)));
   const firstDamageIndex = Math.min(...damages.map((event) => events.indexOf(event)));
   const lastDamageIndex = Math.max(...damages.map((event) => events.indexOf(event)));
@@ -13332,9 +13360,29 @@ function runFireVikings(
       && payload.sourceInstanceId === opening.vikingsInstanceId)
     && damages.every(({ payload }) => isJsonRecord(payload) && payload.amount === 2)
     && deaths.every(({ payload }) => isJsonRecord(payload)
-      && payload.cardId === input.raalDromedary.stableId
-      && payload.instanceId === raalTargetId
+      && payload.cardId === input.firstStrikeTargetMinion.stableId
+      && payload.instanceId === boskTargetId
       && payload.owner === 'south');
+  const dagger = session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === opening.daggerInstanceId);
+  const boskDefinition = session.state.cards[input.firstStrikeTargetMinion.stableId];
+  const artifactCastAndCarried: boolean = castResult.receipt.events.length === 1
+    && castResult.receipt.events[0]?.type === 'artifact-conjured'
+    && castPayload?.cardId === input.poisonousDagger.stableId
+    && castPayload.instanceId === opening.daggerInstanceId
+    && castPayload.manaPaid === 2
+    && castPayload.bearerInstanceId === opening.vikingsInstanceId
+    && dagger !== undefined
+    && 'bearer' in dagger
+    && dagger.bearer.instanceId === opening.vikingsInstanceId
+    && events.every(({ type }) => type !== 'artifact-dropped');
+  const abilityLethalVerified: boolean = boskBefore?.damage === 0
+    && boskDefinition?.cardType === 'minion'
+    && boskDefinition.defense === 3
+    && damages.some(({ payload }) => isJsonRecord(payload)
+      && payload.instanceId === boskTargetId
+      && payload.amount === 2)
+    && deaths.length === 1;
   const exactAdjacentTarget: boolean = targetCells.join(',') === 'B3,C2,C4'
     && selected.length === 1;
   const noCombatOrReturnDamage: boolean = vikings?.damage === 0
@@ -13350,7 +13398,7 @@ function runFireVikings(
     && lastDamageIndex < firstDeathIndex
     && southAvatarLifeBefore - session.state.players.south.avatar.life === 2;
   const targetsEnteredCemetery: boolean = session.state.players.south.cemetery
-    .some((card) => card.instanceId === raalTargetId)
+    .some((card) => card.instanceId === boskTargetId)
     && session.state.players.south.cemetery.length === 1
     && session.state.players.north.cemetery.length === 0;
   const vikingsSurvivedAndTapped: boolean = vikings?.cardId === input.vikings.stableId
@@ -13365,12 +13413,16 @@ function runFireVikings(
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
     activationUnavailableWhileSickAndTapped,
+    artifactCastAndCarried,
+    abilityLethalVerified,
+    boskTroll: input.firstStrikeTargetMinion.name,
     causalEventsVerified,
+    daggerManaPaid: manaBeforeDagger - session.state.players.north.mana,
     deck: deckList(opening.manifest.decks.north, opening.names),
     exactAdjacentTarget,
     noCombatOrReturnDamage,
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
-    raalDromedary: input.raalDromedary.name,
+    poisonousDagger: input.poisonousDagger.name,
     replayVerified: verifyGameReplay(session),
     simultaneousDamageVerified,
     summonManaPaid: manaBeforeSummon - manaAfterSummon,
