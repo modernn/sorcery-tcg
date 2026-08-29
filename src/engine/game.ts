@@ -58,6 +58,7 @@ export type GameCardDefinition =
     elements: readonly GameElement[];
     genesisDiscardTopSpells?: 2;
     genesisDrawSpellPerAdjacentSameCard?: boolean;
+    genesisEnemiesLoseStealth?: true;
     genesisGainMana?: number;
     sacrificeToDestroyNearbySite?: true;
   }>
@@ -888,6 +889,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     if (card.genesisDiscardTopSpells !== undefined && card.genesisDrawSpellPerAdjacentSameCard) {
       throw new RangeError(`${path} simultaneous Genesis spell discard and draw are unsupported`);
     }
+    if (card.genesisEnemiesLoseStealth !== undefined && card.genesisEnemiesLoseStealth !== true) {
+      throw new RangeError(`${path}.genesisEnemiesLoseStealth must be true`);
+    }
     if (card.connectsBurrowedAllies !== undefined && typeof card.connectsBurrowedAllies !== 'boolean') {
       throw new RangeError(`${path}.connectsBurrowedAllies must be boolean`);
     }
@@ -1298,6 +1302,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.genesisDiscardTopSpells === 2 ? { genesisDiscardTopSpells: 2 as const } : {}),
             ...(card.genesisDrawSpellPerAdjacentSameCard === true
               ? { genesisDrawSpellPerAdjacentSameCard: true }
+              : {}),
+            ...(card.genesisEnemiesLoseStealth === true
+              ? { genesisEnemiesLoseStealth: true as const }
               : {}),
             ...(card.genesisGainMana ? { genesisGainMana: card.genesisGainMana } : {}),
             ...(card.sacrificeToDestroyNearbySite === true
@@ -2658,6 +2665,7 @@ function moveAndTapUnit(
 function loseStealth(
   units: readonly UnitInstance[],
   refs: readonly GameUnitRef[],
+  sourceInstanceId?: string,
 ): readonly [readonly UnitInstance[], readonly GameOutcome[]] {
   const interacting = new Set(refs
     .filter(({ kind }) => kind === 'minion')
@@ -2669,7 +2677,7 @@ function loseStealth(
       ? deepFreeze({ ...unit, stealthed: false })
       : unit),
     revealed.map(({ controller, instanceId }) => ({
-      payload: { instanceId, seat: controller },
+      payload: { instanceId, seat: controller, ...(sourceInstanceId ? { sourceInstanceId } : {}) },
       type: 'stealth-lost',
     })),
   ];
@@ -3601,6 +3609,16 @@ function applyDescriptor(
       },
     });
     const settlement = settleRegionOccupancy(placedState);
+    const enemyStealthRefs: readonly GameUnitRef[] = definition.genesisEnemiesLoseStealth
+      ? settlement.state.realm.units
+        .filter(({ controller, stealthed }) => controller !== seat && stealthed)
+        .map(({ controller, instanceId }) => ({ instanceId, kind: 'minion' as const, seat: controller }))
+      : [];
+    const [genesisUnits, enemyStealthOutcomes] = loseStealth(
+      settlement.state.realm.units,
+      enemyStealthRefs,
+      card.instanceId,
+    );
     const terminal = genesisDrawFailed
       ? { loser: seat, reason: 'deck_empty' as const, status: 'finished' as const, winner }
       : settlement.state.terminal;
@@ -3611,7 +3629,7 @@ function applyDescriptor(
       withStateVersion(state, {
         ...(terminal.status === 'finished' ? { phase: 'terminal' as const } : {}),
         players: settlement.state.players,
-        realm: settlement.state.realm,
+        realm: { ...settlement.state.realm, units: genesisUnits },
         terminal,
       }),
       [
@@ -3646,6 +3664,7 @@ function applyDescriptor(
           },
           type: 'spell-discarded',
         })),
+        ...enemyStealthOutcomes,
         ...settlementOutcomes,
         ...(genesisDrawFailed
           ? [{ payload: { loser: seat, reason: 'deck_empty', winner }, type: 'game-ended' }]

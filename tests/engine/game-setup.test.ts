@@ -5678,6 +5678,123 @@ test('RULE-03 site Genesis grants temporary mana once, pays a summon, and expire
   assert.equal(verifyGameReplay(session), true);
 });
 
+test('RULE-03 Hunter\'s Lodge Genesis removes only enemy Stealth', () => {
+  const north: GameDeckSpec = {
+    atlas: Array(4).fill('hunters-lodge'),
+    avatar: 'lodge-north-avatar',
+    spellbook: Array(4).fill('lodge-ally'),
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(5).fill('lodge-south-site'),
+    avatar: 'lodge-south-avatar',
+    spellbook: Array(4).fill('lodge-enemy'),
+  };
+  const cards: Record<string, GameCardDefinition> = {
+    'hunters-lodge': {
+      cardType: 'site',
+      elements: ['earth'],
+      genesisEnemiesLoseStealth: true,
+    },
+    'lodge-ally': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 1,
+      stealth: true,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+    'lodge-enemy': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 1,
+      stealth: true,
+      summonToAnySite: true,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+    'lodge-north-avatar': { attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20 },
+    'lodge-south-avatar': { attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20 },
+    'lodge-south-site': { cardType: 'site', elements: ['earth'] },
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-hunters-lodge-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north' as const,
+    seed: 97,
+  };
+  const gameManifest = createGameManifest(input);
+  assert.deepEqual(gameManifest.cards['hunters-lodge'], cards['hunters-lodge']);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      'hunters-lodge': {
+        cardType: 'site',
+        elements: ['earth'],
+        genesisEnemiesLoseStealth: false,
+      } as unknown as GameCardDefinition,
+    },
+  }), /genesisEnemiesLoseStealth must be true/);
+
+  let session = keep(createGameSession(gameManifest));
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  assert.deepEqual(session.transcript.at(-1)?.events.map(({ type }) => type), ['site-played']);
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'lodge-ally' && descriptor.cell === 'C4');
+  const ally = session.state.realm.units.find(({ cardId }) => cardId === 'lodge-ally')!;
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'lodge-enemy' && descriptor.cell === 'C4');
+  const enemy = session.state.realm.units.find(({ cardId }) => cardId === 'lodge-enemy')!;
+  assert.equal(ally.stealthed, true);
+  assert.equal(enemy.stealthed, true);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+
+  const play = action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cardId === 'hunters-lodge' && descriptor.cell === 'C3');
+  if (play.descriptor.kind !== 'play-site') throw new Error('expected Hunter\'s Lodge play');
+  const result = stepGame(session, play);
+  assert.equal(result.accepted, true);
+  session = result.session;
+  assert.deepEqual(result.receipt.events.map(({ payload, type }) => ({ payload, type })), [
+    {
+      payload: {
+        cardId: 'hunters-lodge',
+        cell: 'C3',
+        instanceId: play.descriptor.cardInstanceId,
+        seat: 'north',
+      },
+      type: 'site-played',
+    },
+    {
+      payload: {
+        instanceId: enemy.instanceId,
+        seat: 'south',
+        sourceInstanceId: play.descriptor.cardInstanceId,
+      },
+      type: 'stealth-lost',
+    },
+  ]);
+  assert.equal(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === ally.instanceId)?.stealthed, true);
+  assert.equal(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === enemy.instanceId)?.stealthed, false);
+  assert.deepEqual(result.receipt.randomDraws, []);
+  assert.equal(verifyGameReplay(session), true);
+});
+
 test('RULE-03 adjacent matching sites trigger one spell draw apiece and a short deck loses', () => {
   const base = deck('leyline-north');
   const north = {
