@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 
 import { createSyntheticDemoManifest } from '../../src/commands/run-game-demo.ts';
+import { createGameManifest } from '../../src/engine/game.ts';
 import { createGamePrototypeServer } from '../../src/prototype/game-server.ts';
 
 type JsonObject = Record<string, unknown>;
@@ -121,7 +122,19 @@ test('playable-core page renders the authoritative 5x4 checkpoint without artwor
 
 test('browser API switches injected starter presets and replays the selected match', async () => {
   const airManifest = createSyntheticDemoManifest(11);
-  const earthManifest = createSyntheticDemoManifest(19);
+  const earthBase = createSyntheticDemoManifest(19);
+  const earthManifest = createGameManifest({
+    authority: earthBase.authority,
+    cards: Object.fromEntries(Object.entries(earthBase.cards).map(([cardId, card]) => [
+      cardId,
+      cardId.startsWith('north-site-') && card.cardType === 'site'
+        ? { ...card, genesisMayBottomNextSpell: true as const }
+        : card,
+    ])),
+    decks: earthBase.decks,
+    firstSeat: earthBase.firstSeat,
+    seed: earthBase.seed,
+  });
   const earthNames = Object.fromEntries(Object.keys(earthManifest.cards)
     .map((cardId, index) => [cardId, `Earth card ${index + 1}`]));
   earthNames['north-avatar'] = 'Earth Avatar';
@@ -165,7 +178,11 @@ test('browser API switches injected starter presets and replays the selected mat
     current = await json('/api/view?seat=south', undefined, catalogOrigin);
     current = await submit(keep(current), catalogOrigin);
     current = await json('/api/view?seat=north', undefined, catalogOrigin);
-    current = await submit(findAction(current, ({ kind }) => kind === 'play-site'), catalogOrigin);
+    const bottomNext = findAction(current, ({ genesisSpellChoice, kind }) =>
+      kind === 'play-site' && genesisSpellChoice === 'bottom-next');
+    assert.match(String(bottomNext.label), /put Earth card \d+ on bottom/);
+    assert.doesNotMatch(String(bottomNext.label), /north-spell-/);
+    current = await submit(bottomNext, catalogOrigin);
     current = await submit(findAction(current, ({ kind }) => kind === 'summon-minion'), catalogOrigin);
     current = await submit(findAction(current, ({ kind }) => kind === 'end-turn'), catalogOrigin);
     current = await json('/api/view?seat=south', undefined, catalogOrigin);

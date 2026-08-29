@@ -146,6 +146,7 @@
 - Observer-safe actions, rejections, causal events, hashes, exact replay, and a deterministic unranked match runner.
 - A no-dependency browser client that renders the authoritative 5x4 realm, scopes hidden information by seat, exposes only engine-issued actions, and verifies replay.
 - The browser defaults to an atomic deterministic South opponent that reuses the engine-issued demo policy, keeps North's view fixed, rejects manual South submissions, and retains an explicit hot-seat option.
+- The Water browser starter is now a concrete actual-card lesson deck with four Autumn Rivers and four Streams. Its pinned opening exposes Autumn River plus Serava Townsfolk, and its private keep-or-bottom labels show the looked-at spell's real name without adding that hidden identity to the public observation or replay descriptor.
 
 ## Evidence
 

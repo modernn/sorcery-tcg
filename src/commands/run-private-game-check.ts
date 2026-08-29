@@ -3363,8 +3363,7 @@ function buildManifest(
     [input.raalDromedary],
     [input.hamlet, input.wasteland],
   );
-  const waterStarterDeck = elementalDeck('water', [input.seravaTownsfolk], [input.stream]);
-  const waterRiverDeck = elementalDeck(
+  const waterStarterDeck = elementalDeck(
     'water',
     [input.seravaTownsfolk],
     [input.autumnRiver, input.stream],
@@ -3695,7 +3694,7 @@ function buildManifest(
         : scenario === 'water-pirate-ship'
           ? waterPirateShipDeck
         : scenario === 'water-river'
-          ? waterRiverDeck
+          ? waterStarterDeck
         : scenario === 'water-lugbog'
           ? waterLugbogDeck
         : scenario === 'water-submerge'
@@ -3754,7 +3753,7 @@ function buildManifest(
       : scenario === 'water-pirate-ship'
         ? waterPirateShipDeck
       : scenario === 'water-river'
-        ? waterRiverDeck
+        ? waterStarterDeck
       : scenario === 'water-lugbog'
         ? waterLugbogDeck
       : scenario === 'earth-entombed'
@@ -5115,7 +5114,7 @@ export async function loadPrivateStarterCatalog(
     ['air-starter', 'Air — Spire + Snow Leopard', input.config.airSeed, input.spire, input.stealthTargetMinion],
     ['earth-starter', 'Earth — Valley + Wild Boars', input.config.earthSeed, input.valley, input.wildBoars],
     ['fire-starter', 'Fire — Wasteland + Raal Dromedary', input.config.fireSeed, input.wasteland, input.raalDromedary],
-    ['water-starter', 'Water — Stream + Serava Townsfolk', input.config.waterSeed, input.stream, input.seravaTownsfolk],
+    ['water-starter', 'Water — Autumn River + Serava Townsfolk', input.config.waterSeed, input.autumnRiver, input.seravaTownsfolk],
   ] as const;
   const cardsById = new Map(input.cards.map((card) => [card.stableId, card]));
   return Object.freeze(starters.map(([id, label, seed, site, minion]) => {
@@ -7503,7 +7502,8 @@ function runStarter(
   const siteResult = stepGame(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.siteInstanceId
-      && descriptor.cell === 'C4'));
+      && descriptor.cell === 'C4'
+      && descriptor.genesisSpellChoice !== 'bottom-next'));
   if (!siteResult.accepted) throw new Error(`private ${siteCard.name} play was rejected`);
   session = siteResult.session;
   const manaBeforeSummon = session.state.players.north.mana;
@@ -16063,7 +16063,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     input,
     'water-starter',
     input.config.waterSeed,
-    input.stream,
+    input.autumnRiver,
     input.seravaTownsfolk,
   );
   const opening = findOpening(input);

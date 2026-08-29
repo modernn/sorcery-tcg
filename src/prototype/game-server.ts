@@ -240,9 +240,12 @@ export function createGamePrototypeServer(
     const visibleObservation = JSON.stringify(observation);
     const cardNames = Object.fromEntries(Object.entries(selectedPreset.cardNames ?? {})
       .filter(([cardId]) => visibleObservation.includes(JSON.stringify(cardId))));
+    const actions = legalGameActions(session.state, seat);
     return {
-      actions: legalGameActions(session.state, seat)
-        .map((action) => ({ ...action, label: displayActionLabel(action, observation, cardNames) })),
+      actions: actions.map((action) => ({
+        ...action,
+        label: displayActionLabel(action, observation, selectedPreset.cardNames ?? {}),
+      })),
       cardNames,
       mode: session.manifest.authority.mode,
       opponent,

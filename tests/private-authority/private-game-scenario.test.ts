@@ -120,6 +120,46 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
     assert.equal(replay.verified, true);
     assert.equal(replay.finalStateHash, current.stateHash);
 
+    const waterPreset = catalog.find(({ id }) => id === 'water-starter');
+    assert.ok(waterPreset);
+    current = await json('/api/reset', {
+      body: JSON.stringify({
+        opponent: 'manual',
+        presetId: waterPreset.id,
+        seed: waterPreset.manifest.seed,
+      }),
+      headers: { 'content-type': 'application/json' },
+      method: 'POST',
+    });
+    const waterNames = current.cardNames as Record<string, string>;
+    const waterHand = ((((current.view as JsonObject).players as JsonObject)
+      .north as JsonObject).hand as JsonObject);
+    const river = (waterHand.atlas as JsonObject[])
+      .find(({ cardId }) => waterNames[cardId as string] === 'Autumn River');
+    assert.ok(river, 'known-good Water seed must expose Autumn River');
+    current = await submit(keep(current));
+    current = await json('/api/view?seat=south');
+    current = await submit(keep(current));
+    current = await json('/api/view?seat=north');
+    const riverChoices = (current.actions as JsonObject[]).filter(({ descriptor }) => {
+      const value = descriptor as JsonObject;
+      return value.kind === 'play-site'
+        && value.cardInstanceId === river.instanceId
+        && value.cell === 'C4';
+    });
+    assert.deepEqual(riverChoices.map(({ descriptor }) =>
+      (descriptor as JsonObject).genesisSpellChoice).sort(), ['bottom-next', 'keep-next']);
+    assert.equal(riverChoices.every(({ label }) =>
+      String(label).includes('Autumn River') && !String(label).includes('card:')), true);
+    const bottomRiver = riverChoices.find(({ descriptor }) =>
+      (descriptor as JsonObject).genesisSpellChoice === 'bottom-next');
+    assert.ok(bottomRiver);
+    current = await submit(bottomRiver);
+    const riverReplay = await json('/api/replay', { method: 'POST' });
+    assert.equal(riverReplay.acceptedActionCount, 3);
+    assert.equal(riverReplay.verified, true);
+    assert.equal(riverReplay.finalStateHash, current.stateHash);
+
     for (const preset of catalog) {
       current = await json('/api/reset', {
         body: JSON.stringify({
@@ -512,6 +552,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     .forEach((name, index) => {
       assert.equal(Object.values(starterCatalog[index]!.cardNames).includes(name), true);
     });
+  assert.equal(Object.values(starterCatalog[3]!.cardNames).includes('Autumn River'), true);
   await verifyPrivateStarterHttp(starterCatalog);
   assertStarter(result.airStarter, 'Spire', 'Snow Leopard');
   assertFatality(result.airFireFatality);
@@ -541,7 +582,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assertGranaryRats(result.fireGranaryRats);
   assertHamlet(result.fireHamlet);
   assertVoidArtifact(result.airVoidArtifact);
-  assertStarter(result.waterStarter, 'Stream', 'Serava Townsfolk');
+  assertStarter(result.waterStarter, 'Autumn River', 'Serava Townsfolk');
   assert.equal(result.waterRiver.river, 'Autumn River');
   assert.equal(result.waterRiver.acceptedActionCount, 3);
   assert.equal(result.waterRiver.exactChoices, true);
