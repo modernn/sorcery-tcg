@@ -716,6 +716,22 @@ export type PrivateGameCheck = Readonly<{
     twoMinionsDied: boolean;
     twoMinionsEnteredCemetery: boolean;
   }>;
+  fireVikings: Readonly<{
+    acceptedActionCount: number;
+    activationUnavailableWhileSickAndTapped: boolean;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    exactAdjacentTarget: boolean;
+    noCombatOrReturnDamage: boolean;
+    noRandomDraws: boolean;
+    raalDromedary: string;
+    replayVerified: boolean;
+    simultaneousDamageVerified: boolean;
+    summonManaPaid: number;
+    targetsEnteredCemetery: boolean;
+    vikings: string;
+    vikingsSurvivedAndTapped: boolean;
+  }>;
   fireResponse: Readonly<{
     acceptedActionCount: number;
     chargeMoveAndAttack: boolean;
@@ -1097,6 +1113,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   steppe: NormalizedCard;
   submergeMinion: NormalizedCard;
   teleport: NormalizedCard;
+  vikings: NormalizedCard;
   voidwalkMinion: NormalizedCard;
   wardMinion: NormalizedCard;
   polarBears: NormalizedCard;
@@ -1644,6 +1661,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || raalDromedary.thresholds.water !== 0
     || raalDromedary.rarity !== 'ordinary') {
     throw new Error('private location-wide damage target minion no longer matches its supported facts');
+  }
+  const vikings = snapshot.cards.find(({ name }) => name === 'Vikings');
+  if (!vikings
+    || vikings.cardType !== 'minion'
+    || ruleTextDigest(vikings.rulesText) !== 'sha256:5d8b531c78d6df2c518a07f785ab294d39054b6df97b42e7ae0fbca72cf174a0'
+    || vikings.manaCost !== 5
+    || vikings.attack !== 4
+    || vikings.defense !== 4
+    || vikings.life !== null
+    || vikings.elements.length !== 1
+    || vikings.elements[0] !== 'fire'
+    || vikings.thresholds.air !== 0
+    || vikings.thresholds.earth !== 0
+    || vikings.thresholds.fire !== 2
+    || vikings.thresholds.water !== 0
+    || vikings.rarity !== 'ordinary') {
+    throw new Error('private adjacent-location damage minion no longer matches its supported facts');
   }
   const recklessSquire = snapshot.cards.find(({ name }) => name === 'Reckless Squire');
   if (!recklessSquire
@@ -2338,6 +2372,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     steppe,
     submergeMinion,
     teleport,
+    vikings,
     voidwalkMinion,
     wardMinion,
     zap,
@@ -2436,6 +2471,7 @@ function gameDefinition(
   grantsBearerPower: 0 | 2 = 0,
   grantsBearerLethal = false,
   siteGenesisEnemiesLoseStealth = false,
+  tapToDamageEachUnitAtAdjacentLocation = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -2574,6 +2610,9 @@ function gameDefinition(
       strikesFirstWhileAttacking,
       submerge,
       summonToAnySite,
+      ...(tapToDamageEachUnitAtAdjacentLocation
+        ? { tapToDamageEachUnitAtAdjacentLocation: 2 as const }
+        : {}),
       ...(tapForMana ? { tapForMana } : {}),
       thresholds: card.thresholds,
       voidwalk,
@@ -2587,7 +2626,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -2822,6 +2861,11 @@ function buildManifest(
     [],
     [input.minorExplosion],
   );
+  const fireVikingsDeck = elementalDeck(
+    'fire',
+    [input.vikings, input.raalDromedary],
+    [input.ghostTownSite],
+  );
   const fireAramosDeck = elementalDeck(
     'fire',
     [input.aramosMercenaries, input.raalDromedary],
@@ -2981,6 +3025,8 @@ function buildManifest(
           ? fireLeapAttackDeck
         : scenario === 'fire-minor-explosion'
           ? fireMinorExplosionDeck
+        : scenario === 'fire-vikings'
+          ? fireVikingsDeck
         : scenario === 'fire-reckless-squire'
           ? fireRecklessSquireDeck
         : scenario === 'water-edge-connection'
@@ -3050,6 +3096,8 @@ function buildManifest(
         ? fireLeapAttackDeck
       : scenario === 'fire-reckless-squire'
         ? fireRecklessSquireDeck
+      : scenario === 'fire-vikings'
+        ? fireVikingsDeck
       : scenario === 'earth-bury'
         ? earthBuryDeck
       : scenario === 'earth-duel'
@@ -3180,6 +3228,7 @@ function buildManifest(
       card.stableId === input.swordAndShield.stableId ? 2 : 0,
       card.stableId === input.poisonousDagger.stableId,
       card.stableId === input.huntersLodge.stableId,
+      card.stableId === input.vikings.stableId,
     ),
   ]));
   return {
@@ -5113,6 +5162,72 @@ function findFireMinorExplosionOpening(
     }
   }
   throw new Error('private location-wide damage Magic scenario lacks its supported opening');
+}
+
+function findFireVikingsOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string, string];
+  session: GameSession;
+  southRaalInstanceId: string;
+  southSiteInstanceIds: readonly [string, string];
+  vikingsInstanceId: string;
+}> {
+  // ponytail: bounded reuse of the Fire seed avoids another private config field.
+  for (let offset = 1; offset <= 4096; offset += 1) {
+    const built = buildManifest(input, input.config.fireSeed + offset, 'fire-vikings');
+    const session = createGameSession(built.manifest);
+    const northHandSites = session.state.players.north.hand.atlas;
+    const northFireSites = northHandSites.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('fire');
+    });
+    const ghostTownInstanceId = northHandSites
+      .find(({ cardId }) => cardId === input.ghostTownSite.stableId)?.instanceId;
+    const thirdNorthSiteInstanceId = session.state.players.north.atlas[0]?.instanceId;
+    const southFireSites = session.state.players.south.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('fire');
+    });
+    const northAccessibleSpells = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 2),
+    ];
+    const southAccessibleSpells = [
+      ...session.state.players.south.hand.spellbook,
+      ...session.state.players.south.spellbook.slice(0, 2),
+    ];
+    const vikingsInstanceId = northAccessibleSpells
+      .find(({ cardId }) => cardId === input.vikings.stableId)?.instanceId;
+    const southRaals = southAccessibleSpells
+      .filter(({ cardId }) => cardId === input.raalDromedary.stableId);
+    if (northFireSites.length >= 2
+      && ghostTownInstanceId
+      && thirdNorthSiteInstanceId
+      && southFireSites.length >= 2
+      && vikingsInstanceId
+      && southRaals.length >= 1) {
+      return {
+        ...built,
+        northSiteInstanceIds: [
+          northFireSites[0]!.instanceId,
+          northFireSites[1]!.instanceId,
+          thirdNorthSiteInstanceId,
+          ghostTownInstanceId,
+        ],
+        session,
+        southRaalInstanceId: southRaals[0]!.instanceId,
+        southSiteInstanceIds: [
+          southFireSites[0]!.instanceId,
+          southFireSites[1]!.instanceId,
+        ],
+        vikingsInstanceId,
+      };
+    }
+  }
+  throw new Error('private Vikings area-damage scenario lacks its supported opening');
 }
 
 function findAirborneOpening(
@@ -10887,6 +11002,188 @@ function runFireMinorExplosion(
   });
 }
 
+function runFireVikingsSetup(
+  opening: ReturnType<typeof findFireVikingsOpening>,
+): GameSession {
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.southRaalInstanceId
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+    && descriptor.cell === 'B3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === session.state.players.south.avatar.card.instanceId
+    && descriptor.path.map(({ cell }) => cell).join(',') === 'C1,C2');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[3]
+    && descriptor.cell === 'B4');
+  return session;
+}
+
+function runFireVikings(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['fireVikings'] {
+  const opening = findFireVikingsOpening(input);
+  let session = runFireVikingsSetup(opening);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  const manaBeforeSummon = session.state.players.north.mana;
+  const summonResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.vikingsInstanceId
+      && descriptor.cell === 'C3'));
+  if (!summonResult.accepted) throw new Error('private Vikings summon was rejected');
+  session = summonResult.session;
+  const manaAfterSummon = session.state.players.north.mana;
+  const summonPayload = summonResult.receipt.events
+    .map(({ payload }) => isJsonRecord(payload) ? payload : undefined)
+    .find((payload) => payload?.instanceId === opening.vikingsInstanceId);
+  const sickActivationUnavailable = legalGameActions(session.state, 'north').every(({ descriptor }) =>
+    descriptor.kind !== 'activate-area-damage'
+      || descriptor.sourceInstanceId !== opening.vikingsInstanceId);
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const activations = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'activate-area-damage'
+      && descriptor.sourceInstanceId === opening.vikingsInstanceId);
+  const targetCells = activations.flatMap(({ descriptor }) =>
+    descriptor.kind === 'activate-area-damage' && descriptor.targetLocation.region === 'surface'
+      ? [descriptor.targetLocation.cell]
+      : []).sort();
+  const selected = activations.filter(({ descriptor }) =>
+    descriptor.kind === 'activate-area-damage'
+      && descriptor.targetLocation.cell === 'C2'
+      && descriptor.targetLocation.region === 'surface');
+  if (selected.length !== 1 || !selected[0]) {
+    throw new Error('private Vikings adjacent C2 activation is unavailable');
+  }
+  const southAvatarLifeBefore = session.state.players.south.avatar.life;
+  const activationResult = stepGame(session, selected[0]);
+  if (!activationResult.accepted) throw new Error('private Vikings activation was rejected');
+  session = activationResult.session;
+
+  const events = activationResult.receipt.events;
+  const activatedPayload = events[0] && isJsonRecord(events[0].payload)
+    ? events[0].payload
+    : undefined;
+  const raalTargetId = opening.southRaalInstanceId;
+  const southAvatarInstanceId = session.state.players.south.avatar.card.instanceId;
+  const targetIds = [raalTargetId, southAvatarInstanceId].sort();
+  const allocations = events.filter(({ payload, type }) => type === 'area-damage-allocated'
+    && isJsonRecord(payload)
+    && targetIds.includes(String(payload.targetInstanceId)));
+  const damages = events.filter(({ payload, type }) => type === 'damage-dealt'
+    && isJsonRecord(payload)
+    && targetIds.includes(String(payload.instanceId)));
+  const deaths = events.filter(({ payload, type }) => type === 'minion-died'
+    && isJsonRecord(payload)
+    && payload.instanceId === raalTargetId);
+  const lastAllocationIndex = Math.max(...allocations.map((event) => events.indexOf(event)));
+  const firstDamageIndex = Math.min(...damages.map((event) => events.indexOf(event)));
+  const lastDamageIndex = Math.max(...damages.map((event) => events.indexOf(event)));
+  const firstDeathIndex = Math.min(...deaths.map((event) => events.indexOf(event)));
+  const vikings = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.vikingsInstanceId);
+  const tappedActivationUnavailable = legalGameActions(session.state, 'north').every(({ descriptor }) =>
+    descriptor.kind !== 'activate-area-damage'
+      || descriptor.sourceInstanceId !== opening.vikingsInstanceId);
+  const activationUnavailableWhileSickAndTapped: boolean = sickActivationUnavailable
+    && tappedActivationUnavailable;
+  const causalEventsVerified: boolean = events[0]?.type === 'area-damage-activated'
+    && activatedPayload?.cell === 'C2'
+    && activatedPayload.region === 'surface'
+    && activatedPayload.seat === 'north'
+    && activatedPayload.sourceInstanceId === opening.vikingsInstanceId
+    && allocations.every(({ payload }) => isJsonRecord(payload)
+      && payload.amount === 2
+      && payload.sourceInstanceId === opening.vikingsInstanceId)
+    && damages.every(({ payload }) => isJsonRecord(payload) && payload.amount === 2)
+    && deaths.every(({ payload }) => isJsonRecord(payload)
+      && payload.cardId === input.raalDromedary.stableId
+      && payload.instanceId === raalTargetId
+      && payload.owner === 'south');
+  const exactAdjacentTarget: boolean = targetCells.join(',') === 'B3,C2,C4'
+    && selected.length === 1;
+  const noCombatOrReturnDamage: boolean = vikings?.damage === 0
+    && events.every(({ type }) => type !== 'fight-started'
+      && type !== 'strike-damage-allocated');
+  const simultaneousDamageVerified: boolean = allocations.length === 2
+    && damages.length === 2
+    && deaths.length === 1
+    && allocations.map(({ payload }) => isJsonRecord(payload)
+      ? String(payload.targetInstanceId)
+      : '').join(',') === targetIds.join(',')
+    && lastAllocationIndex < firstDamageIndex
+    && lastDamageIndex < firstDeathIndex
+    && southAvatarLifeBefore - session.state.players.south.avatar.life === 2;
+  const targetsEnteredCemetery: boolean = session.state.players.south.cemetery
+    .some((card) => card.instanceId === raalTargetId)
+    && session.state.players.south.cemetery.length === 1
+    && session.state.players.north.cemetery.length === 0;
+  const vikingsSurvivedAndTapped: boolean = vikings?.cardId === input.vikings.stableId
+    && vikings.controller === 'north'
+    && vikings.owner === 'north'
+    && vikings.location === 'C3'
+    && vikings.region === 'surface'
+    && vikings.tapped
+    && summonPayload?.manaPaid === 5
+    && manaBeforeSummon === 5;
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    activationUnavailableWhileSickAndTapped,
+    causalEventsVerified,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    exactAdjacentTarget,
+    noCombatOrReturnDamage,
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    raalDromedary: input.raalDromedary.name,
+    replayVerified: verifyGameReplay(session),
+    simultaneousDamageVerified,
+    summonManaPaid: manaBeforeSummon - manaAfterSummon,
+    targetsEnteredCemetery,
+    vikings: input.vikings.name,
+    vikingsSurvivedAndTapped,
+  });
+}
+
 function runFireRecklessSquire(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['fireRecklessSquire'] {
@@ -12659,6 +12956,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const fireLash = runFireLash(input);
   const fireLeapAttack = runFireLeapAttack(input);
   const fireMinorExplosion = runFireMinorExplosion(input);
+  const fireVikings = runFireVikings(input);
   const fireRecklessSquire = runFireRecklessSquire(input);
   const fireResponse = runFireResponse(input);
   const stealth = runStealth(input);
@@ -12840,6 +13138,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     fireLash,
     fireLeapAttack,
     fireMinorExplosion,
+    fireVikings,
     fireRecklessSquire,
     fireResponse,
     finalStateHash: hashGameState(session.state),
