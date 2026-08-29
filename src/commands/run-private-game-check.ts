@@ -632,6 +632,21 @@ export type PrivateGameCheck = Readonly<{
     spellEnteredCemetery: boolean;
     struckAndKilledEveryEnemy: boolean;
   }>;
+  fireRecklessSquire: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    firstStrikeLanceDamage: boolean;
+    gameRemainedActive: boolean;
+    lanceCreatedAndCarried: boolean;
+    lanceUsedAndRemoved: boolean;
+    noRandomDraws: boolean;
+    raalDromedary: string;
+    recklessSquire: string;
+    replayVerified: boolean;
+    secondStrikeNormal: boolean;
+    stateAndCemeteriesVerified: boolean;
+  }>;
   fireMinorExplosion: Readonly<{
     acceptedActionCount: number;
     avatarTookThreeDamage: boolean;
@@ -1014,6 +1029,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   overpower: NormalizedCard;
   providerMinion: NormalizedCard;
   raalDromedary: NormalizedCard;
+  recklessSquire: NormalizedCard;
   rangedMinion: NormalizedCard;
   rescue: NormalizedCard;
   roamingMinion: NormalizedCard;
@@ -1530,6 +1546,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || raalDromedary.thresholds.water !== 0
     || raalDromedary.rarity !== 'ordinary') {
     throw new Error('private location-wide damage target minion no longer matches its supported facts');
+  }
+  const recklessSquire = snapshot.cards.find(({ name }) => name === 'Reckless Squire');
+  if (!recklessSquire
+    || recklessSquire.cardType !== 'minion'
+    || recklessSquire.rulesText.trim() !== 'Charge, Lance'
+    || recklessSquire.manaCost !== 3
+    || recklessSquire.attack !== 1
+    || recklessSquire.defense !== 1
+    || recklessSquire.life !== null
+    || recklessSquire.elements.length !== 1
+    || recklessSquire.elements[0] !== 'fire'
+    || recklessSquire.thresholds.air !== 0
+    || recklessSquire.thresholds.earth !== 0
+    || recklessSquire.thresholds.fire !== 1
+    || recklessSquire.thresholds.water !== 0
+    || recklessSquire.rarity !== 'ordinary') {
+    throw new Error('private Lance minion no longer matches its supported facts');
   }
   const teleport = snapshot.cards.find(({ name }) => name === 'Teleport');
   if (!teleport
@@ -2195,6 +2228,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     staticServant,
     providerMinion,
     raalDromedary,
+    recklessSquire,
     rangedMinion,
     rescue,
     roamingMinion,
@@ -2303,6 +2337,7 @@ function gameDefinition(
   leapAttackAlly = false,
   genesisDamageEachOtherUnitHere: 0 | 1 = 0,
   sacrificeMinionAtSummoningLocationForManaDiscount: 0 | 2 = 0,
+  lanceCount: 0 | 1 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -2408,6 +2443,7 @@ function gameDefinition(
       gainsStealthAtEndOfTurn,
       immobile,
       lethal,
+      ...(lanceCount ? { lanceCount } : {}),
       manaCost: card.manaCost,
       movesOnlyForward,
       mustBeCastBurrowed,
@@ -2440,7 +2476,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-immobile' | 'earth-overpower' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-immobile' | 'earth-overpower' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -2679,6 +2715,11 @@ function buildManifest(
     [input.ghostTownSite],
     [input.leapAttack],
   );
+  const fireRecklessSquireDeck = elementalDeck(
+    'fire',
+    [input.recklessSquire, input.raalDromedary],
+    [input.ghostTownSite],
+  );
   const waterDeck = elementalDeck('water', [
     input.healingMinion,
     input.slyFox,
@@ -2803,6 +2844,8 @@ function buildManifest(
           ? fireLeapAttackDeck
         : scenario === 'fire-minor-explosion'
           ? fireMinorExplosionDeck
+        : scenario === 'fire-reckless-squire'
+          ? fireRecklessSquireDeck
         : scenario === 'water-edge-connection'
           ? waterEdgeConnectionDeck
         : scenario === 'water-drowned'
@@ -2868,6 +2911,8 @@ function buildManifest(
         ? earthEntombedDeck
       : scenario === 'fire-leap-attack'
         ? fireLeapAttackDeck
+      : scenario === 'fire-reckless-squire'
+        ? fireRecklessSquireDeck
       : scenario === 'earth-bury'
         ? earthBuryDeck
       : scenario === 'earth-duel'
@@ -2988,6 +3033,7 @@ function buildManifest(
       card.stableId === input.leapAttack.stableId,
       card.stableId === input.staticServant.stableId ? 1 : 0,
       card.stableId === input.gnarledWendigo.stableId ? 2 : 0,
+      card.stableId === input.recklessSquire.stableId ? 1 : 0,
     ),
   ]));
   return {
@@ -4646,6 +4692,66 @@ function findFireLeapAttackOpening(
     }
   }
   throw new Error('private Leap Attack optional-step strike-all scenario lacks its supported opening');
+}
+
+function findFireRecklessSquireOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  ghostTownInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northFireSiteInstanceId: string;
+  recklessSquireInstanceId: string;
+  session: GameSession;
+  southFireSiteInstanceIds: readonly [string, string];
+  southRaalInstanceIds: readonly [string, string];
+}> {
+  // ponytail: bounded deterministic scan avoids another private seed field.
+  for (let offset = 1; offset <= 4096; offset += 1) {
+    const built = buildManifest(input, input.config.fireSeed + offset, 'fire-reckless-squire');
+    const session = createGameSession(built.manifest);
+    const northFireSiteInstanceId = session.state.players.north.hand.atlas
+      .find(({ cardId }) => {
+        const definition = session.state.cards[cardId];
+        return cardId !== input.ghostTownSite.stableId
+          && definition?.cardType === 'site'
+          && definition.elements.includes('fire');
+      })?.instanceId;
+    const ghostTownInstanceId = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.ghostTownSite.stableId)?.instanceId;
+    const recklessSquireInstanceId = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 1),
+    ].find(({ cardId }) => cardId === input.recklessSquire.stableId)?.instanceId;
+    const southFireSites = session.state.players.south.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('fire');
+    });
+    const southRaalInstanceIds = [
+      ...session.state.players.south.hand.spellbook,
+      ...session.state.players.south.spellbook.slice(0, 1),
+    ].filter(({ cardId }) => cardId === input.raalDromedary.stableId)
+      .map(({ instanceId }) => instanceId);
+    if (northFireSiteInstanceId
+      && ghostTownInstanceId
+      && recklessSquireInstanceId
+      && southFireSites.length >= 2
+      && southRaalInstanceIds.length >= 2) {
+      return {
+        ...built,
+        ghostTownInstanceId,
+        northFireSiteInstanceId,
+        recklessSquireInstanceId,
+        session,
+        southFireSiteInstanceIds: [
+          southFireSites[0]!.instanceId,
+          southFireSites[1]!.instanceId,
+        ],
+        southRaalInstanceIds: [southRaalInstanceIds[0]!, southRaalInstanceIds[1]!],
+      };
+    }
+  }
+  throw new Error('private Reckless Squire Lance scenario lacks its supported opening');
 }
 
 function findFireIgnitedOpening(
@@ -10120,6 +10226,204 @@ function runFireMinorExplosion(
   });
 }
 
+function runFireRecklessSquire(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['fireRecklessSquire'] {
+  const opening = findFireRecklessSquireOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northFireSiteInstanceId
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southFireSiteInstanceIds[0]
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.ghostTownInstanceId
+    && descriptor.cell === 'C3');
+  const summonResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.recklessSquireInstanceId
+      && descriptor.cell === 'C3'));
+  if (!summonResult.accepted) throw new Error('private Reckless Squire summon was rejected');
+  session = summonResult.session;
+  const squireAfterSummon = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.recklessSquireInstanceId);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southFireSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  for (const instanceId of opening.southRaalInstanceIds) {
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === instanceId
+      && descriptor.cell === 'C2');
+  }
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const sitesBeforeCombat = session.state.realm.sites;
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === opening.recklessSquireInstanceId
+    && descriptor.from.cell === 'C3'
+    && descriptor.to.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+    && descriptor.target.kind === 'minion'
+    && descriptor.target.instanceId === opening.southRaalInstanceIds[0]);
+  const firstFight = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  if (!firstFight.accepted) throw new Error('private Lance first fight was rejected');
+  session = firstFight.session;
+  const squireAfterFirstFight = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.recklessSquireInstanceId);
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === opening.recklessSquireInstanceId
+    && descriptor.path.length === 1
+    && descriptor.to.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+    && descriptor.target.kind === 'minion'
+    && descriptor.target.instanceId === opening.southRaalInstanceIds[1]);
+  const secondFight = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  if (!secondFight.accepted) throw new Error('private post-Lance fight was rejected');
+  session = secondFight.session;
+
+  const summonEvents = summonResult.receipt.events;
+  const summonEvent = summonEvents.find(({ type }) => type === 'minion-summoned');
+  const summonPayload = summonEvent && isJsonRecord(summonEvent.payload)
+    ? summonEvent.payload
+    : undefined;
+  const gainedEvent = summonEvents.find(({ type }) => type === 'lance-gained');
+  const gainedPayload = gainedEvent && isJsonRecord(gainedEvent.payload)
+    ? gainedEvent.payload
+    : undefined;
+  const firstEvents = firstFight.receipt.events;
+  const firstAllocations = firstEvents.filter(({ type }) => type === 'strike-damage-allocated')
+    .flatMap(({ payload }) => isJsonRecord(payload) ? [payload] : []);
+  const firstDamage = firstEvents.filter(({ type }) => type === 'damage-dealt')
+    .flatMap(({ payload }) => isJsonRecord(payload) ? [payload] : []);
+  const brokenPayload = firstEvents.find(({ type }) => type === 'lance-broken');
+  const broken = brokenPayload && isJsonRecord(brokenPayload.payload)
+    ? brokenPayload.payload
+    : undefined;
+  const firstDeath = firstEvents.find(({ type }) => type === 'minion-died');
+  const firstDeathPayload = firstDeath && isJsonRecord(firstDeath.payload)
+    ? firstDeath.payload
+    : undefined;
+  const secondEvents = secondFight.receipt.events;
+  const secondAllocations = secondEvents.filter(({ type }) => type === 'strike-damage-allocated')
+    .flatMap(({ payload }) => isJsonRecord(payload) ? [payload] : []);
+  const secondDamage = secondEvents.filter(({ type }) => type === 'damage-dealt')
+    .flatMap(({ payload }) => isJsonRecord(payload) ? [payload] : []);
+  const secondDeath = secondEvents.find(({ type }) => type === 'minion-died');
+  const secondDeathPayload = secondDeath && isJsonRecord(secondDeath.payload)
+    ? secondDeath.payload
+    : undefined;
+  const secondRaal = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.southRaalInstanceIds[1]);
+  const summonIndex = summonEvents.findIndex(({ type }) => type === 'minion-summoned');
+  const lanceGainedIndex = summonEvents.findIndex(({ type }) => type === 'lance-gained');
+  const fightStartedIndex = firstEvents.findIndex(({ type }) => type === 'fight-started');
+  const firstAllocationIndex = firstEvents.findIndex(({ type }) =>
+    type === 'strike-damage-allocated');
+  const firstDamageIndex = firstEvents.findIndex(({ type }) => type === 'damage-dealt');
+  const lanceBreakIndex = firstEvents.findIndex(({ type }) => type === 'lance-broken');
+  const firstDeathIndex = firstEvents.findIndex(({ type }) => type === 'minion-died');
+  const secondSquireAllocation = secondAllocations.some(({
+    amount,
+    strikerInstanceId,
+    targetInstanceId,
+  }) => amount === 1
+    && strikerInstanceId === opening.recklessSquireInstanceId
+    && targetInstanceId === opening.southRaalInstanceIds[1]);
+  const secondRaalReturnDamage = secondDamage.some(({ amount, instanceId }) =>
+    amount === 2 && instanceId === opening.recklessSquireInstanceId);
+  const secondSquireDamage = secondDamage.some(({ amount, instanceId }) =>
+    amount === 1 && instanceId === opening.southRaalInstanceIds[1]);
+  const secondDeathIsSquire = secondDeathPayload?.instanceId
+    === opening.recklessSquireInstanceId;
+  const removedFromRealm = session.state.realm.units.every(({ instanceId }) =>
+    instanceId !== opening.recklessSquireInstanceId
+      && instanceId !== opening.southRaalInstanceIds[0]);
+  const squireInCemetery = session.state.players.north.cemetery.some(({ cardId, instanceId }) =>
+    cardId === input.recklessSquire.stableId
+      && instanceId === opening.recklessSquireInstanceId);
+  const firstRaalInCemetery = session.state.players.south.cemetery.some(({ cardId, instanceId }) =>
+    cardId === input.raalDromedary.stableId
+      && instanceId === opening.southRaalInstanceIds[0]);
+  const secondRaalSurvived = secondRaal?.cardId === input.raalDromedary.stableId
+    && secondRaal.damage === 1
+    && secondRaal.location === 'C2';
+  const sitesPreserved = canonicalJson(session.state.realm.sites as unknown as JsonValue)
+    === canonicalJson(sitesBeforeCombat as unknown as JsonValue);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified: summonPayload?.instanceId === opening.recklessSquireInstanceId
+      && summonPayload.manaPaid === 3
+      && summonPayload.seat === 'north'
+      && gainedPayload?.bearerInstanceId === opening.recklessSquireInstanceId
+      && gainedPayload.count === 1
+      && gainedPayload.sourceInstanceId === opening.recklessSquireInstanceId
+      && summonIndex >= 0
+      && summonIndex < lanceGainedIndex
+      && fightStartedIndex >= 0
+      && fightStartedIndex < firstAllocationIndex
+      && firstAllocationIndex < firstDamageIndex
+      && firstDamageIndex < lanceBreakIndex
+      && lanceBreakIndex < firstDeathIndex
+      && secondEvents.every(({ type }) => type !== 'lance-broken'),
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    firstStrikeLanceDamage: firstAllocations.length === 1
+      && firstAllocations[0]?.amount === 2
+      && firstAllocations[0].strikerInstanceId === opening.recklessSquireInstanceId
+      && firstAllocations[0].targetInstanceId === opening.southRaalInstanceIds[0]
+      && firstDamage.length === 1
+      && firstDamage[0]?.amount === 2
+      && firstDamage[0].instanceId === opening.southRaalInstanceIds[0]
+      && firstDeathPayload?.instanceId === opening.southRaalInstanceIds[0]
+      && firstEvents.every(({ payload, type }) =>
+        type !== 'strike-damage-allocated'
+          || !isJsonRecord(payload)
+          || payload.strikerInstanceId !== opening.southRaalInstanceIds[0]),
+    gameRemainedActive: session.state.terminal.status === 'active',
+    lanceCreatedAndCarried: squireAfterSummon?.carriedLanceCount === 1,
+    lanceUsedAndRemoved: broken?.bearerInstanceId === opening.recklessSquireInstanceId
+      && broken.count === 1
+      && broken.sourceInstanceId === opening.recklessSquireInstanceId
+      && (squireAfterFirstFight?.carriedLanceCount ?? 0) === 0,
+    noRandomDraws: summonResult.receipt.randomDraws.length === 0
+      && firstFight.receipt.randomDraws.length === 0
+      && secondFight.receipt.randomDraws.length === 0,
+    raalDromedary: input.raalDromedary.name,
+    recklessSquire: input.recklessSquire.name,
+    replayVerified: verifyGameReplay(session),
+    secondStrikeNormal: secondAllocations.length === 1
+      && secondSquireAllocation
+      && secondRaalReturnDamage
+      && secondSquireDamage
+      && secondDeathIsSquire,
+    stateAndCemeteriesVerified: removedFromRealm
+      && squireInCemetery
+      && firstRaalInCemetery
+      && secondRaalSurvived
+      && sitesPreserved,
+  });
+}
+
 function runFireResponse(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['fireResponse'] {
@@ -11572,6 +11876,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const fireLash = runFireLash(input);
   const fireLeapAttack = runFireLeapAttack(input);
   const fireMinorExplosion = runFireMinorExplosion(input);
+  const fireRecklessSquire = runFireRecklessSquire(input);
   const fireResponse = runFireResponse(input);
   const stealth = runStealth(input);
   const waterDrowned = runWaterDrowned(input);
@@ -11749,6 +12054,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     fireLash,
     fireLeapAttack,
     fireMinorExplosion,
+    fireRecklessSquire,
     fireResponse,
     finalStateHash: hashGameState(session.state),
     formatStableId: input.formatStableId,

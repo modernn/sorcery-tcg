@@ -49,6 +49,7 @@ type SpellFacts = Readonly<{
   genesisHealController?: 2;
   genesisLoseControllerLife?: 2;
   immobile?: boolean;
+  lanceCount?: 1 | 2 | 3;
   lethal?: boolean;
   manaCost: number;
   movementBonus?: 1 | 2;
@@ -152,6 +153,7 @@ function cardsFor(
         ...(facts.genesisHealController === 2 ? { genesisHealController: 2 as const } : {}),
         ...(facts.genesisLoseControllerLife === 2 ? { genesisLoseControllerLife: 2 as const } : {}),
         immobile: facts.immobile ?? false,
+        ...(facts.lanceCount ? { lanceCount: facts.lanceCount } : {}),
         lethal: facts.lethal ?? false,
         manaCost: facts.manaCost,
         ...(facts.movementBonus ? { movementBonus: facts.movementBonus } : {}),
@@ -951,6 +953,27 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       [firstSpell]: { ...cards[firstSpell]!, immobile: 'yes' } as unknown as GameCardDefinition,
     },
   }), /immobile/);
+  for (const lanceCount of [0, 1.5, 4]) {
+    assert.throws(() => createGameManifest({
+      ...input,
+      cards: {
+        ...cards,
+        [firstSpell]: { ...cards[firstSpell]!, lanceCount } as unknown as GameCardDefinition,
+      },
+    }), /lanceCount must be a safe integer between 1 and 3/);
+  }
+  const lanceManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: { ...cards[firstSpell]!, lanceCount: 3 } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    lanceManifest.cards[firstSpell]?.cardType === 'minion'
+      && lanceManifest.cards[firstSpell].lanceCount,
+    3,
+  );
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -6053,6 +6076,138 @@ test('RULE-04 attacking-only first strike resolves deaths before normal strikes 
     .some(({ instanceId }) => instanceId === defending.attackerInstanceId), true);
   assert.equal(session.state.players.south.cemetery
     .some(({ instanceId }) => instanceId === defending.targetInstanceId), true);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 Lance buffs and breaks on the next unit strike but not a site strike', () => {
+  const lance = {
+    attack: 1,
+    defense: 1,
+    lanceCount: 1,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  } as const;
+  const twoPower = {
+    attack: 2,
+    defense: 2,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  } as const;
+
+  const attacking = northAttacksAtC2(124, lance, undefined, false, twoPower);
+  assert.equal(observeGame(attacking.session.state, 'south').realm.units
+    .find(({ instanceId }) => instanceId === attacking.attackerInstanceId)?.carriedLanceCount, 1);
+  assert.equal(attacking.session.transcript.some(({ events }) => events.some(({ payload, type }) =>
+    type === 'lance-gained'
+      && canonicalJson(payload) === canonicalJson({
+        bearerInstanceId: attacking.attackerInstanceId,
+        count: 1,
+        sourceInstanceId: attacking.attackerInstanceId,
+      }))), true);
+  let session = accept(attacking.session, action(attacking.session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === attacking.targetInstanceId));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  const attackEvents = session.transcript.at(-1)!.events;
+  assert.deepEqual(attackEvents.find(({ type }) => type === 'lance-broken')?.payload, {
+    bearerInstanceId: attacking.attackerInstanceId,
+    count: 1,
+    sourceInstanceId: attacking.attackerInstanceId,
+  });
+  assert.ok(attackEvents.findIndex(({ type }) => type === 'lance-broken')
+    < attackEvents.findIndex(({ type }) => type === 'minion-died'));
+  assert.equal(session.state.realm.units
+    .find(({ instanceId }) => instanceId === attacking.attackerInstanceId)?.damage, 0);
+  assert.equal(session.state.players.south.cemetery
+    .some(({ instanceId }) => instanceId === attacking.targetInstanceId), true);
+  assert.equal(observeGame(session.state, 'north').realm.units
+    .find(({ instanceId }) => instanceId === attacking.attackerInstanceId)?.carriedLanceCount, undefined);
+  assert.equal(verifyGameReplay(session), true);
+
+  const site = northAttacksAtC2(125, lance, undefined, false, twoPower);
+  session = accept(site.session, action(site.session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'close-defend'));
+  const siteEvents = session.transcript.at(-1)!.events;
+  assert.equal(siteEvents.some(({ type }) => type === 'lance-broken'), false);
+  assert.equal(session.state.realm.units
+    .find(({ instanceId }) => instanceId === site.attackerInstanceId)?.carriedLanceCount, 1);
+  const siteStruck = siteEvents.find(({ type }) => type === 'undefended-site-struck');
+  assert.ok(siteStruck);
+  assert.equal(canonicalJson(siteStruck.payload).includes('"amount":1'), true);
+  assert.equal(verifyGameReplay(session), true);
+
+  const tripleLance = { ...lance, defense: 3, lanceCount: 3 as const };
+  const defending = northAttacksAtC2(126, {
+    ...lance,
+    defense: 4,
+  }, undefined, false, tripleLance);
+  session = accept(defending.session, action(defending.session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === defending.targetInstanceId));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  const defendEvents = session.transcript.at(-1)!.events;
+  assert.equal(session.state.players.north.cemetery
+    .some(({ instanceId }) => instanceId === defending.attackerInstanceId), true);
+  assert.equal(session.state.realm.units
+    .find(({ instanceId }) => instanceId === defending.targetInstanceId)?.damage, 2);
+  assert.deepEqual(defendEvents.find(({ payload, type }) =>
+    type === 'lance-broken' && canonicalJson(payload).includes(defending.targetInstanceId))?.payload, {
+    bearerInstanceId: defending.targetInstanceId,
+    count: 3,
+    sourceInstanceId: defending.targetInstanceId,
+  });
+  assert.deepEqual(defendEvents.find(({ payload, type }) =>
+    type === 'damage-dealt' && canonicalJson(payload).includes(defending.attackerInstanceId))?.payload, {
+    accumulated: 4,
+    amount: 4,
+    direct: true,
+    instanceId: defending.attackerInstanceId,
+    seat: 'north',
+  });
+  assert.equal(verifyGameReplay(session), true);
+
+  const ranged = northAttacksAtC2(127, { ...lance, ranged: true }, undefined, false, {
+    ...twoPower,
+    defense: 3,
+    ward: true,
+  });
+  session = accept(ranged.session, action(ranged.session, ({ descriptor }) =>
+    descriptor.kind === 'decline-attack'));
+  if (session.state.phase === 'intercept') {
+    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'close-intercept'));
+  }
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.shooterInstanceId === ranged.attackerInstanceId
+      && descriptor.hit?.instanceId === ranged.targetInstanceId));
+  const rangedEvents = session.transcript.at(-1)!.events;
+  assert.deepEqual(rangedEvents.map(({ type }) => type), [
+    'projectile-shot',
+    'strike-damage-allocated',
+    'damage-dealt',
+    'ward-broken',
+    'lance-broken',
+  ]);
+  assert.equal(canonicalJson(rangedEvents[1]!.payload).includes('"amount":2'), true);
+  const rangedTarget = session.state.realm.units
+    .find(({ instanceId }) => instanceId === ranged.targetInstanceId);
+  assert.deepEqual(
+    rangedTarget && { damage: rangedTarget.damage, warded: rangedTarget.warded },
+    { damage: 0, warded: false },
+  );
+  assert.equal(session.state.realm.units
+    .find(({ instanceId }) => instanceId === ranged.attackerInstanceId)?.carriedLanceCount, undefined);
   assert.equal(verifyGameReplay(session), true);
 });
 
