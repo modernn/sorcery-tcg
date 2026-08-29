@@ -11,6 +11,8 @@ import {
   observeGame,
   stepGame,
   verifyGameReplay,
+  type GameLegalAction,
+  type GameObservation,
   type GameSeat,
   type GameManifest,
   type GameSession,
@@ -98,6 +100,64 @@ function reseedManifest(manifest: GameManifest, seed: number): GameManifest {
   });
 }
 
+function displayActionLabel(
+  action: GameLegalAction,
+  observation: GameObservation,
+  cardNames: Readonly<Record<string, string>>,
+): string {
+  const ownHand = observation.players[observation.viewer].hand;
+  const handCards = [
+    ...(Array.isArray(ownHand.atlas) ? ownHand.atlas : []),
+    ...(Array.isArray(ownHand.spellbook) ? ownHand.spellbook : []),
+  ];
+  const handNames = new Map(handCards.map(({ cardId, instanceId }) =>
+    [instanceId, cardNames[cardId] ?? cardId]));
+  if (action.descriptor.kind === 'mulligan') {
+    if (action.descriptor.atlasOrder.length === 0
+      && action.descriptor.spellbookOrder.length === 0) return action.label;
+    const selected = (zone: 'atlas' | 'spellbook', instanceIds: readonly string[]): string =>
+      instanceIds.length === 0
+        ? ''
+        : `${zone}: ${instanceIds.map((instanceId) =>
+          handNames.get(instanceId) ?? instanceId.slice(0, 15) + '…').join(' → ')}`;
+    return ['Mulligan', selected('atlas', action.descriptor.atlasOrder),
+      selected('spellbook', action.descriptor.spellbookOrder)].filter(Boolean).join(' · ');
+  }
+
+  const references = new Map<string, string>();
+  for (const unit of observation.realm.units) {
+    references.set(
+      unit.instanceId,
+      `${cardNames[unit.cardId] ?? unit.cardId} · ${unit.controller} · ${unit.location} ${unit.region}`,
+    );
+  }
+  for (const seat of ['north', 'south'] as const) {
+    const avatar = observation.players[seat].avatar;
+    references.set(
+      avatar.instanceId,
+      `${cardNames[avatar.cardId] ?? avatar.cardId} · ${seat} · ${avatar.location} ${avatar.region}`,
+    );
+  }
+  for (const [cell, site] of Object.entries(observation.realm.sites)) {
+    references.set(
+      site.instanceId,
+      `${cardNames[site.cardId] ?? site.cardId} · ${site.controller ?? 'neutral'} · ${cell} surface`,
+    );
+  }
+
+  let label = action.label;
+  for (const [instanceId, display] of references) {
+    label = label
+      .replaceAll(instanceId, display)
+      .replaceAll(instanceId.slice(0, 15) + '…', display);
+  }
+  for (const [cardId, name] of Object.entries(cardNames)
+    .sort(([left], [right]) => right.length - left.length)) {
+    label = label.replaceAll(cardId, name);
+  }
+  return label;
+}
+
 async function readJson(request: IncomingMessage): Promise<JsonRecord> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -157,10 +217,12 @@ export function createGamePrototypeServer(
   function view(seat: GameSeat): JsonRecord {
     const observation = observeGame(session.state, seat);
     const visibleObservation = JSON.stringify(observation);
+    const cardNames = Object.fromEntries(Object.entries(selectedPreset.cardNames ?? {})
+      .filter(([cardId]) => visibleObservation.includes(JSON.stringify(cardId))));
     return {
-      actions: legalGameActions(session.state, seat),
-      cardNames: Object.fromEntries(Object.entries(selectedPreset.cardNames ?? {})
-        .filter(([cardId]) => visibleObservation.includes(JSON.stringify(cardId)))),
+      actions: legalGameActions(session.state, seat)
+        .map((action) => ({ ...action, label: displayActionLabel(action, observation, cardNames) })),
+      cardNames,
       mode: session.manifest.authority.mode,
       presetId: selectedPreset.id,
       presets: presets.map(({ id, label, manifest }) => ({ id, label, seed: manifest.seed })),

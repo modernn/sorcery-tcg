@@ -101,21 +101,24 @@ test('playable-core page renders the authoritative 5x4 checkpoint without artwor
 });
 
 test('browser API switches injected starter presets and replays the selected match', async () => {
+  const airManifest = createSyntheticDemoManifest(11);
+  const earthManifest = createSyntheticDemoManifest(19);
+  const earthNames = Object.fromEntries(Object.keys(earthManifest.cards)
+    .map((cardId, index) => [cardId, `Earth card ${index + 1}`]));
+  earthNames['north-avatar'] = 'Earth Avatar';
+  earthNames['south-spell-1'] = 'South Secret';
   const catalogServer = createGamePrototypeServer(undefined, [
     {
       cardNames: { 'north-avatar': 'Air Avatar' },
       id: 'air-starter',
       label: 'Air — Spire + Snow Leopard',
-      manifest: createSyntheticDemoManifest(11),
+      manifest: airManifest,
     },
     {
-      cardNames: {
-        'north-avatar': 'Earth Avatar',
-        'south-spell-1': 'South Secret',
-      },
+      cardNames: earthNames,
       id: 'earth-starter',
       label: 'Earth — Valley + Wild Boars',
-      manifest: createSyntheticDemoManifest(19),
+      manifest: earthManifest,
     },
   ]);
   await new Promise<void>((resolve, reject) => {
@@ -128,12 +131,16 @@ test('browser API switches injected starter presets and replays the selected mat
     assert.equal(current.presetId, 'earth-starter');
     assert.equal(current.seed, 23);
     assert.equal(current.mode, 'synthetic');
-    assert.deepEqual(current.cardNames, { 'north-avatar': 'Earth Avatar' });
+    assert.equal((current.cardNames as JsonObject)['north-avatar'], 'Earth Avatar');
     assert.doesNotMatch(JSON.stringify(current), /South Secret/);
     assert.deepEqual((current.presets as JsonObject[]).map(({ id, seed }) => ({ id, seed })), [
       { id: 'air-starter', seed: 11 },
       { id: 'earth-starter', seed: 19 },
     ]);
+    const mulliganActions = actions(current)
+      .filter((candidate) => descriptor(candidate).kind === 'mulligan');
+    assert.equal(new Set(mulliganActions.map(({ label }) => label)).size, mulliganActions.length);
+    assert.equal(mulliganActions.some(({ label }) => String(label).includes('Earth card')), true);
 
     current = await submit(keep(current), catalogOrigin);
     current = await json('/api/view?seat=south', undefined, catalogOrigin);
@@ -141,6 +148,21 @@ test('browser API switches injected starter presets and replays the selected mat
     current = await json('/api/view?seat=north', undefined, catalogOrigin);
     current = await submit(findAction(current, ({ kind }) => kind === 'play-site'), catalogOrigin);
     current = await submit(findAction(current, ({ kind }) => kind === 'summon-minion'), catalogOrigin);
+    current = await submit(findAction(current, ({ kind }) => kind === 'end-turn'), catalogOrigin);
+    current = await json('/api/view?seat=south', undefined, catalogOrigin);
+    current = await submit(findAction(current, ({ kind, zone }) =>
+      kind === 'draw' && zone === 'atlas'), catalogOrigin);
+    current = await submit(findAction(current, ({ kind }) => kind === 'play-site'), catalogOrigin);
+    current = await submit(findAction(current, ({ kind }) => kind === 'end-turn'), catalogOrigin);
+    current = await json('/api/view?seat=north', undefined, catalogOrigin);
+    current = await submit(findAction(current, ({ kind, zone }) =>
+      kind === 'draw' && zone === 'atlas'), catalogOrigin);
+    const northUnit = ((((current.view as JsonObject).realm as JsonObject).units as JsonObject[])
+      .find(({ controller }) => controller === 'north'))!;
+    const unitAction = findAction(current, ({ kind, unitInstanceId }) =>
+      kind === 'move-and-attack' && unitInstanceId === northUnit.instanceId);
+    assert.match(String(unitAction.label), /Earth card \d+ · north · C4 surface/);
+    assert.doesNotMatch(String(unitAction.label), new RegExp(String(northUnit.instanceId).slice(0, 15)));
     const replay = await post('/api/replay', undefined, catalogOrigin);
     assert.equal(replay.verified, true);
     assert.equal(replay.finalStateHash, current.stateHash);
