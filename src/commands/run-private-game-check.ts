@@ -1320,6 +1320,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   minorExplosion: NormalizedCard;
   monstrousLion: NormalizedCard;
   mountainPass: NormalizedCard;
+  updraftRidge: NormalizedCard;
   movementMinion: NormalizedCard;
   movementTwoMinion: NormalizedCard;
   overpower: NormalizedCard;
@@ -1825,6 +1826,29 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || mountainPass.thresholds.water !== 0
     || mountainPass.rarity !== 'exceptional') {
     throw new Error('private occupied ground-entry site no longer matches its supported facts');
+  }
+  const updraftRidge = snapshot.cards.find(({ name }) => name === 'Updraft Ridge');
+  const updraftRidgeTokens = updraftRidge?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
+  if (!updraftRidge
+    || updraftRidge.stableId
+      !== 'card:c4a270be2d59a7cebb369184aba147a2b3e5a031d0057aab3c93ecf7d41d3b7c'
+    || updraftRidge.officialSourceId !== '001-updraft_ridge-b-f'
+    || updraftRidge.cardType !== 'site'
+    || updraftRidgeTokens.length !== 9
+    || !['airborne', 'minions', 'atop', 'updraft', 'ridge', 'move', 'freely', 'away']
+      .every((token) => updraftRidgeTokens.includes(token))
+    || updraftRidge.manaCost !== null
+    || updraftRidge.attack !== null
+    || updraftRidge.defense !== null
+    || updraftRidge.life !== null
+    || updraftRidge.elements.length !== 1
+    || updraftRidge.elements[0] !== 'air'
+    || updraftRidge.thresholds.air !== 1
+    || updraftRidge.thresholds.earth !== 0
+    || updraftRidge.thresholds.fire !== 0
+    || updraftRidge.thresholds.water !== 0
+    || updraftRidge.rarity !== 'exceptional') {
+    throw new Error('private Airborne free-departure site no longer matches its supported facts');
   }
   const blink = snapshot.cards.find(({ name }) => name === 'Blink');
   const blinkTokens = blink?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
@@ -3255,6 +3279,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     minorExplosion,
     monstrousLion,
     mountainPass,
+    updraftRidge,
     movementMinion,
     movementTwoMinion,
     overpower,
@@ -3414,6 +3439,7 @@ function gameDefinition(
   teleportNearbyAllyThenDrawCard = false,
   nearbyEnemiesPermanentlyLoseStealth = false,
   blocksGroundMinionEntryWhileMinionAtop = false,
+  airborneMinionsAtopMoveFreelyAway = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -3450,6 +3476,9 @@ function gameDefinition(
   }
   if (card.cardType === 'site') {
     return {
+      ...(airborneMinionsAtopMoveFreelyAway
+        ? { airborneMinionsAtopMoveFreelyAway: true as const }
+        : {}),
       ...(blocksGroundMinionEntryWhileMinionAtop
         ? { blocksGroundMinionEntryWhileMinionAtop: true as const }
         : {}),
@@ -3780,6 +3809,7 @@ function buildManifest(
       ...Array(3).fill(input.gothicTower.stableId),
       ...Array(3).fill(input.loneTower.stableId),
       ...Array(2).fill(input.mountainPass.stableId),
+      ...Array(2).fill(input.updraftRidge.stableId),
     ],
     avatar: input.sparkmage.stableId,
     spellbook: [
@@ -4437,6 +4467,7 @@ function buildManifest(
       card.stableId === input.blink.stableId,
       card.stableId === input.scentHounds.stableId,
       card.stableId === input.mountainPass.stableId,
+      card.stableId === input.updraftRidge.stableId,
     ),
   ]));
   return {

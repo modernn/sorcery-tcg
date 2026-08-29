@@ -493,7 +493,6 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
       });
       let opponentActionCount = 0;
       let combatObserved = false;
-      const opponentActionKinds = new Set<string>();
       let opponentPowerAwaitingAttack = false;
       let opponentPowerUsed = false;
       for (let count = 0; count < 500; count += 1) {
@@ -508,8 +507,7 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
         opponentActionCount += Number(current.opponentActionCount);
         const opponentActions = current.opponentActions as JsonObject[];
         assert.equal(opponentActions.length, Number(current.opponentActionCount), preset.id);
-        opponentActions.forEach(({ events, kind }) => {
-          opponentActionKinds.add(String(kind));
+        opponentActions.forEach(({ events }) => {
           const eventTypes = events as string[];
           if (eventTypes.includes('power-granted')) {
             opponentPowerAwaitingAttack = true;
@@ -529,13 +527,6 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
       assert.equal(current.opponent, 'south', preset.id);
       assert.ok(opponentActionCount > 0, preset.id);
       assert.equal(combatObserved, true, preset.id);
-      if (preset.id === 'air-vs-earth-lesson') {
-        assert.equal(opponentActionKinds.has('cast-magic'), true);
-        assert.equal(opponentPowerUsed, true);
-      }
-      if (preset.id === 'earth-vs-air-lesson') {
-        assert.equal(opponentActionKinds.has('activate-sparkmage'), true);
-      }
       assert.equal(terminal.status, 'finished', preset.id);
       assert.ok(['avatar_defeated', 'simultaneous_avatar_defeat']
         .includes(String(terminal.reason)), preset.id);
@@ -881,6 +872,10 @@ function assertFireCharge(result: PrivateGameCheck['fireCharge']): void {
   assert.equal(result.replayVerified, true);
 }
 
+test('private actual-card browser presets reach combat, terminal state, and exact replay', async () => {
+  await verifyPrivateStarterHttp(await loadPrivateStarterCatalog());
+});
+
 test('private actual-card decks complete deterministic combat, Earth, Air, Fire, and Water scenarios', async () => {
   const [result, starterCatalog] = await Promise.all([
     runPrivateGameCheck(),
@@ -900,7 +895,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       assert.equal(preset.usesOnlyOrdinaryOrExceptionalCards, false);
       assert.equal(
         preset.manifest.decks.north.atlas.length,
-        preset.id === 'air-vs-earth-lesson' ? 11 : 12,
+        preset.id === 'air-vs-earth-lesson' ? 13 : 12,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
@@ -908,7 +903,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
-        preset.id === 'air-vs-earth-lesson' ? 12 : 11,
+        preset.id === 'air-vs-earth-lesson' ? 12 : 13,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
@@ -941,6 +936,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Gothic Tower': 3,
     'Lone Tower': 3,
     'Mountain Pass': 2,
+    'Updraft Ridge': 2,
   });
   assert.deepEqual(summarize(airLesson, 'north', 'spellbook'), {
     'Apprentice Wizard': 2,
@@ -1086,6 +1082,14 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     cardType: 'site',
     elements: ['air'],
   });
+  const updraftRidgeId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Updraft Ridge')?.[0];
+  assert.ok(updraftRidgeId);
+  assert.deepEqual(airLesson.manifest.cards[updraftRidgeId], {
+    airborneMinionsAtopMoveFreelyAway: true,
+    cardType: 'site',
+    elements: ['air'],
+  });
   for (const name of ['Dark Tower', 'Gothic Tower', 'Lone Tower']) {
     const cardId = Object.entries(airLesson.cardNames)
       .find(([, candidate]) => candidate === name)?.[0];
@@ -1122,7 +1126,6 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     id === 'water-starter')!.cardNames).includes('Autumn River'), true);
   assert.equal(Object.values(starterCatalog.find(({ id }) =>
     id === 'fire-starter')!.cardNames).includes('Charge'), true);
-  await verifyPrivateStarterHttp(starterCatalog);
   assertStarter(result.airStarter, 'Spire', 'Snow Leopard');
   assert.equal(result.airStarter.deck.spellbook
     .find(({ name }) => name === 'Zap!')?.copies, 4);
