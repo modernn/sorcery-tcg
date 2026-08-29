@@ -31,8 +31,8 @@ Phase 3 now implements actual Sorcery core rules behind that unchanged boundary.
 ### Phase 999.1: Batch Photo Collection Scanning and Count Reconciliation (BACKLOG)
 
 **Goal:** Turn binder-page or tabletop photos into a reviewed collection list by detecting every card, identifying variant and finish with confidence, counting duplicates, and reconciling changes against the saved collection.
-**Requirements:** TBD
-**Plans:** 0 plans
+**Requirements:** Backlog slice; related to DATA-04 without replacing Phase 6 ownership
+**Plans:** 1 plan
 
 Plans:
-- [ ] TBD (promote with $gsd-review-backlog when ready)
+- [ ] [Private photo scan and reconciliation slice](./phases/999.1-batch-photo-collection-scanning/999.1-01-PLAN.md)
