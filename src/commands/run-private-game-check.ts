@@ -1282,6 +1282,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   fatality: NormalizedCard;
   genesisSpellMinion: NormalizedCard;
   genesisMinion: NormalizedCard;
+  geomancer: NormalizedCard;
   granaryRats: NormalizedCard;
   grainSparrow: NormalizedCard;
   gnarledWendigo: NormalizedCard;
@@ -1506,6 +1507,23 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || huntersLodge.thresholds.water !== 0
     || huntersLodge.rarity !== 'ordinary') {
     throw new Error('private enemy Stealth-removing site no longer matches its supported facts');
+  }
+  const geomancer = snapshot.cards.find(({ name }) => name === 'Geomancer');
+  if (!geomancer
+    || geomancer.stableId !== 'card:6fe9e8652f3106e7ae6161ddf2c2f71cc615251462b11040b0fa8128af4863a3'
+    || geomancer.officialSourceId !== '002-geomancer-b-f'
+    || geomancer.cardType !== 'avatar'
+    || geomancer.attack !== 1
+    || geomancer.defense !== 1
+    || geomancer.life !== 20
+    || geomancer.rarity !== null
+    || geomancer.elements.length !== 0
+    || geomancer.thresholds.air !== 0
+    || geomancer.thresholds.earth !== 0
+    || geomancer.thresholds.fire !== 0
+    || geomancer.thresholds.water !== 0
+    || geomancer.rulesText.trim().length !== 169) {
+    throw new Error('private Geomancer no longer matches its supported facts');
   }
   const wildBoars = snapshot.cards.find(({ name }) => name === 'Wild Boars');
   if (!wildBoars
@@ -2857,6 +2875,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     fatality,
     genesisSpellMinion,
     genesisMinion,
+    geomancer,
     granaryRats,
     grainSparrow,
     gnarledWendigo,
@@ -3026,6 +3045,8 @@ function gameDefinition(
   summonTokenToEachControlledSiteBorderingEnemySite?: string,
   token = false,
   siteGenesisMayBottomNextSpell = false,
+  earthSitePlayCreatesAdjacentRubble = false,
+  replaceAdjacentRubbleWithTopAtlasSite = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -3036,7 +3057,13 @@ function gameDefinition(
       cardType: 'avatar',
       defense: card.defense,
       drawSpell,
+      ...(earthSitePlayCreatesAdjacentRubble
+        ? { earthSitePlayCreatesAdjacentRubble: true as const }
+        : {}),
       life: card.life,
+      ...(replaceAdjacentRubbleWithTopAtlasSite
+        ? { replaceAdjacentRubbleWithTopAtlasSite: true as const }
+        : {}),
     };
   }
   if (card.cardType === 'artifact'
@@ -3201,8 +3228,11 @@ function buildManifest(
   seed: number,
   scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
-  const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
-  if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
+  const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
+  if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
+    throw new Error('private scenario Avatar is missing');
+  }
+  const avatar = scenario === 'earth-starter' ? input.geomancer : configuredAvatar;
   const sites = input.cards.filter((card) =>
     card.cardType === 'site' && card.rulesText.trim() === '' && card.life === null);
   const minions = input.cards.filter((card) =>
@@ -3835,7 +3865,7 @@ function buildManifest(
     card.stableId,
     gameDefinition(
       card,
-      card.stableId === avatar.stableId && input.config.avatar.drawSpell,
+      card.stableId === configuredAvatar.stableId && input.config.avatar.drawSpell,
       card.stableId === input.chargeMinion.stableId
         || card.stableId === input.monstrousLion.stableId
         || card.stableId === input.ignited.stableId,
@@ -3938,6 +3968,8 @@ function buildManifest(
       card.stableId === input.borderMilitia.stableId ? input.footSoldier.stableId : undefined,
       card.stableId === input.footSoldier.stableId,
       card.stableId === input.autumnRiver.stableId,
+      card.stableId === input.geomancer.stableId,
+      card.stableId === input.geomancer.stableId,
     ),
   ]));
   return {
@@ -5139,7 +5171,7 @@ export async function loadPrivateStarterCatalog(
   const input = await readPrivateInputs(path);
   const starters = [
     ['air-starter', 'Air — Spire + Snow Leopard + Zap!', input.config.airSeed, input.spire, input.stealthTargetMinion, input.zap],
-    ['earth-starter', 'Earth — Humble Village + Wild Boars', input.config.earthSeed, input.humbleVillage, input.wildBoars],
+    ['earth-starter', 'Earth Beta precon opening — Geomancer + Humble Village + Wild Boars', input.config.earthSeed, input.humbleVillage, input.wildBoars],
     ['fire-starter', 'Fire — Wasteland + Raal Dromedary + Charge', input.config.fireSeed, input.wasteland, input.raalDromedary, input.chargeMagic],
     ['water-starter', 'Water — Autumn River + Serava Townsfolk', input.config.waterSeed, input.autumnRiver, input.seravaTownsfolk],
   ] as const;
@@ -7562,7 +7594,8 @@ function runStarter(
 
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
-    causalEventsVerified: siteResult.receipt.events.map(({ type }) => type).join(',') === 'site-played'
+    causalEventsVerified: siteResult.receipt.events.map(({ type }) => type).join(',')
+      === (scenario === 'earth-starter' ? 'site-played,rubble-created' : 'site-played')
       && summonResult.receipt.events.map(({ type }) => type).join(',') === 'minion-summoned'
       && sitePayload?.cardId === siteCard.stableId
       && sitePayload.instanceId === opening.siteInstanceId

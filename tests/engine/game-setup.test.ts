@@ -82,7 +82,9 @@ type AvatarFacts = Readonly<{
   attack: number;
   defense: number;
   drawSpell: boolean;
+  earthSitePlayCreatesAdjacentRubble?: true;
   life: number;
+  replaceAdjacentRubbleWithTopAtlasSite?: true;
 }>;
 
 type SiteFacts = Readonly<{
@@ -113,7 +115,13 @@ function cardsFor(
       cardType: 'avatar',
       defense: avatar.defense,
       drawSpell: avatar.drawSpell,
+      ...(avatar.earthSitePlayCreatesAdjacentRubble === true
+        ? { earthSitePlayCreatesAdjacentRubble: true as const }
+        : {}),
       life: avatar.life,
+      ...(avatar.replaceAdjacentRubbleWithTopAtlasSite === true
+        ? { replaceAdjacentRubbleWithTopAtlasSite: true as const }
+        : {}),
     };
     playerDeck.atlas.forEach((cardId) => {
       cards[cardId] = {
@@ -6658,6 +6666,179 @@ test('RULE-03 Humble Village Genesis may spend its mana to summon one Foot Soldi
   assert.equal(paidResult.receipt.randomDraws.length, 0);
   assert.equal(verifyGameReplay(declinedResult.session), true);
   assert.equal(verifyGameReplay(paidResult.session), true);
+});
+
+test('RULE-02/03 Geomancer creates Rubble and privately replaces it with the top Atlas site', () => {
+  const northAtlas = Array.from({ length: 4 }, (_, index) => `rustic-village-${index + 1}`);
+  const southAtlas = Array.from({ length: 4 }, (_, index) => `south-site-${index + 1}`);
+  const north: GameDeckSpec = {
+    atlas: northAtlas,
+    avatar: 'geomancer',
+    spellbook: Array(4).fill('north-minion'),
+  };
+  const south: GameDeckSpec = {
+    atlas: southAtlas,
+    avatar: 'south-avatar',
+    spellbook: Array(4).fill('south-minion'),
+  };
+  const cards: Record<string, GameCardDefinition> = {
+    geomancer: {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      earthSitePlayCreatesAdjacentRubble: true,
+      life: 20,
+      replaceAdjacentRubbleWithTopAtlasSite: true,
+    },
+    'foot-soldier': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      token: true,
+    },
+    'north-minion': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 1,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+    'south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'south-minion': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 1,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+  };
+  northAtlas.forEach((cardId) => {
+    cards[cardId] = {
+      cardType: 'site',
+      elements: ['earth'],
+      genesisPayOneManaToSummonToken: 'foot-soldier',
+    };
+  });
+  southAtlas.forEach((cardId) => {
+    cards[cardId] = { cardType: 'site', elements: [] };
+  });
+  const gameManifest = createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic',
+      revisionId: 'synthetic-geomancer-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north',
+    seed: 104,
+  });
+  let session = keep(keep(createGameSession(gameManifest)));
+
+  const firstPlay = action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cell === 'C4'
+      && descriptor.createRubbleAt === 'C3'
+      && descriptor.genesisTokenChoice === 'decline');
+  const firstResult = stepGame(session, firstPlay);
+  assert.equal(firstResult.accepted, true);
+  if (!firstResult.accepted) return;
+  session = firstResult.session;
+  assert.deepEqual(firstResult.receipt.events.map(({ type }) => type), [
+    'site-played',
+    'rubble-created',
+  ]);
+  assert.equal('rubble' in session.state.realm.sites.C3!, true);
+
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const top = session.state.players.north.atlas[0];
+  const swap = session.state.players.north.hand.atlas[0];
+  assert.ok(top);
+  assert.ok(swap);
+  const before = canonicalJson(observeGame(session.state, 'north') as unknown as JsonValue);
+  assert.equal(before.includes(top.cardId), false);
+  assert.equal(before.includes(top.instanceId), false);
+  const replacement = action(session, ({ descriptor }) =>
+    descriptor.kind === 'replace-rubble-with-top-atlas-site'
+      && descriptor.targetCell === 'C3');
+  assert.equal(replacement.label, 'Replace Rubble at C3 with the top site of your Atlas');
+  assert.equal(canonicalJson(replacement as unknown as JsonValue).includes(top.cardId), false);
+  assert.equal(canonicalJson(replacement as unknown as JsonValue).includes(top.instanceId), false);
+
+  const swapped: GameSession = {
+    ...session,
+    state: {
+      ...session.state,
+      players: {
+        ...session.state.players,
+        north: {
+          ...session.state.players.north,
+          atlas: [swap, ...session.state.players.north.atlas.slice(1)],
+          hand: {
+            ...session.state.players.north.hand,
+            atlas: [top, ...session.state.players.north.hand.atlas.slice(1)],
+          },
+        },
+      },
+    },
+  };
+  const swappedReplacement = action(swapped, ({ descriptor }) =>
+    descriptor.kind === 'replace-rubble-with-top-atlas-site'
+      && descriptor.targetCell === 'C3');
+  assert.equal(swappedReplacement.actionId, replacement.actionId);
+  assert.deepEqual(swappedReplacement.descriptor, replacement.descriptor);
+
+  const replaced = stepGame(session, replacement);
+  assert.equal(replaced.accepted, true);
+  if (!replaced.accepted) return;
+  session = replaced.session;
+  assert.deepEqual(replaced.receipt.events.map(({ type }) => type), [
+    'rubble-replaced',
+    'site-played',
+  ]);
+  assert.equal(session.state.phase, 'genesis');
+  assert.equal(session.state.players.north.avatar.tapped, true);
+  assert.equal(session.state.players.north.atlas.length, 0);
+  assert.equal(session.state.players.north.hand.atlas.length, 2);
+  assert.equal(session.state.realm.sites.C3?.instanceId, top.instanceId);
+  assert.equal(Object.values(session.state.realm.sites)
+    .filter((site) => 'rubble' in site).length, 0);
+  const revealed = canonicalJson(observeGame(session.state, 'south') as unknown as JsonValue);
+  assert.equal(revealed.includes(top.cardId), true);
+  assert.equal(revealed.includes(top.instanceId), true);
+
+  const choices = legalGameActions(session.state, 'north');
+  assert.equal(choices.length, 2);
+  assert.equal(choices.every(({ descriptor }) => descriptor.kind === 'resolve-genesis-token'), true);
+  const paid = action(session, ({ descriptor }) =>
+    descriptor.kind === 'resolve-genesis-token' && descriptor.choice === 'pay-one-mana');
+  const paidResult = stepGame(session, paid);
+  assert.equal(paidResult.accepted, true);
+  if (!paidResult.accepted) return;
+  session = paidResult.session;
+  assert.equal(session.state.phase, 'main');
+  assert.equal(session.state.pendingGenesisToken, null);
+  assert.equal(session.state.players.north.mana, 1);
+  assert.equal(session.state.realm.units.at(-1)?.cardId, 'foot-soldier');
+  assert.deepEqual(paidResult.receipt.events.map(({ type }) => type), ['minion-summoned']);
+  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-03 Hunter\'s Lodge Genesis removes only enemy Stealth', () => {

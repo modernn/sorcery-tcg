@@ -230,9 +230,12 @@ function displayActionLabel(
       && definition.genesisPayOneManaToSummonToken !== undefined) {
       const siteName = cardNames[descriptor.cardId] ?? 'this site';
       const tokenName = cardNames[definition.genesisPayOneManaToSummonToken] ?? 'a token';
+      const rubble = descriptor.createRubbleAt
+        ? ` and create Rubble at ${descriptor.createRubbleAt}`
+        : '';
       return descriptor.genesisTokenChoice === 'pay-one-mana'
-        ? `Play ${siteName} at ${descriptor.cell} — spend 1 mana to summon ${tokenName} there`
-        : `Play ${siteName} at ${descriptor.cell} — keep 1 mana and summon no ${tokenName}`;
+        ? `Play ${siteName} at ${descriptor.cell} — spend 1 mana to summon ${tokenName} there${rubble}`
+        : `Play ${siteName} at ${descriptor.cell} — keep 1 mana and summon no ${tokenName}${rubble}`;
     }
     if (definition?.cardType === 'site' && definition.genesisMayBottomNextSpell === true) {
       return `${label} — then inspect the next spell`;
