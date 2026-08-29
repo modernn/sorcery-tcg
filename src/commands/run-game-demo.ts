@@ -66,6 +66,11 @@ export function createSyntheticDemoManifest(seed = 1): GameManifest {
 
 export function selectDeterministicGameAction(session: GameSession): GameLegalAction {
   const actions = legalGameActions(session.state, session.state.decisionSeat);
+  const player = session.state.players[session.state.decisionSeat];
+  // ponytail: preserve one opening-hand-sized Atlas reserve; replace when opponent strategy exists.
+  const drawZone = player.atlas.length > 3 || player.spellbook.length <= player.atlas.length
+    ? 'atlas'
+    : 'spellbook';
   const enemyAvatar = session.state.players[
     session.state.decisionSeat === 'north' ? 'south' : 'north'
   ].avatar.location;
@@ -92,7 +97,8 @@ export function selectDeterministicGameAction(session: GameSession): GameLegalAc
       && descriptor.spellbookOrder.length === 0)
     ?? actions.find(({ descriptor }) => descriptor.kind === 'play-site')
     ?? actions.find(({ descriptor }) => descriptor.kind === 'summon-minion')
-    ?? actions.find(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas')
+    ?? actions.find(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === drawZone)
     ?? (movement && Number.isFinite(movement.distance) ? movement.action : undefined)
     ?? actions.find(({ descriptor }) => descriptor.kind === 'end-turn')
     ?? actions[0];
