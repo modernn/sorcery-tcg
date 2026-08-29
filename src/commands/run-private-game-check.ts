@@ -3352,7 +3352,7 @@ function gameDefinition(
   damageTargetUnit: 0 | 1 | 4 = 0,
   targetNearby = false,
   healController: 0 | 7 = 0,
-  burrowTargetMinion = false,
+  burrowTargetMinionOrArtifact = false,
   siteGenesisDiscardTopSpells: 0 | 2 = 0,
   shootsDragProjectile = false,
   damageRandomUnitAtLocation: 0 | 3 = 0,
@@ -3475,7 +3475,7 @@ function gameDefinition(
     + Number(disableTargetNearbyMinionUntilNextTurn)
     + Number(submergeTargetMinion)
     + Number(healController !== 0)
-    + Number(burrowTargetMinion)
+    + Number(burrowTargetMinionOrArtifact)
     + Number(fightAllyWithAdjacentEnemy)
     + Number(gainControlOfTargetNearbyMinion)
     + Number(killTargetWoundedMinion)
@@ -3485,7 +3485,7 @@ function gameDefinition(
     && card.manaCost !== null
     && supportedMagicEffects === 1) {
     return {
-      ...(burrowTargetMinion ? { burrowTargetMinion: true } : {}),
+      ...(burrowTargetMinionOrArtifact ? { burrowTargetMinionOrArtifact: true } : {}),
       cardType: 'magic',
       ...(damageEachAbovegroundMinion !== 0 ? { damageEachAbovegroundMinion } : {}),
       ...(fightAllyWithAdjacentEnemy ? { fightAllyWithAdjacentEnemy: true } : {}),
@@ -3809,6 +3809,7 @@ function buildManifest(
       input.borderMilitia.stableId,
       input.divineHealing.stableId,
       ...Array(2).fill(input.overpower.stableId),
+      ...Array(2).fill(input.bury.stableId),
     ],
   };
   const fireStarterDeck = elementalDeck(
@@ -5627,7 +5628,7 @@ export async function loadPrivateStarterCatalog(
     [
       'air-vs-earth-lesson',
       'Air Beta vs Earth Beta — supported cards from one boxed precon each',
-      input.config.airSeed + 3,
+      input.config.airSeed + 4,
     ],
     [
       'earth-vs-air-lesson',
