@@ -70,7 +70,17 @@ function assertSwordAndShield(result: PrivateGameCheck['earthSwordAndShield']): 
   assert.equal(result.elthamTownsfolk, 'Eltham Townsfolk');
   assert.equal(result.boskTroll, 'Bosk Troll');
   assert.equal(result.acceptedActionCount, 22);
+  assert.equal(result.dropAcceptedActionCount, 20);
+  assert.equal(result.seed, 8009);
   assert.equal(result.exactPickupChoice, true);
+  assert.equal(result.dropChoiceVerified, true);
+  assert.equal(result.dropEventVerified, true);
+  assert.equal(result.dropStateVerified, true);
+  assert.equal(result.dropSideEffectsAbsent, true);
+  assert.equal(result.dropSecondUseUnavailable, true);
+  assert.equal(result.dropUnavailableAfterInteraction, true);
+  assert.equal(result.dropNoRandomDraws, true);
+  assert.equal(result.dropReplayVerified, true);
   assert.equal(result.manaPaid, 3);
   assert.equal(result.artifactCastUncarried, true);
   assert.equal(result.artifactPickedUpAndCarried, true);
