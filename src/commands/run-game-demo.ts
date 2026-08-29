@@ -63,7 +63,7 @@ export function createSyntheticDemoManifest(seed = 1): GameManifest {
   });
 }
 
-function selectAction(session: GameSession): GameLegalAction {
+export function selectDeterministicGameAction(session: GameSession): GameLegalAction {
   const actions = legalGameActions(session.state, session.state.decisionSeat);
   const selected = actions.find(({ descriptor }) =>
     descriptor.kind === 'mulligan'
@@ -72,7 +72,8 @@ function selectAction(session: GameSession): GameLegalAction {
     ?? actions.find(({ descriptor }) => descriptor.kind === 'play-site')
     ?? actions.find(({ descriptor }) => descriptor.kind === 'summon-minion')
     ?? actions.find(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas')
-    ?? actions.find(({ descriptor }) => descriptor.kind === 'end-turn');
+    ?? actions.find(({ descriptor }) => descriptor.kind === 'end-turn')
+    ?? actions[0];
   if (!selected) throw new Error('deterministic demo agent has no supported legal action');
   return selected;
 }
@@ -90,7 +91,7 @@ export function runGameDemo(seed = 1): Readonly<{
   const manifest = createSyntheticDemoManifest(seed);
   let session = createGameSession(manifest);
   while (session.state.terminal.status === 'active' && session.transcript.length < MAX_ACTIONS) {
-    const result = stepGame(session, selectAction(session));
+    const result = stepGame(session, selectDeterministicGameAction(session));
     if (!result.accepted) throw new Error(`deterministic demo action rejected: ${result.reason.code}`);
     session = result.session;
   }
