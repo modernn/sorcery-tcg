@@ -607,7 +607,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
     cards: {
       ...cards,
       [firstSpell]: {
-        burrowTargetMinion: true,
+        burrowTargetMinionOrArtifact: true,
         cardType: 'magic',
         manaCost: 3,
         thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
@@ -615,7 +615,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
     },
   });
   assert.deepEqual(buryManifest.cards[firstSpell], {
-    burrowTargetMinion: true,
+    burrowTargetMinionOrArtifact: true,
     cardType: 'magic',
     manaCost: 3,
     thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
@@ -625,19 +625,19 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
     cards: {
       ...cards,
       [firstSpell]: {
-        burrowTargetMinion: 'yes',
+        burrowTargetMinionOrArtifact: 'yes',
         cardType: 'magic',
         manaCost: 3,
         thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
       } as unknown as GameCardDefinition,
     },
-  }), /burrowTargetMinion/);
+  }), /burrowTargetMinionOrArtifact/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
       ...cards,
       [firstSpell]: {
-        burrowTargetMinion: true,
+        burrowTargetMinionOrArtifact: true,
         cardType: 'magic',
         damageTargetUnit: 1,
         manaCost: 3,
@@ -5603,7 +5603,7 @@ test('RULE-03/04 Bury forcefully burrows minions if able and immediately resolve
     });
     for (const cardId of decks.north.spellbook) {
       cards[cardId] = {
-        burrowTargetMinion: true,
+        burrowTargetMinionOrArtifact: true,
         cardType: 'magic',
         manaCost: 1,
         thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
@@ -5700,6 +5700,148 @@ test('RULE-03/04 Bury forcefully burrows minions if able and immediately resolve
   assert.deepEqual(water.session.state.realm.units.find(({ instanceId }) =>
     instanceId === water.targetInstanceId), water.beforeCast.realm.units.find(({ instanceId }) =>
     instanceId === water.targetInstanceId));
+  assert.deepEqual(water.session.transcript.at(-1)?.events.map(({ type }) => type), [
+    'magic-cast',
+    'magic-resolved',
+  ]);
+});
+
+test('RULE-03/04 Bury detaches and burrows Artifacts if able', () => {
+  const castBury = (
+    carried: boolean,
+    waterTarget: boolean,
+  ): Readonly<{
+    artifactInstanceId: string;
+    beforeCast: GameSession['state'];
+    session: GameSession;
+  }> => {
+    const north: GameDeckSpec = {
+      atlas: Array(4).fill('bury-artifact-north-site'),
+      avatar: 'bury-artifact-north-avatar',
+      spellbook: Array(4).fill('bury-artifact-magic'),
+    };
+    const south: GameDeckSpec = {
+      atlas: Array(4).fill('bury-artifact-south-site'),
+      avatar: 'bury-artifact-south-avatar',
+      spellbook: Array(4).fill('bury-artifact-target'),
+    };
+    const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+    const cards: Record<string, GameCardDefinition> = {
+      'bury-artifact-magic': {
+        burrowTargetMinionOrArtifact: true,
+        cardType: 'magic',
+        manaCost: 1,
+        thresholds,
+      },
+      'bury-artifact-north-avatar': {
+        attack: 1,
+        cardType: 'avatar',
+        defense: 1,
+        drawSpell: false,
+        life: 20,
+      },
+      'bury-artifact-north-site': {
+        cardType: 'site',
+        elements: ['earth'],
+        genesisGainMana: 6,
+      },
+      'bury-artifact-south-avatar': {
+        attack: 1,
+        cardType: 'avatar',
+        defense: 1,
+        drawSpell: false,
+        life: 20,
+      },
+      'bury-artifact-south-site': {
+        cardType: 'site',
+        elements: waterTarget ? ['water'] : ['earth'],
+        genesisGainMana: 6,
+      },
+      'bury-artifact-target': {
+        cardType: 'artifact',
+        grantsBearerPower: 2,
+        manaCost: 0,
+        thresholds,
+      },
+    };
+    let session = keep(keep(createGameSession(createGameManifest({
+      authority: {
+        contentHash: SYNTHETIC_AUTHORITY_HASH,
+        mode: 'synthetic',
+        revisionId: `synthetic-bury-artifact-${carried ? 'carried' : 'uncarried'}-${waterTarget ? 'water' : 'land'}-v1`,
+      },
+      cards,
+      decks: { north, south },
+      firstSeat: 'north',
+      seed: 156,
+    }))));
+    const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+      session = accept(session, action(session, predicate));
+    };
+    take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+      && descriptor.cardId === 'bury-artifact-target'
+      && (carried
+        ? descriptor.bearer?.kind === 'avatar'
+        : descriptor.bearer === undefined && descriptor.cell === 'C1'));
+    const artifact = session.state.realm.artifacts?.[0];
+    assert.ok(artifact);
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const bury = session.state.players.north.hand.spellbook.find(({ cardId }) =>
+      cardId === 'bury-artifact-magic');
+    assert.ok(bury);
+    const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === bury.instanceId
+        && descriptor.targetArtifactInstanceId === artifact.instanceId);
+    assert.equal(choices.length, 1);
+    assert.match(choices[0]!.label, /artifact/);
+    const beforeCast = session.state;
+    session = accept(session, choices[0]!);
+    assert.equal(verifyGameReplay(session), true);
+    return { artifactInstanceId: artifact.instanceId, beforeCast, session };
+  };
+
+  const uncarried = castBury(false, false);
+  assert.deepEqual(uncarried.session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === uncarried.artifactInstanceId), {
+    ...uncarried.beforeCast.realm.artifacts?.find(({ instanceId }) =>
+      instanceId === uncarried.artifactInstanceId),
+    region: 'underground',
+  });
+  assert.deepEqual(uncarried.session.transcript.at(-1)?.events.map(({ type }) => type), [
+    'magic-cast',
+    'artifact-burrowed',
+    'magic-resolved',
+  ]);
+  assert.equal(canonicalJson(uncarried.session.transcript.at(-1)?.events[0]?.payload ?? null)
+    .includes(`"targetArtifactInstanceId":"${uncarried.artifactInstanceId}"`), true);
+
+  const carried = castBury(true, false);
+  assert.deepEqual(carried.session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === carried.artifactInstanceId), {
+    cardId: 'bury-artifact-target',
+    instanceId: carried.artifactInstanceId,
+    location: 'C1',
+    owner: 'south',
+    region: 'underground',
+    source: 'spellbook',
+  });
+  assert.deepEqual(carried.session.transcript.at(-1)?.events.map(({ type }) => type), [
+    'magic-cast',
+    'artifact-dropped',
+    'artifact-burrowed',
+    'magic-resolved',
+  ]);
+
+  const water = castBury(false, true);
+  assert.deepEqual(water.session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === water.artifactInstanceId), water.beforeCast.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === water.artifactInstanceId));
   assert.deepEqual(water.session.transcript.at(-1)?.events.map(({ type }) => type), [
     'magic-cast',
     'magic-resolved',

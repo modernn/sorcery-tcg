@@ -904,7 +904,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 23 : 24,
+        preset.id === 'air-vs-earth-lesson' ? 23 : 26,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -912,7 +912,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 24 : 23,
+        preset.id === 'air-vs-earth-lesson' ? 26 : 23,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -969,6 +969,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Autumn Unicorn': 2,
     'Belmotte Longbowmen': 3,
     'Border Militia': 1,
+    Bury: 2,
     'Cave Trolls': 3,
     'Dalcean Phalanx': 1,
     'Divine Healing': 1,

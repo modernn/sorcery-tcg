@@ -78,7 +78,7 @@ export type GameCardDefinition =
     sacrificeToDestroyNearbySite?: true;
   }>
   | Readonly<{
-    burrowTargetMinion?: boolean;
+    burrowTargetMinionOrArtifact?: true;
     cardType: 'magic';
     damageEachAbovegroundMinion?: 1;
     damageEachUnitAtLocationWithinTwoSteps?: number;
@@ -481,6 +481,7 @@ type GameActionDescriptor =
     ally?: GameUnitRef;
     allyDestination?: GameLocation;
     target?: GameUnitRef;
+    targetArtifactInstanceId?: StateHash;
     targetLocation?: GameLocation;
     targetSiteInstanceId?: StateHash;
     temptedDestination?: GameLocation;
@@ -1074,9 +1075,26 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
         .filter((location) => locationExists(state, location))
         .map((targetLocation) => ({ ...cast, targetLocation }));
     }
+    if (definition.burrowTargetMinionOrArtifact === true) {
+      const minions = targets.filter((target) => {
+        if (target.kind !== 'minion') return false;
+        const status = unitStatus(state, target);
+        return status.region === caster.region
+          && (target.seat === seat || !status.stealthed);
+      }).map((target) => ({ ...cast, target }));
+      const artifacts = (state.realm.artifacts ?? []).flatMap((artifact) => {
+        const region = 'bearer' in artifact
+          ? unitStatus(state, artifact.bearer).region
+          : artifact.region;
+        return region === caster.region
+          ? [{ ...cast, targetArtifactInstanceId: artifact.instanceId }]
+          : [];
+      });
+      return [...minions, ...artifacts];
+    }
     return targets.filter((target) => {
       const status = unitStatus(state, target);
-      return (!definition.burrowTargetMinion && !definition.submergeTargetMinion || target.kind === 'minion')
+      return (!definition.submergeTargetMinion || target.kind === 'minion')
         && (!definition.disableTargetNearbyMinionUntilNextTurn || target.kind === 'minion')
         && (!definition.untapTargetMinionAfterDamage || target.kind === 'minion')
         && status.region === caster.region
@@ -1227,8 +1245,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     return;
   }
   if (card.cardType === 'magic') {
-    if (card.burrowTargetMinion !== undefined && typeof card.burrowTargetMinion !== 'boolean') {
-      throw new RangeError(`${path}.burrowTargetMinion must be boolean`);
+    if (card.burrowTargetMinionOrArtifact !== undefined
+      && card.burrowTargetMinionOrArtifact !== true) {
+      throw new RangeError(`${path}.burrowTargetMinionOrArtifact must be true when defined`);
     }
     if (card.submergeTargetMinion !== undefined && card.submergeTargetMinion !== true) {
       throw new RangeError(`${path}.submergeTargetMinion must be true when defined`);
@@ -1285,7 +1304,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.damageEachAbovegroundMinion !== 1) {
       throw new RangeError(`${path}.damageEachAbovegroundMinion must be 1`);
     }
-    const effectCount = Number(card.burrowTargetMinion === true)
+    const effectCount = Number(card.burrowTargetMinionOrArtifact === true)
       + Number(card.submergeTargetMinion === true)
       + Number(card.damageEachAbovegroundMinion === 1)
       + Number(card.damageEachUnitAtLocationWithinTwoSteps !== undefined)
@@ -1740,8 +1759,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
           : card.cardType === 'magic'
             ? {
               cardType: 'magic' as const,
-              ...(card.burrowTargetMinion === true
-                ? { burrowTargetMinion: true }
+              ...(card.burrowTargetMinionOrArtifact === true
+                ? { burrowTargetMinionOrArtifact: true as const }
                 : card.submergeTargetMinion === true
                   ? { submergeTargetMinion: true as const }
                 : card.damageEachAbovegroundMinion === 1
@@ -3175,6 +3194,11 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
       }
       return withCaster(
         `Cast ${descriptor.cardId} on ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`,
+      );
+    }
+    if (descriptor.targetArtifactInstanceId) {
+      return withCaster(
+        `Cast ${descriptor.cardId} on artifact ${descriptor.targetArtifactInstanceId.slice(0, 15)}…`,
       );
     }
     if (descriptor.ally && descriptor.targetLocation) {
@@ -5064,6 +5088,7 @@ function applyDescriptor(
             && candidate.target.instanceId === descriptor.target.instanceId
             && candidate.target.kind === descriptor.target.kind
             && candidate.target.seat === descriptor.target.seat)
+        && candidate.targetArtifactInstanceId === descriptor.targetArtifactInstanceId
         && (candidate.targetLocation === undefined && descriptor.targetLocation === undefined
           || candidate.targetLocation !== undefined
             && descriptor.targetLocation !== undefined
@@ -5121,6 +5146,9 @@ function applyDescriptor(
             targetInstanceId: descriptor.target.instanceId,
             targetSeat: descriptor.target.seat,
           }
+          : {}),
+        ...(descriptor.targetArtifactInstanceId
+          ? { targetArtifactInstanceId: descriptor.targetArtifactInstanceId }
           : {}),
         ...(descriptor.targetLocation ? { targetLocation: descriptor.targetLocation } : {}),
         ...(descriptor.ally
@@ -5760,7 +5788,63 @@ function applyDescriptor(
         [],
       ];
     }
-    if (definition.burrowTargetMinion === true || definition.submergeTargetMinion === true) {
+    if (definition.burrowTargetMinionOrArtifact === true
+      && descriptor.targetArtifactInstanceId !== undefined) {
+      const artifactIndex = (castState.realm.artifacts ?? []).findIndex(({ instanceId }) =>
+        instanceId === descriptor.targetArtifactInstanceId);
+      const artifact = castState.realm.artifacts?.[artifactIndex];
+      if (!artifact) throw new Error('unreachable Bury Artifact target');
+      const location = 'bearer' in artifact
+        ? unitStatus(castState, artifact.bearer)
+        : artifact;
+      const canMove = location.region === 'surface'
+        && castState.realm.sites[location.location] !== undefined
+        && !isWaterSite(castState, location.location);
+      if (!canMove) {
+        return [withStateVersion(castState, {}), [...castOutcomes, resolved], []];
+      }
+      const dropped = 'bearer' in artifact
+        ? dropArtifactsCarriedBy(
+          castState.realm.artifacts,
+          {
+            instanceId: artifact.bearer.instanceId,
+            location: location.location,
+            region: location.region,
+          },
+          new Set([artifact.instanceId]),
+        )
+        : { artifacts: castState.realm.artifacts, outcomes: [] };
+      const movedState = deepFreeze({
+        ...castState,
+        realm: {
+          ...castState.realm,
+          artifacts: dropped.artifacts!.map((candidate) =>
+            candidate.instanceId === artifact.instanceId
+              ? deepFreeze({ ...candidate, region: 'underground' as const })
+              : candidate),
+        },
+      });
+      return [
+        withStateVersion(movedState, {}),
+        [
+          ...castOutcomes,
+          ...dropped.outcomes,
+          {
+            payload: {
+              cell: location.location,
+              instanceId: artifact.instanceId,
+              owner: artifact.owner,
+              sourceInstanceId: card.instanceId,
+            },
+            type: 'artifact-burrowed',
+          },
+          resolved,
+        ],
+        [],
+      ];
+    }
+    if (definition.burrowTargetMinionOrArtifact === true
+      || definition.submergeTargetMinion === true) {
       const submerge = definition.submergeTargetMinion === true;
       if (descriptor.target?.kind !== 'minion') throw new Error('unreachable subsurface Magic cast');
       const targetIndex = castState.realm.units.findIndex(({ instanceId, controller }) =>
