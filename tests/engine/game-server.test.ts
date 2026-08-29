@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 
+import { createSyntheticDemoManifest } from '../../src/commands/run-game-demo.ts';
 import { createGamePrototypeServer } from '../../src/prototype/game-server.ts';
 
 type JsonObject = Record<string, unknown>;
@@ -20,21 +21,21 @@ test.after(async () => {
   });
 });
 
-async function json(path: string, init?: RequestInit): Promise<JsonObject> {
-  const response = await fetch(`${origin}${path}`, init);
+async function json(path: string, init?: RequestInit, base = origin): Promise<JsonObject> {
+  const response = await fetch(`${base}${path}`, init);
   const body = await response.json() as JsonObject;
   assert.equal(response.status, 200, JSON.stringify(body));
   return body;
 }
 
-async function post(path: string, body?: unknown): Promise<JsonObject> {
+async function post(path: string, body?: unknown, base = origin): Promise<JsonObject> {
   return json(path, {
     method: 'POST',
     ...(body === undefined ? {} : {
       body: JSON.stringify(body),
       headers: { 'content-type': 'application/json' },
     }),
-  });
+  }, base);
 }
 
 function actions(response: JsonObject): JsonObject[] {
@@ -51,12 +52,12 @@ function findAction(response: JsonObject, predicate: (value: JsonObject) => bool
   return found;
 }
 
-async function submit(candidate: JsonObject): Promise<JsonObject> {
+async function submit(candidate: JsonObject, base = origin): Promise<JsonObject> {
   return post('/api/action', {
     actionId: candidate.actionId,
     seat: candidate.seat,
     stateVersion: candidate.stateVersion,
-  });
+  }, base);
 }
 
 function keep(response: JsonObject): JsonObject {
@@ -91,11 +92,63 @@ test('playable-core page renders the authoritative 5x4 checkpoint without artwor
   assert.equal(response.status, 200);
   assert.match(page, /Sorcery Playable Core/);
   assert.match(page, /Unranked · partial rules/);
+  assert.match(page, /<select id="preset"/);
   assert.equal(page.match(/class="cell"/g)?.length, 20);
   assert.doesNotMatch(page, /<img\b/i);
   assert.match(response.headers.get('content-security-policy') ?? '', /img-src 'none'/);
   assert.match(page, /role="status" aria-live="polite"><strong>Game over<\/strong>/);
   assert.match(page, /Winner:.*Loser:.*Reason:/);
+});
+
+test('browser API switches injected starter presets and replays the selected match', async () => {
+  const catalogServer = createGamePrototypeServer(undefined, [
+    {
+      cardNames: { 'north-avatar': 'Air Avatar' },
+      id: 'air-starter',
+      label: 'Air — Spire + Snow Leopard',
+      manifest: createSyntheticDemoManifest(11),
+    },
+    {
+      cardNames: {
+        'north-avatar': 'Earth Avatar',
+        'south-spell-1': 'South Secret',
+      },
+      id: 'earth-starter',
+      label: 'Earth — Valley + Wild Boars',
+      manifest: createSyntheticDemoManifest(19),
+    },
+  ]);
+  await new Promise<void>((resolve, reject) => {
+    catalogServer.once('error', reject);
+    catalogServer.listen(0, '127.0.0.1', resolve);
+  });
+  const catalogOrigin = `http://127.0.0.1:${(catalogServer.address() as AddressInfo).port}`;
+  try {
+    let current = await post('/api/reset', { presetId: 'earth-starter', seed: 23 }, catalogOrigin);
+    assert.equal(current.presetId, 'earth-starter');
+    assert.equal(current.seed, 23);
+    assert.equal(current.mode, 'synthetic');
+    assert.deepEqual(current.cardNames, { 'north-avatar': 'Earth Avatar' });
+    assert.doesNotMatch(JSON.stringify(current), /South Secret/);
+    assert.deepEqual((current.presets as JsonObject[]).map(({ id, seed }) => ({ id, seed })), [
+      { id: 'air-starter', seed: 11 },
+      { id: 'earth-starter', seed: 19 },
+    ]);
+
+    current = await submit(keep(current), catalogOrigin);
+    current = await json('/api/view?seat=south', undefined, catalogOrigin);
+    current = await submit(keep(current), catalogOrigin);
+    current = await json('/api/view?seat=north', undefined, catalogOrigin);
+    current = await submit(findAction(current, ({ kind }) => kind === 'play-site'), catalogOrigin);
+    current = await submit(findAction(current, ({ kind }) => kind === 'summon-minion'), catalogOrigin);
+    const replay = await post('/api/replay', undefined, catalogOrigin);
+    assert.equal(replay.verified, true);
+    assert.equal(replay.finalStateHash, current.stateHash);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      catalogServer.close((error) => error ? reject(error) : resolve());
+    });
+  }
 });
 
 test('browser API plays setup through the second-seat draw choice and verifies replay', async () => {

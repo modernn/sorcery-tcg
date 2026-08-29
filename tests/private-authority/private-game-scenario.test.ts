@@ -1,10 +1,94 @@
 import assert from 'node:assert/strict';
+import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 
 import {
+  loadPrivateStarterCatalog,
   type PrivateGameCheck,
+  type PrivateStarterPreset,
   runPrivateGameCheck,
 } from '../../src/commands/run-private-game-check.ts';
+import { createGamePrototypeServer } from '../../src/prototype/game-server.ts';
+
+type JsonObject = Record<string, unknown>;
+
+async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]): Promise<void> {
+  const server = createGamePrototypeServer(undefined, catalog);
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const json = async (path: string, init?: RequestInit): Promise<JsonObject> => {
+    const response = await fetch(`${origin}${path}`, init);
+    const body = await response.json() as JsonObject;
+    assert.equal(response.status, 200, JSON.stringify(body));
+    return body;
+  };
+  const findAction = (response: JsonObject, predicate: (value: JsonObject) => boolean): JsonObject => {
+    const found = (response.actions as JsonObject[])
+      .find((candidate) => predicate(candidate.descriptor as JsonObject));
+    assert.ok(found, 'expected actual-card browser action');
+    return found;
+  };
+  const submit = (candidate: JsonObject): Promise<JsonObject> => json('/api/action', {
+    body: JSON.stringify({
+      actionId: candidate.actionId,
+      seat: candidate.seat,
+      stateVersion: candidate.stateVersion,
+    }),
+    headers: { 'content-type': 'application/json' },
+    method: 'POST',
+  });
+  const keep = (response: JsonObject): JsonObject => findAction(response, (descriptor) =>
+    descriptor.kind === 'mulligan'
+      && (descriptor.atlasOrder as unknown[]).length === 0
+      && (descriptor.spellbookOrder as unknown[]).length === 0);
+
+  try {
+    let current = await json('/api/view?seat=north');
+    assert.equal(current.presetId, 'air-starter');
+    assert.equal(current.mode, 'private-local');
+    assert.ok(Object.keys(current.cardNames as JsonObject).length < Object.keys(catalog[0]!.cardNames).length);
+    const north = (((current.view as JsonObject).players as JsonObject).north as JsonObject);
+    const hand = north.hand as JsonObject;
+    const names = current.cardNames as Record<string, string>;
+    const spire = (hand.atlas as JsonObject[]).find(({ cardId }) => names[cardId as string] === 'Spire');
+    const leopard = (hand.spellbook as JsonObject[])
+      .find(({ cardId }) => names[cardId as string] === 'Snow Leopard');
+    assert.ok(spire && leopard, 'known-good Air seed must expose its teaching pair');
+
+    current = await submit(keep(current));
+    current = await json('/api/view?seat=south');
+    current = await submit(keep(current));
+    current = await json('/api/view?seat=north');
+    current = await submit(findAction(current, (descriptor) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardInstanceId === spire.instanceId
+        && descriptor.cell === 'C4'));
+    current = await submit(findAction(current, (descriptor) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === leopard.instanceId
+        && descriptor.cell === 'C4'));
+
+    const view = current.view as JsonObject;
+    const realm = view.realm as JsonObject;
+    const site = (realm.sites as JsonObject).C4 as JsonObject;
+    const unit = (realm.units as JsonObject[])
+      .find(({ instanceId }) => instanceId === leopard.instanceId)!;
+    const visibleNames = current.cardNames as Record<string, string>;
+    assert.equal(visibleNames[site.cardId as string], 'Spire');
+    assert.equal(visibleNames[unit.cardId as string], 'Snow Leopard');
+    const replay = await json('/api/replay', { method: 'POST' });
+    assert.equal(replay.acceptedActionCount, 4);
+    assert.equal(replay.verified, true);
+    assert.equal(replay.finalStateHash, current.stateHash);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+  }
+}
 
 function assertStarter(
   result: PrivateGameCheck['earthStarter'],
@@ -313,7 +397,28 @@ function assertFireCharge(result: PrivateGameCheck['fireCharge']): void {
 }
 
 test('private actual-card decks complete deterministic combat, Earth, Air, Fire, and Water scenarios', async () => {
-  const result = await runPrivateGameCheck();
+  const [result, starterCatalog] = await Promise.all([
+    runPrivateGameCheck(),
+    loadPrivateStarterCatalog(),
+  ]);
+  assert.deepEqual(starterCatalog.map(({ id }) => id), [
+    'air-starter',
+    'earth-starter',
+    'fire-starter',
+    'water-starter',
+  ]);
+  for (const preset of starterCatalog) {
+    assert.equal(preset.manifest.authority.mode, 'private-local');
+    assert.equal(preset.manifest.decks.north.atlas.length, 30);
+    assert.equal(preset.manifest.decks.north.spellbook.length, 60);
+    assert.deepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
+    assert.equal(Object.keys(preset.cardNames).length, Object.keys(preset.manifest.cards).length);
+  }
+  ['Snow Leopard', 'Wild Boars', 'Raal Dromedary', 'Serava Townsfolk']
+    .forEach((name, index) => {
+      assert.equal(Object.values(starterCatalog[index]!.cardNames).includes(name), true);
+    });
+  await verifyPrivateStarterHttp(starterCatalog);
   assertStarter(result.airStarter, 'Spire', 'Snow Leopard');
   assertFatality(result.airFireFatality);
   assertStarter(result.earthStarter, 'Valley', 'Wild Boars');
