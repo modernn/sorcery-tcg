@@ -102,6 +102,7 @@ export type GameCardDefinition =
     mustBeCastToWaterSite?: boolean;
     provides?: GameElement;
     ranged?: boolean;
+    sacrificeMinionAtSummoningLocationForManaDiscount?: 2;
     shootsDragProjectile?: boolean;
     spellcaster?: boolean;
     stealth?: boolean;
@@ -352,6 +353,7 @@ type GameActionDescriptor =
     manaCost: number;
     paymentMode?: 'random-card-discard';
     region?: 'underground' | 'underwater' | 'void';
+    sacrificedMinionInstanceIds?: readonly StateHash[];
   }>
   | Readonly<{
     cardId: string;
@@ -502,6 +504,26 @@ function meetsThresholds(state: GameState, seat: GameSeat, required: GameThresho
     .every((element) => available[element] >= required[element]);
 }
 
+function sacrificeCombinations(
+  instanceIds: readonly StateHash[],
+  maximumCount: number,
+): readonly (readonly StateHash[])[] {
+  const combinations: StateHash[][] = [];
+  const choose = (start: number, remaining: number, chosen: StateHash[]): void => {
+    if (remaining === 0) {
+      combinations.push([...chosen]);
+      return;
+    }
+    for (let index = start; index <= instanceIds.length - remaining; index += 1) {
+      chosen.push(instanceIds[index]!);
+      choose(index + 1, remaining - 1, chosen);
+      chosen.pop();
+    }
+  };
+  for (let count = 1; count <= maximumCount; count += 1) choose(0, count, []);
+  return combinations;
+}
+
 function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   const player = state.players[seat];
   const casters = spellcasterRefs(state, seat);
@@ -511,7 +533,7 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     const definition = cardDefinition(state, cardId);
     if (definition.cardType !== 'minion'
       || !meetsThresholds(state, seat, definition.thresholds)) return [];
-    const paymentOptions: readonly Readonly<{
+    const basePaymentOptions: readonly Readonly<{
       manaCost: number;
       paymentMode?: 'random-card-discard';
     }>[] = [
@@ -522,64 +544,68 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
         ? [{ manaCost: 0, paymentMode: 'random-card-discard' as const }]
         : []),
     ];
-    if (paymentOptions.length === 0) return [];
     const summonCells = (definition.summonToAnySite ? siteCells : controlledCells)
       .filter((cell) => !definition.mustBeCastToOuterColumn || cell[0] === 'A' || cell[0] === 'E')
       .filter((cell) => !definition.mustBeCastToWaterSite || isWaterSite(state, cell));
-    return casters.flatMap(({ instanceId: casterInstanceId }) => paymentOptions.flatMap((payment) => [
-      ...summonCells.flatMap((cell) => [
+    const summonLocations: readonly Readonly<{
+      cell: RealmCell;
+      region?: 'underground' | 'underwater' | 'void';
+    }>[] = [
       ...(!definition.mustBeCastBurrowed && !definition.mustBeCastSubmerged
-        ? [{
-          cardId,
-          cardInstanceId: instanceId,
-          casterInstanceId,
-          cell,
-          kind: 'summon-minion' as const,
-          manaCost: payment.manaCost,
-          ...(payment.paymentMode ? { paymentMode: payment.paymentMode } : {}),
-        }]
+        ? summonCells.map((cell) => ({ cell }))
         : []),
-      ...(definition.burrowing && !definition.mustBeCastSubmerged && !isWaterSite(state, cell)
-        ? [{
-          cardId,
-          cardInstanceId: instanceId,
-          casterInstanceId,
-          cell,
-          kind: 'summon-minion' as const,
-          manaCost: payment.manaCost,
-          ...(payment.paymentMode ? { paymentMode: payment.paymentMode } : {}),
-          region: 'underground' as const,
-        }]
+      ...(definition.burrowing && !definition.mustBeCastSubmerged
+        ? summonCells.filter((cell) => !isWaterSite(state, cell))
+          .map((cell) => ({ cell, region: 'underground' as const }))
         : []),
-      ...(definition.submerge && !definition.mustBeCastBurrowed && isWaterSite(state, cell)
-        ? [{
-          cardId,
-          cardInstanceId: instanceId,
-          casterInstanceId,
-          cell,
-          kind: 'summon-minion' as const,
-          manaCost: payment.manaCost,
-          ...(payment.paymentMode ? { paymentMode: payment.paymentMode } : {}),
-          region: 'underwater' as const,
-        }]
+      ...(definition.submerge && !definition.mustBeCastBurrowed
+        ? summonCells.filter((cell) => isWaterSite(state, cell))
+          .map((cell) => ({ cell, region: 'underwater' as const }))
         : []),
-      ]),
       ...(definition.voidwalk && !definition.mustBeCastBurrowed && !definition.mustBeCastSubmerged
         && !definition.mustBeCastToWaterSite
         ? REALM_CELLS.filter((cell) => !state.realm.sites[cell]
           && (!definition.mustBeCastToOuterColumn || cell[0] === 'A' || cell[0] === 'E'))
-          .map((cell) => ({
+          .map((cell) => ({ cell, region: 'void' as const }))
+        : []),
+    ];
+    return casters.flatMap(({ instanceId: casterInstanceId }) =>
+      summonLocations.flatMap(({ cell, region }) => {
+        const exactRegion: GameRegion = region ?? 'surface';
+        const sacrificeCandidates = state.realm.units
+          .filter((unit) => unit.controller === seat
+            && unit.location === cell
+            && unit.region === exactRegion)
+          .map(({ instanceId: candidateId }) => candidateId)
+          .sort();
+        // ponytail: raise this useful-cost ceiling only if a future ruling permits
+        // gratuitous sacrifices after a spell's mana cost has already reached zero.
+        const maximumSacrifices = definition
+          .sacrificeMinionAtSummoningLocationForManaDiscount === 2
+          ? Math.min(sacrificeCandidates.length, Math.ceil(definition.manaCost / 2))
+          : 0;
+        const sacrificePayments = sacrificeCombinations(sacrificeCandidates, maximumSacrifices)
+          .map((sacrificedMinionInstanceIds) => ({
+            manaCost: Math.max(0, definition.manaCost - (2 * sacrificedMinionInstanceIds.length)),
+            sacrificedMinionInstanceIds,
+          }))
+          .filter(({ manaCost }) => player.mana >= manaCost);
+        return [...basePaymentOptions, ...sacrificePayments].map((payment) => ({
           cardId,
           cardInstanceId: instanceId,
           casterInstanceId,
           cell,
           kind: 'summon-minion' as const,
           manaCost: payment.manaCost,
-          ...(payment.paymentMode ? { paymentMode: payment.paymentMode } : {}),
-          region: 'void' as const,
-        }))
-        : []),
-    ]));
+          ...('paymentMode' in payment && payment.paymentMode
+            ? { paymentMode: payment.paymentMode }
+            : {}),
+          ...(region ? { region } : {}),
+          ...('sacrificedMinionInstanceIds' in payment
+            ? { sacrificedMinionInstanceIds: payment.sacrificedMinionInstanceIds }
+            : {}),
+        }));
+      }));
   });
 }
 
@@ -936,6 +962,16 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && card.discardRandomCardInsteadOfMana !== true) {
     throw new RangeError(`${path}.discardRandomCardInsteadOfMana must be true when defined`);
   }
+  if (card.sacrificeMinionAtSummoningLocationForManaDiscount !== undefined
+    && card.sacrificeMinionAtSummoningLocationForManaDiscount !== 2) {
+    throw new RangeError(
+      `${path}.sacrificeMinionAtSummoningLocationForManaDiscount must be 2`,
+    );
+  }
+  if (card.discardRandomCardInsteadOfMana === true
+    && card.sacrificeMinionAtSummoningLocationForManaDiscount === 2) {
+    throw new RangeError(`${path} competing alternative summon payments are unsupported`);
+  }
   if (card.lethal !== undefined && typeof card.lethal !== 'boolean') {
     throw new RangeError(`${path}.lethal must be boolean`);
   }
@@ -1238,6 +1274,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.mustBeCastToWaterSite === true ? { mustBeCastToWaterSite: true } : {}),
             ...(card.provides ? { provides: card.provides } : {}),
             ...(card.ranged === true ? { ranged: true } : {}),
+            ...(card.sacrificeMinionAtSummoningLocationForManaDiscount === 2
+              ? { sacrificeMinionAtSummoningLocationForManaDiscount: 2 as const }
+              : {}),
             ...(card.shootsDragProjectile === true ? { shootsDragProjectile: true } : {}),
             ...(card.spellcaster === true ? { spellcaster: true } : {}),
             ...(card.stealth === true ? { stealth: true } : {}),
@@ -2212,6 +2251,8 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
       instanceId === descriptor.casterInstanceId);
     const payment = descriptor.paymentMode === 'random-card-discard'
       ? 'discard random card'
+      : descriptor.sacrificedMinionInstanceIds
+        ? `${descriptor.manaCost} mana + sacrifice ${descriptor.sacrificedMinionInstanceIds.length} minion${descriptor.sacrificedMinionInstanceIds.length === 1 ? '' : 's'}`
       : `${descriptor.manaCost} mana`;
     return `Summon ${descriptor.cardId} at ${descriptor.cell}${descriptor.region ? ` ${descriptor.region}` : ''} (${payment})`
       + (caster ? ` with minion ${caster.instanceId.slice(0, 15)}…` : '');
@@ -4230,14 +4271,20 @@ function applyDescriptor(
     const card = player.hand.spellbook.find(({ cardId, instanceId }) =>
       instanceId === descriptor.cardInstanceId && cardId === descriptor.cardId);
     const definition = card && cardDefinition(state, card.cardId);
-    const legal = summonDescriptors(state, seat).some((candidate) =>
-      candidate.kind === 'summon-minion'
-        && candidate.cardInstanceId === descriptor.cardInstanceId
+    const legal = summonDescriptors(state, seat).some((candidate) => {
+      if (candidate.kind !== 'summon-minion') return false;
+      const candidateSacrifices = candidate.sacrificedMinionInstanceIds ?? [];
+      const requestedSacrifices = descriptor.sacrificedMinionInstanceIds ?? [];
+      return candidate.cardInstanceId === descriptor.cardInstanceId
         && candidate.casterInstanceId === descriptor.casterInstanceId
         && candidate.cell === descriptor.cell
         && candidate.manaCost === descriptor.manaCost
         && candidate.paymentMode === descriptor.paymentMode
-        && (candidate.region ?? 'surface') === (descriptor.region ?? 'surface'));
+        && (candidate.region ?? 'surface') === (descriptor.region ?? 'surface')
+        && candidateSacrifices.length === requestedSacrifices.length
+        && candidateSacrifices.every((instanceId, index) =>
+          instanceId === requestedSacrifices[index]);
+    });
     const caster = spellcasterRefs(state, seat).find(({ instanceId }) =>
       instanceId === descriptor.casterInstanceId);
     if (!card || !definition || definition.cardType !== 'minion' || !legal || !caster) {
@@ -4263,10 +4310,10 @@ function applyDescriptor(
     if (descriptor.paymentMode === 'random-card-discard' && !discardedCard) {
       throw new Error('unreachable random card discard cost without another card');
     }
-    const paymentState = randomCost
+    const randomizedState = randomCost
       ? deepFreeze({ ...state, engine: randomCost.engine })
       : state;
-    const paymentOutcomes: readonly GameOutcome[] = discardedCard
+    const discardOutcomes: readonly GameOutcome[] = discardedCard
       ? [{
         payload: {
           cardId: discardedCard.card.cardId,
@@ -4303,8 +4350,60 @@ function applyDescriptor(
       },
       mana: player.mana - descriptor.manaCost,
     });
-    const [castingUnits, casterStealthOutcomes] = loseStealth(paymentState.realm.units, [caster]);
-    const realm = { ...paymentState.realm, units: [...castingUnits, unit] };
+    const paidState = deepFreeze({
+      ...randomizedState,
+      players: replacePlayer(randomizedState, seat, updatedPlayer),
+    });
+    const sacrificedUnits = (descriptor.sacrificedMinionInstanceIds ?? []).map((instanceId) => {
+      const sacrificed = paidState.realm.units.find((unit) => unit.instanceId === instanceId);
+      if (!sacrificed) throw new Error('unreachable missing minion sacrifice cost');
+      return sacrificed;
+    });
+    const sacrificedOutcomes: readonly GameOutcome[] = sacrificedUnits.map((sacrificed) => ({
+      payload: {
+        cardId: sacrificed.cardId,
+        instanceId: sacrificed.instanceId,
+        owner: sacrificed.owner,
+        seat: sacrificed.controller,
+        sourceInstanceId: card.instanceId,
+      },
+      type: 'minion-sacrificed',
+    }));
+    const deathResolution = sacrificedUnits.length > 0
+      ? resolveMinionDeaths(
+        paidState,
+        paidState.players,
+        paidState.realm.units,
+        sacrificedUnits,
+        new Set(),
+      )
+      : undefined;
+    const resolvedPaymentState = deathResolution
+      ? deepFreeze({
+        ...paidState,
+        ...(deathResolution.terminal.status === 'finished' ? { phase: 'terminal' as const } : {}),
+        players: deathResolution.players,
+        realm: { ...paidState.realm, units: deathResolution.units },
+        terminal: deathResolution.terminal,
+      })
+      : paidState;
+    const paymentOutcomes = [
+      ...discardOutcomes,
+      ...sacrificedOutcomes,
+      ...(deathResolution?.outcomes ?? []),
+    ];
+    if (resolvedPaymentState.terminal.status === 'finished') {
+      return [
+        withStateVersion(resolvedPaymentState, {}),
+        paymentOutcomes,
+        paymentRandomDraws,
+      ];
+    }
+    const [castingUnits, casterStealthOutcomes] = loseStealth(
+      resolvedPaymentState.realm.units,
+      [caster],
+    );
+    const realm = { ...resolvedPaymentState.realm, units: [...castingUnits, unit] };
     const summoned: GameOutcome = {
       payload: {
         cardId: card.cardId,
@@ -4319,8 +4418,7 @@ function applyDescriptor(
     };
     const summonOutcomes = [...paymentOutcomes, ...casterStealthOutcomes, summoned];
     const summonedState = deepFreeze({
-      ...paymentState,
-      players: replacePlayer(paymentState, seat, updatedPlayer),
+      ...resolvedPaymentState,
       realm,
     });
     const settlement = settleRegionOccupancy(summonedState);

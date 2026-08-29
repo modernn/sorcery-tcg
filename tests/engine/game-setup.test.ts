@@ -59,6 +59,7 @@ type SpellFacts = Readonly<{
   mustBeCastToWaterSite?: boolean;
   provides?: 'air' | 'earth' | 'fire' | 'water';
   ranged?: boolean;
+  sacrificeMinionAtSummoningLocationForManaDiscount?: 2;
   shootsDragProjectile?: boolean;
   stealth?: boolean;
   strikesFirstWhileAttacking?: boolean;
@@ -161,6 +162,9 @@ function cardsFor(
         mustBeCastToWaterSite: facts.mustBeCastToWaterSite ?? false,
         ...(facts.provides ? { provides: facts.provides } : {}),
         ranged: facts.ranged ?? false,
+        ...(facts.sacrificeMinionAtSummoningLocationForManaDiscount === 2
+          ? { sacrificeMinionAtSummoningLocationForManaDiscount: 2 as const }
+          : {}),
         shootsDragProjectile: facts.shootsDragProjectile ?? false,
         stealth: facts.stealth ?? false,
         strikesFirstWhileAttacking: facts.strikesFirstWhileAttacking ?? false,
@@ -1610,6 +1614,210 @@ test('RULE-03 Aramos Mercenaries may discard a deterministic random hand card in
   const southAfter = canonicalJson(observeGame(session.state, 'south'));
   assert.ok(southAfter.includes(String(discardedCardId)));
   assert.ok(southAfter.includes(String(discardedInstanceId)));
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 Gnarled Wendigo sacrifices local minions before paying its discounted summon', () => {
+  const decks = {
+    north: deck('wendigo-north', 6, 8),
+    south: deck('wendigo-south', 6, 8),
+  };
+  const cards = cardsFor(
+    decks,
+    { manaCost: 0, thresholds: { air: 0, earth: 0, fire: 0, water: 0 } },
+    undefined,
+    { elements: ['water'], genesisGainMana: 2 },
+  );
+  const wendigoId = decks.north.spellbook[0]!;
+  const localMinionId = decks.north.spellbook[1]!;
+  const submergedMinionId = decks.north.spellbook[2]!;
+  const secondLocalMinionId = decks.north.spellbook[3]!;
+  const enemyMinionId = decks.south.spellbook[0]!;
+  cards[wendigoId] = {
+    ...cards[wendigoId]!,
+    attack: 5,
+    defense: 5,
+    manaCost: 6,
+    sacrificeMinionAtSummoningLocationForManaDiscount: 2,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 1 },
+  } as GameCardDefinition;
+  cards[submergedMinionId] = {
+    ...cards[submergedMinionId]!,
+    mustBeCastSubmerged: true,
+    submerge: true,
+  } as GameCardDefinition;
+  cards[enemyMinionId] = {
+    ...cards[enemyMinionId]!,
+    summonToAnySite: true,
+  } as GameCardDefinition;
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-summoning-location-sacrifice-discount-v1',
+    },
+    cards,
+    decks,
+    firstSeat: 'north' as const,
+  };
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [wendigoId]: {
+        ...cards[wendigoId]!,
+        sacrificeMinionAtSummoningLocationForManaDiscount: 1,
+      } as unknown as GameCardDefinition,
+    },
+    seed: 1,
+  }), /sacrificeMinionAtSummoningLocationForManaDiscount must be 2/);
+
+  let gameManifest: GameManifest | undefined;
+  for (let seed = 1; seed <= 4_096; seed += 1) {
+    const candidate = createGameManifest({ ...input, seed });
+    const opening = createGameSession(candidate).state.players;
+    if ([wendigoId, localMinionId, submergedMinionId].every((cardId) =>
+      opening.north.hand.spellbook.some((card) => card.cardId === cardId))
+      && opening.north.spellbook[0]?.cardId === secondLocalMinionId
+      && opening.south.hand.spellbook.some((card) => card.cardId === enemyMinionId)) {
+      gameManifest = candidate;
+      break;
+    }
+  }
+  assert.ok(gameManifest);
+  assert.equal(
+    gameManifest.cards[wendigoId]?.cardType === 'minion'
+      && gameManifest.cards[wendigoId].sacrificeMinionAtSummoningLocationForManaDiscount,
+    2,
+  );
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === localMinionId
+    && descriptor.cell === 'C4'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === submergedMinionId
+    && descriptor.cell === 'C4'
+    && descriptor.region === 'underwater');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === enemyMinionId
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === secondLocalMinionId
+    && descriptor.cell === 'C4'
+    && descriptor.region === undefined);
+  assert.equal(session.state.players.north.mana, 4);
+
+  const local = session.state.realm.units.find(({ cardId }) => cardId === localMinionId);
+  const secondLocal = session.state.realm.units.find(({ cardId }) => cardId === secondLocalMinionId);
+  const submerged = session.state.realm.units.find(({ cardId }) => cardId === submergedMinionId);
+  const enemy = session.state.realm.units.find(({ cardId }) => cardId === enemyMinionId);
+  assert.ok(local && secondLocal && submerged && enemy);
+  const wendigoActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cardId === wendigoId);
+  assert.equal(wendigoActions.some(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.manaCost === 6
+      && descriptor.sacrificedMinionInstanceIds === undefined), false);
+  const discounted = wendigoActions.filter(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'C4'
+      && descriptor.region === undefined
+      && descriptor.manaCost === 4);
+  assert.deepEqual(discounted.map(({ descriptor }) => descriptor.kind === 'summon-minion'
+    ? descriptor.sacrificedMinionInstanceIds
+    : undefined), [local.instanceId, secondLocal.instanceId]
+    .sort()
+    .map((instanceId) => [instanceId]));
+  const doubleDiscounted = wendigoActions.filter(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'C4'
+      && descriptor.region === undefined
+      && descriptor.manaCost === 2);
+  assert.equal(doubleDiscounted.length, 1);
+  assert.deepEqual(
+    doubleDiscounted[0]?.descriptor.kind === 'summon-minion'
+      ? doubleDiscounted[0].descriptor.sacrificedMinionInstanceIds
+      : undefined,
+    [local.instanceId, secondLocal.instanceId].sort(),
+  );
+  const cast = discounted.find(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.sacrificedMinionInstanceIds?.length === 1
+    && descriptor.sacrificedMinionInstanceIds[0] === local.instanceId);
+  assert.ok(cast);
+  assert.deepEqual(
+    cast.descriptor.kind === 'summon-minion'
+      ? cast.descriptor.sacrificedMinionInstanceIds
+      : undefined,
+    [local.instanceId],
+  );
+  assert.equal(wendigoActions.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && (descriptor.sacrificedMinionInstanceIds ?? []).some((instanceId) =>
+      instanceId === submerged.instanceId || instanceId === enemy.instanceId)), false);
+
+  const checkpoint = session;
+  const checkpointHash = hashGameState(checkpoint.state);
+  const forged = stepGame(checkpoint, {
+    actionId: `${cast.actionId}:forged`,
+    seat: 'north',
+    stateVersion: checkpoint.state.stateVersion,
+  });
+  assert.equal(forged.accepted, false);
+  assert.equal(forged.reason?.code, 'unknown_action');
+  assert.equal(hashGameState(forged.session.state), checkpointHash);
+  assert.equal(forged.session.transcript.length, checkpoint.transcript.length);
+
+  const result = stepGame(checkpoint, cast);
+  assert.equal(result.accepted, true);
+  if (!result.accepted) throw new Error('expected Gnarled Wendigo summon to be accepted');
+  session = result.session;
+  assert.deepEqual(result.receipt.events.map(({ type }) => type), [
+    'minion-sacrificed',
+    'minion-died',
+    'minion-summoned',
+  ]);
+  const sacrificed = result.receipt.events[0];
+  assert.ok(sacrificed && typeof sacrificed.payload === 'object' && !Array.isArray(sacrificed.payload));
+  assert.deepEqual(sacrificed.payload, {
+    cardId: local.cardId,
+    instanceId: local.instanceId,
+    owner: local.owner,
+    seat: local.controller,
+    sourceInstanceId: cast.descriptor.kind === 'summon-minion'
+      ? cast.descriptor.cardInstanceId
+      : '',
+  });
+  const summoned = result.receipt.events[2];
+  assert.ok(summoned && typeof summoned.payload === 'object' && !Array.isArray(summoned.payload));
+  assert.equal((summoned.payload as Readonly<Record<string, unknown>>).manaPaid, 4);
+  assert.equal(session.state.players.north.mana, 0);
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === local.instanceId), true);
+  assert.equal(session.state.realm.units.some(({ instanceId }) =>
+    instanceId === local.instanceId), false);
+  const wendigo = session.state.realm.units.find(({ cardId }) => cardId === wendigoId);
+  assert.ok(wendigo);
+  const wendigoDefinition = gameManifest.cards[wendigo.cardId];
+  assert.ok(wendigoDefinition?.cardType === 'minion');
+  assert.deepEqual({
+    attack: wendigoDefinition.attack,
+    defense: wendigoDefinition.defense,
+    location: wendigo.location,
+    region: wendigo.region,
+  }, { attack: 5, defense: 5, location: 'C4', region: 'surface' });
+  assert.deepEqual(result.receipt.randomDraws, []);
+  assert.equal(session.state.stateVersion, checkpoint.state.stateVersion + 1);
   assert.equal(verifyGameReplay(session), true);
 });
 
