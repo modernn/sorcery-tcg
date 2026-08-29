@@ -547,9 +547,20 @@ function isRubble(site: RealmSiteInstance): site is RubbleInstance {
 }
 
 function legalSiteCells(state: GameState, seat: GameSeat): readonly RealmCell[] {
-  return [...new Set(Object.entries(state.realm.sites)
+  const controlledCells = Object.entries(state.realm.sites)
     .filter(([, site]) => site.controller === seat)
-    .flatMap(([cell]) => borderingCells(cell as RealmCell)))]
+    .map(([cell]) => cell as RealmCell);
+  if (controlledCells.length === 0) {
+    const available = REALM_CELLS
+      .filter((cell) => !state.realm.sites[cell] || isRubble(state.realm.sites[cell]!));
+    const minimumDistance = Math.min(...available
+      .map((cell) => cardinalCellDistance(state.players[seat].avatar.location, cell)));
+    return available
+      .filter((cell) => cardinalCellDistance(state.players[seat].avatar.location, cell) === minimumDistance)
+      .sort();
+  }
+  return [...new Set(controlledCells
+    .flatMap((cell) => borderingCells(cell)))]
     .filter((cell) => !state.realm.sites[cell] || isRubble(state.realm.sites[cell]!))
     .sort();
 }

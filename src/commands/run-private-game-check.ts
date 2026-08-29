@@ -511,12 +511,17 @@ export type PrivateGameCheck = Readonly<{
     avatarRemainedOnSurface: boolean;
     causalEventsVerified: boolean;
     deck: DeckList;
+    destructionAcceptedActionCount: number;
     exactActivationAvailable: boolean;
     noAffinityOrControlContribution: boolean;
+    noRandomDraws: boolean;
+    recoveryVerified: boolean;
     replayVerified: boolean;
+    seed: number;
     sinkhole: string;
     sourceAndTargetEnteredCemetery: boolean;
     twoNeutralRubbleSites: boolean;
+    valley: string;
   }>;
   earthDivineHealing: Readonly<{
     acceptedActionCount: number;
@@ -4722,29 +4727,36 @@ function findEarthSinkholeOpening(
 ): Readonly<{
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
+  recoverySiteInstanceId: string;
+  seed: number;
   session: GameSession;
   sinkholeInstanceId: string;
   southSiteInstanceId: string;
   targetSiteInstanceId: string;
 }> {
   // ponytail: bounded seed scan avoids another private config field.
-  for (let offset = 1; offset <= 256; offset += 1) {
-    const built = buildManifest(input, input.config.earthSeed + offset, 'earth-sinkhole');
+  for (let offset = 1; offset <= 4096; offset += 1) {
+    const seed = input.config.earthSeed + offset;
+    const built = buildManifest(input, seed, 'earth-sinkhole');
     const session = createGameSession(built.manifest);
     const sinkholeInstanceId = session.state.players.north.hand.atlas
       .find(({ cardId }) => cardId === input.sinkhole.stableId)?.instanceId;
-    const targetSiteInstanceId = session.state.players.north.hand.atlas.find(({ cardId }) => {
-      const card = input.cards.find(({ stableId }) => stableId === cardId);
-      return card?.cardType === 'site'
-        && card.rarity === 'ordinary'
-        && card.rulesText.trim() === ''
-        && card.elements.includes('earth');
-    })?.instanceId;
+    const targetSiteInstanceId = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.valley.stableId)?.instanceId;
+    const recoverySiteInstanceId = session.state.players.north.atlas[0]?.cardId
+      === input.valley.stableId
+      ? session.state.players.north.atlas[0].instanceId
+      : undefined;
     const southSiteInstanceId = session.state.players.south.hand.atlas
       .find(({ cardId }) => cardId !== input.sinkhole.stableId)?.instanceId;
-    if (sinkholeInstanceId && targetSiteInstanceId && southSiteInstanceId) {
+    if (sinkholeInstanceId
+      && targetSiteInstanceId
+      && recoverySiteInstanceId
+      && southSiteInstanceId) {
       return {
         ...built,
+        recoverySiteInstanceId,
+        seed,
         session,
         sinkholeInstanceId,
         southSiteInstanceId,
@@ -8718,6 +8730,72 @@ function runEarthShallowGrave(
   });
 }
 
+function advanceToNorthSiteRecovery(
+  checkpoint: GameSession,
+  valleyCardId: string,
+  recoverySiteInstanceId: string,
+  rubbleC3InstanceId: string | undefined,
+): GameSession {
+  let session = accept(checkpoint, action(checkpoint, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
+  const player = session.state.players.north;
+  if (session.state.activeSeat !== 'north'
+    || session.state.decisionSeat !== 'north'
+    || session.state.phase !== 'main'
+    || player.avatar.tapped
+    || player.mana !== 0) {
+    throw new Error('private zero-domain recovery did not reach north ready Main');
+  }
+  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'play-site');
+  const exactCells = choices.flatMap(({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cardInstanceId === recoverySiteInstanceId
+      ? [descriptor.cell]
+      : []);
+  if (exactCells.length !== 1 || exactCells[0] !== 'C4') {
+    throw new Error('private zero-domain recovery did not expose only Avatar-local C4');
+  }
+  const result = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === recoverySiteInstanceId
+      && descriptor.cell === 'C4'));
+  if (!result.accepted) {
+    throw new Error(`private zero-domain Valley recovery rejected: ${result.reason.code}`);
+  }
+  session = result.session;
+  const site = session.state.realm.sites.C4;
+  const realSite = site && !('rubble' in site) ? site : undefined;
+  const affinity = observeGame(session.state, 'north').players.north.affinity;
+  if (result.receipt.events.map(({ type }) => type).join(',') !== 'rubble-replaced,site-played'
+    || result.receipt.randomDraws.length !== 0) {
+    throw new Error('private zero-domain recovery emitted unexpected events or randomness');
+  }
+  if (realSite?.cardId !== valleyCardId
+    || realSite.instanceId !== recoverySiteInstanceId
+    || realSite.owner !== 'north'
+    || realSite.controller !== 'north') {
+    throw new Error('private zero-domain recovery did not establish the real owned Valley');
+  }
+  if (session.state.players.north.avatar.location !== 'C4'
+    || session.state.players.north.avatar.region !== 'surface'
+    || !session.state.players.north.avatar.tapped
+    || session.state.players.north.mana !== 1
+    || affinity.earth !== 1) {
+    throw new Error('private zero-domain recovery did not restore Avatar-local mana and E1');
+  }
+  if (session.state.players.north.hand.atlas
+    .some(({ instanceId }) => instanceId === recoverySiteInstanceId)
+    || session.state.realm.sites.C3?.instanceId !== rubbleC3InstanceId) {
+    throw new Error('private zero-domain recovery did not preserve its hand/Rubble transition');
+  }
+  return session;
+}
+
 function runEarthSinkhole(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['earthSinkhole'] {
@@ -8773,53 +8851,71 @@ function runEarthSinkhole(
     ? events[3].payload
     : undefined;
   const affinity = observeGame(session.state, 'north').players.north.affinity;
+  const destructionAcceptedActionCount = session.transcript.length;
+  const avatarRemainedOnSurface = session.state.players.north.avatar.location === 'C4'
+    && session.state.players.north.avatar.region === 'surface';
+  const causalEventsVerified = events.map(({ type }) => type).join(',')
+    === 'site-sacrificed,site-destroyed,rubble-created,rubble-created'
+    && sacrificedPayload?.cell === 'C4'
+    && sacrificedPayload.instanceId === opening.sinkholeInstanceId
+    && sacrificedPayload.owner === 'north'
+    && sacrificedPayload.sourceInstanceId === opening.sinkholeInstanceId
+    && destroyedPayload?.cell === 'C3'
+    && destroyedPayload.instanceId === opening.targetSiteInstanceId
+    && destroyedPayload.owner === 'north'
+    && destroyedPayload.sourceInstanceId === opening.sinkholeInstanceId
+    && rubbleC3Payload?.cell === 'C3'
+    && rubbleC3Payload.instanceId === rubbleC3?.instanceId
+    && rubbleC3Payload.sourceInstanceId === opening.sinkholeInstanceId
+    && rubbleC4Payload?.cell === 'C4'
+    && rubbleC4Payload.instanceId === rubbleC4?.instanceId
+    && rubbleC4Payload.sourceInstanceId === opening.sinkholeInstanceId;
+  const noAffinityOrControlContribution = affinity.air === 0
+    && affinity.earth === 0
+    && affinity.fire === 0
+    && affinity.water === 0
+    && Object.values(session.state.realm.sites)
+      .every(({ controller }) => controller !== 'north');
+  const sourceAndTargetEnteredCemetery = session.state.players.north.cemetery
+    .some(({ instanceId }) => instanceId === opening.sinkholeInstanceId)
+    && session.state.players.north.cemetery
+      .some(({ instanceId }) => instanceId === opening.targetSiteInstanceId);
+  const twoNeutralRubbleSites = rubbleC3 !== undefined
+    && 'rubble' in rubbleC3
+    && rubbleC3.rubble === true
+    && rubbleC3.controller === null
+    && !('cardId' in rubbleC3)
+    && rubbleC3.instanceId !== opening.targetSiteInstanceId
+    && rubbleC4 !== undefined
+    && 'rubble' in rubbleC4
+    && rubbleC4.rubble === true
+    && rubbleC4.controller === null
+    && !('cardId' in rubbleC4)
+    && rubbleC4.instanceId !== opening.sinkholeInstanceId;
+
+  const recoveredSession = advanceToNorthSiteRecovery(
+    session,
+    input.valley.stableId,
+    opening.recoverySiteInstanceId,
+    rubbleC3?.instanceId,
+  );
 
   return Object.freeze({
-    acceptedActionCount: session.transcript.length,
-    avatarRemainedOnSurface: session.state.players.north.avatar.location === 'C4'
-      && session.state.players.north.avatar.region === 'surface',
-    causalEventsVerified: events.map(({ type }) => type).join(',')
-      === 'site-sacrificed,site-destroyed,rubble-created,rubble-created'
-      && sacrificedPayload?.cell === 'C4'
-      && sacrificedPayload.instanceId === opening.sinkholeInstanceId
-      && sacrificedPayload.owner === 'north'
-      && sacrificedPayload.sourceInstanceId === opening.sinkholeInstanceId
-      && destroyedPayload?.cell === 'C3'
-      && destroyedPayload.instanceId === opening.targetSiteInstanceId
-      && destroyedPayload.owner === 'north'
-      && destroyedPayload.sourceInstanceId === opening.sinkholeInstanceId
-      && rubbleC3Payload?.cell === 'C3'
-      && rubbleC3Payload.instanceId === rubbleC3?.instanceId
-      && rubbleC3Payload.sourceInstanceId === opening.sinkholeInstanceId
-      && rubbleC4Payload?.cell === 'C4'
-      && rubbleC4Payload.instanceId === rubbleC4?.instanceId
-      && rubbleC4Payload.sourceInstanceId === opening.sinkholeInstanceId,
+    acceptedActionCount: recoveredSession.transcript.length,
+    avatarRemainedOnSurface,
+    causalEventsVerified,
     deck: deckList(opening.manifest.decks.north, opening.names),
+    destructionAcceptedActionCount,
     exactActivationAvailable,
-    noAffinityOrControlContribution: affinity.air === 0
-      && affinity.earth === 0
-      && affinity.fire === 0
-      && affinity.water === 0
-      && Object.values(session.state.realm.sites)
-        .every(({ controller }) => controller !== 'north'),
-    replayVerified: verifyGameReplay(session),
+    noAffinityOrControlContribution,
+    noRandomDraws: recoveredSession.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    recoveryVerified: true,
+    replayVerified: verifyGameReplay(recoveredSession),
+    seed: opening.seed,
     sinkhole: input.sinkhole.name,
-    sourceAndTargetEnteredCemetery: session.state.players.north.cemetery
-      .some(({ instanceId }) => instanceId === opening.sinkholeInstanceId)
-      && session.state.players.north.cemetery
-        .some(({ instanceId }) => instanceId === opening.targetSiteInstanceId),
-    twoNeutralRubbleSites: rubbleC3 !== undefined
-      && 'rubble' in rubbleC3
-      && rubbleC3.rubble === true
-      && rubbleC3.controller === null
-      && !('cardId' in rubbleC3)
-      && rubbleC3.instanceId !== opening.targetSiteInstanceId
-      && rubbleC4 !== undefined
-      && 'rubble' in rubbleC4
-      && rubbleC4.rubble === true
-      && rubbleC4.controller === null
-      && !('cardId' in rubbleC4)
-      && rubbleC4.instanceId !== opening.sinkholeInstanceId,
+    sourceAndTargetEnteredCemetery,
+    twoNeutralRubbleSites,
+    valley: input.valley.name,
   });
 }
 

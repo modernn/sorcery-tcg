@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { canonicalJson } from '../../src/authority/canonical-json.ts';
+import { opaqueActionId } from '../../src/engine/contract.ts';
 import {
   createGameManifest,
   createGameSession,
@@ -1212,6 +1213,108 @@ test('RULE-02 sites expand through unoccupied orthogonal cells controlled by the
   assert.deepEqual(expansion, ['B3', 'B4', 'D3', 'D4']);
   assert.equal(session.state.players.north.avatar.tapped, false);
   assert.equal(session.state.players.north.mana, 2);
+});
+
+test('RULE-02 a player with no sites recovers at the closest available cell', () => {
+  const base = manifest(267);
+  const preview = createGameSession(base);
+  const sourceCardId = preview.state.players.north.hand.atlas[0]?.cardId;
+  assert.ok(sourceCardId);
+  const gameManifest = createGameManifest({
+    ...base,
+    cards: {
+      ...base.cards,
+      [sourceCardId]: {
+        ...base.cards[sourceCardId]!,
+        sacrificeToDestroyNearbySite: true,
+      } as GameCardDefinition,
+    },
+  });
+  let session = keep(keep(createGameSession(gameManifest)));
+  const sourceCard = session.state.players.north.hand.atlas.find(({ cardId }) => cardId === sourceCardId);
+  assert.ok(sourceCard);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === sourceCard.instanceId);
+  take(({ descriptor }) => descriptor.kind === 'activate-site-destruction'
+    && descriptor.sourceSiteInstanceId === sourceCard.instanceId
+    && descriptor.targetSiteInstanceId === sourceCard.instanceId);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const zeroDomain = session;
+  const recoveryCard = zeroDomain.state.players.north.hand.atlas[0];
+  const rubble = zeroDomain.state.realm.sites.C4;
+  assert.ok(recoveryCard);
+  assert.ok(rubble && 'rubble' in rubble);
+  assert.equal(zeroDomain.state.players.north.domainEstablished, true);
+  assert.equal(zeroDomain.state.players.north.avatar.location, 'C4');
+  assert.equal(Object.values(zeroDomain.state.realm.sites)
+    .some(({ controller }) => controller === 'north'), false);
+  assert.deepEqual(legalGameActions(zeroDomain.state, 'north')
+    .flatMap(({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === recoveryCard.instanceId ? [descriptor.cell] : []), ['C4']);
+
+  const southSite = zeroDomain.state.realm.sites.C1;
+  assert.ok(southSite && !('rubble' in southSite));
+  const tiedCheckpoint: GameSession = {
+    ...zeroDomain,
+    state: {
+      ...zeroDomain.state,
+      players: {
+        ...zeroDomain.state.players,
+        north: {
+          ...zeroDomain.state.players.north,
+          avatar: { ...zeroDomain.state.players.north.avatar, location: 'C3' },
+        },
+      },
+      realm: {
+        ...zeroDomain.state.realm,
+        sites: { C3: southSite, C4: rubble },
+      },
+    },
+  };
+  assert.deepEqual(legalGameActions(tiedCheckpoint.state, 'north')
+    .flatMap(({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === recoveryCard.instanceId ? [descriptor.cell] : []),
+  ['B3', 'C2', 'C4', 'D3']);
+  const beforeForge = canonicalJson(tiedCheckpoint.state);
+  const forged = stepGame(tiedCheckpoint, {
+    actionId: opaqueActionId('sorcery-core-v1', 'north', tiedCheckpoint.state.stateVersion, {
+      cardId: recoveryCard.cardId,
+      cardInstanceId: recoveryCard.instanceId,
+      cell: 'A1',
+      kind: 'play-site',
+    }),
+    seat: 'north',
+    stateVersion: tiedCheckpoint.state.stateVersion,
+  });
+  assert.equal(forged.accepted, false);
+  assert.equal(forged.reason.code, 'unknown_action');
+  assert.equal(canonicalJson(forged.session.state), beforeForge);
+
+  const handBefore = zeroDomain.state.players.north.hand.atlas.length;
+  const recovered = stepGame(zeroDomain, action(zeroDomain, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === recoveryCard.instanceId
+      && descriptor.cell === 'C4'));
+  assert.equal(recovered.accepted, true);
+  if (!recovered.accepted) return;
+  assert.deepEqual(recovered.receipt.events.map(({ type }) => type), ['rubble-replaced', 'site-played']);
+  assert.deepEqual(recovered.receipt.randomDraws, []);
+  assert.equal(recovered.session.state.realm.sites.C4?.controller, 'north');
+  assert.equal('rubble' in recovered.session.state.realm.sites.C4!, false);
+  assert.equal(observeGame(recovered.session.state, 'north').players.north.affinity.earth, 1);
+  assert.equal(recovered.session.state.players.north.avatar.tapped, true);
+  assert.equal(recovered.session.state.players.north.hand.atlas.length, handBefore - 1);
+  assert.equal(recovered.session.state.players.north.mana, 1);
+  assert.equal(verifyGameReplay(recovered.session), true);
 });
 
 test('RULE-02 the Avatar may draw a private site instead of playing one', () => {
