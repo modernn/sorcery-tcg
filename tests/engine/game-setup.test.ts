@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { canonicalJson } from '../../src/authority/canonical-json.ts';
+import { canonicalJson, type JsonValue } from '../../src/authority/canonical-json.ts';
 import { opaqueActionId } from '../../src/engine/contract.ts';
 import {
   createGameManifest,
@@ -91,6 +91,7 @@ type SiteFacts = Readonly<{
   genesisDiscardTopSpells?: 2;
   genesisDrawSpellPerAdjacentSameCard?: boolean;
   genesisGainMana?: number;
+  genesisMayBottomNextSpell?: true;
   sacrificeToDestroyNearbySite?: true;
 }>;
 
@@ -123,6 +124,9 @@ function cardsFor(
         genesisDrawSpellPerAdjacentSameCard:
           site.genesisDrawSpellPerAdjacentSameCard ?? false,
         ...(site.genesisGainMana ? { genesisGainMana: site.genesisGainMana } : {}),
+        ...(site.genesisMayBottomNextSpell === true
+          ? { genesisMayBottomNextSpell: true as const }
+          : {}),
         ...(site.sacrificeToDestroyNearbySite === true
           ? { sacrificeToDestroyNearbySite: true as const }
           : {}),
@@ -6771,6 +6775,91 @@ test('RULE-03 Hunter\'s Lodge Genesis removes only enemy Stealth', () => {
     instanceId === enemy.instanceId)?.stealthed, false);
   assert.deepEqual(result.receipt.randomDraws, []);
   assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 seasonal River Genesis privately keeps or bottoms the next spell', () => {
+  const base = deck('river-north');
+  const north = { ...base, atlas: base.atlas.map(() => 'river-site') };
+  const gameManifest = manifest(160, {
+    north,
+    site: { genesisMayBottomNextSpell: true },
+  });
+  assert.equal(gameManifest.cards['river-site']?.cardType === 'site'
+    && gameManifest.cards['river-site'].genesisMayBottomNextSpell, true);
+  assert.throws(() => createGameManifest({
+    ...gameManifest,
+    cards: {
+      ...gameManifest.cards,
+      'river-site': {
+        ...gameManifest.cards['river-site']!,
+        genesisMayBottomNextSpell: false,
+      } as unknown as GameCardDefinition,
+    },
+  }), /genesisMayBottomNextSpell must be true/);
+
+  const checkpoint = keep(keep(createGameSession(gameManifest)));
+  const before = checkpoint.state.players.north.spellbook;
+  const [top, next] = before;
+  const riverInstanceId = checkpoint.state.players.north.hand.atlas[0]?.instanceId;
+  assert.ok(top);
+  assert.ok(next);
+  assert.ok(riverInstanceId);
+  const southBefore = canonicalJson(observeGame(checkpoint.state, 'south') as unknown as JsonValue);
+  assert.equal(southBefore.includes(top.cardId), false);
+  assert.equal(southBefore.includes(top.instanceId), false);
+
+  const choices = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === riverInstanceId
+      && descriptor.cell === 'C4');
+  const keepNext = choices.find(({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.genesisSpellChoice === 'keep-next');
+  const bottomNext = choices.find(({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.genesisSpellChoice === 'bottom-next');
+  assert.equal(choices.length, 2);
+  assert.ok(keepNext);
+  assert.ok(bottomNext);
+  assert.notEqual(keepNext.actionId, bottomNext.actionId);
+  assert.equal(choices.every(({ descriptor, label }) =>
+    label.includes(top.cardId)
+      && !canonicalJson(descriptor as unknown as JsonValue).includes(top.cardId)
+      && !canonicalJson(descriptor as unknown as JsonValue).includes(top.instanceId)), true);
+
+  const kept = stepGame(checkpoint, keepNext);
+  const bottomed = stepGame(checkpoint, bottomNext);
+  assert.equal(kept.accepted, true);
+  assert.equal(bottomed.accepted, true);
+  if (!kept.accepted || !bottomed.accepted) return;
+  assert.equal(kept.session.state.stateVersion, checkpoint.state.stateVersion + 1);
+  assert.equal(bottomed.session.state.stateVersion, checkpoint.state.stateVersion + 1);
+  assert.deepEqual(kept.session.state.players.north.spellbook, before);
+  assert.deepEqual(bottomed.session.state.players.north.spellbook, [...before.slice(1), top]);
+  assert.equal(bottomed.session.state.players.north.spellbook[0]?.instanceId, next.instanceId);
+  assert.deepEqual(kept.receipt.events.map(({ type }) => type), ['site-played']);
+  assert.deepEqual(bottomed.receipt.events.map(({ payload, type }) => ({ payload, type })), [
+    {
+      payload: {
+        cardId: 'river-site',
+        cell: 'C4',
+        instanceId: riverInstanceId,
+        seat: 'north',
+      },
+      type: 'site-played',
+    },
+    {
+      payload: { seat: 'north', sourceInstanceId: riverInstanceId },
+      type: 'spell-bottomed',
+    },
+  ]);
+  assert.equal(canonicalJson(bottomed.receipt.events as unknown as JsonValue).includes(top.cardId), false);
+  assert.equal(canonicalJson(bottomed.receipt.events as unknown as JsonValue).includes(top.instanceId), false);
+  assert.deepEqual(bottomed.receipt.randomDraws, []);
+  assert.equal(
+    canonicalJson(observeGame(kept.session.state, 'south') as unknown as JsonValue),
+    canonicalJson(observeGame(bottomed.session.state, 'south') as unknown as JsonValue),
+  );
+  assert.equal(verifyGameReplay(kept.session), true);
+  assert.equal(verifyGameReplay(bottomed.session), true);
 });
 
 test('RULE-03 adjacent matching sites trigger one spell draw apiece and a short deck loses', () => {
