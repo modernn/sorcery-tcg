@@ -317,6 +317,16 @@ export type PrivateGameCheck = Readonly<{
     voidSummonAvailable: boolean;
     voidwalkMinion: string;
   }>;
+  airVoidArtifact: Readonly<{
+    acceptedActionCount: number;
+    deck: DeckList;
+    noRandomDraws: boolean;
+    relocationVerified: boolean;
+    replayVerified: boolean;
+    seed: number;
+    spectralStalker: string;
+    swordAndShield: string;
+  }>;
   airZap: Readonly<{
     acceptedActionCount: number;
     damageDealt: number;
@@ -2942,7 +2952,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -3163,6 +3173,13 @@ function buildManifest(
     input.voidwalkMinion,
     input.forsaken,
   ]);
+  const airVoidArtifactDeck = elementalDeck(
+    'air',
+    [input.voidwalkMinion],
+    [input.spire],
+    [],
+    [input.swordAndShield],
+  );
   const spellcasterAirSite = ordered(sites.filter((card) =>
     card.rarity === 'ordinary' && card.elements.includes('air')), false)[0];
   const spellcasterWaterSite = ordered(sites.filter((card) =>
@@ -3318,6 +3335,8 @@ function buildManifest(
       ? airGenesisSpellDeck
       : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
+      : scenario === 'air-void-artifact'
+      ? airVoidArtifactDeck
       : scenario === 'air-fire-fatality'
       ? airFireFatalityDeck
       : scenario === 'air-zap'
@@ -3435,6 +3454,8 @@ function buildManifest(
       ? airGenesisSpellDeck
       : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
+      : scenario === 'air-void-artifact'
+      ? airVoidArtifactDeck
       : scenario === 'air-fire-fatality'
       ? airFireFatalityDeck
       : scenario === 'air-zap'
@@ -5920,6 +5941,51 @@ function findAirVoidwalkOpening(
     }
   }
   throw new Error('private Air Voidwalk scenario no longer produces its supported opening');
+}
+
+function findAirVoidArtifactOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  artifactInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string, string];
+  seed: number;
+  session: GameSession;
+  southSiteInstanceId: string;
+  stalkerInstanceId: string;
+}> {
+  // ponytail: this bounded scan avoids adding a private config field for one teaching proof.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const seed = input.config.airborneSeed + offset;
+    const built = buildManifest(input, seed, 'air-void-artifact');
+    const session = createGameSession(built.manifest);
+    const northSites = [
+      ...session.state.players.north.hand.atlas,
+      ...session.state.players.north.atlas.slice(0, 1),
+    ];
+    const stalkerInstanceId = session.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === input.voidwalkMinion.stableId)?.instanceId;
+    const artifactInstanceId = session.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === input.swordAndShield.stableId)?.instanceId;
+    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+    if (northSites.length >= 4
+      && stalkerInstanceId
+      && artifactInstanceId
+      && southSiteInstanceId) {
+      return {
+        ...built,
+        artifactInstanceId,
+        northSiteInstanceIds: northSites.slice(0, 4)
+          .map(({ instanceId }) => instanceId) as [string, string, string, string],
+        seed,
+        session,
+        southSiteInstanceId,
+        stalkerInstanceId,
+      };
+    }
+  }
+  throw new Error('private void Artifact relocation scenario lacks its supported opening');
 }
 
 function findAirGenesisSpellOpening(
@@ -11031,6 +11097,123 @@ function runAirVoidwalk(
   });
 }
 
+function runAirVoidArtifact(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airVoidArtifact'] {
+  const opening = findAirVoidArtifactOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.stalkerInstanceId
+    && descriptor.cell === 'B3'
+    && descriptor.region === 'void');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+    && descriptor.cell === 'B4');
+
+  const castResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-artifact'
+      && descriptor.cardInstanceId === opening.artifactInstanceId
+      && descriptor.bearer?.kind === 'minion'
+      && descriptor.bearer.instanceId === opening.stalkerInstanceId));
+  if (!castResult.accepted) throw new Error('private void-carried Sword cast was rejected');
+  session = castResult.session;
+  const carried = session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === opening.artifactInstanceId);
+
+  const dropResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'drop-artifacts'
+      && descriptor.unit.kind === 'minion'
+      && descriptor.unit.instanceId === opening.stalkerInstanceId
+      && descriptor.artifactInstanceIds.length === 1
+      && descriptor.artifactInstanceIds[0] === opening.artifactInstanceId));
+  if (!dropResult.accepted) throw new Error('private void-carried Sword Drop was rejected');
+  session = dropResult.session;
+  const dropped = session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === opening.artifactInstanceId);
+  const droppedView = observeGame(session.state, 'north').realm.artifacts
+    ?.find(({ instanceId }) => instanceId === opening.artifactInstanceId);
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  const coveredVoid = session.state.realm.sites.B3 === undefined;
+  const coverResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[3]
+      && descriptor.cell === 'B3'));
+  if (!coverResult.accepted) throw new Error('private site-over-void action was rejected');
+  session = coverResult.session;
+  const relocated = session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === opening.artifactInstanceId);
+  const relocatedView = observeGame(session.state, 'north').realm.artifacts
+    ?.find(({ instanceId }) => instanceId === opening.artifactInstanceId);
+  const surfacedStalker = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.stalkerInstanceId);
+  const dropEvent = dropResult.receipt.events[0];
+  const relocationVerified = carried !== undefined
+    && 'bearer' in carried
+    && carried.bearer.instanceId === opening.stalkerInstanceId
+    && carried.owner === 'north'
+    && dropped !== undefined
+    && !('bearer' in dropped)
+    && dropped.location === 'B3'
+    && dropped.region === 'void'
+    && dropped.owner === 'north'
+    && droppedView?.controller === null
+    && dropResult.receipt.events.length === 1
+    && dropEvent?.type === 'artifacts-dropped'
+    && coveredVoid
+    && relocated !== undefined
+    && !('bearer' in relocated)
+    && relocated.instanceId === opening.artifactInstanceId
+    && relocated.location === 'B3'
+    && relocated.region === 'surface'
+    && relocated.owner === 'north'
+    && relocatedView?.controller === null
+    && relocatedView.owner === 'north'
+    && relocatedView.location === 'B3'
+    && relocatedView.region === 'surface'
+    && surfacedStalker?.instanceId === opening.stalkerInstanceId
+    && surfacedStalker.location === 'B3'
+    && surfacedStalker.region === 'surface'
+    && coverResult.receipt.events.length === 1
+    && coverResult.receipt.events[0]?.type === 'site-played';
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    relocationVerified,
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    spectralStalker: input.voidwalkMinion.name,
+    swordAndShield: input.swordAndShield.name,
+  });
+}
+
 function runAirGenesisSpell(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['airGenesisSpell'] {
@@ -14551,6 +14734,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airMovement = runAirMovement(input);
   const airMovementTwo = runAirMovementTwo(input);
   const airSummoning = runAirSummoning(input);
+  const airVoidArtifact = runAirVoidArtifact(input);
   const airVoidwalk = runAirVoidwalk(input);
   const airZap = runAirZap(input);
   const earthBurrowing = runEarthBurrowing(input);
@@ -14740,6 +14924,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     airMovement,
     airMovementTwo,
     airSummoning,
+    airVoidArtifact,
     airVoidwalk,
     airZap,
     airFireFatality,

@@ -1406,18 +1406,23 @@ test('RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relati
   const southMinions = preview.state.players.south.hand.spellbook;
   const sourceCardId = northSites[1]?.cardId;
   const targetCardId = southSites[1]?.cardId;
+  const replacementCardId = southSites[2]?.cardId;
   const drownedCardId = southMinions[0]?.cardId;
   const survivorCardId = southMinions[1]?.cardId;
+  const artifactCardId = southMinions[2]?.cardId;
   assert.ok(sourceCardId);
   assert.ok(targetCardId);
+  assert.ok(replacementCardId);
   assert.ok(drownedCardId);
   assert.ok(survivorCardId);
+  assert.ok(artifactCardId);
   const cards: Record<string, GameCardDefinition> = { ...base.cards };
   cards[sourceCardId] = {
     ...cards[sourceCardId]!,
     sacrificeToDestroyNearbySite: true,
   } as GameCardDefinition;
   cards[targetCardId] = { cardType: 'site', elements: ['water'] };
+  cards[replacementCardId] = { cardType: 'site', elements: ['water'] };
   cards[drownedCardId] = {
     attack: 1,
     cardType: 'minion',
@@ -1433,6 +1438,12 @@ test('RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relati
     defense: 1,
     manaCost: 0,
     submerge: true,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  };
+  cards[artifactCardId] = {
+    cardType: 'artifact',
+    grantsBearerPower: 2,
+    manaCost: 0,
     thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
   };
   assert.throws(() => createGameManifest({
@@ -1455,12 +1466,18 @@ test('RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relati
   let session = keep(keep(createGameSession(gameManifest)));
   const sourceCard = session.state.players.north.hand.atlas.find(({ cardId }) => cardId === sourceCardId);
   const targetCard = session.state.players.south.hand.atlas.find(({ cardId }) => cardId === targetCardId);
+  const replacementCard = session.state.players.south.hand.atlas.find(({ cardId }) =>
+    cardId === replacementCardId);
   const drownedCard = session.state.players.south.hand.spellbook.find(({ cardId }) => cardId === drownedCardId);
   const survivorCard = session.state.players.south.hand.spellbook.find(({ cardId }) => cardId === survivorCardId);
+  const artifactCard = session.state.players.south.hand.spellbook.find(({ cardId }) =>
+    cardId === artifactCardId);
   assert.ok(sourceCard);
   assert.ok(targetCard);
+  assert.ok(replacementCard);
   assert.ok(drownedCard);
   assert.ok(survivorCard);
+  assert.ok(artifactCard);
 
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
@@ -1497,6 +1514,14 @@ test('RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relati
       && descriptor.cardInstanceId === survivorCard.instanceId
       && descriptor.cell === 'C2'
       && descriptor.region === 'underwater'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-artifact'
+      && descriptor.cardInstanceId === artifactCard.instanceId
+      && descriptor.bearer?.instanceId === survivorCard.instanceId));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'drop-artifacts'
+      && descriptor.unit.instanceId === survivorCard.instanceId
+      && descriptor.artifactInstanceIds[0] === artifactCard.instanceId));
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
@@ -1535,6 +1560,16 @@ test('RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relati
   const survivor = session.state.realm.units.find(({ instanceId }) =>
     instanceId === survivorCard.instanceId);
   assert.equal(survivor?.region, 'underground');
+  const buriedArtifact = session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === artifactCard.instanceId);
+  assert.deepEqual(buriedArtifact, {
+    cardId: artifactCard.cardId,
+    instanceId: artifactCard.instanceId,
+    location: 'C2',
+    owner: 'south',
+    region: 'underground',
+    source: artifactCard.source,
+  });
   assert.deepEqual(observeGame(session.state, 'north').realm.sites.C2, {
     cardId: 'rubble',
     controller: null,
@@ -1553,6 +1588,22 @@ test('RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relati
   ]);
   assert.equal(session.state.realm.sites.C3?.controller, 'north');
   assert.equal('rubble' in session.state.realm.sites.C3!, false);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  const replacement = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === replacementCard.instanceId
+      && descriptor.cell === 'C2'));
+  assert.equal(replacement.accepted, true);
+  if (!replacement.accepted) return;
+  session = replacement.session;
+  assert.deepEqual(replacement.receipt.events.map(({ type }) => type), [
+    'rubble-replaced',
+    'site-played',
+  ]);
+  assert.deepEqual(session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === artifactCard.instanceId), { ...buriedArtifact, region: 'underwater' });
   assert.equal(verifyGameReplay(session), true);
 });
 
@@ -5462,6 +5513,129 @@ test('RULE-02/04 region settlement kills inhospitable minions and banishes them 
   assert.equal(defended.session.state.pendingCombat?.targetRemoved, false);
   assert.equal(defended.session.state.stateVersion, beforeDefend.state.stateVersion + 1);
   assert.equal(verifyGameReplay(defended.session), true);
+});
+
+test('RULE-02/04 playing a site surfaces uncarried Artifacts from the covered void', () => {
+  const north: GameDeckSpec = {
+    atlas: Array(6).fill('artifact-site'),
+    avatar: 'artifact-avatar',
+    spellbook: [...Array(4).fill('voidwalker'), ...Array(4).fill('sword')],
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(6).fill('artifact-site'),
+    avatar: 'artifact-avatar',
+    spellbook: Array(8).fill('voidwalker'),
+  };
+  const cards: Record<string, GameCardDefinition> = {
+    'artifact-avatar': { attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20 },
+    'artifact-site': { cardType: 'site', elements: ['earth'], genesisGainMana: 6 },
+    sword: {
+      cardType: 'artifact',
+      grantsBearerPower: 2,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+    voidwalker: {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      voidwalk: true,
+    },
+  };
+  let gameManifest: GameManifest | undefined;
+  for (let seed = 1; seed < 64; seed += 1) {
+    const candidate = createGameManifest({
+      authority: {
+        contentHash: SYNTHETIC_AUTHORITY_HASH,
+        mode: 'synthetic',
+        revisionId: 'synthetic-artifact-site-entry-v1',
+      },
+      cards,
+      decks: { north, south },
+      firstSeat: 'north',
+      seed,
+    });
+    const hand = createGameSession(candidate).state.players.north.hand.spellbook;
+    if (hand.some(({ cardId }) => cardId === 'voidwalker')
+      && hand.filter(({ cardId }) => cardId === 'sword').length >= 2) {
+      gameManifest = candidate;
+      break;
+    }
+  }
+  assert.ok(gameManifest);
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'voidwalker' && descriptor.cell === 'C4');
+  const bearer = session.state.realm.units.find(({ cardId }) => cardId === 'voidwalker');
+  assert.ok(bearer);
+  take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+    && descriptor.cardId === 'sword'
+    && descriptor.bearer?.instanceId === bearer.instanceId);
+  take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+    && descriptor.cardId === 'sword'
+    && descriptor.bearer?.instanceId === bearer.instanceId);
+  const [carried, stillCarried] = session.state.realm.artifacts ?? [];
+  assert.ok(carried);
+  assert.ok(stillCarried && 'bearer' in stillCarried);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === bearer.instanceId
+    && descriptor.to.cell === 'B4'
+    && descriptor.to.region === 'void');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'drop-artifacts'
+    && descriptor.unit.instanceId === bearer.instanceId
+    && descriptor.artifactInstanceIds.length === 1
+    && descriptor.artifactInstanceIds[0] === carried.instanceId);
+  const dropped = session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === carried.instanceId);
+  assert.deepEqual(dropped, {
+    cardId: carried.cardId,
+    instanceId: carried.instanceId,
+    location: 'B4',
+    owner: 'north',
+    region: 'void',
+    source: carried.source,
+  });
+
+  const result = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'B4'));
+  assert.equal(result.accepted, true);
+  if (!result.accepted) return;
+  assert.deepEqual(result.receipt.events.map(({ type }) => type), ['site-played', 'mana-gained']);
+  assert.deepEqual(result.receipt.randomDraws, []);
+  assert.deepEqual(result.session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === carried.instanceId), { ...dropped, region: 'surface' });
+  assert.deepEqual(result.session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === stillCarried.instanceId), stillCarried);
+  assert.deepEqual(observeGame(result.session.state, 'north').realm.artifacts
+    ?.find(({ instanceId }) => instanceId === stillCarried.instanceId), {
+    bearer: stillCarried.bearer,
+    cardId: stillCarried.cardId,
+    controller: 'north',
+    instanceId: stillCarried.instanceId,
+    location: 'B4',
+    owner: 'north',
+    region: 'surface',
+  });
+  assert.equal(result.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === bearer.instanceId)?.region, 'surface');
+  assert.equal(verifyGameReplay(result.session), true);
 });
 
 test('RULE-04 Charge allows a summoned minion to Move and Attack immediately', () => {
