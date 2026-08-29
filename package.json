@@ -10,6 +10,7 @@
   },
   "scripts": {
     "game:demo": "node src/commands/run-game-demo.ts",
+    "game:batch": "node src/commands/run-game-batch.ts",
     "game:check-private": "node src/commands/run-private-game-check.ts",
     "game:verify-private": "node --test tests/private-authority/private-game-scenario.test.ts",
     "play": "node src/prototype/game-server.ts",

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 
+import { runGameBatch } from '../../src/commands/run-game-batch.ts';
 import {
   loadPrivateStarterCatalog,
   type PrivateGameCheck,
@@ -874,6 +875,28 @@ function assertFireCharge(result: PrivateGameCheck['fireCharge']): void {
 
 test('private actual-card browser presets reach combat, terminal state, and exact replay', async () => {
   await verifyPrivateStarterHttp(await loadPrivateStarterCatalog());
+});
+
+test('private actual-card manifests produce identical summary-only worker batches', async () => {
+  const lessons = (await loadPrivateStarterCatalog()).filter(({ id }) => id.endsWith('-lesson'));
+  assert.deepEqual(lessons.map(({ id }) => id), ['air-vs-earth-lesson', 'earth-vs-air-lesson']);
+  const manifests = lessons.map(({ manifest }) => manifest);
+  const oneWorker = await runGameBatch(manifests, 1);
+  const twoWorkers = await runGameBatch(manifests, 2);
+  assert.deepEqual(oneWorker, twoWorkers);
+  assert.equal(oneWorker.every(({ report }) =>
+    report.fightCount > 0
+      && report.replayVerified
+      && report.terminal.status === 'finished'), true);
+
+  const serialized = JSON.stringify(oneWorker);
+  assert.doesNotMatch(serialized, /\.local|officialSourceId|rulesText/);
+  for (const preset of lessons) {
+    assert.equal(serialized.includes(preset.manifest.authority.contentHash), false);
+    assert.equal(serialized.includes(preset.manifest.authority.revisionId), false);
+    assert.equal(Object.keys(preset.manifest.cards).some((cardId) => serialized.includes(cardId)), false);
+    assert.equal(Object.values(preset.cardNames).some((name) => serialized.includes(name)), false);
+  }
 });
 
 test('private actual-card decks complete deterministic combat, Earth, Air, Fire, and Water scenarios', async () => {

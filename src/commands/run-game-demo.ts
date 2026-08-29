@@ -1,7 +1,8 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { canonicalJson } from '../authority/canonical-json.ts';
+import { canonicalJson, type JsonValue } from '../authority/canonical-json.ts';
+import { identityHash } from '../authority/hash.ts';
 import {
   createGameManifest,
   createGameSession,
@@ -157,16 +158,18 @@ export function selectDeterministicGameAction(session: GameSession): GameLegalAc
   return selected;
 }
 
-export function runGameDemo(seed = 1): Readonly<{
+export type DeterministicGameReport = Readonly<{
   acceptedActionCount: number;
   classification: 'unranked_partial_rules';
   finalStateHash: ReturnType<typeof hashGameState>;
   fightCount: number;
   replayVerified: boolean;
   terminal: Extract<GameTerminal, { status: 'finished' }>;
+  transcriptHash: ReturnType<typeof identityHash>;
   turnCount: number;
-}> {
-  const manifest = createSyntheticDemoManifest(seed);
+}>;
+
+export function runDeterministicGame(manifest: GameManifest): DeterministicGameReport {
   let session = createGameSession(manifest);
   while (session.state.terminal.status === 'active' && session.transcript.length < MAX_ACTIONS) {
     const result = stepGame(session, selectDeterministicGameAction(session));
@@ -182,8 +185,13 @@ export function runGameDemo(seed = 1): Readonly<{
       .filter(({ type }) => type === 'fight-started').length,
     replayVerified: verifyGameReplay(session),
     terminal: session.state.terminal,
+    transcriptHash: identityHash(session.transcript as unknown as JsonValue),
     turnCount: session.state.turnNumber,
   });
+}
+
+export function runGameDemo(seed = 1): DeterministicGameReport {
+  return runDeterministicGame(createSyntheticDemoManifest(seed));
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

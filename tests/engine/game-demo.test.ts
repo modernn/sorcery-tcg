@@ -59,6 +59,7 @@ test('RULE-01 deterministic agents move, fight, and complete a match', () => {
       status: 'finished',
       winner: 'south',
     },
+    transcriptHash: 'sha256:fbdad70e092de2166ee9d853bae9300d45e9921c33a88865cb94147f4cd2ad47',
     turnCount: 27,
   });
 });
