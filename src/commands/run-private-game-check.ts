@@ -1323,6 +1323,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   midnightRogue: NormalizedCard;
   minorExplosion: NormalizedCard;
   monstrousLion: NormalizedCard;
+  mountainPass: NormalizedCard;
   movementMinion: NormalizedCard;
   movementTwoMinion: NormalizedCard;
   overpower: NormalizedCard;
@@ -1803,6 +1804,30 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || vantageHills.thresholds.water !== 0
     || vantageHills.rarity !== 'exceptional') {
     throw new Error('private ranged-range site no longer matches its supported facts');
+  }
+  const mountainPass = snapshot.cards.find(({ name }) => name === 'Mountain Pass');
+  const mountainPassTokens = mountainPass?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
+  if (!mountainPass
+    || mountainPass.stableId
+      !== 'card:5b42647dfa8ee35362de211b25cccf14c72fd2f0ee4ffae02e5dba4f00bfaf14'
+    || mountainPass.officialSourceId !== '001-mountain_pass-b-f'
+    || mountainPass.cardType !== 'site'
+    || mountainPassTokens.length !== 16
+    || !['a', 'already', 'atop', 'can', 'enter', 'ground', 'if', 'minion',
+      'minions', 'on', 's', 'site', 't', 'the', 'there', 'this']
+      .every((token) => mountainPassTokens.includes(token))
+    || mountainPass.manaCost !== null
+    || mountainPass.attack !== null
+    || mountainPass.defense !== null
+    || mountainPass.life !== null
+    || mountainPass.elements.length !== 1
+    || mountainPass.elements[0] !== 'air'
+    || mountainPass.thresholds.air !== 1
+    || mountainPass.thresholds.earth !== 0
+    || mountainPass.thresholds.fire !== 0
+    || mountainPass.thresholds.water !== 0
+    || mountainPass.rarity !== 'exceptional') {
+    throw new Error('private occupied ground-entry site no longer matches its supported facts');
   }
   const blink = snapshot.cards.find(({ name }) => name === 'Blink');
   const blinkTokens = blink?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
@@ -3217,6 +3242,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     midnightRogue,
     minorExplosion,
     monstrousLion,
+    mountainPass,
     movementMinion,
     movementTwoMinion,
     overpower,
@@ -3375,6 +3401,7 @@ function gameDefinition(
   rangedUnitsHereRangeBonus = false,
   teleportNearbyAllyThenDrawCard = false,
   nearbyEnemiesPermanentlyLoseStealth = false,
+  blocksGroundMinionEntryWhileMinionAtop = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -3411,6 +3438,9 @@ function gameDefinition(
   }
   if (card.cardType === 'site') {
     return {
+      ...(blocksGroundMinionEntryWhileMinionAtop
+        ? { blocksGroundMinionEntryWhileMinionAtop: true as const }
+        : {}),
       cardType: 'site',
       ...(connectsBurrowedAllies ? { connectsBurrowedAllies: true } : {}),
       elements: card.elements,
@@ -3737,6 +3767,7 @@ function buildManifest(
       ...Array(3).fill(input.darkTower.stableId),
       ...Array(3).fill(input.gothicTower.stableId),
       ...Array(3).fill(input.loneTower.stableId),
+      ...Array(2).fill(input.mountainPass.stableId),
     ],
     avatar: input.sparkmage.stableId,
     spellbook: [
@@ -4392,6 +4423,7 @@ function buildManifest(
       card.stableId === input.vantageHills.stableId,
       card.stableId === input.blink.stableId,
       card.stableId === input.scentHounds.stableId,
+      card.stableId === input.mountainPass.stableId,
     ),
   ]));
   return {
@@ -5595,7 +5627,7 @@ export async function loadPrivateStarterCatalog(
     [
       'air-vs-earth-lesson',
       'Air Beta vs Earth Beta — supported cards from one boxed precon each',
-      input.config.airSeed,
+      input.config.airSeed + 3,
     ],
     [
       'earth-vs-air-lesson',

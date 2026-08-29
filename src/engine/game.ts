@@ -62,6 +62,7 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    blocksGroundMinionEntryWhileMinionAtop?: true;
     cardType: 'site';
     connectsBurrowedAllies?: boolean;
     elements: readonly GameElement[];
@@ -913,6 +914,7 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
           status.voidwalk,
           status.connectsTopBottom,
           status.immobile,
+          ally.kind === 'minion',
         ).map((path) => path.at(-1)!);
         return [...new Map(destinations.map((allyDestination) => [
           `${allyDestination.cell}:${allyDestination.region}`,
@@ -988,6 +990,7 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
             enemyStatus.voidwalk,
             enemyStatus.connectsTopBottom,
             enemyStatus.immobile,
+            true,
           ).flatMap((path) => path.length === 2 ? [path[1]!] : [])
             .filter(({ cell }) => cardinalCellDistance(cell, allyStatus.location) < startingDistance);
           return [...new Map(destinations.map((destination) => [
@@ -1119,6 +1122,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     return;
   }
   if (card.cardType === 'site') {
+    if (card.blocksGroundMinionEntryWhileMinionAtop !== undefined
+      && card.blocksGroundMinionEntryWhileMinionAtop !== true) {
+      throw new RangeError(
+        `${path}.blocksGroundMinionEntryWhileMinionAtop must be true when defined`,
+      );
+    }
     if (!Array.isArray(card.elements)
       || card.elements.some((element) => !elements.includes(element))
       || new Set(card.elements).size !== card.elements.length
@@ -1695,6 +1704,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
           }
           : card.cardType === 'site'
           ? {
+            ...(card.blocksGroundMinionEntryWhileMinionAtop === true
+              ? { blocksGroundMinionEntryWhileMinionAtop: true as const }
+              : {}),
             cardType: 'site' as const,
             ...(card.connectsBurrowedAllies === true ? { connectsBurrowedAllies: true } : {}),
             elements: [...card.elements],
@@ -2477,6 +2489,27 @@ function burrowedConnectionLocations(
       : [{ cell: candidate, region: 'underground' as const }]);
 }
 
+function groundMinionEntryAllowed(
+  state: GameState,
+  current: GameLocation,
+  candidate: GameLocation,
+  airborne: boolean,
+  movingMinion: boolean,
+): boolean {
+  if (!movingMinion
+    || airborne
+    || current.region !== 'surface'
+    || candidate.region !== 'surface'
+    || current.cell === candidate.cell) return true;
+  const site = state.realm.sites[candidate.cell];
+  if (!site || isRubble(site)) return true;
+  const definition = cardDefinition(state, site.cardId);
+  return definition.cardType !== 'site'
+    || definition.blocksGroundMinionEntryWhileMinionAtop !== true
+    || !state.realm.units.some((unit) =>
+      unit.location === candidate.cell && unit.region === 'surface');
+}
+
 function movementPaths(
   state: GameState,
   start: GameLocation,
@@ -2490,6 +2523,7 @@ function movementPaths(
   voidwalk = false,
   connectsTopBottom = false,
   immobile = false,
+  movingMinion = false,
 ): readonly (readonly GameLocation[])[] {
   if (!locationExists(state, start)) return [];
   if (immobile) return [[start]];
@@ -2557,6 +2591,7 @@ function movementPaths(
           const tunnelHop = tunnelHops.some((location) => sameLocation(location, candidate));
           // ponytail: tunnel-hop direction stays implicit until direction-sensitive effects need path metadata.
           return locationExists(state, candidate)
+            && groundMinionEntryAllowed(state, current, candidate, airborne, movingMinion)
             && (tunnelHop || (
               (!movesOnlySideways
                 || candidate.region === current.region && candidate.cell[1] === current.cell[1])
@@ -2612,6 +2647,7 @@ function defendPaths(
     unit.voidwalk,
     unit.connectsTopBottom,
     unit.immobile,
+    ref.kind === 'minion',
   ).filter((path) => sameLocation(path.at(-1)!, destination));
 }
 
@@ -2633,6 +2669,7 @@ function movementDescriptors(state: GameState, seat: GameSeat): readonly GameAct
       unit.voidwalk,
       unit.connectsTopBottom,
       unit.immobile,
+      ref.kind === 'minion',
     )
       .map((path) => ({
         from: { cell: unit.location, region: unit.region },
@@ -3870,6 +3907,14 @@ function resolveDeclaredPath(
     if (!currentUnit
       || currentUnit.location !== expectedFrom.cell
       || currentUnit.region !== expectedFrom.region) break;
+    const currentStatus = unitStatus(current, ref);
+    if (!groundMinionEntryAllowed(
+      current,
+      expectedFrom,
+      next,
+      currentStatus.airborne,
+      ref.kind === 'minion',
+    )) break;
     const moved = moveUnit(current, ref, next, false);
     current = deepFreeze({ ...current, players: moved.players, realm: moved.realm });
     actualPath.push(next);

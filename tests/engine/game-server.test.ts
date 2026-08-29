@@ -166,7 +166,11 @@ test('browser API switches injected starter presets and replays the selected mat
           replaceAdjacentRubbleWithTopAtlasSite: true as const,
         }
         : cardId.startsWith('north-site-') && card.cardType === 'site'
-        ? { ...card, genesisMayBottomNextSpell: true as const }
+        ? {
+          ...card,
+          blocksGroundMinionEntryWhileMinionAtop: true as const,
+          genesisMayBottomNextSpell: true as const,
+        }
         : card,
     ])),
     decks: earthBase.decks,
@@ -236,6 +240,12 @@ test('browser API switches injected starter presets and replays the selected mat
       defense: 1,
       manaCost: 1,
       thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    });
+    const firstSite = (northHand.atlas as JsonObject[])[0]!;
+    assert.deepEqual(visibleFacts[firstSite.cardId as string], {
+      cardType: 'site',
+      elements: ['earth'],
+      keywords: ['Occupied: blocks ground minion entry'],
     });
     assert.equal(visibleFacts['south-spell-1'], undefined);
     assert.deepEqual((current.presets as JsonObject[]).map(({ id, seed }) => ({ id, seed })), [
