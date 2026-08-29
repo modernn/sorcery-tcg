@@ -78,7 +78,7 @@ const PAGE = String.raw`<!doctype html>
     function render(data){snapshot=data;var view=data.view,picker=byId('preset');if(picker.options.length!==data.presets.length){picker.innerHTML=data.presets.map(function(preset){return '<option value="'+escapeHtml(preset.id)+'">'+escapeHtml(preset.label)+'</option>'}).join('')}picker.value=data.presetId;byId('opponent').value=data.opponent;byId('seed').value=String(data.seed);byId('mode').textContent=(data.mode==='private-local'?'Private-local actual cards · unranked':'Synthetic fallback · unranked')+(data.opponent==='south'?' · vs computer':' · hot seat');byId('observer').textContent=seat;byId('active').textContent=view.activeSeat+(view.decisionSeat===view.activeSeat?'':' · '+view.decisionSeat+' deciding');byId('phase').textContent='Turn '+view.turnNumber+' · '+view.phase;byId('version').textContent=view.stateVersion;byId('hash').textContent=data.stateHash;renderPlayer(view,'north');renderPlayer(view,'south');renderRealm(view);renderActions(data.actions,view);syncSeatButtons()}
     function syncSeatButtons(){document.querySelectorAll('[data-seat]').forEach(function(button){button.disabled=Boolean(snapshot&&snapshot.opponent==='south'&&button.dataset.seat==='south');button.setAttribute('aria-pressed',String(button.dataset.seat===seat))})}
     async function refresh(){render(await request('/api/view?seat='+seat))}
-    async function submit(actionId,command){try{var next=command||{actionId:actionId,seat:seat,stateVersion:snapshot.view.stateVersion};if(!command)lastCommand=next;var result=await request('/api/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(next)});byId('notice').className=result.accepted?'ok':'error';byId('notice').textContent=result.accepted?'Action accepted'+(result.opponentActionCount?' · South computer took '+result.opponentActionCount+' action'+(result.opponentActionCount===1?'':'s'):''):'Rejected: '+result.reason.code;byId('receipt').textContent=JSON.stringify(result.receipt||result.reason,null,2);render(result);byId('stale').disabled=!lastCommand;if(result.accepted&&result.opponent==='manual'&&result.view.decisionSeat!==seat){seat=result.view.decisionSeat;syncSeatButtons();await refresh()}}catch(error){showError(error)}}
+    async function submit(actionId,command){try{var next=command||{actionId:actionId,seat:seat,stateVersion:snapshot.view.stateVersion};if(!command)lastCommand=next;var result=await request('/api/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(next)});byId('notice').className=result.accepted?'ok':'error';byId('notice').textContent=result.accepted?'Action accepted'+(result.opponentActionCount?' · South computer took '+result.opponentActionCount+' action'+(result.opponentActionCount===1?'':'s'):''):'Rejected: '+result.reason.code;var detail=JSON.stringify(result.receipt||result.reason,null,2);if(result.opponentActions&&result.opponentActions.length){detail='South actions\n'+result.opponentActions.map(function(item,index){return (index+1)+'. '+item.kind.replaceAll('-',' ')+(item.events.length?' — '+item.events.join(' → '):'')}).join('\n')+'\n\nYour receipt\n'+detail}byId('receipt').textContent=detail;render(result);byId('stale').disabled=!lastCommand;if(result.accepted&&result.opponent==='manual'&&result.view.decisionSeat!==seat){seat=result.view.decisionSeat;syncSeatButtons();await refresh()}}catch(error){showError(error)}}
     function showError(error){byId('notice').className='error';byId('notice').textContent=error.message}
     document.querySelectorAll('[data-seat]').forEach(function(button){button.addEventListener('click',function(){if(button.disabled)return;seat=button.dataset.seat;syncSeatButtons();refresh().catch(showError)})});
     byId('preset').addEventListener('change',function(){var selected=snapshot.presets.find(function(preset){return preset.id===byId('preset').value});if(selected)byId('seed').value=String(selected.seed)});
@@ -222,17 +222,33 @@ export function createGamePrototypeServer(
     initialSeed ?? selectedPreset.manifest.seed,
   ));
 
-  function advanceOpponent(start: GameSession): Readonly<{ count: number; session: GameSession }> {
+  function advanceOpponent(start: GameSession): Readonly<{
+    count: number;
+    session: GameSession;
+    summaries: readonly Readonly<{
+      events: readonly string[];
+      kind: GameLegalAction['descriptor']['kind'];
+    }>[];
+  }> {
     let next = start;
     let count = 0;
+    const summaries: Array<Readonly<{
+      events: readonly string[];
+      kind: GameLegalAction['descriptor']['kind'];
+    }>> = [];
     while (next.state.terminal.status === 'active' && next.state.decisionSeat === 'south') {
       if (count >= MAX_OPPONENT_ACTIONS) throw new Error('deterministic opponent exceeded action limit');
-      const result = stepGame(next, selectDeterministicGameAction(next));
+      const action = selectDeterministicGameAction(next);
+      const result = stepGame(next, action);
       if (!result.accepted) throw new Error(`deterministic opponent action rejected: ${result.reason.code}`);
+      summaries.push(Object.freeze({
+        events: Object.freeze(result.receipt.events.map(({ type }) => type)),
+        kind: action.descriptor.kind,
+      }));
       next = result.session;
       count += 1;
     }
-    return { count, session: next };
+    return { count, session: next, summaries: Object.freeze(summaries) };
   }
 
   function view(seat: GameSeat): JsonRecord {
@@ -308,12 +324,13 @@ export function createGamePrototypeServer(
         });
         const advanced = result.accepted && opponent === 'south'
           ? advanceOpponent(result.session)
-          : { count: 0, session: result.session };
+          : { count: 0, session: result.session, summaries: [] };
         session = advanced.session;
         return sendJson(response, 200, {
           ...view(seat),
           accepted: result.accepted,
           opponentActionCount: advanced.count,
+          opponentActions: advanced.summaries,
           ...(result.accepted ? { receipt: result.receipt } : { reason: result.reason }),
         });
       }
