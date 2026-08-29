@@ -73,6 +73,7 @@ export type GameCardDefinition =
     genesisEnemiesLoseStealth?: true;
     genesisGainMana?: number;
     genesisGainManaIfOnlyControlledCopy?: 1;
+    genesisImmobilizeNearbyUntilNextTurn?: true;
     genesisMayBottomNextSpell?: true;
     genesisPayOneManaToSummonToken?: string;
     ordinaryMinionManaDiscount?: 1;
@@ -209,6 +210,12 @@ type DisableEffect = Readonly<{
   sourceInstanceId: StateHash;
 }>;
 
+type ImmobileArea = Readonly<{
+  cells: readonly RealmCell[];
+  expiresAtSeat: GameSeat;
+  sourceInstanceId: StateHash;
+}>;
+
 type UnitInstance = Readonly<CardInstance & {
   // ponytail: intrinsic Lance marks omit Artifact transfer/drop; promote them to realm Artifacts when a supported card needs it.
   carriedLanceCount?: number;
@@ -321,6 +328,7 @@ export type GameState = Readonly<{
   players: Readonly<Record<GameSeat, PlayerState>>;
   realm: Readonly<{
     artifacts?: readonly ArtifactInstance[];
+    immobileAreas?: readonly ImmobileArea[];
     sites: Readonly<Partial<Record<RealmCell, RealmSiteInstance>>>;
     units: readonly UnitInstance[];
   }>;
@@ -339,6 +347,7 @@ type ObservedPlayer = Readonly<{
     cardId: string;
     deathDoorTurn: number | null;
     defense: number;
+    immobile: boolean;
     instanceId: StateHash;
     life: number;
     location: RealmCell;
@@ -372,6 +381,7 @@ export type GameObservation = Readonly<{
       owner: GameSeat;
       region: GameRegion;
     }>[];
+    immobileAreas?: readonly ImmobileArea[];
     sites: Readonly<Partial<Record<RealmCell,
       | Readonly<{
         cardId: 'rubble';
@@ -395,6 +405,7 @@ export type GameObservation = Readonly<{
       damage: number;
       defense: number;
       disabled: boolean;
+      immobile: boolean;
       instanceId: StateHash;
       location: RealmCell;
       owner: GameSeat;
@@ -918,6 +929,7 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
           status.connectsTopBottom,
           status.immobile,
           ally.kind === 'minion',
+          true,
         ).map((path) => path.at(-1)!);
         return [...new Map(destinations.map((allyDestination) => [
           `${allyDestination.cell}:${allyDestination.region}`,
@@ -993,6 +1005,7 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
             enemyStatus.voidwalk,
             enemyStatus.connectsTopBottom,
             enemyStatus.immobile,
+            true,
             true,
           ).flatMap((path) => path.length === 2 ? [path[1]!] : [])
             .filter(({ cell }) => cardinalCellDistance(cell, allyStatus.location) < startingDistance);
@@ -1174,6 +1187,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.genesisGainManaIfOnlyControlledCopy !== undefined) {
       throw new RangeError(`${path} simultaneous unconditional and conditional Genesis mana are unsupported`);
     }
+    if (card.genesisImmobilizeNearbyUntilNextTurn !== undefined
+      && card.genesisImmobilizeNearbyUntilNextTurn !== true) {
+      throw new RangeError(
+        `${path}.genesisImmobilizeNearbyUntilNextTurn must be true when defined`,
+      );
+    }
     if (card.genesisPayOneManaToSummonToken !== undefined) {
       requireCardId(
         card.genesisPayOneManaToSummonToken,
@@ -1186,6 +1205,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         || card.genesisEnemiesLoseStealth
         || card.genesisGainMana !== undefined
         || card.genesisGainManaIfOnlyControlledCopy !== undefined
+        || card.genesisImmobilizeNearbyUntilNextTurn !== undefined
         || card.genesisMayBottomNextSpell !== undefined)) {
       throw new RangeError(`${path} simultaneous paid-token and another site Genesis are unsupported`);
     }
@@ -1212,6 +1232,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         || card.genesisEnemiesLoseStealth
         || card.genesisGainMana !== undefined
         || card.genesisGainManaIfOnlyControlledCopy !== undefined
+        || card.genesisImmobilizeNearbyUntilNextTurn !== undefined
         || card.genesisPayOneManaToSummonToken !== undefined)) {
       throw new RangeError(`${path} simultaneous next-spell and another site Genesis are unsupported`);
     }
@@ -1751,6 +1772,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.genesisGainManaIfOnlyControlledCopy === 1
               ? { genesisGainManaIfOnlyControlledCopy: 1 as const }
               : {}),
+            ...(card.genesisImmobilizeNearbyUntilNextTurn === true
+              ? { genesisImmobilizeNearbyUntilNextTurn: true as const }
+              : {}),
             ...(card.genesisMayBottomNextSpell === true
               ? { genesisMayBottomNextSpell: true as const }
               : {}),
@@ -2169,6 +2193,10 @@ function nearbyAlliesPowerBonus(state: GameState, ref: GameUnitRef): number {
   }).length;
 }
 
+function locationInImmobileArea(state: GameState, location: RealmCell): boolean {
+  return state.realm.immobileAreas?.some(({ cells }) => cells.includes(location)) ?? false;
+}
+
 function observePlayer(state: GameState, player: PlayerState, owner: GameSeat, viewer: GameSeat): ObservedPlayer {
   const own = owner === viewer;
   const avatarDefinition = cardDefinition(state, player.avatar.card.cardId);
@@ -2189,6 +2217,7 @@ function observePlayer(state: GameState, player: PlayerState, owner: GameSeat, v
       cardId: player.avatar.card.cardId,
       deathDoorTurn: player.avatar.deathDoorTurn,
       defense: status.defense,
+      immobile: status.immobile,
       instanceId: player.avatar.card.instanceId,
       life: player.avatar.life,
       location: player.avatar.location,
@@ -2268,6 +2297,7 @@ export function observeGame(state: GameState, viewer: GameSeat): GameObservation
       damage: unit.damage,
       defense: status.defense,
       disabled: minionDisabled(state, unit),
+      immobile: status.immobile,
       instanceId: unit.instanceId,
       location: unit.location,
       owner: unit.owner,
@@ -2288,7 +2318,19 @@ export function observeGame(state: GameState, viewer: GameSeat): GameObservation
       north: observePlayer(state, state.players.north, 'north', viewer),
       south: observePlayer(state, state.players.south, 'south', viewer),
     },
-    realm: { ...(artifacts ? { artifacts } : {}), sites, units },
+    realm: {
+      ...(artifacts ? { artifacts } : {}),
+      ...(state.realm.immobileAreas
+        ? {
+          immobileAreas: state.realm.immobileAreas.map((area) => ({
+            ...area,
+            cells: [...area.cells],
+          })),
+        }
+        : {}),
+      sites,
+      units,
+    },
     schemaVersion: 1,
     stateVersion: state.stateVersion,
     terminal: state.terminal,
@@ -2392,7 +2434,7 @@ function unitStatus(
       connectsTopBottom: false,
       defense: definition.defense + powerBonus,
       disabled: false,
-      immobile: false,
+      immobile: locationInImmobileArea(state, avatar.location),
       lethal: bearerHasLethal(state, ref),
       location: avatar.location,
       movementSteps: 1,
@@ -2429,7 +2471,8 @@ function unitStatus(
     connectsTopBottom: !disabled && definition.connectsTopBottom === true,
     defense: definition.defense + powerBonus,
     disabled,
-    immobile: !disabled && definition.immobile === true,
+    immobile: locationInImmobileArea(state, unit.location)
+      || (!disabled && definition.immobile === true),
     lethal: !disabled && (definition.lethal === true || bearerHasLethal(state, ref)),
     location: unit.location,
     movementSteps: disabled ? 0 : 1 + (definition.movementBonus ?? 0),
@@ -2574,6 +2617,7 @@ function movementPaths(
   connectsTopBottom = false,
   immobile = false,
   movingMinion = false,
+  movingUnit = false,
   purpose: MovementPurpose = 'effect',
 ): readonly (readonly GameLocation[])[] {
   if (!locationExists(state, start)) return [];
@@ -2583,6 +2627,7 @@ function movementPaths(
   while (frontier.length > 0) {
     frontier = frontier.flatMap(({ cost, path }) => {
       const current = path.at(-1)!;
+      if (movingUnit && locationInImmobileArea(state, current.cell)) return [];
       const tunnelHops = current.region === 'underground' && burrowing
         ? burrowedConnectionLocations(state, seat, current.cell, connectsTopBottom, submerge)
         : [];
@@ -2710,6 +2755,7 @@ function defendPaths(
     unit.connectsTopBottom,
     unit.immobile,
     ref.kind === 'minion',
+    true,
     unit.canMoveToDefend ? 'defend' : 'effect',
   ).filter((path) => sameLocation(path.at(-1)!, destination));
 }
@@ -2733,6 +2779,7 @@ function movementDescriptors(state: GameState, seat: GameSeat): readonly GameAct
       unit.connectsTopBottom,
       unit.immobile,
       ref.kind === 'minion',
+      true,
       'move-and-attack',
     )
       .map((path) => ({
@@ -4750,6 +4797,21 @@ function applyDescriptor(
       },
     });
     const settlement = settleRegionOccupancy(placedState);
+    const nearbyCells = new Set([
+      descriptor.cell,
+      ...borderingCells(descriptor.cell),
+      ...diagonalCells(descriptor.cell),
+    ]);
+    const immobileArea = definition.genesisImmobilizeNearbyUntilNextTurn
+      ? deepFreeze({
+        cells: REALM_CELLS.filter((cell) => {
+          const nearbySite = settlement.state.realm.sites[cell];
+          return nearbyCells.has(cell) && nearbySite !== undefined && !isRubble(nearbySite);
+        }),
+        expiresAtSeat: seat,
+        sourceInstanceId: card.instanceId,
+      })
+      : undefined;
     const enemyStealthRefs: readonly GameUnitRef[] = definition.genesisEnemiesLoseStealth
       ? settlement.state.realm.units
         .filter(({ controller, stealthed }) => controller !== seat && stealthed)
@@ -4800,6 +4862,14 @@ function applyDescriptor(
         players: settlement.state.players,
         realm: {
           ...settlement.state.realm,
+          ...(immobileArea
+            ? {
+              immobileAreas: [
+                ...(settlement.state.realm.immobileAreas ?? []),
+                immobileArea,
+              ],
+            }
+            : {}),
           units: [...genesisUnits, ...(genesisToken ? [genesisToken] : [])],
         },
         terminal,
@@ -7540,6 +7610,12 @@ function applyDescriptor(
     (unit.disableEffects ?? [])
       .filter(({ expiresAtSeat }) => expiresAtSeat === nextSeat)
       .map((effect) => ({ effect, unit })));
+  const {
+    immobileAreas: previousImmobileAreas,
+    ...endingRealm
+  } = endState.realm;
+  const immobileAreas = (previousImmobileAreas ?? [])
+    .filter(({ expiresAtSeat }) => expiresAtSeat !== nextSeat);
   const chargeExpired: GameOutcome[] = [];
   const units = endState.realm.units.map((unit) => {
     const {
@@ -7586,7 +7662,11 @@ function applyDescriptor(
       pendingCombat: null,
       phase: 'draw',
       players,
-      realm: { ...endState.realm, units },
+      realm: {
+        ...endingRealm,
+        ...(immobileAreas.length > 0 ? { immobileAreas } : {}),
+        units,
+      },
       turnNumber,
     }),
     [

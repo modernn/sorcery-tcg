@@ -515,6 +515,19 @@ export type PrivateGameCheck = Readonly<{
     targetEnteredCemetery: boolean;
     targetLeftRealm: boolean;
   }>;
+  earthQuagmire: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    legalConstructedDeck: boolean;
+    movementRestoredAfterExpiry: boolean;
+    noRandomDraws: boolean;
+    quagmire: string;
+    replayVerified: boolean;
+    seed: number;
+    unitImmobileThroughOpponentTurn: boolean;
+    wildBoars: string;
+  }>;
   earthRescue: Readonly<{
     acceptedActionCount: number;
     boskTroll: string;
@@ -1331,6 +1344,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   movementTwoMinion: NormalizedCard;
   overpower: NormalizedCard;
   providerMinion: NormalizedCard;
+  quagmire: NormalizedCard;
   raalDromedary: NormalizedCard;
   recklessSquire: NormalizedCard;
   rangedMinion: NormalizedCard;
@@ -1807,6 +1821,29 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || vantageHills.thresholds.water !== 0
     || vantageHills.rarity !== 'exceptional') {
     throw new Error('private ranged-range site no longer matches its supported facts');
+  }
+  const quagmire = snapshot.cards.find(({ name }) => name === 'Quagmire');
+  const quagmireTokens: readonly string[] =
+    quagmire?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
+  if (!quagmire
+    || quagmire.stableId
+      !== 'card:e90ed1b4b741c23ab603200f8b447b9cd53d5b55e40ba7e410d6f6ade5102aa6'
+    || quagmire.officialSourceId !== '001-quagmire-b-f'
+    || quagmire.cardType !== 'site'
+    || !['genesis', 'immobile', 'nearby', 'next', 'occupy', 'sites', 'turn', 'units']
+      .every((token) => quagmireTokens.includes(token))
+    || quagmire.manaCost !== null
+    || quagmire.attack !== null
+    || quagmire.defense !== null
+    || quagmire.life !== null
+    || quagmire.elements.length !== 1
+    || quagmire.elements[0] !== 'earth'
+    || quagmire.thresholds.air !== 0
+    || quagmire.thresholds.earth !== 1
+    || quagmire.thresholds.fire !== 0
+    || quagmire.thresholds.water !== 0
+    || quagmire.rarity !== 'exceptional') {
+    throw new Error('private temporary nearby Immobile site no longer matches its supported facts');
   }
   const mountainPass = snapshot.cards.find(({ name }) => name === 'Mountain Pass');
   const mountainPassTokens = mountainPass?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
@@ -3281,6 +3318,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     staticServant,
     swordAndShield,
     providerMinion,
+    quagmire,
     raalDromedary,
     recklessSquire,
     rangedMinion,
@@ -3430,6 +3468,7 @@ function gameDefinition(
   nearbyEnemiesPermanentlyLoseStealth = false,
   blocksGroundMinionEntryWhileMinionAtop = false,
   airborneMinionsAtopMoveFreelyAway = false,
+  genesisImmobilizeNearbyUntilNextTurn = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -3491,6 +3530,9 @@ function gameDefinition(
       ...(rangedUnitsHereRangeBonus ? { rangedUnitsHereRangeBonus: 1 as const } : {}),
       ...(sacrificeToDestroyNearbySite ? { sacrificeToDestroyNearbySite: true } : {}),
       ...(siteGenesisEnemiesLoseStealth ? { genesisEnemiesLoseStealth: true } : {}),
+      ...(genesisImmobilizeNearbyUntilNextTurn
+        ? { genesisImmobilizeNearbyUntilNextTurn: true as const }
+        : {}),
     };
   }
   const supportedMagicEffects = Number(damageTargetUnit !== 0)
@@ -3628,7 +3670,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -3750,6 +3792,15 @@ function buildManifest(
     [input.overpower],
   );
   const earthBuryDeck = elementalDeck('earth', earthMinions, [], [input.bury]);
+  const earthQuagmireBase = elementalDeck('earth', [input.wildBoars]);
+  const earthQuagmireDeck: GameDeckSpec = {
+    ...earthQuagmireBase,
+    atlas: [
+      input.quagmire.stableId,
+      input.quagmire.stableId,
+      ...earthQuagmireBase.atlas.slice(0, input.format.atlasMinimum - 2),
+    ],
+  };
   const earthBorderMilitiaDeck = elementalDeck('earth', [], [], [input.borderMilitia]);
   const earthHumbleVillageDeck = elementalDeck('earth', [], [input.humbleVillage]);
   const earthDuelDeck = elementalDeck(
@@ -3825,6 +3876,7 @@ function buildManifest(
       ...Array(3).fill(input.simpleVillage.stableId),
       input.sinkhole.stableId,
       ...Array(2).fill(input.vantageHills.stableId),
+      ...Array(2).fill(input.quagmire.stableId),
     ],
     avatar: input.geomancer.stableId,
     spellbook: [
@@ -4114,6 +4166,8 @@ function buildManifest(
         ? earthHumbleVillageDeck
       : scenario === 'earth-bury'
         ? earthBuryDeck
+      : scenario === 'earth-quagmire'
+        ? earthQuagmireDeck
       : scenario === 'earth-duel'
         ? earthDuelDeck
       : scenario === 'earth-sword-and-shield'
@@ -4279,6 +4333,8 @@ function buildManifest(
         ? earthHumbleVillageDeck
       : scenario === 'earth-bury'
         ? earthBuryDeck
+      : scenario === 'earth-quagmire'
+        ? earthQuagmireDeck
       : scenario === 'earth-duel'
         ? earthDuelDeck
       : scenario === 'earth-sword-and-shield'
@@ -4458,6 +4514,7 @@ function buildManifest(
       card.stableId === input.scentHounds.stableId,
       card.stableId === input.mountainPass.stableId,
       card.stableId === input.updraftRidge.stableId,
+      card.stableId === input.quagmire.stableId,
     ),
   ]));
   return {
@@ -5529,6 +5586,55 @@ function findEarthBuryOpening(
     }
   }
   throw new Error('private forced-burrow Magic scenario no longer produces its supported opening');
+}
+
+function findEarthQuagmireOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string];
+  quagmireInstanceId: string;
+  seed: number;
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string];
+  wildBoarsInstanceId: string;
+}> {
+  const ordinaryEarthSiteIds = new Set(input.cards.filter((card) =>
+    card.cardType === 'site'
+      && card.rarity === 'ordinary'
+      && card.elements.length === 1
+      && card.elements[0] === 'earth'
+      && card.rulesText.trim() === '').map(({ stableId }) => stableId));
+  // ponytail: bounded opening scan avoids adding another private config field.
+  for (let offset = 1; offset <= 4096; offset += 1) {
+    const seed = input.config.earthSeed + offset;
+    const built = buildManifest(input, seed, 'earth-quagmire');
+    const session = createGameSession(built.manifest);
+    const ordinarySites = (seat: GameSeat) => session.state.players[seat].hand.atlas
+      .filter(({ cardId }) => ordinaryEarthSiteIds.has(cardId));
+    const northSites = ordinarySites('north');
+    const southSites = ordinarySites('south');
+    const quagmireInstanceId = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.quagmire.stableId)?.instanceId;
+    const wildBoarsInstanceId = session.state.players.south.hand.spellbook
+      .find(({ cardId }) => cardId === input.wildBoars.stableId)?.instanceId;
+    if (northSites.length >= 2
+      && southSites.length >= 2
+      && quagmireInstanceId
+      && wildBoarsInstanceId) {
+      return {
+        ...built,
+        northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
+        quagmireInstanceId,
+        seed,
+        session,
+        southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
+        wildBoarsInstanceId,
+      };
+    }
+  }
+  throw new Error('private Quagmire scenario no longer produces its supported opening');
 }
 
 function findEarthRescueOpening(
@@ -9051,6 +9157,104 @@ function runEarthBury(
       .some(({ instanceId }) => instanceId === opening.boskTrollInstanceId),
     targetLeftRealm: !session.state.realm.units
       .some(({ instanceId }) => instanceId === opening.boskTrollInstanceId),
+  });
+}
+
+function runEarthQuagmire(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthQuagmire'] {
+  const opening = findEarthQuagmireOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.wildBoarsInstanceId
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const quagmireAction = action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.quagmireInstanceId
+      && descriptor.cell === 'B3');
+  const quagmireResult = stepGame(session, quagmireAction);
+  if (!quagmireResult.accepted) {
+    throw new Error(`private Quagmire play rejected: ${quagmireResult.reason.code}`);
+  }
+  session = quagmireResult.session;
+  const siteEvent = quagmireResult.receipt.events[0];
+  const sitePayload = siteEvent && isJsonRecord(siteEvent.payload) ? siteEvent.payload : undefined;
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const boarsDuringEffect = session.state.realm.units
+    .find(({ instanceId }) => instanceId === opening.wildBoarsInstanceId);
+  const movementDuringEffect = legalGameActions(session.state, 'south').filter(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.wildBoarsInstanceId
+      && descriptor.path.length > 1);
+  const unitImmobileThroughOpponentTurn = boarsDuringEffect?.location === 'C2'
+    && !boarsDuringEffect.summoningSickness
+    && !boarsDuringEffect.tapped
+    && movementDuringEffect.length === 0;
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const movementAfterExpiry = legalGameActions(session.state, 'south').filter(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.wildBoarsInstanceId
+      && descriptor.path.length > 1);
+  const boarsAfterExpiry = session.state.realm.units
+    .find(({ instanceId }) => instanceId === opening.wildBoarsInstanceId);
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified: siteEvent?.type === 'site-played'
+      && canonicalJson(sitePayload ?? null) === canonicalJson({
+        cardId: input.quagmire.stableId,
+        cell: 'B3',
+        instanceId: opening.quagmireInstanceId,
+        seat: 'north',
+      }),
+    deck,
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && deck.atlas.find(({ name }) => name === input.quagmire.name)?.copies === 2
+      && deck.spellbook.find(({ name }) => name === input.wildBoars.name)?.copies === 4,
+    movementRestoredAfterExpiry: boarsAfterExpiry?.location === 'C2'
+      && !boarsAfterExpiry.summoningSickness
+      && !boarsAfterExpiry.tapped
+      && movementAfterExpiry.length > 0,
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    quagmire: opening.names.get(input.quagmire.stableId) ?? input.quagmire.stableId,
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    unitImmobileThroughOpponentTurn,
+    wildBoars: opening.names.get(input.wildBoars.stableId) ?? input.wildBoars.stableId,
   });
 }
 
@@ -16612,6 +16816,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   );
   const earthOverpower = runEarthOverpower(input);
   const earthBury = runEarthBury(input);
+  const earthQuagmire = runEarthQuagmire(input);
   const earthBorderMilitia = runEarthBorderMilitia(input);
   const earthHumbleVillage = runEarthHumbleVillage(input);
   const earthDuel = runEarthDuel(input);
@@ -16820,6 +17025,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthStarter,
     earthOverpower,
     earthBury,
+    earthQuagmire,
     earthBorderMilitia,
     earthHumbleVillage,
     earthDuel,

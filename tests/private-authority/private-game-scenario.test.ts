@@ -918,7 +918,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       assert.equal(preset.usesOnlyOrdinaryOrExceptionalCards, false);
       assert.equal(
         preset.manifest.decks.north.atlas.length,
-        preset.id === 'air-vs-earth-lesson' ? 13 : 12,
+        preset.id === 'air-vs-earth-lesson' ? 13 : 14,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
@@ -926,7 +926,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
-        preset.id === 'air-vs-earth-lesson' ? 12 : 13,
+        preset.id === 'air-vs-earth-lesson' ? 14 : 13,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
@@ -978,6 +978,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   });
   assert.deepEqual(summarize(airLesson, 'south', 'atlas'), {
     'Humble Village': 3,
+    Quagmire: 2,
     'Rustic Village': 3,
     'Simple Village': 3,
     Sinkhole: 1,
@@ -1096,6 +1097,14 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     cardType: 'site',
     elements: ['earth'],
     rangedUnitsHereRangeBonus: 1,
+  });
+  const quagmireId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Quagmire')?.[0];
+  assert.ok(quagmireId);
+  assert.deepEqual(airLesson.manifest.cards[quagmireId], {
+    cardType: 'site',
+    elements: ['earth'],
+    genesisImmobilizeNearbyUntilNextTurn: true,
   });
   const mountainPassId = Object.entries(airLesson.cardNames)
     .find(([, name]) => name === 'Mountain Pass')?.[0];
@@ -1532,6 +1541,23 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthBury.deck.spellbook
     .find(({ name }) => name === 'Bosk Troll')?.copies, 4);
   assert.equal(result.earthBury.replayVerified, true);
+  assert.equal(result.earthQuagmire.quagmire, 'Quagmire');
+  assert.equal(result.earthQuagmire.wildBoars, 'Wild Boars');
+  assert.equal(result.earthQuagmire.acceptedActionCount, 22);
+  assert.equal(result.earthQuagmire.causalEventsVerified, true);
+  assert.equal(result.earthQuagmire.unitImmobileThroughOpponentTurn, true);
+  assert.equal(result.earthQuagmire.movementRestoredAfterExpiry, true);
+  assert.equal(result.earthQuagmire.legalConstructedDeck, true);
+  assert.equal(result.earthQuagmire.noRandomDraws, true);
+  assert.equal(result.earthQuagmire.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthQuagmire.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthQuagmire.deck.atlas
+    .find(({ name }) => name === 'Quagmire')?.copies, 2);
+  assert.equal(result.earthQuagmire.deck.spellbook
+    .find(({ name }) => name === 'Wild Boars')?.copies, 4);
+  assert.equal(result.earthQuagmire.replayVerified, true);
   assert.equal(result.earthBorderMilitia.borderMilitia, 'Border Militia');
   assert.equal(result.earthBorderMilitia.footSoldier, 'Foot Soldier');
   assert.equal(result.earthBorderMilitia.seed, 7688);

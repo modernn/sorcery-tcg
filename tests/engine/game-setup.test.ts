@@ -99,6 +99,7 @@ type SiteFacts = Readonly<{
   genesisDrawSpellPerAdjacentSameCard?: boolean;
   genesisGainMana?: number;
   genesisGainManaIfOnlyControlledCopy?: 1;
+  genesisImmobilizeNearbyUntilNextTurn?: true;
   genesisMayBottomNextSpell?: true;
   rangedUnitsHereRangeBonus?: 1;
   sacrificeToDestroyNearbySite?: true;
@@ -150,6 +151,9 @@ function cardsFor(
         ...(site.genesisGainMana ? { genesisGainMana: site.genesisGainMana } : {}),
         ...(site.genesisGainManaIfOnlyControlledCopy
           ? { genesisGainManaIfOnlyControlledCopy: site.genesisGainManaIfOnlyControlledCopy }
+          : {}),
+        ...(site.genesisImmobilizeNearbyUntilNextTurn === true
+          ? { genesisImmobilizeNearbyUntilNextTurn: true as const }
           : {}),
         ...(site.genesisMayBottomNextSpell === true
           ? { genesisMayBottomNextSpell: true as const }
@@ -7363,6 +7367,195 @@ test('RULE-03 site Genesis grants temporary mana once, pays a summon, and expire
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
   assert.equal(session.state.players.north.mana, 1);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 site Genesis makes units at nearby sites Immobile until its controller next turn', () => {
+  const base = manifest(246);
+  const preview = createGameSession(base);
+  const [plainC4, plainC3, quagmire] =
+    preview.state.players.north.hand.atlas.map(({ cardId }) => cardId);
+  const sinkhole = preview.state.players.south.hand.atlas[0]?.cardId;
+  const [casterA, casterB] =
+    preview.state.players.north.hand.spellbook.map(({ cardId }) => cardId);
+  const disabledEnemy = preview.state.players.south.hand.spellbook[0]?.cardId;
+  assert.ok(plainC4);
+  assert.ok(plainC3);
+  assert.ok(quagmire);
+  assert.ok(sinkhole);
+  assert.ok(casterA);
+  assert.ok(casterB);
+  assert.ok(disabledEnemy);
+
+  const cards: Record<string, GameCardDefinition> = { ...base.cards };
+  for (const cardId of base.decks.north.spellbook) {
+    cards[cardId] = {
+      cardType: 'magic',
+      manaCost: 0,
+      teleportAllyToTargetSite: true,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    };
+  }
+  for (const cardId of [casterA, casterB]) {
+    cards[cardId] = {
+      attack: 2,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      ...(cardId === casterA ? { movementBonus: 2 as const } : {}),
+      spellcaster: true,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    };
+  }
+  cards[disabledEnemy] = {
+    attack: 2,
+    cardType: 'minion',
+    defense: 2,
+    immobile: true,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    waterbound: true,
+  };
+  cards[quagmire] = {
+    cardType: 'site',
+    elements: ['earth'],
+    genesisImmobilizeNearbyUntilNextTurn: true,
+  };
+  cards[sinkhole] = {
+    cardType: 'site',
+    elements: ['earth'],
+    sacrificeToDestroyNearbySite: true,
+  };
+  const input = {
+    authority: base.authority,
+    cards,
+    decks: base.decks,
+    firstSeat: base.firstSeat,
+    seed: base.seed,
+  };
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [quagmire]: {
+        ...cards[quagmire]!,
+        genesisImmobilizeNearbyUntilNextTurn: false,
+      } as unknown as GameCardDefinition,
+    },
+  }), /genesisImmobilizeNearbyUntilNextTurn/);
+  const gameManifest = createGameManifest(input);
+  assert.equal(gameManifest.cards[quagmire]?.cardType === 'site'
+    && gameManifest.cards[quagmire].genesisImmobilizeNearbyUntilNextTurn, true);
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardId === plainC4 && descriptor.cell === 'C4');
+  for (const cardId of [casterA, casterB]) {
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === cardId && descriptor.cell === 'C4');
+  }
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardId === sinkhole && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === disabledEnemy && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardId === plainC3 && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardId === quagmire && descriptor.cell === 'C2');
+
+  const quagmireSite = session.state.realm.sites.C2;
+  const firstCaster = session.state.realm.units.find(({ cardId }) => cardId === casterA);
+  const secondCaster = session.state.realm.units.find(({ cardId }) => cardId === casterB);
+  const enemy = session.state.realm.units.find(({ cardId }) => cardId === disabledEnemy);
+  assert.ok(quagmireSite);
+  assert.ok(firstCaster);
+  assert.ok(secondCaster);
+  assert.ok(enemy);
+  let view = observeGame(session.state, 'north');
+  assert.deepEqual(view.realm.immobileAreas, [{
+    cells: ['C1', 'C2', 'C3'],
+    expiresAtSeat: 'north',
+    sourceInstanceId: quagmireSite.instanceId,
+  }]);
+  assert.equal(view.players.north.avatar.immobile, false);
+  assert.equal(view.players.south.avatar.immobile, true);
+  const observedEnemy = view.realm.units.find(({ instanceId }) => instanceId === enemy.instanceId);
+  assert.ok(observedEnemy);
+  assert.deepEqual({
+    disabled: observedEnemy.disabled,
+    immobile: observedEnemy.immobile,
+  }, { disabled: true, immobile: true });
+  const areaCells = new Set(['C1', 'C2', 'C3']);
+  const outsidePaths = legalGameActions(session.state, 'north').flatMap(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === firstCaster.instanceId
+      ? [descriptor.path]
+      : []);
+  assert.equal(outsidePaths.some((path) => path.at(-1)?.cell === 'C3'), true);
+  assert.equal(outsidePaths.every((path) => {
+    const entryIndex = path.findIndex(({ cell }, index) => index > 0 && areaCells.has(cell));
+    return entryIndex < 0 || entryIndex === path.length - 1;
+  }), true);
+
+  const teleports = [...session.state.players.north.hand.spellbook];
+  take(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.cardInstanceId === teleports[0]?.instanceId
+    && descriptor.casterInstanceId === firstCaster.instanceId
+    && descriptor.ally?.instanceId === secondCaster.instanceId
+    && descriptor.targetLocation?.cell === 'C3');
+  view = observeGame(session.state, 'north');
+  assert.equal(view.realm.units.find(({ instanceId }) =>
+    instanceId === secondCaster.instanceId)?.immobile, true);
+  take(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.cardInstanceId === teleports[1]?.instanceId
+    && descriptor.casterInstanceId === secondCaster.instanceId
+    && descriptor.ally?.instanceId === secondCaster.instanceId
+    && descriptor.targetLocation?.cell === 'C4');
+  view = observeGame(session.state, 'north');
+  assert.equal(view.realm.units.find(({ instanceId }) =>
+    instanceId === secondCaster.instanceId)?.immobile, false);
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const southAvatarId = session.state.players.south.avatar.card.instanceId;
+  const avatarPaths = legalGameActions(session.state, 'south').flatMap(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === southAvatarId
+      ? [descriptor.path]
+      : []);
+  assert.equal(avatarPaths.length > 0 && avatarPaths.every((path) => path.length === 1), true);
+  take(({ descriptor }) => descriptor.kind === 'activate-site-destruction'
+    && descriptor.sourceSiteInstanceId === session.state.realm.sites.C1?.instanceId
+    && descriptor.targetCell === 'C2');
+  view = observeGame(session.state, 'south');
+  assert.deepEqual(view.realm.immobileAreas?.[0]?.cells, ['C1', 'C2', 'C3']);
+  assert.equal(view.players.south.avatar.immobile, true);
+  assert.equal(view.realm.units.find(({ instanceId }) => instanceId === enemy.instanceId)?.immobile, true);
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  view = observeGame(session.state, 'north');
+  assert.equal(view.realm.immobileAreas, undefined);
+  assert.equal(view.players.south.avatar.immobile, false);
+  assert.deepEqual({
+    disabled: view.realm.units.find(({ instanceId }) => instanceId === enemy.instanceId)?.disabled,
+    immobile: view.realm.units.find(({ instanceId }) => instanceId === enemy.instanceId)?.immobile,
+  }, { disabled: true, immobile: false });
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === southAvatarId
+      && descriptor.path.length > 1), true);
   assert.equal(verifyGameReplay(session), true);
 });
 
