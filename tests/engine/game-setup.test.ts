@@ -6971,6 +6971,124 @@ test('RULE-04 a drag projectile stops at the first visible unit and may fight af
   assert.equal(verifyGameReplay(fight), true);
 });
 
+test('RULE-03 Granary Rats suppresses its site threshold while enabled', () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const north: GameDeckSpec = {
+    atlas: Array(3).fill('dual-site'),
+    avatar: 'north-avatar',
+    spellbook: ['rats', 'gated', 'filler'],
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(3).fill('dual-site'),
+    avatar: 'south-avatar',
+    spellbook: Array(3).fill('filler'),
+  };
+  const cards: Record<string, GameCardDefinition> = {
+    'dual-site': { cardType: 'site', elements: ['earth', 'fire'] },
+    filler: {
+      attack: 1, cardType: 'minion', defense: 1, manaCost: 0, thresholds,
+    },
+    gated: {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 0,
+      thresholds: { ...thresholds, earth: 1, fire: 1 },
+    },
+    'north-avatar': { attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20 },
+    rats: {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 1,
+      siteProvidesNoThreshold: true,
+      thresholds,
+    },
+    'south-avatar': { attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20 },
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-granary-rats-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north' as const,
+  };
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      rats: { ...cards.rats, siteProvidesNoThreshold: false } as unknown as GameCardDefinition,
+    },
+    seed: 1,
+  }), /siteProvidesNoThreshold must be true when defined/);
+
+  const gameManifest = createGameManifest({ ...input, seed: 1 });
+  assert.deepEqual(gameManifest.cards.rats, cards.rats);
+  let session = keep(keep(createGameSession(gameManifest)));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+  const gated = session.state.players.north.hand.spellbook.find(({ cardId }) => cardId === 'gated');
+  const rats = session.state.players.north.hand.spellbook.find(({ cardId }) => cardId === 'rats');
+  assert.ok(gated);
+  assert.ok(rats);
+  const baseline = session;
+  const canSummonGated = (checkpoint: GameSession) => legalGameActions(checkpoint.state, 'north')
+    .some(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === 'gated' && descriptor.cell === 'C4');
+  assert.deepEqual(observeGame(baseline.state, 'north').players.north.affinity,
+    { air: 0, earth: 1, fire: 1, water: 0 });
+  assert.equal(canSummonGated(baseline), true);
+
+  const unit = {
+    ...rats,
+    controller: 'north' as const,
+    damage: 0,
+    location: 'C4' as const,
+    region: 'underground' as const,
+    stealthed: false,
+    summoningSickness: false,
+    tapped: false,
+    warded: false,
+  };
+  const withUnits = (units: GameSession['state']['realm']['units']): GameSession => ({
+    ...baseline,
+    state: {
+      ...baseline.state,
+      realm: { ...baseline.state.realm, units },
+    },
+  });
+  const voidRat = withUnits([{ ...unit, region: 'void' }]);
+  assert.equal(canSummonGated(voidRat), true);
+  const enemyInstanceId =
+    'sha256:2222222222222222222222222222222222222222222222222222222222222222' as const;
+  const suppressed = withUnits([
+    unit,
+    { ...unit, controller: 'south', instanceId: enemyInstanceId, region: 'underwater' },
+  ]);
+  assert.deepEqual(observeGame(suppressed.state, 'north').players.north.affinity,
+    { air: 0, earth: 0, fire: 0, water: 0 });
+  assert.equal(canSummonGated(suppressed), false);
+
+  const oneDisabled = withUnits(suppressed.state.realm.units.map((candidate) =>
+    candidate.instanceId === unit.instanceId
+      ? {
+        ...candidate,
+        disableEffects: [{ expiresAtSeat: 'north' as const, sourceInstanceId: candidate.instanceId }],
+      }
+      : candidate));
+  assert.equal(canSummonGated(oneDisabled), false);
+  const allDisabled = withUnits(oneDisabled.state.realm.units.map((candidate) => ({
+    ...candidate,
+    disableEffects: [{ expiresAtSeat: 'north' as const, sourceInstanceId: candidate.instanceId }],
+  })));
+  assert.deepEqual(observeGame(allDisabled.state, 'north').players.north.affinity,
+    { air: 0, earth: 1, fire: 1, water: 0 });
+  assert.equal(canSummonGated(allDisabled), true);
+});
+
 test('RULE-03 a provider adds affinity until that minion dies', () => {
   const setup = northAttacksAtC2(46, {
     attack: 1,
