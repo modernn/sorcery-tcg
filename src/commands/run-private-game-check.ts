@@ -567,6 +567,20 @@ export type PrivateGameCheck = Readonly<{
     spellEnteredCemetery: boolean;
     tokensVerified: boolean;
   }>;
+  earthHumbleVillage: Readonly<{
+    acceptedActionCount: number;
+    deck: DeckList;
+    declinedKeptManaAndSummonedNothing: boolean;
+    exactChoices: boolean;
+    footSoldier: string;
+    gameRemainedActive: boolean;
+    humbleVillage: string;
+    noRandomDraws: boolean;
+    paidSpentManaAndSummonedToken: boolean;
+    replayVerified: boolean;
+    seed: number;
+    tokenDefinitionVerified: boolean;
+  }>;
   earthDuel: Readonly<{
     acceptedActionCount: number;
     allySurvivedWithTwoDamage: boolean;
@@ -1244,6 +1258,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   hamlet: NormalizedCard;
   healingMinion: NormalizedCard;
   huntersLodge: NormalizedCard;
+  humbleVillage: NormalizedCard;
   lethalMinion: NormalizedCard;
   leylineHenge: NormalizedCard;
   lesserBloodDemon: NormalizedCard;
@@ -1560,6 +1575,26 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || footSoldier.thresholds.water !== 0
     || footSoldier.rarity !== 'ordinary') {
     throw new Error('private Foot Soldier token no longer matches its supported facts');
+  }
+  const humbleVillage = snapshot.cards.find(({ name }) => name === 'Humble Village');
+  if (!humbleVillage
+    || humbleVillage.stableId
+      !== 'card:d6211d4878dc1d28bb72a5d6a48821807277b9a067d51607514dab004cf5feca'
+    || humbleVillage.cardType !== 'site'
+    || humbleVillage.rulesText.trim()
+      !== 'Genesis → You may pay ① to summon a Foot Soldier token here.'
+    || humbleVillage.manaCost !== null
+    || humbleVillage.attack !== null
+    || humbleVillage.defense !== null
+    || humbleVillage.life !== null
+    || humbleVillage.elements.length !== 1
+    || humbleVillage.elements[0] !== 'earth'
+    || humbleVillage.thresholds.air !== 0
+    || humbleVillage.thresholds.earth !== 1
+    || humbleVillage.thresholds.fire !== 0
+    || humbleVillage.thresholds.water !== 0
+    || humbleVillage.rarity !== 'ordinary') {
+    throw new Error('private optional paid Genesis site no longer matches its supported facts');
   }
   const rescue = snapshot.cards.find(({ name }) => name === 'Rescue');
   if (!rescue
@@ -2758,6 +2793,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     hamlet,
     healingMinion,
     huntersLodge,
+    humbleVillage,
     lethalMinion,
     leylineHenge,
     lesserBloodDemon,
@@ -2913,6 +2949,7 @@ function gameDefinition(
   ordinaryMinionManaDiscount: 0 | 1 = 0,
   siteProvidesNoThreshold = false,
   takesLessDamage: 0 | 1 = 0,
+  siteGenesisPayOneManaToSummonToken?: string,
   summonTokenToEachControlledSiteBorderingEnemySite?: string,
   token = false,
 ): GameCardDefinition {
@@ -2950,6 +2987,9 @@ function gameDefinition(
         : {}),
       genesisDrawSpellPerAdjacentSameCard: siteGenesisDrawSpellPerAdjacentSameCard,
       ...(siteGenesisGainMana ? { genesisGainMana: siteGenesisGainMana } : {}),
+      ...(siteGenesisPayOneManaToSummonToken
+        ? { genesisPayOneManaToSummonToken: siteGenesisPayOneManaToSummonToken }
+        : {}),
       ...(ordinaryMinionManaDiscount ? { ordinaryMinionManaDiscount } : {}),
       ...(sacrificeToDestroyNearbySite ? { sacrificeToDestroyNearbySite: true } : {}),
       ...(siteGenesisEnemiesLoseStealth ? { genesisEnemiesLoseStealth: true } : {}),
@@ -3083,7 +3123,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -3199,6 +3239,7 @@ function buildManifest(
   );
   const earthBuryDeck = elementalDeck('earth', earthMinions, [], [input.bury]);
   const earthBorderMilitiaDeck = elementalDeck('earth', [], [], [input.borderMilitia]);
+  const earthHumbleVillageDeck = elementalDeck('earth', [], [input.humbleVillage]);
   const earthDuelDeck = elementalDeck(
     'earth',
     [...earthMinions, input.elthamTownsfolk],
@@ -3487,6 +3528,8 @@ function buildManifest(
         ? earthEntombedDeck
       : scenario === 'earth-border-militia'
         ? earthBorderMilitiaDeck
+      : scenario === 'earth-humble-village'
+        ? earthHumbleVillageDeck
       : scenario === 'earth-bury'
         ? earthBuryDeck
       : scenario === 'earth-duel'
@@ -3638,6 +3681,8 @@ function buildManifest(
         ? fireVikingsDeck
       : scenario === 'earth-border-militia'
         ? earthBorderMilitiaDeck
+      : scenario === 'earth-humble-village'
+        ? earthHumbleVillageDeck
       : scenario === 'earth-bury'
         ? earthBuryDeck
       : scenario === 'earth-duel'
@@ -3680,7 +3725,9 @@ function buildManifest(
     ...decks.north.spellbook,
     ...decks.south.atlas,
     ...decks.south.spellbook,
-    ...(scenario === 'earth-border-militia' ? [input.footSoldier.stableId] : []),
+    ...(scenario === 'earth-border-militia' || scenario === 'earth-humble-village'
+      ? [input.footSoldier.stableId]
+      : []),
   ]);
   const selectedCards = input.cards.filter(({ stableId }) => referenced.has(stableId));
   const definitions = Object.fromEntries(selectedCards.map((card) => [
@@ -3785,6 +3832,7 @@ function buildManifest(
       card.stableId === input.hamlet.stableId ? 1 : 0,
       card.stableId === input.granaryRats.stableId,
       card.stableId === input.shellycoat.stableId ? 1 : 0,
+      card.stableId === input.humbleVillage.stableId ? input.footSoldier.stableId : undefined,
       card.stableId === input.borderMilitia.stableId ? input.footSoldier.stableId : undefined,
       card.stableId === input.footSoldier.stableId,
     ),
@@ -4305,6 +4353,28 @@ function findEarthBorderMilitiaOpening(
     ],
   };
 }
+
+function findEarthHumbleVillageOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  humbleVillageInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  seed: number;
+  session: GameSession;
+}> {
+  // ponytail: pinned seed keeps this private proof fast without another config field.
+  const seed = 7383;
+  const built = buildManifest(input, seed, 'earth-humble-village');
+  const session = createGameSession(built.manifest);
+  const humbleVillageInstanceId = session.state.players.north.hand.atlas
+    .find(({ cardId }) => cardId === input.humbleVillage.stableId)?.instanceId;
+  if (!humbleVillageInstanceId) {
+    throw new Error('private Humble Village seed no longer produces its supported opening');
+  }
+  return { ...built, humbleVillageInstanceId, seed, session };
+}
+
 function findEarthArtifactOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   artifact: NormalizedCard,
@@ -8408,6 +8478,117 @@ function runEarthBorderMilitia(
     seed: opening.seed,
     spellEnteredCemetery,
     tokensVerified,
+  });
+}
+
+function runEarthHumbleVillage(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthHumbleVillage'] {
+  const opening = findEarthHumbleVillageOpening(input);
+  const checkpoint = keep(keep(opening.session));
+  const choices = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.humbleVillageInstanceId
+      && descriptor.cell === 'C4');
+  const declined = choices.find(({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.genesisTokenChoice === 'decline');
+  const paid = choices.find(({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.genesisTokenChoice === 'pay-one-mana');
+  if (!declined || !paid) throw new Error('private Humble Village choices are unavailable');
+  const declinedResult = stepGame(checkpoint, declined);
+  const paidResult = stepGame(checkpoint, paid);
+  if (!declinedResult.accepted || !paidResult.accepted) {
+    throw new Error('private Humble Village choice was rejected');
+  }
+
+  const declinedSession = declinedResult.session;
+  const paidSession = paidResult.session;
+  const token = paidSession.state.realm.units.find(({ cardId }) =>
+    cardId === input.footSoldier.stableId);
+  if (!token) throw new Error('private Humble Village did not summon its token');
+  const source = paidSession.state.realm.sites.C4;
+  const tokenDefinition = paidSession.state.cards[input.footSoldier.stableId];
+  const exactChoices = choices.length === 2
+    && declined.actionId !== paid.actionId
+    && new Set(choices.map(({ label }) => label)).size === 2;
+  const declinedKeptManaAndSummonedNothing = declinedSession.state.players.north.mana === 1
+    && declinedSession.state.players.north.domainEstablished
+    && declinedSession.state.players.north.avatar.tapped
+    && declinedSession.state.realm.sites.C4 !== undefined
+    && 'cardId' in declinedSession.state.realm.sites.C4
+    && declinedSession.state.realm.sites.C4.cardId === input.humbleVillage.stableId
+    && declinedSession.state.realm.units.every(({ cardId }) => cardId !== input.footSoldier.stableId)
+    && declinedResult.receipt.events.map(({ type }) => type).join(',') === 'site-played';
+  const paidSpentManaAndSummonedToken = paidSession.state.players.north.mana === 0
+    && paidSession.state.players.north.domainEstablished
+    && paidSession.state.players.north.avatar.tapped
+    && source !== undefined
+    && 'cardId' in source
+    && source.cardId === input.humbleVillage.stableId
+    && source.controller === 'north'
+    && paidSession.state.realm.units.filter(({ cardId }) =>
+      cardId === input.footSoldier.stableId).length === 1
+    && token.controller === 'north'
+    && token.damage === 0
+    && token.location === 'C4'
+    && token.owner === 'north'
+    && token.region === 'surface'
+    && token.source === 'token'
+    && token.summoningSickness
+    && !token.tapped
+    && canonicalJson(paidResult.receipt.events.map(({ payload, type }) => ({ payload, type })))
+      === canonicalJson([
+        {
+          payload: {
+            cardId: input.humbleVillage.stableId,
+            cell: 'C4',
+            instanceId: source.instanceId,
+            seat: 'north',
+          },
+          type: 'site-played',
+        },
+        {
+          payload: {
+            cardId: input.footSoldier.stableId,
+            cell: 'C4',
+            instanceId: token.instanceId,
+            manaPaid: 1,
+            owner: 'north',
+            seat: 'north',
+            sourceInstanceId: source.instanceId,
+            token: true,
+          },
+          type: 'minion-summoned',
+        },
+      ]);
+  const tokenDefinitionVerified = tokenDefinition?.cardType === 'minion'
+    && tokenDefinition.token === true
+    && tokenDefinition.attack === 1
+    && tokenDefinition.defense === 1
+    && tokenDefinition.manaCost === 0
+    && opening.manifest.decks.north.atlas.every((cardId) =>
+      cardId !== input.footSoldier.stableId)
+    && opening.manifest.decks.north.spellbook.every((cardId) =>
+      cardId !== input.footSoldier.stableId)
+    && (['north', 'south'] as const).every((seat) =>
+      paidSession.state.players[seat].cemetery.every(({ cardId }) =>
+        cardId !== input.footSoldier.stableId));
+
+  return Object.freeze({
+    acceptedActionCount: paidSession.transcript.length,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    declinedKeptManaAndSummonedNothing,
+    exactChoices,
+    footSoldier: input.footSoldier.name,
+    gameRemainedActive: declinedSession.state.terminal.status === 'active'
+      && paidSession.state.terminal.status === 'active',
+    humbleVillage: input.humbleVillage.name,
+    noRandomDraws: [...declinedSession.transcript, ...paidSession.transcript]
+      .every(({ randomDraws }) => randomDraws.length === 0),
+    paidSpentManaAndSummonedToken,
+    replayVerified: verifyGameReplay(declinedSession) && verifyGameReplay(paidSession),
+    seed: opening.seed,
+    tokenDefinitionVerified,
   });
 }
 
@@ -15486,6 +15667,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthOverpower = runEarthOverpower(input);
   const earthBury = runEarthBury(input);
   const earthBorderMilitia = runEarthBorderMilitia(input);
+  const earthHumbleVillage = runEarthHumbleVillage(input);
   const earthDuel = runEarthDuel(input);
   const earthHuntersLodge = runEarthHuntersLodge(input);
   const earthPoisonousDagger = runEarthPoisonousDagger(input);
@@ -15691,6 +15873,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthOverpower,
     earthBury,
     earthBorderMilitia,
+    earthHumbleVillage,
     earthDuel,
     earthHuntersLodge,
     earthPoisonousDagger,
