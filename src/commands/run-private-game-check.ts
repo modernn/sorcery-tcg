@@ -946,8 +946,11 @@ export type PrivateGameCheck = Readonly<{
     causalEventsVerified: boolean;
     controlTransferred: boolean;
     deck: DeckList;
+    deathriteControllerDrewSite: boolean;
+    deathriteOwnerKeptCemetery: boolean;
     exactNearbyTarget: boolean;
     farTargetUnavailable: boolean;
+    kettletopLeprechaun: string;
     manaPaid: number;
     mesmerism: string;
     newControllerGainedAction: boolean;
@@ -955,6 +958,7 @@ export type PrivateGameCheck = Readonly<{
     oldControllerHadAction: boolean;
     oldControllerLostAction: boolean;
     replayVerified: boolean;
+    seed: number;
     seravaTownsfolk: string;
     waterAffinityFour: boolean;
   }>;
@@ -3402,8 +3406,8 @@ function buildManifest(
   const waterLureDeck = elementalDeck('water', [input.seravaTownsfolk], [], [input.lure]);
   const waterMesmerismDeck = elementalDeck(
     'water',
-    [input.seravaTownsfolk],
-    [input.stream],
+    [input.seravaTownsfolk, input.deathriteMinion],
+    [input.stream, input.valley],
     [input.mesmerism],
   );
   const waterPirateShipDeck = elementalDeck(
@@ -6965,16 +6969,16 @@ function findWaterMesmerismOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): Readonly<{
   farSeravaInstanceId: string;
+  kettletopInstanceId: string;
   manifest: GameManifest;
   mesmerismInstanceId: string;
   names: ReadonlyMap<string, string>;
-  nearbySeravaInstanceId: string;
   northSiteInstanceIds: readonly [string, string, string, string];
   session: GameSession;
   southSiteInstanceIds: readonly [string, string];
 }> {
-  // ponytail: bounded opening scan avoids another private seed field.
-  for (let offset = 1; offset <= 4096; offset += 1) {
+  // ponytail: pinned offset keeps this private proof fast without another config field.
+  for (const offset of [4708]) {
     const built = buildManifest(input, input.config.waterSeed + offset, 'water-mesmerism');
     const session = createGameSession(built.manifest);
     const northSites = [
@@ -6984,27 +6988,35 @@ function findWaterMesmerismOpening(
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('water');
     });
-    const southSites = session.state.players.south.hand.atlas.filter(({ cardId }) => {
+    const southWaterSite = session.state.players.south.hand.atlas.find(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('water');
     });
+    const southValleyInstanceId = session.state.players.south.hand.atlas
+      .find(({ cardId }) => cardId === input.valley.stableId)?.instanceId;
     const mesmerismInstanceId = [
       ...session.state.players.north.hand.spellbook,
       ...session.state.players.north.spellbook.slice(0, 3),
     ].find(({ cardId }) => cardId === input.mesmerism.stableId)?.instanceId;
-    const seravas = [
+    const southAccessibleSpells = [
       ...session.state.players.south.hand.spellbook,
       ...session.state.players.south.spellbook.slice(0, 3),
-    ].filter(({ cardId }) => cardId === input.seravaTownsfolk.stableId);
+    ];
+    const farSeravaInstanceId = southAccessibleSpells
+      .find(({ cardId }) => cardId === input.seravaTownsfolk.stableId)?.instanceId;
+    const kettletopInstanceId = southAccessibleSpells
+      .find(({ cardId }) => cardId === input.deathriteMinion.stableId)?.instanceId;
     if (northSites.length >= 4
-      && southSites.length >= 2
+      && southWaterSite
+      && southValleyInstanceId
       && mesmerismInstanceId
-      && seravas.length >= 2) {
+      && farSeravaInstanceId
+      && kettletopInstanceId) {
       return {
         ...built,
-        farSeravaInstanceId: seravas[0]!.instanceId,
+        farSeravaInstanceId,
+        kettletopInstanceId,
         mesmerismInstanceId,
-        nearbySeravaInstanceId: seravas[1]!.instanceId,
         northSiteInstanceIds: [
           northSites[0]!.instanceId,
           northSites[1]!.instanceId,
@@ -7012,7 +7024,7 @@ function findWaterMesmerismOpening(
           northSites[3]!.instanceId,
         ],
         session,
-        southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
+        southSiteInstanceIds: [southWaterSite.instanceId, southValleyInstanceId],
       };
     }
   }
@@ -14826,6 +14838,9 @@ function runWaterMesmerismSetup(
   take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
     && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.farSeravaInstanceId
+    && descriptor.cell === 'C1');
   take(({ descriptor }) => descriptor.kind === 'end-turn');
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
   take(({ descriptor }) => descriptor.kind === 'play-site'
@@ -14836,6 +14851,9 @@ function runWaterMesmerismSetup(
   take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.kettletopInstanceId
+    && descriptor.cell === 'C2');
   take(({ descriptor }) => descriptor.kind === 'end-turn');
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   take(({ descriptor }) => descriptor.kind === 'play-site'
@@ -14843,12 +14861,6 @@ function runWaterMesmerismSetup(
     && descriptor.cell === 'B3');
   take(({ descriptor }) => descriptor.kind === 'end-turn');
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardInstanceId === opening.farSeravaInstanceId
-    && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardInstanceId === opening.nearbySeravaInstanceId
-    && descriptor.cell === 'C2');
   take(({ descriptor }) => descriptor.kind === 'end-turn');
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   take(({ descriptor }) => descriptor.kind === 'play-site'
@@ -14875,10 +14887,10 @@ function runWaterMesmerism(
   };
 
   const targetBefore = session.state.realm.units.find(({ instanceId }) =>
-    instanceId === opening.nearbySeravaInstanceId);
+    instanceId === opening.kettletopInstanceId);
   const farBefore = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.farSeravaInstanceId);
-  if (!targetBefore || !farBefore) throw new Error('private Mesmerism setup lacks its Seravas');
+  if (!targetBefore || !farBefore) throw new Error('private Mesmerism setup lacks its minions');
   const oldControllerHadAction = targetBefore.controller === 'south'
     && !targetBefore.summoningSickness
     && !targetBefore.tapped;
@@ -14887,7 +14899,7 @@ function runWaterMesmerism(
       && descriptor.cardInstanceId === opening.mesmerismInstanceId);
   const chosen = choices.find(({ descriptor }) => descriptor.kind === 'cast-magic'
     && descriptor.target?.kind === 'minion'
-    && descriptor.target.instanceId === opening.nearbySeravaInstanceId
+    && descriptor.target.instanceId === opening.kettletopInstanceId
     && descriptor.target.seat === 'south');
   if (!chosen || choices.length !== 1) {
     throw new Error('private Mesmerism exact nearby target is not uniquely available');
@@ -14900,13 +14912,13 @@ function runWaterMesmerism(
   const manaAfterCast = session.state.players.north.mana;
 
   const targetAfter = session.state.realm.units.find(({ instanceId }) =>
-    instanceId === opening.nearbySeravaInstanceId);
+    instanceId === opening.kettletopInstanceId);
   const farAfter = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.farSeravaInstanceId);
-  if (!targetAfter || !farAfter) throw new Error('private Mesmerism removed a Serava');
+  if (!targetAfter || !farAfter) throw new Error('private Mesmerism removed a minion');
   const newControllerGainedAction = legalGameActions(session.state, 'north').some(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === opening.nearbySeravaInstanceId);
+      && descriptor.unitInstanceId === opening.kettletopInstanceId);
   const events = cast.receipt.events;
   const castPayload = events[0] && isJsonRecord(events[0].payload) ? events[0].payload : undefined;
   const changedPayload = events[1] && isJsonRecord(events[1].payload)
@@ -14918,15 +14930,15 @@ function runWaterMesmerism(
   take(({ descriptor }) => descriptor.kind === 'end-turn');
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   const southActions = legalGameActions(session.state, 'south');
-  const causalEventsVerified: boolean = events.map(({ type }) => type).join(',')
+  const controlEventsVerified: boolean = events.map(({ type }) => type).join(',')
     === 'magic-cast,minion-control-changed,magic-resolved'
     && castPayload?.instanceId === opening.mesmerismInstanceId
     && castPayload.manaPaid === 4
     && castPayload.seat === 'north'
-    && castPayload.targetInstanceId === opening.nearbySeravaInstanceId
+    && castPayload.targetInstanceId === opening.kettletopInstanceId
     && castPayload.targetSeat === 'south'
     && changedPayload?.fromSeat === 'south'
-    && changedPayload.instanceId === opening.nearbySeravaInstanceId
+    && changedPayload.instanceId === opening.kettletopInstanceId
     && changedPayload.seat === 'north'
     && changedPayload.sourceInstanceId === opening.mesmerismInstanceId
     && resolvedPayload?.instanceId === opening.mesmerismInstanceId;
@@ -14952,9 +14964,47 @@ function runWaterMesmerism(
       && descriptor.target?.instanceId !== opening.farSeravaInstanceId);
   const oldControllerLostAction: boolean = southActions.every(({ descriptor }) =>
     descriptor.kind !== 'move-and-attack'
-      || descriptor.unitInstanceId !== opening.nearbySeravaInstanceId)
+      || descriptor.unitInstanceId !== opening.kettletopInstanceId)
     && southActions.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.farSeravaInstanceId);
+  const playersBeforeDeathrite = session.state.players;
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === opening.farSeravaInstanceId
+    && descriptor.from.cell === 'C1'
+    && descriptor.to.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+    && descriptor.target.kind === 'minion'
+    && descriptor.target.instanceId === opening.kettletopInstanceId);
+  const fight = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  if (!fight.accepted) throw new Error('private Mesmerism Deathrite fight was rejected');
+  session = fight.session;
+  const deathEvents = fight.receipt.events;
+  const drawIndex = deathEvents.findIndex(({ payload, type }) =>
+    type === 'site-drawn'
+      && isJsonRecord(payload)
+      && payload.seat === 'north'
+      && payload.sourceInstanceId === opening.kettletopInstanceId);
+  const deathIndex = deathEvents.findIndex(({ payload, type }) =>
+    type === 'minion-died'
+      && isJsonRecord(payload)
+      && payload.instanceId === opening.kettletopInstanceId
+      && payload.owner === 'south');
+  const deathriteControllerDrewSite: boolean =
+    session.state.players.north.atlas.length === playersBeforeDeathrite.north.atlas.length - 1
+    && session.state.players.north.hand.atlas.length
+      === playersBeforeDeathrite.north.hand.atlas.length + 1
+    && session.state.players.south.atlas.length === playersBeforeDeathrite.south.atlas.length
+    && session.state.players.south.hand.atlas.length === playersBeforeDeathrite.south.hand.atlas.length;
+  const deathriteOwnerKeptCemetery: boolean = session.state.players.south.cemetery
+    .some(({ instanceId }) => instanceId === opening.kettletopInstanceId)
+    && session.state.players.north.cemetery
+      .every(({ instanceId }) => instanceId !== opening.kettletopInstanceId)
+    && session.state.realm.units.every(({ instanceId }) =>
+      instanceId !== opening.kettletopInstanceId);
+  const causalEventsVerified: boolean = controlEventsVerified
+    && drawIndex >= 0
+    && drawIndex < deathIndex;
   const waterAffinityFour: boolean = affinityBefore === 4;
 
   return Object.freeze({
@@ -14962,8 +15012,11 @@ function runWaterMesmerism(
     causalEventsVerified,
     controlTransferred,
     deck: deckList(opening.manifest.decks.north, opening.names),
+    deathriteControllerDrewSite,
+    deathriteOwnerKeptCemetery,
     exactNearbyTarget,
     farTargetUnavailable,
+    kettletopLeprechaun: input.deathriteMinion.name,
     manaPaid: manaBefore - manaAfterCast,
     mesmerism: input.mesmerism.name,
     newControllerGainedAction,
@@ -14971,6 +15024,7 @@ function runWaterMesmerism(
     oldControllerHadAction,
     oldControllerLostAction,
     replayVerified: verifyGameReplay(session),
+    seed: opening.manifest.seed,
     seravaTownsfolk: input.seravaTownsfolk.name,
     waterAffinityFour,
   });

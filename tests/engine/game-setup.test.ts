@@ -10607,7 +10607,7 @@ test('RULE-04 a carried Lethal Artifact kills on positive strike damage and drop
   assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-03 Mesmerism gains permanent control of a nearby minion', () => {
+test('RULE-03/05 Mesmerism transfers a minion and its Deathrite to the new controller', () => {
   const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
   const north: GameDeckSpec = {
     atlas: Array(4).fill('mesmerism-north-site'),
@@ -10664,6 +10664,7 @@ test('RULE-03 Mesmerism gains permanent control of a nearby minion', () => {
     'mesmerism-target': {
       attack: 1,
       cardType: 'minion',
+      deathriteDrawSite: true,
       defense: 3,
       lanceCount: 2,
       manaCost: 0,
@@ -10732,11 +10733,17 @@ test('RULE-03 Mesmerism gains permanent control of a nearby minion', () => {
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
   take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardId === 'mesmerism-target' && descriptor.cell === 'C4');
+    && descriptor.cardId === 'mesmerism-target'
+    && descriptor.casterInstanceId === session.state.players.south.avatar.card.instanceId
+    && descriptor.cell === 'C4');
   take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardId === 'mesmerism-warded' && descriptor.cell === 'C4');
+    && descriptor.cardId === 'mesmerism-warded'
+    && descriptor.casterInstanceId === session.state.players.south.avatar.card.instanceId
+    && descriptor.cell === 'C4');
   take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardId === 'mesmerism-attacker' && descriptor.cell === 'C1');
+    && descriptor.cardId === 'mesmerism-attacker'
+    && descriptor.casterInstanceId === session.state.players.south.avatar.card.instanceId
+    && descriptor.cell === 'C1');
   const hiddenTarget = session.state.realm.units.find(({ cardId }) => cardId === 'mesmerism-target')!;
   const wardedTarget = session.state.realm.units.find(({ cardId }) => cardId === 'mesmerism-warded')!;
   const attacker = session.state.realm.units.find(({ cardId }) => cardId === 'mesmerism-attacker')!;
@@ -10846,7 +10853,9 @@ test('RULE-03 Mesmerism gains permanent control of a nearby minion', () => {
       && descriptor.to.cell === 'C3'), true);
 
   const ownNoOp = stepGame(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'cast-magic' && descriptor.target?.instanceId === hiddenTarget.instanceId));
+    descriptor.kind === 'cast-magic'
+      && descriptor.casterInstanceId === session.state.players.north.avatar.card.instanceId
+      && descriptor.target?.instanceId === hiddenTarget.instanceId));
   assert.equal(ownNoOp.accepted, true);
   if (!ownNoOp.accepted) return;
   session = ownNoOp.session;
@@ -10866,6 +10875,7 @@ test('RULE-03 Mesmerism gains permanent control of a nearby minion', () => {
   take(({ descriptor }) => descriptor.kind === 'declare-attack'
     && descriptor.target.kind === 'minion'
     && descriptor.target.instanceId === hiddenTarget.instanceId);
+  const playersBeforeDeathrite = session.state.players;
   const fought = stepGame(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
   assert.equal(fought.accepted, true);
@@ -10878,10 +10888,21 @@ test('RULE-03 Mesmerism gains permanent control of a nearby minion', () => {
   assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
     instanceId === hiddenTarget.instanceId), false);
   const deathEvents = fought.receipt.events;
+  assert.equal(session.state.players.north.atlas.length, playersBeforeDeathrite.north.atlas.length - 1);
+  assert.equal(session.state.players.north.hand.atlas.length,
+    playersBeforeDeathrite.north.hand.atlas.length + 1);
+  assert.equal(session.state.players.south.atlas.length, playersBeforeDeathrite.south.atlas.length);
+  assert.equal(session.state.players.south.hand.atlas.length,
+    playersBeforeDeathrite.south.hand.atlas.length);
+  assert.deepEqual(deathEvents.find(({ type }) => type === 'site-drawn')?.payload, {
+    seat: 'north',
+    sourceInstanceId: hiddenTarget.instanceId,
+  });
+  const drawIndex = deathEvents.findIndex(({ type }) => type === 'site-drawn');
   const dropIndex = deathEvents.findIndex(({ type }) => type === 'artifact-dropped');
   const deathIndex = deathEvents.findIndex(({ payload, type }) => type === 'minion-died'
     && canonicalJson(payload).includes(hiddenTarget.instanceId));
-  assert.ok(dropIndex >= 0 && dropIndex < deathIndex);
+  assert.ok(drawIndex >= 0 && drawIndex < dropIndex && dropIndex < deathIndex);
   assert.equal(observeGame(session.state, 'north').realm.artifacts?.[0]?.controller, null);
   assert.equal(verifyGameReplay(session), true);
 });
