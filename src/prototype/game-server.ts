@@ -244,6 +244,11 @@ function displayActionLabel(
   if (descriptor.kind === 'cast-magic') {
     const definition = cards[descriptor.cardId];
     if (definition?.cardType === 'magic'
+      && definition.teleportNearbyAllyThenDrawCard === true
+      && descriptor.drawZone) {
+      return `${label} — then draw from ${descriptor.drawZone === 'atlas' ? 'Atlas' : 'Spellbook'}`;
+    }
+    if (definition?.cardType === 'magic'
       && definition.grantChargeToAllyThisTurn === true) {
       return `${label} — the ally can move and attack this turn`;
     }
