@@ -59,6 +59,7 @@ export type GameCardDefinition =
     grantChargeToAllyThisTurn?: true;
     grantPowerToAllyThisTurn?: 2;
     healController?: number;
+    leapAttackAlly?: true;
     lureEnemyMinionOneStepCloser?: true;
     manaCost: number;
     returnMinionFromOwnCemetery?: true;
@@ -358,6 +359,7 @@ type GameActionDescriptor =
     cemeteryMinionInstanceId?: StateHash;
     kind: 'cast-magic';
     ally?: GameUnitRef;
+    allyDestination?: GameLocation;
     target?: GameUnitRef;
     targetLocation?: GameLocation;
     targetSiteInstanceId?: StateHash;
@@ -604,6 +606,29 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
     if (definition.grantPowerToAllyThisTurn === 2) {
       return unitRefs(state, seat).map((ally) => ({ ...cast, ally }));
     }
+    if (definition.leapAttackAlly === true) {
+      return unitRefs(state, seat).flatMap((ally) => {
+        const status = unitStatus(state, ally);
+        const destinations = movementPaths(
+          state,
+          { cell: status.location, region: status.region },
+          Math.min(1, status.movementSteps),
+          seat,
+          status.airborne,
+          status.movesOnlySideways,
+          status.movesOnlyForward,
+          status.burrowing,
+          status.submerge,
+          status.voidwalk,
+          status.connectsTopBottom,
+          status.immobile,
+        ).map((path) => path.at(-1)!);
+        return [...new Map(destinations.map((allyDestination) => [
+          `${allyDestination.cell}:${allyDestination.region}`,
+          allyDestination,
+        ])).values()].map((allyDestination) => ({ ...cast, ally, allyDestination }));
+      });
+    }
     if (definition.fightAllyWithAdjacentEnemy === true) {
       return unitRefs(state, seat).flatMap((ally) => {
         const allyStatus = unitStatus(state, ally);
@@ -796,6 +821,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.grantPowerToAllyThisTurn !== 2) {
       throw new RangeError(`${path}.grantPowerToAllyThisTurn must be 2`);
     }
+    if (card.leapAttackAlly !== undefined && card.leapAttackAlly !== true) {
+      throw new RangeError(`${path}.leapAttackAlly must be true when defined`);
+    }
     if (card.fightAllyWithAdjacentEnemy !== undefined
       && card.fightAllyWithAdjacentEnemy !== true) {
       throw new RangeError(`${path}.fightAllyWithAdjacentEnemy must be true when defined`);
@@ -819,6 +847,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.grantChargeToAllyThisTurn === true)
       + Number(card.grantPowerToAllyThisTurn === 2)
       + Number(card.healController !== undefined)
+      + Number(card.leapAttackAlly === true)
       + Number(card.lureEnemyMinionOneStepCloser === true)
       + Number(card.returnMinionFromOwnCemetery === true)
       + Number(card.teleportAllyToTargetSite === true);
@@ -1140,6 +1169,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? { grantChargeToAllyThisTurn: true as const }
                   : card.grantPowerToAllyThisTurn === 2
                     ? { grantPowerToAllyThisTurn: 2 as const }
+                  : card.leapAttackAlly === true
+                    ? { leapAttackAlly: true as const }
                   : card.lureEnemyMinionOneStepCloser === true
                     ? { lureEnemyMinionOneStepCloser: true as const }
                   : card.healController !== undefined
@@ -2198,6 +2229,17 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
     if (descriptor.ally && descriptor.targetLocation) {
       return withCaster(
         `Cast ${descriptor.cardId} to teleport ${descriptor.ally.kind} ${descriptor.ally.instanceId.slice(0, 15)}… to ${descriptor.targetLocation.cell}`,
+      );
+    }
+    if (descriptor.ally && descriptor.allyDestination) {
+      const ally = unitStatus(state, descriptor.ally);
+      const stays = ally.location === descriptor.allyDestination.cell
+        && ally.region === descriptor.allyDestination.region;
+      return withCaster(
+        `Cast ${descriptor.cardId}: ${descriptor.ally.kind} ${descriptor.ally.instanceId.slice(0, 15)}… `
+          + (stays
+            ? `stays at ${descriptor.allyDestination.cell} and strikes enemies there`
+            : `steps to ${descriptor.allyDestination.cell} and strikes enemies there`),
       );
     }
     if (descriptor.ally) {
@@ -3292,6 +3334,10 @@ function applyDescriptor(
             && candidate.ally.instanceId === descriptor.ally.instanceId
             && candidate.ally.kind === descriptor.ally.kind
             && candidate.ally.seat === descriptor.ally.seat)
+        && (candidate.allyDestination === undefined && descriptor.allyDestination === undefined
+          || candidate.allyDestination !== undefined
+            && descriptor.allyDestination !== undefined
+            && sameLocation(candidate.allyDestination, descriptor.allyDestination))
         && (candidate.target === undefined && descriptor.target === undefined
           || candidate.target !== undefined
             && descriptor.target !== undefined
@@ -3354,6 +3400,7 @@ function applyDescriptor(
         ...(descriptor.ally
           ? { allyInstanceId: descriptor.ally.instanceId, allySeat: descriptor.ally.seat }
           : {}),
+        ...(descriptor.allyDestination ? { allyDestination: descriptor.allyDestination } : {}),
         ...(descriptor.targetSiteInstanceId
           ? { targetSiteInstanceId: descriptor.targetSiteInstanceId }
           : {}),
@@ -3553,6 +3600,107 @@ function applyDescriptor(
         withStateVersion(poweredState, {}),
         [...castOutcomes, grantOutcome, resolved],
         [],
+      ];
+    }
+    if (definition.leapAttackAlly === true) {
+      if (!descriptor.ally || !descriptor.allyDestination) {
+        throw new Error('unreachable Leap Attack cast');
+      }
+      const startingStatus = unitStatus(castState, descriptor.ally);
+      const from: GameLocation = {
+        cell: startingStatus.location,
+        region: startingStatus.region,
+      };
+      const declaredPath = sameLocation(from, descriptor.allyDestination)
+        ? [from]
+        : [from, descriptor.allyDestination];
+      const path = resolveDeclaredPath(castState, descriptor.ally, declaredPath, false);
+      const steppedTo = path.path.at(-1) ?? from;
+      const stepOutcomes: readonly GameOutcome[] = path.path.length > 1
+        ? [{
+          payload: {
+            from,
+            instanceId: descriptor.ally.instanceId,
+            seat: descriptor.ally.seat,
+            sourceInstanceId: card.instanceId,
+            steps: path.path.length - 1,
+            to: steppedTo,
+          },
+          type: 'unit-stepped',
+        }]
+        : [];
+      const outcomesBeforeStrike = [...castOutcomes, ...stepOutcomes, ...path.outcomes];
+      const moverRemoved = path.removals.some(({ instanceId }) =>
+        instanceId === descriptor.ally!.instanceId);
+      if (moverRemoved || path.state.terminal.status === 'finished') {
+        const terminalIndex = outcomesBeforeStrike.findIndex(({ type }) => type === 'game-ended');
+        return [
+          withStateVersion(path.state, {}),
+          terminalIndex < 0
+            ? [...outcomesBeforeStrike, resolved]
+            : [
+              ...outcomesBeforeStrike.slice(0, terminalIndex),
+              resolved,
+              ...outcomesBeforeStrike.slice(terminalIndex),
+            ],
+          [],
+        ];
+      }
+      const striker = unitStatus(path.state, descriptor.ally);
+      const enemies = unitRefs(path.state, otherSeat(seat))
+        .filter((enemy) => {
+          const status = unitStatus(path.state, enemy);
+          return status.location === striker.location && status.region === striker.region;
+        })
+        .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+      if (striker.disabled || enemies.length === 0) {
+        return [
+          withStateVersion(path.state, {}),
+          [...outcomesBeforeStrike, resolved],
+          [],
+        ];
+      }
+      const pending: PendingCombat = deepFreeze({
+        allocations: enemies.map(({ instanceId }) => ({
+          amount: striker.attack,
+          targetInstanceId: instanceId,
+        })),
+        attacker: descriptor.ally,
+        attackingSeat: seat,
+        cell: striker.location,
+        combatants: enemies,
+        defenders: [],
+        originalTarget: null,
+        ...(striker.region === 'surface' ? {} : { region: striker.region }),
+        targetRemoved: false,
+      });
+      const allocationOutcomes: readonly GameOutcome[] = enemies.map(({ instanceId }) => ({
+        payload: {
+          amount: striker.attack,
+          strikerInstanceId: descriptor.ally!.instanceId,
+          targetInstanceId: instanceId,
+        },
+        type: 'strike-damage-allocated',
+      }));
+      const [struck, strikeOutcomes, randomDraws] = resolveFightWindow(
+        path.state,
+        pending,
+        [...outcomesBeforeStrike, ...allocationOutcomes],
+        true,
+        false,
+        [descriptor.ally],
+      );
+      const terminalIndex = strikeOutcomes.findIndex(({ type }) => type === 'game-ended');
+      return [
+        withStateVersion(struck, {}),
+        terminalIndex < 0
+          ? [...strikeOutcomes, resolved]
+          : [
+            ...strikeOutcomes.slice(0, terminalIndex),
+            resolved,
+            ...strikeOutcomes.slice(terminalIndex),
+          ],
+        randomDraws,
       ];
     }
     if (definition.fightAllyWithAdjacentEnemy === true) {

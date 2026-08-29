@@ -2140,6 +2140,193 @@ test('RULE-03/04 Duel makes a chosen ally fight a same-square targeted enemy', (
   assert.equal(verifyGameReplay(disabled.session), true);
 });
 
+test('RULE-03/04 Leap Attack optionally steps an ally before it strikes every enemy there', () => {
+  const decks = {
+    north: deck('leap-north', 4, 4),
+    south: deck('leap-south', 4, 4),
+  };
+  const cards = cardsFor(decks, {
+    defense: 3,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  }, undefined, { elements: ['fire'] });
+  const leapId = decks.north.spellbook[0]!;
+  const allyId = decks.north.spellbook[1]!;
+  const immobileId = decks.north.spellbook[2]!;
+  const disabledId = decks.north.spellbook[3]!;
+  const originEnemyId = decks.south.spellbook[0]!;
+  const normalEnemyId = decks.south.spellbook[1]!;
+  const wardedEnemyId = decks.south.spellbook[2]!;
+  const stealthedEnemyId = decks.south.spellbook[3]!;
+  cards[leapId] = {
+    cardType: 'magic',
+    leapAttackAlly: true,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+  } as GameCardDefinition;
+  cards[allyId] = {
+    ...cards[allyId]!,
+    attack: 3,
+    movementBonus: 2,
+  } as GameCardDefinition;
+  cards[immobileId] = { ...cards[immobileId]!, immobile: true } as GameCardDefinition;
+  cards[disabledId] = { ...cards[disabledId]!, waterbound: true } as GameCardDefinition;
+  for (const enemyId of [originEnemyId, normalEnemyId, wardedEnemyId, stealthedEnemyId]) {
+    cards[enemyId] = {
+      ...cards[enemyId]!,
+      attack: 2,
+      defense: 3,
+      summonToAnySite: true,
+    } as GameCardDefinition;
+  }
+  cards[wardedEnemyId] = {
+    ...cards[wardedEnemyId]!,
+    airborne: true,
+    ward: true,
+  } as GameCardDefinition;
+  cards[stealthedEnemyId] = { ...cards[stealthedEnemyId]!, stealth: true } as GameCardDefinition;
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-leap-attack-v1',
+    },
+    cards,
+    decks,
+    firstSeat: 'north' as const,
+  };
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [leapId]: { ...cards[leapId]!, leapAttackAlly: false } as unknown as GameCardDefinition,
+    },
+    seed: 1,
+  }), /leapAttackAlly must be true/);
+  let gameManifest: GameManifest | undefined;
+  for (let seed = 1; seed < 100; seed += 1) {
+    const candidate = createGameManifest({ ...input, seed });
+    const opening = createGameSession(candidate).state.players.north.hand.spellbook;
+    if ([leapId, allyId].every((cardId) => opening.some((card) => card.cardId === cardId))) {
+      gameManifest = candidate;
+      break;
+    }
+  }
+  assert.ok(gameManifest);
+  assert.equal(gameManifest.cards[leapId]?.cardType === 'magic'
+    && gameManifest.cards[leapId].leapAttackAlly, true);
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === allyId && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === originEnemyId && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === immobileId && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === disabledId && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  for (const enemyId of [normalEnemyId, wardedEnemyId, stealthedEnemyId]) {
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === enemyId && descriptor.cell === 'C3');
+  }
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  const ally = session.state.realm.units.find(({ cardId }) => cardId === allyId);
+  const immobile = session.state.realm.units.find(({ cardId }) => cardId === immobileId);
+  const disabled = session.state.realm.units.find(({ cardId }) => cardId === disabledId);
+  const originEnemy = session.state.realm.units.find(({ cardId }) => cardId === originEnemyId);
+  const normalEnemy = session.state.realm.units.find(({ cardId }) => cardId === normalEnemyId);
+  const wardedEnemy = session.state.realm.units.find(({ cardId }) => cardId === wardedEnemyId);
+  const stealthedEnemy = session.state.realm.units.find(({ cardId }) => cardId === stealthedEnemyId);
+  assert.ok(ally);
+  assert.ok(immobile);
+  assert.ok(disabled);
+  assert.ok(originEnemy);
+  assert.ok(normalEnemy);
+  assert.ok(wardedEnemy);
+  assert.ok(stealthedEnemy);
+  const actionsFor = (instanceId: string): readonly GameLegalAction[] =>
+    legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === leapId
+        && descriptor.ally?.instanceId === instanceId);
+  assert.deepEqual(actionsFor(ally.instanceId).flatMap(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.allyDestination
+      ? [`${descriptor.allyDestination.cell}/${descriptor.allyDestination.region}`]
+      : []), ['C3/surface', 'C4/surface']);
+  assert.deepEqual(actionsFor(immobile.instanceId).flatMap(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.allyDestination
+      ? [descriptor.allyDestination.cell]
+      : []), ['C4']);
+  assert.deepEqual(actionsFor(disabled.instanceId).flatMap(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.allyDestination
+      ? [descriptor.allyDestination.cell]
+      : []), ['C4']);
+  const noStepAction = actionsFor(ally.instanceId).find(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.allyDestination?.cell === 'C4');
+  const stepAction = actionsFor(ally.instanceId).find(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.allyDestination?.cell === 'C3');
+  assert.ok(noStepAction);
+  assert.ok(stepAction);
+  if (stepAction.descriptor.kind !== 'cast-magic') throw new Error('expected Leap Attack cast');
+  const leapInstanceId = stepAction.descriptor.cardInstanceId;
+  const checkpoint = session;
+
+  const stayed = stepGame(checkpoint, noStepAction);
+  assert.equal(stayed.accepted, true);
+  assert.equal(stayed.receipt.events.some(({ type }) => type === 'unit-stepped'), false);
+  assert.equal(stayed.receipt.events.filter(({ type }) => type === 'strike-damage-allocated').length, 1);
+  assert.equal(stayed.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === originEnemy.instanceId), false);
+  assert.equal(stayed.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === normalEnemy.instanceId), true);
+  assert.equal(verifyGameReplay(stayed.session), true);
+
+  const leaped = stepGame(checkpoint, stepAction);
+  assert.equal(leaped.accepted, true);
+  const stepped = leaped.receipt.events.find(({ type }) => type === 'unit-stepped');
+  assert.ok(stepped && typeof stepped.payload === 'object' && !Array.isArray(stepped.payload));
+  assert.deepEqual(stepped.payload, {
+    from: { cell: 'C4', region: 'surface' },
+    instanceId: ally.instanceId,
+    seat: 'north',
+    sourceInstanceId: leapInstanceId,
+    steps: 1,
+    to: { cell: 'C3', region: 'surface' },
+  });
+  assert.equal(leaped.receipt.events.filter(({ type }) => type === 'strike-damage-allocated').length, 3);
+  const leapedAlly = leaped.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === ally.instanceId);
+  assert.deepEqual({
+    damage: leapedAlly?.damage,
+    location: leapedAlly?.location,
+    tapped: leapedAlly?.tapped,
+  }, { damage: 0, location: 'C3', tapped: false });
+  assert.equal(leaped.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === normalEnemy.instanceId), false);
+  assert.equal(leaped.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === stealthedEnemy.instanceId), false);
+  assert.equal(leaped.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === wardedEnemy.instanceId)?.warded, false);
+  assert.equal(leaped.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === originEnemy.instanceId), true);
+  assert.equal(leaped.session.state.players.north.mana, 1);
+  assert.equal(leaped.session.state.players.north.cemetery.some(({ cardId }) => cardId === leapId), true);
+  assert.equal(leaped.receipt.events.at(-1)?.type, 'magic-resolved');
+  assert.equal(verifyGameReplay(leaped.session), true);
+});
+
 test('RULE-03 Magic targets stay in the caster region and exclude enemy Stealth', () => {
   const targetIsLegal = (
     spell: SpellFacts,

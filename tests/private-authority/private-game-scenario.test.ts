@@ -653,6 +653,29 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.fireLash.deck.spellbook
     .find(({ name }) => name === 'Raal Dromedary')?.copies, 4);
   assert.equal(result.fireLash.replayVerified, true);
+  assert.equal(result.fireLeapAttack.leapAttack, 'Leap Attack');
+  assert.equal(result.fireLeapAttack.raalDromedary, 'Raal Dromedary');
+  assert.equal(result.fireLeapAttack.acceptedActionCount, 19);
+  assert.equal(result.fireLeapAttack.exactOptionalStepChoices, true);
+  assert.equal(result.fireLeapAttack.manaPaid, 4);
+  assert.equal(result.fireLeapAttack.allySteppedWithoutTapOrDamage, true);
+  assert.equal(result.fireLeapAttack.struckAndKilledEveryEnemy, true);
+  assert.equal(result.fireLeapAttack.causalEventsVerified, true);
+  assert.equal(result.fireLeapAttack.noAttackResponseOrRandomness, true);
+  assert.equal(result.fireLeapAttack.sitesAndAvatarsPreserved, true);
+  assert.equal(result.fireLeapAttack.spellEnteredCemetery, true);
+  assert.equal(result.fireLeapAttack.gameRemainedActive, true);
+  assert.equal(result.fireLeapAttack.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.fireLeapAttack.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.fireLeapAttack.deck.atlas
+    .find(({ name }) => name === 'Ghost Town')?.copies, 3);
+  assert.equal(result.fireLeapAttack.deck.spellbook
+    .find(({ name }) => name === 'Leap Attack')?.copies, 3);
+  assert.equal(result.fireLeapAttack.deck.spellbook
+    .find(({ name }) => name === 'Raal Dromedary')?.copies, 4);
+  assert.equal(result.fireLeapAttack.replayVerified, true);
   assert.equal(result.fireGenesisLifeLoss.lesserBloodDemon, 'Lesser Blood Demon');
   assert.equal(result.fireGenesisLifeLoss.acceptedActionCount, 10);
   assert.equal(result.fireGenesisLifeLoss.summonedAtC3, true);
