@@ -1313,6 +1313,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   lumberingMinion: NormalizedCard;
   loneTower: NormalizedCard;
   manaMinion: NormalizedCard;
+  midnightRogue: NormalizedCard;
   minorExplosion: NormalizedCard;
   monstrousLion: NormalizedCard;
   movementMinion: NormalizedCard;
@@ -1598,6 +1599,29 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || sparkmage.thresholds.water !== 0
     || sparkmage.rulesText.trim().length !== 157) {
     throw new Error('private Sparkmage no longer matches its supported facts');
+  }
+  const midnightRogue = snapshot.cards.find(({ name }) => name === 'Midnight Rogue');
+  const midnightRogueKeywords = midnightRogue?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
+  if (!midnightRogue
+    || midnightRogue.stableId
+      !== 'card:c0b54519507e1fc94d51a6b585f1456cbe98850317629489261ae7939c4faf0b'
+    || midnightRogue.officialSourceId !== '001-midnight_rogue-b-f'
+    || midnightRogue.cardType !== 'minion'
+    || midnightRogueKeywords.length !== 2
+    || !midnightRogueKeywords.includes('ranged')
+    || !midnightRogueKeywords.includes('stealth')
+    || midnightRogue.manaCost !== 3
+    || midnightRogue.attack !== 2
+    || midnightRogue.defense !== 2
+    || midnightRogue.life !== null
+    || midnightRogue.elements.length !== 1
+    || midnightRogue.elements[0] !== 'air'
+    || midnightRogue.thresholds.air !== 1
+    || midnightRogue.thresholds.earth !== 0
+    || midnightRogue.thresholds.fire !== 0
+    || midnightRogue.thresholds.water !== 0
+    || midnightRogue.rarity !== 'ordinary') {
+    throw new Error('private Ranged Stealth minion no longer matches its supported facts');
   }
   const wildBoars = snapshot.cards.find(({ name }) => name === 'Wild Boars');
   if (!wildBoars
@@ -2978,6 +3002,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     lumberingMinion,
     loneTower,
     manaMinion,
+    midnightRogue,
     minorExplosion,
     monstrousLion,
     movementMinion,
@@ -3495,6 +3520,7 @@ function buildManifest(
       ...Array(2).fill(input.airborneMinion.stableId),
       ...Array(2).fill(input.stealthTargetMinion.stableId),
       ...Array(2).fill(input.voidwalkMinion.stableId),
+      ...Array(2).fill(input.midnightRogue.stableId),
       input.roamingMinion.stableId,
       ...Array(3).fill(input.lightningBolt.stableId),
     ],
@@ -4031,7 +4057,8 @@ function buildManifest(
         || card.stableId === input.lugbogCat.stableId,
       card.stableId === input.lumberingMinion.stableId,
       card.stableId === input.monstrousLion.stableId,
-      card.stableId === input.rangedMinion.stableId,
+      card.stableId === input.rangedMinion.stableId
+        || card.stableId === input.midnightRogue.stableId,
       card.stableId === input.firstStrikeMinion.stableId,
       card.stableId === input.wardMinion.stableId
         || card.stableId === input.malakhim.stableId,
@@ -4040,7 +4067,8 @@ function buildManifest(
         || card.stableId === input.grainSparrow.stableId
         || card.stableId === input.bladderblimp.stableId
         || card.stableId === input.malakhim.stableId,
-      card.stableId === input.stealthMinion.stableId,
+      card.stableId === input.stealthMinion.stableId
+        || card.stableId === input.midnightRogue.stableId,
       card.stableId === input.slyFox.stableId,
       card.stableId === input.sedgeCrabs.stableId,
       card.stableId === input.submergeMinion.stableId
