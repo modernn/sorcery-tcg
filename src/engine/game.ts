@@ -189,6 +189,7 @@ type UnitInstance = Readonly<CardInstance & {
   controller: GameSeat;
   damage: number;
   disableEffects?: readonly DisableEffect[];
+  lastPickedUpArtifactsTurn?: number;
   location: RealmCell;
   region: GameRegion;
   stealthed: boolean;
@@ -199,8 +200,6 @@ type UnitInstance = Readonly<CardInstance & {
   warded: boolean;
 }>;
 
-// ponytail: this first Artifact slice intentionally stops at cast placement and
-// bearer-following; add Pick Up, Drop, transfer, and destruction only with a card that needs them.
 type ArtifactInstance = Readonly<CardInstance & (
   | Readonly<{ bearer: GameUnitRef }>
   | Readonly<{ location: RealmCell; region: GameRegion }>
@@ -239,6 +238,7 @@ type PlayerState = Readonly<{
   avatar: Readonly<{
     card: CardInstance;
     deathDoorTurn: number | null;
+    lastPickedUpArtifactsTurn?: number;
     life: number;
     location: RealmCell;
     region: GameRegion;
@@ -441,6 +441,11 @@ type GameActionDescriptor =
     path: readonly GameLocation[];
     shooterInstanceId: StateHash;
   }>
+  | Readonly<{
+    artifactInstanceIds: readonly StateHash[];
+    kind: 'pick-up-artifacts';
+    unit: GameUnitRef;
+  }>
   | Readonly<{ kind: 'decline-attack' }>
   | Readonly<{ kind: 'declare-attack'; target: CombatTarget }>
   | Readonly<{
@@ -558,7 +563,7 @@ function meetsThresholds(state: GameState, seat: GameSeat, required: GameThresho
     .every((element) => available[element] >= required[element]);
 }
 
-function sacrificeCombinations(
+function nonemptyCombinations(
   instanceIds: readonly StateHash[],
   maximumCount: number,
 ): readonly (readonly StateHash[])[] {
@@ -638,7 +643,7 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
           .sacrificeMinionAtSummoningLocationForManaDiscount === 2
           ? Math.min(sacrificeCandidates.length, Math.ceil(definition.manaCost / 2))
           : 0;
-        const sacrificePayments = sacrificeCombinations(sacrificeCandidates, maximumSacrifices)
+        const sacrificePayments = nonemptyCombinations(sacrificeCandidates, maximumSacrifices)
           .map((sacrificedMinionInstanceIds) => ({
             manaCost: Math.max(0, definition.manaCost - (2 * sacrificedMinionInstanceIds.length)),
             sacrificedMinionInstanceIds,
@@ -691,6 +696,31 @@ function artifactDescriptors(state: GameState, seat: GameSeat): readonly GameAct
         manaCost: definition.manaCost,
       })),
     ]);
+  });
+}
+
+function pickUpArtifactDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
+  const uncarried = (state.realm.artifacts ?? [])
+    .flatMap((artifact) => 'bearer' in artifact ? [] : [artifact]);
+  return unitRefs(state, seat).flatMap((unit) => {
+    const status = unitStatus(state, unit);
+    const lastUsedTurn = unit.kind === 'avatar'
+      ? state.players[seat].avatar.lastPickedUpArtifactsTurn
+      : state.realm.units.find(({ instanceId }) =>
+        instanceId === unit.instanceId)?.lastPickedUpArtifactsTurn;
+    if (status.disabled || lastUsedTurn === state.turnNumber) return [];
+    const artifactInstanceIds = uncarried
+      .filter(({ location, region }) =>
+        location === status.location && region === status.region)
+      .map(({ instanceId }) => instanceId)
+      .sort();
+    // ponytail: all subsets are exponential; use staged selection if supported local Artifact counts grow large.
+    return nonemptyCombinations(artifactInstanceIds, artifactInstanceIds.length)
+      .map((ids) => ({
+        artifactInstanceIds: ids,
+        kind: 'pick-up-artifacts' as const,
+        unit,
+      }));
   });
 }
 
@@ -2482,6 +2512,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     ...summonDescriptors(state, seat),
     ...artifactDescriptors(state, seat),
     ...magicDescriptors(state, seat),
+    ...pickUpArtifactDescriptors(state, seat),
     ...siteDestructionDescriptors(state, seat),
     ...areaDamageAbilityDescriptors(state, seat),
     ...manaAbilityDescriptors(state, seat),
@@ -2594,6 +2625,9 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
       ? `${descriptor.hit.kind} ${descriptor.hit.instanceId.slice(0, 15)}…`
       : 'nothing';
     return `Hook ${descriptor.direction} at ${target}${descriptor.fightOnArrival ? ' and fight' : ''}`;
+  }
+  if (descriptor.kind === 'pick-up-artifacts') {
+    return `Pick up ${descriptor.artifactInstanceIds.length} artifact${descriptor.artifactInstanceIds.length === 1 ? '' : 's'} with ${descriptor.unit.kind} ${descriptor.unit.instanceId.slice(0, 15)}…`;
   }
   if (descriptor.kind === 'decline-attack') return 'Decline attack';
   if (descriptor.kind === 'declare-attack') return `Attack ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`;
@@ -3824,6 +3858,61 @@ function applyDescriptor(
           type: 'artifact-conjured',
         },
       ],
+      [],
+    ];
+  }
+
+  if (descriptor.kind === 'pick-up-artifacts') {
+    const legal = pickUpArtifactDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'pick-up-artifacts'
+        && candidate.unit.instanceId === descriptor.unit.instanceId
+        && candidate.unit.kind === descriptor.unit.kind
+        && candidate.unit.seat === descriptor.unit.seat
+        && candidate.artifactInstanceIds.length === descriptor.artifactInstanceIds.length
+        && candidate.artifactInstanceIds.every((instanceId, index) =>
+          instanceId === descriptor.artifactInstanceIds[index]));
+    if (!legal) throw new Error('unreachable illegal Artifact Pick Up');
+
+    const selected = new Set(descriptor.artifactInstanceIds);
+    const artifacts = (state.realm.artifacts ?? []).map((artifact): ArtifactInstance => {
+      if (!selected.has(artifact.instanceId)) return artifact;
+      if ('bearer' in artifact) throw new Error('unreachable carried Artifact Pick Up');
+      return deepFreeze({
+        bearer: descriptor.unit,
+        cardId: artifact.cardId,
+        instanceId: artifact.instanceId,
+        owner: artifact.owner,
+        source: artifact.source,
+      });
+    });
+    const players = descriptor.unit.kind === 'avatar'
+      ? replacePlayer(state, seat, deepFreeze({
+        ...player,
+        avatar: {
+          ...player.avatar,
+          lastPickedUpArtifactsTurn: state.turnNumber,
+        },
+      }))
+      : state.players;
+    const units = descriptor.unit.kind === 'minion'
+      ? state.realm.units.map((unit) => unit.instanceId === descriptor.unit.instanceId
+        ? deepFreeze({ ...unit, lastPickedUpArtifactsTurn: state.turnNumber })
+        : unit)
+      : state.realm.units;
+    return [
+      withStateVersion(state, {
+        players,
+        realm: { ...state.realm, artifacts, units },
+      }),
+      [{
+        payload: {
+          artifactInstanceIds: descriptor.artifactInstanceIds,
+          seat,
+          unitInstanceId: descriptor.unit.instanceId,
+          unitKind: descriptor.unit.kind,
+        },
+        type: 'artifacts-picked-up',
+      }],
       [],
     ];
   }
