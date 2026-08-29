@@ -118,6 +118,8 @@ test('playable-core page renders the authoritative 5x4 checkpoint without artwor
   assert.match(page, /Unranked · partial rules/);
   assert.match(page, /<select id="preset"/);
   assert.match(page, /<select id="opponent"/);
+  assert.match(page, /id="save">Save position/);
+  assert.match(page, /id="resume" disabled>Resume position/);
   assert.match(page, /South computer/);
   assert.equal(page.match(/class="cell"/g)?.length, 20);
   assert.doesNotMatch(page, /<img\b/i);
@@ -346,6 +348,30 @@ test('browser API rejects a stale action without exposing or mutating authority'
   assert.equal((stale.reason as JsonObject).code, 'stale_version');
   assert.equal(stale.stateHash, accepted.stateHash);
   assert.equal('session' in stale, false);
+});
+
+test('browser API restores an opaque same-process checkpoint without exposing hidden state', async () => {
+  const start = await post('/api/reset', { opponent: 'manual', seed: 41 });
+  const saved = await post('/api/checkpoint');
+  assert.deepEqual(Object.keys(saved).sort(), ['saveId', 'stateHash', 'turnNumber']);
+  assert.equal(saved.stateHash, start.stateHash);
+  assert.doesNotMatch(JSON.stringify(saved), /manifest|requests|south-(?:site|spell)-/);
+
+  const advanced = await submit(keep(start));
+  assert.notEqual(advanced.stateHash, saved.stateHash);
+  const restored = await post('/api/resume', { saveId: saved.saveId, seat: 'north' });
+  assert.equal(restored.stateHash, start.stateHash);
+  assert.deepEqual(actions(restored), actions(start));
+  assert.doesNotMatch(JSON.stringify(restored), /south-(?:site|spell)-/);
+  assert.equal((await post('/api/replay')).verified, true);
+
+  const missing = await fetch(`${origin}/api/resume`, {
+    body: JSON.stringify({ saveId: 'missing', seat: 'north' }),
+    headers: { 'content-type': 'application/json' },
+    method: 'POST',
+  });
+  assert.equal(missing.status, 404);
+  assert.deepEqual(await missing.json(), { error: 'saved position not found' });
 });
 
 test('browser API lets North play a deterministic South opponent through terminal replay', async () => {
