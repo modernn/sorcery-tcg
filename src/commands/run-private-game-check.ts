@@ -1054,14 +1054,17 @@ export type PrivateGameCheck = Readonly<{
   waterSubmerge: Readonly<{
     acceptedActionCount: number;
     deck: DeckList;
+    freeze: string;
     nonSubmergeSurfaceAvailable: boolean;
     nonSubmergeUnderwaterUnavailable: boolean;
     replayVerified: boolean;
+    seaWitch: string;
     seed: number;
     submergeMinion: string;
     summonedUnderwater: boolean;
     surfaceSummonAvailable: boolean;
     targetIsWaterSite: boolean;
+    underwaterFreezeSettlementVerified: boolean;
     underwaterSummonAvailable: boolean;
   }>;
   waterHealing: Readonly<{
@@ -1270,6 +1273,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   steppe: NormalizedCard;
   stream: NormalizedCard;
   submergeMinion: NormalizedCard;
+  seaWitch: NormalizedCard;
   teleport: NormalizedCard;
   valley: NormalizedCard;
   vikings: NormalizedCard;
@@ -1875,6 +1879,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   }
   const freeze = snapshot.cards.find(({ name }) => name === 'Freeze');
   if (!freeze
+    || freeze.stableId !== 'card:d8081f9a38d1c16caff073da5d5afc9c5acb71b7e8748e73f4d5febb76d83a13'
     || freeze.cardType !== 'magic'
     || ruleTextDigest(freeze.rulesText) !== 'sha256:9529535d5b932cb7f5cd911595122039c1c3842712f6f947828040144c9fefa9'
     || freeze.manaCost !== 1
@@ -2146,11 +2151,14 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   }
   const submergeMinion = snapshot.cards.find(({ name }) => name === 'Coral-Reef Kelpie');
   if (!submergeMinion
+    || submergeMinion.stableId
+      !== 'card:d55af34a9a87e85723613b133fdefc561e703cedffbd63bb21d9b6bee59def47'
     || submergeMinion.cardType !== 'minion'
     || ruleTextDigest(submergeMinion.rulesText) !== 'sha256:16235f96cb4792cbb4ac6f6c2853c81b66d6994ce3b4a4daec6568330052cdc2'
     || submergeMinion.manaCost !== 3
     || submergeMinion.attack !== 3
     || submergeMinion.defense !== 3
+    || submergeMinion.life !== null
     || submergeMinion.elements.length !== 1
     || submergeMinion.elements[0] !== 'water'
     || submergeMinion.thresholds.air !== 0
@@ -2159,6 +2167,25 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || submergeMinion.thresholds.water !== 1
     || submergeMinion.rarity !== 'ordinary') {
     throw new Error('private Submerge minion no longer matches its supported facts');
+  }
+  const seaWitch = snapshot.cards.find(({ name }) => name === 'Sea Witch');
+  if (!seaWitch
+    || seaWitch.stableId
+      !== 'card:a58188635692f16a219b8d53f903f93d55f58e301fda4aea86073f24f2b8d6d6'
+    || seaWitch.cardType !== 'minion'
+    || ruleTextDigest(seaWitch.rulesText) !== 'sha256:a015ca72025cf17cc387e7902a8e5dbf3207bab482c3c2abe93600bba12d326d'
+    || seaWitch.manaCost !== 2
+    || seaWitch.attack !== 2
+    || seaWitch.defense !== 2
+    || seaWitch.life !== null
+    || seaWitch.elements.length !== 1
+    || seaWitch.elements[0] !== 'water'
+    || seaWitch.thresholds.air !== 0
+    || seaWitch.thresholds.earth !== 0
+    || seaWitch.thresholds.fire !== 0
+    || seaWitch.thresholds.water !== 1
+    || seaWitch.rarity !== 'ordinary') {
+    throw new Error('private underwater Spellcaster minion no longer matches its supported facts');
   }
   const drowned = snapshot.cards.find(({ name }) => name === 'Drowned');
   if (!drowned
@@ -2753,6 +2780,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     steppe,
     stream,
     submergeMinion,
+    seaWitch,
     teleport,
     valley,
     vikings,
@@ -3379,7 +3407,8 @@ function buildManifest(
     input.slyFox,
     input.sedgeCrabs,
     input.submergeMinion,
-  ]);
+    input.seaWitch,
+  ], [], [input.freeze]);
   const waterDrownedDeck = elementalDeck('water', [
     input.healingMinion,
     input.slyFox,
@@ -3671,7 +3700,8 @@ function buildManifest(
       card.stableId === input.sedgeCrabs.stableId,
       card.stableId === input.submergeMinion.stableId
         || card.stableId === input.drowned.stableId
-        || card.stableId === input.shellycoat.stableId,
+        || card.stableId === input.shellycoat.stableId
+        || card.stableId === input.seaWitch.stableId,
       card.stableId === input.burrowingMinion.stableId
         || card.stableId === input.entombed.stableId,
       card.stableId === input.voidwalkMinion.stableId
@@ -3710,7 +3740,8 @@ function buildManifest(
       card.stableId === input.ignited.stableId,
       card.stableId === input.rainOfArrows.stableId ? 1 : 0,
       card.stableId === input.overpower.stableId ? 2 : 0,
-      card.stableId === input.genesisSpellMinion.stableId,
+      card.stableId === input.genesisSpellMinion.stableId
+        || card.stableId === input.seaWitch.stableId,
       card.stableId === input.grainSparrow.stableId ? 2 : 0,
       card.stableId === input.lash.stableId,
       card.stableId === input.aramosMercenaries.stableId,
@@ -6624,6 +6655,78 @@ function findWaterOpening(
     ? 'end-turn Stealth'
     : sideways ? 'sideways movement' : submerge ? 'Submerge' : 'healing';
   throw new Error(`private Water ${scenarioName} scenario no longer produces its supported opening`);
+}
+
+function findWaterSubmergeFreezeOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  comparisonInstanceId: string;
+  featuredInstanceId: string;
+  freezeInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string];
+  seaWitchInstanceId: string;
+  seed: number;
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string];
+}> {
+  for (let offset = 1; offset <= 512; offset += 1) {
+    const seed = input.config.sedgeCrabsSeed + offset;
+    const built = buildManifest(input, seed, 'water-submerge');
+    const session = createGameSession(built.manifest);
+    const north = session.state.players.north;
+    const northWaterSites = north.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('water');
+    });
+    const thirdNorthSite = north.hand.atlas.find(({ instanceId }) =>
+      instanceId !== northWaterSites[0]?.instanceId
+        && instanceId !== northWaterSites[1]?.instanceId);
+    const earlySpells = [...north.hand.spellbook, ...north.spellbook.slice(0, 2)];
+    const availableSpells = [...north.hand.spellbook, ...north.spellbook.slice(0, 3)];
+    const featuredInstanceId = earlySpells
+      .find(({ cardId }) => cardId === input.submergeMinion.stableId)?.instanceId;
+    const comparisonInstanceId = earlySpells.find(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'minion'
+        && definition.submerge !== true
+        && definition.manaCost <= 3
+        && definition.thresholds.air === 0
+        && definition.thresholds.earth === 0
+        && definition.thresholds.fire === 0
+        && definition.thresholds.water <= 3;
+    })?.instanceId;
+    const seaWitchInstanceId = availableSpells
+      .find(({ cardId }) => cardId === input.seaWitch.stableId)?.instanceId;
+    const freezeInstanceId = availableSpells
+      .find(({ cardId }) => cardId === input.freeze.stableId)?.instanceId;
+    const southSites = session.state.players.south.hand.atlas.slice(0, 2);
+    if (northWaterSites.length >= 2
+      && thirdNorthSite
+      && featuredInstanceId
+      && comparisonInstanceId
+      && seaWitchInstanceId
+      && freezeInstanceId
+      && southSites.length === 2) {
+      return {
+        ...built,
+        comparisonInstanceId,
+        featuredInstanceId,
+        freezeInstanceId,
+        northSiteInstanceIds: [
+          northWaterSites[0]!.instanceId,
+          northWaterSites[1]!.instanceId,
+          thirdNorthSite.instanceId,
+        ],
+        seaWitchInstanceId,
+        seed,
+        session,
+        southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
+      };
+    }
+  }
+  throw new Error('private underwater Freeze scenario no longer produces its supported opening');
 }
 
 function findWaterDrownOpening(
@@ -13572,10 +13675,7 @@ function runWaterSidewaysMovement(
 function runWaterSubmerge(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['waterSubmerge'] {
-  const opening = findWaterOpening(input, 'water-submerge');
-  if (!opening.comparisonInstanceId || !opening.northSiteInstanceIds[2]) {
-    throw new Error('private Water Submerge opening is incomplete');
-  }
+  const opening = findWaterSubmergeFreezeOpening(input);
   let session = keep(opening.session);
   session = keep(session);
   const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
@@ -13634,18 +13734,79 @@ function runWaterSubmerge(
   const summonedUnderwater = session.state.realm.units.some(({ instanceId, location, region }) =>
     instanceId === opening.featuredInstanceId && location === 'C3' && region === 'underwater');
 
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const manaBeforeSeaWitch = session.state.players.north.mana;
+  take(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.seaWitchInstanceId
+      && descriptor.cell === 'C3'
+      && descriptor.region === 'underwater');
+  const manaBeforeFreeze = session.state.players.north.mana;
+  const seaWitchBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.seaWitchInstanceId);
+  const kelpieBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.featuredInstanceId);
+  if (!seaWitchBefore || !kelpieBefore) {
+    throw new Error('private underwater Freeze setup lacks its caster or target');
+  }
+  const freezeActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.freezeInstanceId
+      && descriptor.casterInstanceId === opening.seaWitchInstanceId
+      && descriptor.target?.kind === 'minion'
+      && descriptor.target.instanceId === opening.featuredInstanceId
+      && descriptor.target.seat === 'north');
+  const selectedFreeze = freezeActions[0];
+  if (!selectedFreeze || freezeActions.length !== 1) {
+    throw new Error('private underwater Spellcaster Freeze target is not exactly available');
+  }
+  session = accept(session, selectedFreeze);
+
+  const receipt = session.transcript.at(-1);
+  const events = receipt?.events ?? [];
+  const seaWitchAfter = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.seaWitchInstanceId);
+  const cemeteryAfter = session.state.players.north.cemetery;
+  const underwaterFreezeSettlementVerified = [
+    manaBeforeSeaWitch === 3,
+    manaBeforeFreeze === 1,
+    session.state.players.north.mana === 0,
+    seaWitchBefore.location === 'C3'
+      && seaWitchBefore.region === 'underwater'
+      && seaWitchBefore.summoningSickness,
+    kelpieBefore.location === 'C3' && kelpieBefore.region === 'underwater',
+    events.map(({ type }) => type).join(',')
+      === 'magic-cast,minion-disabled,minion-died,magic-resolved',
+    seaWitchAfter !== undefined
+      && seaWitchAfter.controller === 'north'
+      && seaWitchAfter.location === 'C3'
+      && seaWitchAfter.owner === 'north'
+      && seaWitchAfter.region === 'underwater',
+    !session.state.realm.units.some(({ instanceId }) =>
+      instanceId === opening.featuredInstanceId),
+    cemeteryAfter.some(({ instanceId }) => instanceId === opening.featuredInstanceId)
+      && cemeteryAfter.some(({ instanceId }) => instanceId === opening.freezeInstanceId),
+    session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+  ].every(Boolean);
+
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
     deck: deckList(opening.manifest.decks.north, opening.names),
+    freeze: input.freeze.name,
     nonSubmergeSurfaceAvailable,
     nonSubmergeUnderwaterUnavailable,
     replayVerified: verifyGameReplay(session),
+    seaWitch: input.seaWitch.name,
     seed: opening.seed,
     submergeMinion:
       opening.names.get(input.submergeMinion.stableId) ?? input.submergeMinion.stableId,
     summonedUnderwater,
     surfaceSummonAvailable,
     targetIsWaterSite,
+    underwaterFreezeSettlementVerified,
     underwaterSummonAvailable,
   });
 }

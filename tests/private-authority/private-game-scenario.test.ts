@@ -1244,17 +1244,24 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.deepEqual(result.waterSidewaysMovement.deck, result.waterEndTurnStealth.deck);
   assert.equal(result.waterSidewaysMovement.replayVerified, true);
   assert.equal(result.waterSubmerge.submergeMinion, 'Coral-Reef Kelpie');
-  assert.equal(result.waterSubmerge.acceptedActionCount, 16);
+  assert.equal(result.waterSubmerge.seaWitch, 'Sea Witch');
+  assert.equal(result.waterSubmerge.freeze, 'Freeze');
+  assert.equal(result.waterSubmerge.acceptedActionCount, 22);
   assert.equal(result.waterSubmerge.targetIsWaterSite, true);
   assert.equal(result.waterSubmerge.surfaceSummonAvailable, true);
   assert.equal(result.waterSubmerge.underwaterSummonAvailable, true);
   assert.equal(result.waterSubmerge.nonSubmergeSurfaceAvailable, true);
   assert.equal(result.waterSubmerge.nonSubmergeUnderwaterUnavailable, true);
   assert.equal(result.waterSubmerge.summonedUnderwater, true);
+  assert.equal(result.waterSubmerge.underwaterFreezeSettlementVerified, true);
   assert.equal(result.waterSubmerge.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
   assert.equal(result.waterSubmerge.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
   assert.equal(result.waterSubmerge.deck.spellbook
     .find(({ name }) => name === 'Coral-Reef Kelpie')?.copies, 4);
+  assert.equal(result.waterSubmerge.deck.spellbook
+    .find(({ name }) => name === 'Sea Witch')?.copies, 4);
+  assert.equal(result.waterSubmerge.deck.spellbook
+    .find(({ name }) => name === 'Freeze')?.copies, 4);
   assert.equal(result.waterSubmerge.replayVerified, true);
   assert.equal(result.waterFreeze.freeze, 'Freeze');
   assert.equal(result.waterFreeze.seravaTownsfolk, 'Serava Townsfolk');

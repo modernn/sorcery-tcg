@@ -4923,23 +4923,28 @@ function applyDescriptor(
           units: castState.realm.units.map((unit, index) => index === targetIndex ? disabledUnit : unit),
         },
       });
-      return [
-        withStateVersion(disabledState, {}),
-        [
-          ...castOutcomes,
-          {
-            payload: {
-              expiresAtSeat: seat,
-              instanceId: target.instanceId,
-              seat: target.controller,
-              sourceInstanceId: card.instanceId,
-              stealthRemoved: target.stealthed,
-              wardRemoved: target.warded,
-            },
-            type: 'minion-disabled',
+      const settlement = settleRegionOccupancy(disabledState);
+      const outcomes: readonly GameOutcome[] = [
+        ...castOutcomes,
+        {
+          payload: {
+            expiresAtSeat: seat,
+            instanceId: target.instanceId,
+            seat: target.controller,
+            sourceInstanceId: card.instanceId,
+            stealthRemoved: target.stealthed,
+            wardRemoved: target.warded,
           },
-          resolved,
-        ],
+          type: 'minion-disabled',
+        },
+        ...settlement.outcomes,
+      ];
+      const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
+      return [
+        withStateVersion(settlement.state, {}),
+        terminalIndex < 0
+          ? [...outcomes, resolved]
+          : [...outcomes.slice(0, terminalIndex), resolved, ...outcomes.slice(terminalIndex)],
         [],
       ];
     }
