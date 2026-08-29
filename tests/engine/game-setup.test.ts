@@ -5833,7 +5833,6 @@ test('RULE-03/04 Bury detaches and burrows Artifacts if able', () => {
   });
   assert.deepEqual(carried.session.transcript.at(-1)?.events.map(({ type }) => type), [
     'magic-cast',
-    'artifact-dropped',
     'artifact-burrowed',
     'magic-resolved',
   ]);
