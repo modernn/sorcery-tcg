@@ -6808,14 +6808,29 @@ test('RULE-03 seasonal River Genesis privately keeps or bottoms the next spell',
   assert.equal(southBefore.includes(top.cardId), false);
   assert.equal(southBefore.includes(top.instanceId), false);
 
-  const choices = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+  const plays = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === riverInstanceId
       && descriptor.cell === 'C4');
+  const play = plays[0];
+  assert.equal(plays.length, 1);
+  assert.ok(play);
+  assert.equal(play.label.includes(top.cardId), false);
+  const played = stepGame(checkpoint, play);
+  assert.equal(played.accepted, true);
+  if (!played.accepted) return;
+  assert.equal(played.session.state.phase, 'genesis');
+  assert.deepEqual(played.session.state.players.north.spellbook, before);
+  assert.deepEqual(played.receipt.events.map(({ type }) => type), ['site-played']);
+  const pendingSouth = canonicalJson(observeGame(played.session.state, 'south') as unknown as JsonValue);
+  assert.equal(pendingSouth.includes(top.cardId), false);
+  assert.equal(pendingSouth.includes(top.instanceId), false);
+
+  const choices = legalGameActions(played.session.state, 'north');
   const keepNext = choices.find(({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.genesisSpellChoice === 'keep-next');
+    descriptor.kind === 'resolve-genesis-spell' && descriptor.choice === 'keep-next');
   const bottomNext = choices.find(({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.genesisSpellChoice === 'bottom-next');
+    descriptor.kind === 'resolve-genesis-spell' && descriptor.choice === 'bottom-next');
   assert.equal(choices.length, 2);
   assert.ok(keepNext);
   assert.ok(bottomNext);
@@ -6825,27 +6840,22 @@ test('RULE-03 seasonal River Genesis privately keeps or bottoms the next spell',
       && !canonicalJson(descriptor as unknown as JsonValue).includes(top.cardId)
       && !canonicalJson(descriptor as unknown as JsonValue).includes(top.instanceId)), true);
 
-  const kept = stepGame(checkpoint, keepNext);
-  const bottomed = stepGame(checkpoint, bottomNext);
+  const kept = stepGame(played.session, keepNext);
+  const bottomed = stepGame(played.session, bottomNext);
   assert.equal(kept.accepted, true);
   assert.equal(bottomed.accepted, true);
   if (!kept.accepted || !bottomed.accepted) return;
-  assert.equal(kept.session.state.stateVersion, checkpoint.state.stateVersion + 1);
-  assert.equal(bottomed.session.state.stateVersion, checkpoint.state.stateVersion + 1);
+  assert.equal(kept.session.state.stateVersion, checkpoint.state.stateVersion + 2);
+  assert.equal(bottomed.session.state.stateVersion, checkpoint.state.stateVersion + 2);
+  assert.equal(kept.session.state.phase, 'main');
+  assert.equal(bottomed.session.state.phase, 'main');
+  assert.equal(kept.session.state.pendingGenesisSpell, null);
+  assert.equal(bottomed.session.state.pendingGenesisSpell, null);
   assert.deepEqual(kept.session.state.players.north.spellbook, before);
   assert.deepEqual(bottomed.session.state.players.north.spellbook, [...before.slice(1), top]);
   assert.equal(bottomed.session.state.players.north.spellbook[0]?.instanceId, next.instanceId);
-  assert.deepEqual(kept.receipt.events.map(({ type }) => type), ['site-played']);
+  assert.deepEqual(kept.receipt.events.map(({ type }) => type), ['spell-kept']);
   assert.deepEqual(bottomed.receipt.events.map(({ payload, type }) => ({ payload, type })), [
-    {
-      payload: {
-        cardId: 'river-site',
-        cell: 'C4',
-        instanceId: riverInstanceId,
-        seat: 'north',
-      },
-      type: 'site-played',
-    },
     {
       payload: { seat: 'north', sourceInstanceId: riverInstanceId },
       type: 'spell-bottomed',

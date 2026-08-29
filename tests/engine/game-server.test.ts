@@ -184,9 +184,12 @@ test('browser API switches injected starter presets and replays the selected mat
     current = await json('/api/view?seat=south', undefined, catalogOrigin);
     current = await submit(keep(current), catalogOrigin);
     current = await json('/api/view?seat=north', undefined, catalogOrigin);
-    const bottomNext = findAction(current, ({ genesisSpellChoice, kind }) =>
-      kind === 'play-site' && genesisSpellChoice === 'bottom-next');
-    assert.match(String(bottomNext.label), /put Earth card \d+ on bottom/);
+    const riverPlay = findAction(current, ({ kind }) => kind === 'play-site');
+    assert.doesNotMatch(String(riverPlay.label), /put .* on bottom|keep .* on top/i);
+    current = await submit(riverPlay, catalogOrigin);
+    const bottomNext = findAction(current, ({ choice, kind }) =>
+      kind === 'resolve-genesis-spell' && choice === 'bottom-next');
+    assert.match(String(bottomNext.label), /Put Earth card \d+ on bottom/);
     assert.doesNotMatch(String(bottomNext.label), /north-spell-/);
     current = await submit(bottomNext, catalogOrigin);
     current = await submit(findAction(current, ({ kind }) => kind === 'summon-minion'), catalogOrigin);
