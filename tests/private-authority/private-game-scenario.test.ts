@@ -104,6 +104,23 @@ function assertSwordAndShield(result: PrivateGameCheck['earthSwordAndShield']): 
   assert.equal(result.replayVerified, true);
 }
 
+function assertVoidArtifact(result: PrivateGameCheck['airVoidArtifact']): void {
+  assert.equal(result.spectralStalker, 'Spectral Stalker');
+  assert.equal(result.swordAndShield, 'Sword and Shield');
+  assert.equal(result.seed, 18);
+  assert.equal(result.acceptedActionCount, 22);
+  assert.equal(result.relocationVerified, true);
+  assert.equal(result.noRandomDraws, true);
+  assert.equal(result.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.deck.atlas.find(({ name }) => name === 'Spire')?.copies, 4);
+  assert.equal(result.deck.spellbook
+    .find(({ name }) => name === 'Spectral Stalker')?.copies, 4);
+  assert.equal(result.deck.spellbook
+    .find(({ name }) => name === 'Sword and Shield')?.copies, 3);
+  assert.equal(result.replayVerified, true);
+}
+
 function assertPoisonousDagger(result: PrivateGameCheck['earthPoisonousDagger']): void {
   assert.equal(result.poisonousDagger, 'Poisonous Dagger');
   assert.equal(result.elthamTownsfolk, 'Eltham Townsfolk');
@@ -304,6 +321,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assertStarter(result.fireStarter, 'Wasteland', 'Raal Dromedary');
   assertGranaryRats(result.fireGranaryRats);
   assertHamlet(result.fireHamlet);
+  assertVoidArtifact(result.airVoidArtifact);
   assertStarter(result.waterStarter, 'Stream', 'Serava Townsfolk');
   assertVikings(result.fireVikings);
   assert.equal(result.classification, 'private-local_actual-cards_unranked-partial-rules');

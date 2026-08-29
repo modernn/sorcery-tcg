@@ -3323,9 +3323,20 @@ function resolveSiteDeaths(
     floodedCells.has(unit.location) && unit.region === 'underwater'
       ? deepFreeze({ ...unit, region: 'underground' as const })
       : unit);
+  const artifacts = state.realm.artifacts?.map((artifact) =>
+    !('bearer' in artifact)
+      && floodedCells.has(artifact.location)
+      && artifact.region === 'underwater'
+      ? deepFreeze({ ...artifact, region: 'underground' as const })
+      : artifact);
   const terrainState = deepFreeze({
     ...state,
-    realm: { sites, units },
+    realm: {
+      ...state.realm,
+      ...(artifacts ? { artifacts } : {}),
+      sites,
+      units,
+    },
   });
   const settlement = settleRegionOccupancy(terrainState);
   const players: Record<GameSeat, PlayerState> = {
@@ -3354,7 +3365,7 @@ function resolveSiteDeaths(
         ...settlement.outcomes.slice(terminalIndex),
       ],
     players: deepFreeze(players),
-    realm: deepFreeze({ sites, units: settlement.state.realm.units }),
+    realm: settlement.state.realm,
     terminal: settlement.state.terminal,
   };
 }
@@ -3847,11 +3858,24 @@ function applyDescriptor(
       }
       return unit;
     });
+    const placedArtifacts = state.realm.artifacts?.map((artifact) => {
+      if ('bearer' in artifact || artifact.location !== descriptor.cell) return artifact;
+      if (artifact.region === 'void') {
+        return deepFreeze({ ...artifact, region: 'surface' as const });
+      }
+      if (replacingRubble
+        && artifact.region === 'underground'
+        && definition.elements.includes('water')) {
+        return deepFreeze({ ...artifact, region: 'underwater' as const });
+      }
+      return artifact;
+    });
     const placedState = deepFreeze({
       ...state,
       players: replacePlayer(state, seat, updatedPlayer),
       realm: {
         ...state.realm,
+        ...(placedArtifacts ? { artifacts: placedArtifacts } : {}),
         sites: { ...state.realm.sites, [descriptor.cell]: site },
         units: placedUnits,
       },
