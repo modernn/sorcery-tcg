@@ -39,6 +39,12 @@ const REALM_CELLS = (['A', 'B', 'C', 'D', 'E'] as const)
 export type GameCardDefinition =
   | Readonly<{ attack: number; cardType: 'avatar'; defense: number; drawSpell: boolean; life: number }>
   | Readonly<{
+    cardType: 'artifact';
+    grantsBearerPower: 2;
+    manaCost: number;
+    thresholds: GameThresholds;
+  }>
+  | Readonly<{
     cardType: 'site';
     connectsBurrowedAllies?: boolean;
     elements: readonly GameElement[];
@@ -180,6 +186,13 @@ type UnitInstance = Readonly<CardInstance & {
   warded: boolean;
 }>;
 
+// ponytail: this first Artifact slice intentionally stops at cast placement and
+// bearer-following; add Pick Up, Drop, transfer, and destruction only with a card that needs them.
+type ArtifactInstance = Readonly<CardInstance & (
+  | Readonly<{ bearer: GameUnitRef }>
+  | Readonly<{ location: RealmCell; region: GameRegion }>
+)>;
+
 type GameUnitRef = Readonly<{
   instanceId: StateHash;
   kind: 'avatar' | 'minion';
@@ -250,6 +263,7 @@ export type GameState = Readonly<{
   phase: 'allocate' | 'attack' | 'defend' | 'draw' | 'intercept' | 'main' | 'mulligan' | 'terminal';
   players: Readonly<Record<GameSeat, PlayerState>>;
   realm: Readonly<{
+    artifacts?: readonly ArtifactInstance[];
     sites: Readonly<Partial<Record<RealmCell, RealmSiteInstance>>>;
     units: readonly UnitInstance[];
   }>;
@@ -291,6 +305,15 @@ export type GameObservation = Readonly<{
   phase: GameState['phase'];
   players: Readonly<Record<GameSeat, ObservedPlayer>>;
   realm: Readonly<{
+    artifacts?: readonly Readonly<{
+      bearer?: GameUnitRef;
+      cardId: string;
+      controller: GameSeat | null;
+      instanceId: StateHash;
+      location: RealmCell;
+      owner: GameSeat;
+      region: GameRegion;
+    }>[];
     sites: Readonly<Partial<Record<RealmCell,
       | Readonly<{
         cardId: 'rubble';
@@ -347,6 +370,15 @@ type GameActionDescriptor =
     sourceSiteInstanceId: StateHash;
     targetCell: RealmCell;
     targetSiteInstanceId: StateHash;
+  }>
+  | Readonly<{
+    bearer?: GameUnitRef;
+    cardId: string;
+    cardInstanceId: string;
+    casterInstanceId: string;
+    cell?: RealmCell;
+    kind: 'cast-artifact';
+    manaCost: number;
   }>
   | Readonly<{
     cardId: string;
@@ -613,6 +645,37 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
   });
 }
 
+function artifactDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
+  const player = state.players[seat];
+  const casters = spellcasterRefs(state, seat);
+  const bearers = unitRefs(state, seat);
+  const cells = controlledSiteCells(state, seat);
+  return player.hand.spellbook.flatMap(({ cardId, instanceId }) => {
+    const definition = cardDefinition(state, cardId);
+    if (definition.cardType !== 'artifact'
+      || player.mana < definition.manaCost
+      || !meetsThresholds(state, seat, definition.thresholds)) return [];
+    return casters.flatMap(({ instanceId: casterInstanceId }) => [
+      ...cells.map((cell) => ({
+        cardId,
+        cardInstanceId: instanceId,
+        casterInstanceId,
+        cell,
+        kind: 'cast-artifact' as const,
+        manaCost: definition.manaCost,
+      })),
+      ...bearers.map((bearer) => ({
+        bearer,
+        cardId,
+        cardInstanceId: instanceId,
+        casterInstanceId,
+        kind: 'cast-artifact' as const,
+        manaCost: definition.manaCost,
+      })),
+    ]);
+  });
+}
+
 function magicDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   const player = state.players[seat];
   const casters = spellcasterRefs(state, seat);
@@ -823,6 +886,20 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     if (card.sacrificeToDestroyNearbySite !== undefined
       && card.sacrificeToDestroyNearbySite !== true) {
       throw new RangeError(`${path}.sacrificeToDestroyNearbySite must be true when defined`);
+    }
+    return;
+  }
+  if (card.cardType === 'artifact') {
+    if (card.grantsBearerPower !== 2) {
+      throw new RangeError(`${path}.grantsBearerPower must be 2`);
+    }
+    if (!Number.isSafeInteger(card.manaCost) || card.manaCost < 0) {
+      throw new RangeError(`${path}.manaCost must be a supported nonnegative safe integer`);
+    }
+    for (const element of elements) {
+      if (!Number.isSafeInteger(card.thresholds[element]) || card.thresholds[element] < 0) {
+        throw new RangeError(`${path}.thresholds.${element} must be a nonnegative safe integer`);
+      }
     }
     return;
   }
@@ -1146,7 +1223,9 @@ function validateDeck(
     if (cards[cardId]?.cardType !== 'site') throw new RangeError(`${path}.atlas[${index}] must reference a site`);
   });
   deck.spellbook.forEach((cardId, index) => {
-    if (cards[cardId]?.cardType !== 'minion' && cards[cardId]?.cardType !== 'magic') {
+    if (cards[cardId]?.cardType !== 'artifact'
+      && cards[cardId]?.cardType !== 'minion'
+      && cards[cardId]?.cardType !== 'magic') {
       throw new RangeError(`${path}.spellbook[${index}] references an unsupported spell`);
     }
   });
@@ -1188,7 +1267,14 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
           drawSpell: card.drawSpell,
           life: card.life,
         }
-        : card.cardType === 'site'
+        : card.cardType === 'artifact'
+          ? {
+            cardType: 'artifact' as const,
+            grantsBearerPower: 2 as const,
+            manaCost: card.manaCost,
+            thresholds: { ...card.thresholds },
+          }
+          : card.cardType === 'site'
           ? {
             cardType: 'site' as const,
             ...(card.connectsBurrowedAllies === true ? { connectsBurrowedAllies: true } : {}),
@@ -1540,6 +1626,28 @@ function observePlayer(state: GameState, player: PlayerState, owner: GameSeat, v
 }
 
 export function observeGame(state: GameState, viewer: GameSeat): GameObservation {
+  const artifacts = state.realm.artifacts?.map((artifact) => {
+    if ('bearer' in artifact) {
+      const bearer = unitStatus(state, artifact.bearer);
+      return {
+        bearer: artifact.bearer,
+        cardId: artifact.cardId,
+        controller: artifact.bearer.seat,
+        instanceId: artifact.instanceId,
+        location: bearer.location,
+        owner: artifact.owner,
+        region: bearer.region,
+      };
+    }
+    return {
+      cardId: artifact.cardId,
+      controller: null,
+      instanceId: artifact.instanceId,
+      location: artifact.location,
+      owner: artifact.owner,
+      region: artifact.region,
+    };
+  });
   const sites = Object.fromEntries(
     Object.entries(state.realm.sites).map(([cell, card]) => {
       if (isRubble(card)) {
@@ -1597,7 +1705,7 @@ export function observeGame(state: GameState, viewer: GameSeat): GameObservation
       north: observePlayer(state, state.players.north, 'north', viewer),
       south: observePlayer(state, state.players.south, 'south', viewer),
     },
-    realm: { sites, units },
+    realm: { ...(artifacts ? { artifacts } : {}), sites, units },
     schemaVersion: 1,
     stateVersion: state.stateVersion,
     terminal: state.terminal,
@@ -1686,7 +1794,7 @@ function unitStatus(
     if (avatar.card.instanceId !== ref.instanceId) throw new Error('unreachable Avatar reference');
     const definition = cardDefinition(state, avatar.card.cardId);
     if (definition.cardType !== 'avatar') throw new Error('Avatar lacks Avatar definition');
-    const powerBonus = temporaryPowerBonus(avatar.temporaryPowerSources);
+    const powerBonus = temporaryPowerBonus(avatar.temporaryPowerSources) + bearerPowerBonus(state, ref);
     return {
       airborne: false,
       attack: definition.attack + powerBonus,
@@ -1719,7 +1827,7 @@ function unitStatus(
   const definition = cardDefinition(state, unit.cardId);
   if (definition.cardType !== 'minion') throw new Error('minion lacks minion definition');
   const disabled = minionDisabled(state, unit);
-  const powerBonus = temporaryPowerBonus(unit.temporaryPowerSources);
+  const powerBonus = temporaryPowerBonus(unit.temporaryPowerSources) + bearerPowerBonus(state, ref);
   return {
     airborne: !disabled && definition.airborne === true && unit.region === 'surface',
     attack: definition.attack + powerBonus,
@@ -1747,6 +1855,18 @@ function unitStatus(
     tapped: unit.tapped,
     voidwalk: !disabled && definition.voidwalk === true,
   };
+}
+
+function bearerPowerBonus(state: GameState, ref: GameUnitRef): number {
+  return (state.realm.artifacts ?? []).reduce((bonus, artifact) => {
+    if (!('bearer' in artifact)
+      || artifact.bearer.instanceId !== ref.instanceId
+      || artifact.bearer.kind !== ref.kind
+      || artifact.bearer.seat !== ref.seat) return bonus;
+    const definition = cardDefinition(state, artifact.cardId);
+    if (definition.cardType !== 'artifact') throw new Error('realm artifact lacks Artifact definition');
+    return bonus + definition.grantsBearerPower;
+  }, 0);
 }
 
 function carriedLanceCount(state: GameState, ref: GameUnitRef): number {
@@ -2242,6 +2362,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     ...(player.avatar.tapped ? [] : [{ kind: 'draw-site' as const }]),
     ...(!player.avatar.tapped && avatarDefinition.drawSpell ? [{ kind: 'draw-spell' as const }] : []),
     ...summonDescriptors(state, seat),
+    ...artifactDescriptors(state, seat),
     ...magicDescriptors(state, seat),
     ...siteDestructionDescriptors(state, seat),
     ...manaAbilityDescriptors(state, seat),
@@ -2263,6 +2384,12 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
   if (descriptor.kind === 'draw-site') return 'Draw a site with Avatar';
   if (descriptor.kind === 'draw-spell') return 'Draw a spell with Avatar';
   if (descriptor.kind === 'play-site') return `Play ${descriptor.cardId} at ${descriptor.cell}`;
+  if (descriptor.kind === 'cast-artifact') {
+    const destination = descriptor.bearer
+      ? `carried by ${descriptor.bearer.kind} ${descriptor.bearer.instanceId.slice(0, 15)}…`
+      : `uncarried at ${descriptor.cell}`;
+    return `Cast ${descriptor.cardId} ${destination} (${descriptor.manaCost} mana)`;
+  }
   if (descriptor.kind === 'activate-site-destruction') {
     return `Sacrifice site to destroy ${descriptor.targetCell}`;
   }
@@ -2520,6 +2647,43 @@ function loseStealth(
   ];
 }
 
+function dropArtifactsCarriedBy(
+  artifacts: readonly ArtifactInstance[] | undefined,
+  bearer: UnitInstance,
+): Readonly<{
+  artifacts: readonly ArtifactInstance[] | undefined;
+  outcomes: readonly GameOutcome[];
+}> {
+  if (!artifacts) return { artifacts, outcomes: [] };
+  const dropped = artifacts.filter((artifact) =>
+    'bearer' in artifact && artifact.bearer.instanceId === bearer.instanceId);
+  if (dropped.length === 0) return { artifacts, outcomes: [] };
+  return {
+    artifacts: artifacts.map((artifact) =>
+      dropped.some(({ instanceId }) => instanceId === artifact.instanceId)
+        ? deepFreeze({
+          cardId: artifact.cardId,
+          instanceId: artifact.instanceId,
+          location: bearer.location,
+          owner: artifact.owner,
+          region: bearer.region,
+          source: artifact.source,
+        })
+        : artifact),
+    outcomes: dropped.map((artifact) => ({
+      payload: {
+        bearerInstanceId: bearer.instanceId,
+        cardId: artifact.cardId,
+        cell: bearer.location,
+        instanceId: artifact.instanceId,
+        owner: artifact.owner,
+        region: bearer.region,
+      },
+      type: 'artifact-dropped',
+    })),
+  };
+}
+
 function resolveMinionDeaths(
   state: GameState,
   startingPlayers: GameState['players'],
@@ -2527,6 +2691,7 @@ function resolveMinionDeaths(
   deaths: readonly UnitInstance[],
   defeatedAvatars: ReadonlySet<GameSeat>,
 ): Readonly<{
+  artifacts: readonly ArtifactInstance[] | undefined;
   outcomes: readonly GameOutcome[];
   players: GameState['players'];
   terminal: GameTerminal;
@@ -2537,6 +2702,7 @@ function resolveMinionDeaths(
     south: startingPlayers.south,
   };
   const deathOutcomes: GameOutcome[] = [];
+  let artifacts = state.realm.artifacts;
   const deadIds = new Set(deaths.map(({ instanceId }) => instanceId));
   const survivingUnits = units.filter(({ instanceId }) => !deadIds.has(instanceId));
   const deckLosers = new Set<GameSeat>();
@@ -2626,7 +2792,9 @@ function resolveMinionDeaths(
         source: dead.source,
       }],
     });
-    deathOutcomes.push({
+    const drop = dropArtifactsCarriedBy(artifacts, dead);
+    artifacts = drop.artifacts;
+    deathOutcomes.push(...drop.outcomes, {
       payload: { cardId: dead.cardId, instanceId: dead.instanceId, owner: dead.owner },
       type: 'minion-died',
     });
@@ -2648,6 +2816,7 @@ function resolveMinionDeaths(
     deathOutcomes.push({ payload: { loser, reason, winner }, type: 'game-ended' });
   }
   return {
+    artifacts,
     outcomes: deathOutcomes,
     players: deepFreeze(players),
     terminal,
@@ -2685,7 +2854,11 @@ function resolveEndOfTurnDeaths(
         ? { pendingCombat: null, phase: 'terminal' as const }
         : {}),
       players: resolution.players,
-      realm: { ...current.realm, units: resolution.units },
+      realm: {
+        ...current.realm,
+        ...(resolution.artifacts ? { artifacts: resolution.artifacts } : {}),
+        units: resolution.units,
+      },
       terminal: resolution.terminal,
     });
     outcomes.push(...resolution.outcomes);
@@ -2728,7 +2901,20 @@ function settleRegionOccupancy(state: GameState): Readonly<{
   const banished = state.realm.units.filter(({ instanceId }) => banishedIds.has(instanceId));
   const units = state.realm.units.filter(({ instanceId }) => !banishedIds.has(instanceId));
   const deaths = units.filter(({ instanceId }) => deathIds.has(instanceId));
-  const banishedState = deepFreeze({ ...state, realm: { ...state.realm, units } });
+  let artifacts = state.realm.artifacts;
+  const banishedOutcomes: GameOutcome[] = [];
+  for (const unit of banished) {
+    const drop = dropArtifactsCarriedBy(artifacts, unit);
+    artifacts = drop.artifacts;
+    banishedOutcomes.push(...drop.outcomes, {
+      payload: { cardId: unit.cardId, instanceId: unit.instanceId, owner: unit.owner },
+      type: 'minion-banished',
+    });
+  }
+  const banishedState = deepFreeze({
+    ...state,
+    realm: { ...state.realm, ...(artifacts ? { artifacts } : {}), units },
+  });
   const deathResolution = resolveMinionDeaths(
     banishedState,
     state.players,
@@ -2736,10 +2922,6 @@ function settleRegionOccupancy(state: GameState): Readonly<{
     deaths,
     new Set<GameSeat>(),
   );
-  const banishedOutcomes: readonly GameOutcome[] = banished.map((unit) => ({
-    payload: { cardId: unit.cardId, instanceId: unit.instanceId, owner: unit.owner },
-    type: 'minion-banished',
-  }));
   const terminalIndex = deathResolution.outcomes.findIndex(({ type }) => type === 'game-ended');
   const outcomes = terminalIndex < 0
     ? [...deathResolution.outcomes, ...banishedOutcomes]
@@ -2754,7 +2936,11 @@ function settleRegionOccupancy(state: GameState): Readonly<{
       ? { pendingCombat: null, phase: 'terminal' as const }
       : {}),
     players: deathResolution.players,
-    realm: { ...state.realm, units: deathResolution.units },
+    realm: {
+      ...state.realm,
+      ...(deathResolution.artifacts ? { artifacts: deathResolution.artifacts } : {}),
+      units: deathResolution.units,
+    },
     terminal: deathResolution.terminal,
   });
   return { outcomes, removals, state: settledState };
@@ -3070,7 +3256,11 @@ function resolveFightWindow(
       pendingCombat: null,
       phase: deathResolution.terminal.status === 'finished' ? 'terminal' : 'main',
       players: deathResolution.players,
-      realm: { ...state.realm, units: deathResolution.units },
+      realm: {
+        ...state.realm,
+        ...(deathResolution.artifacts ? { artifacts: deathResolution.artifacts } : {}),
+        units: deathResolution.units,
+      },
       terminal: deathResolution.terminal,
     }),
     [...outcomes, ...damageOutcomes, ...lanceOutcomes, ...deathResolution.outcomes],
@@ -3432,6 +3622,73 @@ function applyDescriptor(
         ...(genesisDrawFailed
           ? [{ payload: { loser: seat, reason: 'deck_empty', winner }, type: 'game-ended' }]
           : []),
+      ],
+      [],
+    ];
+  }
+
+  if (descriptor.kind === 'cast-artifact') {
+    const card = player.hand.spellbook.find(({ cardId, instanceId }) =>
+      instanceId === descriptor.cardInstanceId && cardId === descriptor.cardId);
+    const definition = card && cardDefinition(state, card.cardId);
+    const legal = artifactDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'cast-artifact'
+        && candidate.cardInstanceId === descriptor.cardInstanceId
+        && candidate.casterInstanceId === descriptor.casterInstanceId
+        && candidate.cell === descriptor.cell
+        && candidate.manaCost === descriptor.manaCost
+        && (candidate.bearer === undefined && descriptor.bearer === undefined
+          || candidate.bearer !== undefined
+            && descriptor.bearer !== undefined
+            && candidate.bearer.instanceId === descriptor.bearer.instanceId
+            && candidate.bearer.kind === descriptor.bearer.kind
+            && candidate.bearer.seat === descriptor.bearer.seat));
+    const caster = spellcasterRefs(state, seat).find(({ instanceId }) =>
+      instanceId === descriptor.casterInstanceId);
+    if (!card || !definition || definition.cardType !== 'artifact' || !legal || !caster) {
+      throw new Error('unreachable illegal Artifact cast');
+    }
+    const paidPlayer = deepFreeze({
+      ...player,
+      hand: {
+        ...player.hand,
+        spellbook: player.hand.spellbook.filter(({ instanceId }) => instanceId !== card.instanceId),
+      },
+      mana: player.mana - descriptor.manaCost,
+    });
+    const paidState = deepFreeze({ ...state, players: replacePlayer(state, seat, paidPlayer) });
+    const [castingUnits, casterStealthOutcomes] = loseStealth(paidState.realm.units, [caster]);
+    const artifact: ArtifactInstance = descriptor.bearer
+      ? deepFreeze({ ...card, bearer: descriptor.bearer })
+      : deepFreeze({ ...card, location: descriptor.cell!, region: 'surface' as const });
+    return [
+      withStateVersion(paidState, {
+        realm: {
+          ...paidState.realm,
+          artifacts: [...(paidState.realm.artifacts ?? []), artifact],
+          units: castingUnits,
+        },
+      }),
+      [
+        ...casterStealthOutcomes,
+        {
+          payload: {
+            cardId: card.cardId,
+            casterInstanceId: descriptor.casterInstanceId,
+            instanceId: card.instanceId,
+            manaPaid: descriptor.manaCost,
+            owner: card.owner,
+            seat,
+            ...(descriptor.bearer
+              ? {
+                bearerInstanceId: descriptor.bearer.instanceId,
+                bearerKind: descriptor.bearer.kind,
+                bearerSeat: descriptor.bearer.seat,
+              }
+              : { cell: descriptor.cell!, region: 'surface' }),
+          },
+          type: 'artifact-conjured',
+        },
       ],
       [],
     ];
@@ -4431,7 +4688,11 @@ function applyDescriptor(
         ...paidState,
         ...(deathResolution.terminal.status === 'finished' ? { phase: 'terminal' as const } : {}),
         players: deathResolution.players,
-        realm: { ...paidState.realm, units: deathResolution.units },
+        realm: {
+          ...paidState.realm,
+          ...(deathResolution.artifacts ? { artifacts: deathResolution.artifacts } : {}),
+          units: deathResolution.units,
+        },
         terminal: deathResolution.terminal,
       })
       : paidState;

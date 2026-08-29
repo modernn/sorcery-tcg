@@ -8419,3 +8419,161 @@ test('RULE-01 attempting to draw from an empty deck immediately loses', () => {
   assert.equal(session.transcript.at(-1)?.events[0]?.type, 'game-ended');
   assert.equal(verifyGameReplay(session), true);
 });
+
+test('RULE-03/04 a carried Artifact follows its bearer, grants power, and drops when the bearer dies', () => {
+  const north: GameDeckSpec = {
+    atlas: Array(4).fill('artifact-north-site'),
+    avatar: 'artifact-north-avatar',
+    spellbook: ['sword-and-shield', 'sword-and-shield', 'artifact-bearer', 'artifact-bearer'],
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(5).fill('artifact-south-site'),
+    avatar: 'artifact-south-avatar',
+    spellbook: Array(4).fill('artifact-enemy'),
+  };
+  const cards: Record<string, GameCardDefinition> = {
+    'artifact-bearer': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 1,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+    'artifact-enemy': {
+      attack: 3,
+      cardType: 'minion',
+      charge: true,
+      defense: 2,
+      manaCost: 1,
+      summonToAnySite: true,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+    'artifact-north-avatar': { attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20 },
+    'artifact-north-site': { cardType: 'site', elements: ['earth'], genesisGainMana: 6 },
+    'artifact-south-avatar': { attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20 },
+    'artifact-south-site': { cardType: 'site', elements: ['earth'], genesisGainMana: 6 },
+    'sword-and-shield': {
+      cardType: 'artifact',
+      grantsBearerPower: 2,
+      manaCost: 3,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-artifact-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north' as const,
+    seed: 83,
+  };
+  const gameManifest = createGameManifest(input);
+  assert.deepEqual(gameManifest.cards['sword-and-shield'], cards['sword-and-shield']);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      'sword-and-shield': {
+        cardType: 'artifact',
+        grantsBearerPower: 1 as unknown as 2,
+        manaCost: 3,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  }), /grantsBearerPower must be 2/);
+
+  let session = keep(createGameSession(gameManifest));
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): GameSession => {
+    session = accept(session, action(session, predicate));
+    return session;
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'artifact-bearer' && descriptor.cell === 'C4');
+  const bearer = session.state.realm.units.find(({ cardId }) => cardId === 'artifact-bearer')!;
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+
+  const casts = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-artifact' && descriptor.cardId === 'sword-and-shield');
+  assert.equal(casts.length, 4);
+  assert.deepEqual(casts.flatMap(({ descriptor }) =>
+    descriptor.kind === 'cast-artifact' && descriptor.cell ? [descriptor.cell] : []).sort(), ['C3', 'C4']);
+  assert.deepEqual(casts.flatMap(({ descriptor }) =>
+    descriptor.kind === 'cast-artifact' && descriptor.bearer ? [descriptor.bearer.kind] : []).sort(),
+  ['avatar', 'minion']);
+  assert.equal(casts.some(({ descriptor }) =>
+    descriptor.kind === 'cast-artifact' && descriptor.bearer?.seat === 'south'), false);
+
+  const spellbookHandBeforeCast = session.state.players.north.hand.spellbook.length;
+  const castAction = action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-artifact'
+      && descriptor.bearer?.instanceId === bearer.instanceId);
+  const castInstanceId = castAction.descriptor.kind === 'cast-artifact'
+    ? castAction.descriptor.cardInstanceId
+    : '';
+  const cast = stepGame(session, castAction);
+  assert.equal(cast.accepted, true);
+  session = cast.session;
+  assert.deepEqual(cast.receipt.events.map(({ type }) => type), ['artifact-conjured']);
+  assert.equal(session.state.players.north.mana, 5);
+  assert.equal(session.state.players.north.hand.spellbook.length, spellbookHandBeforeCast - 1);
+  assert.equal(session.state.players.north.hand.spellbook.some(({ instanceId }) => instanceId === castInstanceId), false);
+  let northView = observeGame(session.state, 'north');
+  assert.deepEqual(northView.realm.artifacts?.map((artifact) => ({
+    bearer: artifact.bearer?.instanceId,
+    controller: artifact.controller,
+    location: artifact.location,
+    region: artifact.region,
+  })), [{ bearer: bearer.instanceId, controller: 'north', location: 'C4', region: 'surface' }]);
+  const observedBearer = northView.realm.units.find(({ instanceId }) => instanceId === bearer.instanceId);
+  assert.equal(observedBearer?.attack, 3);
+  assert.equal(observedBearer?.defense, 3);
+
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === bearer.instanceId && descriptor.to.cell === 'C3');
+  northView = observeGame(session.state, 'north');
+  assert.equal(northView.realm.artifacts?.[0]?.location, 'C3');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'artifact-enemy' && descriptor.cell === 'C3');
+  const enemy = session.state.realm.units.find(({ cardId }) => cardId === 'artifact-enemy')!;
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === enemy.instanceId && descriptor.to.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+    && descriptor.target.kind === 'minion' && descriptor.target.instanceId === bearer.instanceId);
+  const fought = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  assert.equal(fought.accepted, true);
+  session = fought.session;
+  const events = fought.receipt.events;
+  const swordDamage = events.find(({ payload, type }) => type === 'damage-dealt'
+    && canonicalJson(payload).includes(enemy.instanceId));
+  assert.ok(swordDamage);
+  assert.match(canonicalJson(swordDamage.payload), /"amount":3/);
+  const dropIndex = events.findIndex(({ type }) => type === 'artifact-dropped');
+  const deathIndex = events.findIndex(({ payload, type }) => type === 'minion-died'
+    && canonicalJson(payload).includes(bearer.instanceId));
+  assert.ok(dropIndex >= 0 && dropIndex < deathIndex);
+  northView = observeGame(session.state, 'north');
+  assert.deepEqual(northView.realm.artifacts?.map((artifact) => ({
+    bearer: artifact.bearer,
+    controller: artifact.controller,
+    location: artifact.location,
+    region: artifact.region,
+  })), [{ bearer: undefined, controller: null, location: 'C3', region: 'surface' }]);
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) => instanceId === bearer.instanceId), true);
+  assert.equal(session.state.players.north.cemetery.some(({ cardId }) => cardId === 'sword-and-shield'), false);
+  assert.equal(verifyGameReplay(session), true);
+});

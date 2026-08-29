@@ -332,6 +332,25 @@ export type PrivateGameCheck = Readonly<{
     spellEnteredCemetery: boolean;
     unitStatePreservedOnGrant: boolean;
   }>;
+  earthSwordAndShield: Readonly<{
+    acceptedActionCount: number;
+    artifactCastAndCarried: boolean;
+    boskTroll: string;
+    causalEventsVerified: boolean;
+    combatDamageAndSurvivalVerified: boolean;
+    deck: DeckList;
+    elthamTownsfolk: string;
+    exactBearerChoice: boolean;
+    gameRemainedActive: boolean;
+    manaPaid: number;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    swordAndShield: string;
+    swordFollowedBearer: boolean;
+    swordRemainedCarried: boolean;
+    swordStayedOutOfCemetery: boolean;
+    unrelatedStatePreserved: boolean;
+  }>;
   earthBury: Readonly<{
     acceptedActionCount: number;
     boskTroll: string;
@@ -1055,6 +1074,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   pudgeButcher: NormalizedCard;
   rainOfArrows: NormalizedCard;
   staticServant: NormalizedCard;
+  swordAndShield: NormalizedCard;
   zap: NormalizedCard;
 }>> {
   const config = scenarioConfig(parseJsonWithDuplicateKeyCheck(await readFile(path, 'utf8')));
@@ -1069,6 +1089,22 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     throw new Error('private normalized card artifact identity is invalid');
   }
   const snapshot = normalizedCardSnapshotSchema.parse(artifact.identity.payload);
+  const swordAndShield = snapshot.cards.find(({ name }) => name === 'Sword and Shield');
+  if (!swordAndShield
+    || swordAndShield.cardType !== 'artifact'
+    || ruleTextDigest(swordAndShield.rulesText) !== 'sha256:5b3fa263b7b3585cfeb4bf6038b97d582b1e0cf3c69e8e53237b0a589f4cc028'
+    || swordAndShield.manaCost !== 3
+    || swordAndShield.attack !== null
+    || swordAndShield.defense !== null
+    || swordAndShield.life !== null
+    || swordAndShield.elements.length !== 0
+    || swordAndShield.thresholds.air !== 0
+    || swordAndShield.thresholds.earth !== 0
+    || swordAndShield.thresholds.fire !== 0
+    || swordAndShield.thresholds.water !== 0
+    || swordAndShield.rarity !== 'exceptional') {
+    throw new Error('private bearer power Artifact no longer matches its supported facts');
+  }
   const shallowGrave = snapshot.cards.find(({ name }) => name === 'Shallow Grave');
   if (!shallowGrave
     || shallowGrave.cardType !== 'site'
@@ -2218,6 +2254,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     pudgeButcher,
     rainOfArrows,
     staticServant,
+    swordAndShield,
     providerMinion,
     raalDromedary,
     recklessSquire,
@@ -2330,6 +2367,7 @@ function gameDefinition(
   genesisDamageEachOtherUnitHere: 0 | 1 = 0,
   sacrificeMinionAtSummoningLocationForManaDiscount: 0 | 2 = 0,
   lanceCount: 0 | 1 = 0,
+  grantsBearerPower: 0 | 2 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -2341,6 +2379,16 @@ function gameDefinition(
       defense: card.defense,
       drawSpell,
       life: card.life,
+    };
+  }
+  if (card.cardType === 'artifact'
+    && card.manaCost !== null
+    && grantsBearerPower === 2) {
+    return {
+      cardType: 'artifact',
+      grantsBearerPower,
+      manaCost: card.manaCost,
+      thresholds: card.thresholds,
     };
   }
   if (card.cardType === 'site') {
@@ -2468,7 +2516,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-immobile' | 'earth-overpower' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-immobile' | 'earth-overpower' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -2519,6 +2567,7 @@ function buildManifest(
     featuredMinions: readonly NormalizedCard[],
     featuredSites: readonly NormalizedCard[] = [],
     featuredMagic: readonly NormalizedCard[] = [],
+    featuredArtifacts: readonly NormalizedCard[] = [],
   ): GameDeckSpec => {
     const featuredSiteCards = featuredSites.flatMap((card) =>
       Array.from({ length: input.format.copyLimits[card.rarity!] }, () => card.stableId));
@@ -2530,7 +2579,7 @@ function buildManifest(
       elementSites.reduce((total, card) => total + input.format.copyLimits[card.rarity!], 0),
     );
     const elementSiteIds = new Set(elementSites.map(({ stableId }) => stableId));
-    const featuredSpells = [...featuredMinions, ...featuredMagic];
+    const featuredSpells = [...featuredMinions, ...featuredMagic, ...featuredArtifacts];
     const featuredSpellCards = featuredSpells.flatMap((card) =>
       Array.from({ length: input.format.copyLimits[card.rarity!] }, () => card.stableId));
     const featuredSpellIds = new Set(featuredSpells.map(({ stableId }) => stableId));
@@ -2582,6 +2631,13 @@ function buildManifest(
     [...earthMinions, input.elthamTownsfolk],
     [],
     [input.duel],
+  );
+  const earthSwordAndShieldDeck = elementalDeck(
+    'earth',
+    [...earthMinions, input.elthamTownsfolk],
+    [input.ghostTownSite],
+    [],
+    [input.swordAndShield],
   );
   const earthRescueDeck = elementalDeck('earth', earthMinions, [], [input.bury, input.rescue]);
   const earthDivineHealingDeck = elementalDeck('earth', earthMinions, [], [input.divineHealing]);
@@ -2796,6 +2852,8 @@ function buildManifest(
         ? earthBuryDeck
       : scenario === 'earth-duel'
         ? earthDuelDeck
+      : scenario === 'earth-sword-and-shield'
+        ? earthSwordAndShieldDeck
       : scenario === 'earth-rescue'
         ? earthRescueDeck
       : scenario === 'earth-divine-healing'
@@ -2909,6 +2967,8 @@ function buildManifest(
         ? earthBuryDeck
       : scenario === 'earth-duel'
         ? earthDuelDeck
+      : scenario === 'earth-sword-and-shield'
+        ? earthSwordAndShieldDeck
       : scenario === 'earth-rescue'
         ? earthRescueDeck
       : scenario === 'earth-divine-healing'
@@ -3026,6 +3086,7 @@ function buildManifest(
       card.stableId === input.staticServant.stableId ? 1 : 0,
       card.stableId === input.gnarledWendigo.stableId ? 2 : 0,
       card.stableId === input.recklessSquire.stableId ? 1 : 0,
+      card.stableId === input.swordAndShield.stableId ? 2 : 0,
     ),
   ]));
   return {
@@ -3444,6 +3505,73 @@ function findEarthDuelMagicOpening(
     }
   }
   throw new Error('private Duel Magic scenario no longer produces its supported opening');
+}
+
+function findEarthSwordAndShieldOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  boskTrollInstanceId: string;
+  elthamTownsfolkInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northEarthSiteInstanceIds: readonly [string, string, string];
+  session: GameSession;
+  southEarthSiteInstanceIds: readonly [string, string];
+  swordAndShieldInstanceId: string;
+}> {
+  // ponytail: bounded opening scan avoids another private seed/config field.
+  for (let offset = 1; offset <= 4096; offset += 1) {
+    const built = buildManifest(input, input.config.earthSeed + offset, 'earth-sword-and-shield');
+    const session = createGameSession(built.manifest);
+    const earthSites = (seat: GameSeat) => session.state.players[seat].hand.atlas.filter(({ cardId }) => {
+      if (cardId === input.ghostTownSite.stableId) return false;
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('earth');
+    });
+    const northEarthSites = earthSites('north');
+    const southEarthSites = earthSites('south');
+    const northEarlySpells = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 1),
+    ];
+    const northLaterSpells = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 2),
+    ];
+    const southEarlySpells = [
+      ...session.state.players.south.hand.spellbook,
+      ...session.state.players.south.spellbook.slice(0, 1),
+    ];
+    const elthamTownsfolkInstanceId = northEarlySpells
+      .find(({ cardId }) => cardId === input.elthamTownsfolk.stableId)?.instanceId;
+    const swordAndShieldInstanceId = northLaterSpells
+      .find(({ cardId }) => cardId === input.swordAndShield.stableId)?.instanceId;
+    const boskTrollInstanceId = southEarlySpells
+      .find(({ cardId }) => cardId === input.firstStrikeTargetMinion.stableId)?.instanceId;
+    if (northEarthSites.length >= 3
+      && southEarthSites.length >= 2
+      && elthamTownsfolkInstanceId
+      && swordAndShieldInstanceId
+      && boskTrollInstanceId) {
+      return {
+        ...built,
+        boskTrollInstanceId,
+        elthamTownsfolkInstanceId,
+        northEarthSiteInstanceIds: [
+          northEarthSites[0]!.instanceId,
+          northEarthSites[1]!.instanceId,
+          northEarthSites[2]!.instanceId,
+        ],
+        session,
+        southEarthSiteInstanceIds: [
+          southEarthSites[0]!.instanceId,
+          southEarthSites[1]!.instanceId,
+        ],
+        swordAndShieldInstanceId,
+      };
+    }
+  }
+  throw new Error('private Sword and Shield scenario no longer produces its supported opening');
 }
 
 function findEarthOverpowerOpening(
@@ -6691,6 +6819,251 @@ function runEarthDuel(
       && boskAfter?.location === boskBefore.location
       && boskAfter.tapped === boskBefore.tapped
       && events.every(({ type }) => type !== 'unit-moved' && type !== 'unit-tapped'),
+  });
+}
+
+function runEarthSwordAndShieldSetup(
+  opening: ReturnType<typeof findEarthSwordAndShieldOpening>,
+): GameSession {
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northEarthSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southEarthSiteInstanceIds[0]
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northEarthSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.elthamTownsfolkInstanceId
+    && descriptor.cell === 'C3'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southEarthSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.boskTrollInstanceId
+    && descriptor.cell === 'C2'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northEarthSiteInstanceIds[2]
+    && descriptor.cell === 'B3');
+  return session;
+}
+
+function runEarthSwordAndShield(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthSwordAndShield'] {
+  const opening = findEarthSwordAndShieldOpening(input);
+  let session = runEarthSwordAndShieldSetup(opening);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  const sitesBeforeCombat = canonicalJson(session.state.realm.sites as unknown as JsonValue);
+  const avatarsBeforeCombat = {
+    north: {
+      life: session.state.players.north.avatar.life,
+      location: session.state.players.north.avatar.location,
+      region: session.state.players.north.avatar.region,
+    },
+    south: {
+      life: session.state.players.south.avatar.life,
+      location: session.state.players.south.avatar.location,
+      region: session.state.players.south.avatar.region,
+    },
+  };
+  const manaBefore = session.state.players.north.mana;
+  const bearerChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-artifact'
+      && descriptor.cardInstanceId === opening.swordAndShieldInstanceId
+      && descriptor.bearer?.kind === 'minion'
+      && descriptor.bearer.instanceId === opening.elthamTownsfolkInstanceId);
+  const chosenArtifact = bearerChoices[0];
+  if (!chosenArtifact) throw new Error('private Sword and Shield bearer cast is unavailable');
+  const castResult = stepGame(session, chosenArtifact);
+  if (!castResult.accepted) throw new Error('private Sword and Shield cast was rejected');
+  session = castResult.session;
+
+  const castView = observeGame(session.state, 'north');
+  const castArtifactState = session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === opening.swordAndShieldInstanceId);
+  const castArtifactView = castView.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === opening.swordAndShieldInstanceId);
+  const poweredEltham = castView.realm.units.find(({ instanceId }) =>
+    instanceId === opening.elthamTownsfolkInstanceId);
+
+  const moveResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.elthamTownsfolkInstanceId
+      && descriptor.from.cell === 'C3'
+      && descriptor.to.cell === 'C2'));
+  if (!moveResult.accepted) throw new Error('private Sword bearer move was rejected');
+  session = moveResult.session;
+  const movedView = observeGame(session.state, 'north');
+  const movedArtifact = movedView.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === opening.swordAndShieldInstanceId);
+  const movedEltham = movedView.realm.units.find(({ instanceId }) =>
+    instanceId === opening.elthamTownsfolkInstanceId);
+
+  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+    && descriptor.target.kind === 'minion'
+    && descriptor.target.instanceId === opening.boskTrollInstanceId);
+  const fightResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  if (!fightResult.accepted) throw new Error('private Sword and Shield fight was rejected');
+  session = fightResult.session;
+
+  const castEvent = castResult.receipt.events.find(({ type }) => type === 'artifact-conjured');
+  const castPayload = castEvent && isJsonRecord(castEvent.payload) ? castEvent.payload : undefined;
+  const fightEvents = fightResult.receipt.events;
+  const allocations = fightEvents.filter(({ type }) => type === 'strike-damage-allocated')
+    .flatMap(({ payload }) => isJsonRecord(payload) ? [payload] : []);
+  const damages = fightEvents.filter(({ type }) => type === 'damage-dealt')
+    .flatMap(({ payload }) => isJsonRecord(payload) ? [payload] : []);
+  const deaths = fightEvents.filter(({ type }) => type === 'minion-died')
+    .flatMap(({ payload }) => isJsonRecord(payload) ? [payload] : []);
+  const fightStartedIndex = fightEvents.findIndex(({ type }) => type === 'fight-started');
+  const firstAllocationIndex = fightEvents.findIndex(({ type }) => type === 'strike-damage-allocated');
+  const firstDamageIndex = fightEvents.findIndex(({ type }) => type === 'damage-dealt');
+  const finalArtifactState = session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === opening.swordAndShieldInstanceId);
+  const finalArtifactView = observeGame(session.state, 'north').realm.artifacts
+    ?.find(({ instanceId }) => instanceId === opening.swordAndShieldInstanceId);
+  const finalEltham = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.elthamTownsfolkInstanceId);
+  const elthamAbsentFromCemetery = session.state.players.north.cemetery.every(({ instanceId }) =>
+    instanceId !== opening.elthamTownsfolkInstanceId);
+  const boskInCemetery = session.state.players.south.cemetery.some(({ cardId, instanceId }) =>
+    cardId === input.firstStrikeTargetMinion.stableId
+      && instanceId === opening.boskTrollInstanceId);
+  const artifactAbsentFromCemeteries = (['north', 'south'] as const).every((seat) =>
+    session.state.players[seat].cemetery.every(({ instanceId }) =>
+      instanceId !== opening.swordAndShieldInstanceId));
+  const artifactCastAndCarried: boolean = castArtifactState !== undefined
+    && 'bearer' in castArtifactState
+    && castArtifactState.bearer.kind === 'minion'
+    && castArtifactState.bearer.instanceId === opening.elthamTownsfolkInstanceId
+    && castArtifactView?.bearer?.instanceId === opening.elthamTownsfolkInstanceId
+    && castArtifactView.controller === 'north'
+    && castArtifactView.location === 'C3'
+    && castArtifactView.region === 'surface'
+    && poweredEltham?.attack === 4
+    && poweredEltham.defense === 4;
+  const castEventVerified: boolean = castResult.receipt.events.length === 1
+    && castResult.receipt.events[0]?.type === 'artifact-conjured'
+    && castPayload?.cardId === input.swordAndShield.stableId
+    && castPayload.instanceId === opening.swordAndShieldInstanceId
+    && castPayload.manaPaid === 3
+    && castPayload.owner === 'north'
+    && castPayload.seat === 'north'
+    && castPayload.bearerInstanceId === opening.elthamTownsfolkInstanceId
+    && castPayload.bearerKind === 'minion'
+    && castPayload.bearerSeat === 'north';
+  const fightEventOrderVerified: boolean = fightStartedIndex >= 0
+    && fightStartedIndex < firstAllocationIndex
+    && firstAllocationIndex < firstDamageIndex
+    && fightEvents.every(({ type }) => type !== 'artifact-dropped');
+  const elthamDealtFour: boolean = allocations.some((payload) => payload.amount === 4
+    && payload.strikerInstanceId === opening.elthamTownsfolkInstanceId
+    && payload.targetInstanceId === opening.boskTrollInstanceId);
+  const damageApplied: boolean = damages.some((payload) => payload.amount === 4
+    && payload.instanceId === opening.boskTrollInstanceId)
+    && damages.some((payload) => payload.amount === 3
+      && payload.instanceId === opening.elthamTownsfolkInstanceId);
+  const deathVerified: boolean = deaths.length === 1
+    && deaths.some((payload) => payload.cardId === input.firstStrikeTargetMinion.stableId
+      && payload.instanceId === opening.boskTrollInstanceId
+      && payload.owner === 'south');
+  const combatDamageAndSurvivalVerified: boolean = allocations.length === 1
+    && elthamDealtFour
+    && damageApplied
+    && deathVerified
+    && finalEltham?.cardId === input.elthamTownsfolk.stableId
+    && finalEltham.controller === 'north'
+    && finalEltham.owner === 'north'
+    && finalEltham.location === 'C2'
+    && finalEltham.region === 'surface'
+    && finalEltham.damage === 3
+    && elthamAbsentFromCemetery
+    && session.state.realm.units.every(({ instanceId }) =>
+      instanceId !== opening.boskTrollInstanceId)
+    && boskInCemetery;
+  const exactBearerChoice: boolean = bearerChoices.length === 1
+    && chosenArtifact.descriptor.kind === 'cast-artifact'
+    && chosenArtifact.descriptor.bearer?.seat === 'north';
+  const noRandomDraws: boolean = castResult.receipt.randomDraws.length === 0
+    && moveResult.receipt.randomDraws.length === 0
+    && fightResult.receipt.randomDraws.length === 0;
+  const swordFollowedBearer: boolean = movedArtifact?.bearer?.instanceId
+    === opening.elthamTownsfolkInstanceId
+    && movedArtifact.controller === 'north'
+    && movedArtifact.location === 'C2'
+    && movedArtifact.region === 'surface'
+    && movedEltham?.location === 'C2'
+    && movedEltham.region === 'surface';
+  const swordStayedOutOfCemetery: boolean = artifactAbsentFromCemeteries
+    && session.state.players.north.hand.spellbook.every(({ instanceId }) =>
+      instanceId !== opening.swordAndShieldInstanceId)
+    && finalArtifactState !== undefined;
+  const swordRemainedCarried: boolean = finalArtifactState !== undefined
+    && 'bearer' in finalArtifactState
+    && finalArtifactState.bearer.kind === 'minion'
+    && finalArtifactState.bearer.instanceId === opening.elthamTownsfolkInstanceId
+    && finalArtifactView?.bearer?.instanceId === opening.elthamTownsfolkInstanceId
+    && finalArtifactView.controller === 'north'
+    && finalArtifactView.location === 'C2'
+    && finalArtifactView.region === 'surface';
+  const avatarsAfterCombat = {
+    north: {
+      life: session.state.players.north.avatar.life,
+      location: session.state.players.north.avatar.location,
+      region: session.state.players.north.avatar.region,
+    },
+    south: {
+      life: session.state.players.south.avatar.life,
+      location: session.state.players.south.avatar.location,
+      region: session.state.players.south.avatar.region,
+    },
+  };
+  const unrelatedStatePreserved: boolean = canonicalJson(
+    session.state.realm.sites as unknown as JsonValue,
+  ) === sitesBeforeCombat
+    && canonicalJson(avatarsAfterCombat as unknown as JsonValue)
+      === canonicalJson(avatarsBeforeCombat as unknown as JsonValue);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    artifactCastAndCarried,
+    boskTroll: input.firstStrikeTargetMinion.name,
+    causalEventsVerified: castEventVerified && fightEventOrderVerified,
+    combatDamageAndSurvivalVerified,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    elthamTownsfolk: input.elthamTownsfolk.name,
+    exactBearerChoice,
+    gameRemainedActive: session.state.terminal.status === 'active',
+    manaPaid: manaBefore - session.state.players.north.mana,
+    noRandomDraws,
+    replayVerified: verifyGameReplay(session),
+    swordAndShield: input.swordAndShield.name,
+    swordFollowedBearer,
+    swordRemainedCarried,
+    swordStayedOutOfCemetery,
+    unrelatedStatePreserved,
   });
 }
 
@@ -11848,6 +12221,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthOverpower = runEarthOverpower(input);
   const earthBury = runEarthBury(input);
   const earthDuel = runEarthDuel(input);
+  const earthSwordAndShield = runEarthSwordAndShield(input);
   const earthRescue = runEarthRescue(input);
   const earthDivineHealing = runEarthDivineHealing(input);
   const earthGrainSparrow = runEarthGrainSparrow(input);
@@ -12026,6 +12400,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthOverpower,
     earthBury,
     earthDuel,
+    earthSwordAndShield,
     earthRescue,
     earthDivineHealing,
     earthGrainSparrow,

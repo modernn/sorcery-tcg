@@ -1,7 +1,37 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { runPrivateGameCheck } from '../../src/commands/run-private-game-check.ts';
+import {
+  type PrivateGameCheck,
+  runPrivateGameCheck,
+} from '../../src/commands/run-private-game-check.ts';
+
+function assertSwordAndShield(result: PrivateGameCheck['earthSwordAndShield']): void {
+  assert.equal(result.swordAndShield, 'Sword and Shield');
+  assert.equal(result.elthamTownsfolk, 'Eltham Townsfolk');
+  assert.equal(result.boskTroll, 'Bosk Troll');
+  assert.equal(result.acceptedActionCount, 21);
+  assert.equal(result.exactBearerChoice, true);
+  assert.equal(result.manaPaid, 3);
+  assert.equal(result.artifactCastAndCarried, true);
+  assert.equal(result.swordFollowedBearer, true);
+  assert.equal(result.combatDamageAndSurvivalVerified, true);
+  assert.equal(result.swordRemainedCarried, true);
+  assert.equal(result.swordStayedOutOfCemetery, true);
+  assert.equal(result.causalEventsVerified, true);
+  assert.equal(result.unrelatedStatePreserved, true);
+  assert.equal(result.noRandomDraws, true);
+  assert.equal(result.gameRemainedActive, true);
+  assert.equal(result.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.deck.atlas.find(({ name }) => name === 'Ghost Town')?.copies, 3);
+  assert.equal(result.deck.spellbook
+    .find(({ name }) => name === 'Sword and Shield')?.copies, 3);
+  assert.equal(result.deck.spellbook
+    .find(({ name }) => name === 'Eltham Townsfolk')?.copies, 4);
+  assert.equal(result.deck.spellbook.find(({ name }) => name === 'Bosk Troll')?.copies, 4);
+  assert.equal(result.replayVerified, true);
+}
 
 test('private actual-card decks complete deterministic combat, Earth, Air, Fire, and Water scenarios', async () => {
   const result = await runPrivateGameCheck();
@@ -286,6 +316,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthOverpower.deck.spellbook
     .find(({ name }) => name === 'Eltham Townsfolk')?.copies, 4);
   assert.equal(result.earthOverpower.replayVerified, true);
+  assertSwordAndShield(result.earthSwordAndShield);
   assert.equal(result.waterEdgeConnection.polarBears, 'Polar Bears');
   assert.equal(result.waterEdgeConnection.acceptedActionCount, 16);
   assert.equal(result.waterEdgeConnection.wrapMoveAvailable, true);
