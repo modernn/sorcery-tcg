@@ -71,6 +71,7 @@ export type GameCardDefinition =
     damageTargetUnit?: number;
     disableTargetNearbyMinionUntilNextTurn?: true;
     fightAllyWithAdjacentEnemy?: true;
+    gainControlOfTargetNearbyMinion?: true;
     grantChargeToAllyThisTurn?: true;
     grantPowerToAllyThisTurn?: 2;
     healController?: number;
@@ -750,6 +751,20 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
         }).map((target) => ({ ...cast, ally, target }));
       });
     }
+    if (definition.gainControlOfTargetNearbyMinion === true) {
+      const nearby = new Set([
+        caster.location,
+        ...borderingCells(caster.location),
+        ...diagonalCells(caster.location),
+      ]);
+      return targets.filter((target) => {
+        if (target.kind !== 'minion') return false;
+        const status = unitStatus(state, target);
+        return status.region === caster.region
+          && nearby.has(status.location)
+          && (target.seat === seat || !status.stealthed);
+      }).map((target) => ({ ...cast, target }));
+    }
     if (definition.lureEnemyMinionOneStepCloser === true) {
       const choices = unitRefs(state, seat).flatMap((ally) => {
         const allyStatus = unitStatus(state, ally);
@@ -960,6 +975,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.fightAllyWithAdjacentEnemy !== true) {
       throw new RangeError(`${path}.fightAllyWithAdjacentEnemy must be true when defined`);
     }
+    if (card.gainControlOfTargetNearbyMinion !== undefined
+      && card.gainControlOfTargetNearbyMinion !== true) {
+      throw new RangeError(`${path}.gainControlOfTargetNearbyMinion must be true when defined`);
+    }
     if (card.lureEnemyMinionOneStepCloser !== undefined
       && card.lureEnemyMinionOneStepCloser !== true) {
       throw new RangeError(`${path}.lureEnemyMinionOneStepCloser must be true when defined`);
@@ -976,6 +995,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.damageTargetUnit !== undefined)
       + Number(card.disableTargetNearbyMinionUntilNextTurn === true)
       + Number(card.fightAllyWithAdjacentEnemy === true)
+      + Number(card.gainControlOfTargetNearbyMinion === true)
       + Number(card.grantChargeToAllyThisTurn === true)
       + Number(card.grantPowerToAllyThisTurn === 2)
       + Number(card.healController !== undefined)
@@ -1340,6 +1360,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? { disableTargetNearbyMinionUntilNextTurn: true as const }
                   : card.fightAllyWithAdjacentEnemy === true
                     ? { fightAllyWithAdjacentEnemy: true as const }
+                  : card.gainControlOfTargetNearbyMinion === true
+                    ? { gainControlOfTargetNearbyMinion: true as const }
                   : card.grantChargeToAllyThisTurn === true
                     ? { grantChargeToAllyThisTurn: true as const }
                   : card.grantPowerToAllyThisTurn === 2
@@ -4253,6 +4275,75 @@ function applyDescriptor(
         terminalIndex < 0
           ? [...outcomes, resolved]
           : [...outcomes.slice(0, terminalIndex), resolved, ...outcomes.slice(terminalIndex)],
+        [],
+      ];
+    }
+    if (definition.gainControlOfTargetNearbyMinion === true) {
+      if (descriptor.target?.kind !== 'minion') throw new Error('unreachable Mesmerism cast');
+      const targetIndex = castState.realm.units.findIndex(({ instanceId, controller }) =>
+        instanceId === descriptor.target!.instanceId && controller === descriptor.target!.seat);
+      const target = castState.realm.units[targetIndex];
+      if (!target) throw new Error('unreachable Mesmerism target');
+      if (target.controller === seat) {
+        return [withStateVersion(castState, {}), [...castOutcomes, resolved], []];
+      }
+      if (target.warded) {
+        const wardedState = deepFreeze({
+          ...castState,
+          realm: {
+            ...castState.realm,
+            units: castState.realm.units.map((unit, index) => index === targetIndex
+              ? deepFreeze({ ...unit, warded: false })
+              : unit),
+          },
+        });
+        return [
+          withStateVersion(wardedState, {}),
+          [
+            ...castOutcomes,
+            { payload: { instanceId: target.instanceId, seat: target.controller }, type: 'ward-broken' },
+            resolved,
+          ],
+          [],
+        ];
+      }
+      const controlledState = deepFreeze({
+        ...castState,
+        realm: {
+          ...castState.realm,
+          ...(castState.realm.artifacts
+            ? {
+              artifacts: castState.realm.artifacts.map((artifact) =>
+                'bearer' in artifact
+                  && artifact.bearer.kind === 'minion'
+                  && artifact.bearer.instanceId === target.instanceId
+                  ? deepFreeze({
+                    ...artifact,
+                    bearer: deepFreeze({ ...artifact.bearer, seat }),
+                  })
+                  : artifact),
+            }
+            : {}),
+          units: castState.realm.units.map((unit, index) => index === targetIndex
+            ? deepFreeze({ ...unit, controller: seat })
+            : unit),
+        },
+      });
+      return [
+        withStateVersion(controlledState, {}),
+        [
+          ...castOutcomes,
+          {
+            payload: {
+              fromSeat: target.controller,
+              instanceId: target.instanceId,
+              seat,
+              sourceInstanceId: card.instanceId,
+            },
+            type: 'minion-control-changed',
+          },
+          resolved,
+        ],
         [],
       ];
     }

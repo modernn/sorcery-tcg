@@ -9017,3 +9017,282 @@ test('RULE-04 a carried Lethal Artifact kills on positive strike damage and drop
   })), [{ bearer: undefined, controller: null, location: 'C3', region: 'surface' }]);
   assert.equal(verifyGameReplay(session), true);
 });
+
+test('RULE-03 Mesmerism gains permanent control of a nearby minion', () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const north: GameDeckSpec = {
+    atlas: Array(4).fill('mesmerism-north-site'),
+    avatar: 'mesmerism-north-avatar',
+    spellbook: Array(4).fill('mesmerism'),
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(4).fill('mesmerism-south-site'),
+    avatar: 'mesmerism-south-avatar',
+    spellbook: ['mesmerism-target', 'mesmerism-warded', 'mesmerism-artifact', 'mesmerism-attacker'],
+  };
+  const cards: Record<string, GameCardDefinition> = {
+    mesmerism: {
+      cardType: 'magic',
+      gainControlOfTargetNearbyMinion: true,
+      manaCost: 1,
+      thresholds: { ...thresholds, air: 1 },
+    },
+    'mesmerism-artifact': {
+      cardType: 'artifact',
+      grantsBearerPower: 2,
+      manaCost: 0,
+      thresholds,
+    },
+    'mesmerism-attacker': {
+      attack: 7,
+      cardType: 'minion',
+      defense: 10,
+      manaCost: 0,
+      movementBonus: 2,
+      summonToAnySite: true,
+      thresholds,
+    },
+    'mesmerism-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'mesmerism-north-site': {
+      cardType: 'site',
+      elements: ['air'],
+      genesisGainMana: 3,
+    },
+    'mesmerism-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'mesmerism-south-site': { cardType: 'site', elements: ['air'] },
+    'mesmerism-target': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 3,
+      lanceCount: 2,
+      manaCost: 0,
+      provides: 'fire',
+      spellcaster: true,
+      stealth: true,
+      summonToAnySite: true,
+      thresholds,
+    },
+    'mesmerism-warded': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 3,
+      manaCost: 0,
+      summonToAnySite: true,
+      thresholds,
+      ward: true,
+    },
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-mesmerism-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north' as const,
+    seed: 211,
+  };
+  const gameManifest = createGameManifest(input);
+  assert.deepEqual(gameManifest.cards.mesmerism, cards.mesmerism);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      mesmerism: {
+        cardType: 'magic',
+        gainControlOfTargetNearbyMinion: false,
+        manaCost: 1,
+        thresholds: { ...thresholds, air: 1 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /gainControlOfTargetNearbyMinion must be true/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      mesmerism: {
+        cardType: 'magic',
+        gainControlOfTargetNearbyMinion: true,
+        healController: 1,
+        manaCost: 1,
+        thresholds: { ...thresholds, air: 1 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
+
+  let session = keep(createGameSession(gameManifest));
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'mesmerism-target' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'mesmerism-warded' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'mesmerism-attacker' && descriptor.cell === 'C1');
+  const hiddenTarget = session.state.realm.units.find(({ cardId }) => cardId === 'mesmerism-target')!;
+  const wardedTarget = session.state.realm.units.find(({ cardId }) => cardId === 'mesmerism-warded')!;
+  const attacker = session.state.realm.units.find(({ cardId }) => cardId === 'mesmerism-attacker')!;
+
+  let hidden = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  hidden = accept(hidden, action(hidden, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  const hiddenTargetIds = legalGameActions(hidden.state, 'north').flatMap(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.target?.kind === 'minion'
+      ? [descriptor.target.instanceId]
+      : []);
+  assert.deepEqual([...new Set(hiddenTargetIds)], [wardedTarget.instanceId]);
+  assert.equal(verifyGameReplay(hidden), true);
+
+  take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+    && descriptor.cardId === 'mesmerism-artifact'
+    && descriptor.casterInstanceId === hiddenTarget.instanceId
+    && descriptor.bearer?.instanceId === hiddenTarget.instanceId);
+  assert.equal(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === hiddenTarget.instanceId)?.stealthed, false);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  const checkpoint = session;
+  const targetBefore = checkpoint.state.realm.units.find(({ instanceId }) =>
+    instanceId === hiddenTarget.instanceId)!;
+  const carriedBefore = checkpoint.state.realm.artifacts?.find((artifact) =>
+    'bearer' in artifact && artifact.bearer.instanceId === hiddenTarget.instanceId);
+  assert.ok(carriedBefore);
+  assert.ok('bearer' in carriedBefore);
+  const casts = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic');
+  assert.deepEqual([...new Set(casts.flatMap(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.target?.kind === 'minion'
+      ? [descriptor.target.instanceId]
+      : []))].sort(), [hiddenTarget.instanceId, wardedTarget.instanceId].sort());
+
+  const warded = stepGame(checkpoint, action(checkpoint, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.target?.instanceId === wardedTarget.instanceId));
+  assert.equal(warded.accepted, true);
+  if (!warded.accepted) return;
+  assert.deepEqual(warded.receipt.events.map(({ type }) => type), [
+    'magic-cast',
+    'ward-broken',
+    'magic-resolved',
+  ]);
+  assert.deepEqual({
+    controller: warded.session.state.realm.units.find(({ instanceId }) =>
+      instanceId === wardedTarget.instanceId)?.controller,
+    warded: warded.session.state.realm.units.find(({ instanceId }) =>
+      instanceId === wardedTarget.instanceId)?.warded,
+  }, { controller: 'south', warded: false });
+  assert.equal(verifyGameReplay(warded.session), true);
+
+  const gainedAction = action(checkpoint, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.target?.instanceId === hiddenTarget.instanceId);
+  const sourceInstanceId = gainedAction.descriptor.kind === 'cast-magic'
+    ? gainedAction.descriptor.cardInstanceId
+    : '';
+  const gained = stepGame(checkpoint, gainedAction);
+  assert.equal(gained.accepted, true);
+  if (!gained.accepted) return;
+  session = gained.session;
+  const controlled = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === hiddenTarget.instanceId)!;
+  assert.deepEqual(controlled, { ...targetBefore, controller: 'north' });
+  assert.deepEqual(gained.receipt.events.map(({ type }) => type), [
+    'magic-cast',
+    'minion-control-changed',
+    'magic-resolved',
+  ]);
+  assert.deepEqual(gained.receipt.events[1]?.payload, {
+    fromSeat: 'south',
+    instanceId: hiddenTarget.instanceId,
+    seat: 'north',
+    sourceInstanceId,
+  });
+  const carried = session.state.realm.artifacts?.find((artifact) =>
+    'bearer' in artifact && artifact.bearer.instanceId === hiddenTarget.instanceId);
+  assert.ok(carried);
+  assert.ok('bearer' in carried);
+  assert.deepEqual(carried, {
+    ...carriedBefore,
+    bearer: { ...carriedBefore.bearer, seat: 'north' },
+  });
+  const northView = observeGame(session.state, 'north');
+  assert.deepEqual({
+    artifactController: northView.realm.artifacts?.[0]?.controller,
+    artifactSeat: northView.realm.artifacts?.[0]?.bearer?.seat,
+    attack: northView.realm.units.find(({ instanceId }) =>
+      instanceId === hiddenTarget.instanceId)?.attack,
+    defense: northView.realm.units.find(({ instanceId }) =>
+      instanceId === hiddenTarget.instanceId)?.defense,
+    northFire: northView.players.north.affinity.fire,
+    southFire: northView.players.south.affinity.fire,
+  }, {
+    artifactController: 'north',
+    artifactSeat: 'north',
+    attack: 3,
+    defense: 5,
+    northFire: 1,
+    southFire: 0,
+  });
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === hiddenTarget.instanceId
+      && descriptor.to.cell === 'C3'), true);
+
+  const ownNoOp = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.target?.instanceId === hiddenTarget.instanceId));
+  assert.equal(ownNoOp.accepted, true);
+  if (!ownNoOp.accepted) return;
+  session = ownNoOp.session;
+  assert.deepEqual(ownNoOp.receipt.events.map(({ type }) => type), ['magic-cast', 'magic-resolved']);
+  assert.deepEqual(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === hiddenTarget.instanceId), controlled);
+  assert.deepEqual(session.state.realm.artifacts?.find((artifact) =>
+    'bearer' in artifact && artifact.bearer.instanceId === hiddenTarget.instanceId), carried);
+  assert.equal(gained.receipt.randomDraws.length + ownNoOp.receipt.randomDraws.length, 0);
+  assert.equal(session.state.players.north.mana, checkpoint.state.players.north.mana - 2);
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === attacker.instanceId && descriptor.to.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+    && descriptor.target.kind === 'minion'
+    && descriptor.target.instanceId === hiddenTarget.instanceId);
+  const fought = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  assert.equal(fought.accepted, true);
+  if (!fought.accepted) return;
+  session = fought.session;
+  assert.equal(session.state.realm.units.some(({ instanceId }) =>
+    instanceId === hiddenTarget.instanceId), false);
+  assert.equal(session.state.players.south.cemetery.some(({ instanceId }) =>
+    instanceId === hiddenTarget.instanceId), true);
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === hiddenTarget.instanceId), false);
+  const deathEvents = fought.receipt.events;
+  const dropIndex = deathEvents.findIndex(({ type }) => type === 'artifact-dropped');
+  const deathIndex = deathEvents.findIndex(({ payload, type }) => type === 'minion-died'
+    && canonicalJson(payload).includes(hiddenTarget.instanceId));
+  assert.ok(dropIndex >= 0 && dropIndex < deathIndex);
+  assert.equal(observeGame(session.state, 'north').realm.artifacts?.[0]?.controller, null);
+  assert.equal(verifyGameReplay(session), true);
+});

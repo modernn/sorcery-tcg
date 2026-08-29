@@ -824,6 +824,23 @@ export type PrivateGameCheck = Readonly<{
     targetCemeteriesUnchanged: boolean;
     uniqueStepResolved: boolean;
   }>;
+  waterMesmerism: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    controlTransferred: boolean;
+    deck: DeckList;
+    exactNearbyTarget: boolean;
+    farTargetUnavailable: boolean;
+    manaPaid: number;
+    mesmerism: string;
+    newControllerGainedAction: boolean;
+    noRandomDraws: boolean;
+    oldControllerHadAction: boolean;
+    oldControllerLostAction: boolean;
+    replayVerified: boolean;
+    seravaTownsfolk: string;
+    waterAffinityFour: boolean;
+  }>;
   waterPirateShip: Readonly<{
     acceptedActionCount: number;
     deck: DeckList;
@@ -1107,6 +1124,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   lightningBolt: NormalizedCard;
   lugbogCat: NormalizedCard;
   lure: NormalizedCard;
+  mesmerism: NormalizedCard;
   lumberingMinion: NormalizedCard;
   manaMinion: NormalizedCard;
   minorExplosion: NormalizedCard;
@@ -1677,6 +1695,24 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || lure.thresholds.water !== 1
     || lure.rarity !== 'ordinary') {
     throw new Error('private non-target Lure Magic no longer matches its supported facts');
+  }
+  const mesmerism = snapshot.cards.find(({ name }) => name === 'Mesmerism');
+  if (!mesmerism
+    || mesmerism.stableId !== 'card:89f8ba7cb2d53b610b0d3307c21b97ebfbddcccf56d07a1bf447e3d2b6d52847'
+    || mesmerism.cardType !== 'magic'
+    || ruleTextDigest(mesmerism.rulesText) !== 'sha256:57e334840f526cda61a847e9206c2ddd5bb88ba5babebb024339a99ebaa7a97c'
+    || mesmerism.manaCost !== 4
+    || mesmerism.attack !== null
+    || mesmerism.defense !== null
+    || mesmerism.life !== null
+    || mesmerism.elements.length !== 1
+    || mesmerism.elements[0] !== 'water'
+    || mesmerism.thresholds.air !== 0
+    || mesmerism.thresholds.earth !== 0
+    || mesmerism.thresholds.fire !== 0
+    || mesmerism.thresholds.water !== 4
+    || mesmerism.rarity !== 'unique') {
+    throw new Error('private nearby minion control Magic no longer matches its supported facts');
   }
   const pirateShip = snapshot.cards.find(({ name }) => name === 'Pirate Ship');
   if (!pirateShip
@@ -2429,6 +2465,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     lightningBolt,
     lugbogCat,
     lure,
+    mesmerism,
     lumberingMinion,
     manaMinion,
     minorExplosion,
@@ -2565,6 +2602,7 @@ function gameDefinition(
   grantsBearerLethal = false,
   siteGenesisEnemiesLoseStealth = false,
   tapToDamageEachUnitAtAdjacentLocation = false,
+  gainControlOfTargetNearbyMinion = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -2618,6 +2656,7 @@ function gameDefinition(
     + Number(healController !== 0)
     + Number(burrowTargetMinion)
     + Number(fightAllyWithAdjacentEnemy)
+    + Number(gainControlOfTargetNearbyMinion)
     + Number(leapAttackAlly);
   if (card.cardType === 'magic'
     && card.manaCost !== null
@@ -2627,6 +2666,7 @@ function gameDefinition(
       cardType: 'magic',
       ...(damageEachAbovegroundMinion !== 0 ? { damageEachAbovegroundMinion } : {}),
       ...(fightAllyWithAdjacentEnemy ? { fightAllyWithAdjacentEnemy: true } : {}),
+      ...(gainControlOfTargetNearbyMinion ? { gainControlOfTargetNearbyMinion: true } : {}),
       ...(grantPowerToAllyThisTurn !== 0 ? { grantPowerToAllyThisTurn } : {}),
       ...(leapAttackAlly ? { leapAttackAlly: true } : {}),
       ...(submergeTargetMinion ? { submergeTargetMinion: true } : {}),
@@ -2719,7 +2759,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -3004,6 +3044,12 @@ function buildManifest(
     input.seravaTownsfolk,
   ], [], [input.freeze]);
   const waterLureDeck = elementalDeck('water', [input.seravaTownsfolk], [], [input.lure]);
+  const waterMesmerismDeck = elementalDeck(
+    'water',
+    [input.seravaTownsfolk],
+    [input.stream],
+    [input.mesmerism],
+  );
   const waterPirateShipDeck = elementalDeck(
     'water',
     [input.pirateShip],
@@ -3144,6 +3190,8 @@ function buildManifest(
           ? waterGnarledWendigoDeck
         : scenario === 'water-lure'
           ? waterLureDeck
+        : scenario === 'water-mesmerism'
+          ? waterMesmerismDeck
         : scenario === 'water-pirate-ship'
           ? waterPirateShipDeck
         : scenario === 'water-lugbog'
@@ -3191,6 +3239,8 @@ function buildManifest(
         ? waterGnarledWendigoDeck
       : scenario === 'water-lure'
         ? waterLureDeck
+      : scenario === 'water-mesmerism'
+        ? waterMesmerismDeck
       : scenario === 'water-pirate-ship'
         ? waterPirateShipDeck
       : scenario === 'water-lugbog'
@@ -3334,6 +3384,7 @@ function buildManifest(
       card.stableId === input.poisonousDagger.stableId,
       card.stableId === input.huntersLodge.stableId,
       card.stableId === input.vikings.stableId,
+      card.stableId === input.mesmerism.stableId,
     ),
   ]));
   return {
@@ -6109,6 +6160,64 @@ function findWaterLureOpening(
     }
   }
   throw new Error('private non-target Lure scenario no longer produces its supported opening');
+}
+
+function findWaterMesmerismOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  farSeravaInstanceId: string;
+  manifest: GameManifest;
+  mesmerismInstanceId: string;
+  names: ReadonlyMap<string, string>;
+  nearbySeravaInstanceId: string;
+  northSiteInstanceIds: readonly [string, string, string, string];
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string];
+}> {
+  // ponytail: bounded opening scan avoids another private seed field.
+  for (let offset = 1; offset <= 4096; offset += 1) {
+    const built = buildManifest(input, input.config.waterSeed + offset, 'water-mesmerism');
+    const session = createGameSession(built.manifest);
+    const northSites = [
+      ...session.state.players.north.hand.atlas,
+      ...session.state.players.north.atlas.slice(0, 1),
+    ].filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('water');
+    });
+    const southSites = session.state.players.south.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('water');
+    });
+    const mesmerismInstanceId = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 3),
+    ].find(({ cardId }) => cardId === input.mesmerism.stableId)?.instanceId;
+    const seravas = [
+      ...session.state.players.south.hand.spellbook,
+      ...session.state.players.south.spellbook.slice(0, 3),
+    ].filter(({ cardId }) => cardId === input.seravaTownsfolk.stableId);
+    if (northSites.length >= 4
+      && southSites.length >= 2
+      && mesmerismInstanceId
+      && seravas.length >= 2) {
+      return {
+        ...built,
+        farSeravaInstanceId: seravas[0]!.instanceId,
+        mesmerismInstanceId,
+        nearbySeravaInstanceId: seravas[1]!.instanceId,
+        northSiteInstanceIds: [
+          northSites[0]!.instanceId,
+          northSites[1]!.instanceId,
+          northSites[2]!.instanceId,
+          northSites[3]!.instanceId,
+        ],
+        session,
+        southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
+      };
+    }
+  }
+  throw new Error('private nearby minion control Magic scenario lacks its supported opening');
 }
 
 function findWaterPirateShipOpening(
@@ -12696,6 +12805,172 @@ function runWaterLure(
   });
 }
 
+function runWaterMesmerismSetup(
+  opening: ReturnType<typeof findWaterMesmerismOpening>,
+): GameSession {
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+    && descriptor.cell === 'B3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.farSeravaInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.nearbySeravaInstanceId
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[3]
+    && descriptor.cell === 'A3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === session.state.players.north.avatar.card.instanceId
+    && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  return session;
+}
+
+function runWaterMesmerism(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['waterMesmerism'] {
+  const opening = findWaterMesmerismOpening(input);
+  let session = runWaterMesmerismSetup(opening);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  const targetBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.nearbySeravaInstanceId);
+  const farBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.farSeravaInstanceId);
+  if (!targetBefore || !farBefore) throw new Error('private Mesmerism setup lacks its Seravas');
+  const oldControllerHadAction = targetBefore.controller === 'south'
+    && !targetBefore.summoningSickness
+    && !targetBefore.tapped;
+  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.mesmerismInstanceId);
+  const chosen = choices.find(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.target?.kind === 'minion'
+    && descriptor.target.instanceId === opening.nearbySeravaInstanceId
+    && descriptor.target.seat === 'south');
+  if (!chosen || choices.length !== 1) {
+    throw new Error('private Mesmerism exact nearby target is not uniquely available');
+  }
+  const manaBefore = session.state.players.north.mana;
+  const affinityBefore = observeGame(session.state, 'north').players.north.affinity.water;
+  const cast = stepGame(session, chosen);
+  if (!cast.accepted) throw new Error('private Mesmerism cast was rejected');
+  session = cast.session;
+  const manaAfterCast = session.state.players.north.mana;
+
+  const targetAfter = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.nearbySeravaInstanceId);
+  const farAfter = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.farSeravaInstanceId);
+  if (!targetAfter || !farAfter) throw new Error('private Mesmerism removed a Serava');
+  const newControllerGainedAction = legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.nearbySeravaInstanceId);
+  const events = cast.receipt.events;
+  const castPayload = events[0] && isJsonRecord(events[0].payload) ? events[0].payload : undefined;
+  const changedPayload = events[1] && isJsonRecord(events[1].payload)
+    ? events[1].payload
+    : undefined;
+  const resolvedPayload = events[2] && isJsonRecord(events[2].payload)
+    ? events[2].payload
+    : undefined;
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const southActions = legalGameActions(session.state, 'south');
+  const causalEventsVerified: boolean = events.map(({ type }) => type).join(',')
+    === 'magic-cast,minion-control-changed,magic-resolved'
+    && castPayload?.instanceId === opening.mesmerismInstanceId
+    && castPayload.manaPaid === 4
+    && castPayload.seat === 'north'
+    && castPayload.targetInstanceId === opening.nearbySeravaInstanceId
+    && castPayload.targetSeat === 'south'
+    && changedPayload?.fromSeat === 'south'
+    && changedPayload.instanceId === opening.nearbySeravaInstanceId
+    && changedPayload.seat === 'north'
+    && changedPayload.sourceInstanceId === opening.mesmerismInstanceId
+    && resolvedPayload?.instanceId === opening.mesmerismInstanceId;
+  const controlTransferred: boolean = targetBefore.owner === 'south'
+    && targetBefore.controller === 'south'
+    && targetAfter.owner === 'south'
+    && targetAfter.controller === 'north'
+    && targetAfter.cardId === targetBefore.cardId
+    && targetAfter.location === targetBefore.location
+    && targetAfter.region === targetBefore.region
+    && targetAfter.damage === targetBefore.damage
+    && targetAfter.stealthed === targetBefore.stealthed
+    && targetAfter.summoningSickness === targetBefore.summoningSickness
+    && targetAfter.tapped === targetBefore.tapped
+    && targetAfter.warded === targetBefore.warded
+    && farAfter.owner === farBefore.owner
+    && farAfter.controller === farBefore.controller;
+  const exactNearbyTarget: boolean = targetBefore.location === 'C2'
+    && targetBefore.region === 'surface'
+    && choices.length === 1;
+  const farTargetUnavailable: boolean = farBefore.location === 'C1'
+    && choices.every(({ descriptor }) => descriptor.kind === 'cast-magic'
+      && descriptor.target?.instanceId !== opening.farSeravaInstanceId);
+  const oldControllerLostAction: boolean = southActions.every(({ descriptor }) =>
+    descriptor.kind !== 'move-and-attack'
+      || descriptor.unitInstanceId !== opening.nearbySeravaInstanceId)
+    && southActions.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.farSeravaInstanceId);
+  const waterAffinityFour: boolean = affinityBefore === 4;
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified,
+    controlTransferred,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    exactNearbyTarget,
+    farTargetUnavailable,
+    manaPaid: manaBefore - manaAfterCast,
+    mesmerism: input.mesmerism.name,
+    newControllerGainedAction,
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    oldControllerHadAction,
+    oldControllerLostAction,
+    replayVerified: verifyGameReplay(session),
+    seravaTownsfolk: input.seravaTownsfolk.name,
+    waterAffinityFour,
+  });
+}
+
 function runWaterPirateShip(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['waterPirateShip'] {
@@ -13189,6 +13464,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const waterEdgeConnection = runWaterEdgeConnection(input);
   const waterLugbog = runWaterLugbog(input);
   const waterLure = runWaterLure(input);
+  const waterMesmerism = runWaterMesmerism(input);
   const waterPirateShip = runWaterPirateShip(input);
   const waterEndTurnStealth = runWaterEndTurnStealth(input);
   const waterFreeze = runWaterFreeze(input);
@@ -13404,6 +13680,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     waterEdgeConnection,
     waterLugbog,
     waterLure,
+    waterMesmerism,
     waterPirateShip,
     waterEndTurnStealth,
     waterFreeze,
