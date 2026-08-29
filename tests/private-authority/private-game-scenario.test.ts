@@ -696,6 +696,28 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.fireLeapAttack.deck.spellbook
     .find(({ name }) => name === 'Raal Dromedary')?.copies, 4);
   assert.equal(result.fireLeapAttack.replayVerified, true);
+  assert.equal(result.fireRecklessSquire.recklessSquire, 'Reckless Squire');
+  assert.equal(result.fireRecklessSquire.raalDromedary, 'Raal Dromedary');
+  assert.equal(result.fireRecklessSquire.acceptedActionCount, 27);
+  assert.equal(result.fireRecklessSquire.lanceCreatedAndCarried, true);
+  assert.equal(result.fireRecklessSquire.firstStrikeLanceDamage, true);
+  assert.equal(result.fireRecklessSquire.lanceUsedAndRemoved, true);
+  assert.equal(result.fireRecklessSquire.secondStrikeNormal, true);
+  assert.equal(result.fireRecklessSquire.causalEventsVerified, true);
+  assert.equal(result.fireRecklessSquire.stateAndCemeteriesVerified, true);
+  assert.equal(result.fireRecklessSquire.noRandomDraws, true);
+  assert.equal(result.fireRecklessSquire.gameRemainedActive, true);
+  assert.equal(result.fireRecklessSquire.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.fireRecklessSquire.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.fireRecklessSquire.deck.atlas
+    .find(({ name }) => name === 'Ghost Town')?.copies, 3);
+  assert.equal(result.fireRecklessSquire.deck.spellbook
+    .find(({ name }) => name === 'Reckless Squire')?.copies, 4);
+  assert.equal(result.fireRecklessSquire.deck.spellbook
+    .find(({ name }) => name === 'Raal Dromedary')?.copies, 4);
+  assert.equal(result.fireRecklessSquire.replayVerified, true);
   assert.equal(result.fireGenesisLifeLoss.lesserBloodDemon, 'Lesser Blood Demon');
   assert.equal(result.fireGenesisLifeLoss.acceptedActionCount, 10);
   assert.equal(result.fireGenesisLifeLoss.summonedAtC3, true);

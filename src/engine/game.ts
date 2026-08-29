@@ -92,6 +92,7 @@ export type GameCardDefinition =
     genesisLoseControllerLife?: 2;
     gainsStealthAtEndOfTurn?: boolean;
     immobile?: boolean;
+    lanceCount?: 1 | 2 | 3;
     lethal?: boolean;
     manaCost: number;
     movementBonus?: 1 | 2;
@@ -164,6 +165,8 @@ type DisableEffect = Readonly<{
 }>;
 
 type UnitInstance = Readonly<CardInstance & {
+  // ponytail: intrinsic Lance marks omit Artifact transfer/drop; promote them to realm Artifacts when a supported card needs it.
+  carriedLanceCount?: number;
   controller: GameSeat;
   damage: number;
   disableEffects?: readonly DisableEffect[];
@@ -306,6 +309,7 @@ export type GameObservation = Readonly<{
     units: readonly Readonly<{
       attack: number;
       cardId: string;
+      carriedLanceCount?: number;
       controller: GameSeat;
       damage: number;
       defense: number;
@@ -1022,6 +1026,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.immobile !== undefined && typeof card.immobile !== 'boolean') {
     throw new RangeError(`${path}.immobile must be boolean`);
   }
+  if (card.lanceCount !== undefined
+    && (!Number.isSafeInteger(card.lanceCount) || card.lanceCount < 1 || card.lanceCount > 3)) {
+    throw new RangeError(`${path}.lanceCount must be a safe integer between 1 and 3`);
+  }
   if (card.movementBonus !== undefined
     && (!Number.isSafeInteger(card.movementBonus)
       || card.movementBonus < 1
@@ -1264,6 +1272,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.genesisLoseControllerLife === 2 ? { genesisLoseControllerLife: 2 as const } : {}),
             ...(card.gainsStealthAtEndOfTurn === true ? { gainsStealthAtEndOfTurn: true } : {}),
             ...(card.immobile === true ? { immobile: true } : {}),
+            ...(card.lanceCount !== undefined ? { lanceCount: card.lanceCount } : {}),
             ...(card.lethal === true ? { lethal: true } : {}),
             manaCost: card.manaCost,
             ...(card.movementBonus ? { movementBonus: card.movementBonus } : {}),
@@ -1564,6 +1573,7 @@ export function observeGame(state: GameState, viewer: GameSeat): GameObservation
     return {
       attack: status.attack,
       cardId: unit.cardId,
+      ...(unit.carriedLanceCount ? { carriedLanceCount: unit.carriedLanceCount } : {}),
       controller: unit.controller,
       damage: unit.damage,
       defense: status.defense,
@@ -1737,6 +1747,16 @@ function unitStatus(
     tapped: unit.tapped,
     voidwalk: !disabled && definition.voidwalk === true,
   };
+}
+
+function carriedLanceCount(state: GameState, ref: GameUnitRef): number {
+  return ref.kind === 'minion'
+    ? state.realm.units.find(({ instanceId }) => instanceId === ref.instanceId)?.carriedLanceCount ?? 0
+    : 0;
+}
+
+function strikeDamage(state: GameState, ref: GameUnitRef): number {
+  return unitStatus(state, ref).attack + carriedLanceCount(state, ref);
 }
 
 function readyUnit(state: GameState, ref: GameUnitRef): boolean {
@@ -2192,7 +2212,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     const target = pending.combatants[pending.allocations.length];
     if (!target) throw new Error('unreachable completed strike allocation');
     const assigned = pending.allocations.reduce((total, allocation) => total + allocation.amount, 0);
-    const remaining = unitStatus(state, pending.attacker).attack - assigned;
+    const remaining = strikeDamage(state, pending.attacker) - assigned;
     const last = pending.allocations.length === pending.combatants.length - 1;
     const amounts = last ? [remaining] : Array.from({ length: remaining + 1 }, (_, amount) => amount);
     return amounts.map((amount) => ({
@@ -2874,7 +2894,7 @@ function resolveFightWindow(
   pending: PendingCombat,
   outcomes: readonly GameOutcome[],
   attackerStrikes: boolean,
-  combatantsStrike: boolean,
+  combatantsStrike: boolean | readonly GameUnitRef[],
   interactingRefs?: readonly GameUnitRef[],
   allocationsAreStrikes = true,
 ): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
@@ -2884,13 +2904,15 @@ function resolveFightWindow(
   const lethalDamage = new Set<StateHash>();
   const attackerStatus = unitStatus(state, pending.attacker);
   const attackerCanStrike = attackerStrikes && !attackerStatus.disabled;
-  const strikingCombatants = combatantsStrike
-    ? pending.combatants.filter((ref) => !unitStatus(state, ref).disabled)
-    : [];
+  const requestedCombatants = typeof combatantsStrike === 'boolean'
+    ? combatantsStrike ? pending.combatants : []
+    : combatantsStrike;
+  const strikingCombatants = requestedCombatants
+    .filter((ref) => !unitStatus(state, ref).disabled);
   if (strikingCombatants.length > 0) {
     damage.set(
       pending.attacker.instanceId,
-      strikingCombatants.reduce((total, ref) => total + unitStatus(state, ref).attack, 0),
+      strikingCombatants.reduce((total, ref) => total + strikeDamage(state, ref), 0),
     );
   }
   if (attackerCanStrike) {
@@ -2900,7 +2922,7 @@ function resolveFightWindow(
     const striker = unitStatus(state, ref);
     if (strikingCombatants.some(({ instanceId }) => instanceId === ref.instanceId)
       && striker.lethal
-      && striker.attack > 0) lethalDamage.add(pending.attacker.instanceId);
+      && strikeDamage(state, ref) > 0) lethalDamage.add(pending.attacker.instanceId);
     if (attackerCanStrike
       && allocationsAreStrikes
       && attackerStatus.lethal
@@ -3013,6 +3035,32 @@ function resolveFightWindow(
   }
   damageOutcomes.push(...stealthOutcomes);
 
+  const lanceOutcomes: GameOutcome[] = [];
+  if (allocationsAreStrikes) {
+    const strikers = [
+      ...(attackerCanStrike ? [pending.attacker] : []),
+      ...strikingCombatants,
+    ];
+    for (const ref of strikers) {
+      const count = carriedLanceCount(state, ref);
+      if (ref.kind !== 'minion' || count === 0) continue;
+      units = units.map((unit) => {
+        if (unit.instanceId !== ref.instanceId) return unit;
+        const cleared = { ...unit };
+        delete cleared.carriedLanceCount;
+        return deepFreeze(cleared);
+      });
+      lanceOutcomes.push({
+        payload: {
+          bearerInstanceId: ref.instanceId,
+          count,
+          sourceInstanceId: ref.instanceId,
+        },
+        type: 'lance-broken',
+      });
+    }
+  }
+
   const deathResolution = resolveMinionDeaths(state, players, units, deaths, defeatedAvatars);
 
   return [
@@ -3025,7 +3073,7 @@ function resolveFightWindow(
       realm: { ...state.realm, units: deathResolution.units },
       terminal: deathResolution.terminal,
     }),
-    [...outcomes, ...damageOutcomes, ...deathResolution.outcomes],
+    [...outcomes, ...damageOutcomes, ...lanceOutcomes, ...deathResolution.outcomes],
     [],
   ];
 }
@@ -3037,26 +3085,36 @@ function finishFight(
   returnStrikes = true,
 ): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
   const attacker = unitStatus(state, pending.attacker);
-  if (returnStrikes && attacker.strikesFirstWhileAttacking) {
+  const attackerStrikesFirst = returnStrikes
+    && !attacker.disabled
+    && (attacker.strikesFirstWhileAttacking || carriedLanceCount(state, pending.attacker) > 0);
+  const firstCombatants = returnStrikes
+    ? pending.combatants.filter((ref) =>
+      !unitStatus(state, ref).disabled && carriedLanceCount(state, ref) > 0)
+    : [];
+  if (attackerStrikesFirst || firstCombatants.length > 0) {
     const [earlyState, earlyOutcomes, earlyDraws] = resolveFightWindow(
       state,
       pending,
       outcomes,
-      true,
-      false,
+      attackerStrikesFirst,
+      firstCombatants,
     );
     const survivors = pending.combatants.filter((ref) =>
       ref.kind === 'avatar'
         || earlyState.realm.units.some(({ instanceId }) => instanceId === ref.instanceId));
-    if (earlyState.terminal.status === 'finished' || survivors.length === 0) {
+    const attackerSurvived = pending.attacker.kind === 'avatar'
+      || earlyState.realm.units.some(({ instanceId }) => instanceId === pending.attacker.instanceId);
+    if (earlyState.terminal.status === 'finished' || !attackerSurvived || survivors.length === 0) {
       return [withStateVersion(earlyState, {}), earlyOutcomes, earlyDraws];
     }
+    const firstIds = new Set(firstCombatants.map(({ instanceId }) => instanceId));
     const [resolved, resolvedOutcomes, normalDraws] = resolveFightWindow(
       earlyState,
       deepFreeze({ ...pending, combatants: survivors }),
       earlyOutcomes,
-      false,
-      true,
+      !attackerStrikesFirst,
+      survivors.filter(({ instanceId }) => !firstIds.has(instanceId)),
     );
     return [withStateVersion(resolved, {}), resolvedOutcomes, [...earlyDraws, ...normalDraws]];
   }
@@ -3087,7 +3145,7 @@ function beginFight(
     type: 'fight-started',
   };
   if (ordered.length === 1) {
-    const amount = unitStatus(state, pending.attacker).attack;
+    const amount = strikeDamage(state, pending.attacker);
     const allocated = deepFreeze({
       ...fight,
       allocations: [{ amount, targetInstanceId: ordered[0]!.instanceId }],
@@ -3720,9 +3778,10 @@ function applyDescriptor(
           [],
         ];
       }
+      const amount = strikeDamage(path.state, descriptor.ally);
       const pending: PendingCombat = deepFreeze({
         allocations: enemies.map(({ instanceId }) => ({
-          amount: striker.attack,
+          amount,
           targetInstanceId: instanceId,
         })),
         attacker: descriptor.ally,
@@ -3736,7 +3795,7 @@ function applyDescriptor(
       });
       const allocationOutcomes: readonly GameOutcome[] = enemies.map(({ instanceId }) => ({
         payload: {
-          amount: striker.attack,
+          amount,
           strikerInstanceId: descriptor.ally!.instanceId,
           targetInstanceId: instanceId,
         },
@@ -3792,7 +3851,7 @@ function applyDescriptor(
           ];
         }
       }
-      const amount = allyStatus.attack;
+      const amount = strikeDamage(castState, descriptor.ally);
       const pending: PendingCombat = deepFreeze({
         allocations: [{ amount, targetInstanceId: descriptor.target.instanceId }],
         attacker: descriptor.ally,
@@ -3804,33 +3863,17 @@ function applyDescriptor(
         ...(allyStatus.region === 'surface' ? {} : { region: allyStatus.region }),
         targetRemoved: false,
       });
-      const [foughtState, fightOutcomes, randomDraws] = resolveFightWindow(
+      const [foughtState, fightOutcomes, randomDraws] = beginFight(
         castState,
         pending,
+        [descriptor.target],
         [
           ...castOutcomes,
-          {
-            payload: {
-              attackerInstanceId: descriptor.ally.instanceId,
-              combatantInstanceIds: [descriptor.target.instanceId],
-            },
-            type: 'fight-started',
-          },
-          {
-            payload: {
-              amount,
-              strikerInstanceId: descriptor.ally.instanceId,
-              targetInstanceId: descriptor.target.instanceId,
-            },
-            type: 'strike-damage-allocated',
-          },
         ],
-        true,
-        true,
       );
       const terminalIndex = fightOutcomes.findIndex(({ type }) => type === 'game-ended');
       return [
-        withStateVersion(foughtState, {}),
+        foughtState,
         terminalIndex < 0
           ? [...fightOutcomes, resolved]
           : [
@@ -4073,6 +4116,7 @@ function applyDescriptor(
         true,
         false,
         [caster],
+        false,
       );
       const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
       return [
@@ -4127,6 +4171,7 @@ function applyDescriptor(
         true,
         false,
         [caster],
+        false,
       );
       const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
       return [
@@ -4185,6 +4230,7 @@ function applyDescriptor(
         true,
         false,
         [caster],
+        false,
       );
       const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
       return [
@@ -4225,6 +4271,7 @@ function applyDescriptor(
       true,
       false,
       [caster],
+      false,
     );
     const survivingTarget = definition.untapTargetMinionAfterDamage === true
       && targetRef.kind === 'minion'
@@ -4329,6 +4376,7 @@ function applyDescriptor(
     const paymentRandomDraws = randomCost?.randomDraws ?? [];
     const unit: UnitInstance = deepFreeze({
       ...card,
+      ...(definition.lanceCount ? { carriedLanceCount: definition.lanceCount } : {}),
       controller: seat,
       damage: 0,
       location: descriptor.cell,
@@ -4416,7 +4464,21 @@ function applyDescriptor(
       },
       type: 'minion-summoned',
     };
-    const summonOutcomes = [...paymentOutcomes, ...casterStealthOutcomes, summoned];
+    const summonOutcomes = [
+      ...paymentOutcomes,
+      ...casterStealthOutcomes,
+      summoned,
+      ...(definition.lanceCount
+        ? [{
+          payload: {
+            bearerInstanceId: unit.instanceId,
+            count: definition.lanceCount,
+            sourceInstanceId: unit.instanceId,
+          },
+          type: 'lance-gained',
+        }]
+        : []),
+    ];
     const summonedState = deepFreeze({
       ...resolvedPaymentState,
       realm,
@@ -4686,7 +4748,7 @@ function applyDescriptor(
     if (!descriptor.hit) {
       return [withStateVersion(shotState, {}), [shot, ...stealthOutcomes], []];
     }
-    const amount = shooterStatus.attack;
+    const amount = strikeDamage(shotState, shooter);
     const strike: GameOutcome = {
       payload: {
         amount,
