@@ -9225,7 +9225,7 @@ test('RULE-01 attempting to draw from an empty deck immediately loses', () => {
   assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-04 Pick Up carries any local Artifact once per unit turn and preserves bearer rules', () => {
+test('RULE-04 Pick Up and Drop manage local carried Artifacts once per unit turn', () => {
   const north: GameDeckSpec = {
     atlas: Array(6).fill('artifact-north-site'),
     avatar: 'artifact-north-avatar',
@@ -9234,7 +9234,7 @@ test('RULE-04 Pick Up carries any local Artifact once per unit turn and preserve
   const south: GameDeckSpec = {
     atlas: Array(6).fill('artifact-south-site'),
     avatar: 'artifact-south-avatar',
-    spellbook: Array(4).fill('artifact-enemy'),
+    spellbook: ['artifact-enemy', 'artifact-enemy', 'artifact-enemy', 'artifact-dummy'],
   };
   const cards: Record<string, GameCardDefinition> = {
     'artifact-bearer': {
@@ -9244,7 +9244,15 @@ test('RULE-04 Pick Up carries any local Artifact once per unit turn and preserve
       manaCost: 1,
       spellcaster: true,
       stealth: true,
+      tapForMana: 1,
       thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+    'artifact-dummy': {
+      attack: 0,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
     },
     'artifact-enemy': {
       attack: 7,
@@ -9332,6 +9340,9 @@ test('RULE-04 Pick Up carries any local Artifact once per unit turn and preserve
   const pickupDescriptors = (checkpoint: GameSession) =>
     legalGameActions(checkpoint.state, checkpoint.state.decisionSeat)
       .flatMap(({ descriptor }) => descriptor.kind === 'pick-up-artifacts' ? [descriptor] : []);
+  const dropDescriptors = (checkpoint: GameSession) =>
+    legalGameActions(checkpoint.state, checkpoint.state.decisionSeat)
+      .flatMap(({ descriptor }) => descriptor.kind === 'drop-artifacts' ? [descriptor] : []);
   const expectedSubsets = [
     artifactInstanceIds[0],
     artifactInstanceIds[1],
@@ -9401,6 +9412,59 @@ test('RULE-04 Pick Up carries any local Artifact once per unit turn and preserve
   assert.equal(enemyOwnedPick.session.state.realm.units.find(({ instanceId }) =>
     instanceId === bearer.instanceId)?.tapped, true);
 
+  const readyAvatar = { ...filteredCheckpoint.state.players.north.avatar };
+  delete readyAvatar.lastInteractedTurn;
+  const avatarRef = {
+    instanceId: readyAvatar.card.instanceId,
+    kind: 'avatar' as const,
+    seat: 'north' as const,
+  };
+  const minionRef = { instanceId: bearer.instanceId, kind: 'minion' as const, seat: 'north' as const };
+  const dropReady: GameSession = {
+    ...filteredCheckpoint,
+    state: {
+      ...filteredCheckpoint.state,
+      players: {
+        ...filteredCheckpoint.state.players,
+        north: { ...filteredCheckpoint.state.players.north, avatar: readyAvatar },
+      },
+      realm: {
+        ...filteredCheckpoint.state.realm,
+        artifacts: [
+          ...surfaceArtifacts.map((artifact) => ({
+            bearer: minionRef,
+            cardId: artifact.cardId,
+            instanceId: artifact.instanceId,
+            owner: artifact.owner,
+            source: artifact.source,
+          })),
+          ...[remoteId, underwaterId].map((instanceId) => ({
+            bearer: avatarRef,
+            cardId: firstArtifact.cardId,
+            instanceId,
+            owner: firstArtifact.owner,
+            source: firstArtifact.source,
+          })),
+        ],
+      },
+    },
+  };
+  const initialDrops = dropDescriptors(dropReady);
+  assert.equal(initialDrops.length, 6);
+  assert.deepEqual(initialDrops.filter(({ unit }) => unit.kind === 'minion')
+    .map(({ artifactInstanceIds: ids }) => ids.join(',')).sort(), expectedSubsets);
+  assert.deepEqual(initialDrops.filter(({ unit }) => unit.kind === 'avatar')
+    .map(({ artifactInstanceIds: ids }) => ids.join(',')).sort(), [
+    remoteId,
+    underwaterId,
+    [remoteId, underwaterId].sort().join(','),
+  ].sort());
+  const droppedOnce = accept(dropReady, action(dropReady, ({ descriptor }) =>
+    descriptor.kind === 'drop-artifacts'
+      && descriptor.unit.kind === 'minion'
+      && descriptor.artifactInstanceIds.length === 1));
+  assert.equal(dropDescriptors(droppedOnce).some(({ unit }) => unit.kind === 'minion'), false);
+
   const disabledCheckpoint: GameSession = {
     ...session,
     state: {
@@ -9418,6 +9482,14 @@ test('RULE-04 Pick Up carries any local Artifact once per unit turn and preserve
   };
   assert.deepEqual(pickupDescriptors(disabledCheckpoint).map(({ unit }) => unit.kind),
     ['avatar', 'avatar', 'avatar']);
+  const disabledDrop: GameSession = {
+    ...dropReady,
+    state: {
+      ...dropReady.state,
+      realm: { ...dropReady.state.realm, units: disabledCheckpoint.state.realm.units },
+    },
+  };
+  assert.equal(dropDescriptors(disabledDrop).some(({ unit }) => unit.kind === 'minion'), false);
 
   const beforeForge = hashGameState(session.state);
   const forged = stepGame(session, {
@@ -9459,6 +9531,44 @@ test('RULE-04 Pick Up carries any local Artifact once per unit turn and preserve
   }]);
   assert.equal(session.state.realm.artifacts?.find(({ instanceId }) =>
     instanceId === artifactInstanceIds[0])?.owner, 'north');
+  const voluntarilyDropped = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'drop-artifacts'
+      && descriptor.unit.instanceId === bearer.instanceId
+      && descriptor.artifactInstanceIds[0] === artifactInstanceIds[0]));
+  assert.equal(voluntarilyDropped.accepted, true);
+  if (!voluntarilyDropped.accepted) throw new Error('expected voluntary Artifact Drop to be accepted');
+  assert.deepEqual(voluntarilyDropped.receipt.events.map(({ payload, type }) => ({ payload, type })), [{
+    payload: {
+      artifactInstanceIds: [artifactInstanceIds[0]],
+      seat: 'north',
+      unitInstanceId: bearer.instanceId,
+      unitKind: 'minion',
+    },
+    type: 'artifacts-dropped',
+  }]);
+  assert.deepEqual(voluntarilyDropped.receipt.randomDraws, []);
+  assert.deepEqual(observeGame(voluntarilyDropped.session.state, 'north').realm.artifacts
+    ?.filter(({ instanceId }) => instanceId === artifactInstanceIds[0])
+    .map(({ bearer: droppedBearer, controller, location, owner, region }) => ({
+      bearer: droppedBearer,
+      controller,
+      location,
+      owner,
+      region,
+    })), [{
+    bearer: undefined,
+    controller: null,
+    location: 'C4',
+    owner: 'north',
+    region: 'surface',
+  }]);
+  assert.deepEqual(voluntarilyDropped.session.state.realm.units
+    .filter(({ instanceId }) => instanceId === bearer.instanceId)
+    .map(({ damage, stealthed, summoningSickness, tapped }) => ({
+      damage, stealthed, summoningSickness, tapped,
+    })), [{ damage: 0, stealthed: true, summoningSickness: true, tapped: false }]);
+  assert.equal(voluntarilyDropped.session.state.players.north.mana, manaBeforePickUp);
+  assert.equal(verifyGameReplay(voluntarilyDropped.session), true);
   assert.equal(pickupDescriptors(session).some(({ unit }) => unit.kind === 'minion'), false);
   assert.equal(pickupDescriptors(session).some(({ unit }) => unit.kind === 'avatar'), true);
   let northView = observeGame(session.state, 'north');
@@ -9481,6 +9591,54 @@ test('RULE-04 Pick Up carries any local Artifact once per unit turn and preserve
   if (!pickedAgain.accepted) throw new Error('expected next-turn Artifact Pick Up to be accepted');
   session = pickedAgain.session;
   assert.deepEqual(pickedAgain.receipt.randomDraws, []);
+  let movedOnly = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === bearer.instanceId
+      && descriptor.to.cell === 'C3'));
+  movedOnly = accept(movedOnly, action(movedOnly, ({ descriptor }) =>
+    descriptor.kind === 'decline-attack'));
+  assert.equal(dropDescriptors(movedOnly).some(({ unit }) => unit.instanceId === bearer.instanceId), true);
+  assert.equal(movedOnly.state.realm.units.find(({ instanceId }) =>
+    instanceId === bearer.instanceId)?.stealthed, true);
+
+  const activated = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'activate-mana' && descriptor.unitInstanceId === bearer.instanceId));
+  assert.equal(dropDescriptors(activated).some(({ unit }) => unit.instanceId === bearer.instanceId), false);
+
+  const dummyCard = [
+    ...session.state.players.south.hand.spellbook,
+    ...session.state.players.south.spellbook,
+  ].find(({ cardId }) => cardId === 'artifact-dummy');
+  assert.ok(dummyCard);
+  const strikeCheckpoint: GameSession = {
+    ...session,
+    state: {
+      ...session.state,
+      realm: {
+        ...session.state.realm,
+        units: [...session.state.realm.units, {
+          ...dummyCard,
+          controller: 'south',
+          damage: 0,
+          location: 'C4',
+          region: 'surface',
+          stealthed: false,
+          summoningSickness: false,
+          tapped: false,
+          warded: false,
+        }],
+      },
+    },
+  };
+  let struck = accept(strikeCheckpoint, action(strikeCheckpoint, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === bearer.instanceId
+      && descriptor.path.length === 1));
+  struck = accept(struck, action(struck, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === dummyCard.instanceId));
+  assert.equal(dropDescriptors(struck).some(({ unit }) => unit.instanceId === bearer.instanceId), false);
   northView = observeGame(session.state, 'north');
   const observedBearer = northView.realm.units.find(({ instanceId }) => instanceId === bearer.instanceId);
   assert.equal(observedBearer?.attack, 5);
@@ -9491,6 +9649,7 @@ test('RULE-04 Pick Up carries any local Artifact once per unit turn and preserve
     && descriptor.casterInstanceId === bearer.instanceId
     && descriptor.cell === 'C3'
     && descriptor.bearer === undefined);
+  assert.equal(dropDescriptors(session).some(({ unit }) => unit.instanceId === bearer.instanceId), false);
   assert.equal(session.state.realm.units.find(({ instanceId }) =>
     instanceId === bearer.instanceId)?.stealthed, false);
   take(({ descriptor }) => descriptor.kind === 'move-and-attack'

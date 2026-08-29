@@ -192,6 +192,8 @@ type UnitInstance = Readonly<CardInstance & {
   controller: GameSeat;
   damage: number;
   disableEffects?: readonly DisableEffect[];
+  lastDroppedArtifactsTurn?: number;
+  lastInteractedTurn?: number;
   lastPickedUpArtifactsTurn?: number;
   location: RealmCell;
   region: GameRegion;
@@ -241,6 +243,8 @@ type PlayerState = Readonly<{
   avatar: Readonly<{
     card: CardInstance;
     deathDoorTurn: number | null;
+    lastDroppedArtifactsTurn?: number;
+    lastInteractedTurn?: number;
     lastPickedUpArtifactsTurn?: number;
     life: number;
     location: RealmCell;
@@ -447,6 +451,11 @@ type GameActionDescriptor =
   | Readonly<{
     artifactInstanceIds: readonly StateHash[];
     kind: 'pick-up-artifacts';
+    unit: GameUnitRef;
+  }>
+  | Readonly<{
+    artifactInstanceIds: readonly StateHash[];
+    kind: 'drop-artifacts';
     unit: GameUnitRef;
   }>
   | Readonly<{ kind: 'decline-attack' }>
@@ -740,6 +749,28 @@ function pickUpArtifactDescriptors(state: GameState, seat: GameSeat): readonly G
         kind: 'pick-up-artifacts' as const,
         unit,
       }));
+  });
+}
+
+function dropArtifactDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
+  const artifacts = state.realm.artifacts ?? [];
+  return unitRefs(state, seat).flatMap((unit) => {
+    const status = unitStatus(state, unit);
+    const tracked = unit.kind === 'avatar'
+      ? state.players[seat].avatar
+      : state.realm.units.find(({ instanceId }) => instanceId === unit.instanceId);
+    if (status.disabled
+      || tracked?.lastDroppedArtifactsTurn === state.turnNumber
+      || tracked?.lastInteractedTurn === state.turnNumber) return [];
+    const artifactInstanceIds = artifacts
+      .filter((artifact) => 'bearer' in artifact
+        && artifact.bearer.instanceId === unit.instanceId
+        && artifact.bearer.kind === unit.kind
+        && artifact.bearer.seat === unit.seat)
+      .map(({ instanceId }) => instanceId)
+      .sort();
+    return nonemptyCombinations(artifactInstanceIds, artifactInstanceIds.length)
+      .map((ids) => ({ artifactInstanceIds: ids, kind: 'drop-artifacts' as const, unit }));
   });
 }
 
@@ -2557,6 +2588,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     ...artifactDescriptors(state, seat),
     ...magicDescriptors(state, seat),
     ...pickUpArtifactDescriptors(state, seat),
+    ...dropArtifactDescriptors(state, seat),
     ...siteDestructionDescriptors(state, seat),
     ...areaDamageAbilityDescriptors(state, seat),
     ...manaAbilityDescriptors(state, seat),
@@ -2672,6 +2704,9 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
   }
   if (descriptor.kind === 'pick-up-artifacts') {
     return `Pick up ${descriptor.artifactInstanceIds.length} artifact${descriptor.artifactInstanceIds.length === 1 ? '' : 's'} with ${descriptor.unit.kind} ${descriptor.unit.instanceId.slice(0, 15)}…`;
+  }
+  if (descriptor.kind === 'drop-artifacts') {
+    return `Drop ${descriptor.artifactInstanceIds.length} artifact${descriptor.artifactInstanceIds.length === 1 ? '' : 's'} with ${descriptor.unit.kind} ${descriptor.unit.instanceId.slice(0, 15)}…`;
   }
   if (descriptor.kind === 'decline-attack') return 'Decline attack';
   if (descriptor.kind === 'declare-attack') return `Attack ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`;
@@ -2848,16 +2883,53 @@ function loseStealth(
   ];
 }
 
+function recordInteraction(
+  state: GameState,
+  refs: readonly GameUnitRef[],
+  sourceInstanceId?: string,
+): Readonly<{
+  outcomes: readonly GameOutcome[];
+  players: GameState['players'];
+  units: readonly UnitInstance[];
+}> {
+  const [revealedUnits, outcomes] = loseStealth(state.realm.units, refs, sourceInstanceId);
+  const minionIds = new Set(refs
+    .filter(({ kind }) => kind === 'minion')
+    .map(({ instanceId }) => instanceId));
+  const avatarSeats = new Set(refs
+    .filter(({ kind }) => kind === 'avatar')
+    .map(({ seat }) => seat));
+  const interactedAvatar = (seat: GameSeat): PlayerState => {
+    const player = state.players[seat];
+    return avatarSeats.has(seat)
+      ? deepFreeze({
+        ...player,
+        avatar: { ...player.avatar, lastInteractedTurn: state.turnNumber },
+      })
+      : player;
+  };
+  return {
+    outcomes,
+    players: deepFreeze({ north: interactedAvatar('north'), south: interactedAvatar('south') }),
+    units: revealedUnits.map((unit) => minionIds.has(unit.instanceId)
+      ? deepFreeze({ ...unit, lastInteractedTurn: state.turnNumber })
+      : unit),
+  };
+}
+
 function dropArtifactsCarriedBy(
   artifacts: readonly ArtifactInstance[] | undefined,
-  bearer: UnitInstance,
+  bearer: Readonly<Pick<UnitInstance, 'instanceId' | 'location' | 'region'>>,
+  artifactInstanceIds?: ReadonlySet<StateHash>,
 ): Readonly<{
   artifacts: readonly ArtifactInstance[] | undefined;
   outcomes: readonly GameOutcome[];
 }> {
   if (!artifacts) return { artifacts, outcomes: [] };
   const dropped = artifacts.filter((artifact) =>
-    'bearer' in artifact && artifact.bearer.instanceId === bearer.instanceId);
+    'bearer' in artifact
+      && artifact.bearer.instanceId === bearer.instanceId
+      && (!artifactInstanceIds || artifactInstanceIds.has(artifact.instanceId)));
   if (dropped.length === 0) return { artifacts, outcomes: [] };
   return {
     artifacts: artifacts.map((artifact) =>
@@ -3318,16 +3390,16 @@ function resolveFightWindow(
     }
   });
 
-  const players: Record<GameSeat, PlayerState> = {
-    north: state.players.north,
-    south: state.players.south,
-  };
-  let units = [...state.realm.units];
-  const [interactedUnits, stealthOutcomes] = loseStealth(units, interactingRefs ?? [
+  const interaction = recordInteraction(state, interactingRefs ?? [
     ...(attackerCanStrike ? [pending.attacker] : []),
     ...strikingCombatants,
   ]);
-  units = [...interactedUnits];
+  const players: Record<GameSeat, PlayerState> = {
+    north: interaction.players.north,
+    south: interaction.players.south,
+  };
+  let units = [...interaction.units];
+  const stealthOutcomes = interaction.outcomes;
   const defeatedAvatars = new Set<GameSeat>();
   const deaths: UnitInstance[] = [];
   const damageOutcomes: GameOutcome[] = [];
@@ -3575,8 +3647,8 @@ function strikeUndefendedSite(
     throw new Error('unreachable missing site strike target');
   }
   const amount = unitStatus(state, pending.attacker).attack;
-  const [units, stealthOutcomes] = loseStealth(state.realm.units, [pending.attacker]);
-  const player = state.players[target.seat];
+  const interaction = recordInteraction(state, [pending.attacker]);
+  const player = interaction.players[target.seat];
   const [updatedPlayer, lost, reachedDeathsDoor] = loseAvatarLife(player, amount, state.turnNumber);
   const life = updatedPlayer.avatar.life;
   return [
@@ -3584,8 +3656,8 @@ function strikeUndefendedSite(
       decisionSeat: state.activeSeat,
       pendingCombat: null,
       phase: 'main',
-      players: replacePlayer(state, target.seat, updatedPlayer),
-      realm: { ...state.realm, units },
+      players: deepFreeze({ ...interaction.players, [target.seat]: updatedPlayer }),
+      realm: { ...state.realm, units: interaction.units },
     }),
     [
       ...outcomes,
@@ -3607,7 +3679,7 @@ function strikeUndefendedSite(
           type: 'avatar-reached-deaths-door',
         }]
         : []),
-      ...stealthOutcomes,
+      ...interaction.outcomes,
     ],
     [],
   ];
@@ -3869,20 +3941,21 @@ function applyDescriptor(
       mana: player.mana - descriptor.manaCost,
     });
     const paidState = deepFreeze({ ...state, players: replacePlayer(state, seat, paidPlayer) });
-    const [castingUnits, casterStealthOutcomes] = loseStealth(paidState.realm.units, [caster]);
+    const interaction = recordInteraction(paidState, [caster]);
     const artifact: ArtifactInstance = descriptor.bearer
       ? deepFreeze({ ...card, bearer: descriptor.bearer })
       : deepFreeze({ ...card, location: descriptor.cell!, region: 'surface' as const });
     return [
       withStateVersion(paidState, {
+        players: interaction.players,
         realm: {
           ...paidState.realm,
           artifacts: [...(paidState.realm.artifacts ?? []), artifact],
-          units: castingUnits,
+          units: interaction.units,
         },
       }),
       [
-        ...casterStealthOutcomes,
+        ...interaction.outcomes,
         {
           payload: {
             cardId: card.cardId,
@@ -3961,6 +4034,55 @@ function applyDescriptor(
     ];
   }
 
+  if (descriptor.kind === 'drop-artifacts') {
+    const legal = dropArtifactDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'drop-artifacts'
+        && candidate.unit.instanceId === descriptor.unit.instanceId
+        && candidate.unit.kind === descriptor.unit.kind
+        && candidate.unit.seat === descriptor.unit.seat
+        && candidate.artifactInstanceIds.length === descriptor.artifactInstanceIds.length
+        && candidate.artifactInstanceIds.every((instanceId, index) =>
+          instanceId === descriptor.artifactInstanceIds[index]));
+    if (!legal) throw new Error('unreachable illegal Artifact Drop');
+    const status = unitStatus(state, descriptor.unit);
+    const dropped = dropArtifactsCarriedBy(
+      state.realm.artifacts,
+      { instanceId: descriptor.unit.instanceId, location: status.location, region: status.region },
+      new Set(descriptor.artifactInstanceIds),
+    );
+    const players = descriptor.unit.kind === 'avatar'
+      ? replacePlayer(state, seat, deepFreeze({
+        ...player,
+        avatar: { ...player.avatar, lastDroppedArtifactsTurn: state.turnNumber },
+      }))
+      : state.players;
+    const units = descriptor.unit.kind === 'minion'
+      ? state.realm.units.map((unit) => unit.instanceId === descriptor.unit.instanceId
+        ? deepFreeze({ ...unit, lastDroppedArtifactsTurn: state.turnNumber })
+        : unit)
+      : state.realm.units;
+    return [
+      withStateVersion(state, {
+        players,
+        realm: {
+          ...state.realm,
+          ...(dropped.artifacts ? { artifacts: dropped.artifacts } : {}),
+          units,
+        },
+      }),
+      [{
+        payload: {
+          artifactInstanceIds: descriptor.artifactInstanceIds,
+          seat,
+          unitInstanceId: descriptor.unit.instanceId,
+          unitKind: descriptor.unit.kind,
+        },
+        type: 'artifacts-dropped',
+      }],
+      [],
+    ];
+  }
+
   if (descriptor.kind === 'cast-magic') {
     const card = player.hand.spellbook.find(({ cardId, instanceId }) =>
       instanceId === descriptor.cardInstanceId && cardId === descriptor.cardId);
@@ -4015,15 +4137,15 @@ function applyDescriptor(
       mana: player.mana - definition.manaCost,
     });
     const paidState = deepFreeze({ ...state, players: replacePlayer(state, seat, paidPlayer) });
-    const owner = paidState.players[card.owner];
-    const [castingUnits, casterStealthOutcomes] = loseStealth(paidState.realm.units, [caster]);
+    const interaction = recordInteraction(paidState, [caster]);
+    const owner = interaction.players[card.owner];
     const castState = deepFreeze({
       ...paidState,
-      players: replacePlayer(paidState, card.owner, deepFreeze({
-        ...owner,
-        cemetery: [...owner.cemetery, card],
-      })),
-      realm: { ...paidState.realm, units: castingUnits },
+      players: deepFreeze({
+        ...interaction.players,
+        [card.owner]: deepFreeze({ ...owner, cemetery: [...owner.cemetery, card] }),
+      }),
+      realm: { ...paidState.realm, units: interaction.units },
     });
     const castOutcome = {
       payload: {
@@ -4061,7 +4183,7 @@ function applyDescriptor(
       },
       type: 'magic-cast',
     } as const;
-    const castOutcomes: readonly GameOutcome[] = [castOutcome, ...casterStealthOutcomes];
+    const castOutcomes: readonly GameOutcome[] = [castOutcome, ...interaction.outcomes];
     const resolved = {
       payload: { cardId: card.cardId, instanceId: card.instanceId, owner: card.owner },
       type: 'magic-resolved',
@@ -5113,11 +5235,8 @@ function applyDescriptor(
         paymentRandomDraws,
       ];
     }
-    const [castingUnits, casterStealthOutcomes] = loseStealth(
-      resolvedPaymentState.realm.units,
-      [caster],
-    );
-    const realm = { ...resolvedPaymentState.realm, units: [...castingUnits, unit] };
+    const interaction = recordInteraction(resolvedPaymentState, [caster]);
+    const realm = { ...resolvedPaymentState.realm, units: [...interaction.units, unit] };
     const summoned: GameOutcome = {
       payload: {
         cardId: card.cardId,
@@ -5132,7 +5251,7 @@ function applyDescriptor(
     };
     const summonOutcomes = [
       ...paymentOutcomes,
-      ...casterStealthOutcomes,
+      ...interaction.outcomes,
       summoned,
       ...(definition.lanceCount
         ? [{
@@ -5147,6 +5266,7 @@ function applyDescriptor(
     ];
     const summonedState = deepFreeze({
       ...resolvedPaymentState,
+      players: interaction.players,
       realm,
     });
     const settlement = settleRegionOccupancy(summonedState);
@@ -5221,7 +5341,7 @@ function applyDescriptor(
         [...summonOutcomes, ...settlement.outcomes, ...allocationOutcomes],
         true,
         false,
-        [],
+        [source],
         false,
       );
       return [
@@ -5357,15 +5477,20 @@ function applyDescriptor(
     }
     const amount = definition.tapToDamageEachUnitAtAdjacentLocation;
     const sourceRef: GameUnitRef = { instanceId: source.instanceId, kind: 'minion', seat };
-    const [units, stealthOutcomes] = loseStealth(
-      state.realm.units.map((candidate) => candidate.instanceId === source.instanceId
-        ? deepFreeze({ ...candidate, tapped: true })
-        : candidate),
-      [sourceRef],
-    );
-    const activatedState = deepFreeze({
+    const tappedState = deepFreeze({
       ...state,
-      realm: { ...state.realm, units },
+      realm: {
+        ...state.realm,
+        units: state.realm.units.map((candidate) => candidate.instanceId === source.instanceId
+          ? deepFreeze({ ...candidate, tapped: true })
+          : candidate),
+      },
+    });
+    const interaction = recordInteraction(tappedState, [sourceRef]);
+    const activatedState = deepFreeze({
+      ...tappedState,
+      players: interaction.players,
+      realm: { ...tappedState.realm, units: interaction.units },
     });
     const activated: GameOutcome = {
       payload: {
@@ -5385,7 +5510,7 @@ function applyDescriptor(
       })
       .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
     if (targets.length === 0) {
-      return [withStateVersion(activatedState, {}), [activated, ...stealthOutcomes], []];
+      return [withStateVersion(activatedState, {}), [activated, ...interaction.outcomes], []];
     }
     const pending: PendingCombat = deepFreeze({
       allocations: targets.map(({ instanceId }) => ({
@@ -5414,7 +5539,7 @@ function applyDescriptor(
     const [damaged, outcomes, randomDraws] = resolveFightWindow(
       activatedState,
       pending,
-      [activated, ...stealthOutcomes, ...allocationOutcomes],
+      [activated, ...interaction.outcomes, ...allocationOutcomes],
       true,
       false,
       [],
@@ -5430,16 +5555,29 @@ function applyDescriptor(
         && candidate.unitInstanceId === descriptor.unitInstanceId);
     const unit = state.realm.units.find(({ instanceId }) => instanceId === descriptor.unitInstanceId);
     if (!legal || !unit) throw new Error('unreachable illegal mana activation');
-    const [units, stealthOutcomes] = loseStealth(
-      state.realm.units.map((candidate) => candidate.instanceId === unit.instanceId
-        ? deepFreeze({ ...candidate, tapped: true })
-        : candidate),
+    const tappedState = deepFreeze({
+      ...state,
+      realm: {
+        ...state.realm,
+        units: state.realm.units.map((candidate) => candidate.instanceId === unit.instanceId
+          ? deepFreeze({ ...candidate, tapped: true })
+          : candidate),
+      },
+    });
+    const interaction = recordInteraction(
+      tappedState,
       [{ instanceId: unit.instanceId, kind: 'minion', seat }],
     );
     return [
       withStateVersion(state, {
-        players: replacePlayer(state, seat, deepFreeze({ ...player, mana: player.mana + descriptor.amount })),
-        realm: { ...state.realm, units },
+        players: deepFreeze({
+          ...interaction.players,
+          [seat]: deepFreeze({
+            ...interaction.players[seat],
+            mana: player.mana + descriptor.amount,
+          }),
+        }),
+        realm: { ...state.realm, units: interaction.units },
       }),
       [
         {
@@ -5450,7 +5588,7 @@ function applyDescriptor(
           },
           type: 'mana-activated',
         },
-        ...stealthOutcomes,
+        ...interaction.outcomes,
       ],
       [],
     ];
@@ -5475,11 +5613,15 @@ function applyDescriptor(
       cell: shooterStatus.location,
       region: shooterStatus.region,
     });
-    const [units, stealthOutcomes] = loseStealth(tapped.realm.units, [shooter]);
-    const shotState = deepFreeze({
+    const interaction = recordInteraction(deepFreeze({
       ...state,
       players: tapped.players,
-      realm: { ...tapped.realm, units },
+      realm: tapped.realm,
+    }), [shooter]);
+    const shotState = deepFreeze({
+      ...state,
+      players: interaction.players,
+      realm: { ...tapped.realm, units: interaction.units },
     });
     const shot: GameOutcome = {
       payload: {
@@ -5492,7 +5634,7 @@ function applyDescriptor(
       type: 'projectile-shot',
     };
     if (!descriptor.hit) {
-      return [withStateVersion(shotState, {}), [shot, ...stealthOutcomes], []];
+      return [withStateVersion(shotState, {}), [shot, ...interaction.outcomes], []];
     }
     const amount = strikeDamage(shotState, shooter);
     const strike: GameOutcome = {
@@ -5515,7 +5657,7 @@ function applyDescriptor(
         ? {}
         : { region: unitStatus(state, descriptor.hit).region as 'underground' | 'underwater' | 'void' }),
       targetRemoved: false,
-    }), [shot, ...stealthOutcomes, strike], false);
+    }), [shot, ...interaction.outcomes, strike], false);
   }
 
   if (descriptor.kind === 'shoot-drag-projectile') {
@@ -5538,11 +5680,15 @@ function applyDescriptor(
       cell: shooterStatus.location,
       region: shooterStatus.region,
     });
-    const [units, stealthOutcomes] = loseStealth(tapped.realm.units, [shooter]);
-    const shotState = deepFreeze({
+    const interaction = recordInteraction(deepFreeze({
       ...state,
       players: tapped.players,
-      realm: { ...tapped.realm, units },
+      realm: tapped.realm,
+    }), [shooter]);
+    const shotState = deepFreeze({
+      ...state,
+      players: interaction.players,
+      realm: { ...tapped.realm, units: interaction.units },
     });
     const shot: GameOutcome = {
       payload: {
@@ -5555,7 +5701,7 @@ function applyDescriptor(
       type: 'projectile-shot',
     };
     if (!descriptor.hit) {
-      return [withStateVersion(shotState, {}), [shot, ...stealthOutcomes], []];
+      return [withStateVersion(shotState, {}), [shot, ...interaction.outcomes], []];
     }
     const targetStatus = unitStatus(shotState, descriptor.hit);
     const from: GameLocation = { cell: targetStatus.location, region: targetStatus.region };
@@ -5575,7 +5721,7 @@ function applyDescriptor(
       },
       type: 'unit-dragged',
     };
-    const outcomes = [shot, ...stealthOutcomes, dragged, ...path.outcomes];
+    const outcomes = [shot, ...interaction.outcomes, dragged, ...path.outcomes];
     const hitArrived = path.state.realm.units.some(({ instanceId, location, region }) =>
       instanceId === descriptor.hit!.instanceId && location === to.cell && region === to.region);
     const shooterRemains = path.state.realm.units.some(({ instanceId }) => instanceId === shooter.instanceId);
@@ -5904,12 +6050,17 @@ function applyDescriptor(
         ? 'spellbook'
         : descriptor.zone;
     const deck = player[zone];
+    const activatedAvatar = {
+      ...player.avatar,
+      ...(descriptor.kind === 'draw-spell' ? { lastInteractedTurn: state.turnNumber } : {}),
+      tapped: true,
+    };
     if (deck.length === 0) {
       const winner = otherSeat(seat);
       const players = avatarDraw
         ? replacePlayer(state, seat, deepFreeze({
           ...player,
-          avatar: { ...player.avatar, tapped: true },
+          avatar: activatedAvatar,
         }))
         : state.players;
       return [
@@ -5925,7 +6076,7 @@ function applyDescriptor(
     const [drawn, ...remaining] = deck;
     const updatedPlayer = deepFreeze({
       ...player,
-      ...(avatarDraw ? { avatar: { ...player.avatar, tapped: true } } : {}),
+      ...(avatarDraw ? { avatar: activatedAvatar } : {}),
       [zone]: remaining,
       hand: { ...player.hand, [zone]: [...player.hand[zone], drawn!] },
     });

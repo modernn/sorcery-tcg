@@ -404,6 +404,15 @@ export type PrivateGameCheck = Readonly<{
     causalEventsVerified: boolean;
     combatDamageAndSurvivalVerified: boolean;
     deck: DeckList;
+    dropAcceptedActionCount: number;
+    dropChoiceVerified: boolean;
+    dropEventVerified: boolean;
+    dropNoRandomDraws: boolean;
+    dropReplayVerified: boolean;
+    dropSecondUseUnavailable: boolean;
+    dropSideEffectsAbsent: boolean;
+    dropStateVerified: boolean;
+    dropUnavailableAfterInteraction: boolean;
     elthamTownsfolk: string;
     exactPickupChoice: boolean;
     gameRemainedActive: boolean;
@@ -411,6 +420,7 @@ export type PrivateGameCheck = Readonly<{
     noRandomDraws: boolean;
     pickupSideEffectsAbsent: boolean;
     replayVerified: boolean;
+    seed: number;
     swordAndShield: string;
     swordFollowedBearer: boolean;
     swordRemainedCarried: boolean;
@@ -7879,8 +7889,8 @@ function runEarthDuel(
   if (!boskBefore || !elthamBefore) throw new Error('private Duel setup lacks its real minions');
   const sitesBefore = canonicalJson(session.state.realm.sites as unknown as JsonValue);
   const avatarsBefore = canonicalJson({
-    north: session.state.players.north.avatar,
-    south: session.state.players.south.avatar,
+    north: observeGame(session.state, 'north').players.north.avatar,
+    south: observeGame(session.state, 'north').players.south.avatar,
   } as unknown as JsonValue);
   const manaBefore = session.state.players.north.mana;
   const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
@@ -7953,8 +7963,8 @@ function runEarthDuel(
     sitesAndAvatarsPreserved:
       canonicalJson(session.state.realm.sites as unknown as JsonValue) === sitesBefore
       && canonicalJson({
-        north: session.state.players.north.avatar,
-        south: session.state.players.south.avatar,
+        north: observeGame(session.state, 'north').players.north.avatar,
+        south: observeGame(session.state, 'north').players.south.avatar,
       } as unknown as JsonValue) === avatarsBefore,
     spellEnteredCemetery: session.state.players.north.hand.spellbook
       .every(({ instanceId }) => instanceId !== opening.duelInstanceId)
@@ -8088,6 +8098,33 @@ function runEarthSwordAndShield(
   const poweredEltham = pickedView.realm.units.find(({ instanceId }) =>
     instanceId === opening.elthamTownsfolkInstanceId);
 
+  const dropBranchStart = session;
+  const manaBeforeDrop = dropBranchStart.state.players.north.mana;
+  const dropChoices = legalGameActions(dropBranchStart.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'drop-artifacts'
+      && descriptor.unit.kind === 'minion'
+      && descriptor.unit.instanceId === opening.elthamTownsfolkInstanceId
+      && descriptor.artifactInstanceIds.length === 1
+      && descriptor.artifactInstanceIds[0] === opening.artifactInstanceId);
+  const chosenDrop = dropChoices[0];
+  if (!chosenDrop) throw new Error('private Sword and Shield Drop is unavailable');
+  const dropResult = stepGame(dropBranchStart, chosenDrop);
+  if (!dropResult.accepted) throw new Error('private Sword and Shield Drop was rejected');
+  const dropSession = dropResult.session;
+  const droppedView = observeGame(dropSession.state, 'north');
+  const droppedArtifactState = dropSession.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === opening.artifactInstanceId);
+  const droppedArtifactView = droppedView.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === opening.artifactInstanceId);
+  const droppedEltham = droppedView.realm.units.find(({ instanceId }) =>
+    instanceId === opening.elthamTownsfolkInstanceId);
+  const dropEvent = dropResult.receipt.events.find(({ type }) => type === 'artifacts-dropped');
+  const dropPayload = dropEvent && isJsonRecord(dropEvent.payload) ? dropEvent.payload : undefined;
+  const secondDropUnavailable = legalGameActions(dropSession.state, 'north')
+    .every(({ descriptor }) => descriptor.kind !== 'drop-artifacts'
+      || descriptor.unit.kind !== 'minion'
+      || descriptor.unit.instanceId !== opening.elthamTownsfolkInstanceId);
+
   const moveResult = stepGame(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.elthamTownsfolkInstanceId
@@ -8194,6 +8231,49 @@ function runEarthSwordAndShield(
     && poweredEltham !== undefined
     && poweredEltham.tapped === unpoweredEltham.tapped
     && poweredEltham.stealthed === unpoweredEltham.stealthed;
+  const dropChoiceVerified: boolean = dropChoices.length === 1
+    && chosenDrop.descriptor.kind === 'drop-artifacts'
+    && chosenDrop.descriptor.unit.kind === 'minion'
+    && chosenDrop.descriptor.unit.instanceId === opening.elthamTownsfolkInstanceId
+    && chosenDrop.descriptor.unit.seat === 'north'
+    && chosenDrop.descriptor.artifactInstanceIds.length === 1
+    && chosenDrop.descriptor.artifactInstanceIds[0] === opening.artifactInstanceId;
+  const dropEventVerified: boolean = dropResult.receipt.events.length === 1
+    && dropResult.receipt.events[0]?.type === 'artifacts-dropped'
+    && dropPayload !== undefined
+    && canonicalJson(dropPayload) === canonicalJson({
+      artifactInstanceIds: [opening.artifactInstanceId],
+      seat: 'north',
+      unitInstanceId: opening.elthamTownsfolkInstanceId,
+      unitKind: 'minion',
+    });
+  const dropStateVerified: boolean = droppedArtifactState !== undefined
+    && !('bearer' in droppedArtifactState)
+    && droppedArtifactState.location === 'C3'
+    && droppedArtifactState.region === 'surface'
+    && droppedArtifactState.owner === 'north'
+    && droppedArtifactView !== undefined
+    && droppedArtifactView.bearer === undefined
+    && droppedArtifactView.controller === null
+    && droppedArtifactView.location === 'C3'
+    && droppedArtifactView.region === 'surface'
+    && droppedArtifactView.owner === 'north'
+    && poweredEltham?.attack === 4
+    && poweredEltham.defense === 4
+    && droppedEltham?.attack === 2
+    && droppedEltham.defense === 2;
+  const dropSideEffectsAbsent: boolean = manaBeforeDrop === dropSession.state.players.north.mana
+    && poweredEltham !== undefined
+    && droppedEltham !== undefined
+    && droppedEltham.cardId === poweredEltham.cardId
+    && droppedEltham.owner === poweredEltham.owner
+    && droppedEltham.controller === poweredEltham.controller
+    && droppedEltham.location === poweredEltham.location
+    && droppedEltham.region === poweredEltham.region
+    && droppedEltham.damage === poweredEltham.damage
+    && droppedEltham.tapped === poweredEltham.tapped
+    && droppedEltham.summoningSickness === poweredEltham.summoningSickness
+    && droppedEltham.stealthed === poweredEltham.stealthed;
   const fightEventOrderVerified: boolean = fightStartedIndex >= 0
     && fightStartedIndex < firstAllocationIndex
     && firstAllocationIndex < firstDamageIndex
@@ -8232,6 +8312,7 @@ function runEarthSwordAndShield(
     && chosenPickup.descriptor.artifactInstanceIds[0] === opening.artifactInstanceId;
   const noRandomDraws: boolean = castResult.receipt.randomDraws.length === 0
     && pickupResult.receipt.randomDraws.length === 0
+    && dropResult.receipt.randomDraws.length === 0
     && moveResult.receipt.randomDraws.length === 0
     && fightResult.receipt.randomDraws.length === 0;
   const swordFollowedBearer: boolean = movedArtifact?.bearer?.instanceId
@@ -8253,6 +8334,10 @@ function runEarthSwordAndShield(
     && finalArtifactView.controller === 'north'
     && finalArtifactView.location === 'C2'
     && finalArtifactView.region === 'surface';
+  const dropUnavailableAfterInteraction: boolean = legalGameActions(session.state, 'north')
+    .every(({ descriptor }) => descriptor.kind !== 'drop-artifacts'
+      || descriptor.unit.kind !== 'minion'
+      || descriptor.unit.instanceId !== opening.elthamTownsfolkInstanceId);
   const avatarsAfterCombat = {
     north: {
       life: session.state.players.north.avatar.life,
@@ -8276,9 +8361,21 @@ function runEarthSwordAndShield(
     artifactCastUncarried,
     artifactPickedUpAndCarried,
     boskTroll: input.firstStrikeTargetMinion.name,
-    causalEventsVerified: castEventVerified && pickupEventVerified && fightEventOrderVerified,
+    causalEventsVerified: castEventVerified
+      && pickupEventVerified
+      && dropEventVerified
+      && fightEventOrderVerified,
     combatDamageAndSurvivalVerified,
     deck: deckList(opening.manifest.decks.north, opening.names),
+    dropAcceptedActionCount: dropSession.transcript.length,
+    dropChoiceVerified,
+    dropEventVerified,
+    dropNoRandomDraws: dropResult.receipt.randomDraws.length === 0,
+    dropReplayVerified: verifyGameReplay(dropSession),
+    dropSecondUseUnavailable: secondDropUnavailable,
+    dropSideEffectsAbsent,
+    dropStateVerified,
+    dropUnavailableAfterInteraction,
     elthamTownsfolk: input.elthamTownsfolk.name,
     exactPickupChoice,
     gameRemainedActive: session.state.terminal.status === 'active',
@@ -8286,6 +8383,7 @@ function runEarthSwordAndShield(
     noRandomDraws,
     pickupSideEffectsAbsent,
     replayVerified: verifyGameReplay(session),
+    seed: opening.manifest.seed,
     swordAndShield: input.swordAndShield.name,
     swordFollowedBearer,
     swordRemainedCarried,
@@ -10198,8 +10296,8 @@ function runAirRainOfArrows(
     throw new Error('private Rain of Arrows setup lacks both surface Snow Leopards');
   }
   const avatarsBefore = canonicalJson({
-    north: session.state.players.north.avatar,
-    south: session.state.players.south.avatar,
+    north: observeGame(session.state, 'north').players.north.avatar,
+    south: observeGame(session.state, 'north').players.south.avatar,
   } as unknown as JsonValue);
   const sitesBefore = canonicalJson(session.state.realm.sites as unknown as JsonValue);
   const northCemeteryBefore = canonicalJson(
@@ -10250,8 +10348,8 @@ function runAirRainOfArrows(
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
     avatarsPreserved: canonicalJson({
-      north: session.state.players.north.avatar,
-      south: session.state.players.south.avatar,
+      north: observeGame(session.state, 'north').players.north.avatar,
+      south: observeGame(session.state, 'north').players.south.avatar,
     } as unknown as JsonValue) === avatarsBefore,
     causalEventsVerified: events.map(({ type }) => type).join(',')
       === 'magic-cast,magic-damage-allocated,magic-damage-allocated,damage-dealt,damage-dealt,magic-resolved'
@@ -11404,6 +11502,7 @@ function runFireAramos(
   const southBefore = session.state.players.south;
   const sitesBefore = canonicalJson(session.state.realm.sites as unknown as JsonValue);
   const unitsBefore = canonicalJson(session.state.realm.units as unknown as JsonValue);
+  const northAvatarBefore = observeGame(session.state, 'north').players.north.avatar;
   const eligibleCards = [
     ...northBefore.hand.atlas.map((card) => ({ ...card, zone: 'atlas' as const })),
     ...northBefore.hand.spellbook
@@ -11524,8 +11623,8 @@ function runFireAramos(
         === canonicalJson(northBefore.atlas as unknown as JsonValue)
       && canonicalJson(northAfter.spellbook as unknown as JsonValue)
         === canonicalJson(northBefore.spellbook as unknown as JsonValue)
-      && canonicalJson(northAfter.avatar as unknown as JsonValue)
-        === canonicalJson(northBefore.avatar as unknown as JsonValue)
+      && canonicalJson(observeGame(session.state, 'north').players.north.avatar as unknown as JsonValue)
+        === canonicalJson(northAvatarBefore as unknown as JsonValue)
       && canonicalJson(session.state.players.south as unknown as JsonValue)
         === canonicalJson(southBefore as unknown as JsonValue)
       && canonicalJson(session.state.realm.sites as unknown as JsonValue) === sitesBefore
@@ -12021,8 +12120,8 @@ function runFireLeapAttack(
     instanceId === opening.northRaalInstanceId);
   if (!allyBefore) throw new Error('private Leap Attack setup lacks its allied Raal Dromedary');
   const sitesBefore = session.state.realm.sites;
-  const northAvatarBefore = session.state.players.north.avatar;
-  const southAvatarBefore = session.state.players.south.avatar;
+  const northAvatarBefore = observeGame(session.state, 'north').players.north.avatar;
+  const southAvatarBefore = observeGame(session.state, 'north').players.south.avatar;
   const leapActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.leapAttackInstanceId
@@ -12118,9 +12217,9 @@ function runFireLeapAttack(
     sitesAndAvatarsPreserved:
       canonicalJson(session.state.realm.sites as unknown as JsonValue)
         === canonicalJson(sitesBefore as unknown as JsonValue)
-      && canonicalJson(session.state.players.north.avatar as unknown as JsonValue)
+      && canonicalJson(observeGame(session.state, 'north').players.north.avatar as unknown as JsonValue)
         === canonicalJson(northAvatarBefore as unknown as JsonValue)
-      && canonicalJson(session.state.players.south.avatar as unknown as JsonValue)
+      && canonicalJson(observeGame(session.state, 'north').players.south.avatar as unknown as JsonValue)
         === canonicalJson(southAvatarBefore as unknown as JsonValue),
     spellEnteredCemetery: session.state.players.north.hand.spellbook
       .every(({ instanceId }) => instanceId !== opening.leapAttackInstanceId)
@@ -13070,6 +13169,7 @@ function runWaterGnarledWendigo(
   const northBefore = session.state.players.north;
   const southBefore = session.state.players.south;
   const sitesBefore = session.state.realm.sites;
+  const northAvatarBefore = observeGame(session.state, 'north').players.north.avatar;
   const otherUnitsBefore = session.state.realm.units.filter(({ instanceId }) =>
     instanceId !== opening.seravaInstanceId);
   const stateVersionBefore = session.state.stateVersion;
@@ -13171,8 +13271,8 @@ function runWaterGnarledWendigo(
         === canonicalJson(northBefore.spellbook as unknown as JsonValue)
       && canonicalJson(northAfter.hand.atlas as unknown as JsonValue)
         === canonicalJson(northBefore.hand.atlas as unknown as JsonValue)
-      && canonicalJson(northAfter.avatar as unknown as JsonValue)
-        === canonicalJson(northBefore.avatar as unknown as JsonValue),
+      && canonicalJson(observeGame(session.state, 'north').players.north.avatar as unknown as JsonValue)
+        === canonicalJson(northAvatarBefore as unknown as JsonValue),
     replayVerified: verifyGameReplay(session),
     seravaTownsfolk: input.seravaTownsfolk.name,
     stateVersionAdvancedOnce: session.state.stateVersion === stateVersionBefore + 1,
