@@ -312,6 +312,17 @@ export type PrivateGameCheck = Readonly<{
     targetIsLandSite: boolean;
     undergroundSummonAvailable: boolean;
   }>;
+  earthStarter: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    manaPaid: number;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    siteAndMinionStateVerified: boolean;
+    valley: string;
+    wildBoars: string;
+  }>;
   earthOverpower: Readonly<{
     acceptedActionCount: number;
     causalEventsVerified: boolean;
@@ -1109,9 +1120,11 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   steppe: NormalizedCard;
   submergeMinion: NormalizedCard;
   teleport: NormalizedCard;
+  valley: NormalizedCard;
   vikings: NormalizedCard;
   voidwalkMinion: NormalizedCard;
   wardMinion: NormalizedCard;
+  wildBoars: NormalizedCard;
   polarBears: NormalizedCard;
   pirateShip: NormalizedCard;
   pudgeButcher: NormalizedCard;
@@ -1181,6 +1194,42 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || huntersLodge.thresholds.water !== 0
     || huntersLodge.rarity !== 'ordinary') {
     throw new Error('private enemy Stealth-removing site no longer matches its supported facts');
+  }
+  const valley = snapshot.cards.find(({ name }) => name === 'Valley');
+  if (!valley
+    || valley.stableId !== 'card:11d245c549b417bf6c1bdc675f18594fd9a0c92b560cc2e0c129d03a87b0a9f3'
+    || valley.cardType !== 'site'
+    || valley.rulesText.trim() !== ''
+    || valley.manaCost !== null
+    || valley.attack !== null
+    || valley.defense !== null
+    || valley.life !== null
+    || valley.elements.length !== 1
+    || valley.elements[0] !== 'earth'
+    || valley.thresholds.air !== 0
+    || valley.thresholds.earth !== 1
+    || valley.thresholds.fire !== 0
+    || valley.thresholds.water !== 0
+    || valley.rarity !== 'ordinary') {
+    throw new Error('private blank Earth Valley no longer matches its supported facts');
+  }
+  const wildBoars = snapshot.cards.find(({ name }) => name === 'Wild Boars');
+  if (!wildBoars
+    || wildBoars.stableId !== 'card:9247ae85dd2fd35068d2d6034ccb2a40da872130362e8f82ab9c9a8ddb19037e'
+    || wildBoars.cardType !== 'minion'
+    || wildBoars.rulesText.trim() !== ''
+    || wildBoars.manaCost !== 1
+    || wildBoars.attack !== 2
+    || wildBoars.defense !== 2
+    || wildBoars.life !== null
+    || wildBoars.elements.length !== 1
+    || wildBoars.elements[0] !== 'earth'
+    || wildBoars.thresholds.air !== 0
+    || wildBoars.thresholds.earth !== 1
+    || wildBoars.thresholds.fire !== 0
+    || wildBoars.thresholds.water !== 0
+    || wildBoars.rarity !== 'ordinary') {
+    throw new Error('private blank Earth Wild Boars no longer matches its supported facts');
   }
   const shallowGrave = snapshot.cards.find(({ name }) => name === 'Shallow Grave');
   if (!shallowGrave
@@ -2380,9 +2429,11 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     steppe,
     submergeMinion,
     teleport,
+    valley,
     vikings,
     voidwalkMinion,
     wardMinion,
+    wildBoars,
     zap,
   };
 }
@@ -2634,7 +2685,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-starter' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'movement-two' | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -2778,6 +2829,7 @@ function buildManifest(
   );
   const earthShallowGraveDeck = elementalDeck('earth', earthMinions, [input.shallowGrave]);
   const earthSinkholeDeck = elementalDeck('earth', earthMinions, [input.sinkhole]);
+  const earthStarterDeck = elementalDeck('earth', [input.wildBoars], [input.valley]);
   const earthBurrowingDeck = elementalDeck('earth', [
     ...earthMinions,
     input.burrowingMinion,
@@ -3003,6 +3055,8 @@ function buildManifest(
         ? earthShallowGraveDeck
       : scenario === 'earth-sinkhole'
         ? earthSinkholeDeck
+      : scenario === 'earth-starter'
+        ? earthStarterDeck
       : scenario === 'earth-forward'
         ? earthForwardDeck
       : scenario === 'earth-immobile'
@@ -4239,6 +4293,30 @@ function findEarthShallowGraveOpening(
     }
   }
   throw new Error('private site discard Genesis scenario no longer produces its supported opening');
+}
+
+function findEarthStarterOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  session: GameSession;
+  valleyInstanceId: string;
+  wildBoarsInstanceId: string;
+}> {
+  // ponytail: bounded seed scan avoids another private config field.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const built = buildManifest(input, input.config.earthSeed + offset, 'earth-starter');
+    const session = createGameSession(built.manifest);
+    const valleyInstanceId = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.valley.stableId)?.instanceId;
+    const wildBoarsInstanceId = session.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === input.wildBoars.stableId)?.instanceId;
+    if (valleyInstanceId && wildBoarsInstanceId) {
+      return { ...built, session, valleyInstanceId, wildBoarsInstanceId };
+    }
+  }
+  throw new Error('private Earth starter scenario no longer produces its supported opening');
 }
 
 function findEarthSinkholeOpening(
@@ -6245,6 +6323,72 @@ function deckList(deck: GameDeckSpec, names: ReadonlyMap<string, string>): DeckL
     avatar: names.get(deck.avatar) ?? deck.avatar,
     spellbook: summarize(deck.spellbook),
   };
+}
+
+function runEarthStarter(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthStarter'] {
+  const opening = findEarthStarterOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+
+  const siteResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.valleyInstanceId
+      && descriptor.cell === 'C4'));
+  if (!siteResult.accepted) throw new Error('private Valley play was rejected');
+  session = siteResult.session;
+  const manaBeforeSummon = session.state.players.north.mana;
+
+  const summonResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.wildBoarsInstanceId
+      && descriptor.cell === 'C4'));
+  if (!summonResult.accepted) throw new Error('private Wild Boars summon was rejected');
+  session = summonResult.session;
+
+  const sitePayload = siteResult.receipt.events[0]
+    && isJsonRecord(siteResult.receipt.events[0].payload)
+    ? siteResult.receipt.events[0].payload
+    : undefined;
+  const summonPayload = summonResult.receipt.events[0]
+    && isJsonRecord(summonResult.receipt.events[0].payload)
+    ? summonResult.receipt.events[0].payload
+    : undefined;
+  const site = session.state.realm.sites.C4;
+  const boars = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.wildBoarsInstanceId);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified: siteResult.receipt.events.map(({ type }) => type).join(',') === 'site-played'
+      && summonResult.receipt.events.map(({ type }) => type).join(',') === 'minion-summoned'
+      && sitePayload?.cardId === input.valley.stableId
+      && sitePayload.instanceId === opening.valleyInstanceId
+      && sitePayload.cell === 'C4'
+      && summonPayload?.cardId === input.wildBoars.stableId
+      && summonPayload.instanceId === opening.wildBoarsInstanceId
+      && summonPayload.cell === 'C4'
+      && summonPayload.manaPaid === 1,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    manaPaid: manaBeforeSummon - session.state.players.north.mana,
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    replayVerified: verifyGameReplay(session),
+    siteAndMinionStateVerified: site?.instanceId === opening.valleyInstanceId
+      && 'cardId' in site
+      && site.cardId === input.valley.stableId
+      && site.controller === 'north'
+      && boars?.cardId === input.wildBoars.stableId
+      && boars.controller === 'north'
+      && boars.owner === 'north'
+      && boars.location === 'C4'
+      && boars.region === 'surface'
+      && boars.damage === 0
+      && !boars.tapped
+      && boars.summoningSickness,
+    valley: input.valley.name,
+    wildBoars: input.wildBoars.name,
+  });
 }
 
 function runEarthOverpower(
@@ -12938,6 +13082,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airVoidwalk = runAirVoidwalk(input);
   const airZap = runAirZap(input);
   const earthBurrowing = runEarthBurrowing(input);
+  const earthStarter = runEarthStarter(input);
   const earthOverpower = runEarthOverpower(input);
   const earthBury = runEarthBury(input);
   const earthDuel = runEarthDuel(input);
@@ -13120,6 +13265,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
       south: deckList(opening.manifest.decks.south, opening.names),
     },
     earthBurrowing,
+    earthStarter,
     earthOverpower,
     earthBury,
     earthDuel,
