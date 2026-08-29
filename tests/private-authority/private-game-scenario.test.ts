@@ -52,13 +52,19 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
       .map((candidate) => {
         const descriptor = candidate.descriptor as JsonObject;
         const cell = String((descriptor.to as JsonObject | undefined)?.cell);
+        const inPlaceAvatarAttack = descriptor.kind === 'move-and-attack'
+          && (descriptor.path as unknown[]).length === 1
+          && cell === enemyCell
+          && (descriptor.to as JsonObject).region === 'surface';
         return {
           candidate,
-          distance: descriptor.kind === 'move-and-attack'
-            && (descriptor.path as unknown[]).length > 1
-            ? Math.abs(cell.charCodeAt(0) - enemyCell.charCodeAt(0))
-              + Math.abs(Number(cell[1]) - Number(enemyCell[1]))
-            : Number.POSITIVE_INFINITY,
+          distance: inPlaceAvatarAttack
+            ? -1
+            : descriptor.kind === 'move-and-attack'
+                && (descriptor.path as unknown[]).length > 1
+              ? Math.abs(cell.charCodeAt(0) - enemyCell.charCodeAt(0))
+                + Math.abs(Number(cell[1]) - Number(enemyCell[1]))
+              : Number.POSITIVE_INFINITY,
         };
       })
       .sort((left, right) => left.distance - right.distance)[0];
@@ -188,10 +194,7 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
       assert.ok(opponentActionCount > 0, preset.id);
       assert.equal(combatObserved, true, preset.id);
       assert.equal(terminal.status, 'finished', preset.id);
-      assert.ok(
-        terminal.reason === 'avatar_defeated' || terminal.reason === 'deck_empty',
-        preset.id,
-      );
+      assert.equal(terminal.reason, 'avatar_defeated', preset.id);
       assert.notEqual(terminal.winner, terminal.loser, preset.id);
       assert.deepEqual(current.actions, [], preset.id);
       const fullReplay = await json('/api/replay', { method: 'POST' });

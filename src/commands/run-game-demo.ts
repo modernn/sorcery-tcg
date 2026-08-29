@@ -70,13 +70,21 @@ export function selectDeterministicGameAction(session: GameSession): GameLegalAc
     session.state.decisionSeat === 'north' ? 'south' : 'north'
   ].avatar.location;
   const movement = actions
-    .map((action) => ({
-      action,
-      distance: action.descriptor.kind === 'move-and-attack' && action.descriptor.path.length > 1
-        ? Math.abs(action.descriptor.to.cell.charCodeAt(0) - enemyAvatar.charCodeAt(0))
-          + Math.abs(Number(action.descriptor.to.cell[1]) - Number(enemyAvatar[1]))
-        : Number.POSITIVE_INFINITY,
-    }))
+    .map((action) => {
+      const inPlaceAvatarAttack = action.descriptor.kind === 'move-and-attack'
+        && action.descriptor.path.length === 1
+        && action.descriptor.to.cell === enemyAvatar
+        && action.descriptor.to.region === 'surface';
+      return {
+        action,
+        distance: inPlaceAvatarAttack
+          ? -1
+          : action.descriptor.kind === 'move-and-attack' && action.descriptor.path.length > 1
+            ? Math.abs(action.descriptor.to.cell.charCodeAt(0) - enemyAvatar.charCodeAt(0))
+              + Math.abs(Number(action.descriptor.to.cell[1]) - Number(enemyAvatar[1]))
+            : Number.POSITIVE_INFINITY,
+      };
+    })
     .sort((left, right) => left.distance - right.distance)[0];
   const selected = actions.find(({ descriptor }) =>
     descriptor.kind === 'mulligan'
