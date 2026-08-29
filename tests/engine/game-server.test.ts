@@ -66,6 +66,25 @@ function keep(response: JsonObject): JsonObject {
       && (value.spellbookOrder as unknown[]).length === 0);
 }
 
+function deterministicAction(response: JsonObject): JsonObject {
+  const candidates = actions(response);
+  const selected = candidates.find((candidate) => {
+    const value = descriptor(candidate);
+    return value.kind === 'mulligan'
+      && (value.atlasOrder as unknown[]).length === 0
+      && (value.spellbookOrder as unknown[]).length === 0;
+  })
+    ?? candidates.find((candidate) => descriptor(candidate).kind === 'play-site')
+    ?? candidates.find((candidate) => descriptor(candidate).kind === 'summon-minion')
+    ?? candidates.find((candidate) => {
+      const value = descriptor(candidate);
+      return value.kind === 'draw' && value.zone === 'atlas';
+    })
+    ?? candidates.find((candidate) => descriptor(candidate).kind === 'end-turn');
+  assert.ok(selected, 'expected deterministic legal action');
+  return selected;
+}
+
 test('playable-core page renders the authoritative 5x4 checkpoint without artwork', async () => {
   const response = await fetch(origin);
   const page = await response.text();
@@ -75,6 +94,8 @@ test('playable-core page renders the authoritative 5x4 checkpoint without artwor
   assert.equal(page.match(/class="cell"/g)?.length, 20);
   assert.doesNotMatch(page, /<img\b/i);
   assert.match(response.headers.get('content-security-policy') ?? '', /img-src 'none'/);
+  assert.match(page, /role="status" aria-live="polite"><strong>Game over<\/strong>/);
+  assert.match(page, /Winner:.*Loser:.*Reason:/);
 });
 
 test('browser API plays setup through the second-seat draw choice and verifies replay', async () => {
@@ -122,4 +143,20 @@ test('browser API rejects a stale action without exposing or mutating authority'
   assert.equal((stale.reason as JsonObject).code, 'stale_version');
   assert.equal(stale.stateHash, accepted.stateHash);
   assert.equal('session' in stale, false);
+});
+
+test('browser API reaches the explicit terminal outcome contract', async () => {
+  let current = await post('/api/reset', { seed: 31 });
+  for (let count = 0; count < 500; count += 1) {
+    const view = current.view as JsonObject;
+    if ((view.terminal as JsonObject).status === 'finished') break;
+    if (actions(current).length === 0) current = await json('/api/view?seat=' + String(view.decisionSeat));
+    current = await submit(deterministicAction(current));
+  }
+
+  const terminal = (current.view as JsonObject).terminal as JsonObject;
+  assert.equal(terminal.status, 'finished');
+  assert.equal(terminal.reason, 'deck_empty');
+  assert.notEqual(terminal.winner, terminal.loser);
+  assert.deepEqual(actions(current), []);
 });
