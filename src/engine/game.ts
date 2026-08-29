@@ -40,7 +40,15 @@ export type GameCardDefinition =
   | Readonly<{ attack: number; cardType: 'avatar'; defense: number; drawSpell: boolean; life: number }>
   | Readonly<{
     cardType: 'artifact';
+    grantsBearerLethal?: never;
     grantsBearerPower: 2;
+    manaCost: number;
+    thresholds: GameThresholds;
+  }>
+  | Readonly<{
+    cardType: 'artifact';
+    grantsBearerLethal: true;
+    grantsBearerPower?: never;
     manaCost: number;
     thresholds: GameThresholds;
   }>
@@ -890,8 +898,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     return;
   }
   if (card.cardType === 'artifact') {
-    if (card.grantsBearerPower !== 2) {
+    if (card.grantsBearerPower !== undefined && card.grantsBearerPower !== 2) {
       throw new RangeError(`${path}.grantsBearerPower must be 2`);
+    }
+    if (card.grantsBearerLethal !== undefined && card.grantsBearerLethal !== true) {
+      throw new RangeError(`${path}.grantsBearerLethal must be true`);
+    }
+    if (Number(card.grantsBearerPower === 2) + Number(card.grantsBearerLethal === true) !== 1) {
+      throw new RangeError(`${path} must define exactly one supported bearer grant`);
     }
     if (!Number.isSafeInteger(card.manaCost) || card.manaCost < 0) {
       throw new RangeError(`${path}.manaCost must be a supported nonnegative safe integer`);
@@ -1270,7 +1284,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
         : card.cardType === 'artifact'
           ? {
             cardType: 'artifact' as const,
-            grantsBearerPower: 2 as const,
+            ...(card.grantsBearerPower === 2
+              ? { grantsBearerPower: 2 as const }
+              : { grantsBearerLethal: true as const }),
             manaCost: card.manaCost,
             thresholds: { ...card.thresholds },
           }
@@ -1807,7 +1823,7 @@ function unitStatus(
       defense: definition.defense + powerBonus,
       disabled: false,
       immobile: false,
-      lethal: false,
+      lethal: bearerHasLethal(state, ref),
       location: avatar.location,
       movementSteps: 1,
       movesOnlyForward: false,
@@ -1841,7 +1857,7 @@ function unitStatus(
     defense: definition.defense + powerBonus,
     disabled,
     immobile: !disabled && definition.immobile === true,
-    lethal: !disabled && definition.lethal === true,
+    lethal: !disabled && (definition.lethal === true || bearerHasLethal(state, ref)),
     location: unit.location,
     movementSteps: disabled ? 0 : 1 + (definition.movementBonus ?? 0),
     movesOnlyForward: !disabled && definition.movesOnlyForward === true,
@@ -1865,8 +1881,20 @@ function bearerPowerBonus(state: GameState, ref: GameUnitRef): number {
       || artifact.bearer.seat !== ref.seat) return bonus;
     const definition = cardDefinition(state, artifact.cardId);
     if (definition.cardType !== 'artifact') throw new Error('realm artifact lacks Artifact definition');
-    return bonus + definition.grantsBearerPower;
+    return bonus + (definition.grantsBearerPower ?? 0);
   }, 0);
+}
+
+function bearerHasLethal(state: GameState, ref: GameUnitRef): boolean {
+  return (state.realm.artifacts ?? []).some((artifact) => {
+    if (!('bearer' in artifact)
+      || artifact.bearer.instanceId !== ref.instanceId
+      || artifact.bearer.kind !== ref.kind
+      || artifact.bearer.seat !== ref.seat) return false;
+    const definition = cardDefinition(state, artifact.cardId);
+    if (definition.cardType !== 'artifact') throw new Error('realm artifact lacks Artifact definition');
+    return definition.grantsBearerLethal === true;
+  });
 }
 
 function carriedLanceCount(state: GameState, ref: GameUnitRef): number {

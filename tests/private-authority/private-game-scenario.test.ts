@@ -33,6 +33,31 @@ function assertSwordAndShield(result: PrivateGameCheck['earthSwordAndShield']): 
   assert.equal(result.replayVerified, true);
 }
 
+function assertPoisonousDagger(result: PrivateGameCheck['earthPoisonousDagger']): void {
+  assert.equal(result.poisonousDagger, 'Poisonous Dagger');
+  assert.equal(result.elthamTownsfolk, 'Eltham Townsfolk');
+  assert.equal(result.boskTroll, 'Bosk Troll');
+  assert.equal(result.acceptedActionCount, 20);
+  assert.equal(result.exactBearerChoice, true);
+  assert.equal(result.manaPaid, 2);
+  assert.equal(result.artifactCastAndCarried, true);
+  assert.equal(result.combatLethalVerified, true);
+  assert.equal(result.daggerDroppedUncontrolled, true);
+  assert.equal(result.causalEventsVerified, true);
+  assert.equal(result.stateAndCemeteriesVerified, true);
+  assert.equal(result.noRandomDraws, true);
+  assert.equal(result.gameRemainedActive, true);
+  assert.equal(result.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.deck.atlas.find(({ name }) => name === 'Ghost Town')?.copies, 3);
+  assert.equal(result.deck.spellbook
+    .find(({ name }) => name === 'Poisonous Dagger')?.copies, 3);
+  assert.equal(result.deck.spellbook
+    .find(({ name }) => name === 'Eltham Townsfolk')?.copies, 4);
+  assert.equal(result.deck.spellbook.find(({ name }) => name === 'Bosk Troll')?.copies, 4);
+  assert.equal(result.replayVerified, true);
+}
+
 test('private actual-card decks complete deterministic combat, Earth, Air, Fire, and Water scenarios', async () => {
   const result = await runPrivateGameCheck();
   assert.equal(result.classification, 'private-local_actual-cards_unranked-partial-rules');
@@ -317,6 +342,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     .find(({ name }) => name === 'Eltham Townsfolk')?.copies, 4);
   assert.equal(result.earthOverpower.replayVerified, true);
   assertSwordAndShield(result.earthSwordAndShield);
+  assertPoisonousDagger(result.earthPoisonousDagger);
   assert.equal(result.waterEdgeConnection.polarBears, 'Polar Bears');
   assert.equal(result.waterEdgeConnection.acceptedActionCount, 16);
   assert.equal(result.waterEdgeConnection.wrapMoveAvailable, true);

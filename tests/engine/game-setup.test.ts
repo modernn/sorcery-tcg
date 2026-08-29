@@ -8577,3 +8577,138 @@ test('RULE-03/04 a carried Artifact follows its bearer, grants power, and drops 
   assert.equal(session.state.players.north.cemetery.some(({ cardId }) => cardId === 'sword-and-shield'), false);
   assert.equal(verifyGameReplay(session), true);
 });
+
+test('RULE-04 a carried Lethal Artifact kills on positive strike damage and drops with its bearer', () => {
+  const north: GameDeckSpec = {
+    atlas: Array(4).fill('dagger-north-site'),
+    avatar: 'dagger-north-avatar',
+    spellbook: ['poisonous-dagger', 'poisonous-dagger', 'dagger-bearer', 'dagger-bearer'],
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(5).fill('dagger-south-site'),
+    avatar: 'dagger-south-avatar',
+    spellbook: Array(4).fill('dagger-enemy'),
+  };
+  const cards: Record<string, GameCardDefinition> = {
+    'dagger-bearer': {
+      attack: 2,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 1,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+    'dagger-enemy': {
+      attack: 2,
+      cardType: 'minion',
+      charge: true,
+      defense: 3,
+      manaCost: 1,
+      summonToAnySite: true,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+    'dagger-north-avatar': { attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20 },
+    'dagger-north-site': { cardType: 'site', elements: ['earth'], genesisGainMana: 6 },
+    'dagger-south-avatar': { attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20 },
+    'dagger-south-site': { cardType: 'site', elements: ['earth'], genesisGainMana: 6 },
+    'poisonous-dagger': {
+      cardType: 'artifact',
+      grantsBearerLethal: true,
+      manaCost: 2,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-lethal-artifact-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north' as const,
+    seed: 89,
+  };
+  const gameManifest = createGameManifest(input);
+  assert.deepEqual(gameManifest.cards['poisonous-dagger'], cards['poisonous-dagger']);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      'poisonous-dagger': {
+        cardType: 'artifact',
+        grantsBearerLethal: false,
+        manaCost: 2,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /grantsBearerLethal must be true/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      'poisonous-dagger': {
+        cardType: 'artifact',
+        grantsBearerLethal: true,
+        grantsBearerPower: 2,
+        manaCost: 2,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /exactly one supported bearer grant/);
+
+  let session = keep(createGameSession(gameManifest));
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'dagger-bearer' && descriptor.cell === 'C4');
+  const bearer = session.state.realm.units.find(({ cardId }) => cardId === 'dagger-bearer')!;
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+    && descriptor.cardId === 'poisonous-dagger'
+    && descriptor.bearer?.instanceId === bearer.instanceId);
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === bearer.instanceId && descriptor.to.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'dagger-enemy' && descriptor.cell === 'C3');
+  const enemy = session.state.realm.units.find(({ cardId }) => cardId === 'dagger-enemy')!;
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === enemy.instanceId && descriptor.to.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+    && descriptor.target.kind === 'minion' && descriptor.target.instanceId === bearer.instanceId);
+  const fought = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  assert.equal(fought.accepted, true);
+  session = fought.session;
+
+  const events = fought.receipt.events;
+  const lethalDamage = events.find(({ payload, type }) => type === 'damage-dealt'
+    && canonicalJson(payload).includes(enemy.instanceId));
+  assert.ok(lethalDamage);
+  assert.match(canonicalJson(lethalDamage.payload), /"amount":2/);
+  assert.equal(events.filter(({ type }) => type === 'minion-died').length, 2);
+  const dropIndex = events.findIndex(({ type }) => type === 'artifact-dropped');
+  const bearerDeathIndex = events.findIndex(({ payload, type }) => type === 'minion-died'
+    && canonicalJson(payload).includes(bearer.instanceId));
+  assert.ok(dropIndex >= 0 && dropIndex < bearerDeathIndex);
+  assert.equal(session.state.realm.units.some(({ instanceId }) =>
+    instanceId === bearer.instanceId || instanceId === enemy.instanceId), false);
+  assert.deepEqual(observeGame(session.state, 'north').realm.artifacts?.map((artifact) => ({
+    bearer: artifact.bearer,
+    controller: artifact.controller,
+    location: artifact.location,
+    region: artifact.region,
+  })), [{ bearer: undefined, controller: null, location: 'C3', region: 'surface' }]);
+  assert.equal(verifyGameReplay(session), true);
+});
