@@ -129,6 +129,17 @@ export function selectDeterministicGameAction(session: GameSession): GameLegalAc
     return targetControllers.length > 0
       && targetControllers.every((controller) => controller === enemySeat);
   });
+  const movingUnitInstanceId = movement?.action.descriptor.kind === 'move-and-attack'
+    ? movement.action.descriptor.unitInstanceId
+    : undefined;
+  const poweredMovement = movingUnitInstanceId
+    && (player.avatar.card.instanceId === movingUnitInstanceId
+      ? (player.avatar.temporaryPowerSources?.length ?? 0) > 0
+      : session.state.realm.units.some(({ instanceId, temporaryPowerSources }) =>
+        instanceId === movingUnitInstanceId
+          && (temporaryPowerSources?.length ?? 0) > 0))
+    ? movement?.action
+    : undefined;
   const selected = actions.find(({ descriptor }) =>
     descriptor.kind === 'mulligan'
       && descriptor.atlasOrder.length === 0
@@ -137,6 +148,7 @@ export function selectDeterministicGameAction(session: GameSession): GameLegalAc
     ?? actions.find(({ descriptor }) => descriptor.kind === 'summon-minion')
     ?? actions.find(({ descriptor }) =>
       descriptor.kind === 'draw' && descriptor.zone === drawZone)
+    ?? poweredMovement
     ?? tactic
     ?? (movement && Number.isFinite(movement.distance) ? movement.action : undefined)
     ?? actions.find(({ descriptor }) => descriptor.kind === 'end-turn')

@@ -903,9 +903,15 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     assert.equal(preset.usesOnlyOrdinaryOrExceptionalCards, true);
     if (preset.id.endsWith('-lesson')) {
       assert.equal(preset.manifest.decks.north.atlas.length, 9);
-      assert.equal(preset.manifest.decks.north.spellbook.length, 14);
+      assert.equal(
+        preset.manifest.decks.north.spellbook.length,
+        preset.id === 'air-vs-earth-lesson' ? 16 : 14,
+      );
       assert.equal(preset.manifest.decks.south.atlas.length, 9);
-      assert.equal(preset.manifest.decks.south.spellbook.length, 14);
+      assert.equal(
+        preset.manifest.decks.south.spellbook.length,
+        preset.id === 'air-vs-earth-lesson' ? 14 : 16,
+      );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
       assert.equal(preset.manifest.decks.north.atlas.length, 30);
@@ -936,6 +942,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Apprentice Wizard': 2,
     'Cloud Spirit': 2,
     'Lightning Bolt': 3,
+    'Midnight Rogue': 2,
     'Plumed Pegasus': 2,
     'Roaming Monster': 1,
     'Snow Leopard': 2,
@@ -995,6 +1002,20 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     tacticSession = stepped.session;
   }
   assert.equal(completedPowerUse, true);
+  const midnightRogueId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Midnight Rogue')?.[0];
+  assert.ok(midnightRogueId);
+  const midnightRogue = airLesson.manifest.cards[midnightRogueId];
+  assert.equal(midnightRogue?.cardType, 'minion');
+  if (midnightRogue?.cardType === 'minion') {
+    assert.equal(midnightRogue.attack, 2);
+    assert.equal(midnightRogue.defense, 2);
+    assert.equal(midnightRogue.manaCost, 3);
+    assert.equal(midnightRogue.ordinary, true);
+    assert.equal(midnightRogue.ranged, true);
+    assert.equal(midnightRogue.stealth, true);
+    assert.deepEqual(midnightRogue.thresholds, { air: 1, earth: 0, fire: 0, water: 0 });
+  }
   for (const name of ['Dark Tower', 'Gothic Tower', 'Lone Tower']) {
     const cardId = Object.entries(airLesson.cardNames)
       .find(([, candidate]) => candidate === name)?.[0];
