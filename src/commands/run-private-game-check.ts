@@ -784,6 +784,22 @@ export type PrivateGameCheck = Readonly<{
     replayVerified: boolean;
     summonedAtC3: boolean;
   }>;
+  fireVileImp: Readonly<{
+    acceptedActionCount: number;
+    avatarTookTwoDamage: boolean;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    declinePreservedAvatar: boolean;
+    exactChoices: boolean;
+    legalLowRarityDeck: boolean;
+    manaPaid: number;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    seed: number;
+    summonedAtC3: boolean;
+    vileImp: string;
+    wasteland: string;
+  }>;
   fireIgnited: Readonly<{
     acceptedActionCount: number;
     causalEventsVerified: boolean;
@@ -1299,6 +1315,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   seaWitch: NormalizedCard;
   teleport: NormalizedCard;
   valley: NormalizedCard;
+  vileImp: NormalizedCard;
   vikings: NormalizedCard;
   voidwalkMinion: NormalizedCard;
   wardMinion: NormalizedCard;
@@ -1733,6 +1750,24 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || staticServant.thresholds.water !== 0
     || staticServant.rarity !== 'ordinary') {
     throw new Error('private location-wide Genesis damage minion no longer matches its supported facts');
+  }
+  const vileImp = snapshot.cards.find(({ name }) => name === 'Vile Imp');
+  if (!vileImp
+    || vileImp.stableId !== 'card:61054ba4b2dbd90c7b2729eda4a7d24ba509c0d00a4bee8c534eb7ce35bdb856'
+    || vileImp.cardType !== 'minion'
+    || vileImp.rulesText.trim() !== 'Genesis → May deal 2 damage to target adjacent unit.'
+    || vileImp.manaCost !== 2
+    || vileImp.attack !== 2
+    || vileImp.defense !== 2
+    || vileImp.life !== null
+    || vileImp.elements.length !== 1
+    || vileImp.elements[0] !== 'fire'
+    || vileImp.thresholds.air !== 0
+    || vileImp.thresholds.earth !== 0
+    || vileImp.thresholds.fire !== 1
+    || vileImp.thresholds.water !== 0
+    || vileImp.rarity !== 'ordinary') {
+    throw new Error('private optional targeted Genesis damage minion no longer matches its supported facts');
   }
   const minorExplosion = snapshot.cards.find(({ name }) => name === 'Minor Explosion');
   if (!minorExplosion
@@ -2841,6 +2876,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     seaWitch,
     teleport,
     valley,
+    vileImp,
     vikings,
     voidwalkMinion,
     wardMinion,
@@ -2937,6 +2973,7 @@ function gameDefinition(
   deathriteLoseLifePerNearbySiteControlled = false,
   leapAttackAlly = false,
   genesisDamageEachOtherUnitHere: 0 | 1 = 0,
+  genesisMayDamageTargetAdjacentUnit: 0 | 2 = 0,
   sacrificeMinionAtSummoningLocationForManaDiscount: 0 | 2 = 0,
   lanceCount: 0 | 1 = 0,
   grantsBearerPower: 0 | 2 = 0,
@@ -3076,6 +3113,7 @@ function gameDefinition(
       ...(diesAtEndOfControllerTurn ? { diesAtEndOfControllerTurn: true } : {}),
       ...(genesisHealController ? { genesisHealController } : {}),
       ...(genesisDamageEachOtherUnitHere ? { genesisDamageEachOtherUnitHere } : {}),
+      ...(genesisMayDamageTargetAdjacentUnit ? { genesisMayDamageTargetAdjacentUnit } : {}),
       genesisDrawSpell,
       genesisDrawSite,
       ...(genesisLoseControllerLife ? { genesisLoseControllerLife } : {}),
@@ -3123,7 +3161,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const avatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!avatar || avatar.cardType !== 'avatar') throw new Error('private scenario Avatar is missing');
@@ -3415,6 +3453,7 @@ function buildManifest(
     [input.chargeMagic],
   );
   const fireGenesisLifeLossDeck = elementalDeck('fire', [input.lesserBloodDemon]);
+  const fireVileImpDeck = elementalDeck('fire', [input.vileImp], [input.wasteland]);
   const fireIgnitedDeck = elementalDeck('fire', [input.ignited]);
   const fireLashDeck = elementalDeck(
     'fire',
@@ -3582,6 +3621,8 @@ function buildManifest(
           ? fireChargeDeck
         : scenario === 'fire-genesis-life-loss'
           ? fireGenesisLifeLossDeck
+        : scenario === 'fire-vile-imp'
+          ? fireVileImpDeck
         : scenario === 'fire-ignited'
           ? fireIgnitedDeck
         : scenario === 'fire-lash'
@@ -3679,6 +3720,8 @@ function buildManifest(
         ? fireRecklessSquireDeck
       : scenario === 'fire-vikings'
         ? fireVikingsDeck
+      : scenario === 'fire-vile-imp'
+        ? fireVileImpDeck
       : scenario === 'earth-border-militia'
         ? earthBorderMilitiaDeck
       : scenario === 'earth-humble-village'
@@ -3820,6 +3863,7 @@ function buildManifest(
       card.stableId === input.bladderblimp.stableId,
       card.stableId === input.leapAttack.stableId,
       card.stableId === input.staticServant.stableId ? 1 : 0,
+      card.stableId === input.vileImp.stableId ? 2 : 0,
       card.stableId === input.gnarledWendigo.stableId ? 2 : 0,
       card.stableId === input.recklessSquire.stableId ? 1 : 0,
       card.stableId === input.swordAndShield.stableId ? 2 : 0,
@@ -5734,6 +5778,41 @@ function findFireGenesisLifeLossOpening(
     }
   }
   throw new Error('private Genesis life-loss scenario no longer produces its supported opening');
+}
+
+function findFireVileImpOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string];
+  seed: number;
+  session: GameSession;
+  southSiteInstanceId: string;
+  vileImpInstanceId: string;
+}> {
+  // ponytail: pinned seed keeps this private teaching proof fast without another config field.
+  const seed = 141;
+  const built = buildManifest(input, seed, 'fire-vile-imp');
+  const session = createGameSession(built.manifest);
+  const northSites = session.state.players.north.hand.atlas
+    .filter(({ cardId }) => cardId === input.wasteland.stableId);
+  const vileImpInstanceId = [
+    ...session.state.players.north.hand.spellbook,
+    ...session.state.players.north.spellbook.slice(0, 1),
+  ].find(({ cardId }) => cardId === input.vileImp.stableId)?.instanceId;
+  const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+  if (northSites.length >= 2 && southSiteInstanceId && vileImpInstanceId) {
+    return {
+      ...built,
+      northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
+      seed,
+      session,
+      southSiteInstanceId,
+      vileImpInstanceId,
+    };
+  }
+  throw new Error('private Vile Imp optional Genesis damage scenario lacks its supported opening');
 }
 
 function findFireAramosOpening(
@@ -12534,6 +12613,117 @@ function runFireGenesisLifeLoss(
   });
 }
 
+function runFireVileImp(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['fireVileImp'] {
+  const opening = findFireVileImpOpening(input);
+  let checkpoint = keep(keep(opening.session));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    checkpoint = accept(checkpoint, action(checkpoint, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+
+  const avatarInstanceId = checkpoint.state.players.north.avatar.card.instanceId;
+  const choices = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.vileImpInstanceId
+      && descriptor.cell === 'C3');
+  const decline = choices.find(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.genesisDamageChoice === 'decline');
+  const selfTarget = choices.find(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.genesisDamageChoice === 'target'
+    && descriptor.genesisDamageTarget?.kind === 'minion'
+    && descriptor.genesisDamageTarget.instanceId === opening.vileImpInstanceId);
+  const target = choices.find(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.genesisDamageChoice === 'target'
+    && descriptor.genesisDamageTarget?.kind === 'avatar'
+    && descriptor.genesisDamageTarget.instanceId === avatarInstanceId);
+  if (!decline || !selfTarget || !target) {
+    throw new Error('private Vile Imp Genesis choices are unavailable');
+  }
+  const declined = stepGame(checkpoint, decline);
+  const targeted = stepGame(checkpoint, target);
+  if (!declined.accepted || !targeted.accepted) {
+    throw new Error('private Vile Imp Genesis choice was rejected');
+  }
+
+  const events = targeted.receipt.events;
+  const summonPayload = events[0] && isJsonRecord(events[0].payload) ? events[0].payload : undefined;
+  const allocationPayload = events[1] && isJsonRecord(events[1].payload)
+    ? events[1].payload
+    : undefined;
+  const damagePayload = events[2] && isJsonRecord(events[2].payload) ? events[2].payload : undefined;
+  const lifePayload = events[3] && isJsonRecord(events[3].payload) ? events[3].payload : undefined;
+  const imp = targeted.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.vileImpInstanceId);
+  const deckCardIds = [
+    ...opening.manifest.decks.north.atlas,
+    ...opening.manifest.decks.north.spellbook,
+  ];
+  const cardsById = new Map(input.cards.map((card) => [card.stableId, card]));
+  const legalLowRarityDeck = opening.manifest.decks.north.atlas.length === 30
+    && opening.manifest.decks.north.spellbook.length === 60
+    && opening.manifest.decks.north.atlas.filter((cardId) =>
+      cardId === input.wasteland.stableId).length === input.format.copyLimits.ordinary
+    && opening.manifest.decks.north.spellbook.filter((cardId) =>
+      cardId === input.vileImp.stableId).length === input.format.copyLimits.ordinary
+    && deckCardIds.every((cardId) => {
+      const rarity = cardsById.get(cardId)?.rarity;
+      return rarity === 'ordinary' || rarity === 'exceptional';
+    });
+  if (!legalLowRarityDeck) throw new Error('private Vile Imp teaching deck is no longer legal and low-rarity');
+
+  return Object.freeze({
+    acceptedActionCount: targeted.session.transcript.length,
+    avatarTookTwoDamage: checkpoint.state.players.north.avatar.life === 20
+      && targeted.session.state.players.north.avatar.life === 18,
+    causalEventsVerified: events.map(({ type }) => type).join(',')
+      === 'minion-summoned,genesis-damage-allocated,damage-dealt,avatar-life-lost'
+      && summonPayload?.instanceId === opening.vileImpInstanceId
+      && summonPayload.manaPaid === 2
+      && allocationPayload?.amount === 2
+      && allocationPayload.sourceInstanceId === opening.vileImpInstanceId
+      && allocationPayload.targetInstanceId === avatarInstanceId
+      && damagePayload?.amount === 2
+      && damagePayload.instanceId === avatarInstanceId
+      && lifePayload?.amount === 2
+      && lifePayload.life === 18
+      && lifePayload.seat === 'north',
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    declinePreservedAvatar: declined.session.state.players.north.avatar.life === 20
+      && declined.receipt.events.map(({ type }) => type).join(',') === 'minion-summoned',
+    exactChoices: choices.length === 3
+      && new Set([decline.actionId, selfTarget.actionId, target.actionId]).size === 3,
+    legalLowRarityDeck,
+    manaPaid: checkpoint.state.players.north.mana
+      - targeted.session.state.players.north.mana,
+    noRandomDraws: [...declined.session.transcript, ...targeted.session.transcript]
+      .every(({ randomDraws }) => randomDraws.length === 0),
+    replayVerified: verifyGameReplay(declined.session) && verifyGameReplay(targeted.session),
+    seed: opening.seed,
+    summonedAtC3: imp?.cardId === input.vileImp.stableId
+      && imp.controller === 'north'
+      && imp.damage === 0
+      && imp.location === 'C3'
+      && imp.owner === 'north'
+      && imp.region === 'surface',
+    vileImp: input.vileImp.name,
+    wasteland: input.wasteland.name,
+  });
+}
+
 function runFireAramos(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['fireAramos'] {
@@ -15698,6 +15888,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const fireAramos = runFireAramos(input);
   const fireCharge = runFireCharge(input);
   const fireGenesisLifeLoss = runFireGenesisLifeLoss(input);
+  const fireVileImp = runFireVileImp(input);
   const fireIgnited = runFireIgnited(input);
   const fireLash = runFireLash(input);
   const fireLeapAttack = runFireLeapAttack(input);
@@ -15895,6 +16086,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     fireAramos,
     fireCharge,
     fireGenesisLifeLoss,
+    fireVileImp,
     fireGranaryRats,
     fireHamlet,
     fireIgnited,

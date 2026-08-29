@@ -106,6 +106,7 @@ export type GameCardDefinition =
     discardRandomCardInsteadOfMana?: true;
     diesAtEndOfControllerTurn?: true;
     genesisDamageEachOtherUnitHere?: 1;
+    genesisMayDamageTargetAdjacentUnit?: 2;
     genesisDrawSpell?: boolean;
     genesisDrawSite?: boolean;
     genesisHealController?: 2;
@@ -418,6 +419,8 @@ type GameActionDescriptor =
     cell: RealmCell;
     kind: 'summon-minion';
     manaCost: number;
+    genesisDamageChoice?: 'decline' | 'target';
+    genesisDamageTarget?: GameUnitRef;
     paymentMode?: 'random-card-discard';
     region?: 'underground' | 'underwater' | 'void';
     sacrificedMinionInstanceIds?: readonly StateHash[];
@@ -699,21 +702,44 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
             sacrificedMinionInstanceIds,
           }))
           .filter(({ manaCost }) => player.mana >= manaCost);
-        return [...basePaymentOptions, ...sacrificePayments].map((payment) => ({
-          cardId,
-          cardInstanceId: instanceId,
-          casterInstanceId,
-          cell,
-          kind: 'summon-minion' as const,
-          manaCost: payment.manaCost,
-          ...('paymentMode' in payment && payment.paymentMode
-            ? { paymentMode: payment.paymentMode }
-            : {}),
-          ...(region ? { region } : {}),
-          ...('sacrificedMinionInstanceIds' in payment
-            ? { sacrificedMinionInstanceIds: payment.sacrificedMinionInstanceIds }
-            : {}),
-        }));
+        const genesisChoices = definition.genesisMayDamageTargetAdjacentUnit === 2
+          ? [
+            { genesisDamageChoice: 'decline' as const },
+            ...[
+              { instanceId, kind: 'minion' as const, seat },
+              ...(['north', 'south'] as const)
+                .flatMap((targetSeat) => unitRefs(state, targetSeat))
+                .filter((target) => {
+                  const status = unitStatus(state, target);
+                  return status.region === exactRegion
+                    && (status.location === cell
+                      || borderingCells(cell).includes(status.location))
+                    && (target.seat === seat || !status.stealthed);
+                }),
+            ].sort((left, right) => left.instanceId.localeCompare(right.instanceId))
+              .map((genesisDamageTarget) => ({
+                genesisDamageChoice: 'target' as const,
+                genesisDamageTarget,
+              })),
+          ]
+          : [{}];
+        return [...basePaymentOptions, ...sacrificePayments].flatMap((payment) =>
+          genesisChoices.map((choice) => ({
+            cardId,
+            cardInstanceId: instanceId,
+            casterInstanceId,
+            cell,
+            ...choice,
+            kind: 'summon-minion' as const,
+            manaCost: payment.manaCost,
+            ...('paymentMode' in payment && payment.paymentMode
+              ? { paymentMode: payment.paymentMode }
+              : {}),
+            ...(region ? { region } : {}),
+            ...('sacrificedMinionInstanceIds' in payment
+              ? { sacrificedMinionInstanceIds: payment.sacrificedMinionInstanceIds }
+              : {}),
+          })));
       }));
   });
 }
@@ -1264,6 +1290,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && card.genesisDamageEachOtherUnitHere !== 1) {
     throw new RangeError(`${path}.genesisDamageEachOtherUnitHere must be 1`);
   }
+  if (card.genesisMayDamageTargetAdjacentUnit !== undefined
+    && card.genesisMayDamageTargetAdjacentUnit !== 2) {
+    throw new RangeError(`${path}.genesisMayDamageTargetAdjacentUnit must be 2`);
+  }
   if (card.genesisHealController !== undefined && card.genesisHealController !== 2) {
     throw new RangeError(`${path}.genesisHealController must be 2`);
   }
@@ -1288,9 +1318,21 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   }
   if (card.genesisDamageEachOtherUnitHere === 1
     && (card.genesisDrawSite || card.genesisDrawSpell
+      || card.genesisMayDamageTargetAdjacentUnit !== undefined
       || card.genesisHealController !== undefined
       || card.genesisLoseControllerLife !== undefined)) {
     throw new RangeError(`${path} simultaneous Genesis damage and another effect are unsupported`);
+  }
+  if (card.genesisMayDamageTargetAdjacentUnit === 2
+    && (card.genesisDrawSite || card.genesisDrawSpell
+      || card.genesisHealController !== undefined
+      || card.genesisLoseControllerLife !== undefined)) {
+    throw new RangeError(`${path} simultaneous Genesis damage and another effect are unsupported`);
+  }
+  if (card.genesisMayDamageTargetAdjacentUnit === 2
+    && (card.discardRandomCardInsteadOfMana === true
+      || card.sacrificeMinionAtSummoningLocationForManaDiscount === 2)) {
+    throw new RangeError(`${path} targeted Genesis with alternative summon payment is unsupported`);
   }
   if (card.gainsStealthAtEndOfTurn !== undefined && typeof card.gainsStealthAtEndOfTurn !== 'boolean') {
     throw new RangeError(`${path}.gainsStealthAtEndOfTurn must be boolean`);
@@ -1365,6 +1407,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.token === true
     && (card.genesisDrawSite || card.genesisDrawSpell
       || card.genesisDamageEachOtherUnitHere === 1
+      || card.genesisMayDamageTargetAdjacentUnit === 2
       || card.genesisHealController !== undefined
       || card.genesisLoseControllerLife !== undefined)) {
     throw new RangeError(`${path} token Genesis effects are unsupported`);
@@ -1388,6 +1431,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.waterbound
     && (card.genesisDrawSite || card.genesisDrawSpell
       || card.genesisDamageEachOtherUnitHere === 1
+      || card.genesisMayDamageTargetAdjacentUnit === 2
       || card.genesisHealController !== undefined
       || card.genesisLoseControllerLife !== undefined)) {
     throw new RangeError(`${path} Waterbound with Genesis is unsupported`);
@@ -1609,6 +1653,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               : {}),
             ...(card.genesisDamageEachOtherUnitHere === 1
               ? { genesisDamageEachOtherUnitHere: 1 as const }
+              : {}),
+            ...(card.genesisMayDamageTargetAdjacentUnit === 2
+              ? { genesisMayDamageTargetAdjacentUnit: 2 as const }
               : {}),
             ...(card.genesisDrawSpell === true ? { genesisDrawSpell: true } : {}),
             ...(card.genesisDrawSite === true ? { genesisDrawSite: true } : {}),
@@ -2764,7 +2811,10 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
       : descriptor.sacrificedMinionInstanceIds
         ? `${descriptor.manaCost} mana + sacrifice ${descriptor.sacrificedMinionInstanceIds.length} minion${descriptor.sacrificedMinionInstanceIds.length === 1 ? '' : 's'}`
       : `${descriptor.manaCost} mana`;
-    return `Summon ${descriptor.cardId} at ${descriptor.cell}${descriptor.region ? ` ${descriptor.region}` : ''} (${payment})`
+    const genesis = descriptor.genesisDamageChoice === 'target' && descriptor.genesisDamageTarget
+      ? `; Genesis targets ${descriptor.genesisDamageTarget.kind} ${descriptor.genesisDamageTarget.instanceId.slice(0, 15)}…`
+      : descriptor.genesisDamageChoice === 'decline' ? '; decline Genesis' : '';
+    return `Summon ${descriptor.cardId} at ${descriptor.cell}${descriptor.region ? ` ${descriptor.region}` : ''} (${payment})${genesis}`
       + (caster ? ` with minion ${caster.instanceId.slice(0, 15)}…` : '');
   }
   if (descriptor.kind === 'cast-magic') {
@@ -5390,6 +5440,10 @@ function applyDescriptor(
       return candidate.cardInstanceId === descriptor.cardInstanceId
         && candidate.casterInstanceId === descriptor.casterInstanceId
         && candidate.cell === descriptor.cell
+        && candidate.genesisDamageChoice === descriptor.genesisDamageChoice
+        && candidate.genesisDamageTarget?.instanceId === descriptor.genesisDamageTarget?.instanceId
+        && candidate.genesisDamageTarget?.kind === descriptor.genesisDamageTarget?.kind
+        && candidate.genesisDamageTarget?.seat === descriptor.genesisDamageTarget?.seat
         && candidate.manaCost === descriptor.manaCost
         && candidate.paymentMode === descriptor.paymentMode
         && (candidate.region ?? 'surface') === (descriptor.region ?? 'surface')
@@ -5620,6 +5674,75 @@ function applyDescriptor(
         settlement.state,
         pending,
         [...summonOutcomes, ...settlement.outcomes, ...allocationOutcomes],
+        true,
+        false,
+        [source],
+        false,
+        true,
+      );
+      return [
+        withStateVersion(damaged, {}),
+        outcomes,
+        [...paymentRandomDraws, ...randomDraws],
+      ];
+    }
+    if (definition.genesisMayDamageTargetAdjacentUnit === 2
+      && descriptor.genesisDamageChoice === 'target'
+      && descriptor.genesisDamageTarget) {
+      const source: GameUnitRef = {
+        instanceId: unit.instanceId,
+        kind: 'minion',
+        seat,
+      };
+      const sourceUnit = settlement.state.realm.units.find(({ instanceId }) =>
+        instanceId === unit.instanceId);
+      const target = unitRefs(settlement.state, descriptor.genesisDamageTarget.seat)
+        .find((candidate) => candidate.kind === descriptor.genesisDamageTarget!.kind
+          && candidate.instanceId === descriptor.genesisDamageTarget!.instanceId);
+      const targetStatus = target ? unitStatus(settlement.state, target) : undefined;
+      if (!sourceUnit
+        || minionDisabled(settlement.state, sourceUnit)
+        || !target
+        || !targetStatus
+        || targetStatus.region !== sourceUnit.region
+        || target.seat !== seat && targetStatus.stealthed
+        || targetStatus.location !== sourceUnit.location
+          && !borderingCells(sourceUnit.location).includes(targetStatus.location)) {
+        return [
+          withStateVersion(settlement.state, {}),
+          [...summonOutcomes, ...settlement.outcomes],
+          paymentRandomDraws,
+        ];
+      }
+      const pending: PendingCombat = deepFreeze({
+        allocations: [{
+          amount: definition.genesisMayDamageTargetAdjacentUnit,
+          targetInstanceId: target.instanceId,
+        }],
+        attacker: source,
+        attackingSeat: seat,
+        cell: sourceUnit.location,
+        combatants: [target],
+        defenders: [],
+        originalTarget: null,
+        ...(sourceUnit.region === 'surface' ? {} : { region: sourceUnit.region }),
+        targetRemoved: false,
+      });
+      const [damaged, outcomes, randomDraws] = resolveFightWindow(
+        settlement.state,
+        pending,
+        [
+          ...summonOutcomes,
+          ...settlement.outcomes,
+          {
+            payload: {
+              amount: definition.genesisMayDamageTargetAdjacentUnit,
+              sourceInstanceId: source.instanceId,
+              targetInstanceId: target.instanceId,
+            },
+            type: 'genesis-damage-allocated',
+          },
+        ],
         true,
         false,
         [source],
