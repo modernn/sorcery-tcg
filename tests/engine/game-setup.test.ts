@@ -97,6 +97,7 @@ type SiteFacts = Readonly<{
   genesisGainMana?: number;
   genesisGainManaIfOnlyControlledCopy?: 1;
   genesisMayBottomNextSpell?: true;
+  rangedUnitsHereRangeBonus?: 1;
   sacrificeToDestroyNearbySite?: true;
 }>;
 
@@ -143,6 +144,9 @@ function cardsFor(
           : {}),
         ...(site.genesisMayBottomNextSpell === true
           ? { genesisMayBottomNextSpell: true as const }
+          : {}),
+        ...(site.rangedUnitsHereRangeBonus === 1
+          ? { rangedUnitsHereRangeBonus: 1 as const }
           : {}),
         ...(site.sacrificeToDestroyNearbySite === true
           ? { sacrificeToDestroyNearbySite: true as const }
@@ -8300,6 +8304,7 @@ test('RULE-04 Ranged strikes without return damage and Ward prevents the first p
       ranged: true,
       thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
     },
+    site: { rangedUnitsHereRangeBonus: 1 },
   });
   const wardManifest = createGameManifest({
     ...base,
@@ -8340,6 +8345,32 @@ test('RULE-04 Ranged strikes without return damage and Ward prevents the first p
       && descriptor.to.cell === 'C3'));
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  let longRange = session;
+  longRange = accept(longRange, action(longRange, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  longRange = accept(longRange, action(longRange, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C2'));
+  longRange = accept(longRange, action(longRange, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  longRange = accept(longRange, action(longRange, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  const longRangeShots = legalGameActions(longRange.state, 'north')
+    .filter(({ descriptor }) => descriptor.kind === 'shoot-projectile');
+  const longRangeShot = longRangeShots.find(({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.shooterInstanceId === shooterInstanceId
+      && descriptor.hit?.instanceId === targetInstanceId);
+  assert.ok(longRangeShot);
+  assert.deepEqual(
+    longRangeShot.descriptor.kind === 'shoot-projectile'
+      ? longRangeShot.descriptor.path.map(({ cell }) => cell)
+      : [],
+    ['C3', 'C2', 'C1'],
+  );
+  assert.equal(longRangeShots.some(({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile' && descriptor.path.length > 3), false);
+  longRange = accept(longRange, longRangeShot);
+  assert.equal(verifyGameReplay(longRange), true);
 
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
