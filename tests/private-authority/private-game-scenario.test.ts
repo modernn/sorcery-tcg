@@ -95,6 +95,8 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
     const north = (((current.view as JsonObject).players as JsonObject).north as JsonObject);
     const hand = north.hand as JsonObject;
     const names = current.cardNames as Record<string, string>;
+    const sparkmage = north.avatar as JsonObject;
+    assert.equal(names[sparkmage.cardId as string], 'Sparkmage');
     const spire = (hand.atlas as JsonObject[]).find(({ cardId }) => names[cardId as string] === 'Spire');
     const leopard = (hand.spellbook as JsonObject[])
       .find(({ cardId }) => names[cardId as string] === 'Snow Leopard');
@@ -102,6 +104,12 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
       .find(({ cardId }) => names[cardId as string] === 'Zap!');
     assert.ok(spire && leopard && zap, 'known-good Air seed must expose its teaching cards');
     const facts = current.cardFacts as Record<string, JsonObject>;
+    assert.deepEqual(facts[sparkmage.cardId as string], {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      life: 20,
+    });
     assert.deepEqual(facts[spire.cardId as string], {
       cardType: 'site',
       elements: ['air'],
@@ -141,6 +149,8 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
     const visibleNames = current.cardNames as Record<string, string>;
     assert.equal(visibleNames[site.cardId as string], 'Spire');
     assert.equal(visibleNames[unit.cardId as string], 'Snow Leopard');
+    const afterSummonNorth = (((current.view as JsonObject).players as JsonObject).north as JsonObject);
+    assert.equal(afterSummonNorth.airThresholdsCastThisTurn, 1);
     current = await submit(findAction(current, (descriptor) => descriptor.kind === 'end-turn'));
     current = await json('/api/view?seat=south');
     current = await submit(findAction(current, (descriptor) =>
@@ -150,6 +160,8 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
     current = await json('/api/view?seat=north');
     current = await submit(findAction(current, (descriptor) =>
       descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    assert.equal(((((current.view as JsonObject).players as JsonObject).north as JsonObject)
+      .airThresholdsCastThisTurn), 0);
     const castZap = findAction(current, (descriptor) =>
       descriptor.kind === 'cast-magic'
         && descriptor.cardInstanceId === zap.instanceId
@@ -159,8 +171,30 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
     current = await submit(castZap);
     assert.match(String(current.playerAction), /Cast Zap!.*Snow Leopard.*attempt to deal 1 damage/);
     assert.doesNotMatch(String(current.playerAction), /card:|sha256:/);
+    const afterCastNorth = (((current.view as JsonObject).players as JsonObject).north as JsonObject);
+    assert.equal(afterCastNorth.airThresholdsCastThisTurn, 1);
+    const activateSparkmage = findAction(current, (descriptor) => {
+      const target = descriptor.targetLocation as JsonObject | undefined;
+      return descriptor.kind === 'activate-sparkmage'
+        && target?.cell === 'C4'
+        && target.region === 'surface';
+    });
+    assert.match(String(activateSparkmage.label), /Sparkmage.*C4/);
+    assert.doesNotMatch(String(activateSparkmage.label), /card:|sha256:/);
+    current = await submit(activateSparkmage);
+    assert.match(String(current.playerAction), /Sparkmage.*C4/);
+    const afterSparkmage = (((current.view as JsonObject).players as JsonObject).north as JsonObject);
+    assert.equal((afterSparkmage.avatar as JsonObject).tapped, true);
+    assert.equal((afterSparkmage.cemetery as JsonObject[])
+      .some(({ instanceId }) => instanceId === leopard.instanceId), true);
+    assert.equal(afterSparkmage.airThresholdsCastThisTurn, 1);
+    const sparkmageEvents = ((current.receipt as JsonObject).events as JsonObject[])
+      .map(({ type }) => type);
+    assert.equal(sparkmageEvents.includes('sparkmage-activated'), true);
+    assert.equal(sparkmageEvents.includes('damage-dealt'), true);
+    assert.equal(sparkmageEvents.includes('minion-died'), true);
     const replay = await json('/api/replay', { method: 'POST' });
-    assert.equal(replay.acceptedActionCount, 10);
+    assert.equal(replay.acceptedActionCount, 11);
     assert.equal(replay.verified, true);
     assert.equal(replay.finalStateHash, current.stateHash);
 
@@ -816,6 +850,11 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     .forEach((name, index) => {
       assert.equal(Object.values(starterCatalog[index]!.cardNames).includes(name), true);
     });
+  assert.equal(
+    starterCatalog[0]!.cardNames[starterCatalog[0]!.manifest.decks.north.avatar],
+    'Sparkmage',
+  );
+  assert.match(starterCatalog[0]!.label, /Air Beta precon card lesson.*Sparkmage/);
   assert.equal(Object.values(starterCatalog[3]!.cardNames).includes('Autumn River'), true);
   assert.equal(Object.values(starterCatalog[2]!.cardNames).includes('Charge'), true);
   await verifyPrivateStarterHttp(starterCatalog);
