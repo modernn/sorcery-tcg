@@ -323,23 +323,30 @@ function assertVikings(result: PrivateGameCheck['fireVikings']): void {
 function assertMesmerism(result: PrivateGameCheck['waterMesmerism']): void {
   assert.equal(result.mesmerism, 'Mesmerism');
   assert.equal(result.seravaTownsfolk, 'Serava Townsfolk');
-  assert.equal(result.acceptedActionCount, 31);
+  assert.equal(result.kettletopLeprechaun, 'Kettletop Leprechaun');
+  assert.equal(result.acceptedActionCount, 34);
   assert.equal(result.waterAffinityFour, true);
   assert.equal(result.exactNearbyTarget, true);
   assert.equal(result.farTargetUnavailable, true);
   assert.equal(result.manaPaid, 4);
   assert.equal(result.controlTransferred, true);
+  assert.equal(result.deathriteControllerDrewSite, true);
+  assert.equal(result.deathriteOwnerKeptCemetery, true);
   assert.equal(result.oldControllerHadAction, true);
   assert.equal(result.newControllerGainedAction, true);
   assert.equal(result.oldControllerLostAction, true);
+  assert.equal(result.seed, 4724);
   assert.equal(result.causalEventsVerified, true);
   assert.equal(result.noRandomDraws, true);
   assert.equal(result.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
   assert.equal(result.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
   assert.equal(result.deck.atlas.find(({ name }) => name === 'Stream')?.copies, 4);
+  assert.equal(result.deck.atlas.find(({ name }) => name === 'Valley')?.copies, 4);
   assert.equal(result.deck.spellbook.find(({ name }) => name === 'Mesmerism')?.copies, 1);
   assert.equal(result.deck.spellbook
     .find(({ name }) => name === 'Serava Townsfolk')?.copies, 4);
+  assert.equal(result.deck.spellbook
+    .find(({ name }) => name === 'Kettletop Leprechaun')?.copies, 4);
   assert.equal(result.replayVerified, true);
 }
 

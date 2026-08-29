@@ -3140,19 +3140,19 @@ function resolveMinionDeaths(
       }
     }
     if (!definition.deathriteDrawSite) continue;
-    const owner = players[dead.owner];
-    const [drawn, ...atlas] = owner.atlas;
+    const controller = players[dead.controller];
+    const [drawn, ...atlas] = controller.atlas;
     if (!drawn) {
-      deckLosers.add(dead.owner);
+      deckLosers.add(dead.controller);
       continue;
     }
-    players[dead.owner] = deepFreeze({
-      ...owner,
+    players[dead.controller] = deepFreeze({
+      ...controller,
       atlas,
-      hand: { ...owner.hand, atlas: [...owner.hand.atlas, drawn] },
+      hand: { ...controller.hand, atlas: [...controller.hand.atlas, drawn] },
     });
     deathOutcomes.push({
-      payload: { seat: dead.owner, sourceInstanceId: dead.instanceId },
+      payload: { seat: dead.controller, sourceInstanceId: dead.instanceId },
       type: 'site-drawn',
     });
   }
