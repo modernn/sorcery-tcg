@@ -3485,6 +3485,114 @@ test('RULE-03 Freeze disables a nearby minion until the caster next Start Phase'
   assert.equal(verifyGameReplay(session), true);
 });
 
+test('RULE-03/04 disabling a subsurface minion immediately settles its region', () => {
+  const decks = {
+    north: deck('disable-region-north', 3, 3),
+    south: deck('disable-region-south', 3, 3),
+  };
+  const cards = cardsFor(decks, {
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  }, undefined, { elements: ['water'] });
+  const [casterCardId, targetCardId, freezeCardId] = decks.north.spellbook;
+  assert.ok(casterCardId && targetCardId && freezeCardId);
+  cards[casterCardId] = {
+    ...cards[casterCardId]!,
+    spellcaster: true,
+    submerge: true,
+    voidwalk: true,
+  } as GameCardDefinition;
+  cards[targetCardId] = {
+    ...cards[targetCardId]!,
+    submerge: true,
+    voidwalk: true,
+  } as GameCardDefinition;
+  cards[freezeCardId] = {
+    cardType: 'magic',
+    disableTargetNearbyMinionUntilNextTurn: true,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  };
+  const gameManifest = createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic',
+      revisionId: 'synthetic-disable-region-v1',
+    },
+    cards,
+    decks,
+    firstSeat: 'north',
+    seed: 0,
+  });
+  let checkpoint = keep(keep(createGameSession(gameManifest)));
+  checkpoint = accept(checkpoint, action(checkpoint, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+
+  const freezeAt = (region: 'underwater' | 'void', cell: 'C4' | 'B4') => {
+    let session = checkpoint;
+    const take = (predicate: Parameters<typeof action>[1]): void => {
+      session = accept(session, action(session, predicate));
+    };
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === casterCardId && descriptor.cell === cell
+      && descriptor.region === region);
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === targetCardId && descriptor.cell === cell
+      && descriptor.region === region);
+    const caster = session.state.realm.units.find(({ cardId }) => cardId === casterCardId);
+    const target = session.state.realm.units.find(({ cardId }) => cardId === targetCardId);
+    const freeze = session.state.players.north.hand.spellbook.find(({ cardId }) =>
+      cardId === freezeCardId);
+    assert.ok(caster && target && freeze);
+    const result = stepGame(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === freeze.instanceId
+        && descriptor.casterInstanceId === caster.instanceId
+        && descriptor.target?.instanceId === target.instanceId));
+    assert.equal(result.accepted, true);
+    if (!result.accepted) throw new Error('expected Freeze to resolve');
+    return { caster, freeze, result, target };
+  };
+
+  const underwater = freezeAt('underwater', 'C4');
+  assert.deepEqual(underwater.result.receipt.events.map(({ type }) => type), [
+    'magic-cast',
+    'minion-disabled',
+    'minion-died',
+    'magic-resolved',
+  ]);
+  assert.equal(underwater.result.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === underwater.target.instanceId), false);
+  assert.equal(underwater.result.session.state.realm.units.some(({ instanceId, region }) =>
+    instanceId === underwater.caster.instanceId && region === 'underwater'), true);
+  assert.equal(underwater.result.session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === underwater.target.instanceId), true);
+  assert.equal(underwater.result.session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === underwater.freeze.instanceId), true);
+  assert.equal(underwater.result.receipt.randomDraws.length, 0);
+  assert.equal(verifyGameReplay(underwater.result.session), true);
+
+  const voided = freezeAt('void', 'B4');
+  assert.deepEqual(voided.result.receipt.events.map(({ type }) => type), [
+    'magic-cast',
+    'minion-disabled',
+    'minion-banished',
+    'magic-resolved',
+  ]);
+  assert.equal(voided.result.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === voided.target.instanceId), false);
+  assert.equal(voided.result.session.state.realm.units.some(({ instanceId, region }) =>
+    instanceId === voided.caster.instanceId && region === 'void'), true);
+  assert.equal(voided.result.session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === voided.target.instanceId), false);
+  assert.equal(voided.result.session.state.players.south.cemetery.some(({ instanceId }) =>
+    instanceId === voided.target.instanceId), false);
+  assert.equal(voided.result.session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === voided.freeze.instanceId), true);
+  assert.equal(voided.result.receipt.randomDraws.length, 0);
+  assert.equal(verifyGameReplay(voided.result.session), true);
+});
+
 test('RULE-03 Lightning Bolt targets a location and deterministically damages one random unit there', () => {
   const decks = { north: deck('bolt-north', 4, 6), south: deck('bolt-south', 4, 6) };
   const cards = cardsFor(decks, {
