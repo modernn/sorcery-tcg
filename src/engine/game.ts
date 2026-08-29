@@ -126,6 +126,7 @@ export type GameCardDefinition =
     submerge?: boolean;
     summonToAnySite?: boolean;
     mustBeCastToOuterColumn?: boolean;
+    tapToDamageEachUnitAtAdjacentLocation?: 2;
     tapForMana?: number;
     thresholds: GameThresholds;
     voidwalk?: boolean;
@@ -450,6 +451,11 @@ type GameActionDescriptor =
   | Readonly<{ kind: 'intercept'; unitInstanceId: StateHash }>
   | Readonly<{ kind: 'close-intercept' }>
   | Readonly<{ amount: number; kind: 'allocate-strike'; targetInstanceId: StateHash }>
+  | Readonly<{
+    kind: 'activate-area-damage';
+    sourceInstanceId: StateHash;
+    targetLocation: GameLocation;
+  }>
   | Readonly<{ amount: number; kind: 'activate-mana'; unitInstanceId: StateHash }>
   | Readonly<{ kind: 'end-turn' }>;
 
@@ -1207,6 +1213,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && (!Number.isSafeInteger(card.tapForMana) || card.tapForMana < 1 || card.tapForMana > MAX_COMBAT_STAT)) {
     throw new RangeError(path + '.tapForMana must be a safe integer between 1 and ' + MAX_COMBAT_STAT);
   }
+  if (card.tapToDamageEachUnitAtAdjacentLocation !== undefined
+    && card.tapToDamageEachUnitAtAdjacentLocation !== 2) {
+    throw new RangeError(`${path}.tapToDamageEachUnitAtAdjacentLocation must be 2`);
+  }
   if (card.provides !== undefined && !elements.includes(card.provides)) {
     throw new RangeError(`${path}.provides must be a supported element`);
   }
@@ -1402,6 +1412,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.submerge === true ? { submerge: true } : {}),
             ...(card.summonToAnySite === true ? { summonToAnySite: true } : {}),
             ...(card.mustBeCastToOuterColumn === true ? { mustBeCastToOuterColumn: true } : {}),
+            ...(card.tapToDamageEachUnitAtAdjacentLocation === 2
+              ? { tapToDamageEachUnitAtAdjacentLocation: 2 as const }
+              : {}),
             ...(card.tapForMana ? { tapForMana: card.tapForMana } : {}),
             thresholds: { ...card.thresholds },
             ...(card.voidwalk === true ? { voidwalk: true } : {}),
@@ -2240,6 +2253,26 @@ function manaAbilityDescriptors(state: GameState, seat: GameSeat): readonly Game
   });
 }
 
+function areaDamageAbilityDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
+  return state.realm.units.flatMap((unit) => {
+    if (unit.controller !== seat
+      || minionDisabled(state, unit)
+      || unit.tapped
+      || unit.summoningSickness) return [];
+    const definition = cardDefinition(state, unit.cardId);
+    if (definition.cardType !== 'minion'
+      || definition.tapToDamageEachUnitAtAdjacentLocation !== 2) return [];
+    return borderingCells(unit.location)
+      .map((cell): GameLocation => ({ cell, region: unit.region }))
+      .filter((location) => locationExists(state, location))
+      .map((targetLocation) => ({
+        kind: 'activate-area-damage' as const,
+        sourceInstanceId: unit.instanceId,
+        targetLocation,
+      }));
+  });
+}
+
 function siteDestructionDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   return REALM_CELLS.flatMap((sourceCell) => {
     const source = state.realm.sites[sourceCell];
@@ -2400,6 +2433,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     ...artifactDescriptors(state, seat),
     ...magicDescriptors(state, seat),
     ...siteDestructionDescriptors(state, seat),
+    ...areaDamageAbilityDescriptors(state, seat),
     ...manaAbilityDescriptors(state, seat),
     ...movementDescriptors(state, seat),
     ...dragProjectileDescriptors(state, seat),
@@ -2523,6 +2557,9 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
   if (descriptor.kind === 'close-intercept') return 'Close intercept window';
   if (descriptor.kind === 'allocate-strike') {
     return `Assign ${descriptor.amount} damage to ${descriptor.targetInstanceId.slice(0, 15)}…`;
+  }
+  if (descriptor.kind === 'activate-area-damage') {
+    return `Tap ${descriptor.sourceInstanceId.slice(0, 15)}… to damage every unit at ${descriptor.targetLocation.cell}`;
   }
   if (descriptor.kind === 'activate-mana') {
     return 'Tap ' + descriptor.unitInstanceId.slice(0, 15) + '… for ' + descriptor.amount + ' mana';
@@ -4983,6 +5020,86 @@ function applyDescriptor(
       [...summonOutcomes, ...settlement.outcomes],
       paymentRandomDraws,
     ];
+  }
+
+  if (descriptor.kind === 'activate-area-damage') {
+    const legal = areaDamageAbilityDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'activate-area-damage'
+        && candidate.sourceInstanceId === descriptor.sourceInstanceId
+        && sameLocation(candidate.targetLocation, descriptor.targetLocation));
+    const source = state.realm.units.find(({ instanceId }) => instanceId === descriptor.sourceInstanceId);
+    if (!legal || !source) throw new Error('unreachable illegal area-damage activation');
+    const definition = cardDefinition(state, source.cardId);
+    if (definition.cardType !== 'minion'
+      || definition.tapToDamageEachUnitAtAdjacentLocation !== 2) {
+      throw new Error('unreachable area-damage source definition');
+    }
+    const amount = definition.tapToDamageEachUnitAtAdjacentLocation;
+    const sourceRef: GameUnitRef = { instanceId: source.instanceId, kind: 'minion', seat };
+    const [units, stealthOutcomes] = loseStealth(
+      state.realm.units.map((candidate) => candidate.instanceId === source.instanceId
+        ? deepFreeze({ ...candidate, tapped: true })
+        : candidate),
+      [sourceRef],
+    );
+    const activatedState = deepFreeze({
+      ...state,
+      realm: { ...state.realm, units },
+    });
+    const activated: GameOutcome = {
+      payload: {
+        cell: descriptor.targetLocation.cell,
+        region: descriptor.targetLocation.region,
+        seat,
+        sourceInstanceId: source.instanceId,
+      },
+      type: 'area-damage-activated',
+    };
+    const targets = (['north', 'south'] as const)
+      .flatMap((targetSeat) => unitRefs(activatedState, targetSeat))
+      .filter((target) => {
+        const status = unitStatus(activatedState, target);
+        return status.location === descriptor.targetLocation.cell
+          && status.region === descriptor.targetLocation.region;
+      })
+      .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+    if (targets.length === 0) {
+      return [withStateVersion(activatedState, {}), [activated, ...stealthOutcomes], []];
+    }
+    const pending: PendingCombat = deepFreeze({
+      allocations: targets.map(({ instanceId }) => ({
+        amount,
+        targetInstanceId: instanceId,
+      })),
+      attacker: sourceRef,
+      attackingSeat: seat,
+      cell: descriptor.targetLocation.cell,
+      combatants: targets,
+      defenders: [],
+      originalTarget: null,
+      ...(descriptor.targetLocation.region === 'surface'
+        ? {}
+        : { region: descriptor.targetLocation.region }),
+      targetRemoved: false,
+    });
+    const allocationOutcomes: readonly GameOutcome[] = targets.map(({ instanceId }) => ({
+      payload: {
+        amount,
+        sourceInstanceId: source.instanceId,
+        targetInstanceId: instanceId,
+      },
+      type: 'area-damage-allocated',
+    }));
+    const [damaged, outcomes, randomDraws] = resolveFightWindow(
+      activatedState,
+      pending,
+      [activated, ...stealthOutcomes, ...allocationOutcomes],
+      true,
+      false,
+      [],
+      false,
+    );
+    return [withStateVersion(damaged, {}), outcomes, randomDraws];
   }
 
   if (descriptor.kind === 'activate-mana') {

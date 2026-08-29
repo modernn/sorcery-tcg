@@ -74,8 +74,86 @@ function assertHuntersLodge(result: PrivateGameCheck['earthHuntersLodge']): void
   assert.equal(result.replayVerified, true);
 }
 
+function assertVikings(result: PrivateGameCheck['fireVikings']): void {
+  assert.equal(result.vikings, 'Vikings');
+  assert.equal(result.raalDromedary, 'Raal Dromedary');
+  assert.equal(result.acceptedActionCount, 29);
+  assert.equal(result.activationUnavailableWhileSickAndTapped, true);
+  assert.equal(result.exactAdjacentTarget, true);
+  assert.equal(result.summonManaPaid, 5);
+  assert.equal(result.simultaneousDamageVerified, true);
+  assert.equal(result.targetsEnteredCemetery, true);
+  assert.equal(result.vikingsSurvivedAndTapped, true);
+  assert.equal(result.noCombatOrReturnDamage, true);
+  assert.equal(result.causalEventsVerified, true);
+  assert.equal(result.noRandomDraws, true);
+  assert.equal(result.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.deck.atlas.find(({ name }) => name === 'Ghost Town')?.copies, 3);
+  assert.equal(result.deck.spellbook.find(({ name }) => name === 'Vikings')?.copies, 4);
+  assert.equal(result.deck.spellbook.find(({ name }) => name === 'Raal Dromedary')?.copies, 4);
+  assert.equal(result.replayVerified, true);
+}
+
+function assertMinorExplosion(result: PrivateGameCheck['fireMinorExplosion']): void {
+  assert.equal(result.minorExplosion, 'Minor Explosion');
+  assert.equal(result.raalDromedary, 'Raal Dromedary');
+  assert.equal(result.acceptedActionCount, 17);
+  assert.equal(result.exactLocationTargetAvailable, true);
+  assert.equal(result.targetWithinTwoSteps, true);
+  assert.equal(result.manaPaid, 3);
+  assert.equal(result.avatarTookThreeDamage, true);
+  assert.equal(result.simultaneousDamageVerified, true);
+  assert.equal(result.twoMinionsDied, true);
+  assert.equal(result.twoMinionsEnteredCemetery, true);
+  assert.equal(result.spellEnteredCemetery, true);
+  assert.equal(result.causalEventsVerified, true);
+  assert.equal(result.noRandomDraws, true);
+  assert.equal(result.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.deck.spellbook
+    .find(({ name }) => name === 'Minor Explosion')?.copies, 4);
+  assert.equal(result.deck.spellbook
+    .find(({ name }) => name === 'Raal Dromedary')?.copies, 4);
+  assert.equal(result.replayVerified, true);
+}
+
+function assertFireResponse(result: PrivateGameCheck['fireResponse']): void {
+  assert.equal(result.lumberingGiant, 'Lumbering Giant');
+  assert.equal(result.monstrousLion, 'Monstrous Lion');
+  assert.equal(result.chargeMoveAndAttack, true);
+  assert.equal(result.unitTargetAvailable, true);
+  assert.equal(result.siteTargetUnavailable, true);
+  assert.equal(result.defendUnavailable, true);
+  assert.equal(result.interceptUnavailable, true);
+  assert.equal(result.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.replayVerified, true);
+}
+
+function assertFireCharge(result: PrivateGameCheck['fireCharge']): void {
+  assert.equal(result.charge, 'Charge');
+  assert.equal(result.raalDromedary, 'Raal Dromedary');
+  assert.equal(result.acceptedActionCount, 12);
+  assert.equal(result.moveUnavailableBeforeCharge, true);
+  assert.equal(result.exactNonTargetAllyChoice, true);
+  assert.equal(result.manaPaid, 1);
+  assert.equal(result.temporaryChargeRecorded, true);
+  assert.equal(result.moveAvailableAfterCharge, true);
+  assert.equal(result.unitStatePreservedOnGrant, true);
+  assert.equal(result.expiredAtEndOfTurn, true);
+  assert.equal(result.causalEventsVerified, true);
+  assert.equal(result.spellEnteredCemetery, true);
+  assert.equal(result.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.deck.spellbook.find(({ name }) => name === 'Charge')?.copies, 4);
+  assert.equal(result.deck.spellbook.find(({ name }) => name === 'Raal Dromedary')?.copies, 4);
+  assert.equal(result.replayVerified, true);
+}
+
 test('private actual-card decks complete deterministic combat, Earth, Air, Fire, and Water scenarios', async () => {
   const result = await runPrivateGameCheck();
+  assertVikings(result.fireVikings);
   assert.equal(result.classification, 'private-local_actual-cards_unranked-partial-rules');
   assert.equal(result.airGenesisSpell.genesisMinion, 'Apprentice Wizard');
   assert.equal(result.airGenesisSpell.acceptedActionCount, 15);
@@ -650,59 +728,9 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthWard.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
   assert.deepEqual(result.earthWard.deck, result.earthRamp.deck);
   assert.equal(result.earthWard.replayVerified, true);
-  assert.equal(result.fireResponse.lumberingGiant, 'Lumbering Giant');
-  assert.equal(result.fireResponse.monstrousLion, 'Monstrous Lion');
-  assert.equal(result.fireResponse.chargeMoveAndAttack, true);
-  assert.equal(result.fireResponse.unitTargetAvailable, true);
-  assert.equal(result.fireResponse.siteTargetUnavailable, true);
-  assert.equal(result.fireResponse.defendUnavailable, true);
-  assert.equal(result.fireResponse.interceptUnavailable, true);
-  assert.equal(result.fireResponse.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
-  assert.equal(result.fireResponse.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
-  assert.equal(result.fireResponse.replayVerified, true);
-  assert.equal(result.fireMinorExplosion.minorExplosion, 'Minor Explosion');
-  assert.equal(result.fireMinorExplosion.raalDromedary, 'Raal Dromedary');
-  assert.equal(result.fireMinorExplosion.acceptedActionCount, 17);
-  assert.equal(result.fireMinorExplosion.exactLocationTargetAvailable, true);
-  assert.equal(result.fireMinorExplosion.targetWithinTwoSteps, true);
-  assert.equal(result.fireMinorExplosion.manaPaid, 3);
-  assert.equal(result.fireMinorExplosion.avatarTookThreeDamage, true);
-  assert.equal(result.fireMinorExplosion.simultaneousDamageVerified, true);
-  assert.equal(result.fireMinorExplosion.twoMinionsDied, true);
-  assert.equal(result.fireMinorExplosion.twoMinionsEnteredCemetery, true);
-  assert.equal(result.fireMinorExplosion.spellEnteredCemetery, true);
-  assert.equal(result.fireMinorExplosion.causalEventsVerified, true);
-  assert.equal(result.fireMinorExplosion.noRandomDraws, true);
-  assert.equal(result.fireMinorExplosion.deck.atlas
-    .reduce((total, card) => total + card.copies, 0), 30);
-  assert.equal(result.fireMinorExplosion.deck.spellbook
-    .reduce((total, card) => total + card.copies, 0), 60);
-  assert.equal(result.fireMinorExplosion.deck.spellbook
-    .find(({ name }) => name === 'Minor Explosion')?.copies, 4);
-  assert.equal(result.fireMinorExplosion.deck.spellbook
-    .find(({ name }) => name === 'Raal Dromedary')?.copies, 4);
-  assert.equal(result.fireMinorExplosion.replayVerified, true);
-  assert.equal(result.fireCharge.charge, 'Charge');
-  assert.equal(result.fireCharge.raalDromedary, 'Raal Dromedary');
-  assert.equal(result.fireCharge.acceptedActionCount, 12);
-  assert.equal(result.fireCharge.moveUnavailableBeforeCharge, true);
-  assert.equal(result.fireCharge.exactNonTargetAllyChoice, true);
-  assert.equal(result.fireCharge.manaPaid, 1);
-  assert.equal(result.fireCharge.temporaryChargeRecorded, true);
-  assert.equal(result.fireCharge.moveAvailableAfterCharge, true);
-  assert.equal(result.fireCharge.unitStatePreservedOnGrant, true);
-  assert.equal(result.fireCharge.expiredAtEndOfTurn, true);
-  assert.equal(result.fireCharge.causalEventsVerified, true);
-  assert.equal(result.fireCharge.spellEnteredCemetery, true);
-  assert.equal(result.fireCharge.deck.atlas
-    .reduce((total, card) => total + card.copies, 0), 30);
-  assert.equal(result.fireCharge.deck.spellbook
-    .reduce((total, card) => total + card.copies, 0), 60);
-  assert.equal(result.fireCharge.deck.spellbook
-    .find(({ name }) => name === 'Charge')?.copies, 4);
-  assert.equal(result.fireCharge.deck.spellbook
-    .find(({ name }) => name === 'Raal Dromedary')?.copies, 4);
-  assert.equal(result.fireCharge.replayVerified, true);
+  assertFireResponse(result.fireResponse);
+  assertMinorExplosion(result.fireMinorExplosion);
+  assertFireCharge(result.fireCharge);
   assert.equal(result.fireAramos.aramosMercenaries, 'Aramos Mercenaries');
   assert.equal(result.fireAramos.raalDromedary, 'Raal Dromedary');
   assert.equal(result.fireAramos.acceptedActionCount, 10);
