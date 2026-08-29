@@ -6,9 +6,13 @@ import {
   runPrivateGameCheck,
 } from '../../src/commands/run-private-game-check.ts';
 
-function assertEarthStarter(result: PrivateGameCheck['earthStarter']): void {
-  assert.equal(result.valley, 'Valley');
-  assert.equal(result.wildBoars, 'Wild Boars');
+function assertStarter(
+  result: PrivateGameCheck['earthStarter'],
+  site: string,
+  minion: string,
+): void {
+  assert.equal(result.site, site);
+  assert.equal(result.minion, minion);
   assert.equal(result.acceptedActionCount, 4);
   assert.equal(result.manaPaid, 1);
   assert.equal(result.siteAndMinionStateVerified, true);
@@ -16,8 +20,8 @@ function assertEarthStarter(result: PrivateGameCheck['earthStarter']): void {
   assert.equal(result.noRandomDraws, true);
   assert.equal(result.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
   assert.equal(result.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
-  assert.equal(result.deck.atlas.find(({ name }) => name === 'Valley')?.copies, 4);
-  assert.equal(result.deck.spellbook.find(({ name }) => name === 'Wild Boars')?.copies, 4);
+  assert.equal(result.deck.atlas.find(({ name }) => name === site)?.copies, 4);
+  assert.equal(result.deck.spellbook.find(({ name }) => name === minion)?.copies, 4);
   assert.equal(result.replayVerified, true);
 }
 
@@ -168,7 +172,10 @@ function assertFireCharge(result: PrivateGameCheck['fireCharge']): void {
 
 test('private actual-card decks complete deterministic combat, Earth, Air, Fire, and Water scenarios', async () => {
   const result = await runPrivateGameCheck();
-  assertEarthStarter(result.earthStarter);
+  assertStarter(result.airStarter, 'Spire', 'Snow Leopard');
+  assertStarter(result.earthStarter, 'Valley', 'Wild Boars');
+  assertStarter(result.fireStarter, 'Wasteland', 'Raal Dromedary');
+  assertStarter(result.waterStarter, 'Stream', 'Serava Townsfolk');
   assertVikings(result.fireVikings);
   assert.equal(result.classification, 'private-local_actual-cards_unranked-partial-rules');
   assert.equal(result.airGenesisSpell.genesisMinion, 'Apprentice Wizard');
