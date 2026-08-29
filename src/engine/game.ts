@@ -69,6 +69,7 @@ export type GameCardDefinition =
     genesisDrawSpellPerAdjacentSameCard?: boolean;
     genesisEnemiesLoseStealth?: true;
     genesisGainMana?: number;
+    genesisGainManaIfOnlyControlledCopy?: 1;
     genesisMayBottomNextSpell?: true;
     genesisPayOneManaToSummonToken?: string;
     ordinaryMinionManaDiscount?: 1;
@@ -1104,6 +1105,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         || card.genesisGainMana > MAX_COMBAT_STAT)) {
       throw new RangeError(`${path}.genesisGainMana must be a safe integer between 1 and ${MAX_COMBAT_STAT}`);
     }
+    if (card.genesisGainManaIfOnlyControlledCopy !== undefined
+      && card.genesisGainManaIfOnlyControlledCopy !== 1) {
+      throw new RangeError(`${path}.genesisGainManaIfOnlyControlledCopy must be 1`);
+    }
+    if (card.genesisGainMana !== undefined
+      && card.genesisGainManaIfOnlyControlledCopy !== undefined) {
+      throw new RangeError(`${path} simultaneous unconditional and conditional Genesis mana are unsupported`);
+    }
     if (card.genesisPayOneManaToSummonToken !== undefined) {
       requireCardId(
         card.genesisPayOneManaToSummonToken,
@@ -1115,6 +1124,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         || card.genesisDrawSpellPerAdjacentSameCard
         || card.genesisEnemiesLoseStealth
         || card.genesisGainMana !== undefined
+        || card.genesisGainManaIfOnlyControlledCopy !== undefined
         || card.genesisMayBottomNextSpell !== undefined)) {
       throw new RangeError(`${path} simultaneous paid-token and another site Genesis are unsupported`);
     }
@@ -1140,6 +1150,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         || card.genesisDrawSpellPerAdjacentSameCard
         || card.genesisEnemiesLoseStealth
         || card.genesisGainMana !== undefined
+        || card.genesisGainManaIfOnlyControlledCopy !== undefined
         || card.genesisPayOneManaToSummonToken !== undefined)) {
       throw new RangeError(`${path} simultaneous next-spell and another site Genesis are unsupported`);
     }
@@ -1652,6 +1663,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? { genesisEnemiesLoseStealth: true as const }
               : {}),
             ...(card.genesisGainMana ? { genesisGainMana: card.genesisGainMana } : {}),
+            ...(card.genesisGainManaIfOnlyControlledCopy === 1
+              ? { genesisGainManaIfOnlyControlledCopy: 1 as const }
+              : {}),
             ...(card.genesisMayBottomNextSpell === true
               ? { genesisMayBottomNextSpell: true as const }
               : {}),
@@ -4334,6 +4348,12 @@ function applyDescriptor(
     const genesisSpellDiscards = definition.genesisDiscardTopSpells
       ? player.spellbook.slice(0, definition.genesisDiscardTopSpells)
       : [];
+    const genesisGainMana = definition.genesisGainMana
+      ?? (definition.genesisGainManaIfOnlyControlledCopy === 1
+        && Object.values(state.realm.sites).every((existing) =>
+          isRubble(existing) || existing.controller !== seat || existing.cardId !== card.cardId)
+        ? 1
+        : 0);
     const genesisDrawFailed = genesisSpellDraws.length < genesisSpellDrawCount;
     const updatedPlayer = deepFreeze({
       ...player,
@@ -4347,7 +4367,7 @@ function applyDescriptor(
           : player.hand.atlas.filter(({ instanceId }) => instanceId !== card.instanceId),
         spellbook: [...player.hand.spellbook, ...genesisSpellDraws],
       },
-      mana: player.mana + 1 + (definition.genesisGainMana ?? 0)
+      mana: player.mana + 1 + genesisGainMana
         - Number(descriptor.genesisTokenChoice === 'pay-one-mana'),
       atlas: descriptor.fromTopAtlas ? player.atlas.slice(1) : player.atlas,
       spellbook: player.spellbook.slice(genesisSpellDraws.length + genesisSpellDiscards.length),
@@ -4488,9 +4508,9 @@ function applyDescriptor(
           }]
           : []),
         { payload: { cardId: card.cardId, cell: descriptor.cell, instanceId: card.instanceId, seat }, type: 'site-played' },
-        ...(definition.genesisGainMana
+        ...(genesisGainMana
           ? [{
-            payload: { amount: definition.genesisGainMana, seat, sourceInstanceId: card.instanceId },
+            payload: { amount: genesisGainMana, seat, sourceInstanceId: card.instanceId },
             type: 'mana-gained',
           }]
           : []),

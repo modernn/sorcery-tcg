@@ -93,10 +93,11 @@ type StarterCheck = Readonly<{
 }>;
 
 export type StarterScenario = 'air-starter' | 'earth-starter' | 'fire-starter' | 'water-starter';
+type BetaLessonScenario = 'air-vs-earth-lesson' | 'earth-vs-air-lesson';
 
 export type PrivateStarterPreset = Readonly<{
   cardNames: Readonly<Record<string, string>>;
-  id: StarterScenario;
+  id: StarterScenario | BetaLessonScenario;
   label: string;
   manifest: GameManifest;
   usesOnlyOrdinaryOrExceptionalCards: true;
@@ -1264,6 +1265,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   chargeMinion: NormalizedCard;
   config: ScenarioConfig;
   deathriteMinion: NormalizedCard;
+  darkTower: NormalizedCard;
   dalceanPhalanx: NormalizedCard;
   divineHealing: NormalizedCard;
   duel: NormalizedCard;
@@ -1283,6 +1285,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   genesisSpellMinion: NormalizedCard;
   genesisMinion: NormalizedCard;
   geomancer: NormalizedCard;
+  gothicTower: NormalizedCard;
   sparkmage: NormalizedCard;
   granaryRats: NormalizedCard;
   grainSparrow: NormalizedCard;
@@ -1304,6 +1307,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   malakhim: NormalizedCard;
   mesmerism: NormalizedCard;
   lumberingMinion: NormalizedCard;
+  loneTower: NormalizedCard;
   manaMinion: NormalizedCard;
   minorExplosion: NormalizedCard;
   monstrousLion: NormalizedCard;
@@ -1315,6 +1319,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   recklessSquire: NormalizedCard;
   rangedMinion: NormalizedCard;
   rescue: NormalizedCard;
+  rusticVillage: NormalizedCard;
   roamingMinion: NormalizedCard;
   secretTunnel: NormalizedCard;
   sedgeCrabs: NormalizedCard;
@@ -1322,6 +1327,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   shellycoat: NormalizedCard;
   shallowGrave: NormalizedCard;
   sinkhole: NormalizedCard;
+  simpleVillage: NormalizedCard;
   slyFox: NormalizedCard;
   spire: NormalizedCard;
   stealthMinion: NormalizedCard;
@@ -1382,6 +1388,53 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     }
     return card;
   };
+  const ordinarySiteWithRules = (
+    name: string,
+    stableId: string,
+    officialSourceId: string,
+    element: GameElement,
+    rulesLength: number,
+  ): NormalizedCard => {
+    const card = snapshot.cards.find((candidate) => candidate.name === name);
+    if (!card
+      || card.stableId !== stableId
+      || card.officialSourceId !== officialSourceId
+      || card.cardType !== 'site'
+      || card.rulesText.trim().length !== rulesLength
+      || card.manaCost !== null
+      || card.attack !== null
+      || card.defense !== null
+      || card.life !== null
+      || card.elements.length !== 1
+      || card.elements[0] !== element
+      || (['air', 'earth', 'fire', 'water'] as const).some((candidate) =>
+        card.thresholds[candidate] !== (candidate === element ? 1 : 0))
+      || card.rarity !== 'ordinary') {
+      throw new Error(`private ${name} no longer matches its supported facts`);
+    }
+    return card;
+  };
+  const darkTower = ordinarySiteWithRules(
+    'Dark Tower',
+    'card:8c61e291e4b91f791fe2a142f154fce92c0066efdfee22f909b4712266d042e1',
+    '001-dark_tower-b-f',
+    'air',
+    71,
+  );
+  const gothicTower = ordinarySiteWithRules(
+    'Gothic Tower',
+    'card:f05863c980b6f65f2cf3d1bbc4bbd022bdc83e81a7bbf9dc64180808bf0f764b',
+    '001-gothic_tower-b-f',
+    'air',
+    73,
+  );
+  const loneTower = ordinarySiteWithRules(
+    'Lone Tower',
+    'card:3fadcb68035615a1c5b9461fef66b7190113126ebc0b32444d7c5c22586efd47',
+    '001-lone_tower-b-f',
+    'air',
+    71,
+  );
   const spire = blankOrdinarySite(
     'Spire',
     'card:e563251eda8b839ca617fb2eb1bfb512b8980747c8618e1e7b8e4e4de2d77e66',
@@ -1683,6 +1736,24 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || humbleVillage.thresholds.water !== 0
     || humbleVillage.rarity !== 'ordinary') {
     throw new Error('private optional paid Genesis site no longer matches its supported facts');
+  }
+  const rusticVillage = ordinarySiteWithRules(
+    'Rustic Village',
+    'card:0212a50acf38b36f9ce70a348885b587263855c6b174737994ca8cddc408910c',
+    '001-rustic_village-b-f',
+    'earth',
+    60,
+  );
+  const simpleVillage = ordinarySiteWithRules(
+    'Simple Village',
+    'card:25d60f9bf9d9a623a101bc4ed5f4e6bace8cc85bf1522df7a04ec25daddf9546',
+    '001-simple_village-b-f',
+    'earth',
+    60,
+  );
+  if (rusticVillage.rulesText !== humbleVillage.rulesText
+    || simpleVillage.rulesText !== humbleVillage.rulesText) {
+    throw new Error('private ordinary Village rules no longer match Humble Village');
   }
   const rescue = snapshot.cards.find(({ name }) => name === 'Rescue');
   if (!rescue
@@ -2876,6 +2947,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     config,
     dalceanPhalanx,
     deathriteMinion,
+    darkTower,
     divineHealing,
     duel,
     drown,
@@ -2894,6 +2966,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     genesisSpellMinion,
     genesisMinion,
     geomancer,
+    gothicTower,
     sparkmage,
     granaryRats,
     grainSparrow,
@@ -2915,6 +2988,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     malakhim,
     mesmerism,
     lumberingMinion,
+    loneTower,
     manaMinion,
     minorExplosion,
     monstrousLion,
@@ -2933,6 +3007,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     recklessSquire,
     rangedMinion,
     rescue,
+    rusticVillage,
     roamingMinion,
     secretTunnel,
     sedgeCrabs,
@@ -2940,6 +3015,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     shellycoat,
     shallowGrave,
     sinkhole,
+    simpleVillage,
     slyFox,
     spire,
     stealthMinion,
@@ -2996,6 +3072,7 @@ function gameDefinition(
   movementBonus: 0 | 1 | 2 = 0,
   deathriteHeal = 0,
   siteGenesisGainMana = 0,
+  siteGenesisGainManaIfOnlyControlledCopy = false,
   summonToAnySite = false,
   cannotDefendOrIntercept = false,
   cannotAttackSites = false,
@@ -3111,6 +3188,9 @@ function gameDefinition(
         : {}),
       genesisDrawSpellPerAdjacentSameCard: siteGenesisDrawSpellPerAdjacentSameCard,
       ...(siteGenesisGainMana ? { genesisGainMana: siteGenesisGainMana } : {}),
+      ...(siteGenesisGainManaIfOnlyControlledCopy
+        ? { genesisGainManaIfOnlyControlledCopy: 1 as const }
+        : {}),
       ...(siteGenesisPayOneManaToSummonToken
         ? { genesisPayOneManaToSummonToken: siteGenesisPayOneManaToSummonToken }
         : {}),
@@ -3249,7 +3329,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | 'combat' | 'earth' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -3414,6 +3494,40 @@ function buildManifest(
     [input.zap],
   );
   const earthStarterDeck = elementalDeck('earth', [input.wildBoars], [input.humbleVillage]);
+  const airBetaLessonDeck: GameDeckSpec = {
+    atlas: [
+      ...Array(3).fill(input.darkTower.stableId),
+      ...Array(3).fill(input.gothicTower.stableId),
+      ...Array(3).fill(input.loneTower.stableId),
+    ],
+    avatar: input.sparkmage.stableId,
+    spellbook: [
+      ...Array(2).fill(input.genesisSpellMinion.stableId),
+      ...Array(2).fill(input.movementTwoMinion.stableId),
+      ...Array(2).fill(input.airborneMinion.stableId),
+      ...Array(2).fill(input.stealthTargetMinion.stableId),
+      ...Array(2).fill(input.voidwalkMinion.stableId),
+      input.roamingMinion.stableId,
+      ...Array(3).fill(input.lightningBolt.stableId),
+    ],
+  };
+  const earthBetaLessonDeck: GameDeckSpec = {
+    atlas: [
+      ...Array(3).fill(input.humbleVillage.stableId),
+      ...Array(3).fill(input.rusticVillage.stableId),
+      ...Array(3).fill(input.simpleVillage.stableId),
+    ],
+    avatar: input.geomancer.stableId,
+    spellbook: [
+      ...Array(2).fill(input.wildBoars.stableId),
+      ...Array(2).fill(input.genesisMinion.stableId),
+      ...Array(3).fill(input.rangedMinion.stableId),
+      ...Array(3).fill(input.burrowingMinion.stableId),
+      input.dalceanPhalanx.stableId,
+      input.pudgeButcher.stableId,
+      ...Array(2).fill(input.overpower.stableId),
+    ],
+  };
   const fireStarterDeck = elementalDeck(
     'fire',
     [input.raalDromedary],
@@ -3642,7 +3756,11 @@ function buildManifest(
   ]);
   const waterLugbogDeck: GameDeckSpec = waterLugbogBase;
   const decks = {
-    north: scenario === 'air-starter'
+    north: scenario === 'air-vs-earth-lesson'
+      ? airBetaLessonDeck
+      : scenario === 'earth-vs-air-lesson'
+      ? earthBetaLessonDeck
+      : scenario === 'air-starter'
       ? airStarterDeck
       : scenario === 'air-leyline'
       ? airLeylineDeck
@@ -3771,7 +3889,11 @@ function buildManifest(
         : scenario === 'water' || scenario === 'water-sideways' || scenario === 'water-stealth'
           ? waterDeck
           : deck(false, true),
-    south: scenario === 'air-starter'
+    south: scenario === 'air-vs-earth-lesson'
+      ? earthBetaLessonDeck
+      : scenario === 'earth-vs-air-lesson'
+      ? airBetaLessonDeck
+      : scenario === 'air-starter'
       ? airStarterDeck
       : scenario === 'air-leyline'
       ? airLeylineDeck
@@ -3877,6 +3999,7 @@ function buildManifest(
   };
   const referenced = new Set([
     decks.north.avatar,
+    decks.south.avatar,
     ...decks.north.atlas,
     ...decks.north.spellbook,
     ...decks.south.atlas,
@@ -3884,6 +4007,8 @@ function buildManifest(
     ...(scenario === 'earth-border-militia'
       || scenario === 'earth-humble-village'
       || scenario === 'earth-starter'
+      || scenario === 'air-vs-earth-lesson'
+      || scenario === 'earth-vs-air-lesson'
       ? [input.footSoldier.stableId]
       : []),
   ]);
@@ -3911,6 +4036,9 @@ function buildManifest(
         : card.stableId === input.movementTwoMinion.stableId ? 2 : 0,
       card.stableId === input.healingMinion.stableId ? 3 : 0,
       card.stableId === input.ghostTownSite.stableId ? 1 : 0,
+      card.stableId === input.darkTower.stableId
+        || card.stableId === input.gothicTower.stableId
+        || card.stableId === input.loneTower.stableId,
       card.stableId === input.roamingMinion.stableId
         || card.stableId === input.lugbogCat.stableId,
       card.stableId === input.lumberingMinion.stableId,
@@ -3991,7 +4119,11 @@ function buildManifest(
       card.stableId === input.hamlet.stableId ? 1 : 0,
       card.stableId === input.granaryRats.stableId,
       card.stableId === input.shellycoat.stableId ? 1 : 0,
-      card.stableId === input.humbleVillage.stableId ? input.footSoldier.stableId : undefined,
+      card.stableId === input.humbleVillage.stableId
+        || card.stableId === input.rusticVillage.stableId
+        || card.stableId === input.simpleVillage.stableId
+        ? input.footSoldier.stableId
+        : undefined,
       card.stableId === input.borderMilitia.stableId ? input.footSoldier.stableId : undefined,
       card.stableId === input.footSoldier.stableId,
       card.stableId === input.autumnRiver.stableId,
@@ -5197,6 +5329,18 @@ export async function loadPrivateStarterCatalog(
   path = DEFAULT_SCENARIO,
 ): Promise<readonly PrivateStarterPreset[]> {
   const input = await readPrivateInputs(path);
+  const lessons = [
+    [
+      'air-vs-earth-lesson',
+      'Air Beta vs Earth Beta — supported cards from one boxed precon each',
+      input.config.airSeed,
+    ],
+    [
+      'earth-vs-air-lesson',
+      'Earth Beta vs Air Beta — supported cards from one boxed precon each',
+      input.config.earthSeed,
+    ],
+  ] as const;
   const starters = [
     ['air-starter', 'Air Beta precon card lesson — Sparkmage + Snow Leopard', input.config.airSeed, input.spire, input.stealthTargetMinion, input.zap],
     ['earth-starter', 'Earth Beta precon opening — Geomancer + Humble Village + Wild Boars', input.config.earthSeed, input.humbleVillage, input.wildBoars],
@@ -5204,11 +5348,16 @@ export async function loadPrivateStarterCatalog(
     ['water-starter', 'Water — Autumn River + Serava Townsfolk', input.config.waterSeed, input.autumnRiver, input.seravaTownsfolk],
   ] as const;
   const cardsById = new Map(input.cards.map((card) => [card.stableId, card]));
-  return Object.freeze(starters.map(([id, label, seed, site, minion, featuredSpell]) => {
-    const opening = findStarterOpening(input, id, seed, site, minion, featuredSpell);
+  const preset = (
+    id: PrivateStarterPreset['id'],
+    label: string,
+    built: ReturnType<typeof buildManifest>,
+  ): PrivateStarterPreset => {
     const deckCardIds = [
-      ...opening.manifest.decks.north.atlas,
-      ...opening.manifest.decks.north.spellbook,
+      ...built.manifest.decks.north.atlas,
+      ...built.manifest.decks.north.spellbook,
+      ...built.manifest.decks.south.atlas,
+      ...built.manifest.decks.south.spellbook,
     ];
     if (!deckCardIds.every((cardId) => {
       const rarity = cardsById.get(cardId)?.rarity;
@@ -5217,13 +5366,19 @@ export async function loadPrivateStarterCatalog(
       throw new Error('private ' + id + ' teaching deck no longer uses only entry-level rarities');
     }
     return Object.freeze({
-      cardNames: Object.freeze(Object.fromEntries(opening.names)),
+      cardNames: Object.freeze(Object.fromEntries(built.names)),
       id,
       label,
-      manifest: opening.manifest,
+      manifest: built.manifest,
       usesOnlyOrdinaryOrExceptionalCards: true,
     });
-  }));
+  };
+  return Object.freeze([
+    ...lessons.map(([id, label, seed]) =>
+      preset(id, label, buildManifest(input, seed, id))),
+    ...starters.map(([id, label, seed, site, minion, featuredSpell]) =>
+      preset(id, label, findStarterOpening(input, id, seed, site, minion, featuredSpell))),
+  ]);
 }
 
 function findFireHamletOpening(

@@ -89,9 +89,27 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
 
   try {
     let current = await json('/api/view?seat=north');
-    assert.equal(current.presetId, 'air-starter');
+    assert.equal(current.presetId, 'air-vs-earth-lesson');
     assert.equal(current.mode, 'private-local');
     assert.ok(Object.keys(current.cardNames as JsonObject).length < Object.keys(catalog[0]!.cardNames).length);
+    const defaultNames = current.cardNames as Record<string, string>;
+    const defaultPlayers = ((current.view as JsonObject).players as JsonObject);
+    assert.equal(defaultNames[(((defaultPlayers.north as JsonObject).avatar as JsonObject).cardId as string)],
+      'Sparkmage');
+    assert.equal(defaultNames[(((defaultPlayers.south as JsonObject).avatar as JsonObject).cardId as string)],
+      'Geomancer');
+    const airSandbox = catalog.find(({ id }) => id === 'air-starter');
+    assert.ok(airSandbox);
+    current = await json('/api/reset', {
+      body: JSON.stringify({
+        opponent: 'manual',
+        presetId: airSandbox.id,
+        seed: airSandbox.manifest.seed,
+      }),
+      headers: { 'content-type': 'application/json' },
+      method: 'POST',
+    });
+    assert.equal(current.presetId, 'air-starter');
     const north = (((current.view as JsonObject).players as JsonObject).north as JsonObject);
     const hand = north.hand as JsonObject;
     const names = current.cardNames as Record<string, string>;
@@ -484,8 +502,12 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
       assert.ok(opponentActionCount > 0, preset.id);
       assert.equal(combatObserved, true, preset.id);
       assert.equal(terminal.status, 'finished', preset.id);
-      assert.ok(['avatar_defeated', 'simultaneous_avatar_defeat'].includes(String(terminal.reason)), preset.id);
-      if (terminal.reason === 'avatar_defeated') {
+      assert.ok([
+        'avatar_defeated',
+        'simultaneous_avatar_defeat',
+        ...(preset.id.endsWith('-lesson') ? ['deck_empty'] : []),
+      ].includes(String(terminal.reason)), preset.id);
+      if (terminal.reason === 'avatar_defeated' || terminal.reason === 'deck_empty') {
         assert.notEqual(terminal.winner, terminal.loser, preset.id);
       } else {
         assert.equal(terminal.result, 'draw', preset.id);
@@ -833,6 +855,8 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     loadPrivateStarterCatalog(),
   ]);
   assert.deepEqual(starterCatalog.map(({ id }) => id), [
+    'air-vs-earth-lesson',
+    'earth-vs-air-lesson',
     'air-starter',
     'earth-starter',
     'fire-starter',
@@ -841,22 +865,86 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   for (const preset of starterCatalog) {
     assert.equal(preset.manifest.authority.mode, 'private-local');
     assert.equal(preset.usesOnlyOrdinaryOrExceptionalCards, true);
-    assert.equal(preset.manifest.decks.north.atlas.length, 30);
-    assert.equal(preset.manifest.decks.north.spellbook.length, 60);
-    assert.deepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
+    if (preset.id.endsWith('-lesson')) {
+      assert.equal(preset.manifest.decks.north.atlas.length, 9);
+      assert.equal(preset.manifest.decks.north.spellbook.length, 14);
+      assert.equal(preset.manifest.decks.south.atlas.length, 9);
+      assert.equal(preset.manifest.decks.south.spellbook.length, 14);
+      assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
+    } else {
+      assert.equal(preset.manifest.decks.north.atlas.length, 30);
+      assert.equal(preset.manifest.decks.north.spellbook.length, 60);
+      assert.deepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
+    }
     assert.equal(Object.keys(preset.cardNames).length, Object.keys(preset.manifest.cards).length);
   }
-  ['Snow Leopard', 'Wild Boars', 'Raal Dromedary', 'Serava Townsfolk']
-    .forEach((name, index) => {
-      assert.equal(Object.values(starterCatalog[index]!.cardNames).includes(name), true);
-    });
+  const summarize = (
+    preset: PrivateStarterPreset,
+    seat: 'north' | 'south',
+    zone: 'atlas' | 'spellbook',
+  ): Record<string, number> => preset.manifest.decks[seat][zone].reduce<Record<string, number>>(
+    (counts, cardId) => {
+      const name = preset.cardNames[cardId]!;
+      counts[name] = (counts[name] ?? 0) + 1;
+      return counts;
+    },
+    {},
+  );
+  const airLesson = starterCatalog[0]!;
+  assert.deepEqual(summarize(airLesson, 'north', 'atlas'), {
+    'Dark Tower': 3,
+    'Gothic Tower': 3,
+    'Lone Tower': 3,
+  });
+  assert.deepEqual(summarize(airLesson, 'north', 'spellbook'), {
+    'Apprentice Wizard': 2,
+    'Cloud Spirit': 2,
+    'Lightning Bolt': 3,
+    'Plumed Pegasus': 2,
+    'Roaming Monster': 1,
+    'Snow Leopard': 2,
+    'Spectral Stalker': 2,
+  });
+  assert.deepEqual(summarize(airLesson, 'south', 'atlas'), {
+    'Humble Village': 3,
+    'Rustic Village': 3,
+    'Simple Village': 3,
+  });
+  assert.deepEqual(summarize(airLesson, 'south', 'spellbook'), {
+    'Belmotte Longbowmen': 3,
+    'Cave Trolls': 3,
+    'Dalcean Phalanx': 1,
+    'Land Surveyor': 2,
+    Overpower: 2,
+    'Pudge Butcher': 1,
+    'Wild Boars': 2,
+  });
+  const earthLesson = starterCatalog[1]!;
+  assert.deepEqual(earthLesson.manifest.decks.north, airLesson.manifest.decks.south);
+  assert.deepEqual(earthLesson.manifest.decks.south, airLesson.manifest.decks.north);
+  assert.equal(airLesson.cardNames[airLesson.manifest.decks.north.avatar], 'Sparkmage');
+  assert.equal(airLesson.cardNames[airLesson.manifest.decks.south.avatar], 'Geomancer');
+  assert.equal(earthLesson.cardNames[earthLesson.manifest.decks.north.avatar], 'Geomancer');
+  assert.equal(earthLesson.cardNames[earthLesson.manifest.decks.south.avatar], 'Sparkmage');
+  [
+    ['air-starter', 'Snow Leopard'],
+    ['earth-starter', 'Wild Boars'],
+    ['fire-starter', 'Raal Dromedary'],
+    ['water-starter', 'Serava Townsfolk'],
+  ].forEach(([id, name]) => {
+    const preset = starterCatalog.find((candidate) => candidate.id === id);
+    assert.ok(preset);
+    assert.equal(Object.values(preset.cardNames).includes(name!), true);
+  });
   assert.equal(
     starterCatalog[0]!.cardNames[starterCatalog[0]!.manifest.decks.north.avatar],
     'Sparkmage',
   );
-  assert.match(starterCatalog[0]!.label, /Air Beta precon card lesson.*Sparkmage/);
-  assert.equal(Object.values(starterCatalog[3]!.cardNames).includes('Autumn River'), true);
-  assert.equal(Object.values(starterCatalog[2]!.cardNames).includes('Charge'), true);
+  assert.match(starterCatalog[0]!.label, /Air Beta vs Earth Beta.*one boxed precon each/);
+  assert.equal(Object.values(starterCatalog.find(({ id }) =>
+    id === 'water-starter')!.cardNames).includes('Autumn River'), true);
+  assert.equal(Object.values(starterCatalog.find(({ id }) =>
+    id === 'fire-starter')!.cardNames).includes('Charge'), true);
   await verifyPrivateStarterHttp(starterCatalog);
   assertStarter(result.airStarter, 'Spire', 'Snow Leopard');
   assert.equal(result.airStarter.deck.spellbook
