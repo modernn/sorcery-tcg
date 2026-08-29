@@ -3345,7 +3345,12 @@ function buildManifest(
     [input.zap],
   );
   const earthStarterDeck = elementalDeck('earth', [input.wildBoars], [input.humbleVillage]);
-  const fireStarterDeck = elementalDeck('fire', [input.raalDromedary], [input.wasteland]);
+  const fireStarterDeck = elementalDeck(
+    'fire',
+    [input.raalDromedary],
+    [input.wasteland],
+    [input.chargeMagic],
+  );
   const fireGranaryRatsDeck = elementalDeck(
     'fire',
     [input.granaryRats],
@@ -5099,7 +5104,17 @@ function findStarterOpening(
       ? session.state.players.north.hand.spellbook
         .find(({ cardId }) => cardId === featuredSpell.stableId)?.instanceId
       : undefined;
-    if (siteInstanceId && minionInstanceId && (!featuredSpell || featuredSpellInstanceId)) {
+    const hasSecondFireSite = scenario !== 'fire-starter'
+      || session.state.players.north.hand.atlas.some(({ cardId, instanceId }) => {
+        const definition = session.state.cards[cardId];
+        return instanceId !== siteInstanceId
+          && definition?.cardType === 'site'
+          && definition.elements.includes('fire');
+      });
+    if (siteInstanceId
+      && minionInstanceId
+      && (!featuredSpell || featuredSpellInstanceId)
+      && hasSecondFireSite) {
       return { ...built, minionInstanceId, session, siteInstanceId };
     }
   }
@@ -5113,7 +5128,7 @@ export async function loadPrivateStarterCatalog(
   const starters = [
     ['air-starter', 'Air — Spire + Snow Leopard + Zap!', input.config.airSeed, input.spire, input.stealthTargetMinion, input.zap],
     ['earth-starter', 'Earth — Humble Village + Wild Boars', input.config.earthSeed, input.humbleVillage, input.wildBoars],
-    ['fire-starter', 'Fire — Wasteland + Raal Dromedary', input.config.fireSeed, input.wasteland, input.raalDromedary],
+    ['fire-starter', 'Fire — Wasteland + Raal Dromedary + Charge', input.config.fireSeed, input.wasteland, input.raalDromedary, input.chargeMagic],
     ['water-starter', 'Water — Autumn River + Serava Townsfolk', input.config.waterSeed, input.autumnRiver, input.seravaTownsfolk],
   ] as const;
   const cardsById = new Map(input.cards.map((card) => [card.stableId, card]));

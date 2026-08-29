@@ -225,6 +225,93 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
     assert.equal(villageReplay.verified, true);
     assert.equal(villageReplay.finalStateHash, current.stateHash);
 
+    const firePreset = catalog.find(({ id }) => id === 'fire-starter');
+    assert.ok(firePreset);
+    assert.equal(firePreset.label, 'Fire — Wasteland + Raal Dromedary + Charge');
+    current = await json('/api/reset', {
+      body: JSON.stringify({
+        opponent: 'manual',
+        presetId: firePreset.id,
+        seed: firePreset.manifest.seed,
+      }),
+      headers: { 'content-type': 'application/json' },
+      method: 'POST',
+    });
+    const fireNames = current.cardNames as Record<string, string>;
+    const fireFacts = current.cardFacts as Record<string, JsonObject>;
+    const fireHand = ((((current.view as JsonObject).players as JsonObject)
+      .north as JsonObject).hand as JsonObject);
+    const wasteland = (fireHand.atlas as JsonObject[])
+      .find(({ cardId }) => fireNames[cardId as string] === 'Wasteland');
+    const secondFireSite = (fireHand.atlas as JsonObject[]).find(({ cardId, instanceId }) =>
+      instanceId !== wasteland?.instanceId
+        && (fireFacts[cardId as string]?.elements as unknown[] | undefined)?.includes('fire'));
+    const raal = (fireHand.spellbook as JsonObject[])
+      .find(({ cardId }) => fireNames[cardId as string] === 'Raal Dromedary');
+    const charge = (fireHand.spellbook as JsonObject[])
+      .find(({ cardId }) => fireNames[cardId as string] === 'Charge');
+    assert.ok(wasteland && secondFireSite && raal && charge,
+      'known-good Fire seed must expose Wasteland, a second Fire site, Raal, and Charge');
+    assert.deepEqual(fireFacts[charge.cardId as string], {
+      cardType: 'magic',
+      manaCost: 1,
+      thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+    });
+    current = await submit(keep(current));
+    current = await json('/api/view?seat=south');
+    current = await submit(keep(current));
+    current = await json('/api/view?seat=north');
+    current = await submit(findAction(current, (descriptor) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardInstanceId === wasteland.instanceId
+        && descriptor.cell === 'C4'));
+    current = await submit(findAction(current, (descriptor) => descriptor.kind === 'end-turn'));
+    current = await json('/api/view?seat=south');
+    current = await submit(findAction(current, (descriptor) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
+    current = await submit(findAction(current, (descriptor) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
+    current = await submit(findAction(current, (descriptor) => descriptor.kind === 'end-turn'));
+    current = await json('/api/view?seat=north');
+    current = await submit(findAction(current, (descriptor) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    current = await submit(findAction(current, (descriptor) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardInstanceId === secondFireSite.instanceId
+        && descriptor.cell === 'C3'));
+    current = await submit(findAction(current, (descriptor) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === raal.instanceId
+        && descriptor.cell === 'C3'));
+    assert.equal((current.actions as JsonObject[]).every(({ descriptor }) => {
+      const value = descriptor as JsonObject;
+      return value.kind !== 'move-and-attack' || value.unitInstanceId !== raal.instanceId;
+    }), true);
+    const castCharge = findAction(current, (descriptor) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === charge.instanceId
+        && (descriptor.ally as JsonObject | undefined)?.instanceId === raal.instanceId);
+    assert.match(String(castCharge.label),
+      /Cast Charge.*Raal Dromedary.*ally can move and attack this turn/);
+    assert.doesNotMatch(String(castCharge.label), /card:|sha256:/);
+    current = await submit(castCharge);
+    assert.match(String(current.playerAction),
+      /Cast Charge.*Raal Dromedary.*ally can move and attack this turn/);
+    assert.deepEqual(((current.receipt as JsonObject).events as JsonObject[])
+      .map(({ type }) => type), ['magic-cast', 'charge-granted', 'magic-resolved']);
+    const chargedMove = findAction(current, (descriptor) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === raal.instanceId
+        && (descriptor.path as JsonObject[]).map(({ cell }) => cell).join(',') === 'C3,C4');
+    current = await submit(chargedMove);
+    const movedRaal = (((current.view as JsonObject).realm as JsonObject).units as JsonObject[])
+      .find(({ instanceId }) => instanceId === raal.instanceId);
+    assert.equal(movedRaal?.location, 'C4');
+    const chargeReplay = await json('/api/replay', { method: 'POST' });
+    assert.equal(chargeReplay.acceptedActionCount, 12);
+    assert.equal(chargeReplay.verified, true);
+    assert.equal(chargeReplay.finalStateHash, current.stateHash);
+
     const waterPreset = catalog.find(({ id }) => id === 'water-starter');
     assert.ok(waterPreset);
     current = await json('/api/reset', {
@@ -675,6 +762,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       assert.equal(Object.values(starterCatalog[index]!.cardNames).includes(name), true);
     });
   assert.equal(Object.values(starterCatalog[3]!.cardNames).includes('Autumn River'), true);
+  assert.equal(Object.values(starterCatalog[2]!.cardNames).includes('Charge'), true);
   await verifyPrivateStarterHttp(starterCatalog);
   assertStarter(result.airStarter, 'Spire', 'Snow Leopard');
   assert.equal(result.airStarter.deck.spellbook
@@ -683,6 +771,8 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assertStarter(result.earthStarter, 'Humble Village', 'Wild Boars');
   assertMalakhim(result.earthMalakhim);
   assertStarter(result.fireStarter, 'Wasteland', 'Raal Dromedary');
+  assert.equal(result.fireStarter.deck.spellbook
+    .find(({ name }) => name === 'Charge')?.copies, 4);
   assert.equal(result.fireVileImp.vileImp, 'Vile Imp');
   assert.equal(result.fireVileImp.wasteland, 'Wasteland');
   assert.equal(result.fireVileImp.acceptedActionCount, 10);
