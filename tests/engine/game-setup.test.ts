@@ -69,6 +69,7 @@ type SpellFacts = Readonly<{
   summonToAnySite?: boolean;
   mustBeCastToOuterColumn?: boolean;
   tapForMana?: number;
+  takesLessDamage?: 1;
   thresholds: Readonly<{ air: number; earth: number; fire: number; water: number }>;
   untapsAtEndOfControllerTurn?: true;
   voidwalk?: boolean;
@@ -176,6 +177,7 @@ function cardsFor(
         summonToAnySite: facts.summonToAnySite ?? false,
         mustBeCastToOuterColumn: facts.mustBeCastToOuterColumn ?? false,
         ...(facts.tapForMana ? { tapForMana: facts.tapForMana } : {}),
+        ...(facts.takesLessDamage === 1 ? { takesLessDamage: 1 as const } : {}),
         thresholds: { ...facts.thresholds },
         ...(facts.untapsAtEndOfControllerTurn === true
           ? { untapsAtEndOfControllerTurn: true as const }
@@ -718,6 +720,27 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       [firstSpell]: { ...cards[firstSpell]!, submerge: 'yes' } as unknown as GameCardDefinition,
     },
   }), /submerge/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        takesLessDamage: 2,
+      } as unknown as GameCardDefinition,
+    },
+  }), /takesLessDamage/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        takesLessDamage: 1,
+        ward: true,
+      } as GameCardDefinition,
+    },
+  }), /competing damage prevention/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -9220,6 +9243,67 @@ test('RULE-04 Defend moves a unit into a simultaneous fight and stages exact spl
   assert.equal(session.state.players.south.cemetery.some(({ instanceId }) => instanceId === damagedInstanceId), true);
   assert.equal(session.transcript.flatMap(({ events }) => events).filter(({ type }) => type === 'minion-died').length, 2);
   assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 takes-less prevention applies to each simultaneous damage source before Lethal', () => {
+  for (const scenario of [
+    { attack: 2, defense: 2, enemyPower: 1, expectedDamage: 0, lethal: true, seed: 142 },
+    { attack: 4, defense: 3, enemyPower: 2, expectedDamage: 2, lethal: false, seed: 143 },
+  ] as const) {
+    const setup = northAttacksAtC2(
+      scenario.seed,
+      {
+        attack: scenario.attack,
+        defense: scenario.defense,
+        manaCost: 1,
+        takesLessDamage: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+      undefined,
+      false,
+      {
+        attack: scenario.enemyPower,
+        defense: scenario.enemyPower,
+        lethal: scenario.lethal,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    );
+    let { session } = setup;
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === setup.targetInstanceId));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'defend'
+        && descriptor.unitInstanceId === setup.defenderInstanceId));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+    const allocated = stepGame(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'allocate-strike' && descriptor.amount === scenario.enemyPower));
+    assert.equal(allocated.accepted, true);
+    const fought = stepGame(allocated.session, action(allocated.session, ({ descriptor }) =>
+      descriptor.kind === 'allocate-strike' && descriptor.amount === scenario.enemyPower));
+    assert.equal(fought.accepted, true);
+    session = fought.session;
+
+    assert.equal(session.state.realm.units.find(({ instanceId }) =>
+      instanceId === setup.attackerInstanceId)?.damage, scenario.expectedDamage);
+    assert.equal(session.state.realm.units.filter(({ controller }) => controller === 'south').length, 0);
+    assert.deepEqual(fought.receipt.events.find(({ payload, type }) =>
+      type === 'damage-dealt'
+        && canonicalJson(payload).includes(setup.attackerInstanceId))?.payload, {
+      accumulated: scenario.expectedDamage,
+      amount: scenario.expectedDamage,
+      attemptedAmount: scenario.enemyPower * 2,
+      direct: true,
+      instanceId: setup.attackerInstanceId,
+      prevented: true,
+      seat: 'north',
+    });
+    assert.equal(fought.receipt.randomDraws.length, 0);
+    assert.equal(verifyGameReplay(session), true);
+  }
 });
 
 test('RULE-04 declining an attack gives only co-located ready enemies an Intercept window', () => {

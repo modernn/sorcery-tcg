@@ -133,6 +133,7 @@ export type GameCardDefinition =
     mustBeCastToOuterColumn?: boolean;
     tapToDamageEachUnitAtAdjacentLocation?: 2;
     tapForMana?: number;
+    takesLessDamage?: 1;
     thresholds: GameThresholds;
     untapsAtEndOfControllerTurn?: true;
     voidwalk?: boolean;
@@ -1322,8 +1323,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.submerge !== undefined && typeof card.submerge !== 'boolean') {
     throw new RangeError(`${path}.submerge must be boolean`);
   }
+  if (card.takesLessDamage !== undefined && card.takesLessDamage !== 1) {
+    throw new RangeError(`${path}.takesLessDamage must be 1`);
+  }
   if (card.ward !== undefined && typeof card.ward !== 'boolean') {
     throw new RangeError(`${path}.ward must be boolean`);
+  }
+  if (card.takesLessDamage === 1 && card.ward) {
+    throw new RangeError(`${path} competing damage prevention effects are unsupported`);
   }
   if (card.voidwalk !== undefined && typeof card.voidwalk !== 'boolean') {
     throw new RangeError(`${path}.voidwalk must be boolean`);
@@ -1571,6 +1578,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? { tapToDamageEachUnitAtAdjacentLocation: 2 as const }
               : {}),
             ...(card.tapForMana ? { tapForMana: card.tapForMana } : {}),
+            ...(card.takesLessDamage === 1 ? { takesLessDamage: 1 as const } : {}),
             thresholds: { ...card.thresholds },
             ...(card.untapsAtEndOfControllerTurn === true
               ? { untapsAtEndOfControllerTurn: true as const }
@@ -1989,6 +1997,7 @@ function unitStatus(
   submerge: boolean;
   summoningSickness: boolean;
   tapped: boolean;
+  takesLessDamage: number;
   voidwalk: boolean;
 }> {
   if (ref.kind === 'avatar') {
@@ -2021,6 +2030,7 @@ function unitStatus(
       submerge: false,
       summoningSickness: false,
       tapped: avatar.tapped,
+      takesLessDamage: 0,
       voidwalk: false,
     };
   }
@@ -2055,6 +2065,7 @@ function unitStatus(
     submerge: !disabled && definition.submerge === true,
     summoningSickness: unit.summoningSickness,
     tapped: unit.tapped,
+    takesLessDamage: disabled ? 0 : (definition.takesLessDamage ?? 0),
     voidwalk: !disabled && definition.voidwalk === true,
   };
 }
@@ -3381,7 +3392,7 @@ function resolveFightWindow(
 ): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
   const allocations = new Map(pending.allocations.map(({ amount, targetInstanceId }) =>
     [targetInstanceId, amount]));
-  const damage = new Map<StateHash, number>();
+  const damageSources = new Map<StateHash, readonly number[]>();
   const lethalDamage = new Set<StateHash>();
   const attackerStatus = unitStatus(state, pending.attacker);
   const attackerCanStrike = attackerStrikes && !attackerStatus.disabled;
@@ -3391,23 +3402,26 @@ function resolveFightWindow(
   const strikingCombatants = requestedCombatants
     .filter((ref) => !unitStatus(state, ref).disabled);
   if (strikingCombatants.length > 0) {
-    damage.set(
+    damageSources.set(
       pending.attacker.instanceId,
-      strikingCombatants.reduce((total, ref) => total + strikeDamage(state, ref), 0),
+      strikingCombatants.map((ref) => strikeDamage(state, ref)),
     );
   }
   if (attackerCanStrike) {
-    pending.combatants.forEach((ref) => damage.set(ref.instanceId, allocations.get(ref.instanceId) ?? 0));
+    pending.combatants.forEach((ref) =>
+      damageSources.set(ref.instanceId, [allocations.get(ref.instanceId) ?? 0]));
   }
   pending.combatants.forEach((ref) => {
     const striker = unitStatus(state, ref);
     if (strikingCombatants.some(({ instanceId }) => instanceId === ref.instanceId)
       && striker.lethal
-      && strikeDamage(state, ref) > 0) lethalDamage.add(pending.attacker.instanceId);
+      && strikeDamage(state, ref) > attackerStatus.takesLessDamage) {
+      lethalDamage.add(pending.attacker.instanceId);
+    }
     if (attackerCanStrike
       && allocationsAreStrikes
       && attackerStatus.lethal
-      && (allocations.get(ref.instanceId) ?? 0) > 0) {
+      && (allocations.get(ref.instanceId) ?? 0) > unitStatus(state, ref).takesLessDamage) {
       lethalDamage.add(ref.instanceId);
     }
   });
@@ -3431,7 +3445,8 @@ function resolveFightWindow(
     ...(attackerCanStrike ? pending.combatants : []),
   ];
   for (const ref of damagedRefs) {
-    const amount = damage.get(ref.instanceId) ?? 0;
+    const sources = damageSources.get(ref.instanceId) ?? [];
+    const amount = sources.reduce((total, source) => total + source, 0);
     if (ref.kind === 'avatar') {
       const player = players[ref.seat];
       const avatar = player.avatar;
@@ -3503,14 +3518,24 @@ function resolveFightWindow(
       );
       continue;
     }
-    const accumulated = unit.damage + amount;
+    const reduction = unitStatus(state, ref).takesLessDamage;
+    const dealt = sources.reduce((total, source) => total + Math.max(0, source - reduction), 0);
+    const accumulated = unit.damage + dealt;
     units[index] = deepFreeze({ ...unit, damage: accumulated });
     damageOutcomes.push({
-      payload: { accumulated, amount, direct: true, instanceId: ref.instanceId, seat: ref.seat },
+      payload: {
+        accumulated,
+        amount: dealt,
+        ...(dealt < amount ? { attemptedAmount: amount, prevented: true } : {}),
+        direct: true,
+        instanceId: ref.instanceId,
+        seat: ref.seat,
+      },
       type: 'damage-dealt',
     });
     if (accumulated > 0
-      && (accumulated >= unitStatus(state, ref).defense || lethalDamage.has(ref.instanceId))) {
+      && (accumulated >= unitStatus(state, ref).defense
+        || (dealt > 0 && lethalDamage.has(ref.instanceId)))) {
       deaths.push(units[index]!);
     }
   }
