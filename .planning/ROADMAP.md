@@ -35,4 +35,4 @@ Phase 3 now implements actual Sorcery core rules behind that unchanged boundary.
 **Plans:** 1 plan
 
 Plans:
-- [ ] [Private photo scan and reconciliation slice](./phases/999.1-batch-photo-collection-scanning/999.1-01-PLAN.md)
+- [ ] [Private photo scan and reconciliation slice](./phases/999.1-batch-photo-collection-scanning/999.1-01-PLAN.md) — implementation [summary](./phases/999.1-batch-photo-collection-scanning/999.1-01-SUMMARY.md); full verification pending

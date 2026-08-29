@@ -18,8 +18,9 @@
     "authority:import": "node src/commands/import-authority.ts",
     "authority:validate": "node src/commands/validate-authority.ts",
     "authority:verify-private": "node --test tests/private-authority/*.test.ts",
+    "collection:scan": "node src/commands/scan-collection-photos.ts",
     "lint": "eslint .",
-    "test": "node --test tests/authority/*.test.ts tests/engine/*.test.ts",
+    "test": "node --test tests/authority/*.test.ts tests/collection/*.test.ts tests/engine/*.test.ts",
     "verify": "pnpm typecheck && pnpm lint && pnpm test"
   },
   "dependencies": {
