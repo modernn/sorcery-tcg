@@ -5066,6 +5066,222 @@ test('RULE-03 Genesis draws a hidden spell and an empty Spellbook loses after su
   assert.equal(verifyGameReplay(session), true);
 });
 
+test('RULE-03/04 Static Servant Genesis simultaneously damages every other unit here', () => {
+  const decks = {
+    north: deck('static-north', 5, 6),
+    south: deck('static-south', 5, 6),
+  };
+  const cards = cardsFor(decks, {
+    defense: 3,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  }, undefined, { elements: ['air'] });
+  const staticId = decks.north.spellbook[0]!;
+  const alliedMinionId = decks.north.spellbook[1]!;
+  const teleportId = decks.south.spellbook[0]!;
+  const enemyMinionId = decks.south.spellbook[1]!;
+  const wardedMinionId = decks.south.spellbook[2]!;
+  const undergroundMinionId = decks.south.spellbook[3]!;
+  cards[staticId] = {
+    ...cards[staticId]!,
+    attack: 2,
+    defense: 2,
+    genesisDamageEachOtherUnitHere: 1,
+  } as unknown as GameCardDefinition;
+  cards[alliedMinionId] = {
+    ...cards[alliedMinionId]!,
+    deathriteDrawSite: true,
+    defense: 1,
+  } as GameCardDefinition;
+  cards[teleportId] = {
+    cardType: 'magic',
+    manaCost: 0,
+    teleportAllyToTargetSite: true,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  };
+  for (const minionId of [enemyMinionId, wardedMinionId, undergroundMinionId]) {
+    cards[minionId] = {
+      ...cards[minionId]!,
+      defense: 1,
+      summonToAnySite: true,
+    } as GameCardDefinition;
+  }
+  cards[wardedMinionId] = {
+    ...cards[wardedMinionId]!,
+    ward: true,
+  } as GameCardDefinition;
+  cards[undergroundMinionId] = {
+    ...cards[undergroundMinionId]!,
+    burrowing: true,
+    mustBeCastBurrowed: true,
+  } as GameCardDefinition;
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-static-servant-v1',
+    },
+    cards,
+    decks,
+    firstSeat: 'north' as const,
+  };
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [staticId]: {
+        ...cards[staticId]!,
+        genesisDamageEachOtherUnitHere: false,
+      } as unknown as GameCardDefinition,
+    },
+    seed: 1,
+  }), /genesisDamageEachOtherUnitHere must be 1/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [staticId]: {
+        ...cards[staticId]!,
+        genesisDrawSpell: true,
+      } as unknown as GameCardDefinition,
+    },
+    seed: 1,
+  }), /simultaneous Genesis/);
+  let gameManifest: GameManifest | undefined;
+  for (let seed = 1; seed <= 4_096; seed += 1) {
+    const candidate = createGameManifest({ ...input, seed });
+    const opening = createGameSession(candidate).state.players;
+    const northReady = [staticId, alliedMinionId].every((cardId) =>
+      opening.north.hand.spellbook.some((card) => card.cardId === cardId));
+    const southAvailable = [
+      ...opening.south.hand.spellbook,
+      opening.south.spellbook[0],
+    ].flatMap((card) => card ? [card.cardId] : []);
+    if (northReady && [teleportId, enemyMinionId, wardedMinionId, undergroundMinionId]
+      .every((cardId) => southAvailable.includes(cardId))) {
+      gameManifest = candidate;
+      break;
+    }
+  }
+  assert.ok(gameManifest);
+  assert.equal((gameManifest.cards[staticId] as unknown as
+    Readonly<Record<string, unknown>>).genesisDamageEachOtherUnitHere, 1);
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === alliedMinionId && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.cardId === teleportId
+    && descriptor.ally?.kind === 'avatar'
+    && descriptor.allyDestination === undefined
+    && descriptor.targetLocation?.cell === 'C4');
+  for (const minionId of [enemyMinionId, wardedMinionId]) {
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === minionId
+      && descriptor.cell === 'C4'
+      && descriptor.region === undefined);
+  }
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === undergroundMinionId
+    && descriptor.cell === 'C4'
+    && descriptor.region === 'underground');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+
+  const beforeVersion = session.state.stateVersion;
+  const beforeNorthAtlas = session.state.players.north.atlas.length;
+  const alliedMinion = session.state.realm.units.find(({ cardId }) => cardId === alliedMinionId);
+  const enemyMinion = session.state.realm.units.find(({ cardId }) => cardId === enemyMinionId);
+  const wardedMinion = session.state.realm.units.find(({ cardId }) => cardId === wardedMinionId);
+  const undergroundMinion = session.state.realm.units.find(({ cardId }) =>
+    cardId === undergroundMinionId);
+  assert.ok(alliedMinion);
+  assert.ok(enemyMinion);
+  assert.ok(wardedMinion);
+  assert.ok(undergroundMinion);
+  const result = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardId === staticId
+      && descriptor.cell === 'C4'));
+  assert.equal(result.accepted, true);
+  const source = result.session.state.realm.units.find(({ cardId }) => cardId === staticId);
+  assert.ok(source);
+  assert.equal(result.session.state.stateVersion, beforeVersion + 1);
+  const allocations = result.receipt.events.filter(({ type }) =>
+    type === 'genesis-damage-allocated');
+  assert.deepEqual(allocations.map(({ payload }) => payload), [
+    result.session.state.players.north.avatar.card,
+    result.session.state.players.south.avatar.card,
+    alliedMinion,
+    enemyMinion,
+    wardedMinion,
+  ].map(({ instanceId }) => ({
+    amount: 1,
+    sourceInstanceId: source.instanceId,
+    targetInstanceId: instanceId,
+  })).sort((left, right) => left.targetInstanceId.localeCompare(right.targetInstanceId)));
+  assert.equal(allocations.some(({ payload }) =>
+    typeof payload === 'object'
+      && payload !== null
+      && 'targetInstanceId' in payload
+      && payload.targetInstanceId === source.instanceId), false);
+  assert.deepEqual({
+    northLife: result.session.state.players.north.avatar.life,
+    southLife: result.session.state.players.south.avatar.life,
+    sourceDamage: source.damage,
+    undergroundDamage: result.session.state.realm.units.find(({ instanceId }) =>
+      instanceId === undergroundMinion.instanceId)?.damage,
+    warded: result.session.state.realm.units.find(({ instanceId }) =>
+      instanceId === wardedMinion.instanceId)?.warded,
+  }, {
+    northLife: 19,
+    southLife: 19,
+    sourceDamage: 0,
+    undergroundDamage: 0,
+    warded: false,
+  });
+  assert.equal(result.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === alliedMinion.instanceId), false);
+  assert.equal(result.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === enemyMinion.instanceId), false);
+  assert.equal(result.session.state.players.north.atlas.length, beforeNorthAtlas - 1);
+  const avatarIds = new Set([
+    result.session.state.players.north.avatar.card.instanceId,
+    result.session.state.players.south.avatar.card.instanceId,
+  ]);
+  const targetIds = [
+    ...avatarIds,
+    alliedMinion.instanceId,
+    enemyMinion.instanceId,
+    wardedMinion.instanceId,
+  ].sort();
+  const resolutionTypes = targetIds.flatMap((instanceId) =>
+    avatarIds.has(instanceId)
+      ? ['damage-dealt', 'avatar-life-lost']
+      : instanceId === wardedMinion.instanceId
+        ? ['damage-dealt', 'ward-broken']
+        : ['damage-dealt']);
+  assert.deepEqual(result.receipt.events.map(({ type }) => type), [
+    'minion-summoned',
+    ...Array.from({ length: 5 }, () => 'genesis-damage-allocated'),
+    ...resolutionTypes,
+    'site-drawn',
+    'minion-died',
+    'minion-died',
+  ]);
+  assert.equal(result.receipt.randomDraws.length, 0);
+  assert.equal(result.session.state.pendingCombat, null);
+  assert.equal(result.session.state.terminal.status, 'active');
+  assert.equal(verifyGameReplay(result.session), true);
+});
+
 test("RULE-03 Genesis life loss reaches but cannot cross Death's Door", () => {
   const readyToSummon = (life: number, seed: number): GameSession => {
     let session = keep(createGameSession(manifest(seed, {

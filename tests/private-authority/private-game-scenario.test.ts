@@ -214,6 +214,26 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airRainOfArrows.deck.spellbook
     .find(({ name }) => name === 'Snow Leopard')?.copies, 4);
   assert.equal(result.airRainOfArrows.replayVerified, true);
+  assert.equal(result.airStaticServant.staticServant, 'Static Servant');
+  assert.equal(result.airStaticServant.snowLeopard, 'Snow Leopard');
+  assert.equal(result.airStaticServant.acceptedActionCount, 11);
+  assert.equal(result.airStaticServant.avatarAndLeopardDamaged, true);
+  assert.equal(result.airStaticServant.staticServantExcludedAndUndamaged, true);
+  assert.equal(result.airStaticServant.manaPaid, 2);
+  assert.equal(result.airStaticServant.causalEventsVerified, true);
+  assert.equal(result.airStaticServant.noTargetChoiceOrRandomness, true);
+  assert.equal(result.airStaticServant.cemeteriesUnchanged, true);
+  assert.equal(result.airStaticServant.otherStatePreserved, true);
+  assert.equal(result.airStaticServant.gameRemainedActive, true);
+  assert.equal(result.airStaticServant.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airStaticServant.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airStaticServant.deck.spellbook
+    .find(({ name }) => name === 'Static Servant')?.copies, 4);
+  assert.equal(result.airStaticServant.deck.spellbook
+    .find(({ name }) => name === 'Snow Leopard')?.copies, 4);
+  assert.equal(result.airStaticServant.replayVerified, true);
   assert.equal(result.airTeleport.teleport, 'Teleport');
   assert.equal(result.airTeleport.snowLeopard, 'Snow Leopard');
   assert.equal(result.airTeleport.acceptedActionCount, 11);

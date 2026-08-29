@@ -85,6 +85,7 @@ export type GameCardDefinition =
     defense: number;
     discardRandomCardInsteadOfMana?: true;
     diesAtEndOfControllerTurn?: true;
+    genesisDamageEachOtherUnitHere?: 1;
     genesisDrawSpell?: boolean;
     genesisDrawSite?: boolean;
     genesisHealController?: 2;
@@ -947,6 +948,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.genesisDrawSpell !== undefined && typeof card.genesisDrawSpell !== 'boolean') {
     throw new RangeError(`${path}.genesisDrawSpell must be boolean`);
   }
+  if (card.genesisDamageEachOtherUnitHere !== undefined
+    && card.genesisDamageEachOtherUnitHere !== 1) {
+    throw new RangeError(`${path}.genesisDamageEachOtherUnitHere must be 1`);
+  }
   if (card.genesisHealController !== undefined && card.genesisHealController !== 2) {
     throw new RangeError(`${path}.genesisHealController must be 2`);
   }
@@ -968,6 +973,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && (card.genesisDrawSite || card.genesisDrawSpell
       || card.genesisLoseControllerLife !== undefined)) {
     throw new RangeError(`${path} simultaneous Genesis healing and another effect are unsupported`);
+  }
+  if (card.genesisDamageEachOtherUnitHere === 1
+    && (card.genesisDrawSite || card.genesisDrawSpell
+      || card.genesisHealController !== undefined
+      || card.genesisLoseControllerLife !== undefined)) {
+    throw new RangeError(`${path} simultaneous Genesis damage and another effect are unsupported`);
   }
   if (card.gainsStealthAtEndOfTurn !== undefined && typeof card.gainsStealthAtEndOfTurn !== 'boolean') {
     throw new RangeError(`${path}.gainsStealthAtEndOfTurn must be boolean`);
@@ -1041,6 +1052,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   }
   if (card.waterbound
     && (card.genesisDrawSite || card.genesisDrawSpell
+      || card.genesisDamageEachOtherUnitHere === 1
       || card.genesisHealController !== undefined
       || card.genesisLoseControllerLife !== undefined)) {
     throw new RangeError(`${path} Waterbound with Genesis is unsupported`);
@@ -1206,6 +1218,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               : {}),
             ...(card.discardRandomCardInsteadOfMana === true
               ? { discardRandomCardInsteadOfMana: true as const }
+              : {}),
+            ...(card.genesisDamageEachOtherUnitHere === 1
+              ? { genesisDamageEachOtherUnitHere: 1 as const }
               : {}),
             ...(card.genesisDrawSpell === true ? { genesisDrawSpell: true } : {}),
             ...(card.genesisDrawSite === true ? { genesisDrawSite: true } : {}),
@@ -2820,6 +2835,7 @@ function resolveFightWindow(
   attackerStrikes: boolean,
   combatantsStrike: boolean,
   interactingRefs?: readonly GameUnitRef[],
+  allocationsAreStrikes = true,
 ): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
   const allocations = new Map(pending.allocations.map(({ amount, targetInstanceId }) =>
     [targetInstanceId, amount]));
@@ -2844,7 +2860,10 @@ function resolveFightWindow(
     if (strikingCombatants.some(({ instanceId }) => instanceId === ref.instanceId)
       && striker.lethal
       && striker.attack > 0) lethalDamage.add(pending.attacker.instanceId);
-    if (attackerCanStrike && attackerStatus.lethal && (allocations.get(ref.instanceId) ?? 0) > 0) {
+    if (attackerCanStrike
+      && allocationsAreStrikes
+      && attackerStatus.lethal
+      && (allocations.get(ref.instanceId) ?? 0) > 0) {
       lethalDamage.add(ref.instanceId);
     }
   });
@@ -4318,6 +4337,73 @@ function applyDescriptor(
     const genesisDrawZone = definition.genesisDrawSite
       ? 'atlas'
       : definition.genesisDrawSpell ? 'spellbook' : undefined;
+    if (definition.genesisDamageEachOtherUnitHere === 1) {
+      const source: GameUnitRef = {
+        instanceId: unit.instanceId,
+        kind: 'minion',
+        seat,
+      };
+      const sourceUnit = settlement.state.realm.units.find(({ instanceId }) =>
+        instanceId === unit.instanceId);
+      if (!sourceUnit || minionDisabled(settlement.state, sourceUnit)) {
+        return [
+          withStateVersion(settlement.state, {}),
+          [...summonOutcomes, ...settlement.outcomes],
+          paymentRandomDraws,
+        ];
+      }
+      const targets = (['north', 'south'] as const)
+        .flatMap((targetSeat) => unitRefs(settlement.state, targetSeat))
+        .filter((target) => {
+          if (target.instanceId === source.instanceId) return false;
+          const status = unitStatus(settlement.state, target);
+          return status.location === sourceUnit.location && status.region === sourceUnit.region;
+        })
+        .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+      if (targets.length === 0) {
+        return [
+          withStateVersion(settlement.state, {}),
+          [...summonOutcomes, ...settlement.outcomes],
+          paymentRandomDraws,
+        ];
+      }
+      const pending: PendingCombat = deepFreeze({
+        allocations: targets.map(({ instanceId }) => ({
+          amount: definition.genesisDamageEachOtherUnitHere!,
+          targetInstanceId: instanceId,
+        })),
+        attacker: source,
+        attackingSeat: seat,
+        cell: sourceUnit.location,
+        combatants: targets,
+        defenders: [],
+        originalTarget: null,
+        ...(sourceUnit.region === 'surface' ? {} : { region: sourceUnit.region }),
+        targetRemoved: false,
+      });
+      const allocationOutcomes: readonly GameOutcome[] = targets.map(({ instanceId }) => ({
+        payload: {
+          amount: definition.genesisDamageEachOtherUnitHere!,
+          sourceInstanceId: source.instanceId,
+          targetInstanceId: instanceId,
+        },
+        type: 'genesis-damage-allocated',
+      }));
+      const [damaged, outcomes, randomDraws] = resolveFightWindow(
+        settlement.state,
+        pending,
+        [...summonOutcomes, ...settlement.outcomes, ...allocationOutcomes],
+        true,
+        false,
+        [],
+        false,
+      );
+      return [
+        withStateVersion(damaged, {}),
+        outcomes,
+        [...paymentRandomDraws, ...randomDraws],
+      ];
+    }
     if (definition.genesisHealController === 2) {
       const avatarDefinition = cardDefinition(settlement.state, settledPlayer.avatar.card.cardId);
       if (avatarDefinition.cardType !== 'avatar') throw new Error('player Avatar lacks Avatar definition');
