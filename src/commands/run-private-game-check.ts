@@ -104,7 +104,7 @@ export type PrivateStarterPreset = Readonly<{
   id: StarterScenario | BetaLessonScenario;
   label: string;
   manifest: GameManifest;
-  usesOnlyOrdinaryOrExceptionalCards: true;
+  usesOnlyOrdinaryOrExceptionalCards: boolean;
 }>;
 
 export type PrivateGameCheck = Readonly<{
@@ -1253,11 +1253,13 @@ function scenarioConfig(value: JsonValue): ScenarioConfig {
 }
 
 async function readPrivateInputs(path: string): Promise<Readonly<{
+  amazonWarriors: NormalizedCard;
   airborneMinion: NormalizedCard;
   airborneTargetMinion: NormalizedCard;
   aramosMercenaries: NormalizedCard;
   arcLightning: NormalizedCard;
   autumnRiver: NormalizedCard;
+  autumnUnicorn: NormalizedCard;
   authorityHash: Hash;
   bladderblimp: NormalizedCard;
   bury: NormalizedCard;
@@ -1269,6 +1271,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   chargeMinion: NormalizedCard;
   config: ScenarioConfig;
   deathriteMinion: NormalizedCard;
+  deadOfNightDemon: NormalizedCard;
   darkTower: NormalizedCard;
   dalceanPhalanx: NormalizedCard;
   divineHealing: NormalizedCard;
@@ -1293,11 +1296,13 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   sparkmage: NormalizedCard;
   granaryRats: NormalizedCard;
   grainSparrow: NormalizedCard;
+  gyreHippogriffs: NormalizedCard;
   gnarledWendigo: NormalizedCard;
   ghostTownSite: NormalizedCard;
   hamlet: NormalizedCard;
   healingMinion: NormalizedCard;
   huntersLodge: NormalizedCard;
+  highlandClansmen: NormalizedCard;
   humbleVillage: NormalizedCard;
   lethalMinion: NormalizedCard;
   leylineHenge: NormalizedCard;
@@ -1622,6 +1627,109 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || midnightRogue.thresholds.water !== 0
     || midnightRogue.rarity !== 'ordinary') {
     throw new Error('private Ranged Stealth minion no longer matches its supported facts');
+  }
+  const deadOfNightDemon = snapshot.cards.find(({ name }) => name === 'Dead of Night Demon');
+  if (!deadOfNightDemon
+    || deadOfNightDemon.stableId
+      !== 'card:8b8120a300bf81eab49b29ab68aab941c883722a7ec58df93d6f7705a8693319'
+    || deadOfNightDemon.officialSourceId !== '001-dead_of_night_demon-b-f'
+    || deadOfNightDemon.cardType !== 'minion'
+    || deadOfNightDemon.rulesText.trim().toLowerCase() !== 'stealth'
+    || deadOfNightDemon.manaCost !== 2
+    || deadOfNightDemon.attack !== 2
+    || deadOfNightDemon.defense !== 2
+    || deadOfNightDemon.life !== null
+    || deadOfNightDemon.elements.length !== 1
+    || deadOfNightDemon.elements[0] !== 'air'
+    || deadOfNightDemon.thresholds.air !== 1
+    || deadOfNightDemon.thresholds.earth !== 0
+    || deadOfNightDemon.thresholds.fire !== 0
+    || deadOfNightDemon.thresholds.water !== 0
+    || deadOfNightDemon.rarity !== 'ordinary') {
+    throw new Error('private Stealth Demon no longer matches its supported facts');
+  }
+  const gyreHippogriffs = snapshot.cards.find(({ name }) => name === 'Gyre Hippogriffs');
+  const gyreKeywords = gyreHippogriffs?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
+  if (!gyreHippogriffs
+    || gyreHippogriffs.stableId
+      !== 'card:0ca5beff70b55e927ac7ea0800a25ca3a820b4a02cf55ec426bc0fa36101584b'
+    || gyreHippogriffs.officialSourceId !== '001-gyre_hippogriffs-b-f'
+    || gyreHippogriffs.cardType !== 'minion'
+    || gyreKeywords.length !== 2
+    || !gyreKeywords.includes('airborne')
+    || !gyreKeywords.includes('charge')
+    || gyreHippogriffs.manaCost !== 4
+    || gyreHippogriffs.attack !== 3
+    || gyreHippogriffs.defense !== 3
+    || gyreHippogriffs.life !== null
+    || gyreHippogriffs.elements.length !== 1
+    || gyreHippogriffs.elements[0] !== 'air'
+    || gyreHippogriffs.thresholds.air !== 2
+    || gyreHippogriffs.thresholds.earth !== 0
+    || gyreHippogriffs.thresholds.fire !== 0
+    || gyreHippogriffs.thresholds.water !== 0
+    || gyreHippogriffs.rarity !== 'exceptional') {
+    throw new Error('private Airborne Charge Hippogriffs no longer match their supported facts');
+  }
+  const highlandClansmen = snapshot.cards.find(({ name }) => name === 'Highland Clansmen');
+  if (!highlandClansmen
+    || highlandClansmen.stableId
+      !== 'card:017aecc6e8766f7a5507234db7720a1a85179033b8d6963920522a72fe4e8633'
+    || highlandClansmen.officialSourceId !== '001-highland_clansmen-b-f'
+    || highlandClansmen.cardType !== 'minion'
+    || highlandClansmen.rulesText.trim().toLowerCase() !== 'charge'
+    || highlandClansmen.manaCost !== 7
+    || highlandClansmen.attack !== 5
+    || highlandClansmen.defense !== 5
+    || highlandClansmen.life !== null
+    || highlandClansmen.elements.length !== 1
+    || highlandClansmen.elements[0] !== 'air'
+    || highlandClansmen.thresholds.air !== 1
+    || highlandClansmen.thresholds.earth !== 0
+    || highlandClansmen.thresholds.fire !== 0
+    || highlandClansmen.thresholds.water !== 0
+    || highlandClansmen.rarity !== 'ordinary') {
+    throw new Error('private Charge Clansmen no longer match their supported facts');
+  }
+  const autumnUnicorn = snapshot.cards.find(({ name }) => name === 'Autumn Unicorn');
+  if (!autumnUnicorn
+    || autumnUnicorn.stableId
+      !== 'card:c9dda83781a55e4af97f34a3cfb3acbb515ba6768c5e5540c2bac91cc0971608'
+    || autumnUnicorn.officialSourceId !== '001-autumn_unicorn-b-f'
+    || autumnUnicorn.cardType !== 'minion'
+    || autumnUnicorn.rulesText.trim() !== ''
+    || autumnUnicorn.manaCost !== 3
+    || autumnUnicorn.attack !== 4
+    || autumnUnicorn.defense !== 4
+    || autumnUnicorn.life !== null
+    || autumnUnicorn.elements.length !== 1
+    || autumnUnicorn.elements[0] !== 'earth'
+    || autumnUnicorn.thresholds.air !== 0
+    || autumnUnicorn.thresholds.earth !== 2
+    || autumnUnicorn.thresholds.fire !== 0
+    || autumnUnicorn.thresholds.water !== 0
+    || autumnUnicorn.rarity !== 'exceptional') {
+    throw new Error('private blank Earth Unicorn no longer matches its supported facts');
+  }
+  const amazonWarriors = snapshot.cards.find(({ name }) => name === 'Amazon Warriors');
+  if (!amazonWarriors
+    || amazonWarriors.stableId
+      !== 'card:b980d7ff8df3b87d505c00d079d6f3b8676e3beb98cf37ba9d40dbe4e62fc515'
+    || amazonWarriors.officialSourceId !== '001-amazon_warriors-b-f'
+    || amazonWarriors.cardType !== 'minion'
+    || amazonWarriors.rulesText.trim() !== ''
+    || amazonWarriors.manaCost !== 5
+    || amazonWarriors.attack !== 5
+    || amazonWarriors.defense !== 5
+    || amazonWarriors.life !== null
+    || amazonWarriors.elements.length !== 1
+    || amazonWarriors.elements[0] !== 'earth'
+    || amazonWarriors.thresholds.air !== 0
+    || amazonWarriors.thresholds.earth !== 1
+    || amazonWarriors.thresholds.fire !== 0
+    || amazonWarriors.thresholds.water !== 0
+    || amazonWarriors.rarity !== 'ordinary') {
+    throw new Error('private blank Earth Warriors no longer match their supported facts');
   }
   const wildBoars = snapshot.cards.find(({ name }) => name === 'Wild Boars');
   if (!wildBoars
@@ -2942,11 +3050,13 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     .sort((left, right) => right.identity.payload.effectiveDate.localeCompare(left.identity.payload.effectiveDate))[0];
   if (!selected) throw new Error('private authority has no Constructed format');
   return {
+    amazonWarriors,
     airborneMinion,
     airborneTargetMinion,
     aramosMercenaries,
     arcLightning,
     autumnRiver,
+    autumnUnicorn,
     authorityHash: artifact.contentHash,
     bladderblimp,
     borderMilitia,
@@ -2959,6 +3069,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     config,
     dalceanPhalanx,
     deathriteMinion,
+    deadOfNightDemon,
     darkTower,
     divineHealing,
     duel,
@@ -2982,11 +3093,13 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     sparkmage,
     granaryRats,
     grainSparrow,
+    gyreHippogriffs,
     gnarledWendigo,
     ghostTownSite,
     hamlet,
     healingMinion,
     huntersLodge,
+    highlandClansmen,
     humbleVillage,
     lethalMinion,
     leylineHenge,
@@ -3521,7 +3634,11 @@ function buildManifest(
       ...Array(2).fill(input.stealthTargetMinion.stableId),
       ...Array(2).fill(input.voidwalkMinion.stableId),
       ...Array(2).fill(input.midnightRogue.stableId),
+      ...Array(2).fill(input.deadOfNightDemon.stableId),
+      input.gyreHippogriffs.stableId,
+      input.highlandClansmen.stableId,
       input.roamingMinion.stableId,
+      input.teleport.stableId,
       ...Array(3).fill(input.lightningBolt.stableId),
     ],
   };
@@ -3530,15 +3647,20 @@ function buildManifest(
       ...Array(3).fill(input.humbleVillage.stableId),
       ...Array(3).fill(input.rusticVillage.stableId),
       ...Array(3).fill(input.simpleVillage.stableId),
+      input.sinkhole.stableId,
     ],
     avatar: input.geomancer.stableId,
     spellbook: [
       ...Array(2).fill(input.wildBoars.stableId),
       ...Array(2).fill(input.genesisMinion.stableId),
+      ...Array(2).fill(input.autumnUnicorn.stableId),
       ...Array(3).fill(input.rangedMinion.stableId),
       ...Array(3).fill(input.burrowingMinion.stableId),
       input.dalceanPhalanx.stableId,
       input.pudgeButcher.stableId,
+      ...Array(2).fill(input.amazonWarriors.stableId),
+      input.borderMilitia.stableId,
+      input.divineHealing.stableId,
       ...Array(2).fill(input.overpower.stableId),
     ],
   };
@@ -4034,7 +4156,9 @@ function buildManifest(
       card.stableId === configuredAvatar.stableId && input.config.avatar.drawSpell,
       card.stableId === input.chargeMinion.stableId
         || card.stableId === input.monstrousLion.stableId
-        || card.stableId === input.ignited.stableId,
+        || card.stableId === input.ignited.stableId
+        || card.stableId === input.gyreHippogriffs.stableId
+        || card.stableId === input.highlandClansmen.stableId,
       card.stableId === input.genesisMinion.stableId,
       card.stableId === input.lethalMinion.stableId,
       card.stableId === input.providerMinion.stableId
@@ -4063,12 +4187,14 @@ function buildManifest(
       card.stableId === input.wardMinion.stableId
         || card.stableId === input.malakhim.stableId,
       card.stableId === input.airborneMinion.stableId
+        || card.stableId === input.gyreHippogriffs.stableId
         || card.stableId === input.movementTwoMinion.stableId
         || card.stableId === input.grainSparrow.stableId
         || card.stableId === input.bladderblimp.stableId
         || card.stableId === input.malakhim.stableId,
       card.stableId === input.stealthMinion.stableId
-        || card.stableId === input.midnightRogue.stableId,
+        || card.stableId === input.midnightRogue.stableId
+        || card.stableId === input.deadOfNightDemon.stableId,
       card.stableId === input.slyFox.stableId,
       card.stableId === input.sedgeCrabs.stableId,
       card.stableId === input.submergeMinion.stableId
@@ -5375,10 +5501,11 @@ export async function loadPrivateStarterCatalog(
       ...built.manifest.decks.south.atlas,
       ...built.manifest.decks.south.spellbook,
     ];
-    if (!deckCardIds.every((cardId) => {
+    const usesOnlyOrdinaryOrExceptionalCards = deckCardIds.every((cardId) => {
       const rarity = cardsById.get(cardId)?.rarity;
       return rarity === 'ordinary' || rarity === 'exceptional';
-    })) {
+    });
+    if (!usesOnlyOrdinaryOrExceptionalCards && !id.endsWith('-lesson')) {
       throw new Error('private ' + id + ' teaching deck no longer uses only entry-level rarities');
     }
     return Object.freeze({
@@ -5386,7 +5513,7 @@ export async function loadPrivateStarterCatalog(
       id,
       label,
       manifest: built.manifest,
-      usesOnlyOrdinaryOrExceptionalCards: true,
+      usesOnlyOrdinaryOrExceptionalCards,
     });
   };
   return Object.freeze([
