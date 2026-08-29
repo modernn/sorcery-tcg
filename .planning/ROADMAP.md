@@ -25,3 +25,14 @@ Phase 3 now implements actual Sorcery core rules behind that unchanged boundary.
 - Avatar placement on the 5x4 realm;
 - first-turn start sequencing, mandatory domain establishment, and the next draw choice;
 - exact replay and hidden-zone verification through the shared contract.
+
+## Backlog
+
+### Phase 999.1: Batch Photo Collection Scanning and Count Reconciliation (BACKLOG)
+
+**Goal:** Turn binder-page or tabletop photos into a reviewed collection list by detecting every card, identifying variant and finish with confidence, counting duplicates, and reconciling changes against the saved collection.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with $gsd-review-backlog when ready)
