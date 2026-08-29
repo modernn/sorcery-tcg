@@ -7515,10 +7515,15 @@ function runStarter(
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.siteInstanceId
       && descriptor.cell === 'C4'
-      && descriptor.genesisSpellChoice !== 'bottom-next'
       && descriptor.genesisTokenChoice !== 'pay-one-mana'));
   if (!siteResult.accepted) throw new Error(`private ${siteCard.name} play was rejected`);
   session = siteResult.session;
+  if (session.state.phase === 'genesis') {
+    const genesisResult = stepGame(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'resolve-genesis-spell' && descriptor.choice === 'keep-next'));
+    if (!genesisResult.accepted) throw new Error(`private ${siteCard.name} Genesis was rejected`);
+    session = genesisResult.session;
+  }
   const manaBeforeSummon = session.state.players.north.mana;
 
   const summonResult = stepGame(session, action(session, ({ descriptor }) =>
@@ -14253,17 +14258,23 @@ function runWaterRiver(
   const before = checkpoint.state.players.north.spellbook;
   const top = before[0];
   if (!top) throw new Error('private seasonal River scenario lacks a next spell');
-  const choices = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+  const plays = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.riverInstanceId
       && descriptor.cell === 'C4');
+  const play = plays[0];
+  if (plays.length !== 1 || !play) throw new Error('private seasonal River play is unavailable');
+  const played = stepGame(checkpoint, play);
+  if (!played.accepted) throw new Error('private seasonal River play was rejected');
+  const choices = legalGameActions(played.session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'resolve-genesis-spell');
   const keepChoice = choices.find(({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.genesisSpellChoice === 'keep-next');
+    descriptor.kind === 'resolve-genesis-spell' && descriptor.choice === 'keep-next');
   const bottomChoice = choices.find(({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.genesisSpellChoice === 'bottom-next');
+    descriptor.kind === 'resolve-genesis-spell' && descriptor.choice === 'bottom-next');
   if (!keepChoice || !bottomChoice) throw new Error('private seasonal River choices are unavailable');
-  const kept = stepGame(checkpoint, keepChoice);
-  const bottomed = stepGame(checkpoint, bottomChoice);
+  const kept = stepGame(played.session, keepChoice);
+  const bottomed = stepGame(played.session, bottomChoice);
   if (!kept.accepted || !bottomed.accepted) {
     throw new Error('private seasonal River choice was rejected');
   }
@@ -14271,11 +14282,15 @@ function runWaterRiver(
   const keptOrder = kept.session.state.players.north.spellbook.map(({ instanceId }) => instanceId);
   const bottomedOrder = bottomed.session.state.players.north.spellbook
     .map(({ instanceId }) => instanceId);
+  const playEvents = played.receipt.events.map(({ type }) => type).join(',');
   const keepEvents = kept.receipt.events.map(({ type }) => type).join(',');
   const bottomEvents = bottomed.receipt.events.map(({ type }) => type).join(',');
-  const bottomEvent = bottomed.receipt.events[1];
+  const bottomEvent = bottomed.receipt.events[0];
   const privateIdentity = [top.cardId, top.instanceId];
-  const publicEvents = canonicalJson(bottomed.receipt.events as unknown as JsonValue);
+  const publicEvents = canonicalJson([
+    ...played.receipt.events,
+    ...bottomed.receipt.events,
+  ] as unknown as JsonValue);
   const deckCardIds = [
     ...opening.manifest.decks.north.atlas,
     ...opening.manifest.decks.north.spellbook,
@@ -14291,24 +14306,30 @@ function runWaterRiver(
     acceptedActionCount: bottomed.session.transcript.length,
     bottomedNextSpell: bottomedOrder.join(',')
       === [...beforeOrder.slice(1), beforeOrder[0]!].join(','),
-    causalEventsVerified: keepEvents === 'site-played'
-      && bottomEvents === 'site-played,spell-bottomed'
+    causalEventsVerified: playEvents === 'site-played'
+      && keepEvents === 'spell-kept'
+      && bottomEvents === 'spell-bottomed'
       && bottomEvent?.type === 'spell-bottomed'
       && isJsonRecord(bottomEvent.payload)
       && bottomEvent.payload.seat === 'north'
       && bottomEvent.payload.sourceInstanceId === opening.riverInstanceId,
     deck: deckList(opening.manifest.decks.north, opening.names),
-    exactChoices: choices.length === 2
+    exactChoices: plays.length === 1
+      && !play.label.includes(top.cardId)
+      && choices.length === 2
       && new Set(choices.map(({ actionId }) => actionId)).size === 2
       && privateIdentity.every((identity) =>
         !canonicalJson(choices.map(({ descriptor }) => descriptor) as unknown as JsonValue)
           .includes(identity)),
     hiddenFromOpponent: canonicalJson(observeGame(kept.session.state, 'south') as unknown as JsonValue)
       === canonicalJson(observeGame(bottomed.session.state, 'south') as unknown as JsonValue)
+      && !canonicalJson(observeGame(played.session.state, 'south') as unknown as JsonValue)
+        .includes(top.instanceId)
       && privateIdentity.every((identity) => !publicEvents.includes(identity)),
     keptNextSpell: keptOrder.join(',') === beforeOrder.join(','),
     legalLowRarityDeck: true,
-    noRandomDraws: kept.receipt.randomDraws.length === 0
+    noRandomDraws: played.receipt.randomDraws.length === 0
+      && kept.receipt.randomDraws.length === 0
       && bottomed.receipt.randomDraws.length === 0,
     replayVerified: verifyGameReplay(kept.session) && verifyGameReplay(bottomed.session),
     river: input.autumnRiver.name,

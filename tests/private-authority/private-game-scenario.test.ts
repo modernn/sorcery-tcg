@@ -218,22 +218,32 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
     current = await json('/api/view?seat=south');
     current = await submit(keep(current));
     current = await json('/api/view?seat=north');
-    const riverChoices = (current.actions as JsonObject[]).filter(({ descriptor }) => {
+    const riverPlays = (current.actions as JsonObject[]).filter(({ descriptor }) => {
       const value = descriptor as JsonObject;
       return value.kind === 'play-site'
         && value.cardInstanceId === river.instanceId
         && value.cell === 'C4';
     });
+    assert.equal(riverPlays.length, 1);
+    assert.match(String(riverPlays[0]!.label), /Play Autumn River at C4/);
+    assert.doesNotMatch(String(riverPlays[0]!.label), /put .* on bottom|keep .* on top|card:|sha256:/i);
+    current = await submit(riverPlays[0]!);
+    assert.equal(((current.view as JsonObject).phase), 'genesis');
+    const southPending = await json('/api/view?seat=south');
+    assert.deepEqual(southPending.actions, []);
+    current = await json('/api/view?seat=north');
+    const riverChoices = (current.actions as JsonObject[]).filter(({ descriptor }) =>
+      (descriptor as JsonObject).kind === 'resolve-genesis-spell');
     assert.deepEqual(riverChoices.map(({ descriptor }) =>
-      (descriptor as JsonObject).genesisSpellChoice).sort(), ['bottom-next', 'keep-next']);
+      (descriptor as JsonObject).choice).sort(), ['bottom-next', 'keep-next']);
     assert.equal(riverChoices.every(({ label }) =>
-      String(label).includes('Autumn River') && !String(label).includes('card:')), true);
+      !/card:|sha256:/.test(String(label))), true);
     const bottomRiver = riverChoices.find(({ descriptor }) =>
-      (descriptor as JsonObject).genesisSpellChoice === 'bottom-next');
+      (descriptor as JsonObject).choice === 'bottom-next');
     assert.ok(bottomRiver);
     current = await submit(bottomRiver);
     const riverReplay = await json('/api/replay', { method: 'POST' });
-    assert.equal(riverReplay.acceptedActionCount, 3);
+    assert.equal(riverReplay.acceptedActionCount, 4);
     assert.equal(riverReplay.verified, true);
     assert.equal(riverReplay.finalStateHash, current.stateHash);
 
@@ -287,10 +297,11 @@ function assertStarter(
   result: PrivateGameCheck['earthStarter'],
   site: string,
   minion: string,
+  acceptedActionCount = 4,
 ): void {
   assert.equal(result.site, site);
   assert.equal(result.minion, minion);
-  assert.equal(result.acceptedActionCount, 4);
+  assert.equal(result.acceptedActionCount, acceptedActionCount);
   assert.equal(result.manaPaid, 1);
   assert.equal(result.siteAndMinionStateVerified, true);
   assert.equal(result.causalEventsVerified, true);
@@ -662,9 +673,9 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assertGranaryRats(result.fireGranaryRats);
   assertHamlet(result.fireHamlet);
   assertVoidArtifact(result.airVoidArtifact);
-  assertStarter(result.waterStarter, 'Autumn River', 'Serava Townsfolk');
+  assertStarter(result.waterStarter, 'Autumn River', 'Serava Townsfolk', 5);
   assert.equal(result.waterRiver.river, 'Autumn River');
-  assert.equal(result.waterRiver.acceptedActionCount, 3);
+  assert.equal(result.waterRiver.acceptedActionCount, 4);
   assert.equal(result.waterRiver.exactChoices, true);
   assert.equal(result.waterRiver.keptNextSpell, true);
   assert.equal(result.waterRiver.bottomedNextSpell, true);

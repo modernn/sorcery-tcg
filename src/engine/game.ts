@@ -244,6 +244,11 @@ type PendingCombat = Readonly<{
   targetRemoved: boolean;
 }>;
 
+type PendingGenesisSpell = Readonly<{
+  seat: GameSeat;
+  sourceInstanceId: StateHash;
+}>;
+
 type PlayerState = Readonly<{
   atlas: readonly CardInstance[];
   avatar: Readonly<{
@@ -286,7 +291,8 @@ export type GameState = Readonly<{
   decisionSeat: GameSeat;
   engine: EngineState;
   pendingCombat: PendingCombat | null;
-  phase: 'allocate' | 'attack' | 'defend' | 'draw' | 'intercept' | 'main' | 'mulligan' | 'terminal';
+  pendingGenesisSpell?: PendingGenesisSpell | null;
+  phase: 'allocate' | 'attack' | 'defend' | 'draw' | 'genesis' | 'intercept' | 'main' | 'mulligan' | 'terminal';
   players: Readonly<Record<GameSeat, PlayerState>>;
   realm: Readonly<{
     artifacts?: readonly ArtifactInstance[];
@@ -395,9 +401,12 @@ type GameActionDescriptor =
     cardId: string;
     cardInstanceId: string;
     cell: RealmCell;
-    genesisSpellChoice?: 'bottom-next' | 'keep-next';
     genesisTokenChoice?: 'decline' | 'pay-one-mana';
     kind: 'play-site';
+  }>
+  | Readonly<{
+    choice: 'bottom-next' | 'keep-next';
+    kind: 'resolve-genesis-spell';
   }>
   | Readonly<{
     kind: 'activate-site-destruction';
@@ -2699,6 +2708,17 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
   const player = state.players[seat];
   if (state.phase === 'mulligan') return mulliganDescriptors(player);
   if (state.phase === 'draw') return [{ kind: 'draw', zone: 'atlas' }, { kind: 'draw', zone: 'spellbook' }];
+  if (state.phase === 'genesis') {
+    if (!state.pendingGenesisSpell
+      || state.pendingGenesisSpell.seat !== seat
+      || player.spellbook.length === 0) {
+      throw new Error('unreachable missing pending Genesis spell');
+    }
+    return [
+      { choice: 'keep-next', kind: 'resolve-genesis-spell' },
+      { choice: 'bottom-next', kind: 'resolve-genesis-spell' },
+    ];
+  }
   if (state.phase === 'attack') {
     const pending = pendingCombat(state);
     return [
@@ -2768,12 +2788,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
           { ...base, genesisTokenChoice: 'pay-one-mana' as const },
         ];
       }
-      return definition.genesisMayBottomNextSpell === true && player.spellbook.length > 0
-        ? [
-          { ...base, genesisSpellChoice: 'keep-next' as const },
-          { ...base, genesisSpellChoice: 'bottom-next' as const },
-        ]
-        : [base];
+      return [base];
     }));
   if (!player.domainEstablished) return siteDescriptors([player.avatar.location]);
   const cells = player.avatar.tapped ? [] : legalSiteCells(state, seat);
@@ -2810,18 +2825,19 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
   if (descriptor.kind === 'draw-spell') return 'Draw a spell with Avatar';
   if (descriptor.kind === 'play-site') {
     const definition = cardDefinition(state, descriptor.cardId);
-    const nextSpell = state.players[state.decisionSeat].spellbook[0];
-    const choice = definition.cardType === 'site' && definition.genesisMayBottomNextSpell === true
-      ? descriptor.genesisSpellChoice === 'bottom-next'
-        ? ` (put ${nextSpell?.cardId ?? 'next spell'} on bottom)`
-        : ` (keep ${nextSpell?.cardId ?? 'next spell'} on top)`
-      : definition.cardType === 'site'
+    const choice = definition.cardType === 'site'
       && definition.genesisPayOneManaToSummonToken !== undefined
       ? descriptor.genesisTokenChoice === 'pay-one-mana'
         ? ' (pay 1 for Genesis)'
         : ' (decline Genesis)'
       : '';
     return `Play ${descriptor.cardId} at ${descriptor.cell}${choice}`;
+  }
+  if (descriptor.kind === 'resolve-genesis-spell') {
+    const nextSpell = state.players[state.decisionSeat].spellbook[0];
+    return descriptor.choice === 'bottom-next'
+      ? `Put ${nextSpell?.cardId ?? 'next spell'} on bottom`
+      : `Keep ${nextSpell?.cardId ?? 'next spell'} on top`;
   }
   if (descriptor.kind === 'cast-artifact') {
     const destination = descriptor.bearer
@@ -4039,6 +4055,32 @@ function applyDescriptor(
     ];
   }
 
+  if (descriptor.kind === 'resolve-genesis-spell') {
+    const pending = state.pendingGenesisSpell;
+    const nextSpell = player.spellbook[0];
+    if (state.phase !== 'genesis'
+      || !pending
+      || pending.seat !== seat
+      || !nextSpell) {
+      throw new Error('unreachable illegal Genesis spell choice');
+    }
+    const updatedPlayer = descriptor.choice === 'bottom-next'
+      ? deepFreeze({ ...player, spellbook: [...player.spellbook.slice(1), nextSpell] })
+      : player;
+    return [
+      withStateVersion(state, {
+        pendingGenesisSpell: null,
+        phase: 'main',
+        players: replacePlayer(state, seat, updatedPlayer),
+      }),
+      [{
+        payload: { seat, sourceInstanceId: pending.sourceInstanceId },
+        type: descriptor.choice === 'bottom-next' ? 'spell-bottomed' : 'spell-kept',
+      }],
+      [],
+    ];
+  }
+
   if (descriptor.kind === 'play-site') {
     const card = player.hand.atlas.find(({ cardId, instanceId }) =>
       instanceId === descriptor.cardInstanceId && cardId === descriptor.cardId);
@@ -4065,10 +4107,6 @@ function applyDescriptor(
     const genesisSpellDiscards = definition.genesisDiscardTopSpells
       ? player.spellbook.slice(0, definition.genesisDiscardTopSpells)
       : [];
-    const genesisBottomedSpell = definition.genesisMayBottomNextSpell === true
-      && descriptor.genesisSpellChoice === 'bottom-next'
-      ? player.spellbook[0]
-      : undefined;
     const genesisDrawFailed = genesisSpellDraws.length < genesisSpellDrawCount;
     const updatedPlayer = deepFreeze({
       ...player,
@@ -4082,9 +4120,7 @@ function applyDescriptor(
       },
       mana: player.mana + 1 + (definition.genesisGainMana ?? 0)
         - Number(descriptor.genesisTokenChoice === 'pay-one-mana'),
-      spellbook: genesisBottomedSpell
-        ? [...player.spellbook.slice(1), genesisBottomedSpell]
-        : player.spellbook.slice(genesisSpellDraws.length + genesisSpellDiscards.length),
+      spellbook: player.spellbook.slice(genesisSpellDraws.length + genesisSpellDiscards.length),
     });
     const winner = otherSeat(seat);
     const placedUnits = state.realm.units.map((unit) => {
@@ -4145,9 +4181,18 @@ function applyDescriptor(
     const settlementOutcomes = genesisDrawFailed
       ? settlement.outcomes.filter(({ type }) => type !== 'game-ended')
       : settlement.outcomes;
+    const pendingGenesisSpell = terminal.status === 'active'
+      && definition.genesisMayBottomNextSpell === true
+      && settlement.state.players[seat].spellbook.length > 0
+      ? deepFreeze({ seat, sourceInstanceId: card.instanceId })
+      : undefined;
     return [
       withStateVersion(state, {
-        ...(terminal.status === 'finished' ? { phase: 'terminal' as const } : {}),
+        ...(terminal.status === 'finished'
+          ? { phase: 'terminal' as const }
+          : pendingGenesisSpell
+            ? { pendingGenesisSpell, phase: 'genesis' as const }
+            : {}),
         players: settlement.state.players,
         realm: {
           ...settlement.state.realm,
@@ -4167,12 +4212,6 @@ function applyDescriptor(
           }]
           : []),
         { payload: { cardId: card.cardId, cell: descriptor.cell, instanceId: card.instanceId, seat }, type: 'site-played' },
-        ...(genesisBottomedSpell
-          ? [{
-            payload: { seat, sourceInstanceId: card.instanceId },
-            type: 'spell-bottomed' as const,
-          }]
-          : []),
         ...(definition.genesisGainMana
           ? [{
             payload: { amount: definition.genesisGainMana, seat, sourceInstanceId: card.instanceId },
