@@ -7,6 +7,8 @@
 - The engine owns state and enumerates legal actions; clients and models may not submit arbitrary mutations.
 - A run manifest plus seed must reproduce byte-identical deterministic-agent events.
 - Unsupported exercised mechanics invalidate ranked results instead of becoming silent no-ops.
+- Keep rule enforcement readable: bind cards to generic facts, route those facts through shared rule helpers, avoid card-name branches, and leave one direct scenario proof for each supported rule slice.
+- Build scenario search from deterministic checkpoint branches and engine-issued legal actions. LLMs may explain results or compete optionally, but may not define legality or be required for rollouts.
 
 ## Privacy and reuse boundary
 

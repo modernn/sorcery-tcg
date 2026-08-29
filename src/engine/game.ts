@@ -32,6 +32,7 @@ export type RealmCell = `${'A' | 'B' | 'C' | 'D' | 'E'}${1 | 2 | 3 | 4}`;
 export type GameElement = 'air' | 'earth' | 'fire' | 'water';
 export type GameThresholds = Readonly<Record<GameElement, number>>;
 export type GameRegion = 'surface' | 'underground' | 'underwater' | 'void';
+type MovementPurpose = 'defend' | 'effect' | 'move-and-attack';
 
 const REALM_CELLS = (['A', 'B', 'C', 'D', 'E'] as const)
   .flatMap((file) => ([1, 2, 3, 4] as const).map((rank) => `${file}${rank}` as RealmCell));
@@ -62,6 +63,7 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    airborneMinionsAtopMoveFreelyAway?: true;
     blocksGroundMinionEntryWhileMinionAtop?: true;
     cardType: 'site';
     connectsBurrowedAllies?: boolean;
@@ -1140,6 +1142,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     return;
   }
   if (card.cardType === 'site') {
+    if (card.airborneMinionsAtopMoveFreelyAway !== undefined
+      && card.airborneMinionsAtopMoveFreelyAway !== true) {
+      throw new RangeError(
+        `${path}.airborneMinionsAtopMoveFreelyAway must be true when defined`,
+      );
+    }
     if (card.blocksGroundMinionEntryWhileMinionAtop !== undefined
       && card.blocksGroundMinionEntryWhileMinionAtop !== true) {
       throw new RangeError(
@@ -1723,6 +1731,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
           }
           : card.cardType === 'site'
           ? {
+            ...(card.airborneMinionsAtopMoveFreelyAway === true
+              ? { airborneMinionsAtopMoveFreelyAway: true as const }
+              : {}),
             ...(card.blocksGroundMinionEntryWhileMinionAtop === true
               ? { blocksGroundMinionEntryWhileMinionAtop: true as const }
               : {}),
@@ -2529,6 +2540,26 @@ function groundMinionEntryAllowed(
       unit.location === candidate.cell && unit.region === 'surface');
 }
 
+function movementStepCost(
+  state: GameState,
+  current: GameLocation,
+  candidate: GameLocation,
+  airborne: boolean,
+  movingMinion: boolean,
+  purpose: MovementPurpose,
+): 0 | 1 {
+  if (purpose === 'effect'
+    || !airborne
+    || !movingMinion
+    || current.region !== 'surface'
+    || current.cell === candidate.cell) return 1;
+  const site = state.realm.sites[current.cell];
+  if (!site || isRubble(site)) return 1;
+  const definition = cardDefinition(state, site.cardId);
+  return definition.cardType === 'site'
+    && definition.airborneMinionsAtopMoveFreelyAway === true ? 0 : 1;
+}
+
 function movementPaths(
   state: GameState,
   start: GameLocation,
@@ -2543,13 +2574,14 @@ function movementPaths(
   connectsTopBottom = false,
   immobile = false,
   movingMinion = false,
+  purpose: MovementPurpose = 'effect',
 ): readonly (readonly GameLocation[])[] {
   if (!locationExists(state, start)) return [];
   if (immobile) return [[start]];
   const paths: GameLocation[][] = [[start]];
-  let frontier: GameLocation[][] = [[start]];
-  for (let step = 0; step < maximumSteps; step += 1) {
-    frontier = frontier.flatMap((path) => {
+  let frontier: Array<Readonly<{ cost: number; path: GameLocation[] }>> = [{ cost: 0, path: [start] }];
+  while (frontier.length > 0) {
+    frontier = frontier.flatMap(({ cost, path }) => {
       const current = path.at(-1)!;
       const tunnelHops = current.region === 'underground' && burrowing
         ? burrowedConnectionLocations(state, seat, current.cell, connectsTopBottom, submerge)
@@ -2629,9 +2661,20 @@ function movementPaths(
         .sort((left, right) => left.cell === right.cell
           ? left.region < right.region ? -1 : left.region > right.region ? 1 : 0
           : left.cell < right.cell ? -1 : 1)
-        .map((candidate) => [...path, candidate]);
+        .map((candidate) => ({
+          cost: cost + movementStepCost(
+            state,
+            current,
+            candidate,
+            airborne,
+            movingMinion,
+            purpose,
+          ),
+          path: [...path, candidate],
+        }))
+        .filter(({ cost: nextCost }) => nextCost <= maximumSteps);
     });
-    paths.push(...frontier);
+    paths.push(...frontier.map(({ path }) => path));
   }
   return paths;
 }
@@ -2667,6 +2710,7 @@ function defendPaths(
     unit.connectsTopBottom,
     unit.immobile,
     ref.kind === 'minion',
+    unit.canMoveToDefend ? 'defend' : 'effect',
   ).filter((path) => sameLocation(path.at(-1)!, destination));
 }
 
@@ -2689,6 +2733,7 @@ function movementDescriptors(state: GameState, seat: GameSeat): readonly GameAct
       unit.connectsTopBottom,
       unit.immobile,
       ref.kind === 'minion',
+      'move-and-attack',
     )
       .map((path) => ({
         from: { cell: unit.location, region: unit.region },
@@ -3280,14 +3325,22 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
   return 'End turn';
 }
 
+const legalActionCache = new WeakMap<GameState, Map<GameSeat, readonly GameLegalAction[]>>();
+
 export function legalGameActions(state: GameState, seat: GameSeat): readonly GameLegalAction[] {
-  return orderLegalActions(actionDescriptors(state, seat).map((descriptor) => ({
+  const cached = legalActionCache.get(state)?.get(seat);
+  if (cached) return cached;
+  const actions = orderLegalActions(actionDescriptors(state, seat).map((descriptor) => ({
     actionId: opaqueActionId('sorcery-core-v1', seat, state.stateVersion, descriptor),
     descriptor,
     label: actionLabel(state, descriptor),
     seat,
     stateVersion: state.stateVersion,
   })));
+  const bySeat = legalActionCache.get(state) ?? new Map();
+  bySeat.set(seat, actions);
+  legalActionCache.set(state, bySeat);
+  return actions;
 }
 
 function withStateVersion(state: GameState, changes: Partial<GameState>): GameState {
