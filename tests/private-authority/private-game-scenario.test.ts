@@ -104,19 +104,26 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
 
     for (const preset of catalog) {
       current = await json('/api/reset', {
-        body: JSON.stringify({ presetId: preset.id, seed: preset.manifest.seed }),
+        body: JSON.stringify({
+          opponent: 'south',
+          presetId: preset.id,
+          seed: preset.manifest.seed,
+        }),
         headers: { 'content-type': 'application/json' },
         method: 'POST',
       });
+      let opponentActionCount = 0;
       for (let count = 0; count < 500; count += 1) {
         const currentView = current.view as JsonObject;
         if ((currentView.terminal as JsonObject).status === 'finished') break;
-        if ((current.actions as JsonObject[]).length === 0) {
-          current = await json('/api/view?seat=' + String(currentView.decisionSeat));
-        }
+        assert.equal(currentView.decisionSeat, 'north', preset.id);
+        assert.ok((current.actions as JsonObject[]).length > 0, preset.id);
         current = await submit(deterministicAction(current));
+        opponentActionCount += Number(current.opponentActionCount);
       }
       const terminal = ((current.view as JsonObject).terminal as JsonObject);
+      assert.equal(current.opponent, 'south', preset.id);
+      assert.ok(opponentActionCount > 0, preset.id);
       assert.equal(terminal.status, 'finished', preset.id);
       assert.equal(terminal.reason, 'deck_empty', preset.id);
       assert.notEqual(terminal.winner, terminal.loser, preset.id);

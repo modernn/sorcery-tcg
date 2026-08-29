@@ -2,7 +2,10 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { createSyntheticDemoManifest } from '../commands/run-game-demo.ts';
+import {
+  createSyntheticDemoManifest,
+  selectDeterministicGameAction,
+} from '../commands/run-game-demo.ts';
 import {
   createGameManifest,
   createGameSession,
@@ -21,6 +24,9 @@ import {
 const HOST = '127.0.0.1';
 const DEFAULT_PORT = 4174;
 const MAX_BODY_BYTES = 65_536;
+const MAX_OPPONENT_ACTIONS = 500;
+
+type GameOpponent = 'manual' | 'south';
 
 export type GamePreset = Readonly<{
   cardNames?: Readonly<Record<string, string>>;
@@ -45,7 +51,7 @@ const PAGE = String.raw`<!doctype html>
 </head>
 <body>
   <header><div><div class="eyebrow">Authoritative rules checkpoint</div><h1>Sorcery Playable Core</h1></div><span class="badge" id="mode">Unranked · partial rules</span></header>
-  <form class="toolbar" id="reset-form"><label>Starter matchup<select id="preset" aria-label="Starter matchup"></select></label><label>Seed<input id="seed" inputmode="numeric" min="0" max="4294967295" step="1" value="1" required></label><button>Reset match</button><button type="button" id="replay">Verify replay</button><button type="button" id="stale" disabled>Resubmit stale</button><div class="seat-switch" role="group" aria-label="Observed seat"><button type="button" data-seat="north" aria-pressed="true">North</button><button type="button" data-seat="south" aria-pressed="false">South</button></div></form>
+  <form class="toolbar" id="reset-form"><label>Starter matchup<select id="preset" aria-label="Starter matchup"></select></label><label>Opponent<select id="opponent" aria-label="Opponent"><option value="south">South computer</option><option value="manual">Hot seat</option></select></label><label>Seed<input id="seed" inputmode="numeric" min="0" max="4294967295" step="1" value="1" required></label><button>Reset match</button><button type="button" id="replay">Verify replay</button><button type="button" id="stale" disabled>Resubmit stale</button><div class="seat-switch" role="group" aria-label="Observed seat"><button type="button" data-seat="north" aria-pressed="true">North</button><button type="button" data-seat="south" aria-pressed="false">South</button></div></form>
   <main class="layout">
     <section class="table" aria-label="Five by four realm">
       <article class="player south"><div><h2>South</h2><p id="south-stats"></p></div><div class="hand" id="south-hand"></div></article>
@@ -69,14 +75,14 @@ const PAGE = String.raw`<!doctype html>
     function renderRealm(view){document.querySelectorAll('[data-cell]').forEach(function(cell){cell.innerHTML=''});Object.entries(view.realm.sites||{}).forEach(function(entry){var cell=document.querySelector('[data-cell="'+entry[0]+'"]');if(cell)cell.innerHTML+='<span class="piece site">'+escapeHtml(cardName(entry[1].cardId))+'</span>'});(view.realm.units||[]).forEach(function(unit){var cell=document.querySelector('[data-cell="'+unit.location+'"]');if(cell)cell.innerHTML+='<span class="piece unit">'+escapeHtml(cardName(unit.cardId))+' · '+unit.attack+'/'+unit.defense+(unit.damage?' · '+unit.damage+' dmg':'')+(unit.tapped?' · tapped':'')+(unit.summoningSickness?' · new':'')+'</span>'});['north','south'].forEach(function(owner){var avatar=view.players[owner].avatar,cell=document.querySelector('[data-cell="'+avatar.location+'"]');if(cell)cell.innerHTML+='<span class="piece avatar '+owner+'">'+owner+' avatar · '+avatar.attack+' atk · '+avatar.life+' life'+(avatar.tapped?' · tapped':'')+'</span>'})}
     function actionButton(candidate){var button=document.createElement('button');button.type='button';button.className='action';button.textContent=displayText(candidate.label);button.title=JSON.stringify(candidate.descriptor);button.addEventListener('click',function(){submit(candidate.actionId)});return button}
     function renderActions(actions,view){var dock=byId('actions');dock.innerHTML='';if(view.terminal.status==='finished'){var terminal=view.terminal,outcome=terminal.result==='draw'?'Draw':'Winner: '+escapeHtml(terminal.winner)+' · Loser: '+escapeHtml(terminal.loser);dock.innerHTML='<div class="ok" role="status" aria-live="polite"><strong>Game over</strong><p>'+outcome+' · Reason: '+escapeHtml(terminal.reason.replaceAll('_',' '))+'</p></div>';return}if(!actions.length){dock.innerHTML='<p class="empty">No legal actions for this observer.</p>';return}if(view.phase==='mulligan'){var keep=actions.filter(function(a){return a.descriptor.kind==='mulligan'&&!a.descriptor.atlasOrder.length&&!a.descriptor.spellbookOrder.length});keep.forEach(function(a){dock.appendChild(actionButton(a))});var rest=actions.filter(function(a){return keep.indexOf(a)<0});var details=document.createElement('details'),summary=document.createElement('summary'),list=document.createElement('div');summary.textContent='Show '+rest.length+' mulligan alternatives';list.className='actions';rest.forEach(function(a){list.appendChild(actionButton(a))});details.append(summary,list);dock.appendChild(details);return}actions.forEach(function(a){dock.appendChild(actionButton(a))})}
-    function render(data){snapshot=data;var view=data.view,picker=byId('preset');if(picker.options.length!==data.presets.length){picker.innerHTML=data.presets.map(function(preset){return '<option value="'+escapeHtml(preset.id)+'">'+escapeHtml(preset.label)+'</option>'}).join('')}picker.value=data.presetId;byId('seed').value=String(data.seed);byId('mode').textContent=data.mode==='private-local'?'Private-local actual cards · unranked':'Synthetic fallback · unranked';byId('observer').textContent=seat;byId('active').textContent=view.activeSeat+(view.decisionSeat===view.activeSeat?'':' · '+view.decisionSeat+' deciding');byId('phase').textContent='Turn '+view.turnNumber+' · '+view.phase;byId('version').textContent=view.stateVersion;byId('hash').textContent=data.stateHash;renderPlayer(view,'north');renderPlayer(view,'south');renderRealm(view);renderActions(data.actions,view)}
-    function syncSeatButtons(){document.querySelectorAll('[data-seat]').forEach(function(button){button.setAttribute('aria-pressed',String(button.dataset.seat===seat))})}
+    function render(data){snapshot=data;var view=data.view,picker=byId('preset');if(picker.options.length!==data.presets.length){picker.innerHTML=data.presets.map(function(preset){return '<option value="'+escapeHtml(preset.id)+'">'+escapeHtml(preset.label)+'</option>'}).join('')}picker.value=data.presetId;byId('opponent').value=data.opponent;byId('seed').value=String(data.seed);byId('mode').textContent=(data.mode==='private-local'?'Private-local actual cards · unranked':'Synthetic fallback · unranked')+(data.opponent==='south'?' · vs computer':' · hot seat');byId('observer').textContent=seat;byId('active').textContent=view.activeSeat+(view.decisionSeat===view.activeSeat?'':' · '+view.decisionSeat+' deciding');byId('phase').textContent='Turn '+view.turnNumber+' · '+view.phase;byId('version').textContent=view.stateVersion;byId('hash').textContent=data.stateHash;renderPlayer(view,'north');renderPlayer(view,'south');renderRealm(view);renderActions(data.actions,view);syncSeatButtons()}
+    function syncSeatButtons(){document.querySelectorAll('[data-seat]').forEach(function(button){button.disabled=Boolean(snapshot&&snapshot.opponent==='south'&&button.dataset.seat==='south');button.setAttribute('aria-pressed',String(button.dataset.seat===seat))})}
     async function refresh(){render(await request('/api/view?seat='+seat))}
-    async function submit(actionId,command){try{var next=command||{actionId:actionId,seat:seat,stateVersion:snapshot.view.stateVersion};if(!command)lastCommand=next;var result=await request('/api/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(next)});byId('notice').className=result.accepted?'ok':'error';byId('notice').textContent=result.accepted?'Action accepted':'Rejected: '+result.reason.code;byId('receipt').textContent=JSON.stringify(result.receipt||result.reason,null,2);render(result);byId('stale').disabled=!lastCommand;if(result.accepted&&result.view.decisionSeat!==seat){seat=result.view.decisionSeat;syncSeatButtons();await refresh()}}catch(error){showError(error)}}
+    async function submit(actionId,command){try{var next=command||{actionId:actionId,seat:seat,stateVersion:snapshot.view.stateVersion};if(!command)lastCommand=next;var result=await request('/api/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(next)});byId('notice').className=result.accepted?'ok':'error';byId('notice').textContent=result.accepted?'Action accepted'+(result.opponentActionCount?' · South computer took '+result.opponentActionCount+' action'+(result.opponentActionCount===1?'':'s'):''):'Rejected: '+result.reason.code;byId('receipt').textContent=JSON.stringify(result.receipt||result.reason,null,2);render(result);byId('stale').disabled=!lastCommand;if(result.accepted&&result.opponent==='manual'&&result.view.decisionSeat!==seat){seat=result.view.decisionSeat;syncSeatButtons();await refresh()}}catch(error){showError(error)}}
     function showError(error){byId('notice').className='error';byId('notice').textContent=error.message}
-    document.querySelectorAll('[data-seat]').forEach(function(button){button.addEventListener('click',function(){seat=button.dataset.seat;syncSeatButtons();refresh().catch(showError)})});
+    document.querySelectorAll('[data-seat]').forEach(function(button){button.addEventListener('click',function(){if(button.disabled)return;seat=button.dataset.seat;syncSeatButtons();refresh().catch(showError)})});
     byId('preset').addEventListener('change',function(){var selected=snapshot.presets.find(function(preset){return preset.id===byId('preset').value});if(selected)byId('seed').value=String(selected.seed)});
-    byId('reset-form').addEventListener('submit',async function(event){event.preventDefault();try{seat='north';lastCommand=undefined;syncSeatButtons();byId('stale').disabled=true;var data=await request('/api/reset',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({presetId:byId('preset').value,seed:Number(byId('seed').value)})});byId('notice').className='ok';byId('notice').textContent='Match reset';byId('receipt').textContent=JSON.stringify({stateHash:data.stateHash},null,2);render(data)}catch(error){showError(error)}});
+    byId('reset-form').addEventListener('submit',async function(event){event.preventDefault();try{seat='north';lastCommand=undefined;syncSeatButtons();byId('stale').disabled=true;var data=await request('/api/reset',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({opponent:byId('opponent').value,presetId:byId('preset').value,seed:Number(byId('seed').value)})});byId('notice').className='ok';byId('notice').textContent='Match reset';byId('receipt').textContent=JSON.stringify({stateHash:data.stateHash},null,2);render(data)}catch(error){showError(error)}});
     byId('stale').addEventListener('click',function(){if(lastCommand)submit(lastCommand.actionId,lastCommand)});
     byId('replay').addEventListener('click',async function(){try{var data=await request('/api/replay',{method:'POST'});byId('notice').className=data.verified?'ok':'error';byId('notice').textContent=data.verified?'Replay byte-identical':'Replay mismatch';byId('receipt').textContent=JSON.stringify(data,null,2)}catch(error){showError(error)}});
     refresh().catch(showError);
@@ -199,6 +205,7 @@ function sendPage(response: ServerResponse): void {
 export function createGamePrototypeServer(
   initialSeed?: number,
   suppliedPresets?: readonly GamePreset[],
+  initialOpponent: GameOpponent = 'manual',
 ): Server {
   const presets = suppliedPresets?.length
     ? [...suppliedPresets]
@@ -209,10 +216,24 @@ export function createGamePrototypeServer(
     throw new RangeError('presets must contain 1-16 unique labeled IDs');
   }
   let selectedPreset = presets[0]!;
+  let opponent = initialOpponent;
   let session: GameSession = createGameSession(reseedManifest(
     selectedPreset.manifest,
     initialSeed ?? selectedPreset.manifest.seed,
   ));
+
+  function advanceOpponent(start: GameSession): Readonly<{ count: number; session: GameSession }> {
+    let next = start;
+    let count = 0;
+    while (next.state.terminal.status === 'active' && next.state.decisionSeat === 'south') {
+      if (count >= MAX_OPPONENT_ACTIONS) throw new Error('deterministic opponent exceeded action limit');
+      const result = stepGame(next, selectDeterministicGameAction(next));
+      if (!result.accepted) throw new Error(`deterministic opponent action rejected: ${result.reason.code}`);
+      next = result.session;
+      count += 1;
+    }
+    return { count, session: next };
+  }
 
   function view(seat: GameSeat): JsonRecord {
     const observation = observeGame(session.state, seat);
@@ -224,6 +245,7 @@ export function createGamePrototypeServer(
         .map((action) => ({ ...action, label: displayActionLabel(action, observation, cardNames) })),
       cardNames,
       mode: session.manifest.authority.mode,
+      opponent,
       presetId: selectedPreset.id,
       presets: presets.map(({ id, label, manifest }) => ({ id, label, seed: manifest.seed })),
       seed: session.manifest.seed,
@@ -239,6 +261,9 @@ export function createGamePrototypeServer(
       if (request.method === 'GET' && url.pathname === '/api/view') {
         const seat = url.searchParams.get('seat');
         if (!isSeat(seat)) return sendJson(response, 400, { error: 'seat must be north or south' });
+        if (opponent === 'south' && seat === 'south') {
+          return sendJson(response, 403, { error: 'south is hidden while controlled by the deterministic opponent' });
+        }
         return sendJson(response, 200, view(seat));
       }
       if (request.method === 'POST' && url.pathname === '/api/reset') {
@@ -251,7 +276,12 @@ export function createGamePrototypeServer(
           ? presets.find(({ id }) => id === presetId)
           : undefined;
         if (!preset) return sendJson(response, 400, { error: 'presetId must name an available preset' });
+        const requestedOpponent = body.opponent === undefined ? opponent : body.opponent;
+        if (requestedOpponent !== 'manual' && requestedOpponent !== 'south') {
+          return sendJson(response, 400, { error: 'opponent must be manual or south' });
+        }
         selectedPreset = preset;
+        opponent = requestedOpponent;
         session = createGameSession(reseedManifest(selectedPreset.manifest, body.seed as number));
         return sendJson(response, 200, view('north'));
       }
@@ -265,15 +295,22 @@ export function createGamePrototypeServer(
           || body.actionId.length > 128) {
           return sendJson(response, 400, { error: 'valid seat, stateVersion, and actionId are required' });
         }
+        if (opponent === 'south' && seat === 'south') {
+          return sendJson(response, 400, { error: 'south is controlled by the deterministic opponent' });
+        }
         const result = stepGame(session, {
           actionId: body.actionId,
           seat,
           stateVersion: body.stateVersion as number,
         });
-        session = result.session;
+        const advanced = result.accepted && opponent === 'south'
+          ? advanceOpponent(result.session)
+          : { count: 0, session: result.session };
+        session = advanced.session;
         return sendJson(response, 200, {
           ...view(seat),
           accepted: result.accepted,
+          opponentActionCount: advanced.count,
           ...(result.accepted ? { receipt: result.receipt } : { reason: result.reason }),
         });
       }
@@ -299,7 +336,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
-  createGamePrototypeServer(undefined, presets).listen(DEFAULT_PORT, HOST, () => {
+  createGamePrototypeServer(undefined, presets, 'south').listen(DEFAULT_PORT, HOST, () => {
     process.stdout.write(`Sorcery Playable Core: http://${HOST}:${DEFAULT_PORT}\n`);
   });
 }

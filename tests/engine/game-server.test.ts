@@ -93,6 +93,8 @@ test('playable-core page renders the authoritative 5x4 checkpoint without artwor
   assert.match(page, /Sorcery Playable Core/);
   assert.match(page, /Unranked · partial rules/);
   assert.match(page, /<select id="preset"/);
+  assert.match(page, /<select id="opponent"/);
+  assert.match(page, /South computer/);
   assert.equal(page.match(/class="cell"/g)?.length, 20);
   assert.doesNotMatch(page, /<img\b/i);
   assert.match(response.headers.get('content-security-policy') ?? '', /img-src 'none'/);
@@ -220,13 +222,44 @@ test('browser API rejects a stale action without exposing or mutating authority'
   assert.equal('session' in stale, false);
 });
 
-test('browser API reaches the explicit terminal outcome contract', async () => {
-  let current = await post('/api/reset', { seed: 31 });
+test('browser API lets North play a deterministic South opponent through terminal replay', async () => {
+  const invalidOpponent = await fetch(`${origin}/api/reset`, {
+    body: JSON.stringify({ opponent: 'north', seed: 31 }),
+    headers: { 'content-type': 'application/json' },
+    method: 'POST',
+  });
+  assert.equal(invalidOpponent.status, 400);
+  assert.deepEqual(await invalidOpponent.json(), { error: 'opponent must be manual or south' });
+  let current = await post('/api/reset', { opponent: 'south', seed: 31 });
+  assert.equal(current.opponent, 'south');
+  const hiddenOpponent = await fetch(`${origin}/api/view?seat=south`);
+  assert.equal(hiddenOpponent.status, 403);
+  assert.deepEqual(await hiddenOpponent.json(), {
+    error: 'south is hidden while controlled by the deterministic opponent',
+  });
+  const northKeep = keep(current);
+  const forbidden = await fetch(`${origin}/api/action`, {
+    body: JSON.stringify({
+      actionId: northKeep.actionId,
+      seat: 'south',
+      stateVersion: northKeep.stateVersion,
+    }),
+    headers: { 'content-type': 'application/json' },
+    method: 'POST',
+  });
+  assert.equal(forbidden.status, 400);
+  assert.deepEqual(await forbidden.json(), {
+    error: 'south is controlled by the deterministic opponent',
+  });
+  assert.equal((await json('/api/view?seat=north')).stateHash, current.stateHash);
+  let opponentActionCount = 0;
   for (let count = 0; count < 500; count += 1) {
     const view = current.view as JsonObject;
     if ((view.terminal as JsonObject).status === 'finished') break;
-    if (actions(current).length === 0) current = await json('/api/view?seat=' + String(view.decisionSeat));
+    assert.equal(view.decisionSeat, 'north');
+    assert.ok(actions(current).length > 0);
     current = await submit(deterministicAction(current));
+    opponentActionCount += Number(current.opponentActionCount);
   }
 
   const terminal = (current.view as JsonObject).terminal as JsonObject;
@@ -234,4 +267,8 @@ test('browser API reaches the explicit terminal outcome contract', async () => {
   assert.equal(terminal.reason, 'deck_empty');
   assert.notEqual(terminal.winner, terminal.loser);
   assert.deepEqual(actions(current), []);
+  assert.ok(opponentActionCount > 0);
+  const replay = await post('/api/replay');
+  assert.equal(replay.verified, true);
+  assert.equal(replay.finalStateHash, current.stateHash);
 });
