@@ -103,6 +103,7 @@ export type PrivateStarterPreset = Readonly<{
   id: StarterScenario;
   label: string;
   manifest: GameManifest;
+  usesOnlyOrdinaryOrExceptionalCards: true;
 }>;
 
 export type PrivateGameCheck = Readonly<{
@@ -4934,13 +4935,25 @@ export async function loadPrivateStarterCatalog(
     ['fire-starter', 'Fire — Wasteland + Raal Dromedary', input.config.fireSeed, input.wasteland, input.raalDromedary],
     ['water-starter', 'Water — Stream + Serava Townsfolk', input.config.waterSeed, input.stream, input.seravaTownsfolk],
   ] as const;
+  const cardsById = new Map(input.cards.map((card) => [card.stableId, card]));
   return Object.freeze(starters.map(([id, label, seed, site, minion]) => {
     const opening = findStarterOpening(input, id, seed, site, minion);
+    const deckCardIds = [
+      ...opening.manifest.decks.north.atlas,
+      ...opening.manifest.decks.north.spellbook,
+    ];
+    if (!deckCardIds.every((cardId) => {
+      const rarity = cardsById.get(cardId)?.rarity;
+      return rarity === 'ordinary' || rarity === 'exceptional';
+    })) {
+      throw new Error('private ' + id + ' teaching deck no longer uses only entry-level rarities');
+    }
     return Object.freeze({
       cardNames: Object.freeze(Object.fromEntries(opening.names)),
       id,
       label,
       manifest: opening.manifest,
+      usesOnlyOrdinaryOrExceptionalCards: true,
     });
   }));
 }
