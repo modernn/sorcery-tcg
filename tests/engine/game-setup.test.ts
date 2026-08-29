@@ -55,6 +55,7 @@ type SpellFacts = Readonly<{
   lethal?: boolean;
   manaCost: number;
   movementBonus?: 1 | 2;
+  otherNearbyAlliesPowerBonus?: 1;
   movesOnlyForward?: boolean;
   movesOnlySideways?: boolean;
   mustBeCastBurrowed?: boolean;
@@ -184,6 +185,9 @@ function cardsFor(
         lethal: facts.lethal ?? false,
         manaCost: facts.manaCost,
         ...(facts.movementBonus ? { movementBonus: facts.movementBonus } : {}),
+        ...(facts.otherNearbyAlliesPowerBonus === 1
+          ? { otherNearbyAlliesPowerBonus: 1 as const }
+          : {}),
         movesOnlyForward: facts.movesOnlyForward ?? false,
         movesOnlySideways: facts.movesOnlySideways ?? false,
         mustBeCastBurrowed: facts.mustBeCastBurrowed ?? false,
@@ -4457,6 +4461,447 @@ test('RULE-03 Overpower gives a chosen ally +2 power until the current End Phase
   assert.equal(session.state.realm.units.some(({ instanceId }) => instanceId === fighter.instanceId), true);
   assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
     instanceId === overpower.instanceId), true);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 nearby-allies power is derived and settles deaths when its source dies', () => {
+  const decks = { north: deck('banner-north', 4, 6), south: deck('banner-south', 4, 6) };
+  const baseCards = cardsFor(decks, {
+    attack: 1,
+    defense: 1,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  });
+  const authority = {
+    contentHash: SYNTHETIC_AUTHORITY_HASH,
+    mode: 'synthetic' as const,
+    revisionId: 'synthetic-nearby-power-v1',
+  };
+  const seed = 265;
+  const preview = createGameSession(createGameManifest({
+    authority,
+    cards: baseCards,
+    decks,
+    firstSeat: 'north',
+    seed,
+  }));
+  const [allyCard, sourceCard, disabledSourceCard] = preview.state.players.north.hand.spellbook;
+  const rainCard = preview.state.players.south.hand.spellbook[0];
+  assert.ok(allyCard);
+  assert.ok(sourceCard);
+  assert.ok(disabledSourceCard);
+  assert.ok(rainCard);
+
+  const cards: Record<string, GameCardDefinition> = { ...baseCards };
+  cards[sourceCard.cardId] = {
+    ...baseCards[sourceCard.cardId]!,
+    otherNearbyAlliesPowerBonus: 1,
+  } as GameCardDefinition;
+  cards[disabledSourceCard.cardId] = {
+    ...baseCards[disabledSourceCard.cardId]!,
+    otherNearbyAlliesPowerBonus: 1,
+    waterbound: true,
+  } as GameCardDefinition;
+  cards[rainCard.cardId] = {
+    cardType: 'magic',
+    damageEachAbovegroundMinion: 1,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  };
+  assert.throws(() => createGameManifest({
+    authority,
+    cards: {
+      ...cards,
+      [sourceCard.cardId]: {
+        ...baseCards[sourceCard.cardId]!,
+        otherNearbyAlliesPowerBonus: 2,
+      } as unknown as GameCardDefinition,
+    },
+    decks,
+    firstSeat: 'north',
+    seed,
+  }), /otherNearbyAlliesPowerBonus must be 1/);
+  const gameManifest = createGameManifest({ authority, cards, decks, firstSeat: 'north', seed });
+  const sourceDefinition = gameManifest.cards[sourceCard.cardId];
+  assert.equal(sourceDefinition?.cardType, 'minion');
+  assert.equal(sourceDefinition?.cardType === 'minion'
+    ? sourceDefinition.otherNearbyAlliesPowerBonus
+    : undefined, 1);
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  for (const card of [allyCard, sourceCard, disabledSourceCard]) {
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === card.cardId
+      && descriptor.cell === 'C4');
+  }
+  const ally = session.state.realm.units.find(({ cardId }) => cardId === allyCard.cardId);
+  const source = session.state.realm.units.find(({ cardId }) => cardId === sourceCard.cardId);
+  const disabledSource = session.state.realm.units.find(({ cardId }) =>
+    cardId === disabledSourceCard.cardId);
+  assert.ok(ally);
+  assert.ok(source);
+  assert.ok(disabledSource);
+  const view = observeGame(session.state, 'north');
+  const status = (instanceId: string) => view.realm.units.find((unit) =>
+    unit.instanceId === instanceId);
+  assert.deepEqual({
+    ally: [status(ally.instanceId)?.attack, status(ally.instanceId)?.defense],
+    avatar: [view.players.north.avatar.attack, view.players.north.avatar.defense],
+    disabledSource: [
+      status(disabledSource.instanceId)?.attack,
+      status(disabledSource.instanceId)?.defense,
+      status(disabledSource.instanceId)?.disabled,
+    ],
+    source: [status(source.instanceId)?.attack, status(source.instanceId)?.defense],
+  }, {
+    ally: [2, 2],
+    avatar: [2, 2],
+    disabledSource: [2, 2, true],
+    source: [1, 1],
+  });
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  const damaged = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.cardId === rainCard.cardId));
+  assert.equal(damaged.accepted, true);
+  if (!damaged.accepted) return;
+  session = damaged.session;
+  assert.equal(session.state.realm.units.some(({ owner }) => owner === 'north'), false);
+  assert.deepEqual(session.state.players.north.cemetery.map(({ instanceId }) => instanceId), [
+    source.instanceId,
+    ally.instanceId,
+    disabledSource.instanceId,
+  ]);
+  assert.equal(damaged.receipt.events.filter(({ type }) => type === 'minion-died').length, 3);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 aura-loss Deathrite ends the game after its triggering Magic resolves', () => {
+  const north: GameDeckSpec = {
+    atlas: Array(3).fill('banner-site'),
+    avatar: 'banner-north-avatar',
+    spellbook: [
+      ...Array(2).fill('banner-source'),
+      ...Array(2).fill('banner-ally'),
+      ...Array(2).fill('banner-teleport'),
+      ...Array(2).fill('banner-rain'),
+    ],
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(3).fill('banner-site'),
+    avatar: 'banner-south-avatar',
+    spellbook: Array(6).fill('banner-source'),
+  };
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const cards: Readonly<Record<string, GameCardDefinition>> = {
+    'banner-ally': {
+      attack: 1,
+      cardType: 'minion',
+      deathriteDrawSite: true,
+      defense: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'banner-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'banner-rain': {
+      cardType: 'magic',
+      damageEachAbovegroundMinion: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'banner-site': { cardType: 'site', elements: [] },
+    'banner-source': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      otherNearbyAlliesPowerBonus: 1,
+      thresholds,
+    },
+    'banner-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'banner-teleport': {
+      cardType: 'magic',
+      manaCost: 0,
+      teleportAllyToTargetSite: true,
+      thresholds,
+    },
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-nearby-power-deathrite-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north' as const,
+  };
+  let gameManifest: GameManifest | undefined;
+  for (let seed = 1; seed <= 4_096; seed += 1) {
+    const candidate = createGameManifest({ ...input, seed });
+    const opening = createGameSession(candidate).state.players.north;
+    const openingNames = new Set(opening.hand.spellbook.map(({ cardId }) => cardId));
+    const availableNames = new Set([
+      ...opening.hand.spellbook,
+      ...opening.spellbook.slice(0, 2),
+    ].map(({ cardId }) => cardId));
+    if (openingNames.has('banner-ally')
+      && openingNames.has('banner-source')
+      && ['banner-rain', 'banner-teleport']
+      .every((cardId) => availableNames.has(cardId))) {
+      gameManifest = candidate;
+      break;
+    }
+  }
+  assert.ok(gameManifest);
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'banner-source');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'banner-ally');
+  const source = session.state.realm.units.find(({ cardId }) => cardId === 'banner-source');
+  const ally = session.state.realm.units.find(({ cardId }) => cardId === 'banner-ally');
+  assert.ok(source);
+  assert.ok(ally);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'A4');
+  assert.equal(session.state.players.north.atlas.length, 0);
+  take(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.cardId === 'banner-rain');
+  assert.equal(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === ally.instanceId)?.damage, 1);
+
+  const result = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardId === 'banner-teleport'
+      && descriptor.ally?.instanceId === source.instanceId
+      && descriptor.targetLocation?.cell === 'A4'));
+  assert.equal(result.accepted, true);
+  if (!result.accepted) return;
+  session = result.session;
+  assert.deepEqual(result.receipt.events.map(({ type }) => type), [
+    'magic-cast',
+    'unit-teleported',
+    'minion-died',
+    'magic-resolved',
+    'game-ended',
+  ]);
+  assert.deepEqual(session.state.terminal, {
+    loser: 'north',
+    reason: 'deck_empty',
+    status: 'finished',
+    winner: 'south',
+  });
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 aura-loss deaths cannot restore stale combat during a defender path', () => {
+  const north: GameDeckSpec = {
+    atlas: Array(3).fill('defend-site'),
+    avatar: 'defend-north-avatar',
+    spellbook: [
+      ...Array(2).fill('defend-target'),
+      ...Array(2).fill('defend-fragile'),
+      ...Array(2).fill('defend-source'),
+    ],
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(3).fill('defend-site'),
+    avatar: 'defend-south-avatar',
+    spellbook: [
+      ...Array(3).fill('defend-attacker'),
+      ...Array(3).fill('defend-rain'),
+    ],
+  };
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const cards: Readonly<Record<string, GameCardDefinition>> = {
+    'defend-attacker': {
+      attack: 1,
+      cardType: 'minion',
+      charge: true,
+      defense: 10,
+      manaCost: 0,
+      summonToAnySite: true,
+      thresholds,
+    },
+    'defend-fragile': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'defend-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'defend-rain': {
+      cardType: 'magic',
+      damageEachAbovegroundMinion: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'defend-site': { cardType: 'site', elements: [] },
+    'defend-source': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      movementBonus: 2,
+      otherNearbyAlliesPowerBonus: 1,
+      thresholds,
+    },
+    'defend-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'defend-target': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 3,
+      manaCost: 0,
+      thresholds,
+    },
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-nearby-power-defend-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north' as const,
+  };
+  let gameManifest: GameManifest | undefined;
+  for (let seed = 1; seed <= 4_096; seed += 1) {
+    const candidate = createGameManifest({ ...input, seed });
+    const opening = createGameSession(candidate).state.players;
+    const northOpening = new Set(opening.north.hand.spellbook.map(({ cardId }) => cardId));
+    const southBySecondTurn = new Set([
+      ...opening.south.hand.spellbook,
+      ...opening.south.spellbook.slice(0, 2),
+    ].map(({ cardId }) => cardId));
+    if (['defend-fragile', 'defend-source', 'defend-target']
+      .every((cardId) => northOpening.has(cardId))
+      && southBySecondTurn.has('defend-attacker')
+      && new Set([
+        ...opening.south.hand.spellbook,
+        ...opening.south.spellbook.slice(0, 3),
+      ].map(({ cardId }) => cardId)).has('defend-rain')) {
+      gameManifest = candidate;
+      break;
+    }
+  }
+  assert.ok(gameManifest);
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  for (const cardId of ['defend-target', 'defend-fragile', 'defend-source']) {
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === cardId
+      && descriptor.cell === 'C4');
+  }
+  const target = session.state.realm.units.find(({ cardId }) => cardId === 'defend-target');
+  const fragile = session.state.realm.units.find(({ cardId }) => cardId === 'defend-fragile');
+  const source = session.state.realm.units.find(({ cardId }) => cardId === 'defend-source');
+  assert.ok(target);
+  assert.ok(fragile);
+  assert.ok(source);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B4');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === source.instanceId
+    && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,B4');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'defend-attacker'
+    && descriptor.cell === 'C4');
+  const attacker = session.state.realm.units.find(({ cardId }) => cardId === 'defend-attacker');
+  assert.ok(attacker);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'A4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'A1');
+  take(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.cardId === 'defend-rain');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === attacker.instanceId
+    && descriptor.path.length === 1);
+  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+    && descriptor.target.kind === 'minion'
+    && descriptor.target.instanceId === target.instanceId);
+  take(({ descriptor }) => descriptor.kind === 'defend'
+    && descriptor.unitInstanceId === fragile.instanceId
+    && descriptor.path.length === 1);
+
+  const defended = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'defend'
+      && descriptor.unitInstanceId === source.instanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'B4,A4,B4,C4'));
+  assert.equal(defended.accepted, true);
+  if (!defended.accepted) return;
+  session = defended.session;
+  assert.deepEqual(session.state.pendingCombat?.defenders.map(({ instanceId }) => instanceId), [
+    source.instanceId,
+  ]);
+  assert.equal(session.state.realm.units.some(({ instanceId }) =>
+    instanceId === fragile.instanceId), false);
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === fragile.instanceId), true);
+  assert.deepEqual(defended.receipt.events.map(({ type }) => type), [
+    'defender-joined',
+    'minion-died',
+  ]);
   assert.equal(verifyGameReplay(session), true);
 });
 
