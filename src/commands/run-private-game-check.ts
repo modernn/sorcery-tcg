@@ -3344,7 +3344,7 @@ function buildManifest(
     [input.spire],
     [input.zap],
   );
-  const earthStarterDeck = elementalDeck('earth', [input.wildBoars], [input.valley]);
+  const earthStarterDeck = elementalDeck('earth', [input.wildBoars], [input.humbleVillage]);
   const fireStarterDeck = elementalDeck('fire', [input.raalDromedary], [input.wasteland]);
   const fireGranaryRatsDeck = elementalDeck(
     'fire',
@@ -3807,7 +3807,9 @@ function buildManifest(
     ...decks.north.spellbook,
     ...decks.south.atlas,
     ...decks.south.spellbook,
-    ...(scenario === 'earth-border-militia' || scenario === 'earth-humble-village'
+    ...(scenario === 'earth-border-militia'
+      || scenario === 'earth-humble-village'
+      || scenario === 'earth-starter'
       ? [input.footSoldier.stableId]
       : []),
   ]);
@@ -5110,7 +5112,7 @@ export async function loadPrivateStarterCatalog(
   const input = await readPrivateInputs(path);
   const starters = [
     ['air-starter', 'Air — Spire + Snow Leopard + Zap!', input.config.airSeed, input.spire, input.stealthTargetMinion, input.zap],
-    ['earth-starter', 'Earth — Valley + Wild Boars', input.config.earthSeed, input.valley, input.wildBoars],
+    ['earth-starter', 'Earth — Humble Village + Wild Boars', input.config.earthSeed, input.humbleVillage, input.wildBoars],
     ['fire-starter', 'Fire — Wasteland + Raal Dromedary', input.config.fireSeed, input.wasteland, input.raalDromedary],
     ['water-starter', 'Water — Autumn River + Serava Townsfolk', input.config.waterSeed, input.autumnRiver, input.seravaTownsfolk],
   ] as const;
@@ -7501,7 +7503,8 @@ function runStarter(
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.siteInstanceId
       && descriptor.cell === 'C4'
-      && descriptor.genesisSpellChoice !== 'bottom-next'));
+      && descriptor.genesisSpellChoice !== 'bottom-next'
+      && descriptor.genesisTokenChoice !== 'pay-one-mana'));
   if (!siteResult.accepted) throw new Error(`private ${siteCard.name} play was rejected`);
   session = siteResult.session;
   const manaBeforeSummon = session.state.players.north.mana;
@@ -15997,7 +16000,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     input,
     'earth-starter',
     input.config.earthSeed,
-    input.valley,
+    input.humbleVillage,
     input.wildBoars,
   );
   const earthOverpower = runEarthOverpower(input);

@@ -144,6 +144,59 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
     assert.equal(replay.verified, true);
     assert.equal(replay.finalStateHash, current.stateHash);
 
+    const earthPreset = catalog.find(({ id }) => id === 'earth-starter');
+    assert.ok(earthPreset);
+    current = await json('/api/reset', {
+      body: JSON.stringify({
+        opponent: 'manual',
+        presetId: earthPreset.id,
+        seed: earthPreset.manifest.seed,
+      }),
+      headers: { 'content-type': 'application/json' },
+      method: 'POST',
+    });
+    const earthNames = current.cardNames as Record<string, string>;
+    const earthHand = ((((current.view as JsonObject).players as JsonObject)
+      .north as JsonObject).hand as JsonObject);
+    const village = (earthHand.atlas as JsonObject[])
+      .find(({ cardId }) => earthNames[cardId as string] === 'Humble Village');
+    const boars = (earthHand.spellbook as JsonObject[])
+      .find(({ cardId }) => earthNames[cardId as string] === 'Wild Boars');
+    assert.ok(village && boars, 'known-good Earth seed must expose its teaching cards');
+    current = await submit(keep(current));
+    current = await json('/api/view?seat=south');
+    current = await submit(keep(current));
+    current = await json('/api/view?seat=north');
+    const villageChoices = (current.actions as JsonObject[]).filter(({ descriptor }) => {
+      const value = descriptor as JsonObject;
+      return value.kind === 'play-site'
+        && value.cardInstanceId === village.instanceId
+        && value.cell === 'C4';
+    });
+    assert.deepEqual(villageChoices.map(({ descriptor }) =>
+      (descriptor as JsonObject).genesisTokenChoice).sort(), ['decline', 'pay-one-mana']);
+    assert.equal(villageChoices.every(({ label }) =>
+      String(label).includes('Humble Village') && !/card:|sha256:/.test(String(label))), true);
+    const paidVillage = villageChoices.find(({ descriptor }) =>
+      (descriptor as JsonObject).genesisTokenChoice === 'pay-one-mana');
+    assert.ok(paidVillage);
+    current = await submit(paidVillage);
+    const paidView = current.view as JsonObject;
+    const paidRealm = paidView.realm as JsonObject;
+    const paidNames = current.cardNames as Record<string, string>;
+    const footSoldiers = (paidRealm.units as JsonObject[]).filter(({ cardId }) =>
+      paidNames[cardId as string] === 'Foot Soldier');
+    assert.equal(footSoldiers.length, 1);
+    assert.equal(footSoldiers[0]!.location, 'C4');
+    assert.equal(footSoldiers[0]!.controller, 'north');
+    assert.deepEqual(((current.receipt as JsonObject).events as JsonObject[])
+      .map(({ type }) => type), ['site-played', 'minion-summoned']);
+    assert.equal((((paidView.players as JsonObject).north as JsonObject).mana), 0);
+    const villageReplay = await json('/api/replay', { method: 'POST' });
+    assert.equal(villageReplay.acceptedActionCount, 3);
+    assert.equal(villageReplay.verified, true);
+    assert.equal(villageReplay.finalStateHash, current.stateHash);
+
     const waterPreset = catalog.find(({ id }) => id === 'water-starter');
     assert.ok(waterPreset);
     current = await json('/api/reset', {
@@ -212,8 +265,12 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
       assert.ok(opponentActionCount > 0, preset.id);
       assert.equal(combatObserved, true, preset.id);
       assert.equal(terminal.status, 'finished', preset.id);
-      assert.equal(terminal.reason, 'avatar_defeated', preset.id);
-      assert.notEqual(terminal.winner, terminal.loser, preset.id);
+      assert.ok(['avatar_defeated', 'simultaneous_avatar_defeat'].includes(String(terminal.reason)), preset.id);
+      if (terminal.reason === 'avatar_defeated') {
+        assert.notEqual(terminal.winner, terminal.loser, preset.id);
+      } else {
+        assert.equal(terminal.result, 'draw', preset.id);
+      }
       assert.deepEqual(current.actions, [], preset.id);
       const fullReplay = await json('/api/replay', { method: 'POST' });
       assert.equal(fullReplay.verified, true, preset.id);
@@ -579,7 +636,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airStarter.deck.spellbook
     .find(({ name }) => name === 'Zap!')?.copies, 4);
   assertFatality(result.airFireFatality);
-  assertStarter(result.earthStarter, 'Valley', 'Wild Boars');
+  assertStarter(result.earthStarter, 'Humble Village', 'Wild Boars');
   assertMalakhim(result.earthMalakhim);
   assertStarter(result.fireStarter, 'Wasteland', 'Raal Dromedary');
   assert.equal(result.fireVileImp.vileImp, 'Vile Imp');
