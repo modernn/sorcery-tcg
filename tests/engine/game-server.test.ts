@@ -136,7 +136,24 @@ test('playable-core page renders the authoritative 5x4 checkpoint without artwor
 });
 
 test('browser API switches injected starter presets and replays the selected match', async () => {
-  const airManifest = createSyntheticDemoManifest(11);
+  const airBase = createSyntheticDemoManifest(11);
+  const airManifest = createGameManifest({
+    authority: airBase.authority,
+    cards: Object.fromEntries(Object.entries(airBase.cards).map(([cardId, card]) => [
+      cardId,
+      cardId.startsWith('north-spell-')
+        ? {
+          cardType: 'magic' as const,
+          manaCost: 0,
+          teleportNearbyAllyThenDrawCard: true as const,
+          thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+        }
+        : card,
+    ])),
+    decks: airBase.decks,
+    firstSeat: airBase.firstSeat,
+    seed: airBase.seed,
+  });
   const earthBase = createSyntheticDemoManifest(19);
   const earthManifest = createGameManifest({
     authority: earthBase.authority,
@@ -162,7 +179,12 @@ test('browser API switches injected starter presets and replays the selected mat
   earthNames['south-spell-1'] = 'South Secret';
   const catalogServer = createGamePrototypeServer(undefined, [
     {
-      cardNames: { 'north-avatar': 'Air Avatar' },
+      cardNames: {
+        'north-avatar': 'Air Avatar',
+        ...Object.fromEntries(Object.keys(airManifest.cards)
+          .filter((cardId) => cardId.startsWith('north-spell-'))
+          .map((cardId) => [cardId, 'Blink'])),
+      },
       id: 'air-starter',
       label: 'Air — Spire + Snow Leopard',
       manifest: airManifest,
@@ -180,7 +202,19 @@ test('browser API switches injected starter presets and replays the selected mat
   });
   const catalogOrigin = `http://127.0.0.1:${(catalogServer.address() as AddressInfo).port}`;
   try {
-    let current = await post('/api/reset', { presetId: 'earth-starter', seed: 23 }, catalogOrigin);
+    let current = await post('/api/reset', { presetId: 'air-starter', seed: 11 }, catalogOrigin);
+    current = await submit(keep(current), catalogOrigin);
+    current = await json('/api/view?seat=south', undefined, catalogOrigin);
+    current = await submit(keep(current), catalogOrigin);
+    current = await json('/api/view?seat=north', undefined, catalogOrigin);
+    current = await submit(findAction(current, ({ kind }) => kind === 'play-site'), catalogOrigin);
+    const blinkActions = actions(current).filter((candidate) =>
+      descriptor(candidate).kind === 'cast-magic' && descriptor(candidate).drawZone);
+    assert.equal(blinkActions.length > 0, true);
+    assert.equal(blinkActions.every((candidate) => String(candidate.label).includes(
+      descriptor(candidate).drawZone === 'atlas' ? 'draw from Atlas' : 'draw from Spellbook')), true);
+
+    current = await post('/api/reset', { presetId: 'earth-starter', seed: 23 }, catalogOrigin);
     assert.equal(current.presetId, 'earth-starter');
     assert.equal(current.seed, 23);
     assert.equal(current.mode, 'synthetic');
