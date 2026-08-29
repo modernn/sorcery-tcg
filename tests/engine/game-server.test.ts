@@ -125,8 +125,14 @@ test('playable-core page renders the authoritative 5x4 checkpoint without artwor
   assert.match(page, /role="status" aria-live="polite"><strong>Game over<\/strong>/);
   assert.match(page, /Winner:.*Loser:.*Reason:/);
   assert.match(page, /South actions/);
+  assert.match(page, /Technical receipt/);
+  assert.match(page, /details:not\(\[open\]\)>:not\(summary\)\{display:none\}/);
   assert.match(page, /function cardFactText/);
   assert.doesNotMatch(page, /class=\"card\" title=/);
+  assert.doesNotMatch(page, /button\.title=JSON\.stringify/);
+  assert.match(page, /clearActionResult\(\);seat=result\.view\.decisionSeat/);
+  assert.match(page, /clearActionResult\(\);seat=button\.dataset\.seat/);
+  assert.match(page, /\/api\/replay[\s\S]*clearActionResult\(\)/);
 });
 
 test('browser API switches injected starter presets and replays the selected match', async () => {
@@ -206,8 +212,11 @@ test('browser API switches injected starter presets and replays the selected mat
     current = await submit(keep(current), catalogOrigin);
     current = await json('/api/view?seat=north', undefined, catalogOrigin);
     const riverPlay = findAction(current, ({ kind }) => kind === 'play-site');
+    assert.match(String(riverPlay.label), /then inspect the next spell/);
     assert.doesNotMatch(String(riverPlay.label), /put .* on bottom|keep .* on top/i);
     current = await submit(riverPlay, catalogOrigin);
+    assert.match(String(current.playerAction), /then inspect the next spell/);
+    assert.doesNotMatch(String(current.playerAction), /north-spell-/);
     const bottomNext = findAction(current, ({ choice, kind }) =>
       kind === 'resolve-genesis-spell' && choice === 'bottom-next');
     assert.match(String(bottomNext.label), /Put Earth card \d+ on bottom/);
