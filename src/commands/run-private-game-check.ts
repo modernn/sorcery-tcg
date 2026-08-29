@@ -92,7 +92,14 @@ type StarterCheck = Readonly<{
   siteAndMinionStateVerified: boolean;
 }>;
 
-type StarterScenario = 'air-starter' | 'earth-starter' | 'fire-starter' | 'water-starter';
+export type StarterScenario = 'air-starter' | 'earth-starter' | 'fire-starter' | 'water-starter';
+
+export type PrivateStarterPreset = Readonly<{
+  cardNames: Readonly<Record<string, string>>;
+  id: StarterScenario;
+  label: string;
+  manifest: GameManifest;
+}>;
 
 export type PrivateGameCheck = Readonly<{
   acceptedActionCount: number;
@@ -3526,7 +3533,9 @@ function buildManifest(
         : scenario === 'water' || scenario === 'water-sideways' || scenario === 'water-stealth'
           ? waterDeck
           : deck(false, true),
-    south: scenario === 'air-leyline'
+    south: scenario === 'air-starter'
+      ? airStarterDeck
+      : scenario === 'air-leyline'
       ? airLeylineDeck
       : scenario === 'air-arc-lightning'
       ? airArcLightningDeck
@@ -3554,6 +3563,8 @@ function buildManifest(
       ? airZapDeck
       : scenario === 'airborne' || scenario === 'movement-two' || scenario === 'stealth'
       ? airborneDeck
+      : scenario === 'water-starter'
+        ? waterStarterDeck
       : scenario === 'water-edge-connection'
         ? waterEdgeConnectionDeck
       : scenario === 'water-drowned'
@@ -3574,6 +3585,8 @@ function buildManifest(
         ? waterLugbogDeck
       : scenario === 'earth-entombed'
         ? earthEntombedDeck
+      : scenario === 'fire-starter'
+        ? fireStarterDeck
       : scenario === 'fire-leap-attack'
         ? fireLeapAttackDeck
       : scenario === 'fire-reckless-squire'
@@ -3602,6 +3615,8 @@ function buildManifest(
         ? earthShallowGraveDeck
       : scenario === 'earth-sinkhole'
         ? earthSinkholeDeck
+      : scenario === 'earth-starter'
+        ? earthStarterDeck
       : scenario === 'earth-forward'
         ? earthForwardDeck
       : scenario === 'earth-immobile'
@@ -4855,6 +4870,27 @@ function findStarterOpening(
     }
   }
   throw new Error(`private ${scenario} scenario no longer produces its supported opening`);
+}
+
+export async function loadPrivateStarterCatalog(
+  path = DEFAULT_SCENARIO,
+): Promise<readonly PrivateStarterPreset[]> {
+  const input = await readPrivateInputs(path);
+  const starters = [
+    ['air-starter', 'Air — Spire + Snow Leopard', input.config.airSeed, input.spire, input.stealthTargetMinion],
+    ['earth-starter', 'Earth — Valley + Wild Boars', input.config.earthSeed, input.valley, input.wildBoars],
+    ['fire-starter', 'Fire — Wasteland + Raal Dromedary', input.config.fireSeed, input.wasteland, input.raalDromedary],
+    ['water-starter', 'Water — Stream + Serava Townsfolk', input.config.waterSeed, input.stream, input.seravaTownsfolk],
+  ] as const;
+  return Object.freeze(starters.map(([id, label, seed, site, minion]) => {
+    const opening = findStarterOpening(input, id, seed, site, minion);
+    return Object.freeze({
+      cardNames: Object.freeze(Object.fromEntries(opening.names)),
+      id,
+      label,
+      manifest: opening.manifest,
+    });
+  }));
 }
 
 function findFireHamletOpening(
