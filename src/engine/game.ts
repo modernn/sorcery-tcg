@@ -98,6 +98,7 @@ export type GameCardDefinition =
     summonTokenToEachControlledSiteBorderingEnemySite?: string;
     targetNearby?: boolean;
     teleportAllyToTargetSite?: true;
+    teleportNearbyAllyThenDrawCard?: true;
     thresholds: GameThresholds;
     untapTargetMinionAfterDamage?: true;
   }>
@@ -473,6 +474,7 @@ type GameActionDescriptor =
     cardInstanceId: string;
     casterInstanceId: StateHash;
     cemeteryMinionInstanceId?: StateHash;
+    drawZone?: DeckZone;
     kind: 'cast-magic';
     ally?: GameUnitRef;
     allyDestination?: GameLocation;
@@ -1013,6 +1015,27 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
     if (definition.summonTokenToEachControlledSiteBorderingEnemySite !== undefined) {
       return [cast];
     }
+    if (definition.teleportNearbyAllyThenDrawCard === true) {
+      return unitRefs(state, seat).flatMap((ally) => {
+        const status = unitStatus(state, ally);
+        return [
+          status.location,
+          ...borderingCells(status.location),
+          ...diagonalCells(status.location),
+        ].flatMap((cell) => {
+          const targetLocation = { cell, region: status.region };
+          if (!locationExists(state, targetLocation)) return [];
+          const site = state.realm.sites[cell];
+          return (['atlas', 'spellbook'] as const).map((drawZone) => ({
+            ...cast,
+            ally,
+            drawZone,
+            targetLocation,
+            ...(site ? { targetSiteInstanceId: site.instanceId } : {}),
+          }));
+        });
+      });
+    }
     if (definition.teleportAllyToTargetSite === true) {
       if (caster.region !== 'surface') return [];
       const targetSites = REALM_CELLS.flatMap((cell) => {
@@ -1203,6 +1226,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     if (card.teleportAllyToTargetSite !== undefined && card.teleportAllyToTargetSite !== true) {
       throw new RangeError(`${path}.teleportAllyToTargetSite must be true when defined`);
     }
+    if (card.teleportNearbyAllyThenDrawCard !== undefined
+      && card.teleportNearbyAllyThenDrawCard !== true) {
+      throw new RangeError(`${path}.teleportNearbyAllyThenDrawCard must be true when defined`);
+    }
     if (card.returnMinionFromOwnCemetery !== undefined
       && card.returnMinionFromOwnCemetery !== true) {
       throw new RangeError(`${path}.returnMinionFromOwnCemetery must be true when defined`);
@@ -1265,7 +1292,8 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.lureEnemyMinionOneStepCloser === true)
       + Number(card.returnMinionFromOwnCemetery === true)
       + Number(card.summonTokenToEachControlledSiteBorderingEnemySite !== undefined)
-      + Number(card.teleportAllyToTargetSite === true);
+      + Number(card.teleportAllyToTargetSite === true)
+      + Number(card.teleportNearbyAllyThenDrawCard === true);
     if (effectCount !== 1) {
       throw new RangeError(`${path} must define exactly one supported Magic effect`);
     }
@@ -1732,7 +1760,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                           summonTokenToEachControlledSiteBorderingEnemySite:
                             card.summonTokenToEachControlledSiteBorderingEnemySite,
                         }
-                        : { teleportAllyToTargetSite: true as const }),
+                        : card.teleportNearbyAllyThenDrawCard === true
+                          ? { teleportNearbyAllyThenDrawCard: true as const }
+                          : { teleportAllyToTargetSite: true as const }),
               manaCost: card.manaCost,
               ...(card.targetNearby === true ? { targetNearby: true } : {}),
               thresholds: { ...card.thresholds },
@@ -5699,40 +5729,97 @@ function applyDescriptor(
         [],
       ];
     }
-    if (definition.teleportAllyToTargetSite === true) {
-      if (!descriptor.ally || !descriptor.targetLocation || !descriptor.targetSiteInstanceId) {
+    if (definition.teleportAllyToTargetSite === true
+      || definition.teleportNearbyAllyThenDrawCard === true) {
+      const blink = definition.teleportNearbyAllyThenDrawCard === true;
+      if (!descriptor.ally
+        || !descriptor.targetLocation
+        || (!blink && !descriptor.targetSiteInstanceId)
+        || (blink && !descriptor.drawZone)) {
         throw new Error('unreachable Teleport cast');
       }
       const status = unitStatus(castState, descriptor.ally);
       const from: GameLocation = { cell: status.location, region: status.region };
-      if (sameLocation(from, descriptor.targetLocation)) {
-        return [withStateVersion(castState, {}), [...castOutcomes, resolved], []];
+      let effectState = castState;
+      const effectOutcomes: GameOutcome[] = [...castOutcomes];
+      if (!sameLocation(from, descriptor.targetLocation)) {
+        const moved = moveUnit(castState, descriptor.ally, descriptor.targetLocation, false);
+        const teleportedState = deepFreeze({
+          ...castState,
+          players: moved.players,
+          realm: moved.realm,
+        });
+        effectOutcomes.push({
+          payload: {
+            from,
+            seat: descriptor.ally.seat,
+            sourceInstanceId: card.instanceId,
+            targetInstanceId: descriptor.ally.instanceId,
+            ...(descriptor.targetSiteInstanceId
+              ? { targetSiteInstanceId: descriptor.targetSiteInstanceId }
+              : {}),
+            to: descriptor.targetLocation,
+          },
+          type: 'unit-teleported',
+        });
+        const regionSettlement = settleRegionOccupancy(teleportedState);
+        const powerSettlement = settleStaticPowerDeaths(regionSettlement.state);
+        effectState = powerSettlement.state;
+        effectOutcomes.push(...regionSettlement.outcomes, ...powerSettlement.outcomes);
       }
-      const moved = moveUnit(castState, descriptor.ally, descriptor.targetLocation, false);
-      const teleportedState = deepFreeze({
-        ...castState,
-        players: moved.players,
-        realm: moved.realm,
-      });
-      const teleported: GameOutcome = {
-        payload: {
-          from,
-          seat: descriptor.ally.seat,
-          sourceInstanceId: card.instanceId,
-          targetInstanceId: descriptor.ally.instanceId,
-          targetSiteInstanceId: descriptor.targetSiteInstanceId,
-          to: descriptor.targetLocation,
+      const terminalIndex = effectOutcomes.findIndex(({ type }) => type === 'game-ended');
+      if (!blink || effectState.terminal.status === 'finished') {
+        return [
+          withStateVersion(effectState, {}),
+          terminalIndex < 0
+            ? [...effectOutcomes, resolved]
+            : [
+              ...effectOutcomes.slice(0, terminalIndex),
+              resolved,
+              ...effectOutcomes.slice(terminalIndex),
+            ],
+          [],
+        ];
+      }
+      const drawingPlayer = effectState.players[seat];
+      const zone = descriptor.drawZone!;
+      const [drawn, ...remaining] = drawingPlayer[zone];
+      if (!drawn) {
+        const winner = otherSeat(seat);
+        return [
+          withStateVersion(effectState, {
+            pendingCombat: null,
+            phase: 'terminal',
+            terminal: { loser: seat, reason: 'deck_empty', status: 'finished', winner },
+          }),
+          [
+            ...effectOutcomes,
+            resolved,
+            { payload: { loser: seat, reason: 'deck_empty', winner }, type: 'game-ended' },
+          ],
+          [],
+        ];
+      }
+      const updatedPlayer = deepFreeze({
+        ...drawingPlayer,
+        [zone]: remaining,
+        hand: {
+          ...drawingPlayer.hand,
+          [zone]: [...drawingPlayer.hand[zone], drawn],
         },
-        type: 'unit-teleported',
-      };
-      const settlement = settleRegionOccupancy(teleportedState);
-      const outcomes = [...castOutcomes, teleported, ...settlement.outcomes];
-      const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
+      });
       return [
-        withStateVersion(settlement.state, {}),
-        terminalIndex < 0
-          ? [...outcomes, resolved]
-          : [...outcomes.slice(0, terminalIndex), resolved, ...outcomes.slice(terminalIndex)],
+        withStateVersion(effectState, {
+          players: replacePlayer(effectState, seat, updatedPlayer),
+        }),
+        [
+          ...effectOutcomes,
+          {
+            payload: { seat, sourceInstanceId: card.instanceId },
+            type: zone === 'atlas' ? 'site-drawn' : 'spell-drawn',
+          },
+          resolved,
+        ],
         [],
       ];
     }
