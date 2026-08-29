@@ -60,6 +60,7 @@ export type GameCardDefinition =
     genesisDrawSpellPerAdjacentSameCard?: boolean;
     genesisEnemiesLoseStealth?: true;
     genesisGainMana?: number;
+    genesisPayOneManaToSummonToken?: string;
     ordinaryMinionManaDiscount?: 1;
     sacrificeToDestroyNearbySite?: true;
   }>
@@ -388,7 +389,13 @@ type GameActionDescriptor =
   | MulliganDescriptor
   | Readonly<{ kind: 'draw-site' }>
   | Readonly<{ kind: 'draw-spell' }>
-  | Readonly<{ cardId: string; cardInstanceId: string; cell: RealmCell; kind: 'play-site' }>
+  | Readonly<{
+    cardId: string;
+    cardInstanceId: string;
+    cell: RealmCell;
+    genesisTokenChoice?: 'decline' | 'pay-one-mana';
+    kind: 'play-site';
+  }>
   | Readonly<{
     kind: 'activate-site-destruction';
     sourceSiteInstanceId: StateHash;
@@ -1012,6 +1019,19 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         || card.genesisGainMana > MAX_COMBAT_STAT)) {
       throw new RangeError(`${path}.genesisGainMana must be a safe integer between 1 and ${MAX_COMBAT_STAT}`);
     }
+    if (card.genesisPayOneManaToSummonToken !== undefined) {
+      requireCardId(
+        card.genesisPayOneManaToSummonToken,
+        `${path}.genesisPayOneManaToSummonToken`,
+      );
+    }
+    if (card.genesisPayOneManaToSummonToken !== undefined
+      && (card.genesisDiscardTopSpells !== undefined
+        || card.genesisDrawSpellPerAdjacentSameCard
+        || card.genesisEnemiesLoseStealth
+        || card.genesisGainMana !== undefined)) {
+      throw new RangeError(`${path} simultaneous paid-token and another site Genesis are unsupported`);
+    }
     if (card.genesisDrawSpellPerAdjacentSameCard !== undefined
       && typeof card.genesisDrawSpellPerAdjacentSameCard !== 'boolean') {
       throw new RangeError(`${path}.genesisDrawSpellPerAdjacentSameCard must be boolean`);
@@ -1451,12 +1471,15 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
   }));
   for (const cardId of referencedCardIds) {
     const definition = input.cards[cardId];
-    if (definition?.cardType !== 'magic'
-      || definition.summonTokenToEachControlledSiteBorderingEnemySite === undefined) continue;
-    const tokenCardId = definition.summonTokenToEachControlledSiteBorderingEnemySite;
+    const tokenCardId = definition?.cardType === 'magic'
+      ? definition.summonTokenToEachControlledSiteBorderingEnemySite
+      : definition?.cardType === 'site'
+        ? definition.genesisPayOneManaToSummonToken
+        : undefined;
+    if (tokenCardId === undefined) continue;
     const token = input.cards[tokenCardId];
     if (token?.cardType !== 'minion' || token.token !== true) {
-      throw new RangeError(`cards.${cardId}.summonTokenToEachControlledSiteBorderingEnemySite must reference a token minion`);
+      throw new RangeError(`cards.${cardId} token effect must reference a token minion`);
     }
     referencedCardIds.add(tokenCardId);
   }
@@ -1504,6 +1527,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? { genesisEnemiesLoseStealth: true as const }
               : {}),
             ...(card.genesisGainMana ? { genesisGainMana: card.genesisGainMana } : {}),
+            ...(card.genesisPayOneManaToSummonToken
+              ? { genesisPayOneManaToSummonToken: card.genesisPayOneManaToSummonToken }
+              : {}),
             ...(card.ordinaryMinionManaDiscount === 1
               ? { ordinaryMinionManaDiscount: 1 as const }
               : {}),
@@ -2666,24 +2692,24 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
       targetInstanceId: target.instanceId,
     }));
   }
-  if (!player.domainEstablished) {
-    return player.hand.atlas.map(({ cardId, instanceId }) => ({
-      cardId,
-      cardInstanceId: instanceId,
-      cell: player.avatar.location,
-      kind: 'play-site',
+  const siteDescriptors = (cells: readonly RealmCell[]): readonly GameActionDescriptor[] =>
+    player.hand.atlas.flatMap(({ cardId, instanceId }) => cells.flatMap((cell) => {
+      const base = { cardId, cardInstanceId: instanceId, cell, kind: 'play-site' as const };
+      const definition = cardDefinition(state, cardId);
+      return definition.cardType === 'site'
+        && definition.genesisPayOneManaToSummonToken !== undefined
+        ? [
+          { ...base, genesisTokenChoice: 'decline' as const },
+          { ...base, genesisTokenChoice: 'pay-one-mana' as const },
+        ]
+        : [base];
     }));
-  }
+  if (!player.domainEstablished) return siteDescriptors([player.avatar.location]);
   const cells = player.avatar.tapped ? [] : legalSiteCells(state, seat);
   const avatarDefinition = cardDefinition(state, player.avatar.card.cardId);
   if (avatarDefinition.cardType !== 'avatar') throw new Error('player Avatar lacks Avatar definition');
   return [
-    ...player.hand.atlas.flatMap(({ cardId, instanceId }) => cells.map((cell) => ({
-      cardId,
-      cardInstanceId: instanceId,
-      cell,
-      kind: 'play-site' as const,
-    }))),
+    ...siteDescriptors(cells),
     ...(player.avatar.tapped ? [] : [{ kind: 'draw-site' as const }]),
     ...(!player.avatar.tapped && avatarDefinition.drawSpell ? [{ kind: 'draw-spell' as const }] : []),
     ...summonDescriptors(state, seat),
@@ -2711,7 +2737,16 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
   if (descriptor.kind === 'draw') return `Draw from ${descriptor.zone}`;
   if (descriptor.kind === 'draw-site') return 'Draw a site with Avatar';
   if (descriptor.kind === 'draw-spell') return 'Draw a spell with Avatar';
-  if (descriptor.kind === 'play-site') return `Play ${descriptor.cardId} at ${descriptor.cell}`;
+  if (descriptor.kind === 'play-site') {
+    const definition = cardDefinition(state, descriptor.cardId);
+    const choice = definition.cardType === 'site'
+      && definition.genesisPayOneManaToSummonToken !== undefined
+      ? descriptor.genesisTokenChoice === 'pay-one-mana'
+        ? ' (pay 1 for Genesis)'
+        : ' (decline Genesis)'
+      : '';
+    return `Play ${descriptor.cardId} at ${descriptor.cell}${choice}`;
+  }
   if (descriptor.kind === 'cast-artifact') {
     const destination = descriptor.bearer
       ? `carried by ${descriptor.bearer.kind} ${descriptor.bearer.instanceId.slice(0, 15)}…`
@@ -3962,7 +3997,8 @@ function applyDescriptor(
         atlas: player.hand.atlas.filter(({ instanceId }) => instanceId !== card.instanceId),
         spellbook: [...player.hand.spellbook, ...genesisSpellDraws],
       },
-      mana: player.mana + 1 + (definition.genesisGainMana ?? 0),
+      mana: player.mana + 1 + (definition.genesisGainMana ?? 0)
+        - Number(descriptor.genesisTokenChoice === 'pay-one-mana'),
       spellbook: player.spellbook.slice(genesisSpellDraws.length + genesisSpellDiscards.length),
     });
     const winner = otherSeat(seat);
@@ -4007,6 +4043,17 @@ function applyDescriptor(
       enemyStealthRefs,
       card.instanceId,
     );
+    const genesisToken = descriptor.genesisTokenChoice === 'pay-one-mana'
+      && definition.genesisPayOneManaToSummonToken
+      ? tokenUnit(
+        settlement.state,
+        seat,
+        definition.genesisPayOneManaToSummonToken,
+        card.instanceId,
+        descriptor.cell,
+        0,
+      )
+      : undefined;
     const terminal = genesisDrawFailed
       ? { loser: seat, reason: 'deck_empty' as const, status: 'finished' as const, winner }
       : settlement.state.terminal;
@@ -4017,7 +4064,10 @@ function applyDescriptor(
       withStateVersion(state, {
         ...(terminal.status === 'finished' ? { phase: 'terminal' as const } : {}),
         players: settlement.state.players,
-        realm: { ...settlement.state.realm, units: genesisUnits },
+        realm: {
+          ...settlement.state.realm,
+          units: [...genesisUnits, ...(genesisToken ? [genesisToken] : [])],
+        },
         terminal,
       }),
       [
@@ -4036,6 +4086,21 @@ function applyDescriptor(
           ? [{
             payload: { amount: definition.genesisGainMana, seat, sourceInstanceId: card.instanceId },
             type: 'mana-gained',
+          }]
+          : []),
+        ...(genesisToken
+          ? [{
+            payload: {
+              cardId: genesisToken.cardId,
+              cell: genesisToken.location,
+              instanceId: genesisToken.instanceId,
+              manaPaid: 1,
+              owner: genesisToken.owner,
+              seat: genesisToken.controller,
+              sourceInstanceId: card.instanceId,
+              token: true,
+            },
+            type: 'minion-summoned' as const,
           }]
           : []),
         ...genesisSpellDraws.map(() => ({

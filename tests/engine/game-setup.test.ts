@@ -6421,6 +6421,129 @@ test('RULE-03 site Genesis grants temporary mana once, pays a summon, and expire
   assert.equal(verifyGameReplay(session), true);
 });
 
+test('RULE-03 Humble Village Genesis may spend its mana to summon one Foot Soldier', () => {
+  const north: GameDeckSpec = {
+    atlas: Array(4).fill('humble-village'),
+    avatar: 'avatar',
+    spellbook: Array(4).fill('blank-minion'),
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(4).fill('plain-site'),
+    avatar: 'avatar',
+    spellbook: Array(4).fill('blank-minion'),
+  };
+  const cards: Record<string, GameCardDefinition> = {
+    avatar: { attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20 },
+    'blank-minion': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 1,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+    'foot-soldier': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      token: true,
+    },
+    'humble-village': {
+      cardType: 'site',
+      elements: ['earth'],
+      genesisPayOneManaToSummonToken: 'foot-soldier',
+    },
+    'plain-site': { cardType: 'site', elements: ['earth'] },
+  };
+  const gameManifest = createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic',
+      revisionId: 'synthetic-humble-village-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north',
+    seed: 103,
+  });
+  assert.equal(gameManifest.cards['humble-village']?.cardType === 'site'
+    && gameManifest.cards['humble-village'].genesisPayOneManaToSummonToken,
+  'foot-soldier');
+  const missingTokenCards = { ...cards };
+  delete missingTokenCards['foot-soldier'];
+  assert.throws(() => createGameManifest({
+    ...gameManifest,
+    cards: missingTokenCards,
+  }), /token effect must reference a token minion/);
+  const checkpoint = keep(keep(createGameSession(gameManifest)));
+  const villageInstanceId = checkpoint.state.players.north.hand.atlas[0]!.instanceId;
+  const choices = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === villageInstanceId
+      && descriptor.cell === 'C4');
+  const declined = choices.find(({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.genesisTokenChoice === 'decline');
+  const paid = choices.find(({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.genesisTokenChoice === 'pay-one-mana');
+  assert.equal(choices.length, 2);
+  assert.ok(declined);
+  assert.ok(paid);
+  assert.notEqual(declined.actionId, paid.actionId);
+
+  const declinedResult = stepGame(checkpoint, declined);
+  const paidResult = stepGame(checkpoint, paid);
+  assert.equal(declinedResult.accepted, true);
+  assert.equal(paidResult.accepted, true);
+  if (!declinedResult.accepted || !paidResult.accepted) return;
+  assert.equal(declinedResult.session.state.stateVersion, checkpoint.state.stateVersion + 1);
+  assert.equal(paidResult.session.state.stateVersion, checkpoint.state.stateVersion + 1);
+  assert.equal(declinedResult.session.state.players.north.mana, 1);
+  assert.equal(declinedResult.session.state.realm.units.length, 0);
+  assert.deepEqual(declinedResult.receipt.events.map(({ type }) => type), ['site-played']);
+
+  const token = paidResult.session.state.realm.units[0];
+  assert.ok(token);
+  assert.equal(paidResult.session.state.players.north.mana, 0);
+  assert.deepEqual(paidResult.receipt.events.map(({ type }) => type), [
+    'site-played',
+    'minion-summoned',
+  ]);
+  assert.deepEqual(paidResult.receipt.events[1]?.payload, {
+    cardId: 'foot-soldier',
+    cell: 'C4',
+    instanceId: token.instanceId,
+    manaPaid: 1,
+    owner: 'north',
+    seat: 'north',
+    sourceInstanceId: paidResult.session.state.realm.sites.C4?.instanceId,
+    token: true,
+  });
+  assert.deepEqual({
+    controller: token.controller,
+    damage: token.damage,
+    location: token.location,
+    owner: token.owner,
+    region: token.region,
+    source: token.source,
+    summoningSickness: token.summoningSickness,
+    tapped: token.tapped,
+  }, {
+    controller: 'north',
+    damage: 0,
+    location: 'C4',
+    owner: 'north',
+    region: 'surface',
+    source: 'token',
+    summoningSickness: true,
+    tapped: false,
+  });
+  assert.equal(declinedResult.receipt.randomDraws.length, 0);
+  assert.equal(paidResult.receipt.randomDraws.length, 0);
+  assert.equal(verifyGameReplay(declinedResult.session), true);
+  assert.equal(verifyGameReplay(paidResult.session), true);
+});
+
 test('RULE-03 Hunter\'s Lodge Genesis removes only enemy Stealth', () => {
   const north: GameDeckSpec = {
     atlas: Array(4).fill('hunters-lodge'),

@@ -840,6 +840,25 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthBorderMilitia.deck.spellbook
     .some(({ name }) => name === 'Foot Soldier'), false);
   assert.equal(result.earthBorderMilitia.replayVerified, true);
+  assert.equal(result.earthHumbleVillage.humbleVillage, 'Humble Village');
+  assert.equal(result.earthHumbleVillage.footSoldier, 'Foot Soldier');
+  assert.equal(result.earthHumbleVillage.seed, 7383);
+  assert.equal(result.earthHumbleVillage.acceptedActionCount, 3);
+  assert.equal(result.earthHumbleVillage.exactChoices, true);
+  assert.equal(result.earthHumbleVillage.declinedKeptManaAndSummonedNothing, true);
+  assert.equal(result.earthHumbleVillage.paidSpentManaAndSummonedToken, true);
+  assert.equal(result.earthHumbleVillage.tokenDefinitionVerified, true);
+  assert.equal(result.earthHumbleVillage.gameRemainedActive, true);
+  assert.equal(result.earthHumbleVillage.noRandomDraws, true);
+  assert.equal(result.earthHumbleVillage.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthHumbleVillage.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthHumbleVillage.deck.atlas
+    .find(({ name }) => name === 'Humble Village')?.copies, 4);
+  assert.equal(result.earthHumbleVillage.deck.spellbook
+    .some(({ name }) => name === 'Foot Soldier'), false);
+  assert.equal(result.earthHumbleVillage.replayVerified, true);
   assert.equal(result.earthDuel.duel, 'Duel');
   assert.equal(result.earthDuel.boskTroll, 'Bosk Troll');
   assert.equal(result.earthDuel.elthamTownsfolk, 'Eltham Townsfolk');
