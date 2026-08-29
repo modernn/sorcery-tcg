@@ -124,6 +124,7 @@ test('playable-core page renders the authoritative 5x4 checkpoint without artwor
   assert.match(response.headers.get('content-security-policy') ?? '', /img-src 'none'/);
   assert.match(page, /role="status" aria-live="polite"><strong>Game over<\/strong>/);
   assert.match(page, /Winner:.*Loser:.*Reason:/);
+  assert.match(page, /South actions/);
 });
 
 test('browser API switches injected starter presets and replays the selected match', async () => {
@@ -296,6 +297,7 @@ test('browser API lets North play a deterministic South opponent through termina
   });
   assert.equal((await json('/api/view?seat=north')).stateHash, current.stateHash);
   let opponentActionCount = 0;
+  let opponentSummaryCount = 0;
   let combatObserved = false;
   for (let count = 0; count < 500; count += 1) {
     const view = current.view as JsonObject;
@@ -307,6 +309,15 @@ test('browser API lets North play a deterministic South opponent through termina
     assert.ok(actions(current).length > 0);
     current = await submit(deterministicAction(current));
     opponentActionCount += Number(current.opponentActionCount);
+    const opponentActions = current.opponentActions as JsonObject[];
+    assert.equal(opponentActions.length, Number(current.opponentActionCount));
+    opponentSummaryCount += opponentActions.length;
+    for (const summary of opponentActions) {
+      assert.deepEqual(Object.keys(summary).sort(), ['events', 'kind']);
+      assert.equal(typeof summary.kind, 'string');
+      assert.equal((summary.events as unknown[]).every((event) => typeof event === 'string'), true);
+    }
+    assert.doesNotMatch(JSON.stringify(opponentActions), /card:|sha256:|south-(?:site|spell)-/);
   }
 
   const terminal = (current.view as JsonObject).terminal as JsonObject;
@@ -315,6 +326,7 @@ test('browser API lets North play a deterministic South opponent through termina
   assert.notEqual(terminal.winner, terminal.loser);
   assert.deepEqual(actions(current), []);
   assert.ok(opponentActionCount > 0);
+  assert.equal(opponentSummaryCount, opponentActionCount);
   assert.equal(combatObserved, true);
   const replay = await post('/api/replay');
   assert.equal(replay.verified, true);

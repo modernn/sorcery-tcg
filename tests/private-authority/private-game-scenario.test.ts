@@ -269,6 +269,9 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
         assert.ok((current.actions as JsonObject[]).length > 0, preset.id);
         current = await submit(deterministicAction(current));
         opponentActionCount += Number(current.opponentActionCount);
+        const opponentActions = current.opponentActions as JsonObject[];
+        assert.equal(opponentActions.length, Number(current.opponentActionCount), preset.id);
+        assert.doesNotMatch(JSON.stringify(opponentActions), /card:|sha256:/, preset.id);
       }
       const terminal = ((current.view as JsonObject).terminal as JsonObject);
       assert.equal(current.opponent, 'south', preset.id);
