@@ -135,6 +135,7 @@ export type GameCardDefinition =
     mustBeCastBurrowed?: boolean;
     mustBeCastSubmerged?: boolean;
     mustBeCastToWaterSite?: boolean;
+    nearbyEnemiesPermanentlyLoseStealth?: true;
     ordinary?: true;
     otherNearbyAlliesPowerBonus?: 1;
     provides?: GameElement;
@@ -1467,6 +1468,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.movementBonus > 2)) {
     throw new RangeError(`${path}.movementBonus must be a safe integer between 1 and 2`);
   }
+  if (card.nearbyEnemiesPermanentlyLoseStealth !== undefined
+    && card.nearbyEnemiesPermanentlyLoseStealth !== true) {
+    throw new RangeError(`${path}.nearbyEnemiesPermanentlyLoseStealth must be true when defined`);
+  }
   if (card.otherNearbyAlliesPowerBonus !== undefined
     && card.otherNearbyAlliesPowerBonus !== 1) {
     throw new RangeError(`${path}.otherNearbyAlliesPowerBonus must be 1`);
@@ -1813,6 +1818,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.mustBeCastBurrowed === true ? { mustBeCastBurrowed: true } : {}),
             ...(card.mustBeCastSubmerged === true ? { mustBeCastSubmerged: true } : {}),
             ...(card.mustBeCastToWaterSite === true ? { mustBeCastToWaterSite: true } : {}),
+            ...(card.nearbyEnemiesPermanentlyLoseStealth === true
+              ? { nearbyEnemiesPermanentlyLoseStealth: true as const }
+              : {}),
             ...(card.ordinary === true ? { ordinary: true as const } : {}),
             ...(card.otherNearbyAlliesPowerBonus === 1
               ? { otherNearbyAlliesPowerBonus: 1 as const }
@@ -3364,6 +3372,45 @@ function loseStealth(
   ];
 }
 
+function settleNearbyEnemyStealth(
+  state: GameState,
+): Readonly<{ outcomes: readonly GameOutcome[]; state: GameState }> {
+  if (state.terminal.status === 'finished') return { outcomes: [], state };
+  const sources = state.realm.units.filter((unit) => {
+    const definition = cardDefinition(state, unit.cardId);
+    return definition.cardType === 'minion'
+      && definition.nearbyEnemiesPermanentlyLoseStealth === true
+      && !minionDisabled(state, unit);
+  }).sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+  let units = state.realm.units;
+  const outcomes: GameOutcome[] = [];
+  for (const source of sources) {
+    const nearby = new Set([
+      source.location,
+      ...borderingCells(source.location),
+      ...diagonalCells(source.location),
+    ]);
+    const refs = units.filter((unit) => unit.controller !== source.controller
+      && unit.region === source.region
+      && unit.stealthed
+      && nearby.has(unit.location))
+      .map(({ controller, instanceId }) => ({
+        instanceId,
+        kind: 'minion' as const,
+        seat: controller,
+      }));
+    const [revealed, lost] = loseStealth(units, refs, source.instanceId);
+    units = revealed;
+    outcomes.push(...lost);
+  }
+  return outcomes.length === 0
+    ? { outcomes, state }
+    : {
+      outcomes,
+      state: deepFreeze({ ...state, realm: { ...state.realm, units } }),
+    };
+}
+
 function recordInteraction(
   state: GameState,
   refs: readonly GameUnitRef[],
@@ -3830,6 +3877,9 @@ function resolveDeclaredPath(
     current = settlement.state;
     outcomes.push(...settlement.outcomes);
     removals.push(...settlement.removals);
+    const stealthSettlement = settleNearbyEnemyStealth(current);
+    current = stealthSettlement.state;
+    outcomes.push(...stealthSettlement.outcomes);
     const powerSettlement = settleStaticPowerDeaths(current);
     current = powerSettlement.state;
     outcomes.push(...powerSettlement.outcomes);
@@ -7426,21 +7476,23 @@ export function stepGame(session: GameSession, request: GameActionRequest): Game
     action.descriptor,
     session.manifest,
   );
-  const powerSettlement = settleStaticPowerDeaths(appliedState);
+  const stealthSettlement = settleNearbyEnemyStealth(appliedState);
+  const powerSettlement = settleStaticPowerDeaths(stealthSettlement.state);
+  const settlementOutcomes = [...stealthSettlement.outcomes, ...powerSettlement.outcomes];
   const completionIndex = appliedOutcomes.findIndex(({ type }) =>
     type === 'game-ended' || type === 'magic-resolved' || type === 'turn-ended');
-  const settlementEndIndex = powerSettlement.outcomes.findIndex(({ type }) =>
+  const settlementEndIndex = settlementOutcomes.findIndex(({ type }) =>
     type === 'game-ended');
   const settlementBeforeCompletion = settlementEndIndex < 0
-    ? powerSettlement.outcomes
-    : powerSettlement.outcomes.slice(0, settlementEndIndex);
+    ? settlementOutcomes
+    : settlementOutcomes.slice(0, settlementEndIndex);
   const settlementAfterCompletion = settlementEndIndex < 0
     ? []
-    : powerSettlement.outcomes.slice(settlementEndIndex);
-  const outcomes = powerSettlement.outcomes.length === 0
+    : settlementOutcomes.slice(settlementEndIndex);
+  const outcomes = settlementOutcomes.length === 0
     ? appliedOutcomes
     : completionIndex < 0
-      ? [...appliedOutcomes, ...powerSettlement.outcomes]
+      ? [...appliedOutcomes, ...settlementOutcomes]
       : [
         ...appliedOutcomes.slice(0, completionIndex),
         ...settlementBeforeCompletion,

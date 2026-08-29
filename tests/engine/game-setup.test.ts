@@ -55,6 +55,7 @@ type SpellFacts = Readonly<{
   lethal?: boolean;
   manaCost: number;
   movementBonus?: 1 | 2;
+  nearbyEnemiesPermanentlyLoseStealth?: true;
   otherNearbyAlliesPowerBonus?: 1;
   movesOnlyForward?: boolean;
   movesOnlySideways?: boolean;
@@ -189,6 +190,9 @@ function cardsFor(
         lethal: facts.lethal ?? false,
         manaCost: facts.manaCost,
         ...(facts.movementBonus ? { movementBonus: facts.movementBonus } : {}),
+        ...(facts.nearbyEnemiesPermanentlyLoseStealth === true
+          ? { nearbyEnemiesPermanentlyLoseStealth: true as const }
+          : {}),
         ...(facts.otherNearbyAlliesPowerBonus === 1
           ? { otherNearbyAlliesPowerBonus: 1 as const }
           : {}),
@@ -9306,6 +9310,135 @@ test('RULE-04 Sly Fox gains Stealth once at the end of its controller turn', () 
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
   assert.equal(session.transcript.at(-1)?.events.some(({ type }) => type === 'stealth-gained'), false);
   assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 Scent Hounds permanently removes nearby enemy Stealth', () => {
+  const gameManifest = manifest(160, {
+    northSpell: {
+      attack: 2,
+      defense: 2,
+      manaCost: 1,
+      nearbyEnemiesPermanentlyLoseStealth: true,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+    southSpell: {
+      attack: 1,
+      defense: 1,
+      gainsStealthAtEndOfTurn: true,
+      manaCost: 1,
+      stealth: true,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+  });
+  const canonicalHound = gameManifest.cards[gameManifest.decks.north.spellbook[0]!];
+  assert.equal(canonicalHound?.cardType === 'minion'
+    && canonicalHound.nearbyEnemiesPermanentlyLoseStealth, true);
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cell === 'C4'));
+  const houndInstanceId = session.state.realm.units[0]!.instanceId;
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cell === 'C1'));
+  const targetInstanceId = session.state.realm.units
+    .find(({ controller }) => controller === 'south')!.instanceId;
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C3'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === houndInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C2'));
+  const checkpoint = session;
+  const moved = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === targetInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C1,C2'));
+  assert.equal(moved.accepted, true);
+  if (!moved.accepted) return;
+  session = moved.session;
+  assert.deepEqual(moved.receipt.events.map(({ type }) => type), [
+    'move-and-attack-activated',
+    'stealth-lost',
+  ]);
+  assert.deepEqual(moved.receipt.events[1]?.payload, {
+    instanceId: targetInstanceId,
+    seat: 'south',
+    sourceInstanceId: houndInstanceId,
+  });
+  assert.equal(session.state.realm.units
+    .find(({ instanceId }) => instanceId === targetInstanceId)?.stealthed, false);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+
+  const regained = stepGame(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  assert.equal(regained.accepted, true);
+  if (!regained.accepted) return;
+  session = regained.session;
+  assert.deepEqual(regained.receipt.events.map(({ type }) => type), [
+    'stealth-gained',
+    'stealth-lost',
+    'turn-ended',
+    'turn-started',
+  ]);
+  assert.equal(session.state.realm.units
+    .find(({ instanceId }) => instanceId === targetInstanceId)?.stealthed, false);
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === houndInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C4'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  assert.equal(session.state.realm.units
+    .find(({ instanceId }) => instanceId === targetInstanceId)?.stealthed, false);
+  assert.equal(verifyGameReplay(session), true);
+
+  const disabledCheckpoint: GameSession = {
+    ...checkpoint,
+    state: {
+      ...checkpoint.state,
+      realm: {
+        ...checkpoint.state.realm,
+        units: checkpoint.state.realm.units.map((unit) => unit.instanceId === houndInstanceId
+          ? {
+            ...unit,
+            disableEffects: [{
+              expiresAtSeat: 'south' as const,
+              sourceInstanceId: unit.instanceId,
+            }],
+          }
+          : unit),
+      },
+    },
+  };
+  const disabledMove = stepGame(disabledCheckpoint, action(disabledCheckpoint, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === targetInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C1,C2'));
+  assert.equal(disabledMove.accepted, true);
+  if (!disabledMove.accepted) return;
+  assert.equal(disabledMove.receipt.events.some(({ type }) => type === 'stealth-lost'), false);
+  assert.equal(disabledMove.session.state.realm.units
+    .find(({ instanceId }) => instanceId === targetInstanceId)?.stealthed, true);
 });
 
 test('RULE-04 Malakhim untaps at its controller End Phase unless Disabled', () => {
