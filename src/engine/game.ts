@@ -4211,24 +4211,53 @@ function applyDescriptor(
         ? deepFreeze({ ...unit, lastDroppedArtifactsTurn: state.turnNumber })
         : unit)
       : state.realm.units;
+    const droppedState = deepFreeze({
+      ...state,
+      players,
+      realm: {
+        ...state.realm,
+        ...(dropped.artifacts ? { artifacts: dropped.artifacts } : {}),
+        units,
+      },
+    });
+    const bearer = descriptor.unit.kind === 'minion'
+      ? units.find(({ instanceId }) => instanceId === descriptor.unit.instanceId)
+      : undefined;
+    const deaths = bearer
+      && bearer.damage > 0
+      && bearer.damage >= unitStatus(droppedState, descriptor.unit).defense
+      ? [bearer]
+      : [];
+    const deathResolution = resolveMinionDeaths(
+      droppedState,
+      droppedState.players,
+      droppedState.realm.units,
+      deaths,
+      new Set(),
+    );
     return [
-      withStateVersion(state, {
-        players,
+      withStateVersion(droppedState, {
+        ...(deathResolution.terminal.status === 'finished' ? { phase: 'terminal' } : {}),
+        players: deathResolution.players,
         realm: {
-          ...state.realm,
-          ...(dropped.artifacts ? { artifacts: dropped.artifacts } : {}),
-          units,
+          ...droppedState.realm,
+          ...(deathResolution.artifacts ? { artifacts: deathResolution.artifacts } : {}),
+          units: deathResolution.units,
         },
+        terminal: deathResolution.terminal,
       }),
-      [{
-        payload: {
-          artifactInstanceIds: descriptor.artifactInstanceIds,
-          seat,
-          unitInstanceId: descriptor.unit.instanceId,
-          unitKind: descriptor.unit.kind,
+      [
+        {
+          payload: {
+            artifactInstanceIds: descriptor.artifactInstanceIds,
+            seat,
+            unitInstanceId: descriptor.unit.instanceId,
+            unitKind: descriptor.unit.kind,
+          },
+          type: 'artifacts-dropped',
         },
-        type: 'artifacts-dropped',
-      }],
+        ...deathResolution.outcomes,
+      ],
       [],
     ];
   }

@@ -426,6 +426,9 @@ export type PrivateGameCheck = Readonly<{
     deck: DeckList;
     dropAcceptedActionCount: number;
     dropChoiceVerified: boolean;
+    dropDeathAcceptedActionCount: number;
+    dropDeathReplayVerified: boolean;
+    dropDeathVerified: boolean;
     dropEventVerified: boolean;
     dropNoRandomDraws: boolean;
     dropReplayVerified: boolean;
@@ -3196,8 +3199,8 @@ function buildManifest(
   const earthSwordAndShieldDeck = elementalDeck(
     'earth',
     [...earthMinions, input.elthamTownsfolk],
-    [input.ghostTownSite],
-    [],
+    [input.ghostTownSite, input.spire],
+    [input.zap],
     [input.swordAndShield],
   );
   const earthPoisonousDaggerDeck = elementalDeck(
@@ -4301,9 +4304,11 @@ function findEarthArtifactOpening(
   elthamTownsfolkInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
-  northEarthSiteInstanceIds: readonly [string, string, string];
+  northSiteInstanceIds: readonly [string, string, string];
   session: GameSession;
   southEarthSiteInstanceIds: readonly [string, string];
+  zapDrawCount?: number;
+  zapInstanceIds?: readonly [string, string];
 }> {
   // ponytail: bounded opening scan avoids another private seed/config field.
   for (let offset = 1; offset <= 4096; offset += 1) {
@@ -4316,6 +4321,8 @@ function findEarthArtifactOpening(
     });
     const northEarthSites = earthSites('north');
     const southEarthSites = earthSites('south');
+    const northSpire = session.state.players.north.hand.atlas
+      .find(({ cardId }) => cardId === input.spire.stableId);
     const northEarlySpells = [
       ...session.state.players.north.hand.spellbook,
       ...session.state.players.north.spellbook.slice(0, 1),
@@ -4323,6 +4330,10 @@ function findEarthArtifactOpening(
     const northLaterSpells = [
       ...session.state.players.north.hand.spellbook,
       ...session.state.players.north.spellbook.slice(0, 2),
+    ];
+    const northDropSpells = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 12),
     ];
     const southEarlySpells = [
       ...session.state.players.south.hand.spellbook,
@@ -4334,26 +4345,46 @@ function findEarthArtifactOpening(
       .find(({ cardId }) => cardId === artifact.stableId)?.instanceId;
     const boskTrollInstanceId = southEarlySpells
       .find(({ cardId }) => cardId === input.firstStrikeTargetMinion.stableId)?.instanceId;
-    if (northEarthSites.length >= 3
+    const northSiteInstanceIds: readonly [string, string, string] | undefined =
+      scenario === 'earth-sword-and-shield'
+        ? northEarthSites[0] && northEarthSites[1] && northSpire
+          ? [northEarthSites[0].instanceId, northEarthSites[1].instanceId, northSpire.instanceId]
+          : undefined
+        : northEarthSites[0] && northEarthSites[1] && northEarthSites[2]
+          ? [northEarthSites[0].instanceId, northEarthSites[1].instanceId,
+            northEarthSites[2].instanceId]
+          : undefined;
+    const zaps = northDropSpells.filter(({ cardId }) => cardId === input.zap.stableId);
+    const zapInstanceIds: readonly [string, string] | undefined = zaps[0] && zaps[1]
+      ? [zaps[0].instanceId, zaps[1].instanceId]
+      : undefined;
+    const zapDrawCount = zapInstanceIds
+      ? Math.max(...zapInstanceIds.map((instanceId) => {
+        const index = session.state.players.north.spellbook
+          .findIndex((card) => card.instanceId === instanceId);
+        return index < 0 ? 0 : Math.max(0, index - 1);
+      }))
+      : undefined;
+    if (northSiteInstanceIds
       && southEarthSites.length >= 2
       && elthamTownsfolkInstanceId
       && artifactInstanceId
-      && boskTrollInstanceId) {
+      && boskTrollInstanceId
+      && (scenario !== 'earth-sword-and-shield' || zapInstanceIds)) {
       return {
         ...built,
         artifactInstanceId,
         boskTrollInstanceId,
         elthamTownsfolkInstanceId,
-        northEarthSiteInstanceIds: [
-          northEarthSites[0]!.instanceId,
-          northEarthSites[1]!.instanceId,
-          northEarthSites[2]!.instanceId,
-        ],
+        northSiteInstanceIds,
         session,
         southEarthSiteInstanceIds: [
           southEarthSites[0]!.instanceId,
           southEarthSites[1]!.instanceId,
         ],
+        ...(zapInstanceIds && zapDrawCount !== undefined
+          ? { zapDrawCount, zapInstanceIds }
+          : {}),
       };
     }
   }
@@ -8497,7 +8528,7 @@ function runEarthArtifactSetup(
   };
 
   take(({ descriptor }) => descriptor.kind === 'play-site'
-    && descriptor.cardInstanceId === opening.northEarthSiteInstanceIds[0]
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
   take(({ descriptor }) => descriptor.kind === 'end-turn');
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
@@ -8507,7 +8538,7 @@ function runEarthArtifactSetup(
   take(({ descriptor }) => descriptor.kind === 'end-turn');
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   take(({ descriptor }) => descriptor.kind === 'play-site'
-    && descriptor.cardInstanceId === opening.northEarthSiteInstanceIds[1]
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
   take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.elthamTownsfolkInstanceId
@@ -8526,7 +8557,7 @@ function runEarthArtifactSetup(
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   if (playThirdNorthSite) {
     take(({ descriptor }) => descriptor.kind === 'play-site'
-      && descriptor.cardInstanceId === opening.northEarthSiteInstanceIds[2]
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
       && descriptor.cell === 'B3');
   }
   return session;
@@ -8540,6 +8571,9 @@ function runEarthSwordAndShield(
     input.swordAndShield,
     'earth-sword-and-shield',
   );
+  if (!opening.zapInstanceIds || opening.zapDrawCount === undefined) {
+    throw new Error('private Sword Drop-death opening lacks Zap!');
+  }
   let session = runEarthArtifactSetup(opening, true);
   const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
     session = accept(session, action(session, predicate));
@@ -8625,6 +8659,71 @@ function runEarthSwordAndShield(
     .every(({ descriptor }) => descriptor.kind !== 'drop-artifacts'
       || descriptor.unit.kind !== 'minion'
       || descriptor.unit.instanceId !== opening.elthamTownsfolkInstanceId);
+
+  let dropDeathSession = dropBranchStart;
+  const takeDropDeath = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    dropDeathSession = accept(dropDeathSession, action(dropDeathSession, predicate));
+  };
+  for (let draw = 0; draw < Math.max(1, opening.zapDrawCount); draw += 1) {
+    takeDropDeath(({ descriptor }) => descriptor.kind === 'end-turn');
+    takeDropDeath(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    takeDropDeath(({ descriptor }) => descriptor.kind === 'end-turn');
+    takeDropDeath(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  }
+  for (const zapInstanceId of opening.zapInstanceIds) {
+    takeDropDeath(({ descriptor }) => descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === zapInstanceId
+      && descriptor.target?.kind === 'minion'
+      && descriptor.target.instanceId === opening.elthamTownsfolkInstanceId);
+  }
+  const damagedBearer = observeGame(dropDeathSession.state, 'north').realm.units
+    .find(({ instanceId }) => instanceId === opening.elthamTownsfolkInstanceId);
+  const dropDeathResult = stepGame(dropDeathSession, action(dropDeathSession, ({ descriptor }) =>
+    descriptor.kind === 'drop-artifacts'
+      && descriptor.unit.kind === 'minion'
+      && descriptor.unit.instanceId === opening.elthamTownsfolkInstanceId
+      && descriptor.artifactInstanceIds.length === 1
+      && descriptor.artifactInstanceIds[0] === opening.artifactInstanceId));
+  if (!dropDeathResult.accepted) throw new Error('private lethal Sword Drop was rejected');
+  dropDeathSession = dropDeathResult.session;
+  const dropDeathArtifact = observeGame(dropDeathSession.state, 'north').realm.artifacts
+    ?.find(({ instanceId }) => instanceId === opening.artifactInstanceId);
+  const dropDeathEvents = dropDeathResult.receipt.events;
+  const dropDeathDropPayload = dropDeathEvents[0] && isJsonRecord(dropDeathEvents[0].payload)
+    ? dropDeathEvents[0].payload
+    : undefined;
+  const dropDeathMinionPayload = dropDeathEvents[1] && isJsonRecord(dropDeathEvents[1].payload)
+    ? dropDeathEvents[1].payload
+    : undefined;
+  const dropDeathVerified = damagedBearer?.damage === 2
+    && damagedBearer.defense === 4
+    && dropDeathEvents.map(({ type }) => type).join(',') === 'artifacts-dropped,minion-died'
+    && dropDeathDropPayload !== undefined
+    && canonicalJson(dropDeathDropPayload) === canonicalJson({
+      artifactInstanceIds: [opening.artifactInstanceId],
+      seat: 'north',
+      unitInstanceId: opening.elthamTownsfolkInstanceId,
+      unitKind: 'minion',
+    })
+    && dropDeathMinionPayload !== undefined
+    && canonicalJson(dropDeathMinionPayload) === canonicalJson({
+      cardId: input.elthamTownsfolk.stableId,
+      instanceId: opening.elthamTownsfolkInstanceId,
+      owner: 'north',
+    })
+    && dropDeathSession.state.realm.units.every(({ instanceId }) =>
+      instanceId !== opening.elthamTownsfolkInstanceId)
+    && dropDeathSession.state.players.north.cemetery.some(({ instanceId }) =>
+      instanceId === opening.elthamTownsfolkInstanceId)
+    && dropDeathArtifact !== undefined
+    && dropDeathArtifact.bearer === undefined
+    && dropDeathArtifact.controller === null
+    && dropDeathArtifact.location === 'C3'
+    && dropDeathArtifact.owner === 'north'
+    && dropDeathArtifact.region === 'surface'
+    && dropDeathSession.state.players.north.cemetery.every(({ instanceId }) =>
+      instanceId !== opening.artifactInstanceId)
+    && dropDeathSession.transcript.every(({ randomDraws }) => randomDraws.length === 0);
 
   const moveResult = stepGame(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
@@ -8870,6 +8969,9 @@ function runEarthSwordAndShield(
     deck: deckList(opening.manifest.decks.north, opening.names),
     dropAcceptedActionCount: dropSession.transcript.length,
     dropChoiceVerified,
+    dropDeathAcceptedActionCount: dropDeathSession.transcript.length,
+    dropDeathReplayVerified: verifyGameReplay(dropDeathSession),
+    dropDeathVerified,
     dropEventVerified,
     dropNoRandomDraws: dropResult.receipt.randomDraws.length === 0,
     dropReplayVerified: verifyGameReplay(dropSession),

@@ -155,7 +155,8 @@ function assertSwordAndShield(result: PrivateGameCheck['earthSwordAndShield']): 
   assert.equal(result.boskTroll, 'Bosk Troll');
   assert.equal(result.acceptedActionCount, 22);
   assert.equal(result.dropAcceptedActionCount, 20);
-  assert.equal(result.seed, 8009);
+  assert.equal(result.dropDeathAcceptedActionCount, 42);
+  assert.equal(result.seed, 9492);
   assert.equal(result.exactPickupChoice, true);
   assert.equal(result.dropChoiceVerified, true);
   assert.equal(result.dropEventVerified, true);
@@ -165,6 +166,8 @@ function assertSwordAndShield(result: PrivateGameCheck['earthSwordAndShield']): 
   assert.equal(result.dropUnavailableAfterInteraction, true);
   assert.equal(result.dropNoRandomDraws, true);
   assert.equal(result.dropReplayVerified, true);
+  assert.equal(result.dropDeathVerified, true);
+  assert.equal(result.dropDeathReplayVerified, true);
   assert.equal(result.manaPaid, 3);
   assert.equal(result.artifactCastUncarried, true);
   assert.equal(result.artifactPickedUpAndCarried, true);
@@ -180,8 +183,10 @@ function assertSwordAndShield(result: PrivateGameCheck['earthSwordAndShield']): 
   assert.equal(result.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
   assert.equal(result.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
   assert.equal(result.deck.atlas.find(({ name }) => name === 'Ghost Town')?.copies, 3);
+  assert.equal(result.deck.atlas.find(({ name }) => name === 'Spire')?.copies, 4);
   assert.equal(result.deck.spellbook
     .find(({ name }) => name === 'Sword and Shield')?.copies, 3);
+  assert.equal(result.deck.spellbook.find(({ name }) => name === 'Zap!')?.copies, 4);
   assert.equal(result.deck.spellbook
     .find(({ name }) => name === 'Eltham Townsfolk')?.copies, 4);
   assert.equal(result.deck.spellbook.find(({ name }) => name === 'Bosk Troll')?.copies, 4);
