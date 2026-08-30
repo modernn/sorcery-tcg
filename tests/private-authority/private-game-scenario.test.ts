@@ -927,7 +927,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 32 : 35,
+        preset.id === 'air-vs-earth-lesson' ? 33 : 35,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -935,7 +935,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 35 : 32,
+        preset.id === 'air-vs-earth-lesson' ? 35 : 33,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -988,6 +988,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Spire Lich': 1,
     'Spectral Stalker': 2,
     Teleport: 1,
+    Thunderstorm: 1,
   });
   const grandmasterWizardId = Object.entries(airLesson.cardNames)
     .find(([, name]) => name === 'Grandmaster Wizard')?.[0];
@@ -1676,6 +1677,26 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airLuckyCharm.deck.spellbook
     .find(({ name }) => name === 'Lucky Charm')?.copies, 1);
   assert.equal(result.airLuckyCharm.replayVerified, true);
+  assert.equal(result.airThunderstorm.thunderstorm, 'Thunderstorm');
+  assert.equal(result.airThunderstorm.seed, 155);
+  assert.equal(result.airThunderstorm.acceptedActionCount, 33);
+  assert.equal(result.airThunderstorm.auraCastVerified, true);
+  assert.equal(result.airThunderstorm.committedRandomDamageVerified, true);
+  assert.equal(result.airThunderstorm.declineBranchVerified, true);
+  assert.equal(result.airThunderstorm.moveBranchVerified, true);
+  assert.equal(result.airThunderstorm.expiryVerified, true);
+  assert.equal(result.airThunderstorm.causalEventsVerified, true);
+  assert.equal(result.airThunderstorm.randomDrawCount, 1);
+  assert.equal(result.airThunderstorm.structuralFactsVerified, true);
+  assert.equal(result.airThunderstorm.unsupportedMechanicsAbsent, true);
+  assert.equal(result.airThunderstorm.legalConstructedDeck, true);
+  assert.equal(result.airThunderstorm.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airThunderstorm.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airThunderstorm.deck.spellbook
+    .find(({ name }) => name === 'Thunderstorm')?.copies, 1);
+  assert.equal(result.airThunderstorm.replayVerified, true);
   assert.equal(result.airSpellcasterFreeze.apprenticeWizard, 'Apprentice Wizard');
   assert.equal(result.airSpellcasterFreeze.freeze, 'Freeze');
   assert.equal(result.airSpellcasterFreeze.seravaTownsfolk, 'Serava Townsfolk');

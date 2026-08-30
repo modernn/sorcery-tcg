@@ -166,8 +166,16 @@ export type GameCardDefinition =
     sacrificeToDestroyNearbySite?: true;
   }>
   | Readonly<{
+    atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep?: never;
     cardType: 'aura';
     immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns: true;
+    manaCost: number;
+    thresholds: GameThresholds;
+  }>
+  | Readonly<{
+    atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep: 3;
+    cardType: 'aura';
+    immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns?: never;
     manaCost: number;
     thresholds: GameThresholds;
   }>
@@ -395,6 +403,14 @@ type PendingRandomOutcome = Readonly<{
   seat: GameSeat;
 }>;
 
+type PendingEndTurnAura = Readonly<{
+  auraInstanceId: StateHash;
+  outcomeInstanceIds?: readonly StateHash[];
+  remainingAuraInstanceIds: readonly StateHash[];
+  seat: GameSeat;
+  stage: 'move' | 'random';
+}>;
+
 type DamageAllocationSource = 'attacker-unit' | 'non-unit';
 
 type DamageSourceSnapshot =
@@ -467,11 +483,12 @@ export type GameState = Readonly<{
   engine: EngineState;
   pendingChainMagic?: PendingChainMagic | null;
   pendingCombat: PendingCombat | null;
+  pendingEndTurnAura?: PendingEndTurnAura | null;
   pendingGenesisSpell?: PendingGenesisSpell | null;
   pendingGenesisToken?: PendingGenesisToken | null;
   pendingRandomOutcome?: PendingRandomOutcome | null;
   pendingRangedStep?: PendingRangedStep | null;
-  phase: 'allocate' | 'attack' | 'chain-magic' | 'defend' | 'draw' | 'genesis' | 'intercept' | 'main' | 'mulligan' | 'random-choice' | 'ranged-step' | 'terminal';
+  phase: 'allocate' | 'attack' | 'chain-magic' | 'defend' | 'draw' | 'end-turn-aura' | 'genesis' | 'intercept' | 'main' | 'mulligan' | 'random-choice' | 'ranged-step' | 'terminal';
   players: Readonly<Record<GameSeat, PlayerState>>;
   realm: Readonly<{
     artifacts?: readonly ArtifactInstance[];
@@ -781,6 +798,16 @@ type GameActionDescriptor =
   | Readonly<{
     kind: 'resolve-random-outcome';
     outcomeInstanceId: StateHash;
+  }>
+  | Readonly<{
+    auraInstanceId: StateHash;
+    kind: 'resolve-end-turn-aura-random';
+    outcomeInstanceId: StateHash;
+  }>
+  | Readonly<{
+    auraInstanceId: StateHash;
+    cells?: TwoByTwoArea;
+    kind: 'resolve-end-turn-aura-move';
   }>
   | Readonly<{ amount: number; kind: 'activate-mana'; unitInstanceId: StateHash }>
   | Readonly<{ kind: 'end-turn' }>;
@@ -1821,10 +1848,23 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     return;
   }
   if (card.cardType === 'aura') {
-    if (card.immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns !== true) {
+    if (card.immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns !== undefined
+      && card.immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns !== true) {
       throw new RangeError(
         `${path}.immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns must be true`,
       );
+    }
+    if (card.atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep
+      !== undefined
+      && card.atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep !== 3) {
+      throw new RangeError(
+        `${path}.atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep must be 3`,
+      );
+    }
+    if (Number(card.immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns === true)
+      + Number(card.atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3)
+        !== 1) {
+      throw new RangeError(`${path} must define exactly one supported Aura effect`);
     }
     if (!Number.isSafeInteger(card.manaCost) || card.manaCost < 0) {
       throw new RangeError(`${path}.manaCost must be a supported nonnegative safe integer`);
@@ -2508,8 +2548,16 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
           }
           : card.cardType === 'aura'
             ? {
+              ...(card.atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3
+                ? {
+                  atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep:
+                    3 as const,
+                }
+                : {
+                  immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns:
+                    true as const,
+                }),
               cardType: 'aura' as const,
-              immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns: true as const,
               manaCost: card.manaCost,
               thresholds: { ...card.thresholds },
             }
@@ -3537,6 +3585,190 @@ function luckyRandomOutcomeRequest(
   return undefined;
 }
 
+function auraOneStepAreas(aura: AuraInstance): readonly TwoByTwoArea[] {
+  return TWO_BY_TWO_AREAS.filter((cells) =>
+    cells[0] !== aura.cells[0] && cardinalCellDistance(cells[0], aura.cells[0]) === 1);
+}
+
+function endTurnAuraCandidates(
+  state: GameState,
+  aura: AuraInstance,
+): readonly GameUnitRef[] {
+  const affectedSites = new Set(aura.cells.filter((cell) => state.realm.sites[cell] !== undefined));
+  return (['north', 'south'] as const)
+    .flatMap((targetSeat) => unitRefs(state, targetSeat))
+    .filter((target) => {
+      const status = unitStatus(state, target);
+      return status.region === 'surface'
+        && status.occupiedCells.some((cell) => affectedSites.has(cell));
+    })
+    .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+}
+
+function endTurnDamageAuraIds(state: GameState, seat: GameSeat): readonly StateHash[] {
+  return (state.realm.auras ?? [])
+    .filter((aura) => {
+      if (aura.controller !== seat) return false;
+      const definition = cardDefinition(state, aura.cardId);
+      return definition.cardType === 'aura'
+        && definition.atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3;
+    })
+    .map(({ instanceId }) => instanceId)
+    .sort();
+}
+
+function resolveEndTurnAuraDamage(
+  state: GameState,
+  aura: AuraInstance,
+  targetRef: GameUnitRef,
+): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
+  const definition = cardDefinition(state, aura.cardId);
+  if (definition.cardType !== 'aura'
+    || definition.atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep !== 3
+    || !endTurnAuraCandidates(state, aura).some(({ instanceId }) =>
+      instanceId === targetRef.instanceId)) {
+    throw new Error('unreachable invalid end-turn Aura damage');
+  }
+  const target = unitStatus(state, targetRef);
+  const attacker: GameUnitRef = {
+    instanceId: state.players[aura.controller].avatar.card.instanceId,
+    kind: 'avatar',
+    seat: aura.controller,
+  };
+  const pending: PendingCombat = deepFreeze({
+    allocations: [{ amount: 3, targetInstanceId: targetRef.instanceId }],
+    attacker,
+    attackingSeat: aura.controller,
+    cell: target.location,
+    combatants: [targetRef],
+    defenders: [],
+    originalTarget: targetRef,
+    targetRemoved: false,
+  });
+  return resolveFightWindow(
+    state,
+    pending,
+    [{
+      payload: {
+        amount: 3,
+        sourceInstanceId: aura.instanceId,
+        targetInstanceId: targetRef.instanceId,
+      },
+      type: 'aura-end-turn-damage-allocated',
+    }],
+    'non-unit',
+    true,
+    false,
+    [],
+    false,
+    false,
+  );
+}
+
+function beginEndTurnAura(
+  state: GameState,
+  seat: GameSeat,
+  auraInstanceIds: readonly StateHash[],
+): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] | null {
+  const index = auraInstanceIds.findIndex((instanceId) => {
+    const aura = state.realm.auras?.find((candidate) => candidate.instanceId === instanceId);
+    if (!aura || aura.controller !== seat) return false;
+    const definition = cardDefinition(state, aura.cardId);
+    return definition.cardType === 'aura'
+      && definition.atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3;
+  });
+  if (index < 0) return null;
+  const auraInstanceId = auraInstanceIds[index]!;
+  const aura = state.realm.auras!.find(({ instanceId }) => instanceId === auraInstanceId)!;
+  const remainingAuraInstanceIds = auraInstanceIds.slice(index + 1);
+  const candidates = endTurnAuraCandidates(state, aura);
+  const triggered: GameOutcome = {
+    payload: {
+      cells: aura.cells,
+      instanceId: aura.instanceId,
+      seat,
+      sourceInstanceId: aura.instanceId,
+    },
+    type: 'aura-end-turn-triggered',
+  };
+  if (candidates.length === 0) {
+    return [
+      deepFreeze({
+        ...state,
+        pendingEndTurnAura: {
+          auraInstanceId,
+          remainingAuraInstanceIds,
+          seat,
+          stage: 'move',
+        },
+        phase: 'end-turn-aura',
+      }),
+      [triggered, {
+        payload: { instanceId: aura.instanceId, seat, sourceInstanceId: aura.instanceId },
+        type: 'aura-random-damage-skipped',
+      }],
+      [],
+    ];
+  }
+  if (luckyCharmCount(state, seat) > 0) {
+    const drawn = drawRandomOutcomes(
+      state,
+      seat,
+      candidates.map(({ instanceId }) => instanceId),
+      'aura_end_turn_random_unit_at_affected_sites',
+      'unit_index_candidate',
+    );
+    return [
+      deepFreeze({
+        ...state,
+        engine: drawn.engine,
+        pendingEndTurnAura: {
+          auraInstanceId,
+          outcomeInstanceIds: [...new Set(drawn.outcomeInstanceIds)],
+          remainingAuraInstanceIds,
+          seat,
+          stage: 'random',
+        },
+        phase: 'end-turn-aura',
+      }),
+      [triggered],
+      drawn.randomDraws,
+    ];
+  }
+  const selected = resolveRandomOutcome(
+    state,
+    candidates.map(({ instanceId }) => instanceId),
+    'aura_end_turn_random_unit_at_affected_sites',
+    'unit_index_candidate',
+  );
+  const randomizedState = deepFreeze({ ...state, engine: selected.engine });
+  const targetRef = candidates.find(({ instanceId }) =>
+    instanceId === selected.outcomeInstanceId)!;
+  const [damaged, outcomes, draws] = resolveEndTurnAuraDamage(randomizedState, aura, targetRef);
+  if (damaged.terminal.status === 'finished') {
+    return [
+      deepFreeze({ ...damaged, pendingEndTurnAura: null, phase: 'terminal' }),
+      [triggered, ...outcomes],
+      [...selected.randomDraws, ...draws],
+    ];
+  }
+  return [
+    deepFreeze({
+      ...damaged,
+      decisionSeat: seat,
+      pendingEndTurnAura: {
+        auraInstanceId,
+        remainingAuraInstanceIds,
+        seat,
+        stage: 'move',
+      },
+      phase: 'end-turn-aura',
+    }),
+    [triggered, ...outcomes],
+    [...selected.randomDraws, ...draws],
+  ];
+}
+
 function unitOccupiedCells(unit: Readonly<Pick<UnitInstance, 'location' | 'occupiedCells'>>):
 readonly RealmCell[] {
   return unit.occupiedCells ?? [unit.location];
@@ -4306,6 +4538,32 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
       outcomeInstanceId,
     }));
   }
+  if (state.phase === 'end-turn-aura') {
+    const pending = state.pendingEndTurnAura;
+    const aura = state.realm.auras?.find(({ instanceId }) =>
+      instanceId === pending?.auraInstanceId);
+    if (!pending || pending.seat !== seat || !aura) {
+      throw new Error('unreachable missing pending end-turn Aura');
+    }
+    if (pending.stage === 'random') {
+      if (!pending.outcomeInstanceIds || pending.outcomeInstanceIds.length === 0) {
+        throw new Error('unreachable missing pending end-turn Aura outcomes');
+      }
+      return pending.outcomeInstanceIds.map((outcomeInstanceId) => ({
+        auraInstanceId: aura.instanceId,
+        kind: 'resolve-end-turn-aura-random' as const,
+        outcomeInstanceId,
+      }));
+    }
+    return [
+      { auraInstanceId: aura.instanceId, kind: 'resolve-end-turn-aura-move' },
+      ...auraOneStepAreas(aura).map((cells) => ({
+        auraInstanceId: aura.instanceId,
+        cells,
+        kind: 'resolve-end-turn-aura-move' as const,
+      })),
+    ];
+  }
   if (state.phase === 'genesis') {
     if (state.pendingGenesisToken?.seat === seat) {
       return [
@@ -4491,6 +4749,14 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
     return descriptor.choice === 'bottom-next'
       ? `Put ${nextSpell?.cardId ?? 'next spell'} on bottom`
       : `Keep ${nextSpell?.cardId ?? 'next spell'} on top`;
+  }
+  if (descriptor.kind === 'resolve-end-turn-aura-random') {
+    return `Choose unit ${descriptor.outcomeInstanceId.slice(0, 15)}… for the Aura's random damage`;
+  }
+  if (descriptor.kind === 'resolve-end-turn-aura-move') {
+    return descriptor.cells
+      ? `Move Aura to ${descriptor.cells.join(', ')}`
+      : 'Keep Aura in place';
   }
   if (descriptor.kind === 'cast-artifact') {
     const destination = descriptor.bearer
@@ -6229,6 +6495,7 @@ function applyDescriptor(
   descriptor: GameActionDescriptor,
   manifest: GameManifest,
   forcedRandomOutcomeInstanceId?: StateHash,
+  resumeEndTurn = false,
 ): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
   const seat = state.decisionSeat;
   const player = state.players[seat];
@@ -6246,6 +6513,102 @@ function applyDescriptor(
       manifest,
       descriptor.outcomeInstanceId,
     );
+  }
+  if (descriptor.kind === 'resolve-end-turn-aura-random') {
+    const { auraInstanceId, outcomeInstanceId } = descriptor;
+    const pending = state.pendingEndTurnAura;
+    const aura = state.realm.auras?.find(({ instanceId }) =>
+      instanceId === auraInstanceId);
+    const target = aura
+      ? endTurnAuraCandidates(state, aura).find(({ instanceId }) =>
+        instanceId === outcomeInstanceId)
+      : undefined;
+    if (state.phase !== 'end-turn-aura'
+      || !pending
+      || pending.stage !== 'random'
+      || pending.seat !== seat
+      || pending.auraInstanceId !== auraInstanceId
+      || !pending.outcomeInstanceIds?.includes(outcomeInstanceId)
+      || !aura
+      || !target) {
+      throw new Error('unreachable illegal end-turn Aura random choice');
+    }
+    const [damaged, outcomes, draws] = resolveEndTurnAuraDamage(state, aura, target);
+    if (damaged.terminal.status === 'finished') {
+      return [
+        withStateVersion(damaged, { pendingEndTurnAura: null, phase: 'terminal' }),
+        outcomes,
+        draws,
+      ];
+    }
+    return [
+      withStateVersion(damaged, {
+        decisionSeat: seat,
+        pendingEndTurnAura: {
+          auraInstanceId: pending.auraInstanceId,
+          remainingAuraInstanceIds: pending.remainingAuraInstanceIds,
+          seat,
+          stage: 'move',
+        },
+        phase: 'end-turn-aura',
+      }),
+      outcomes,
+      draws,
+    ];
+  }
+  if (descriptor.kind === 'resolve-end-turn-aura-move') {
+    const { auraInstanceId, cells: destinationCells } = descriptor;
+    const pending = state.pendingEndTurnAura;
+    const aura = state.realm.auras?.find(({ instanceId }) =>
+      instanceId === auraInstanceId);
+    const legalMove = destinationCells === undefined || (aura !== undefined
+      && auraOneStepAreas(aura).some((cells) =>
+        cells.every((cell, index) => cell === destinationCells[index])));
+    if (state.phase !== 'end-turn-aura'
+      || !pending
+      || pending.stage !== 'move'
+      || pending.seat !== seat
+      || pending.auraInstanceId !== auraInstanceId
+      || !aura
+      || !legalMove) {
+      throw new Error('unreachable illegal end-turn Aura move');
+    }
+    const moved = deepFreeze({
+      ...state,
+      pendingEndTurnAura: null,
+      phase: 'main' as const,
+      realm: {
+        ...state.realm,
+        auras: state.realm.auras!.map((candidate) =>
+          candidate.instanceId === aura.instanceId && destinationCells
+            ? deepFreeze({ ...candidate, cells: [...destinationCells] as TwoByTwoArea })
+            : candidate),
+      },
+    });
+    const movement: GameOutcome = destinationCells
+      ? {
+        payload: {
+          cells: destinationCells,
+          instanceId: aura.instanceId,
+          seat,
+          sourceInstanceId: aura.instanceId,
+        },
+        type: 'aura-moved',
+      }
+      : {
+        payload: { instanceId: aura.instanceId, seat, sourceInstanceId: aura.instanceId },
+        type: 'aura-move-declined',
+      };
+    const nextAura = beginEndTurnAura(moved, seat, pending.remainingAuraInstanceIds);
+    if (nextAura) {
+      return [
+        withStateVersion(nextAura[0], {}),
+        [movement, ...nextAura[1]],
+        nextAura[2],
+      ];
+    }
+    const ended = applyDescriptor(moved, { kind: 'end-turn' }, manifest, undefined, true);
+    return [ended[0], [movement, ...ended[1]], ended[2]];
   }
   const randomRequest = forcedRandomOutcomeInstanceId === undefined
     ? luckyRandomOutcomeRequest(state, seat, descriptor)
@@ -7139,19 +7502,24 @@ function applyDescriptor(
       controller: seat,
       turnCounters: 0,
     });
-    const immobileArea: ImmobileArea = deepFreeze({
-      cells: [...descriptor.cells],
-      minionsAtSitesOnly: true,
-      sourceInstanceId: card.instanceId,
-      suppressesAirborne: true,
-    });
+    const immobileArea: ImmobileArea | undefined =
+      definition.immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns === true
+        ? deepFreeze({
+          cells: [...descriptor.cells],
+          minionsAtSitesOnly: true,
+          sourceInstanceId: card.instanceId,
+          suppressesAirborne: true,
+        })
+        : undefined;
     return [
       withStateVersion(paidState, {
         players: interaction.players,
         realm: {
           ...paidState.realm,
           auras: [...(paidState.realm.auras ?? []), aura],
-          immobileAreas: [...(paidState.realm.immobileAreas ?? []), immobileArea],
+          ...(immobileArea
+            ? { immobileAreas: [...(paidState.realm.immobileAreas ?? []), immobileArea] }
+            : {}),
           units: interaction.units,
         },
       }),
@@ -10219,15 +10587,41 @@ function applyDescriptor(
   }
 
   if (descriptor.kind !== 'end-turn') throw new Error('unreachable unsupported action');
-  const endOfTurnLifeLoss = resolveEndOfEachTurnSiteControllerLifeLoss(state, seat);
-  const endOfTurnDeaths = resolveEndOfTurnDeaths(endOfTurnLifeLoss.state, seat);
-  const endState = endOfTurnDeaths.state;
+  const endOfTurnLifeLoss = resumeEndTurn
+    ? { outcomes: [] as readonly GameOutcome[], state }
+    : resolveEndOfEachTurnSiteControllerLifeLoss(state, seat);
+  const endOfTurnDeaths = resumeEndTurn
+    ? { outcomes: [] as readonly GameOutcome[], state: endOfTurnLifeLoss.state }
+    : resolveEndOfTurnDeaths(endOfTurnLifeLoss.state, seat);
+  const endOfTurnPowerDeaths = resumeEndTurn
+    ? { outcomes: [] as readonly GameOutcome[], state: endOfTurnDeaths.state }
+    : settleStaticPowerDeaths(endOfTurnDeaths.state);
+  const endState = endOfTurnPowerDeaths.state;
   if (endState.terminal.status === 'finished') {
     return [
       withStateVersion(endState, { pendingCombat: null, phase: 'terminal' }),
-      [...endOfTurnLifeLoss.outcomes, ...endOfTurnDeaths.outcomes],
+      [
+        ...endOfTurnLifeLoss.outcomes,
+        ...endOfTurnDeaths.outcomes,
+        ...endOfTurnPowerDeaths.outcomes,
+      ],
       [],
     ];
+  }
+  if (!resumeEndTurn) {
+    const endTurnAura = beginEndTurnAura(endState, seat, endTurnDamageAuraIds(endState, seat));
+    if (endTurnAura) {
+      return [
+        withStateVersion(endTurnAura[0], {}),
+        [
+          ...endOfTurnLifeLoss.outcomes,
+          ...endOfTurnDeaths.outcomes,
+          ...endOfTurnPowerDeaths.outcomes,
+          ...endTurnAura[1],
+        ],
+        endTurnAura[2],
+      ];
+    }
   }
   const nextSeat = otherSeat(seat);
   const {
@@ -10365,6 +10759,7 @@ function applyDescriptor(
     [
       ...endOfTurnLifeLoss.outcomes,
       ...endOfTurnDeaths.outcomes,
+      ...endOfTurnPowerDeaths.outcomes,
       ...endPhaseUntapped.map(({ controller, instanceId }) => ({
         payload: { instanceId, seat: controller, sourceInstanceId: instanceId },
         type: 'minion-untapped',

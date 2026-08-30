@@ -219,6 +219,23 @@ export type PrivateGameCheck = Readonly<{
     twoDistinctOutcomesOffered: boolean;
     unsupportedMechanicsAbsent: boolean;
   }>;
+  airThunderstorm: Readonly<{
+    acceptedActionCount: number;
+    auraCastVerified: boolean;
+    causalEventsVerified: boolean;
+    committedRandomDamageVerified: boolean;
+    deck: DeckList;
+    declineBranchVerified: boolean;
+    expiryVerified: boolean;
+    legalConstructedDeck: boolean;
+    moveBranchVerified: boolean;
+    randomDrawCount: number;
+    replayVerified: boolean;
+    seed: number;
+    structuralFactsVerified: boolean;
+    thunderstorm: string;
+    unsupportedMechanicsAbsent: boolean;
+  }>;
   airRainOfArrows: Readonly<{
     acceptedActionCount: number;
     avatarsPreserved: boolean;
@@ -1732,6 +1749,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   poisonousDagger: NormalizedCard;
   staticServant: NormalizedCard;
   swordAndShield: NormalizedCard;
+  thunderstorm: NormalizedCard;
   zap: NormalizedCard;
 }>> {
   const config = scenarioConfig(parseJsonWithDuplicateKeyCheck(await readFile(path, 'utf8')));
@@ -2740,6 +2758,28 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || luckyCharm.subtypes.length !== 1
     || luckyCharm.subtypes[0] !== 'Relic') {
     throw new Error('private extra random-outcome artifact no longer matches its supported facts');
+  }
+  const thunderstorm = snapshot.cards.find(({ name }) => name === 'Thunderstorm');
+  if (!thunderstorm
+    || thunderstorm.stableId
+      !== 'card:b25e9db9a090ca8626728829d903bd40c7f9c1674786f22932ee2885012444bc'
+    || thunderstorm.officialSourceId !== '001-thunderstorm-b-f'
+    || thunderstorm.cardType !== 'aura'
+    || ruleTextDigest(thunderstorm.rulesText)
+      !== 'sha256:633711151e265729c729e4cf598ff6dd13dfe7ae3976e2549600f75c39fb472a'
+    || thunderstorm.manaCost !== 4
+    || thunderstorm.attack !== null
+    || thunderstorm.defense !== null
+    || thunderstorm.life !== null
+    || thunderstorm.elements.length !== 1
+    || thunderstorm.elements[0] !== 'air'
+    || thunderstorm.thresholds.air !== 2
+    || thunderstorm.thresholds.earth !== 0
+    || thunderstorm.thresholds.fire !== 0
+    || thunderstorm.thresholds.water !== 0
+    || thunderstorm.rarity !== 'exceptional'
+    || thunderstorm.subtypes.length !== 0) {
+    throw new Error('private random end-turn damage Aura no longer matches its supported facts');
   }
   const bladderblimp = snapshot.cards.find(({ name }) => name === 'Bladderblimp');
   if (!bladderblimp
@@ -4114,6 +4154,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     rainOfArrows,
     staticServant,
     swordAndShield,
+    thunderstorm,
     providerMinion,
     quagmire,
     raalDromedary,
@@ -4289,6 +4330,7 @@ function gameDefinition(
   mayStepAfterRangedStrike = false,
   damageChainNearbyUnits = false,
   bearerControllerChoosesExtraRandomOutcome = false,
+  atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep: 0 | 3 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4385,10 +4427,13 @@ function gameDefinition(
   }
   if (card.cardType === 'aura'
     && card.manaCost !== null
-    && immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns) {
+    && Number(immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns)
+      + Number(atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3) === 1) {
     return {
+      ...(atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3
+        ? { atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep }
+        : { immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns: true as const }),
       cardType: 'aura',
-      immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns: true,
       manaCost: card.manaCost,
       thresholds: card.thresholds,
     };
@@ -4554,7 +4599,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-chain-lightning' | 'air-devils-egg' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-kite-archer' | 'air-leyline' | 'air-lightning-bolt' | 'air-lucky-charm' | 'air-nimbus-jinn' | 'air-rain-of-arrows' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-chain-lightning' | 'air-devils-egg' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-kite-archer' | 'air-leyline' | 'air-lightning-bolt' | 'air-lucky-charm' | 'air-nimbus-jinn' | 'air-rain-of-arrows' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-thunderstorm' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -4860,6 +4905,7 @@ function buildManifest(
       input.kiteArcher.stableId,
       ...Array(2).fill(input.chainLightning.stableId),
       input.luckyCharm.stableId,
+      input.thunderstorm.stableId,
       ...Array(2).fill(input.movementTwoMinion.stableId),
       ...Array(2).fill(input.airborneMinion.stableId),
       ...Array(2).fill(input.stealthTargetMinion.stableId),
@@ -4982,6 +5028,14 @@ function buildManifest(
     spellbook: [
       input.luckyCharm.stableId,
       ...airLuckyCharmBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
+    ],
+  };
+  const airThunderstormBase = elementalDeck('air', [input.stealthTargetMinion]);
+  const airThunderstormDeck: GameDeckSpec = {
+    ...airThunderstormBase,
+    spellbook: [
+      input.thunderstorm.stableId,
+      ...airThunderstormBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
     ],
   };
   const airRainOfArrowsDeck = elementalDeck(
@@ -5218,6 +5272,8 @@ function buildManifest(
       ? airLightningBoltDeck
       : scenario === 'air-lucky-charm'
       ? airLuckyCharmDeck
+      : scenario === 'air-thunderstorm'
+      ? airThunderstormDeck
       : scenario === 'air-rain-of-arrows'
       ? airRainOfArrowsDeck
       : scenario === 'air-static-servant'
@@ -5393,6 +5449,8 @@ function buildManifest(
       ? airLightningBoltDeck
       : scenario === 'air-lucky-charm'
       ? airLuckyCharmDeck
+      : scenario === 'air-thunderstorm'
+      ? airThunderstormDeck
       : scenario === 'air-rain-of-arrows'
       ? airRainOfArrowsDeck
       : scenario === 'air-static-servant'
@@ -5700,6 +5758,7 @@ function buildManifest(
       card.stableId === input.kiteArcher.stableId,
       card.stableId === input.chainLightning.stableId,
       card.stableId === input.luckyCharm.stableId,
+      card.stableId === input.thunderstorm.stableId ? 3 : 0,
     ),
   ]));
   return {
@@ -8265,6 +8324,90 @@ function findAirLuckyCharmOpening(
   };
 }
 
+function findAirThunderstormOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northDrawnSiteInstanceId: string;
+  northSiteInstanceIds: readonly [string, string, string];
+  seed: number;
+  session: GameSession;
+  snowLeopardInstanceId: string;
+  thunderstormInstanceId: string;
+}> {
+  const seed = 155;
+  const built = buildManifest(input, seed, 'air-thunderstorm');
+  const initial = createGameSession(built.manifest);
+  const north = initial.state.players.north;
+  const isAirSite = ({ cardId }: { cardId: string }): boolean => {
+    const definition = built.manifest.cards[cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('air');
+  };
+  const northSites = [...north.hand.atlas]
+    .sort((left, right) => Number(isAirSite(right)) - Number(isAirSite(left)));
+  const snowLeopard = north.hand.spellbook
+    .find(({ cardId }) => cardId === input.stealthTargetMinion.stableId);
+  const thunderstorm = [...north.hand.spellbook, ...north.spellbook.slice(0, 2)]
+    .find(({ cardId }) => cardId === input.thunderstorm.stableId);
+  const drawnSite = north.atlas[0];
+  if (northSites.length !== 3
+    || !isAirSite(northSites[0]!)
+    || !isAirSite(northSites[1]!)
+    || !snowLeopard
+    || !thunderstorm
+    || !drawnSite) {
+    throw new Error('private Thunderstorm seed 155 no longer produces its supported opening');
+  }
+
+  let probe = keep(keep(initial));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    probe = accept(probe, action(probe, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === northSites[0]!.instanceId && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === snowLeopard.instanceId && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === northSites[1]!.instanceId && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === northSites[2]!.instanceId && descriptor.cell === 'B4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === drawnSite.instanceId && descriptor.cell === 'B3');
+  take(({ descriptor }) => descriptor.kind === 'cast-aura'
+    && descriptor.cardInstanceId === thunderstorm.instanceId
+    && descriptor.cells.join(',') === 'B3,B4,C3,C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  if (probe.state.phase !== 'end-turn-aura'
+    || probe.transcript.at(-1)?.randomDraws.length !== 1
+    || !legalGameActions(probe.state, 'north').some(({ descriptor }) =>
+      descriptor.kind === 'resolve-end-turn-aura-move')) {
+    throw new Error('private Thunderstorm seed 155 no longer reaches its supported trigger');
+  }
+  return {
+    ...built,
+    northDrawnSiteInstanceId: drawnSite.instanceId,
+    northSiteInstanceIds: northSites.map(({ instanceId }) => instanceId) as [string, string, string],
+    seed,
+    session: initial,
+    snowLeopardInstanceId: snowLeopard.instanceId,
+    thunderstormInstanceId: thunderstorm.instanceId,
+  };
+}
+
 function findAirBladderblimpOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): Readonly<{
@@ -10758,7 +10901,7 @@ function runFireHamlet(
   if (!wastelandResult.accepted) throw new Error('private Wasteland play was rejected');
   session = wastelandResult.session;
   take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
   take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
@@ -10899,7 +11042,7 @@ function runEarthOverpower(
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
   take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
   take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
@@ -16333,6 +16476,177 @@ function runAirLuckyCharm(
       && session.state.pendingRandomOutcome === null
       && session.state.players.north.cemetery.some(({ instanceId }) =>
         instanceId === opening.lightningBoltInstanceId)
+      && session.state.terminal.status === 'active',
+  });
+}
+
+function runAirThunderstorm(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airThunderstorm'] {
+  const opening = findAirThunderstormOpening(input);
+  let session = keep(keep(opening.session));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.snowLeopardInstanceId
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+    && descriptor.cell === 'B4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northDrawnSiteInstanceId
+    && descriptor.cell === 'B3');
+
+  const manaBeforeCast = session.state.players.north.mana;
+  const cast = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-aura'
+      && descriptor.cardInstanceId === opening.thunderstormInstanceId
+      && descriptor.cells.join(',') === 'B3,B4,C3,C4'));
+  if (!cast.accepted) throw new Error('private Thunderstorm cast was rejected');
+  session = cast.session;
+  const aura = session.state.realm.auras?.find(({ instanceId }) =>
+    instanceId === opening.thunderstormInstanceId);
+  if (!aura) throw new Error('private Thunderstorm Aura was not conjured');
+  const auraCastVerified = manaBeforeCast - session.state.players.north.mana === 4
+    && aura.cells.join(',') === 'B3,B4,C3,C4'
+    && cast.receipt.randomDraws.length === 0
+    && cast.receipt.events.some(({ type }) => type === 'aura-conjured')
+    && session.state.players.north.hand.spellbook.every(({ instanceId }) =>
+      instanceId !== opening.thunderstormInstanceId);
+
+  const randomChoiceHiddenBeforeCommit = !legalGameActions(session.state, 'north')
+    .some(({ descriptor }) => descriptor.kind === 'resolve-end-turn-aura-random');
+  const triggered = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  if (!triggered.accepted) throw new Error('private Thunderstorm end-turn trigger was rejected');
+  session = triggered.session;
+  const allocation = triggered.receipt.events.find(({ payload, type }) =>
+    type === 'aura-end-turn-damage-allocated'
+      && isJsonRecord(payload)
+      && payload.amount === 3
+      && typeof payload.targetInstanceId === 'string');
+  const targetInstanceId = allocation && isJsonRecord(allocation.payload)
+    && typeof allocation.payload.targetInstanceId === 'string'
+    ? allocation.payload.targetInstanceId
+    : undefined;
+  const committedRandomDamageVerified = targetInstanceId !== undefined
+    && triggered.receipt.events.some(({ payload, type }) =>
+      type === 'aura-end-turn-triggered'
+        && isJsonRecord(payload)
+        && payload.instanceId === aura.instanceId)
+    && triggered.receipt.events.some(({ payload, type }) =>
+      type === 'damage-dealt'
+        && isJsonRecord(payload)
+        && payload.amount === 3
+        && payload.instanceId === targetInstanceId)
+    && triggered.receipt.randomDraws.length === 1
+    && triggered.receipt.randomDraws[0]?.purpose
+      === 'aura_end_turn_random_unit_at_affected_sites'
+    && session.state.phase === 'end-turn-aura';
+
+  const pendingMove = session;
+  const decline = stepGame(pendingMove, action(pendingMove, ({ descriptor }) =>
+    descriptor.kind === 'resolve-end-turn-aura-move' && descriptor.cells === undefined));
+  if (!decline.accepted) throw new Error('private Thunderstorm move decline was rejected');
+  const declineBranchVerified = decline.session.state.phase === 'draw'
+    && decline.receipt.events.some(({ type }) => type === 'aura-move-declined')
+    && decline.receipt.events.some(({ type }) => type === 'turn-ended')
+    && decline.session.state.realm.auras?.find(({ instanceId }) => instanceId === aura.instanceId)
+      ?.cells.join(',') === 'B3,B4,C3,C4';
+
+  const moved = stepGame(pendingMove, action(pendingMove, ({ descriptor }) =>
+    descriptor.kind === 'resolve-end-turn-aura-move'
+      && descriptor.cells?.join(',') === 'C3,C4,D3,D4'));
+  if (!moved.accepted) throw new Error('private Thunderstorm one-step move was rejected');
+  const moveBranchVerified = moved.session.state.phase === 'draw'
+    && moved.receipt.events.some(({ type }) => type === 'aura-moved')
+    && moved.session.state.realm.auras?.find(({ instanceId }) => instanceId === aura.instanceId)
+      ?.cells.join(',') === 'C3,C4,D3,D4';
+  session = moved.session;
+  const causalReceipts = [cast.receipt, triggered.receipt, decline.receipt, moved.receipt];
+
+  for (let controllerTurn = 2; controllerTurn <= 3; controllerTurn += 1) {
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const nextTrigger = stepGame(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'end-turn'));
+    if (!nextTrigger.accepted) throw new Error('private Thunderstorm repeat trigger was rejected');
+    session = nextTrigger.session;
+    causalReceipts.push(nextTrigger.receipt);
+    const nextDecline = stepGame(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'resolve-end-turn-aura-move' && descriptor.cells === undefined));
+    if (!nextDecline.accepted) throw new Error('private Thunderstorm repeat decline was rejected');
+    session = nextDecline.session;
+    causalReceipts.push(nextDecline.receipt);
+  }
+
+  const finalReceipt = causalReceipts.at(-1)!;
+  const causalEventsVerified = causalReceipts.every((receipt) => receipt.events.every((event, index) =>
+    event.cause.actionId === receipt.actionId
+      && event.cause.receiptSequence === receipt.receiptSequence
+      && event.eventSequence === receipt.events[0]!.eventSequence + index));
+  const expiryVerified = session.state.realm.auras?.every(({ instanceId }) =>
+    instanceId !== aura.instanceId) !== false
+    && session.state.players.north.cemetery.some(({ instanceId }) => instanceId === aura.instanceId)
+    && finalReceipt.events.some(({ type }) => type === 'aura-turn-counted')
+    && finalReceipt.events.some(({ type }) => type === 'aura-dispelled');
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+  const southDeck = deckList(opening.manifest.decks.south, opening.names);
+  const definition = session.state.cards[input.thunderstorm.stableId];
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    auraCastVerified,
+    causalEventsVerified,
+    committedRandomDamageVerified,
+    deck,
+    declineBranchVerified,
+    expiryVerified,
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && southDeck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && southDeck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && (deck.spellbook.find(({ name }) => name === input.thunderstorm.name)?.copies ?? 0) === 1
+      && 1 <= input.format.copyLimits[input.thunderstorm.rarity!],
+    moveBranchVerified,
+    randomDrawCount: triggered.receipt.randomDraws.length,
+    replayVerified: verifyGameReplay(decline.session)
+      && verifyGameReplay(moved.session)
+      && verifyGameReplay(session),
+    seed: opening.seed,
+    structuralFactsVerified: definition?.cardType === 'aura'
+      && definition.atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3
+      && definition.manaCost === 4
+      && canonicalJson(definition.thresholds)
+        === canonicalJson({ air: 2, earth: 0, fire: 0, water: 0 }),
+    thunderstorm: input.thunderstorm.name,
+    unsupportedMechanicsAbsent: randomChoiceHiddenBeforeCommit
+      && triggered.receipt.randomDraws.length === 1
+      && !legalGameActions(pendingMove.state, 'north').some(({ descriptor }) =>
+        descriptor.kind === 'resolve-end-turn-aura-random')
+      && pendingMove.state.pendingEndTurnAura?.stage === 'move'
+      && !opening.manifest.decks.north.spellbook.includes(input.luckyCharm.stableId)
       && session.state.terminal.status === 'active',
   });
 }
@@ -22780,6 +23094,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airArcLightning = runAirArcLightning(input);
   const airLightningBolt = runAirLightningBolt(input);
   const airLuckyCharm = runAirLuckyCharm(input);
+  const airThunderstorm = runAirThunderstorm(input);
   const airRainOfArrows = runAirRainOfArrows(input);
   const airStaticServant = runAirStaticServant(input);
   const airTeleport = runAirTeleport(input);
@@ -22995,6 +23310,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     airArcLightning,
     airLightningBolt,
     airLuckyCharm,
+    airThunderstorm,
     airRainOfArrows,
     airStaticServant,
     airTeleport,
