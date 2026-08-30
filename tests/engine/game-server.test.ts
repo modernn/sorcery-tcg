@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 
 import { createSyntheticDemoManifest } from '../../src/commands/run-game-demo.ts';
-import { createGameManifest } from '../../src/engine/game.ts';
+import { createGameManifest, createGameSession } from '../../src/engine/game.ts';
 import { createGamePrototypeServer } from '../../src/prototype/game-server.ts';
 
 type JsonObject = Record<string, unknown>;
@@ -133,11 +133,103 @@ test('playable-core page renders the authoritative 5x4 checkpoint without artwor
   assert.match(page, /items\.length<=3/);
   assert.match(page, /items\.length\+' choices'/);
   assert.match(page, /function cardFactText/);
+  assert.match(page, /view\.realm\.artifacts/);
+  assert.match(page, /view\.realm\.auras/);
+  assert.match(page, /unit\.occupiedCells/);
+  assert.match(page, /view\.realm\.immobileAreas/);
+  assert.match(page, /kind==='cast-aura'/);
+  assert.match(page, /grid-template-rows:repeat\(4,minmax\(0,1fr\)\)/);
+  assert.match(page, /align-content:safe center[^{]*overflow:auto/);
+  assert.match(page, /site minions immobile/);
+  assert.match(page, /grounds airborne/);
   assert.doesNotMatch(page, /class=\"card\" title=/);
   assert.doesNotMatch(page, /button\.title=JSON\.stringify/);
   assert.match(page, /clearActionResult\(\);seat=result\.view\.decisionSeat/);
   assert.match(page, /clearActionResult\(\);seat=button\.dataset\.seat/);
   assert.match(page, /\/api\/replay[\s\S]*clearActionResult\(\)/);
+});
+
+test('browser API keeps cast artifacts and auras visible without exposing the opponent hand', async () => {
+  const base = createSyntheticDemoManifest(53);
+  const openingSpells = createGameSession(base).state.players.north.hand.spellbook;
+  const artifactCardId = openingSpells[0]?.cardId;
+  const auraCardId = openingSpells[1]?.cardId;
+  assert.ok(artifactCardId && auraCardId);
+  const realmManifest = createGameManifest({
+    authority: base.authority,
+    cards: {
+      ...base.cards,
+      [artifactCardId]: {
+        cardType: 'artifact',
+        grantsBearerPower: 2,
+        manaCost: 0,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      },
+      [auraCardId]: {
+        cardType: 'aura',
+        immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns: true,
+        manaCost: 0,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      },
+    },
+    decks: base.decks,
+    firstSeat: base.firstSeat,
+    seed: base.seed,
+  });
+  const realmServer = createGamePrototypeServer(undefined, [{
+    cardNames: {
+      [artifactCardId]: 'Test Relic',
+      [auraCardId]: 'Test Aura',
+      'south-spell-1': 'South Secret',
+    },
+    id: 'realm-pieces',
+    label: 'Realm pieces',
+    manifest: realmManifest,
+  }]);
+  await new Promise<void>((resolve, reject) => {
+    realmServer.once('error', reject);
+    realmServer.listen(0, '127.0.0.1', resolve);
+  });
+  const realmOrigin = `http://127.0.0.1:${(realmServer.address() as AddressInfo).port}`;
+  try {
+    let current = await post('/api/reset', { presetId: 'realm-pieces', seed: 53 }, realmOrigin);
+    current = await submit(keep(current), realmOrigin);
+    current = await json('/api/view?seat=south', undefined, realmOrigin);
+    current = await submit(keep(current), realmOrigin);
+    current = await json('/api/view?seat=north', undefined, realmOrigin);
+    current = await submit(findAction(current, ({ kind }) => kind === 'play-site'), realmOrigin);
+    current = await submit(findAction(current, ({ bearer, cardId, kind }) =>
+      kind === 'cast-artifact' && cardId === artifactCardId
+        && (bearer as JsonObject | undefined)?.kind === 'avatar'), realmOrigin);
+    current = await submit(findAction(current, ({ cardId, kind }) =>
+      kind === 'cast-aura' && cardId === auraCardId), realmOrigin);
+
+    const realm = (current.view as JsonObject).realm as JsonObject;
+    const artifact = (realm.artifacts as JsonObject[])[0];
+    const aura = (realm.auras as JsonObject[])[0];
+    assert.ok(artifact && aura);
+    assert.equal(artifact.cardId, artifactCardId);
+    assert.equal(artifact.controller, 'north');
+    assert.deepEqual(artifact.bearer, {
+      instanceId: ((((current.view as JsonObject).players as JsonObject)
+        .north as JsonObject).avatar as JsonObject).instanceId,
+      kind: 'avatar',
+      seat: 'north',
+    });
+    assert.equal(aura.cardId, auraCardId);
+    assert.equal((aura.cells as unknown[]).length, 4);
+    assert.equal(aura.turnCounters, 0);
+    assert.equal((realm.immobileAreas as JsonObject[])[0]?.sourceInstanceId, aura.instanceId);
+    assert.equal((current.cardNames as JsonObject)[artifactCardId], 'Test Relic');
+    assert.equal((current.cardNames as JsonObject)[auraCardId], 'Test Aura');
+    assert.equal(((current.cardFacts as JsonObject)[artifactCardId] as JsonObject).cardType, 'artifact');
+    assert.equal(((current.cardFacts as JsonObject)[auraCardId] as JsonObject).cardType, 'aura');
+    assert.doesNotMatch(JSON.stringify(current), /South Secret|south-(?:site|spell)-/);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      realmServer.close((error) => error ? reject(error) : resolve());
+    });
+  }
 });
 
 test('browser API switches injected starter presets and replays the selected match', async () => {
