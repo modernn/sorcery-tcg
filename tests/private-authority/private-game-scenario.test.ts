@@ -506,10 +506,14 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
         assert.ok((current.actions as JsonObject[]).length > 0, preset.id);
         current = await submit(deterministicAction(current));
         opponentActionCount += Number(current.opponentActionCount);
+        const playerReceipt = current.receipt as JsonObject | undefined;
+        const playerReceiptEvents = playerReceipt?.events as JsonObject[] | undefined;
+        combatObserved ||= (playerReceiptEvents ?? []).some(({ type }) => type === 'fight-started');
         const opponentActions = current.opponentActions as JsonObject[];
         assert.equal(opponentActions.length, Number(current.opponentActionCount), preset.id);
         opponentActions.forEach(({ events }) => {
           const eventTypes = events as string[];
+          combatObserved ||= eventTypes.includes('fight-started');
           if (eventTypes.includes('power-granted')) {
             opponentPowerAwaitingAttack = true;
             opponentPowerUsed = false;
@@ -923,7 +927,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 27 : 35,
+        preset.id === 'air-vs-earth-lesson' ? 28 : 35,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -931,7 +935,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 35 : 27,
+        preset.id === 'air-vs-earth-lesson' ? 35 : 28,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -967,6 +971,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     Blink: 2,
     'Cloud Spirit': 2,
     'Dead of Night Demon': 2,
+    "Devil's Egg": 1,
     'Gyre Hippogriffs': 1,
     'Grandmaster Wizard': 1,
     'Highland Clansmen': 1,
@@ -1035,6 +1040,16 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     assert.equal(nimbusJinn.airborne, true);
     assert.equal(nimbusJinn.discardSpellToDamageRandomOtherUnitHere, 3);
     assert.deepEqual(nimbusJinn.thresholds, { air: 2, earth: 0, fire: 0, water: 0 });
+  }
+  const devilsEggId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === "Devil's Egg")?.[0];
+  assert.ok(devilsEggId);
+  const devilsEgg = airLesson.manifest.cards[devilsEggId];
+  assert.equal(devilsEgg?.cardType, 'artifact');
+  if (devilsEgg?.cardType === 'artifact') {
+    assert.equal(devilsEgg.manaCost, 3);
+    assert.equal(devilsEgg.atEndOfEachTurnSiteControllerLosesLife, 1);
+    assert.deepEqual(devilsEgg.thresholds, { air: 0, earth: 0, fire: 0, water: 0 });
   }
   for (const towerName of ['Dark Tower', 'Gothic Tower', 'Lone Tower']) {
     const towerId = Object.entries(airLesson.cardNames)
@@ -1561,6 +1576,22 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airNimbusJinn.deck.spellbook
     .find(({ name }) => name === 'Nimbus Jinn')?.copies, 2);
   assert.equal(result.airNimbusJinn.replayVerified, true);
+  assert.equal(result.airDevilsEgg.devilsEgg, "Devil's Egg");
+  assert.equal(result.airDevilsEgg.seed, 2);
+  assert.equal(result.airDevilsEgg.acceptedActionCount, 19);
+  assert.equal(result.airDevilsEgg.exactEndTurnEffects, true);
+  assert.equal(result.airDevilsEgg.causalEventsVerified, true);
+  assert.equal(result.airDevilsEgg.structuralFactsVerified, true);
+  assert.equal(result.airDevilsEgg.noDamageDeathsOrRandomness, true);
+  assert.equal(result.airDevilsEgg.unsupportedMechanicsAbsent, true);
+  assert.equal(result.airDevilsEgg.legalConstructedDeck, true);
+  assert.equal(result.airDevilsEgg.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airDevilsEgg.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airDevilsEgg.deck.spellbook
+    .find(({ name }) => name === "Devil's Egg")?.copies, 1);
+  assert.equal(result.airDevilsEgg.replayVerified, true);
   assert.equal(result.airSpellcasterFreeze.apprenticeWizard, 'Apprentice Wizard');
   assert.equal(result.airSpellcasterFreeze.freeze, 'Freeze');
   assert.equal(result.airSpellcasterFreeze.seravaTownsfolk, 'Serava Townsfolk');

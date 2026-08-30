@@ -17343,3 +17343,306 @@ test('RULE-03 discard damage snapshots derived unit power and uses Ward and prev
   assert.equal(warded.result.session.state.realm.units.find(({ instanceId }) =>
     instanceId === warded.targetId)?.warded, false);
 });
+
+function devilsEggFixture(kind: 'both' | 'carried' | 'regions', seed: number) {
+  const prefix = 'egg-' + kind;
+  const ids = { carrier: prefix + '-carrier', northEgg: prefix + '-north-egg' } as const;
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const artifact: GameCardDefinition = {
+    atEndOfEachTurnSiteControllerLosesLife: 1, cardType: 'artifact', manaCost: 0, thresholds,
+  };
+  const minion: GameCardDefinition = {
+    attack: 1, cardType: 'minion', defense: 1, manaCost: 0, thresholds,
+  };
+  const avatar: GameCardDefinition = {
+    attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20,
+  };
+  const northSite = prefix + '-north-site';
+  const southSite = prefix + '-south-site';
+  const southEgg = prefix + '-south-egg';
+  const dummy = prefix + '-dummy';
+  const northSpellbook = kind === 'carried'
+    ? Array.from({ length: 6 }, (_, index) => index % 2 === 0 ? ids.carrier : ids.northEgg)
+    : Array(6).fill(ids.northEgg);
+  const decks = {
+    north: { atlas: Array(6).fill(northSite), avatar: prefix + '-north-avatar', spellbook: northSpellbook },
+    south: {
+      atlas: Array(6).fill(southSite), avatar: prefix + '-south-avatar',
+      spellbook: Array(6).fill(kind === 'both' ? southEgg : dummy),
+    },
+  } satisfies Record<'north' | 'south', GameDeckSpec>;
+  const gameManifest = createGameManifest({
+    authority: { contentHash: SYNTHETIC_AUTHORITY_HASH, mode: 'synthetic',
+      revisionId: 'synthetic-devils-egg-' + kind + '-v1' },
+    cards: {
+      [decks.north.avatar]: avatar,
+      [ids.northEgg]: artifact,
+      [northSite]: { cardType: 'site', elements: ['air'] },
+      [decks.south.avatar]: avatar,
+      [southSite]: { cardType: 'site', elements: ['air'] },
+      ...(kind === 'carried'
+        ? { [ids.carrier]: { ...minion, diesAtEndOfControllerTurn: true } }
+        : {}),
+      ...(kind === 'both' ? { [southEgg]: artifact } : { [dummy]: minion }),
+    },
+    decks,
+    firstSeat: 'north',
+    seed,
+  });
+  let checkpoint = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    checkpoint = accept(checkpoint, action(checkpoint, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  if (kind === 'carried') {
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === ids.carrier && descriptor.cell === 'C4');
+    const carrier = checkpoint.state.realm.units.find(({ cardId }) => cardId === ids.carrier);
+    assert.ok(carrier);
+    take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+      && descriptor.cardId === ids.northEgg
+      && descriptor.bearer?.instanceId === carrier.instanceId);
+  } else {
+    for (let index = 0; index < (kind === 'regions' ? 3 : 1); index += 1) {
+      take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+        && descriptor.cardId === ids.northEgg && descriptor.cell === 'C4');
+    }
+  }
+  return { checkpoint, gameManifest, ids };
+}
+
+test('RULE-03 Artifacts make their current site controller lose life at each turn end', () => {
+  const { checkpoint, gameManifest, ids } = devilsEggFixture('both', 73);
+  const northEggDefinition = gameManifest.cards[ids.northEgg];
+  assert.equal(northEggDefinition?.cardType === 'artifact'
+    && northEggDefinition.atEndOfEachTurnSiteControllerLosesLife, 1);
+  assert.throws(() => createGameManifest({
+    ...gameManifest,
+    cards: {
+      ...gameManifest.cards,
+      [ids.northEgg]: {
+        ...northEggDefinition,
+        atEndOfEachTurnSiteControllerLosesLife: 0,
+      } as unknown as GameCardDefinition,
+    },
+  }), /atEndOfEachTurnSiteControllerLosesLife must be a safe integer between 1 and/);
+
+  let session = checkpoint;
+  const northEggCard = session.state.realm.artifacts?.find(({ cardId }) => cardId === ids.northEgg);
+  assert.ok(northEggCard);
+  const northSite = session.state.realm.sites.C4;
+  assert.ok(northSite);
+  const northEnded = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  assert.equal(northEnded.accepted, true);
+  if (!northEnded.accepted) return;
+  assert.deepEqual(northEnded.receipt.events.map(({ type }) => type), [
+    'end-turn-site-life-loss-triggered',
+    'avatar-life-lost',
+    'turn-ended',
+    'turn-started',
+  ]);
+  assert.deepEqual(northEnded.receipt.events.slice(0, 2).map(({ payload }) => payload), [
+    { amount: 1, seat: 'north', siteInstanceId: northSite.instanceId,
+      sourceInstanceId: northEggCard.instanceId },
+    { amount: 1, life: 19, seat: 'north', sourceInstanceId: northEggCard.instanceId },
+  ]);
+  session = northEnded.session;
+
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
+  const southEggCard = session.state.players.south.hand.spellbook[0];
+  assert.ok(southEggCard);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-artifact'
+      && descriptor.cardInstanceId === southEggCard.instanceId
+      && descriptor.cell === 'C1'));
+  const southSite = session.state.realm.sites.C1;
+  assert.ok(southSite);
+  const southEnded = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  assert.equal(southEnded.accepted, true);
+  if (!southEnded.accepted) return;
+  assert.deepEqual(southEnded.receipt.events.slice(0, 4).map(({ payload, type }) => ({ payload, type })), [
+    {
+      payload: { amount: 1, seat: 'north', siteInstanceId: northSite.instanceId,
+        sourceInstanceId: northEggCard.instanceId },
+      type: 'end-turn-site-life-loss-triggered',
+    },
+    {
+      payload: { amount: 1, life: 18, seat: 'north', sourceInstanceId: northEggCard.instanceId },
+      type: 'avatar-life-lost',
+    },
+    {
+      payload: { amount: 1, seat: 'south', siteInstanceId: southSite.instanceId,
+        sourceInstanceId: southEggCard.instanceId },
+      type: 'end-turn-site-life-loss-triggered',
+    },
+    {
+      payload: { amount: 1, life: 19, seat: 'south', sourceInstanceId: southEggCard.instanceId },
+      type: 'avatar-life-lost',
+    },
+  ]);
+  assert.deepEqual({
+    north: southEnded.session.state.players.north.avatar.life,
+    south: southEnded.session.state.players.south.avatar.life,
+  }, { north: 18, south: 19 });
+  assert.equal(southEnded.receipt.randomDraws.length, 0);
+  assert.equal(verifyGameReplay(southEnded.session), true);
+});
+
+test('RULE-03 end-turn Artifact life loss uses its carried cell and survives bearer Disable', () => {
+  const { checkpoint, ids } = devilsEggFixture('carried', 4);
+  const carrier = checkpoint.state.realm.units.find(({ cardId }) => cardId === ids.carrier);
+  assert.ok(carrier);
+  const carried = checkpoint.state.realm.artifacts?.find(({ cardId }) => cardId === ids.northEgg);
+  assert.ok(carried && 'bearer' in carried);
+
+  const ordinaryEnd = stepGame(checkpoint, action(checkpoint, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  assert.equal(ordinaryEnd.accepted, true);
+  if (!ordinaryEnd.accepted) return;
+  assert.deepEqual(ordinaryEnd.receipt.events.map(({ type }) => type), [
+    'end-turn-site-life-loss-triggered',
+    'avatar-life-lost',
+    'artifact-dropped',
+    'minion-died',
+    'turn-ended',
+    'turn-started',
+  ]);
+  assert.deepEqual(observeGame(ordinaryEnd.session.state, 'north').realm.artifacts?.map((artifact) => ({
+    bearer: artifact.bearer,
+    controller: artifact.controller,
+    location: artifact.location,
+    region: artifact.region,
+  })), [{ bearer: undefined, controller: null, location: 'C4', region: 'surface' }]);
+  assert.equal(verifyGameReplay(ordinaryEnd.session), true);
+
+  const foreignSiteCard = checkpoint.state.players.south.hand.atlas[0];
+  assert.ok(foreignSiteCard);
+  const carriedOnDisabledOversizedBearer: GameSession = {
+    ...checkpoint,
+    state: {
+      ...checkpoint.state,
+      realm: {
+        ...checkpoint.state.realm,
+        artifacts: checkpoint.state.realm.artifacts!.map((artifact) =>
+          artifact.instanceId === carried.instanceId
+            ? { ...artifact, bearerCell: 'C1' }
+            : artifact),
+        sites: {
+          ...checkpoint.state.realm.sites,
+          C1: { ...foreignSiteCard, controller: 'south' },
+        },
+        units: checkpoint.state.realm.units.map((unit) => unit.instanceId === carrier.instanceId
+          ? {
+            ...unit,
+            disableEffects: [{ expiresAtSeat: 'south', sourceInstanceId: carrier.instanceId }],
+            location: 'B1',
+            occupiedCells: ['B1', 'B2', 'C1', 'C2'],
+          }
+          : unit),
+      },
+    },
+  };
+  const disabledEnd = stepGame(
+    carriedOnDisabledOversizedBearer,
+    action(carriedOnDisabledOversizedBearer, ({ descriptor }) => descriptor.kind === 'end-turn'),
+  );
+  assert.equal(disabledEnd.accepted, true);
+  if (!disabledEnd.accepted) return;
+  assert.deepEqual(disabledEnd.receipt.events.slice(0, 2).map(({ payload, type }) => ({ payload, type })), [
+    {
+      payload: { amount: 1, seat: 'south', siteInstanceId: foreignSiteCard.instanceId,
+        sourceInstanceId: carried.instanceId },
+      type: 'end-turn-site-life-loss-triggered',
+    },
+    {
+      payload: { amount: 1, life: 19, seat: 'south', sourceInstanceId: carried.instanceId },
+      type: 'avatar-life-lost',
+    },
+  ]);
+  assert.equal(disabledEnd.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === carrier.instanceId), true);
+  assert.equal(disabledEnd.session.state.players.north.avatar.life, 20);
+  assert.equal(observeGame(disabledEnd.session.state, 'north').realm.artifacts?.[0]?.location, 'C1');
+});
+
+test('RULE-03 end-turn Artifact life loss respects regions, Rubble, stacking, and Death\'s Door', () => {
+  const { checkpoint } = devilsEggFixture('regions', 91);
+  const extraArtifactCard = checkpoint.state.players.north.spellbook[0];
+  assert.ok(extraArtifactCard);
+  const artifacts = [
+    ...(checkpoint.state.realm.artifacts ?? []),
+    { ...extraArtifactCard, location: 'C4' as const, region: 'surface' as const },
+  ]
+    .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+  assert.equal(artifacts.length, 4);
+  const southSiteCard = checkpoint.state.players.south.hand.atlas[0];
+  const rubbleCard = checkpoint.state.players.south.hand.atlas[1];
+  assert.ok(southSiteCard && rubbleCard);
+  const regionCheckpoint: GameSession = {
+    ...checkpoint,
+    state: {
+      ...checkpoint.state,
+      players: {
+        north: {
+          ...checkpoint.state.players.north,
+          avatar: { ...checkpoint.state.players.north.avatar, life: 1 },
+          spellbook: checkpoint.state.players.north.spellbook.slice(1),
+        },
+        south: {
+          ...checkpoint.state.players.south,
+          avatar: { ...checkpoint.state.players.south.avatar, life: 1 },
+        },
+      },
+      realm: {
+        ...checkpoint.state.realm,
+        artifacts: artifacts.map((artifact, index) => ({
+          ...artifact,
+          ...(index === 0
+            ? { location: 'C4' as const, region: 'surface' as const }
+            : index === 1
+              ? { location: 'C1' as const, region: 'underground' as const }
+              : index === 2
+                ? { location: 'C4' as const, region: 'void' as const }
+                : { location: 'C2' as const, region: 'surface' as const }),
+        })),
+        sites: {
+          ...checkpoint.state.realm.sites,
+          C1: { ...southSiteCard, controller: 'south' },
+          C2: { controller: null, instanceId: rubbleCard.instanceId, rubble: true },
+        },
+      },
+    },
+  };
+  const ended = stepGame(regionCheckpoint, action(regionCheckpoint, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  assert.equal(ended.accepted, true);
+  if (!ended.accepted) return;
+  assert.deepEqual(ended.receipt.events.filter(({ type }) =>
+    type === 'end-turn-site-life-loss-triggered').map(({ payload }) => payload), [
+    { amount: 1, seat: 'north', siteInstanceId: checkpoint.state.realm.sites.C4?.instanceId,
+      sourceInstanceId: artifacts[0]!.instanceId },
+    { amount: 1, seat: 'south', siteInstanceId: southSiteCard.instanceId,
+      sourceInstanceId: artifacts[1]!.instanceId },
+  ]);
+  assert.deepEqual(ended.receipt.events.filter(({ type }) =>
+    type === 'avatar-reached-deaths-door').map(({ payload }) => payload), [
+    { seat: 'north', sourceInstanceId: artifacts[0]!.instanceId, turnNumber: 1 },
+    { seat: 'south', sourceInstanceId: artifacts[1]!.instanceId, turnNumber: 1 },
+  ]);
+  assert.equal(ended.receipt.events.some(({ payload }) =>
+    canonicalJson(payload).includes(artifacts[2]!.instanceId)
+      || canonicalJson(payload).includes(artifacts[3]!.instanceId)), false);
+  assert.deepEqual({
+    north: ended.session.state.players.north.avatar.life,
+    south: ended.session.state.players.south.avatar.life,
+    terminal: ended.session.state.terminal.status,
+  }, { north: 0, south: 0, terminal: 'active' });
+  assert.equal(ended.receipt.events.some(({ type }) => type === 'damage-dealt'), false);
+  assert.equal(ended.receipt.events.some(({ type }) => type === 'game-ended'), false);
+  assert.equal(ended.receipt.randomDraws.length, 0);
+});

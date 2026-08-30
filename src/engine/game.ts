@@ -59,6 +59,7 @@ export type GameCardDefinition =
     tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn?: true;
   }>
   | Readonly<{
+    atEndOfEachTurnSiteControllerLosesLife?: never;
     cardType: 'artifact';
     grantsBearerLethal?: never;
     grantsBearerPower: 2;
@@ -69,6 +70,7 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    atEndOfEachTurnSiteControllerLosesLife?: never;
     cardType: 'artifact';
     grantsBearerLethal: true;
     grantsBearerPower?: never;
@@ -79,6 +81,7 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    atEndOfEachTurnSiteControllerLosesLife?: never;
     cardType: 'artifact';
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
@@ -89,6 +92,7 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    atEndOfEachTurnSiteControllerLosesLife?: never;
     cardType: 'artifact';
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
@@ -99,6 +103,7 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    atEndOfEachTurnSiteControllerLosesLife?: never;
     cardType: 'artifact';
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
@@ -106,6 +111,17 @@ export type GameCardDefinition =
     tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps?: never;
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath: 4;
+    thresholds: GameThresholds;
+  }>
+  | Readonly<{
+    atEndOfEachTurnSiteControllerLosesLife: number;
+    cardType: 'artifact';
+    grantsBearerLethal?: never;
+    grantsBearerPower?: never;
+    manaCost: number;
+    tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps?: never;
+    tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
+    tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
     thresholds: GameThresholds;
   }>
   | Readonly<{
@@ -1609,6 +1625,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     return;
   }
   if (card.cardType === 'artifact') {
+    if (card.atEndOfEachTurnSiteControllerLosesLife !== undefined
+      && (!Number.isSafeInteger(card.atEndOfEachTurnSiteControllerLosesLife)
+        || card.atEndOfEachTurnSiteControllerLosesLife < 1
+        || card.atEndOfEachTurnSiteControllerLosesLife > MAX_COMBAT_STAT)) {
+      throw new RangeError(
+        `${path}.atEndOfEachTurnSiteControllerLosesLife must be a safe integer between 1 and ${MAX_COMBAT_STAT}`,
+      );
+    }
     if (card.grantsBearerPower !== undefined && card.grantsBearerPower !== 2) {
       throw new RangeError(`${path}.grantsBearerPower must be 2`);
     }
@@ -1637,7 +1661,8 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         `${path}.tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath must be 4`,
       );
     }
-    if (Number(card.grantsBearerPower === 2)
+    if (Number(card.atEndOfEachTurnSiteControllerLosesLife !== undefined)
+      + Number(card.grantsBearerPower === 2)
       + Number(card.grantsBearerLethal === true)
       + Number(card.tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps === 3)
       + Number(card
@@ -2259,7 +2284,12 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
         : card.cardType === 'artifact'
           ? {
             cardType: 'artifact' as const,
-            ...(card.grantsBearerPower === 2
+            ...(card.atEndOfEachTurnSiteControllerLosesLife !== undefined
+              ? {
+                atEndOfEachTurnSiteControllerLosesLife:
+                  card.atEndOfEachTurnSiteControllerLosesLife,
+              }
+              : card.grantsBearerPower === 2
               ? { grantsBearerPower: 2 as const }
               : card.grantsBearerLethal === true
                 ? { grantsBearerLethal: true as const }
@@ -5015,6 +5045,66 @@ function resolveEndOfTurnDeaths(
     });
     outcomes.push(...resolution.outcomes);
     if (resolution.terminal.status === 'finished') break;
+  }
+  return { outcomes, state: current };
+}
+
+function resolveEndOfEachTurnSiteControllerLifeLoss(
+  state: GameState,
+  activeSeat: GameSeat,
+): Readonly<{ outcomes: readonly GameOutcome[]; state: GameState }> {
+  const nonActiveSeat = otherSeat(activeSeat);
+  const triggeredIds = (state.realm.artifacts ?? []).flatMap((artifact) => {
+    const definition = cardDefinition(state, artifact.cardId);
+    if (definition.cardType !== 'artifact'
+      || definition.atEndOfEachTurnSiteControllerLosesLife === undefined) return [];
+    const orderingSeat = 'bearer' in artifact ? artifact.bearer.seat : artifact.owner;
+    return [{
+      instanceId: artifact.instanceId,
+      orderingGroup: orderingSeat === nonActiveSeat ? 0 : 1,
+    }];
+  }).sort((left, right) => left.orderingGroup - right.orderingGroup
+    || left.instanceId.localeCompare(right.instanceId));
+  let current = state;
+  const outcomes: GameOutcome[] = [];
+  for (const { instanceId } of triggeredIds) {
+    const artifact = current.realm.artifacts?.find((candidate) =>
+      candidate.instanceId === instanceId);
+    if (!artifact) continue;
+    const definition = cardDefinition(current, artifact.cardId);
+    if (definition.cardType !== 'artifact'
+      || definition.atEndOfEachTurnSiteControllerLosesLife === undefined) continue;
+    const location = artifactLocation(current, artifact);
+    const site = location.region === 'void' ? undefined : current.realm.sites[location.cell];
+    if (!site || isRubble(site)) continue;
+    const seat = site.controller;
+    const [player, lost, reachedDeathsDoor] = loseAvatarLife(
+      current.players[seat],
+      definition.atEndOfEachTurnSiteControllerLosesLife,
+      current.turnNumber,
+    );
+    current = deepFreeze({ ...current, players: replacePlayer(current, seat, player) });
+    outcomes.push({
+      payload: {
+        amount: definition.atEndOfEachTurnSiteControllerLosesLife,
+        seat,
+        siteInstanceId: site.instanceId,
+        sourceInstanceId: artifact.instanceId,
+      },
+      type: 'end-turn-site-life-loss-triggered',
+    });
+    if (lost > 0) {
+      outcomes.push({
+        payload: { amount: lost, life: player.avatar.life, seat, sourceInstanceId: artifact.instanceId },
+        type: 'avatar-life-lost',
+      });
+    }
+    if (reachedDeathsDoor) {
+      outcomes.push({
+        payload: { seat, sourceInstanceId: artifact.instanceId, turnNumber: current.turnNumber },
+        type: 'avatar-reached-deaths-door',
+      });
+    }
   }
   return { outcomes, state: current };
 }
@@ -9476,12 +9566,13 @@ function applyDescriptor(
   }
 
   if (descriptor.kind !== 'end-turn') throw new Error('unreachable unsupported action');
-  const endOfTurnDeaths = resolveEndOfTurnDeaths(state, seat);
+  const endOfTurnLifeLoss = resolveEndOfEachTurnSiteControllerLifeLoss(state, seat);
+  const endOfTurnDeaths = resolveEndOfTurnDeaths(endOfTurnLifeLoss.state, seat);
   const endState = endOfTurnDeaths.state;
   if (endState.terminal.status === 'finished') {
     return [
       withStateVersion(endState, { pendingCombat: null, phase: 'terminal' }),
-      endOfTurnDeaths.outcomes,
+      [...endOfTurnLifeLoss.outcomes, ...endOfTurnDeaths.outcomes],
       [],
     ];
   }
@@ -9619,6 +9710,7 @@ function applyDescriptor(
       turnNumber,
     }),
     [
+      ...endOfTurnLifeLoss.outcomes,
       ...endOfTurnDeaths.outcomes,
       ...endPhaseUntapped.map(({ controller, instanceId }) => ({
         payload: { instanceId, seat: controller, sourceInstanceId: instanceId },

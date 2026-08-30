@@ -341,6 +341,19 @@ export type PrivateGameCheck = Readonly<{
     structuralFactsVerified: boolean;
     unsupportedMechanicsAbsent: boolean;
   }>;
+  airDevilsEgg: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    devilsEgg: string;
+    exactEndTurnEffects: boolean;
+    legalConstructedDeck: boolean;
+    noDamageDeathsOrRandomness: boolean;
+    replayVerified: boolean;
+    seed: number;
+    structuralFactsVerified: boolean;
+    unsupportedMechanicsAbsent: boolean;
+  }>;
   airLeyline: Readonly<{
     acceptedActionCount: number;
     deck: DeckList;
@@ -1584,6 +1597,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   slingPixies: NormalizedCard;
   spireLich: NormalizedCard;
   nimbusJinn: NormalizedCard;
+  devilsEgg: NormalizedCard;
   genesisMinion: NormalizedCard;
   geomancer: NormalizedCard;
   gothicTower: NormalizedCard;
@@ -3530,6 +3544,28 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || nimbusJinn.subtypes[0] !== 'Spirit') {
     throw new Error('private discard-for-random-damage minion no longer matches its supported facts');
   }
+  const devilsEgg = snapshot.cards.find(({ name }) => name === "Devil's Egg");
+  if (!devilsEgg
+    || devilsEgg.stableId
+      !== 'card:082acef132910bf28edae4c136919951acfee7eb1b98e09e34e1550c9568f097'
+    || devilsEgg.officialSourceId !== '001-devils_egg-b-f'
+    || devilsEgg.cardType !== 'artifact'
+    || ruleTextDigest(devilsEgg.rulesText)
+      !== 'sha256:01031af02347366442d456a7a221ce77afe0d65cc7f88a5ccd6537d68dedf180'
+    || devilsEgg.manaCost !== 3
+    || devilsEgg.attack !== null
+    || devilsEgg.defense !== null
+    || devilsEgg.life !== null
+    || devilsEgg.elements.length !== 0
+    || devilsEgg.thresholds.air !== 0
+    || devilsEgg.thresholds.earth !== 0
+    || devilsEgg.thresholds.fire !== 0
+    || devilsEgg.thresholds.water !== 0
+    || devilsEgg.rarity !== 'elite'
+    || devilsEgg.subtypes.length !== 1
+    || devilsEgg.subtypes[0] !== 'Relic') {
+    throw new Error('private end-turn Site life-loss Artifact no longer matches its supported facts');
+  }
   const polarBears = snapshot.cards.find(({ name }) => name === 'Polar Bears');
   if (!polarBears
     || polarBears.cardType !== 'minion'
@@ -3909,6 +3945,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     slingPixies,
     spireLich,
     nimbusJinn,
+    devilsEgg,
     genesisMinion,
     geomancer,
     gothicTower,
@@ -4127,6 +4164,7 @@ function gameDefinition(
   isTower = false,
   gainsPowerRangedAndSpellcasterAtopTower: 0 | 2 = 0,
   discardSpellToDamageRandomOtherUnitHere: 0 | 3 = 0,
+  atEndOfEachTurnSiteControllerLosesLife: 0 | 1 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4157,7 +4195,8 @@ function gameDefinition(
       + Number(
         tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps,
       )
-      + Number(tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath) === 1) {
+      + Number(tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath)
+      + Number(atEndOfEachTurnSiteControllerLosesLife !== 0) === 1) {
     return {
       cardType: 'artifact',
       ...(grantsBearerPower === 2
@@ -4171,9 +4210,11 @@ function gameDefinition(
                 tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps:
                   true as const,
               }
-              : {
-                tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath: 4 as const,
-              }),
+              : tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath
+                ? {
+                  tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath: 4 as const,
+                }
+                : { atEndOfEachTurnSiteControllerLosesLife }),
       manaCost: card.manaCost,
       thresholds: card.thresholds,
     };
@@ -4383,7 +4424,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-leyline' | 'air-lightning-bolt' | 'air-nimbus-jinn' | 'air-rain-of-arrows' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-devils-egg' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-leyline' | 'air-lightning-bolt' | 'air-nimbus-jinn' | 'air-rain-of-arrows' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -4685,6 +4726,7 @@ function buildManifest(
       input.slingPixies.stableId,
       input.spireLich.stableId,
       input.nimbusJinn.stableId,
+      input.devilsEgg.stableId,
       ...Array(2).fill(input.movementTwoMinion.stableId),
       ...Array(2).fill(input.airborneMinion.stableId),
       ...Array(2).fill(input.stealthTargetMinion.stableId),
@@ -4836,6 +4878,14 @@ function buildManifest(
     [],
     [input.zap],
   );
+  const airDevilsEggBase = elementalDeck('air', []);
+  const airDevilsEggDeck: GameDeckSpec = {
+    ...airDevilsEggBase,
+    spellbook: [
+      input.devilsEgg.stableId,
+      ...airDevilsEggBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
+    ],
+  };
   const fireNimbusJinnDeck = elementalDeck('fire', [input.raalDromedary]);
   const fireSlingPixiesDeck = elementalDeck('fire', [input.vikings, input.raalDromedary]);
   const airLeylineDeck = elementalDeck('air', airMinions, [input.leylineHenge]);
@@ -5024,6 +5074,8 @@ function buildManifest(
       ? airSpireLichDeck
       : scenario === 'air-nimbus-jinn'
       ? airNimbusJinnDeck
+      : scenario === 'air-devils-egg'
+      ? airDevilsEggDeck
       : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
       : scenario === 'air-void-artifact'
@@ -5191,6 +5243,8 @@ function buildManifest(
       ? airSpireLichDeck
       : scenario === 'air-nimbus-jinn'
       ? fireNimbusJinnDeck
+      : scenario === 'air-devils-egg'
+      ? airDevilsEggDeck
       : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
       : scenario === 'air-void-artifact'
@@ -5471,6 +5525,7 @@ function buildManifest(
         || card.stableId === input.loneTower.stableId,
       card.stableId === input.spireLich.stableId ? 2 : 0,
       card.stableId === input.nimbusJinn.stableId ? 3 : 0,
+      card.stableId === input.devilsEgg.stableId ? 1 : 0,
     ),
   ]));
   return {
@@ -6188,7 +6243,7 @@ function findEarthBurrowingOpening(
       session,
       'north',
       input.burrowingMinion.stableId,
-      2,
+      1,
     );
     const affinity = { air: 0, earth: 0, fire: 0, water: 0 };
     northSites.slice(0, 3).forEach(({ cardId }) => {
@@ -9160,6 +9215,42 @@ function findAirNimbusJinnOpening(
     session,
     southSiteInstanceIds: [fireSouthSite.instanceId, otherSouthSite.instanceId],
     zapInstanceId: zap.instanceId,
+  };
+}
+
+function findAirDevilsEggOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  devilsEggInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string];
+  seed: number;
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string];
+}> {
+  const seed = 2;
+  const built = buildManifest(input, seed, 'air-devils-egg');
+  const session = createGameSession(built.manifest);
+  const north = session.state.players.north;
+  const south = session.state.players.south;
+  const devilsEgg = [...north.hand.spellbook, ...north.spellbook.slice(0, 2)]
+    .find(({ cardId }) => cardId === input.devilsEgg.stableId);
+  if (north.hand.atlas.length !== 3 || south.hand.atlas.length < 2 || !devilsEgg) {
+    throw new Error("private Devil's Egg seed 2 no longer produces its supported opening");
+  }
+  return {
+    ...built,
+    devilsEggInstanceId: devilsEgg.instanceId,
+    northSiteInstanceIds: north.hand.atlas.map(({ instanceId }) => instanceId) as [
+      string,
+      string,
+      string,
+    ],
+    seed,
+    session,
+    southSiteInstanceIds: south.hand.atlas.slice(0, 2)
+      .map(({ instanceId }) => instanceId) as [string, string],
   };
 }
 
@@ -17664,6 +17755,173 @@ function runAirNimbusJinn(
   });
 }
 
+function runAirDevilsEgg(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airDevilsEgg'] {
+  const opening = findAirDevilsEggOpening(input);
+  let session = keep(keep(opening.session));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  const drawSpell = (): void => take(({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const playSite = (instanceId: string, cell: RealmCell): void => take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === instanceId
+      && descriptor.cell === cell);
+  const endTurn = (): void => take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  playSite(opening.northSiteInstanceIds[0], 'C4');
+  endTurn();
+  drawSpell();
+  playSite(opening.southSiteInstanceIds[0], 'C1');
+  endTurn();
+
+  drawSpell();
+  playSite(opening.northSiteInstanceIds[1], 'B4');
+  endTurn();
+  drawSpell();
+  playSite(opening.southSiteInstanceIds[1], 'C2');
+  endTurn();
+
+  drawSpell();
+  playSite(opening.northSiteInstanceIds[2], 'A4');
+  const beforeCast = session.state.players.north;
+  const castAction = action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-artifact'
+      && descriptor.cardInstanceId === opening.devilsEggInstanceId
+      && descriptor.bearer === undefined
+      && descriptor.cell === 'C4');
+  if (castAction.descriptor.kind !== 'cast-artifact') {
+    throw new Error("private Devil's Egg cast action has the wrong descriptor");
+  }
+  const cast = stepGame(session, castAction);
+  if (!cast.accepted) throw new Error("private Devil's Egg loose cast was rejected");
+  session = cast.session;
+  const site = session.state.realm.sites.C4;
+  if (!site) throw new Error("private Devil's Egg Site is absent after casting");
+  const castExpected = [{
+    payload: {
+      cardId: input.devilsEgg.stableId,
+      casterInstanceId: castAction.descriptor.casterInstanceId,
+      cell: 'C4',
+      instanceId: opening.devilsEggInstanceId,
+      manaPaid: 3,
+      owner: 'north',
+      region: 'surface',
+      seat: 'north',
+    },
+    type: 'artifact-conjured',
+  }];
+  const castManaPaid = beforeCast.mana - cast.session.state.players.north.mana;
+
+  const lifeBefore = session.state.players.north.avatar.life;
+  const northTurnNumber = session.state.turnNumber;
+  const northEnded = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  if (!northEnded.accepted) throw new Error("private Devil's Egg North End Phase was rejected");
+  session = northEnded.session;
+  drawSpell();
+  const southTurnNumber = session.state.turnNumber;
+  const southEnded = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  if (!southEnded.accepted) throw new Error("private Devil's Egg South End Phase was rejected");
+  session = southEnded.session;
+
+  const endExpected = (
+    life: number,
+    endedSeat: 'north' | 'south',
+    endedTurnNumber: number,
+  ) => [
+    {
+      payload: {
+        amount: 1,
+        seat: 'north',
+        siteInstanceId: site.instanceId,
+        sourceInstanceId: opening.devilsEggInstanceId,
+      },
+      type: 'end-turn-site-life-loss-triggered',
+    },
+    {
+      payload: {
+        amount: 1,
+        life,
+        seat: 'north',
+        sourceInstanceId: opening.devilsEggInstanceId,
+      },
+      type: 'avatar-life-lost',
+    },
+    { payload: { seat: endedSeat, turnNumber: endedTurnNumber }, type: 'turn-ended' },
+    {
+      payload: {
+        drawSkipped: false,
+        seat: endedSeat === 'north' ? 'south' : 'north',
+        turnNumber: endedTurnNumber + 1,
+      },
+      type: 'turn-started',
+    },
+  ];
+  const eventShape = (receipt: typeof cast.receipt): JsonValue => receipt.events
+    .map(({ payload, type }) => ({ payload, type })) as unknown as JsonValue;
+  const exactNorth = canonicalJson(eventShape(northEnded.receipt))
+    === canonicalJson(endExpected(lifeBefore - 1, 'north', northTurnNumber) as unknown as JsonValue);
+  const exactSouth = canonicalJson(eventShape(southEnded.receipt))
+    === canonicalJson(endExpected(lifeBefore - 2, 'south', southTurnNumber) as unknown as JsonValue);
+  const causal = (receipt: typeof cast.receipt): boolean => {
+    const first = receipt.events[0]?.eventSequence;
+    return first !== undefined && receipt.events.every((event, index) =>
+      event.cause.actionId === receipt.actionId
+        && event.cause.receiptSequence === receipt.receiptSequence
+        && event.eventSequence === first + index);
+  };
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+  const southDeck = deckList(opening.manifest.decks.south, opening.names);
+  const definition = session.state.cards[input.devilsEgg.stableId];
+  const artifact = session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === opening.devilsEggInstanceId);
+  const allEvents = session.transcript.flatMap(({ events }) => events);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified: causal(cast.receipt)
+      && causal(northEnded.receipt)
+      && causal(southEnded.receipt),
+    deck,
+    devilsEgg: input.devilsEgg.name,
+    exactEndTurnEffects: canonicalJson(eventShape(cast.receipt))
+      === canonicalJson(castExpected as unknown as JsonValue)
+      && exactNorth
+      && exactSouth
+      && session.state.players.north.avatar.life === lifeBefore - 2
+      && session.state.players.south.avatar.life === 20,
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && southDeck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && southDeck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && (deck.spellbook.find(({ name }) => name === input.devilsEgg.name)?.copies ?? 0)
+        === 1,
+    noDamageDeathsOrRandomness: session.transcript.every(({ randomDraws }) =>
+      randomDraws.length === 0)
+      && allEvents.every(({ type }) => type !== 'damage-dealt'
+        && type !== 'minion-died'
+        && type !== 'game-ended'),
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    structuralFactsVerified: definition?.cardType === 'artifact'
+      && definition.manaCost === 3
+      && definition.atEndOfEachTurnSiteControllerLosesLife === 1
+      && artifact !== undefined
+      && 'location' in artifact
+      && artifact.location === 'C4'
+      && artifact.region === 'surface'
+      && castManaPaid === 3,
+    unsupportedMechanicsAbsent: session.state.terminal.status === 'active'
+      && cast.receipt.events.length === castExpected.length
+      && northEnded.receipt.events.length === 4
+      && southEnded.receipt.events.length === 4,
+  });
+}
+
 function runAirSpellcasterFreeze(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['airSpellcasterFreeze'] {
@@ -21757,6 +22015,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airSlingPixies = runAirSlingPixies(input);
   const airSpireLich = runAirSpireLich(input);
   const airNimbusJinn = runAirNimbusJinn(input);
+  const airDevilsEgg = runAirDevilsEgg(input);
   const airSpellcasterFreeze = runAirSpellcasterFreeze(input);
   const airArcLightning = runAirArcLightning(input);
   const airLightningBolt = runAirLightningBolt(input);
@@ -21968,6 +22227,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     airSlingPixies,
     airSpireLich,
     airNimbusJinn,
+    airDevilsEgg,
     airSpellcasterFreeze,
     airArcLightning,
     airLightningBolt,
