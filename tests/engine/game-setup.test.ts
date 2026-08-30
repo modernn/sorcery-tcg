@@ -13114,7 +13114,7 @@ test('RULE-04 a carried Lethal Artifact kills on positive strike damage and drop
         thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
       } as unknown as GameCardDefinition,
     },
-  }), /exactly one supported bearer grant/);
+  }), /exactly one supported Artifact effect/);
 
   let session = keep(createGameSession(gameManifest));
   session = keep(session);
@@ -13170,6 +13170,356 @@ test('RULE-04 a carried Lethal Artifact kills on positive strike damage and drop
     location: artifact.location,
     region: artifact.region,
   })), [{ bearer: undefined, controller: null, location: 'C3', region: 'surface' }]);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 Siege Ballista taps its bearer and another ally for measured artifact damage', () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const north: GameDeckSpec = {
+    atlas: Array(6).fill('ballista-north-site'),
+    avatar: 'ballista-north-avatar',
+    spellbook: [
+      'siege-ballista',
+      'ballista-bearer',
+      'ballista-helper',
+      'siege-ballista',
+      'ballista-bearer',
+      'ballista-helper',
+    ],
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(6).fill('ballista-south-site'),
+    avatar: 'ballista-south-avatar',
+    spellbook: [
+      'ballista-far-target',
+      'ballista-near-target',
+      'ballista-burrowed-target',
+      'ballista-far-target',
+      'ballista-near-target',
+      'ballista-burrowed-target',
+    ],
+  };
+  const cards: Record<string, GameCardDefinition> = {
+    'ballista-bearer': {
+      attack: 1,
+      burrowing: true,
+      cardType: 'minion',
+      defense: 2,
+      lethal: true,
+      manaCost: 0,
+      stealth: true,
+      thresholds,
+    },
+    'ballista-burrowed-target': {
+      attack: 1,
+      burrowing: true,
+      cardType: 'minion',
+      defense: 5,
+      manaCost: 0,
+      thresholds,
+    },
+    'ballista-far-target': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 5,
+      manaCost: 0,
+      thresholds,
+    },
+    'ballista-helper': {
+      attack: 1,
+      burrowing: true,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      thresholds,
+    },
+    'ballista-near-target': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 5,
+      manaCost: 0,
+      thresholds,
+    },
+    'ballista-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'ballista-north-site': { cardType: 'site', elements: ['earth'] },
+    'ballista-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'ballista-south-site': { cardType: 'site', elements: ['earth'] },
+    'siege-ballista': {
+      cardType: 'artifact',
+      manaCost: 0,
+      tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps: 3,
+      thresholds,
+    },
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-siege-ballista-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north' as const,
+  };
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      'siege-ballista': {
+        ...cards['siege-ballista'],
+        tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps: 4,
+      } as unknown as GameCardDefinition,
+    },
+    seed: 2,
+  }), /tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps must be 3/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      'siege-ballista': {
+        ...cards['siege-ballista'],
+        grantsBearerLethal: true,
+      } as unknown as GameCardDefinition,
+    },
+    seed: 2,
+  }), /exactly one supported Artifact effect/);
+  const manifest = createGameManifest({ ...input, seed: 2 });
+  assert.deepEqual(manifest.cards['siege-ballista'], cards['siege-ballista']);
+
+  let session = keep(keep(createGameSession(manifest)));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'ballista-bearer'
+    && descriptor.cell === 'C4'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'ballista-helper'
+    && descriptor.cell === 'C4'
+    && descriptor.region === undefined);
+  const bearer = session.state.realm.units.find(({ cardId }) => cardId === 'ballista-bearer');
+  const helper = session.state.realm.units.find(({ cardId }) => cardId === 'ballista-helper');
+  assert.ok(bearer && helper);
+  take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+    && descriptor.cardId === 'siege-ballista'
+    && descriptor.bearer?.kind === 'minion'
+    && descriptor.bearer.instanceId === bearer.instanceId);
+  const ballista = session.state.realm.artifacts?.find(({ cardId }) => cardId === 'siege-ballista');
+  assert.ok(ballista);
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-damage'
+      && descriptor.artifactInstanceId === ballista.instanceId
+      && descriptor.helper.instanceId === helper.instanceId), false);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'ballista-far-target' && descriptor.cell === 'C1');
+  const farTarget = session.state.realm.units.find(({ cardId }) => cardId === 'ballista-far-target');
+  assert.ok(farTarget);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-damage'
+      && descriptor.artifactInstanceId === ballista.instanceId
+      && descriptor.target.instanceId === farTarget.instanceId), false);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'ballista-near-target'
+    && descriptor.cell === 'C2'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'ballista-burrowed-target'
+    && descriptor.cell === 'C2'
+    && descriptor.region === 'underground');
+  const nearTarget = session.state.realm.units.find(({ cardId }) => cardId === 'ballista-near-target');
+  const burrowedTarget = session.state.realm.units.find(({ cardId }) =>
+    cardId === 'ballista-burrowed-target');
+  assert.ok(nearTarget && burrowedTarget);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+
+  const abilities = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-damage'
+      && descriptor.artifactInstanceId === ballista.instanceId);
+  assert.equal(abilities.some(({ descriptor }) => descriptor.kind === 'activate-artifact-damage'
+    && descriptor.helper.instanceId === helper.instanceId
+    && descriptor.target.instanceId === nearTarget.instanceId), true, JSON.stringify({
+    abilities: abilities.map(({ descriptor }) => descriptor),
+    bearer: bearer.instanceId,
+    burrowedTarget: burrowedTarget.instanceId,
+    farTarget: farTarget.instanceId,
+    helper: helper.instanceId,
+    nearTarget: nearTarget.instanceId,
+  }));
+  assert.equal(abilities.some(({ descriptor }) => descriptor.kind === 'activate-artifact-damage'
+    && descriptor.target.instanceId === farTarget.instanceId), false);
+  assert.equal(abilities.some(({ descriptor }) => descriptor.kind === 'activate-artifact-damage'
+    && descriptor.target.instanceId === burrowedTarget.instanceId), false);
+  assert.equal(abilities.some(({ descriptor }) => descriptor.kind === 'activate-artifact-damage'
+    && descriptor.target.instanceId === bearer.instanceId), true);
+
+  const noHelperState = {
+    ...session.state,
+    realm: {
+      ...session.state.realm,
+      units: session.state.realm.units.map((unit) => unit.instanceId === helper.instanceId
+        ? { ...unit, location: 'C3' as const }
+        : unit),
+    },
+  };
+  assert.equal(legalGameActions(noHelperState, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-damage'
+      && descriptor.helper.instanceId === helper.instanceId), false);
+  const tappedHelperState = {
+    ...session.state,
+    realm: {
+      ...session.state.realm,
+      units: session.state.realm.units.map((unit) => unit.instanceId === helper.instanceId
+        ? { ...unit, tapped: true }
+        : unit),
+    },
+  };
+  assert.equal(legalGameActions(tappedHelperState, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-damage'
+      && descriptor.helper.instanceId === helper.instanceId), false);
+  const disabledBearerState = {
+    ...session.state,
+    realm: {
+      ...session.state.realm,
+      units: session.state.realm.units.map((unit) => unit.instanceId === bearer.instanceId
+        ? { ...unit, disabledUntilDamaged: true as const }
+        : unit),
+    },
+  };
+  assert.equal(legalGameActions(disabledBearerState, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-damage'
+      && descriptor.artifactInstanceId === ballista.instanceId), false);
+  const uncarriedState = {
+    ...session.state,
+    realm: {
+      ...session.state.realm,
+      artifacts: session.state.realm.artifacts!.map((artifact) =>
+        artifact.instanceId === ballista.instanceId
+          ? {
+            cardId: artifact.cardId,
+            instanceId: artifact.instanceId,
+            location: 'C4' as const,
+            owner: artifact.owner,
+            region: 'surface' as const,
+            source: artifact.source,
+          }
+          : artifact),
+    },
+  };
+  assert.equal(legalGameActions(uncarriedState, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-damage'
+      && descriptor.artifactInstanceId === ballista.instanceId), false);
+  const hiddenTargetState = {
+    ...session.state,
+    realm: {
+      ...session.state.realm,
+      units: session.state.realm.units.map((unit) => unit.instanceId === nearTarget.instanceId
+        ? { ...unit, stealthed: true }
+        : unit),
+    },
+  };
+  assert.equal(legalGameActions(hiddenTargetState, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-damage'
+      && descriptor.target.instanceId === nearTarget.instanceId), false);
+  const undergroundState = {
+    ...session.state,
+    realm: {
+      ...session.state.realm,
+      units: session.state.realm.units.map((unit) =>
+        unit.instanceId === bearer.instanceId || unit.instanceId === helper.instanceId
+          ? { ...unit, region: 'underground' as const }
+          : unit),
+    },
+  };
+  assert.equal(legalGameActions(undergroundState, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-damage'
+      && descriptor.artifactInstanceId === ballista.instanceId
+      && descriptor.helper.instanceId === helper.instanceId
+      && descriptor.target.instanceId === burrowedTarget.instanceId), true);
+
+  const overlap = abilities.find(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-damage'
+      && descriptor.helper.instanceId === helper.instanceId
+      && descriptor.target.instanceId === helper.instanceId);
+  assert.ok(overlap);
+  const overlapResult = stepGame(session, overlap);
+  assert.equal(overlapResult.accepted, true);
+  if (!overlapResult.accepted) return;
+  assert.equal(overlapResult.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === helper.instanceId), false);
+  assert.equal(overlapResult.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === bearer.instanceId)?.tapped, true);
+  assert.equal(verifyGameReplay(overlapResult.session), true);
+
+  const activation = abilities.find(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-damage'
+      && descriptor.helper.instanceId === helper.instanceId
+      && descriptor.target.instanceId === nearTarget.instanceId);
+  assert.ok(activation);
+  const result = stepGame(session, activation);
+  assert.equal(result.accepted, true);
+  if (!result.accepted) return;
+  session = result.session;
+  const survivingBearer = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === bearer.instanceId);
+  const survivingHelper = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === helper.instanceId);
+  const damagedTarget = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === nearTarget.instanceId);
+  assert.deepEqual({
+    bearerStealthed: survivingBearer?.stealthed,
+    bearerTapped: survivingBearer?.tapped,
+    helperTapped: survivingHelper?.tapped,
+    targetDamage: damagedTarget?.damage,
+  }, {
+    bearerStealthed: true,
+    bearerTapped: true,
+    helperTapped: true,
+    targetDamage: 3,
+  });
+  const activated = result.receipt.events.find(({ type }) => type === 'artifact-damage-activated');
+  const allocated = result.receipt.events.find(({ type }) => type === 'artifact-damage-allocated');
+  assert.ok(activated);
+  assert.ok(allocated);
+  assert.equal(canonicalJson(activated.payload).includes(ballista.instanceId), true);
+  assert.deepEqual(allocated.payload, {
+    amount: 3,
+    sourceInstanceId: ballista.instanceId,
+    targetInstanceId: nearTarget.instanceId,
+  });
+  assert.deepEqual(result.receipt.events.map(({ type }) => type), [
+    'artifact-damage-activated',
+    'artifact-damage-allocated',
+    'damage-dealt',
+  ]);
+  assert.equal(result.receipt.randomDraws.length, 0);
+  assert.equal(session.transcript.every(({ randomDraws }) => randomDraws.length === 0), true);
   assert.equal(verifyGameReplay(session), true);
 });
 

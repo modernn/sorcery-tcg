@@ -922,7 +922,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 23 : 29,
+        preset.id === 'air-vs-earth-lesson' ? 23 : 30,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -930,7 +930,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 29 : 23,
+        preset.id === 'air-vs-earth-lesson' ? 30 : 23,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -1001,6 +1001,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     Overpower: 2,
     'Pudge Butcher': 1,
     'Scent Hounds': 2,
+    'Siege Ballista': 1,
     'Slumbering Giantess': 1,
     'Wild Boars': 2,
     'Wraetannis Titan': 1,
@@ -1118,6 +1119,23 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       burrowAllMinionsAndArtifactsAtTargetLandSite: true,
       manaCost: 4,
       thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    });
+  }
+  const siegeBallistaId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Siege Ballista')?.[0];
+  assert.ok(siegeBallistaId);
+  const siegeBallista = airLesson.manifest.cards[siegeBallistaId];
+  assert.equal(siegeBallista?.cardType, 'artifact');
+  if (siegeBallista?.cardType === 'artifact') {
+    assert.deepEqual({
+      manaCost: siegeBallista.manaCost,
+      tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps:
+        siegeBallista.tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps,
+      thresholds: siegeBallista.thresholds,
+    }, {
+      manaCost: 3,
+      tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps: 3,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
     });
   }
   const scentHoundsId = Object.entries(airLesson.cardNames)
@@ -1743,6 +1761,26 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthCaveIn.deck.spellbook
     .find(({ name }) => name === 'Cave-In')?.copies, 1);
   assert.equal(result.earthCaveIn.replayVerified, true);
+  assert.equal(result.earthSiegeBallista.siegeBallista, 'Siege Ballista');
+  assert.equal(result.earthSiegeBallista.scentHounds, 'Scent Hounds');
+  assert.equal(result.earthSiegeBallista.snowLeopard, 'Snow Leopard');
+  assert.equal(result.earthSiegeBallista.seed, 3828);
+  assert.equal(result.earthSiegeBallista.acceptedActionCount, 28);
+  assert.equal(result.earthSiegeBallista.twoStepRangeVerified, true);
+  assert.equal(result.earthSiegeBallista.exactCastAndActivation, true);
+  assert.equal(result.earthSiegeBallista.fixedDamageKilledTarget, true);
+  assert.equal(result.earthSiegeBallista.noReturnStrike, true);
+  assert.equal(result.earthSiegeBallista.ballistaRemainedCarried, true);
+  assert.equal(result.earthSiegeBallista.causalEventsVerified, true);
+  assert.equal(result.earthSiegeBallista.legalConstructedDeck, true);
+  assert.equal(result.earthSiegeBallista.noRandomDraws, true);
+  assert.equal(result.earthSiegeBallista.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthSiegeBallista.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthSiegeBallista.deck.spellbook
+    .find(({ name }) => name === 'Siege Ballista')?.copies, 1);
+  assert.equal(result.earthSiegeBallista.replayVerified, true);
   assert.equal(result.earthBorderMilitia.borderMilitia, 'Border Militia');
   assert.equal(result.earthBorderMilitia.footSoldier, 'Foot Soldier');
   assert.equal(result.earthBorderMilitia.seed, 7688);

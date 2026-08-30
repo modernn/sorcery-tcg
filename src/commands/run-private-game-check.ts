@@ -610,6 +610,23 @@ export type PrivateGameCheck = Readonly<{
     survivorAndArtifactUndergroundCarried: boolean;
     swordAndShield: string;
   }>;
+  earthSiegeBallista: Readonly<{
+    acceptedActionCount: number;
+    ballistaRemainedCarried: boolean;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    exactCastAndActivation: boolean;
+    fixedDamageKilledTarget: boolean;
+    legalConstructedDeck: boolean;
+    noRandomDraws: boolean;
+    noReturnStrike: boolean;
+    replayVerified: boolean;
+    scentHounds: string;
+    seed: number;
+    siegeBallista: string;
+    snowLeopard: string;
+    twoStepRangeVerified: boolean;
+  }>;
   earthRescue: Readonly<{
     acceptedActionCount: number;
     boskTroll: string;
@@ -1363,6 +1380,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   blink: NormalizedCard;
   bury: NormalizedCard;
   caveIn: NormalizedCard;
+  siegeBallista: NormalizedCard;
   borderMilitia: NormalizedCard;
   burrowingMinion: NormalizedCard;
   cards: readonly NormalizedCard[];
@@ -2184,6 +2202,28 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || caveIn.thresholds.water !== 0
     || caveIn.rarity !== 'exceptional') {
     throw new Error('private site-wide forced-burrow Magic no longer matches its supported facts');
+  }
+  const siegeBallista = snapshot.cards.find(({ name }) => name === 'Siege Ballista');
+  const siegeBallistaTokens = siegeBallista?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
+  if (!siegeBallista
+    || siegeBallista.stableId
+      !== 'card:76ed02aea74e242ac32b426a7fb87769474bfb54287a4b7b1f30d2ce9fc9440e'
+    || siegeBallista.officialSourceId !== '001-siege_ballista-b-f'
+    || siegeBallista.cardType !== 'artifact'
+    || siegeBallistaTokens.length !== 16
+    || identityHash(siegeBallistaTokens as unknown as JsonValue)
+      !== 'sha256:d6a31b7f3c30bd67cb0db944dc2db4bd35785991c2b77a803c12e96a639df5eb'
+    || siegeBallista.manaCost !== 3
+    || siegeBallista.attack !== null
+    || siegeBallista.defense !== null
+    || siegeBallista.life !== null
+    || siegeBallista.elements.length !== 0
+    || siegeBallista.thresholds.air !== 0
+    || siegeBallista.thresholds.earth !== 0
+    || siegeBallista.thresholds.fire !== 0
+    || siegeBallista.thresholds.water !== 0
+    || siegeBallista.rarity !== 'exceptional') {
+    throw new Error('private carried ranged-damage Artifact no longer matches its supported facts');
   }
   const duel = snapshot.cards.find(({ name }) => name === 'Duel');
   if (!duel
@@ -3450,6 +3490,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     borderMilitia,
     bury,
     caveIn,
+    siegeBallista,
     burrowingMinion,
     cards: snapshot.cards,
     cannotDefendMinion,
@@ -3680,6 +3721,7 @@ function gameDefinition(
   genesisStrikeEachEnemyHere = false,
   genesisDisableSelfUntilDamaged = false,
   burrowAllMinionsAndArtifactsAtTargetLandSite = false,
+  tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -3704,12 +3746,16 @@ function gameDefinition(
   }
   if (card.cardType === 'artifact'
     && card.manaCost !== null
-    && Number(grantsBearerPower === 2) + Number(grantsBearerLethal) === 1) {
+    && Number(grantsBearerPower === 2)
+      + Number(grantsBearerLethal)
+      + Number(tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps) === 1) {
     return {
       cardType: 'artifact',
       ...(grantsBearerPower === 2
         ? { grantsBearerPower }
-        : { grantsBearerLethal: true as const }),
+        : grantsBearerLethal
+          ? { grantsBearerLethal: true as const }
+          : { tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps: 3 as const }),
       manaCost: card.manaCost,
       thresholds: card.thresholds,
     };
@@ -3893,7 +3939,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -4073,6 +4119,18 @@ function buildManifest(
       ...earthCaveInBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
     ],
   };
+  const earthSiegeBallistaBase = elementalDeck(
+    'earth',
+    [input.scentHounds, input.stealthTargetMinion],
+    [input.spire],
+  );
+  const earthSiegeBallistaDeck: GameDeckSpec = {
+    ...earthSiegeBallistaBase,
+    spellbook: [
+      input.siegeBallista.stableId,
+      ...earthSiegeBallistaBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
+    ],
+  };
   const earthBorderMilitiaDeck = elementalDeck('earth', [], [], [input.borderMilitia]);
   const earthHumbleVillageDeck = elementalDeck('earth', [], [input.humbleVillage]);
   const earthDuelDeck = elementalDeck(
@@ -4171,6 +4229,7 @@ function buildManifest(
       input.wraetannisTitan.stableId,
       input.slumberingGiantess.stableId,
       input.caveIn.stableId,
+      input.siegeBallista.stableId,
     ],
   };
   const fireStarterDeck = elementalDeck(
@@ -4445,6 +4504,8 @@ function buildManifest(
         ? earthBuryDeck
       : scenario === 'earth-cave-in'
         ? earthCaveInDeck
+      : scenario === 'earth-siege-ballista'
+        ? earthSiegeBallistaDeck
       : scenario === 'earth-quagmire'
         ? earthQuagmireDeck
       : scenario === 'earth-holy-ground'
@@ -4622,6 +4683,8 @@ function buildManifest(
         ? earthBuryDeck
       : scenario === 'earth-cave-in'
         ? earthCaveInDeck
+      : scenario === 'earth-siege-ballista'
+        ? earthSiegeBallistaDeck
       : scenario === 'earth-quagmire'
         ? earthQuagmireDeck
       : scenario === 'earth-holy-ground'
@@ -4817,6 +4880,7 @@ function buildManifest(
       card.stableId === input.wraetannisTitan.stableId,
       card.stableId === input.slumberingGiantess.stableId,
       card.stableId === input.caveIn.stableId,
+      card.stableId === input.siegeBallista.stableId,
     ),
   ]));
   return {
@@ -6275,6 +6339,77 @@ function findEarthCaveInOpening(
     };
   }
   throw new Error('private Cave-In scenario no longer produces its supported opening');
+}
+
+function findEarthSiegeBallistaOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  bearerInstanceId: string;
+  helperInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string];
+  seed: number;
+  session: GameSession;
+  siegeBallistaInstanceId: string;
+  snowLeopardInstanceId: string;
+  southAirSiteInstanceId: string;
+  southSecondSiteInstanceId: string;
+}> {
+  // Calibrated against the ignored exact-card authority snapshot.
+  const seed = 3_828;
+  const built = buildManifest(input, seed, 'earth-siege-ballista');
+  const session = createGameSession(built.manifest);
+  const northEarthSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('earth');
+    });
+  const northThirdSite = session.state.players.north.hand.atlas.find(({ instanceId }) =>
+    !northEarthSites.slice(0, 2).some((site) => site.instanceId === instanceId));
+    const southAirSite = session.state.players.south.hand.atlas.find(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('air');
+    });
+    const southSecondSite = session.state.players.south.hand.atlas
+      .find(({ instanceId }) => instanceId !== southAirSite?.instanceId);
+    const northWindow = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 3),
+    ];
+    const scentHounds = northWindow.filter(({ cardId }) => cardId === input.scentHounds.stableId);
+    const siegeBallista = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 2),
+    ].find(({ cardId }) => cardId === input.siegeBallista.stableId);
+    const snowLeopard = [
+      ...session.state.players.south.hand.spellbook,
+      ...session.state.players.south.spellbook.slice(0, 1),
+    ].find(({ cardId }) => cardId === input.stealthTargetMinion.stableId);
+    if (northEarthSites.length >= 2
+      && northThirdSite
+      && southAirSite
+      && southSecondSite
+      && scentHounds.length >= 2
+      && siegeBallista
+      && snowLeopard) {
+      return {
+        ...built,
+        bearerInstanceId: scentHounds[0]!.instanceId,
+        helperInstanceId: scentHounds[1]!.instanceId,
+        northSiteInstanceIds: [
+          northEarthSites[0]!.instanceId,
+          northEarthSites[1]!.instanceId,
+          northThirdSite.instanceId,
+        ],
+        seed,
+        session,
+        siegeBallistaInstanceId: siegeBallista.instanceId,
+        snowLeopardInstanceId: snowLeopard.instanceId,
+        southAirSiteInstanceId: southAirSite.instanceId,
+        southSecondSiteInstanceId: southSecondSite.instanceId,
+      };
+  }
+  throw new Error('private Siege Ballista scenario no longer produces its supported opening');
 }
 
 function findEarthRescueOpening(
@@ -10617,6 +10752,190 @@ function runEarthCaveIn(
       && observedSwordAndShield.region === 'underground',
     swordAndShield:
       opening.names.get(input.swordAndShield.stableId) ?? input.swordAndShield.stableId,
+  });
+}
+
+function runEarthSiegeBallista(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthSiegeBallista'] {
+  const opening = findEarthSiegeBallistaOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southAirSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.snowLeopardInstanceId
+    && descriptor.cell === 'C1'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.bearerInstanceId
+    && descriptor.cell === 'C3'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSecondSiteInstanceId
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+    && descriptor.cell === 'B4');
+  const castResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-artifact'
+      && descriptor.cardInstanceId === opening.siegeBallistaInstanceId
+      && descriptor.bearer?.kind === 'minion'
+      && descriptor.bearer.instanceId === opening.bearerInstanceId));
+  if (!castResult.accepted) throw new Error('private Siege Ballista cast was rejected');
+  session = castResult.session;
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.helperInstanceId
+    && descriptor.cell === 'C3'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const bearerBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.bearerInstanceId);
+  const helperBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.helperInstanceId);
+  const targetBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.snowLeopardInstanceId);
+  const activationChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-damage'
+      && descriptor.artifactInstanceId === opening.siegeBallistaInstanceId
+      && descriptor.helper.kind === 'minion'
+      && descriptor.helper.instanceId === opening.helperInstanceId
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === opening.snowLeopardInstanceId);
+  const activation = activationChoices[0];
+  if (!activation || activationChoices.length !== 1) {
+    throw new Error('private Siege Ballista exact activation is unavailable or ambiguous');
+  }
+  const activationResult = stepGame(session, activation);
+  if (!activationResult.accepted) throw new Error('private Siege Ballista activation was rejected');
+  session = activationResult.session;
+
+  const castPayload = castResult.receipt.events[0]
+    && isJsonRecord(castResult.receipt.events[0].payload)
+    ? castResult.receipt.events[0].payload
+    : undefined;
+  const events = activationResult.receipt.events;
+  const activationPayload = events[0] && isJsonRecord(events[0].payload)
+    ? events[0].payload
+    : undefined;
+  const allocationEvent = events.find(({ type }) => type === 'artifact-damage-allocated');
+  const allocationPayload = allocationEvent && isJsonRecord(allocationEvent.payload)
+    ? allocationEvent.payload
+    : undefined;
+  const damageEvent = events.find(({ payload, type }) =>
+    type === 'damage-dealt'
+      && isJsonRecord(payload)
+      && payload.instanceId === opening.snowLeopardInstanceId);
+  const damagePayload = damageEvent && isJsonRecord(damageEvent.payload)
+    ? damageEvent.payload
+    : undefined;
+  const deathEvent = events.find(({ payload, type }) =>
+    type === 'minion-died'
+      && isJsonRecord(payload)
+      && payload.instanceId === opening.snowLeopardInstanceId);
+  const bearerAfter = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.bearerInstanceId);
+  const helperAfter = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.helperInstanceId);
+  const ballistaAfter = session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === opening.siegeBallistaInstanceId);
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    ballistaRemainedCarried: ballistaAfter !== undefined
+      && 'bearer' in ballistaAfter
+      && ballistaAfter.bearer.kind === 'minion'
+      && ballistaAfter.bearer.instanceId === opening.bearerInstanceId,
+    causalEventsVerified: events.map(({ type }) => type).join(',')
+      === 'artifact-damage-activated,artifact-damage-allocated,damage-dealt,minion-died'
+      && events[0]?.type === 'artifact-damage-activated'
+      && activationPayload?.bearerInstanceId === opening.bearerInstanceId
+      && activationPayload.helperInstanceId === opening.helperInstanceId
+      && activationPayload.sourceInstanceId === opening.siegeBallistaInstanceId
+      && activationPayload.targetInstanceId === opening.snowLeopardInstanceId
+      && allocationPayload?.amount === 3
+      && allocationPayload.sourceInstanceId === opening.siegeBallistaInstanceId
+      && allocationPayload.targetInstanceId === opening.snowLeopardInstanceId,
+    deck,
+    exactCastAndActivation: castResult.receipt.events.length === 1
+      && castResult.receipt.events[0]?.type === 'artifact-conjured'
+      && castPayload?.cardId === input.siegeBallista.stableId
+      && castPayload.instanceId === opening.siegeBallistaInstanceId
+      && castPayload.manaPaid === 3
+      && castPayload.bearerInstanceId === opening.bearerInstanceId
+      && castPayload.bearerKind === 'minion'
+      && castPayload.bearerSeat === 'north'
+      && activationChoices.length === 1
+      && bearerBefore?.tapped === false
+      && helperBefore?.tapped === false
+      && bearerAfter?.tapped === true
+      && helperAfter?.tapped === true,
+    fixedDamageKilledTarget: targetBefore?.damage === 0
+      && damagePayload?.amount === 3
+      && damagePayload.accumulated === 3
+      && deathEvent !== undefined
+      && session.state.realm.units.every(({ instanceId }) =>
+        instanceId !== opening.snowLeopardInstanceId)
+      && session.state.players.south.cemetery.some(({ instanceId }) =>
+        instanceId === opening.snowLeopardInstanceId),
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && deck.spellbook.find(({ name }) => name === input.siegeBallista.name)?.copies === 1,
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    noReturnStrike: bearerAfter?.damage === 0
+      && events.every(({ payload, type }) =>
+        type !== 'fight-started'
+          && type !== 'strike-damage-allocated'
+          && !(type === 'damage-dealt'
+            && isJsonRecord(payload)
+            && payload.instanceId === opening.bearerInstanceId)),
+    replayVerified: verifyGameReplay(session),
+    scentHounds: opening.names.get(input.scentHounds.stableId) ?? input.scentHounds.stableId,
+    seed: opening.seed,
+    siegeBallista:
+      opening.names.get(input.siegeBallista.stableId) ?? input.siegeBallista.stableId,
+    snowLeopard:
+      opening.names.get(input.stealthTargetMinion.stableId) ?? input.stealthTargetMinion.stableId,
+    twoStepRangeVerified: bearerBefore?.location === 'C3'
+      && bearerBefore.region === 'surface'
+      && targetBefore?.location === 'C1'
+      && targetBefore.region === 'surface'
+      && session.state.realm.sites.C2 !== undefined,
   });
 }
 
@@ -18184,6 +18503,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthWraetannisTitan = runEarthWraetannisTitan(input);
   const earthSlumberingGiantess = runEarthSlumberingGiantess(input);
   const earthCaveIn = runEarthCaveIn(input);
+  const earthSiegeBallista = runEarthSiegeBallista(input);
   const earthBorderMilitia = runEarthBorderMilitia(input);
   const earthHumbleVillage = runEarthHumbleVillage(input);
   const earthDuel = runEarthDuel(input);
@@ -18398,6 +18718,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthWraetannisTitan,
     earthSlumberingGiantess,
     earthCaveIn,
+    earthSiegeBallista,
     earthBorderMilitia,
     earthHumbleVillage,
     earthDuel,

@@ -53,6 +53,7 @@ export type GameCardDefinition =
     grantsBearerLethal?: never;
     grantsBearerPower: 2;
     manaCost: number;
+    tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
     thresholds: GameThresholds;
   }>
   | Readonly<{
@@ -60,6 +61,15 @@ export type GameCardDefinition =
     grantsBearerLethal: true;
     grantsBearerPower?: never;
     manaCost: number;
+    tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
+    thresholds: GameThresholds;
+  }>
+  | Readonly<{
+    cardType: 'artifact';
+    grantsBearerLethal?: never;
+    grantsBearerPower?: never;
+    manaCost: number;
+    tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps: 3;
     thresholds: GameThresholds;
   }>
   | Readonly<{
@@ -539,6 +549,12 @@ type GameActionDescriptor =
     kind: 'drop-artifacts';
     unit: GameUnitRef;
   }>
+  | Readonly<{
+    artifactInstanceId: StateHash;
+    helper: GameUnitRef;
+    kind: 'activate-artifact-damage';
+    target: GameUnitRef;
+  }>
   | Readonly<{ kind: 'decline-attack' }>
   | Readonly<{ kind: 'declare-attack'; target: CombatTarget }>
   | Readonly<{
@@ -853,6 +869,46 @@ function artifactDescriptors(state: GameState, seat: GameSeat): readonly GameAct
   });
 }
 
+function artifactDamageAbilityDescriptors(
+  state: GameState,
+  seat: GameSeat,
+): readonly GameActionDescriptor[] {
+  const allies = unitRefs(state, seat);
+  const targets = (['north', 'south'] as const).flatMap((targetSeat) =>
+    unitRefs(state, targetSeat));
+  return (state.realm.artifacts ?? []).flatMap((artifact) => {
+    if (!('bearer' in artifact) || artifact.bearer.seat !== seat) return [];
+    const definition = cardDefinition(state, artifact.cardId);
+    if (definition.cardType !== 'artifact'
+      || definition.tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps !== 3
+      || !readyUnit(state, artifact.bearer)) return [];
+    const bearer = unitStatus(state, artifact.bearer);
+    const locations = new Set(locationsWithinMeasuredSteps(
+      state,
+      { cell: bearer.location, region: bearer.region },
+      2,
+    ).map(({ cell }) => cell));
+    const legalTargets = targets.filter((target) => {
+      const status = unitStatus(state, target);
+      return status.region === bearer.region
+        && locations.has(status.location)
+        && (target.seat === seat || !status.stealthed);
+    });
+    return allies.filter((helper) => {
+      const status = unitStatus(state, helper);
+      return helper.instanceId !== artifact.bearer.instanceId
+        && readyUnit(state, helper)
+        && status.location === bearer.location
+        && status.region === bearer.region;
+    }).flatMap((helper) => legalTargets.map((target) => ({
+      artifactInstanceId: artifact.instanceId,
+      helper,
+      kind: 'activate-artifact-damage' as const,
+      target,
+    })));
+  });
+}
+
 function pickUpArtifactDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   const uncarried = (state.realm.artifacts ?? [])
     .flatMap((artifact) => 'bearer' in artifact ? [] : [artifact]);
@@ -1083,18 +1139,11 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
     }
     if (definition.damageEachAbovegroundMinion === 1) return [cast];
     if (definition.damageEachUnitAtLocationWithinTwoSteps !== undefined) {
-      const endpoints = movementPaths(
+      return locationsWithinMeasuredSteps(
         state,
         { cell: caster.location, region: caster.region },
         2,
-        seat,
-      ).map((path) => path.at(-1)!);
-      return [...new Map(endpoints.map((location) => [
-        `${location.cell}:${location.region}`,
-        location,
-      ])).values()]
-        .sort((left, right) => left.cell.localeCompare(right.cell))
-        .map((targetLocation) => ({ ...cast, targetLocation }));
+      ).map((targetLocation) => ({ ...cast, targetLocation }));
     }
     if (definition.damageRandomUnitAtLocation !== undefined) {
       return REALM_CELLS
@@ -1295,8 +1344,16 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     if (card.grantsBearerLethal !== undefined && card.grantsBearerLethal !== true) {
       throw new RangeError(`${path}.grantsBearerLethal must be true`);
     }
-    if (Number(card.grantsBearerPower === 2) + Number(card.grantsBearerLethal === true) !== 1) {
-      throw new RangeError(`${path} must define exactly one supported bearer grant`);
+    if (card.tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps !== undefined
+      && card.tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps !== 3) {
+      throw new RangeError(
+        `${path}.tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps must be 3`,
+      );
+    }
+    if (Number(card.grantsBearerPower === 2)
+      + Number(card.grantsBearerLethal === true)
+      + Number(card.tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps === 3) !== 1) {
+      throw new RangeError(`${path} must define exactly one supported Artifact effect`);
     }
     if (!Number.isSafeInteger(card.manaCost) || card.manaCost < 0) {
       throw new RangeError(`${path}.manaCost must be a supported nonnegative safe integer`);
@@ -1817,7 +1874,11 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             cardType: 'artifact' as const,
             ...(card.grantsBearerPower === 2
               ? { grantsBearerPower: 2 as const }
-              : { grantsBearerLethal: true as const }),
+              : card.grantsBearerLethal === true
+                ? { grantsBearerLethal: true as const }
+                : {
+                  tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps: 3 as const,
+                }),
             manaCost: card.manaCost,
             thresholds: { ...card.thresholds },
           }
@@ -2626,6 +2687,29 @@ function locationExists(state: GameState, location: GameLocation): boolean {
       || location.region === (isWaterSite(state, location.cell) ? 'underwater' : 'underground'));
 }
 
+function locationsWithinMeasuredSteps(
+  state: GameState,
+  start: GameLocation,
+  maximumSteps: number,
+): readonly GameLocation[] {
+  if (!locationExists(state, start)) return [];
+  const distances = new Map<RealmCell, number>([[start.cell, 0]]);
+  const frontier: RealmCell[] = [start.cell];
+  while (frontier.length > 0) {
+    const current = frontier.shift()!;
+    const distance = distances.get(current)!;
+    if (distance === maximumSteps) continue;
+    for (const cell of borderingCells(current)) {
+      if (distances.has(cell)
+        || !locationExists(state, { cell, region: start.region })) continue;
+      distances.set(cell, distance + 1);
+      frontier.push(cell);
+    }
+  }
+  return [...distances.keys()].sort()
+    .map((cell) => ({ cell, region: start.region }));
+}
+
 function burrowedConnectionLocations(
   state: GameState,
   seat: GameSeat,
@@ -3271,6 +3355,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     ...summonDescriptors(state, seat),
     ...artifactDescriptors(state, seat),
     ...magicDescriptors(state, seat),
+    ...artifactDamageAbilityDescriptors(state, seat),
     ...pickUpArtifactDescriptors(state, seat),
     ...dropArtifactDescriptors(state, seat),
     ...siteDestructionDescriptors(state, seat),
@@ -3431,6 +3516,9 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
   }
   if (descriptor.kind === 'drop-artifacts') {
     return `Drop ${descriptor.artifactInstanceIds.length} artifact${descriptor.artifactInstanceIds.length === 1 ? '' : 's'} with ${descriptor.unit.kind} ${descriptor.unit.instanceId.slice(0, 15)}…`;
+  }
+  if (descriptor.kind === 'activate-artifact-damage') {
+    return `Tap bearer and ally to activate artifact ${descriptor.artifactInstanceId.slice(0, 15)}… on ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`;
   }
   if (descriptor.kind === 'decline-attack') return 'Decline attack';
   if (descriptor.kind === 'declare-attack') return `Attack ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`;
@@ -7040,6 +7128,86 @@ function applyDescriptor(
       [...summonOutcomes, ...settlement.outcomes],
       paymentRandomDraws,
     ];
+  }
+
+  if (descriptor.kind === 'activate-artifact-damage') {
+    const legal = artifactDamageAbilityDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'activate-artifact-damage'
+        && candidate.artifactInstanceId === descriptor.artifactInstanceId
+        && candidate.helper.instanceId === descriptor.helper.instanceId
+        && candidate.helper.kind === descriptor.helper.kind
+        && candidate.helper.seat === descriptor.helper.seat
+        && candidate.target.instanceId === descriptor.target.instanceId
+        && candidate.target.kind === descriptor.target.kind
+        && candidate.target.seat === descriptor.target.seat);
+    const artifact = state.realm.artifacts?.find(({ instanceId }) =>
+      instanceId === descriptor.artifactInstanceId);
+    if (!legal || !artifact || !('bearer' in artifact)) {
+      throw new Error('unreachable illegal Artifact damage activation');
+    }
+    const definition = cardDefinition(state, artifact.cardId);
+    if (definition.cardType !== 'artifact'
+      || definition.tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps !== 3) {
+      throw new Error('unreachable Artifact damage definition');
+    }
+    const costIds = new Set([artifact.bearer.instanceId, descriptor.helper.instanceId]);
+    const tappedPlayer = costIds.has(player.avatar.card.instanceId)
+      ? deepFreeze({ ...player, avatar: { ...player.avatar, tapped: true } })
+      : player;
+    const tappedState = deepFreeze({
+      ...state,
+      players: replacePlayer(state, seat, tappedPlayer),
+      realm: {
+        ...state.realm,
+        units: state.realm.units.map((unit) => costIds.has(unit.instanceId)
+          ? deepFreeze({ ...unit, tapped: true })
+          : unit),
+      },
+    });
+    const target = unitStatus(tappedState, descriptor.target);
+    const pending: PendingCombat = deepFreeze({
+      allocations: [{
+        amount: definition.tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps,
+        targetInstanceId: descriptor.target.instanceId,
+      }],
+      attacker: artifact.bearer,
+      attackingSeat: seat,
+      cell: target.location,
+      combatants: [descriptor.target],
+      defenders: [],
+      originalTarget: descriptor.target,
+      ...(target.region === 'surface'
+        ? {}
+        : { region: target.region as 'underground' | 'underwater' | 'void' }),
+      targetRemoved: false,
+    });
+    const [damaged, outcomes, randomDraws] = resolveFightWindow(
+      tappedState,
+      pending,
+      [{
+        payload: {
+          bearerInstanceId: artifact.bearer.instanceId,
+          helperInstanceId: descriptor.helper.instanceId,
+          seat,
+          sourceInstanceId: artifact.instanceId,
+          targetInstanceId: descriptor.target.instanceId,
+        },
+        type: 'artifact-damage-activated',
+      }, {
+        payload: {
+          amount: definition.tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps,
+          sourceInstanceId: artifact.instanceId,
+          targetInstanceId: descriptor.target.instanceId,
+        },
+        type: 'artifact-damage-allocated',
+      }],
+      true,
+      false,
+      [],
+      false,
+      false,
+    );
+    return [withStateVersion(damaged, {}), outcomes, randomDraws];
   }
 
   if (descriptor.kind === 'activate-area-damage') {
