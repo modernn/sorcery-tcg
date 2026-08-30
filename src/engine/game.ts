@@ -73,6 +73,7 @@ export type GameCardDefinition =
     genesisEnemiesLoseStealth?: true;
     genesisGainMana?: number;
     genesisGainManaIfOnlyControlledCopy?: 1;
+    genesisHealNearbyAvatars?: 3;
     genesisImmobilizeNearbyUntilNextTurn?: true;
     genesisMayBottomNextSpell?: true;
     genesisPayOneManaToSummonToken?: string;
@@ -1187,6 +1188,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.genesisGainManaIfOnlyControlledCopy !== undefined) {
       throw new RangeError(`${path} simultaneous unconditional and conditional Genesis mana are unsupported`);
     }
+    if (card.genesisHealNearbyAvatars !== undefined
+      && card.genesisHealNearbyAvatars !== 3) {
+      throw new RangeError(`${path}.genesisHealNearbyAvatars must be 3`);
+    }
     if (card.genesisImmobilizeNearbyUntilNextTurn !== undefined
       && card.genesisImmobilizeNearbyUntilNextTurn !== true) {
       throw new RangeError(
@@ -1205,6 +1210,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         || card.genesisEnemiesLoseStealth
         || card.genesisGainMana !== undefined
         || card.genesisGainManaIfOnlyControlledCopy !== undefined
+        || card.genesisHealNearbyAvatars !== undefined
         || card.genesisImmobilizeNearbyUntilNextTurn !== undefined
         || card.genesisMayBottomNextSpell !== undefined)) {
       throw new RangeError(`${path} simultaneous paid-token and another site Genesis are unsupported`);
@@ -1232,6 +1238,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         || card.genesisEnemiesLoseStealth
         || card.genesisGainMana !== undefined
         || card.genesisGainManaIfOnlyControlledCopy !== undefined
+        || card.genesisHealNearbyAvatars !== undefined
         || card.genesisImmobilizeNearbyUntilNextTurn !== undefined
         || card.genesisPayOneManaToSummonToken !== undefined)) {
       throw new RangeError(`${path} simultaneous next-spell and another site Genesis are unsupported`);
@@ -1771,6 +1778,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.genesisGainMana ? { genesisGainMana: card.genesisGainMana } : {}),
             ...(card.genesisGainManaIfOnlyControlledCopy === 1
               ? { genesisGainManaIfOnlyControlledCopy: 1 as const }
+              : {}),
+            ...(card.genesisHealNearbyAvatars === 3
+              ? { genesisHealNearbyAvatars: 3 as const }
               : {}),
             ...(card.genesisImmobilizeNearbyUntilNextTurn === true
               ? { genesisImmobilizeNearbyUntilNextTurn: true as const }
@@ -4802,6 +4812,34 @@ function applyDescriptor(
       ...borderingCells(descriptor.cell),
       ...diagonalCells(descriptor.cell),
     ]);
+    let genesisPlayers = settlement.state.players;
+    const genesisHealOutcomes: GameOutcome[] = [];
+    if (definition.genesisHealNearbyAvatars === 3) {
+      for (const healedSeat of ['north', 'south'] as const) {
+        const healedPlayer = genesisPlayers[healedSeat];
+        if (!nearbyCells.has(healedPlayer.avatar.location)) continue;
+        const avatar = cardDefinition(settlement.state, healedPlayer.avatar.card.cardId);
+        if (avatar.cardType !== 'avatar') throw new Error('player Avatar lacks Avatar definition');
+        const [healed, amount] = healAvatar(
+          healedPlayer,
+          avatar.life,
+          definition.genesisHealNearbyAvatars,
+        );
+        genesisPlayers = deepFreeze({ ...genesisPlayers, [healedSeat]: healed });
+        if (amount > 0) {
+          genesisHealOutcomes.push({
+            payload: {
+              amount,
+              attemptedAmount: definition.genesisHealNearbyAvatars,
+              life: healed.avatar.life,
+              seat: healedSeat,
+              sourceInstanceId: card.instanceId,
+            },
+            type: 'avatar-healed',
+          });
+        }
+      }
+    }
     const immobileArea = definition.genesisImmobilizeNearbyUntilNextTurn
       ? deepFreeze({
         cells: REALM_CELLS.filter((cell) => {
@@ -4859,7 +4897,7 @@ function applyDescriptor(
               phase: 'genesis' as const,
             }
             : {}),
-        players: settlement.state.players,
+        players: genesisPlayers,
         realm: {
           ...settlement.state.realm,
           ...(immobileArea
@@ -4924,6 +4962,7 @@ function applyDescriptor(
           }]
           : []),
         { payload: { cardId: card.cardId, cell: descriptor.cell, instanceId: card.instanceId, seat }, type: 'site-played' },
+        ...genesisHealOutcomes,
         ...(genesisGainMana
           ? [{
             payload: { amount: genesisGainMana, seat, sourceInstanceId: card.instanceId },

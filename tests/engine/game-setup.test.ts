@@ -99,6 +99,7 @@ type SiteFacts = Readonly<{
   genesisDrawSpellPerAdjacentSameCard?: boolean;
   genesisGainMana?: number;
   genesisGainManaIfOnlyControlledCopy?: 1;
+  genesisHealNearbyAvatars?: 3;
   genesisImmobilizeNearbyUntilNextTurn?: true;
   genesisMayBottomNextSpell?: true;
   rangedUnitsHereRangeBonus?: 1;
@@ -151,6 +152,9 @@ function cardsFor(
         ...(site.genesisGainMana ? { genesisGainMana: site.genesisGainMana } : {}),
         ...(site.genesisGainManaIfOnlyControlledCopy
           ? { genesisGainManaIfOnlyControlledCopy: site.genesisGainManaIfOnlyControlledCopy }
+          : {}),
+        ...(site.genesisHealNearbyAvatars === 3
+          ? { genesisHealNearbyAvatars: 3 as const }
           : {}),
         ...(site.genesisImmobilizeNearbyUntilNextTurn === true
           ? { genesisImmobilizeNearbyUntilNextTurn: true as const }
@@ -7368,6 +7372,176 @@ test('RULE-03 site Genesis grants temporary mana once, pays a summon, and expire
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
   assert.equal(session.state.players.north.mana, 1);
   assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 site Genesis heals every nearby Avatar through shared life caps', () => {
+  const base = manifest(247, {
+    avatar: { attack: 1, defense: 1, drawSpell: false, life: 10 },
+  });
+  const preview = createGameSession(base);
+  const [plainC4, plainC3, holyGround] =
+    preview.state.players.north.hand.atlas.map(({ cardId }) => cardId);
+  const [plainC1, plainC2] =
+    preview.state.players.south.hand.atlas.map(({ cardId }) => cardId);
+  assert.ok(plainC4);
+  assert.ok(plainC3);
+  assert.ok(holyGround);
+  assert.ok(plainC1);
+  assert.ok(plainC2);
+
+  const cards: Record<string, GameCardDefinition> = { ...base.cards };
+  for (const cardId of base.decks.north.spellbook) {
+    cards[cardId] = {
+      cardType: 'magic',
+      damageTargetUnit: 1,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    };
+  }
+  for (const cardId of base.decks.south.spellbook) {
+    cards[cardId] = {
+      cardType: 'magic',
+      damageTargetUnit: 3,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    };
+  }
+  cards[holyGround] = {
+    cardType: 'site',
+    elements: ['earth'],
+    genesisHealNearbyAvatars: 3,
+  };
+  const input = {
+    authority: base.authority,
+    cards,
+    decks: base.decks,
+    firstSeat: base.firstSeat,
+    seed: base.seed,
+  };
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [holyGround]: {
+        ...cards[holyGround]!,
+        genesisHealNearbyAvatars: 2,
+      } as unknown as GameCardDefinition,
+    },
+  }), /genesisHealNearbyAvatars must be 3/);
+  const gameManifest = createGameManifest(input);
+  assert.equal(gameManifest.cards[holyGround]?.cardType === 'site'
+    && gameManifest.cards[holyGround].genesisHealNearbyAvatars, 3);
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardId === plainC4 && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardId === plainC1 && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.target?.kind === 'avatar' && descriptor.target.seat === 'south');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardId === plainC3 && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.target?.kind === 'avatar' && descriptor.target.seat === 'north');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardId === plainC2 && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === session.state.players.north.avatar.card.instanceId
+    && descriptor.from.cell === 'C4' && descriptor.to.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  assert.deepEqual({
+    north: session.state.players.north.avatar.life,
+    south: session.state.players.south.avatar.life,
+  }, { north: 7, south: 9 });
+  const southTurn = session;
+
+  let farSession = accept(southTurn, action(southTurn, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  farSession = accept(farSession, action(farSession, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  const farResult = stepGame(farSession, action(farSession, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardId === holyGround
+      && descriptor.cell === 'B3'));
+  assert.equal(farResult.accepted, true);
+  const farSource = farResult.session.state.realm.sites.B3;
+  assert.ok(farSource);
+  assert.deepEqual({
+    north: farResult.session.state.players.north.avatar.life,
+    south: farResult.session.state.players.south.avatar.life,
+  }, { north: 10, south: 9 });
+  assert.deepEqual(farResult.receipt.events.map(({ type }) => type), [
+    'site-played',
+    'avatar-healed',
+  ]);
+  assert.deepEqual(farResult.receipt.events[1]?.payload, {
+    amount: 3,
+    attemptedAmount: 3,
+    life: 10,
+    seat: 'north',
+    sourceInstanceId: farSource.instanceId,
+  });
+  assert.deepEqual(farResult.receipt.randomDraws, []);
+  assert.equal(verifyGameReplay(farResult.session), true);
+
+  let nearSession = accept(southTurn, action(southTurn, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === southTurn.state.players.south.avatar.card.instanceId
+      && descriptor.from.cell === 'C1'
+      && descriptor.to.cell === 'C2'));
+  nearSession = accept(nearSession, action(nearSession, ({ descriptor }) =>
+    descriptor.kind === 'decline-attack'));
+  nearSession = accept(nearSession, action(nearSession, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  nearSession = accept(nearSession, action(nearSession, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  const nearResult = stepGame(nearSession, action(nearSession, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardId === holyGround
+      && descriptor.cell === 'B3'));
+  assert.equal(nearResult.accepted, true);
+  const nearSource = nearResult.session.state.realm.sites.B3;
+  assert.ok(nearSource);
+  assert.deepEqual({
+    north: nearResult.session.state.players.north.avatar.life,
+    south: nearResult.session.state.players.south.avatar.life,
+  }, { north: 10, south: 10 });
+  assert.deepEqual(nearResult.receipt.events.map(({ type }) => type), [
+    'site-played',
+    'avatar-healed',
+    'avatar-healed',
+  ]);
+  assert.deepEqual(nearResult.receipt.events.slice(1).map(({ payload }) => payload), [
+    {
+      amount: 3,
+      attemptedAmount: 3,
+      life: 10,
+      seat: 'north',
+      sourceInstanceId: nearSource.instanceId,
+    },
+    {
+      amount: 1,
+      attemptedAmount: 3,
+      life: 10,
+      seat: 'south',
+      sourceInstanceId: nearSource.instanceId,
+    },
+  ]);
+  assert.deepEqual(nearResult.receipt.randomDraws, []);
+  assert.equal(verifyGameReplay(nearResult.session), true);
 });
 
 test('RULE-03 site Genesis makes units at nearby sites Immobile until its controller next turn', () => {

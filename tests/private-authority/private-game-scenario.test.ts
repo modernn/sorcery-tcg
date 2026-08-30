@@ -918,7 +918,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       assert.equal(preset.usesOnlyOrdinaryOrExceptionalCards, false);
       assert.equal(
         preset.manifest.decks.north.atlas.length,
-        preset.id === 'air-vs-earth-lesson' ? 13 : 14,
+        preset.id === 'air-vs-earth-lesson' ? 13 : 15,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
@@ -926,7 +926,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
-        preset.id === 'air-vs-earth-lesson' ? 14 : 13,
+        preset.id === 'air-vs-earth-lesson' ? 15 : 13,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
@@ -977,6 +977,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     Teleport: 1,
   });
   assert.deepEqual(summarize(airLesson, 'south', 'atlas'), {
+    'Holy Ground': 1,
     'Humble Village': 3,
     Quagmire: 2,
     'Rustic Village': 3,
@@ -1105,6 +1106,14 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     cardType: 'site',
     elements: ['earth'],
     genesisImmobilizeNearbyUntilNextTurn: true,
+  });
+  const holyGroundId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Holy Ground')?.[0];
+  assert.ok(holyGroundId);
+  assert.deepEqual(airLesson.manifest.cards[holyGroundId], {
+    cardType: 'site',
+    elements: ['earth'],
+    genesisHealNearbyAvatars: 3,
   });
   const mountainPassId = Object.entries(airLesson.cardNames)
     .find(([, name]) => name === 'Mountain Pass')?.[0];
@@ -1558,6 +1567,26 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthQuagmire.deck.spellbook
     .find(({ name }) => name === 'Wild Boars')?.copies, 4);
   assert.equal(result.earthQuagmire.replayVerified, true);
+  assert.equal(result.earthHolyGround.holyGround, 'Holy Ground');
+  assert.equal(result.earthHolyGround.lesserBloodDemon, 'Lesser Blood Demon');
+  assert.equal(result.earthHolyGround.seed, 7398);
+  assert.equal(result.earthHolyGround.acceptedActionCount, 16);
+  assert.equal(result.earthHolyGround.lifeWasReducedByFour, true);
+  assert.equal(result.earthHolyGround.healed, 3);
+  assert.equal(result.earthHolyGround.farAvatarUnchanged, true);
+  assert.equal(result.earthHolyGround.causalEventsVerified, true);
+  assert.equal(result.earthHolyGround.siteEstablished, true);
+  assert.equal(result.earthHolyGround.legalConstructedDeck, true);
+  assert.equal(result.earthHolyGround.noRandomDraws, true);
+  assert.equal(result.earthHolyGround.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthHolyGround.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthHolyGround.deck.atlas
+    .find(({ name }) => name === 'Holy Ground')?.copies, 1);
+  assert.equal(result.earthHolyGround.deck.spellbook
+    .find(({ name }) => name === 'Lesser Blood Demon')?.copies, 4);
+  assert.equal(result.earthHolyGround.replayVerified, true);
   assert.equal(result.earthBorderMilitia.borderMilitia, 'Border Militia');
   assert.equal(result.earthBorderMilitia.footSoldier, 'Foot Soldier');
   assert.equal(result.earthBorderMilitia.seed, 7688);

@@ -528,6 +528,21 @@ export type PrivateGameCheck = Readonly<{
     unitImmobileThroughOpponentTurn: boolean;
     wildBoars: string;
   }>;
+  earthHolyGround: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    farAvatarUnchanged: boolean;
+    healed: number;
+    holyGround: string;
+    legalConstructedDeck: boolean;
+    lesserBloodDemon: string;
+    lifeWasReducedByFour: boolean;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    seed: number;
+    siteEstablished: boolean;
+  }>;
   earthRescue: Readonly<{
     acceptedActionCount: number;
     boskTroll: string;
@@ -1318,6 +1333,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   hamlet: NormalizedCard;
   healingMinion: NormalizedCard;
   houseArnBannerman: NormalizedCard;
+  holyGround: NormalizedCard;
   huntersLodge: NormalizedCard;
   highlandClansmen: NormalizedCard;
   humbleVillage: NormalizedCard;
@@ -1844,6 +1860,30 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || quagmire.thresholds.water !== 0
     || quagmire.rarity !== 'exceptional') {
     throw new Error('private temporary nearby Immobile site no longer matches its supported facts');
+  }
+  const holyGround = snapshot.cards.find(({ name }) => name === 'Holy Ground');
+  const holyGroundTokens: readonly string[] =
+    holyGround?.rulesText.toLowerCase().match(/[a-z]+|\d+/g) ?? [];
+  if (!holyGround
+    || holyGround.stableId
+      !== 'card:1f763067030ccd1847df904e97ca07926c64e359a9e5cad13398f2db8a0a48d9'
+    || holyGround.officialSourceId !== '001-holy_ground-b-f'
+    || holyGround.cardType !== 'site'
+    || holyGroundTokens.length !== 7
+    || !['3', 'avatar', 'each', 'genesis', 'heals', 'life', 'nearby']
+      .every((token) => holyGroundTokens.includes(token))
+    || holyGround.manaCost !== null
+    || holyGround.attack !== null
+    || holyGround.defense !== null
+    || holyGround.life !== null
+    || holyGround.elements.length !== 1
+    || holyGround.elements[0] !== 'earth'
+    || holyGround.thresholds.air !== 0
+    || holyGround.thresholds.earth !== 1
+    || holyGround.thresholds.fire !== 0
+    || holyGround.thresholds.water !== 0
+    || holyGround.rarity !== 'exceptional') {
+    throw new Error('private nearby Avatar-healing site no longer matches its supported facts');
   }
   const mountainPass = snapshot.cards.find(({ name }) => name === 'Mountain Pass');
   const mountainPassTokens = mountainPass?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
@@ -3285,6 +3325,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     hamlet,
     healingMinion,
     houseArnBannerman,
+    holyGround,
     huntersLodge,
     highlandClansmen,
     humbleVillage,
@@ -3469,6 +3510,7 @@ function gameDefinition(
   blocksGroundMinionEntryWhileMinionAtop = false,
   airborneMinionsAtopMoveFreelyAway = false,
   genesisImmobilizeNearbyUntilNextTurn = false,
+  genesisHealNearbyAvatars: 0 | 3 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -3533,6 +3575,7 @@ function gameDefinition(
       ...(genesisImmobilizeNearbyUntilNextTurn
         ? { genesisImmobilizeNearbyUntilNextTurn: true as const }
         : {}),
+      ...(genesisHealNearbyAvatars ? { genesisHealNearbyAvatars } : {}),
     };
   }
   const supportedMagicEffects = Number(damageTargetUnit !== 0)
@@ -3670,7 +3713,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -3801,6 +3844,14 @@ function buildManifest(
       ...earthQuagmireBase.atlas.slice(0, input.format.atlasMinimum - 2),
     ],
   };
+  const earthHolyGroundBase = elementalDeck('fire', [input.lesserBloodDemon]);
+  const earthHolyGroundDeck: GameDeckSpec = {
+    ...earthHolyGroundBase,
+    atlas: [
+      input.holyGround.stableId,
+      ...earthHolyGroundBase.atlas.slice(0, input.format.atlasMinimum - 1),
+    ],
+  };
   const earthBorderMilitiaDeck = elementalDeck('earth', [], [], [input.borderMilitia]);
   const earthHumbleVillageDeck = elementalDeck('earth', [], [input.humbleVillage]);
   const earthDuelDeck = elementalDeck(
@@ -3877,6 +3928,7 @@ function buildManifest(
       input.sinkhole.stableId,
       ...Array(2).fill(input.vantageHills.stableId),
       ...Array(2).fill(input.quagmire.stableId),
+      input.holyGround.stableId,
     ],
     avatar: input.geomancer.stableId,
     spellbook: [
@@ -4168,6 +4220,8 @@ function buildManifest(
         ? earthBuryDeck
       : scenario === 'earth-quagmire'
         ? earthQuagmireDeck
+      : scenario === 'earth-holy-ground'
+        ? earthHolyGroundDeck
       : scenario === 'earth-duel'
         ? earthDuelDeck
       : scenario === 'earth-sword-and-shield'
@@ -4335,6 +4389,8 @@ function buildManifest(
         ? earthBuryDeck
       : scenario === 'earth-quagmire'
         ? earthQuagmireDeck
+      : scenario === 'earth-holy-ground'
+        ? earthHolyGroundDeck
       : scenario === 'earth-duel'
         ? earthDuelDeck
       : scenario === 'earth-sword-and-shield'
@@ -4515,6 +4571,7 @@ function buildManifest(
       card.stableId === input.mountainPass.stableId,
       card.stableId === input.updraftRidge.stableId,
       card.stableId === input.quagmire.stableId,
+      card.stableId === input.holyGround.stableId ? 3 : 0,
     ),
   ]));
   return {
@@ -5635,6 +5692,60 @@ function findEarthQuagmireOpening(
     }
   }
   throw new Error('private Quagmire scenario no longer produces its supported opening');
+}
+
+function findEarthHolyGroundOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  demonInstanceIds: readonly [string, string];
+  holyGroundInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string];
+  seed: number;
+  session: GameSession;
+  southSiteInstanceId: string;
+}> {
+  const ordinaryFireSiteIds = new Set(input.cards.filter((card) =>
+    card.cardType === 'site'
+      && card.rarity === 'ordinary'
+      && card.elements.length === 1
+      && card.elements[0] === 'fire'
+      && card.rulesText.trim() === '').map(({ stableId }) => stableId));
+  // ponytail: pinned seed keeps the actual-card proof fast and deterministic.
+  const seed = 7398;
+  const built = buildManifest(input, seed, 'earth-holy-ground');
+  const session = createGameSession(built.manifest);
+  const northSites = session.state.players.north.hand.atlas
+    .filter(({ cardId }) => ordinaryFireSiteIds.has(cardId));
+  const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+  const holyGroundInstanceId = session.state.players.north.hand.atlas
+    .find(({ cardId }) => cardId === input.holyGround.stableId)?.instanceId;
+  const firstDemonInstanceId = [
+    ...session.state.players.north.hand.spellbook,
+    ...session.state.players.north.spellbook.slice(0, 1),
+  ].find(({ cardId }) => cardId === input.lesserBloodDemon.stableId)?.instanceId;
+  const secondDemonInstanceId = [
+    ...session.state.players.north.hand.spellbook,
+    ...session.state.players.north.spellbook.slice(0, 2),
+  ].find(({ cardId, instanceId }) => cardId === input.lesserBloodDemon.stableId
+    && instanceId !== firstDemonInstanceId)?.instanceId;
+  if (northSites.length >= 2
+    && southSiteInstanceId
+    && holyGroundInstanceId
+    && firstDemonInstanceId
+    && secondDemonInstanceId) {
+    return {
+      ...built,
+      demonInstanceIds: [firstDemonInstanceId, secondDemonInstanceId],
+      holyGroundInstanceId,
+      northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
+      seed,
+      session,
+      southSiteInstanceId,
+    };
+  }
+  throw new Error('private Holy Ground scenario no longer produces its supported opening');
 }
 
 function findEarthRescueOpening(
@@ -9255,6 +9366,97 @@ function runEarthQuagmire(
     seed: opening.seed,
     unitImmobileThroughOpponentTurn,
     wildBoars: opening.names.get(input.wildBoars.stableId) ?? input.wildBoars.stableId,
+  });
+}
+
+function runEarthHolyGround(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthHolyGround'] {
+  const opening = findEarthHolyGroundOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  const initialNorthLife = session.state.players.north.avatar.life;
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.demonInstanceIds[0]
+    && descriptor.cell === 'C3'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.demonInstanceIds[1]
+    && descriptor.cell === 'C3'
+    && descriptor.region === undefined);
+
+  const northLifeBeforeHealing = session.state.players.north.avatar.life;
+  const southLifeBeforeHealing = session.state.players.south.avatar.life;
+  const result = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.holyGroundInstanceId
+      && descriptor.cell === 'B3'));
+  if (!result.accepted) throw new Error(`private Holy Ground play rejected: ${result.reason.code}`);
+  session = result.session;
+  const sitePayload = result.receipt.events[0]
+    && isJsonRecord(result.receipt.events[0].payload)
+    ? result.receipt.events[0].payload
+    : undefined;
+  const healPayload = result.receipt.events[1]
+    && isJsonRecord(result.receipt.events[1].payload)
+    ? result.receipt.events[1].payload
+    : undefined;
+  const northLifeAfterHealing = session.state.players.north.avatar.life;
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified: result.receipt.events.map(({ type }) => type).join(',')
+      === 'site-played,avatar-healed'
+      && canonicalJson(sitePayload ?? null) === canonicalJson({
+        cardId: input.holyGround.stableId,
+        cell: 'B3',
+        instanceId: opening.holyGroundInstanceId,
+        seat: 'north',
+      })
+      && canonicalJson(healPayload ?? null) === canonicalJson({
+        amount: 3,
+        attemptedAmount: 3,
+        life: northLifeAfterHealing,
+        seat: 'north',
+        sourceInstanceId: opening.holyGroundInstanceId,
+      }),
+    deck,
+    farAvatarUnchanged: session.state.players.south.avatar.life === southLifeBeforeHealing,
+    healed: northLifeAfterHealing - northLifeBeforeHealing,
+    holyGround: opening.names.get(input.holyGround.stableId) ?? input.holyGround.stableId,
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && deck.atlas.find(({ name }) => name === input.holyGround.name)?.copies === 1
+      && deck.spellbook.find(({ name }) => name === input.lesserBloodDemon.name)?.copies === 4,
+    lesserBloodDemon:
+      opening.names.get(input.lesserBloodDemon.stableId) ?? input.lesserBloodDemon.stableId,
+    lifeWasReducedByFour: northLifeBeforeHealing === initialNorthLife - 4,
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    siteEstablished: session.state.realm.sites.B3?.instanceId === opening.holyGroundInstanceId,
   });
 }
 
@@ -16817,6 +17019,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthOverpower = runEarthOverpower(input);
   const earthBury = runEarthBury(input);
   const earthQuagmire = runEarthQuagmire(input);
+  const earthHolyGround = runEarthHolyGround(input);
   const earthBorderMilitia = runEarthBorderMilitia(input);
   const earthHumbleVillage = runEarthHumbleVillage(input);
   const earthDuel = runEarthDuel(input);
@@ -17026,6 +17229,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthOverpower,
     earthBury,
     earthQuagmire,
+    earthHolyGround,
     earthBorderMilitia,
     earthHumbleVillage,
     earthDuel,
