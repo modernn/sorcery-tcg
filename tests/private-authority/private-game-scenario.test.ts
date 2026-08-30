@@ -922,7 +922,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 23 : 28,
+        preset.id === 'air-vs-earth-lesson' ? 23 : 29,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -930,7 +930,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 28 : 23,
+        preset.id === 'air-vs-earth-lesson' ? 29 : 23,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -992,6 +992,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Belmotte Longbowmen': 3,
     'Border Militia': 1,
     Bury: 2,
+    'Cave-In': 1,
     'Cave Trolls': 3,
     'Dalcean Phalanx': 1,
     'Divine Healing': 1,
@@ -1099,6 +1100,23 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       defense: 5,
       genesisDisableSelfUntilDamaged: true,
       manaCost: 3,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    });
+  }
+  const caveInId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Cave-In')?.[0];
+  assert.ok(caveInId);
+  const caveIn = airLesson.manifest.cards[caveInId];
+  assert.equal(caveIn?.cardType, 'magic');
+  if (caveIn?.cardType === 'magic') {
+    assert.deepEqual({
+      burrowAllMinionsAndArtifactsAtTargetLandSite:
+        caveIn.burrowAllMinionsAndArtifactsAtTargetLandSite,
+      manaCost: caveIn.manaCost,
+      thresholds: caveIn.thresholds,
+    }, {
+      burrowAllMinionsAndArtifactsAtTargetLandSite: true,
+      manaCost: 4,
       thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
     });
   }
@@ -1703,6 +1721,28 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthSlumberingGiantess.deck.spellbook
     .find(({ name }) => name === 'Albespine Pikemen')?.copies, 3);
   assert.equal(result.earthSlumberingGiantess.replayVerified, true);
+  assert.equal(result.earthCaveIn.caveIn, 'Cave-In');
+  assert.equal(result.earthCaveIn.caveTrolls, 'Cave Trolls');
+  assert.equal(result.earthCaveIn.boskTroll, 'Bosk Troll');
+  assert.equal(result.earthCaveIn.scentHounds, 'Scent Hounds');
+  assert.equal(result.earthCaveIn.swordAndShield, 'Sword and Shield');
+  assert.equal(result.earthCaveIn.seed, 9852);
+  assert.equal(result.earthCaveIn.acceptedActionCount, 67);
+  assert.equal(result.earthCaveIn.exactTargetAndCost, true);
+  assert.equal(result.earthCaveIn.simultaneousBurrowOrderVerified, true);
+  assert.equal(result.earthCaveIn.causalEventsVerified, true);
+  assert.equal(result.earthCaveIn.survivorAndArtifactUndergroundCarried, true);
+  assert.equal(result.earthCaveIn.nonBurrowerDied, true);
+  assert.equal(result.earthCaveIn.controlUntouched, true);
+  assert.equal(result.earthCaveIn.legalConstructedDeck, true);
+  assert.equal(result.earthCaveIn.noRandomDraws, true);
+  assert.equal(result.earthCaveIn.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthCaveIn.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthCaveIn.deck.spellbook
+    .find(({ name }) => name === 'Cave-In')?.copies, 1);
+  assert.equal(result.earthCaveIn.replayVerified, true);
   assert.equal(result.earthBorderMilitia.borderMilitia, 'Border Militia');
   assert.equal(result.earthBorderMilitia.footSoldier, 'Foot Soldier');
   assert.equal(result.earthBorderMilitia.seed, 7688);

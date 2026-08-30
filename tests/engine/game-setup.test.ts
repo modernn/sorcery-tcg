@@ -5909,6 +5909,204 @@ test('RULE-03/04 Bury detaches and burrows Artifacts if able', () => {
   ]);
 });
 
+test('RULE-03/04 Cave-In burrows every surface minion and Artifact at one Land Site together', () => {
+  const north: GameDeckSpec = {
+    atlas: Array(4).fill('cave-in-water-site'),
+    avatar: 'cave-in-north-avatar',
+    spellbook: Array(4).fill('cave-in-magic'),
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(4).fill('cave-in-land-site'),
+    avatar: 'cave-in-south-avatar',
+    spellbook: ['cave-in-burrower', 'cave-in-victim', 'cave-in-artifact'],
+  };
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const cards: Record<string, GameCardDefinition> = {
+    'cave-in-artifact': {
+      cardType: 'artifact',
+      grantsBearerPower: 2,
+      manaCost: 0,
+      thresholds,
+    },
+    'cave-in-burrower': {
+      attack: 1,
+      burrowing: true,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      stealth: true,
+      thresholds,
+      ward: true,
+    },
+    'cave-in-land-site': { cardType: 'site', elements: ['earth'] },
+    'cave-in-magic': {
+      burrowAllMinionsAndArtifactsAtTargetLandSite: true,
+      cardType: 'magic',
+      manaCost: 0,
+      thresholds,
+    },
+    'cave-in-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'cave-in-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'cave-in-victim': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'cave-in-water-site': { cardType: 'site', elements: ['water'] },
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-cave-in-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north' as const,
+  };
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      'cave-in-magic': {
+        ...cards['cave-in-magic'],
+        burrowAllMinionsAndArtifactsAtTargetLandSite: false,
+      } as unknown as GameCardDefinition,
+    },
+    seed: 1,
+  }), /burrowAllMinionsAndArtifactsAtTargetLandSite must be true when defined/);
+  const gameManifest = createGameManifest({ ...input, seed: 157 });
+  assert.equal((gameManifest.cards['cave-in-magic'] as Extract<GameCardDefinition, {
+    cardType: 'magic';
+  }>).burrowAllMinionsAndArtifactsAtTargetLandSite, true);
+  let checkpoint = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    checkpoint = accept(checkpoint, action(checkpoint, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'cave-in-burrower'
+    && descriptor.cell === 'C1'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'cave-in-victim' && descriptor.cell === 'C1');
+  const burrower = checkpoint.state.realm.units.find(({ cardId }) => cardId === 'cave-in-burrower');
+  const victim = checkpoint.state.realm.units.find(({ cardId }) => cardId === 'cave-in-victim');
+  const artifactCard = checkpoint.state.players.south.hand.spellbook
+    .find(({ cardId }) => cardId === 'cave-in-artifact');
+  assert.ok(burrower && victim && artifactCard);
+
+  const castCaveIn = (bearer: 'avatar' | 'minion'): GameSession => {
+    let session = accept(checkpoint, action(checkpoint, ({ descriptor }) =>
+      descriptor.kind === 'cast-artifact'
+        && descriptor.cardInstanceId === artifactCard.instanceId
+        && descriptor.bearer?.kind === bearer
+        && (bearer === 'avatar' || descriptor.bearer.instanceId === burrower.instanceId)));
+    const artifact = session.state.realm.artifacts?.find(({ instanceId }) =>
+      instanceId === artifactCard.instanceId);
+    assert.ok(artifact);
+    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    const spell = session.state.players.north.hand.spellbook.find(({ cardId }) =>
+      cardId === 'cave-in-magic');
+    assert.ok(spell);
+    const casts = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+      descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === spell.instanceId);
+    assert.deepEqual(casts.flatMap(({ descriptor }) => descriptor.kind === 'cast-magic'
+      && descriptor.targetLocation
+      ? [`${descriptor.targetLocation.cell}:${descriptor.targetLocation.region}`]
+      : []), ['C1:surface']);
+    const rubbleId = 'sha256:6666666666666666666666666666666666666666666666666666666666666666' as const;
+    const rubbleState = {
+      ...session.state,
+      realm: {
+        ...session.state.realm,
+        sites: {
+          ...session.state.realm.sites,
+          A1: { controller: null, instanceId: rubbleId, rubble: true as const },
+        },
+      },
+    };
+    assert.equal(legalGameActions(rubbleState, 'north').some(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === spell.instanceId
+        && descriptor.targetSiteInstanceId === rubbleId
+        && descriptor.targetLocation?.cell === 'A1'), true);
+    assert.equal(legalGameActions({
+      ...session.state,
+      players: {
+        ...session.state.players,
+        north: {
+          ...session.state.players.north,
+          avatar: { ...session.state.players.north.avatar, region: 'underground' as const },
+        },
+      },
+    }, 'north').some(({ descriptor }) => descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === spell.instanceId), false);
+    const result = stepGame(session, casts[0]!);
+    assert.equal(result.accepted, true);
+    if (!result.accepted) return session;
+    const events = result.receipt.events;
+    const burrowEvents = events.filter(({ type }) =>
+      type === 'minion-burrowed' || type === 'artifact-burrowed');
+    assert.deepEqual(burrowEvents.map(({ payload }) => (payload as { instanceId: string }).instanceId), [
+      artifact.instanceId,
+      burrower.instanceId,
+      victim.instanceId,
+    ].sort());
+    assert.ok(events.findIndex(({ type }) => type === 'minion-died')
+      > events.findLastIndex(({ type }) => type === 'minion-burrowed' || type === 'artifact-burrowed'));
+    const survivingBurrower = result.session.state.realm.units.find(({ instanceId }) =>
+      instanceId === burrower.instanceId);
+    assert.deepEqual({
+      region: survivingBurrower?.region,
+      stealthed: survivingBurrower?.stealthed,
+      warded: survivingBurrower?.warded,
+    }, { region: 'underground', stealthed: true, warded: true });
+    assert.equal(result.session.state.players.south.cemetery.some(({ instanceId }) =>
+      instanceId === victim.instanceId), true);
+    assert.equal(result.session.state.players.south.avatar.region, 'surface');
+    const movedArtifact = result.session.state.realm.artifacts?.find(({ instanceId }) =>
+      instanceId === artifact.instanceId);
+    if (bearer === 'minion') {
+      assert.deepEqual(movedArtifact, artifact);
+    } else {
+      assert.deepEqual(movedArtifact, {
+        cardId: artifact.cardId,
+        instanceId: artifact.instanceId,
+        location: 'C1',
+        owner: artifact.owner,
+        region: 'underground',
+        source: artifact.source,
+      });
+    }
+    assert.equal(result.session.transcript.every(({ randomDraws }) => randomDraws.length === 0), true);
+    assert.equal(verifyGameReplay(result.session), true);
+    return result.session;
+  };
+
+  castCaveIn('minion');
+  castCaveIn('avatar');
+});
+
 test('RULE-03/04 Drown forcefully submerges a target minion if able', () => {
   const decks = { north: deck('drown-north', 4, 8), south: deck('drown-south', 4, 8) };
   const baseCards = cardsFor(decks, {

@@ -591,6 +591,25 @@ export type PrivateGameCheck = Readonly<{
     seed: number;
     slumberingGiantess: string;
   }>;
+  earthCaveIn: Readonly<{
+    acceptedActionCount: number;
+    boskTroll: string;
+    caveIn: string;
+    caveTrolls: string;
+    causalEventsVerified: boolean;
+    controlUntouched: boolean;
+    deck: DeckList;
+    exactTargetAndCost: boolean;
+    legalConstructedDeck: boolean;
+    nonBurrowerDied: boolean;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    seed: number;
+    scentHounds: string;
+    simultaneousBurrowOrderVerified: boolean;
+    survivorAndArtifactUndergroundCarried: boolean;
+    swordAndShield: string;
+  }>;
   earthRescue: Readonly<{
     acceptedActionCount: number;
     boskTroll: string;
@@ -1343,6 +1362,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   bedrock: NormalizedCard;
   blink: NormalizedCard;
   bury: NormalizedCard;
+  caveIn: NormalizedCard;
   borderMilitia: NormalizedCard;
   burrowingMinion: NormalizedCard;
   cards: readonly NormalizedCard[];
@@ -2142,6 +2162,28 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || bury.thresholds.water !== 0
     || bury.rarity !== 'ordinary') {
     throw new Error('private forced-burrow Magic no longer matches its supported facts');
+  }
+  const caveIn = snapshot.cards.find(({ name }) => name === 'Cave-In');
+  const caveInTokens = caveIn?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
+  if (!caveIn
+    || caveIn.stableId
+      !== 'card:65a2a0672cf7ced121c3b204e56ef2779bc9501e49d68413fb45b89641bc6a15'
+    || caveIn.officialSourceId !== '001-cave_in-b-f'
+    || caveIn.cardType !== 'magic'
+    || identityHash(caveInTokens as unknown as JsonValue)
+      !== 'sha256:139b7689e0ead9b8c22d2fe7f631281d32833567138da027cfe5dcc6813fe9c9'
+    || caveIn.manaCost !== 4
+    || caveIn.attack !== null
+    || caveIn.defense !== null
+    || caveIn.life !== null
+    || caveIn.elements.length !== 1
+    || caveIn.elements[0] !== 'earth'
+    || caveIn.thresholds.air !== 0
+    || caveIn.thresholds.earth !== 1
+    || caveIn.thresholds.fire !== 0
+    || caveIn.thresholds.water !== 0
+    || caveIn.rarity !== 'exceptional') {
+    throw new Error('private site-wide forced-burrow Magic no longer matches its supported facts');
   }
   const duel = snapshot.cards.find(({ name }) => name === 'Duel');
   if (!duel
@@ -3407,6 +3449,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     blink,
     borderMilitia,
     bury,
+    caveIn,
     burrowingMinion,
     cards: snapshot.cards,
     cannotDefendMinion,
@@ -3636,6 +3679,7 @@ function gameDefinition(
   cannotBeMovedDestroyedOrModified = false,
   genesisStrikeEachEnemyHere = false,
   genesisDisableSelfUntilDamaged = false,
+  burrowAllMinionsAndArtifactsAtTargetLandSite = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -3720,6 +3764,7 @@ function gameDefinition(
     + Number(submergeTargetMinion)
     + Number(healController !== 0)
     + Number(burrowTargetMinionOrArtifact)
+    + Number(burrowAllMinionsAndArtifactsAtTargetLandSite)
     + Number(fightAllyWithAdjacentEnemy)
     + Number(gainControlOfTargetNearbyMinion)
     + Number(killTargetWoundedMinion)
@@ -3729,6 +3774,9 @@ function gameDefinition(
     && card.manaCost !== null
     && supportedMagicEffects === 1) {
     return {
+      ...(burrowAllMinionsAndArtifactsAtTargetLandSite
+        ? { burrowAllMinionsAndArtifactsAtTargetLandSite: true as const }
+        : {}),
       ...(burrowTargetMinionOrArtifact ? { burrowTargetMinionOrArtifact: true } : {}),
       cardType: 'magic',
       ...(damageEachAbovegroundMinion !== 0 ? { damageEachAbovegroundMinion } : {}),
@@ -3845,7 +3893,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -4011,6 +4059,20 @@ function buildManifest(
       ...earthSlumberingGiantessBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
     ],
   };
+  const earthCaveInBase = elementalDeck(
+    'earth',
+    [input.burrowingMinion, input.firstStrikeTargetMinion, input.scentHounds],
+    [],
+    [],
+    [input.swordAndShield],
+  );
+  const earthCaveInDeck: GameDeckSpec = {
+    ...earthCaveInBase,
+    spellbook: [
+      input.caveIn.stableId,
+      ...earthCaveInBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
+    ],
+  };
   const earthBorderMilitiaDeck = elementalDeck('earth', [], [], [input.borderMilitia]);
   const earthHumbleVillageDeck = elementalDeck('earth', [], [input.humbleVillage]);
   const earthDuelDeck = elementalDeck(
@@ -4108,6 +4170,7 @@ function buildManifest(
       ...Array(2).fill(input.bury.stableId),
       input.wraetannisTitan.stableId,
       input.slumberingGiantess.stableId,
+      input.caveIn.stableId,
     ],
   };
   const fireStarterDeck = elementalDeck(
@@ -4380,6 +4443,8 @@ function buildManifest(
         ? earthHumbleVillageDeck
       : scenario === 'earth-bury'
         ? earthBuryDeck
+      : scenario === 'earth-cave-in'
+        ? earthCaveInDeck
       : scenario === 'earth-quagmire'
         ? earthQuagmireDeck
       : scenario === 'earth-holy-ground'
@@ -4555,6 +4620,8 @@ function buildManifest(
         ? earthHumbleVillageDeck
       : scenario === 'earth-bury'
         ? earthBuryDeck
+      : scenario === 'earth-cave-in'
+        ? earthCaveInDeck
       : scenario === 'earth-quagmire'
         ? earthQuagmireDeck
       : scenario === 'earth-holy-ground'
@@ -4749,6 +4816,7 @@ function buildManifest(
       card.stableId === input.bedrock.stableId,
       card.stableId === input.wraetannisTitan.stableId,
       card.stableId === input.slumberingGiantess.stableId,
+      card.stableId === input.caveIn.stableId,
     ),
   ]));
   return {
@@ -6107,6 +6175,106 @@ function findEarthSlumberingGiantessOpening(
     };
   }
   throw new Error('private Slumbering Giantess seed no longer produces its supported opening');
+}
+
+function findEarthCaveInOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  boskTrollInstanceId: string;
+  caveInInstanceId: string;
+  caveTrollsInstanceId: string;
+  controlScentInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northFourthSiteInstanceId: string;
+  northSiteInstanceIds: readonly [string, string, string];
+  northSpellDrawCount: number;
+  seed: number;
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string, string];
+  southSpellDrawCount: number;
+  swordAndShieldInstanceId: string;
+}> {
+  const drawCount = (session: GameSession, seat: GameSeat, instanceId: string): number => {
+    const player = session.state.players[seat];
+    if (player.hand.spellbook.some((card) => card.instanceId === instanceId)) return 0;
+    const index = player.spellbook.findIndex((card) => card.instanceId === instanceId);
+    return index < 0 ? Number.POSITIVE_INFINITY : index + 1;
+  };
+  // Calibrated against the ignored exact-card authority snapshot.
+  const seed = 9_852;
+  const built = buildManifest(input, seed, 'earth-cave-in');
+  const session = createGameSession(built.manifest);
+  const earthSites = (seat: GameSeat) => session.state.players[seat].hand.atlas
+    .filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site'
+        && definition.elements.includes('earth');
+    });
+  const northSites = earthSites('north');
+  const southSites = earthSites('south');
+  const northFourthSite = session.state.players.north.atlas[0];
+  const northFourthDefinition = northFourthSite
+    ? session.state.cards[northFourthSite.cardId]
+    : undefined;
+  const northWindow = [
+    ...session.state.players.north.hand.spellbook,
+    ...session.state.players.north.spellbook.slice(0, 12),
+  ];
+  const southWindow = [
+    ...session.state.players.south.hand.spellbook,
+    ...session.state.players.south.spellbook.slice(0, 12),
+  ];
+  const caveInInstanceId = northWindow
+    .find(({ cardId }) => cardId === input.caveIn.stableId)?.instanceId;
+  const caveTrollsInstanceId = southWindow
+    .find(({ cardId }) => cardId === input.burrowingMinion.stableId)?.instanceId;
+  const boskTrollInstanceId = southWindow
+    .find(({ cardId }) => cardId === input.firstStrikeTargetMinion.stableId)?.instanceId;
+  const controlScentInstanceId = southWindow
+    .find(({ cardId }) => cardId === input.scentHounds.stableId)?.instanceId;
+  const swordAndShieldInstanceId = southWindow
+    .find(({ cardId }) => cardId === input.swordAndShield.stableId)?.instanceId;
+  if (northSites.length >= 3
+    && southSites.length >= 3
+    && northFourthSite
+    && northFourthDefinition?.cardType === 'site'
+    && northFourthDefinition.elements.includes('earth')
+    && caveInInstanceId
+    && caveTrollsInstanceId
+    && boskTrollInstanceId
+    && controlScentInstanceId
+    && swordAndShieldInstanceId) {
+    return {
+      ...built,
+      boskTrollInstanceId,
+      caveInInstanceId,
+      caveTrollsInstanceId,
+      controlScentInstanceId,
+      northFourthSiteInstanceId: northFourthSite.instanceId,
+      northSiteInstanceIds: [
+        northSites[0]!.instanceId,
+        northSites[1]!.instanceId,
+        northSites[2]!.instanceId,
+      ],
+      northSpellDrawCount: drawCount(session, 'north', caveInInstanceId),
+      seed,
+      session,
+      southSiteInstanceIds: [
+        southSites[0]!.instanceId,
+        southSites[1]!.instanceId,
+        southSites[2]!.instanceId,
+      ],
+      southSpellDrawCount: Math.max(
+        drawCount(session, 'south', caveTrollsInstanceId),
+        drawCount(session, 'south', boskTrollInstanceId),
+        drawCount(session, 'south', controlScentInstanceId),
+        drawCount(session, 'south', swordAndShieldInstanceId),
+      ),
+      swordAndShieldInstanceId,
+    };
+  }
+  throw new Error('private Cave-In scenario no longer produces its supported opening');
 }
 
 function findEarthRescueOpening(
@@ -10252,6 +10420,203 @@ function runEarthSlumberingGiantess(
     seed: opening.seed,
     slumberingGiantess:
       opening.names.get(input.slumberingGiantess.stableId) ?? input.slumberingGiantess.stableId,
+  });
+}
+
+function runEarthCaveIn(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthCaveIn'] {
+  const opening = findEarthCaveInOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  const cycles = Math.max(
+    3,
+    opening.northSpellDrawCount + 1,
+    opening.southSpellDrawCount,
+  );
+  const southCells = ['C1', 'C2', 'B2'] as const;
+  const northCells = ['C3', 'B3'] as const;
+  for (let cycle = 0; cycle < cycles; cycle += 1) {
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    if (cycle < opening.southSiteInstanceIds.length) {
+      take(({ descriptor }) => descriptor.kind === 'play-site'
+        && descriptor.cardInstanceId === opening.southSiteInstanceIds[cycle]
+        && descriptor.cell === southCells[cycle]);
+    }
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    take(({ descriptor }) => descriptor.kind === 'draw'
+      && descriptor.zone === (cycle === 2 ? 'atlas' : 'spellbook'));
+    if (cycle < northCells.length) {
+      take(({ descriptor }) => descriptor.kind === 'play-site'
+        && descriptor.cardInstanceId === opening.northSiteInstanceIds[cycle + 1]
+        && descriptor.cell === northCells[cycle]);
+    }
+    if (cycle === 2) {
+      take(({ descriptor }) => descriptor.kind === 'play-site'
+        && descriptor.cardInstanceId === opening.northFourthSiteInstanceId
+        && descriptor.cell === 'A3');
+    }
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+  }
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.caveTrollsInstanceId
+    && descriptor.cell === 'C2'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+    && descriptor.cardInstanceId === opening.swordAndShieldInstanceId
+    && descriptor.bearer === undefined
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'pick-up-artifacts'
+    && descriptor.unit.kind === 'minion'
+    && descriptor.unit.instanceId === opening.caveTrollsInstanceId
+    && descriptor.artifactInstanceIds.length === 1
+    && descriptor.artifactInstanceIds[0] === opening.swordAndShieldInstanceId);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.boskTrollInstanceId
+    && descriptor.cell === 'C2'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.controlScentInstanceId
+    && descriptor.cell === 'C1'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const targetSite = session.state.realm.sites.C2;
+  if (!targetSite) throw new Error('private Cave-In target Site is absent');
+  const controlBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.controlScentInstanceId);
+  const caveInChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.caveInInstanceId
+      && descriptor.targetLocation?.cell === 'C2'
+      && descriptor.targetLocation.region === 'surface'
+      && descriptor.targetSiteInstanceId === targetSite.instanceId);
+  const caveInChoice = caveInChoices[0];
+  if (!caveInChoice || caveInChoices.length !== 1) {
+    throw new Error('private Cave-In exact Land Site cast is unavailable or ambiguous');
+  }
+  const manaBefore = session.state.players.north.mana;
+  const result = stepGame(session, caveInChoice);
+  if (!result.accepted) throw new Error('private Cave-In cast was rejected');
+  session = result.session;
+
+  const events = result.receipt.events;
+  const castEvent = events[0];
+  const resolvedEvent = events.at(-1);
+  const castPayload = castEvent && isJsonRecord(castEvent.payload) ? castEvent.payload : undefined;
+  const resolvedPayload = resolvedEvent && isJsonRecord(resolvedEvent.payload)
+    ? resolvedEvent.payload
+    : undefined;
+  const burrowEvents = events.filter(({ type }) =>
+    type === 'minion-burrowed' || type === 'artifact-burrowed');
+  const burrowIds = burrowEvents.flatMap(({ payload }) =>
+    isJsonRecord(payload) && typeof payload.instanceId === 'string' ? [payload.instanceId] : []);
+  const expectedBurrowIds = [
+    opening.boskTrollInstanceId,
+    opening.caveTrollsInstanceId,
+    opening.swordAndShieldInstanceId,
+  ].sort((left, right) => left.localeCompare(right));
+  const firstDeathIndex = events.findIndex(({ type }) => type === 'minion-died');
+  const lastBurrowIndex = Math.max(...events.map(({ type }, index) =>
+    type === 'minion-burrowed' || type === 'artifact-burrowed' ? index : -1));
+  const caveTrolls = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.caveTrollsInstanceId);
+  const swordAndShield = session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === opening.swordAndShieldInstanceId);
+  const observedSwordAndShield = observeGame(session.state, 'north').realm.artifacts
+    ?.find(({ instanceId }) => instanceId === opening.swordAndShieldInstanceId);
+  const controlAfter = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.controlScentInstanceId);
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+  const targetLocation = castPayload?.targetLocation;
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    boskTroll:
+      opening.names.get(input.firstStrikeTargetMinion.stableId)
+        ?? input.firstStrikeTargetMinion.stableId,
+    caveIn: opening.names.get(input.caveIn.stableId) ?? input.caveIn.stableId,
+    caveTrolls:
+      opening.names.get(input.burrowingMinion.stableId) ?? input.burrowingMinion.stableId,
+    causalEventsVerified: castEvent?.type === 'magic-cast'
+      && resolvedEvent?.type === 'magic-resolved'
+      && resolvedPayload?.instanceId === opening.caveInInstanceId
+      && firstDeathIndex > lastBurrowIndex
+      && events.every(({ type }) => type !== 'artifacts-dropped')
+      && session.state.realm.sites.C2?.instanceId === targetSite.instanceId
+      && session.state.players.north.cemetery
+        .some(({ instanceId }) => instanceId === opening.caveInInstanceId),
+    controlUntouched: controlBefore !== undefined
+      && controlAfter !== undefined
+      && canonicalJson(controlAfter as unknown as JsonValue)
+        === canonicalJson(controlBefore as unknown as JsonValue),
+    deck,
+    exactTargetAndCost: caveInChoices.length === 1
+      && manaBefore - session.state.players.north.mana === 4
+      && castPayload?.cardId === input.caveIn.stableId
+      && castPayload.casterInstanceId === session.state.players.north.avatar.card.instanceId
+      && castPayload.instanceId === opening.caveInInstanceId
+      && castPayload.manaPaid === 4
+      && castPayload.seat === 'north'
+      && isJsonRecord(targetLocation)
+      && targetLocation.cell === 'C2'
+      && targetLocation.region === 'surface'
+      && castPayload.targetSiteInstanceId === targetSite.instanceId,
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && deck.spellbook.find(({ name }) => name === input.caveIn.name)?.copies === 1,
+    nonBurrowerDied: session.state.realm.units.every(({ instanceId }) =>
+      instanceId !== opening.boskTrollInstanceId)
+      && session.state.players.south.cemetery.some(({ instanceId }) =>
+        instanceId === opening.boskTrollInstanceId),
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    replayVerified: verifyGameReplay(session),
+    scentHounds:
+      opening.names.get(input.scentHounds.stableId) ?? input.scentHounds.stableId,
+    seed: opening.seed,
+    simultaneousBurrowOrderVerified: burrowIds.length === expectedBurrowIds.length
+      && canonicalJson(burrowIds as unknown as JsonValue)
+        === canonicalJson(expectedBurrowIds as unknown as JsonValue)
+      && events.slice(1, 1 + burrowEvents.length).every((event, index) =>
+        event === burrowEvents[index])
+      && burrowEvents.every(({ payload }) => isJsonRecord(payload)
+        && payload.cell === 'C2'
+        && payload.sourceInstanceId === opening.caveInInstanceId),
+    survivorAndArtifactUndergroundCarried: caveTrolls?.location === 'C2'
+      && caveTrolls.region === 'underground'
+      && swordAndShield !== undefined
+      && 'bearer' in swordAndShield
+      && swordAndShield.bearer.kind === 'minion'
+      && swordAndShield.bearer.instanceId === opening.caveTrollsInstanceId
+      && observedSwordAndShield?.location === 'C2'
+      && observedSwordAndShield.region === 'underground',
+    swordAndShield:
+      opening.names.get(input.swordAndShield.stableId) ?? input.swordAndShield.stableId,
   });
 }
 
@@ -17818,6 +18183,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthBedrock = runEarthBedrock(input);
   const earthWraetannisTitan = runEarthWraetannisTitan(input);
   const earthSlumberingGiantess = runEarthSlumberingGiantess(input);
+  const earthCaveIn = runEarthCaveIn(input);
   const earthBorderMilitia = runEarthBorderMilitia(input);
   const earthHumbleVillage = runEarthHumbleVillage(input);
   const earthDuel = runEarthDuel(input);
@@ -18031,6 +18397,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthBedrock,
     earthWraetannisTitan,
     earthSlumberingGiantess,
+    earthCaveIn,
     earthBorderMilitia,
     earthHumbleVillage,
     earthDuel,

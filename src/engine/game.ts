@@ -83,6 +83,7 @@ export type GameCardDefinition =
     sacrificeToDestroyNearbySite?: true;
   }>
   | Readonly<{
+    burrowAllMinionsAndArtifactsAtTargetLandSite?: true;
     burrowTargetMinionOrArtifact?: true;
     cardType: 'magic';
     damageEachAbovegroundMinion?: 1;
@@ -1101,6 +1102,17 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
         .filter((location) => locationExists(state, location))
         .map((targetLocation) => ({ ...cast, targetLocation }));
     }
+    if (definition.burrowAllMinionsAndArtifactsAtTargetLandSite === true) {
+      if (caster.region !== 'surface') return [];
+      return (Object.entries(state.realm.sites) as Array<[RealmCell, RealmSiteInstance]>)
+        .filter(([cell]) => !isWaterSite(state, cell))
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([cell, site]) => ({
+          ...cast,
+          targetLocation: { cell, region: 'surface' as const },
+          targetSiteInstanceId: site.instanceId,
+        }));
+    }
     if (definition.burrowTargetMinionOrArtifact === true) {
       const minions = targets.filter((target) => {
         if (target.kind !== 'minion') return false;
@@ -1297,6 +1309,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     return;
   }
   if (card.cardType === 'magic') {
+    if (card.burrowAllMinionsAndArtifactsAtTargetLandSite !== undefined
+      && card.burrowAllMinionsAndArtifactsAtTargetLandSite !== true) {
+      throw new RangeError(
+        `${path}.burrowAllMinionsAndArtifactsAtTargetLandSite must be true when defined`,
+      );
+    }
     if (card.burrowTargetMinionOrArtifact !== undefined
       && card.burrowTargetMinionOrArtifact !== true) {
       throw new RangeError(`${path}.burrowTargetMinionOrArtifact must be true when defined`);
@@ -1356,7 +1374,8 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.damageEachAbovegroundMinion !== 1) {
       throw new RangeError(`${path}.damageEachAbovegroundMinion must be 1`);
     }
-    const effectCount = Number(card.burrowTargetMinionOrArtifact === true)
+    const effectCount = Number(card.burrowAllMinionsAndArtifactsAtTargetLandSite === true)
+      + Number(card.burrowTargetMinionOrArtifact === true)
       + Number(card.submergeTargetMinion === true)
       + Number(card.damageEachAbovegroundMinion === 1)
       + Number(card.damageEachUnitAtLocationWithinTwoSteps !== undefined)
@@ -1852,8 +1871,10 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
           : card.cardType === 'magic'
             ? {
               cardType: 'magic' as const,
-              ...(card.burrowTargetMinionOrArtifact === true
-                ? { burrowTargetMinionOrArtifact: true as const }
+              ...(card.burrowAllMinionsAndArtifactsAtTargetLandSite === true
+                ? { burrowAllMinionsAndArtifactsAtTargetLandSite: true as const }
+                : card.burrowTargetMinionOrArtifact === true
+                  ? { burrowTargetMinionOrArtifact: true as const }
                 : card.submergeTargetMinion === true
                   ? { submergeTargetMinion: true as const }
                 : card.damageEachAbovegroundMinion === 1
@@ -6009,6 +6030,91 @@ function applyDescriptor(
         },
         ...settlement.outcomes,
       ];
+      const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
+      return [
+        withStateVersion(settlement.state, {}),
+        terminalIndex < 0
+          ? [...outcomes, resolved]
+          : [...outcomes.slice(0, terminalIndex), resolved, ...outcomes.slice(terminalIndex)],
+        [],
+      ];
+    }
+    if (definition.burrowAllMinionsAndArtifactsAtTargetLandSite === true) {
+      if (!descriptor.targetLocation
+        || descriptor.targetLocation.region !== 'surface'
+        || !descriptor.targetSiteInstanceId) {
+        throw new Error('unreachable Cave-In target');
+      }
+      const cell = descriptor.targetLocation.cell;
+      const site = castState.realm.sites[cell];
+      if (!site
+        || site.instanceId !== descriptor.targetSiteInstanceId
+        || isWaterSite(castState, cell)) {
+        throw new Error('unreachable Cave-In Land Site');
+      }
+      const minions = castState.realm.units
+        .filter((unit) => unit.location === cell && unit.region === 'surface')
+        .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+      const minionIds = new Set(minions.map(({ instanceId }) => instanceId));
+      const artifacts = (castState.realm.artifacts ?? []).filter((artifact) => {
+        const location = 'bearer' in artifact ? unitStatus(castState, artifact.bearer) : artifact;
+        return location.location === cell && location.region === 'surface';
+      }).sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+      const artifactIds = new Set(artifacts.map(({ instanceId }) => instanceId));
+      const burrowedState = deepFreeze({
+        ...castState,
+        realm: {
+          ...castState.realm,
+          ...(castState.realm.artifacts
+            ? {
+              artifacts: castState.realm.artifacts.map((artifact) => {
+                if (!artifactIds.has(artifact.instanceId)
+                  || 'bearer' in artifact && minionIds.has(artifact.bearer.instanceId)) return artifact;
+                return deepFreeze({
+                  cardId: artifact.cardId,
+                  instanceId: artifact.instanceId,
+                  location: cell,
+                  owner: artifact.owner,
+                  region: 'underground' as const,
+                  source: artifact.source,
+                });
+              }),
+            }
+            : {}),
+          units: castState.realm.units.map((unit) => minionIds.has(unit.instanceId)
+            ? deepFreeze({ ...unit, region: 'underground' as const })
+            : unit),
+        },
+      });
+      const burrowOutcomes: GameOutcome[] = [
+        ...minions.map((unit) => ({
+          instanceId: unit.instanceId,
+          outcome: {
+            payload: {
+              cell,
+              instanceId: unit.instanceId,
+              seat: unit.controller,
+              sourceInstanceId: card.instanceId,
+            },
+            type: 'minion-burrowed' as const,
+          },
+        })),
+        ...artifacts.map((artifact) => ({
+          instanceId: artifact.instanceId,
+          outcome: {
+            payload: {
+              cell,
+              instanceId: artifact.instanceId,
+              owner: artifact.owner,
+              sourceInstanceId: card.instanceId,
+            },
+            type: 'artifact-burrowed' as const,
+          },
+        })),
+      ].sort((left, right) => left.instanceId.localeCompare(right.instanceId))
+        .map(({ outcome }) => outcome);
+      const settlement = settleRegionOccupancy(burrowedState);
+      const outcomes = [...castOutcomes, ...burrowOutcomes, ...settlement.outcomes];
       const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
       return [
         withStateVersion(settlement.state, {}),
