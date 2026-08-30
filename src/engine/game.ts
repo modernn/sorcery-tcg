@@ -55,6 +55,7 @@ export type GameCardDefinition =
     manaCost: number;
     tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps?: never;
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
+    tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
     thresholds: GameThresholds;
   }>
   | Readonly<{
@@ -64,6 +65,7 @@ export type GameCardDefinition =
     manaCost: number;
     tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps?: never;
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
+    tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
     thresholds: GameThresholds;
   }>
   | Readonly<{
@@ -73,6 +75,7 @@ export type GameCardDefinition =
     manaCost: number;
     tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps?: never;
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps: 3;
+    tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
     thresholds: GameThresholds;
   }>
   | Readonly<{
@@ -82,6 +85,17 @@ export type GameCardDefinition =
     manaCost: number;
     tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps: true;
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
+    tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
+    thresholds: GameThresholds;
+  }>
+  | Readonly<{
+    cardType: 'artifact';
+    grantsBearerLethal?: never;
+    grantsBearerPower?: never;
+    manaCost: number;
+    tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps?: never;
+    tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
+    tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath: 4;
     thresholds: GameThresholds;
   }>
   | Readonly<{
@@ -575,6 +589,13 @@ type GameActionDescriptor =
     kind: 'activate-artifact-discard-area-damage';
     targetLocation: GameLocation;
   }>
+  | Readonly<{
+    artifactInstanceId: StateHash;
+    direction: ProjectileDirection;
+    kind: 'activate-artifact-roll-damage';
+    path: readonly GameLocation[];
+    pusher: GameUnitRef;
+  }>
   | Readonly<{ kind: 'decline-attack' }>
   | Readonly<{ kind: 'declare-attack'; target: CombatTarget }>
   | Readonly<{
@@ -968,6 +989,50 @@ function artifactDiscardAreaDamageAbilityDescriptors(
         kind: 'activate-artifact-discard-area-damage' as const,
         targetLocation,
       }))));
+  });
+}
+
+function artifactRollDamageAbilityDescriptors(
+  state: GameState,
+  seat: GameSeat,
+): readonly GameActionDescriptor[] {
+  const pushers = unitRefs(state, seat);
+  const directions = ['east', 'north', 'south', 'west'] as const;
+  return (state.realm.artifacts ?? []).flatMap((artifact) => {
+    const definition = cardDefinition(state, artifact.cardId);
+    if (definition.cardType !== 'artifact'
+      || definition.tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath !== 4) {
+      return [];
+    }
+    const origin = 'bearer' in artifact
+      ? (() => {
+        const bearer = unitStatus(state, artifact.bearer);
+        return { cell: bearer.location, region: bearer.region };
+      })()
+      : { cell: artifact.location, region: artifact.region };
+    return pushers.filter((pusher) => {
+      const status = unitStatus(state, pusher);
+      return readyUnit(state, pusher)
+        && status.location === origin.cell
+        && status.region === origin.region;
+    }).flatMap((pusher) => directions.map((direction) => {
+      const path: GameLocation[] = [origin];
+      const seen = new Set<RealmCell>([origin.cell]);
+      while (true) {
+        const nextCell = projectileStep(path.at(-1)!.cell, direction);
+        const next = nextCell ? { cell: nextCell, region: origin.region } : undefined;
+        if (!next || seen.has(next.cell) || !locationExists(state, next)) break;
+        path.push(next);
+        seen.add(next.cell);
+      }
+      return {
+        artifactInstanceId: artifact.instanceId,
+        direction,
+        kind: 'activate-artifact-roll-damage' as const,
+        path,
+        pusher,
+      };
+    }));
   });
 }
 
@@ -1422,12 +1487,20 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         `${path}.tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps must be true`,
       );
     }
+    if (card.tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath !== undefined
+      && card.tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath !== 4) {
+      throw new RangeError(
+        `${path}.tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath must be 4`,
+      );
+    }
     if (Number(card.grantsBearerPower === 2)
       + Number(card.grantsBearerLethal === true)
       + Number(card.tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps === 3)
       + Number(card
         .tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
-          === true) !== 1) {
+          === true)
+      + Number(card.tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath === 4)
+        !== 1) {
       throw new RangeError(`${path} must define exactly one supported Artifact effect`);
     }
     if (!Number.isSafeInteger(card.manaCost) || card.manaCost < 0) {
@@ -1955,9 +2028,15 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                   ? {
                     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps: 3 as const,
                   }
-                  : {
+                  : card
+                    .tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
+                      === true
+                    ? {
                     tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps:
                       true as const,
+                    }
+                    : {
+                      tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath: 4 as const,
                   }),
             manaCost: card.manaCost,
             thresholds: { ...card.thresholds },
@@ -3437,6 +3516,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     ...magicDescriptors(state, seat),
     ...artifactDamageAbilityDescriptors(state, seat),
     ...artifactDiscardAreaDamageAbilityDescriptors(state, seat),
+    ...artifactRollDamageAbilityDescriptors(state, seat),
     ...pickUpArtifactDescriptors(state, seat),
     ...dropArtifactDescriptors(state, seat),
     ...siteDestructionDescriptors(state, seat),
@@ -3603,6 +3683,9 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
   }
   if (descriptor.kind === 'activate-artifact-discard-area-damage') {
     return `Tap bearer and ally, discard ${descriptor.discardCardInstanceId.slice(0, 15)}…, and activate artifact ${descriptor.artifactInstanceId.slice(0, 15)}… at ${descriptor.targetLocation.cell}`;
+  }
+  if (descriptor.kind === 'activate-artifact-roll-damage') {
+    return `Tap ${descriptor.pusher.kind} ${descriptor.pusher.instanceId.slice(0, 15)}… to roll artifact ${descriptor.direction} through ${descriptor.path.map(({ cell }) => cell).join(' → ')}`;
   }
   if (descriptor.kind === 'decline-attack') return 'Decline attack';
   if (descriptor.kind === 'declare-attack') return `Attack ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}…`;
@@ -7395,6 +7478,117 @@ function applyDescriptor(
       ...(descriptor.targetLocation.region === 'surface'
         ? {}
         : { region: descriptor.targetLocation.region }),
+      targetRemoved: false,
+    });
+    const [damaged, outcomes, randomDraws] = resolveFightWindow(
+      costState,
+      pending,
+      events,
+      true,
+      false,
+      [],
+      false,
+      false,
+    );
+    return [withStateVersion(damaged, {}), outcomes, randomDraws];
+  }
+
+  if (descriptor.kind === 'activate-artifact-roll-damage') {
+    const legal = artifactRollDamageAbilityDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'activate-artifact-roll-damage'
+        && candidate.artifactInstanceId === descriptor.artifactInstanceId
+        && candidate.direction === descriptor.direction
+        && candidate.pusher.instanceId === descriptor.pusher.instanceId
+        && candidate.pusher.kind === descriptor.pusher.kind
+        && candidate.pusher.seat === descriptor.pusher.seat
+        && candidate.path.length === descriptor.path.length
+        && candidate.path.every((location, index) =>
+          sameLocation(location, descriptor.path[index]!)));
+    const artifact = state.realm.artifacts?.find(({ instanceId }) =>
+      instanceId === descriptor.artifactInstanceId);
+    const destination = descriptor.path.at(-1);
+    if (!legal || !artifact || !destination) {
+      throw new Error('unreachable illegal Artifact roll-damage activation');
+    }
+    const definition = cardDefinition(state, artifact.cardId);
+    if (definition.cardType !== 'artifact'
+      || definition.tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath !== 4) {
+      throw new Error('unreachable Artifact roll-damage definition');
+    }
+    const tappedPlayers = descriptor.pusher.kind === 'avatar'
+      ? replacePlayer(state, seat, deepFreeze({
+        ...player,
+        avatar: { ...player.avatar, tapped: true },
+      }))
+      : state.players;
+    const tappedUnits = descriptor.pusher.kind === 'minion'
+      ? state.realm.units.map((unit) => unit.instanceId === descriptor.pusher.instanceId
+        ? deepFreeze({ ...unit, tapped: true })
+        : unit)
+      : state.realm.units;
+    const movedArtifacts = state.realm.artifacts!.map((candidate): ArtifactInstance =>
+      candidate.instanceId === artifact.instanceId
+        ? deepFreeze({
+          cardId: candidate.cardId,
+          instanceId: candidate.instanceId,
+          location: destination.cell,
+          owner: candidate.owner,
+          region: destination.region,
+          source: candidate.source,
+        })
+        : candidate);
+    const costState = deepFreeze({
+      ...state,
+      players: tappedPlayers,
+      realm: { ...state.realm, artifacts: movedArtifacts, units: tappedUnits },
+    });
+    const pathCells = descriptor.path.length > 1
+      ? new Set(descriptor.path.map(({ cell }) => cell))
+      : new Set<RealmCell>();
+    const targets = (['north', 'south'] as const)
+      .flatMap((targetSeat) => unitRefs(costState, targetSeat))
+      .filter((target) => {
+        if (target.instanceId === descriptor.pusher.instanceId) return false;
+        const status = unitStatus(costState, target);
+        return status.region === destination.region && pathCells.has(status.location);
+      })
+      .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+    const events: readonly GameOutcome[] = [{
+      payload: {
+        direction: descriptor.direction,
+        fromCell: descriptor.path[0]!.cell,
+        fromRegion: descriptor.path[0]!.region,
+        path: descriptor.path,
+        pusherInstanceId: descriptor.pusher.instanceId,
+        pusherKind: descriptor.pusher.kind,
+        pusherSeat: descriptor.pusher.seat,
+        seat,
+        sourceInstanceId: artifact.instanceId,
+        toCell: destination.cell,
+        toRegion: destination.region,
+      },
+      type: 'artifact-roll-damage-activated',
+    }, ...targets.map(({ instanceId }) => ({
+      payload: {
+        amount: definition.tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath,
+        sourceInstanceId: artifact.instanceId,
+        targetInstanceId: instanceId,
+      },
+      type: 'artifact-roll-damage-allocated',
+    }))];
+    if (targets.length === 0) return [withStateVersion(costState, {}), events, []];
+    const pending: PendingCombat = deepFreeze({
+      allocations: targets.map(({ instanceId }) => ({
+        amount: definition.tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath,
+        targetInstanceId: instanceId,
+      })),
+      attacker: descriptor.pusher,
+      attackingSeat: seat,
+      cell: destination.cell,
+      combatants: targets,
+      defenders: [],
+      originalTarget: null,
+      ...(destination.region === 'surface' ? {} : { region: destination.region }),
       targetRemoved: false,
     });
     const [damaged, outcomes, randomDraws] = resolveFightWindow(

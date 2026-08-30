@@ -13831,6 +13831,345 @@ test('RULE-03 Payload Trebuchet discards a card for measured location damage', (
   assert.equal(verifyGameReplay(session), true);
 });
 
+test('RULE-03 Rolling Boulder rolls maximally and damages other units along its path', () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const north: GameDeckSpec = {
+    atlas: Array(6).fill('boulder-north-site'),
+    avatar: 'boulder-north-avatar',
+    spellbook: ['rolling-boulder', 'boulder-pusher', 'boulder-origin-target'],
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(6).fill('boulder-south-site'),
+    avatar: 'boulder-south-avatar',
+    spellbook: ['boulder-warded-target', 'boulder-underground-target', 'boulder-off-path-target'],
+  };
+  const cards: Record<string, GameCardDefinition> = {
+    'boulder-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'boulder-north-site': { cardType: 'site', elements: ['earth'] },
+    'boulder-off-path-target': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 5,
+      manaCost: 0,
+      thresholds,
+    },
+    'boulder-origin-target': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 4,
+      manaCost: 0,
+      thresholds,
+    },
+    'boulder-pusher': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 5,
+      lanceCount: 1,
+      lethal: true,
+      manaCost: 0,
+      stealth: true,
+      thresholds,
+    },
+    'boulder-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'boulder-south-site': { cardType: 'site', elements: ['earth'] },
+    'boulder-underground-target': {
+      attack: 1,
+      burrowing: true,
+      cardType: 'minion',
+      defense: 5,
+      manaCost: 0,
+      thresholds,
+    },
+    'boulder-warded-target': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 5,
+      manaCost: 0,
+      stealth: true,
+      thresholds,
+      ward: true,
+    },
+    'rolling-boulder': {
+      cardType: 'artifact',
+      manaCost: 0,
+      tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath: 4,
+      thresholds,
+    },
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-rolling-boulder-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north' as const,
+  };
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      'rolling-boulder': {
+        ...cards['rolling-boulder'],
+        tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath: 5,
+      } as unknown as GameCardDefinition,
+    },
+    seed: 1,
+  }), /tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath must be 4/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      'rolling-boulder': {
+        ...cards['rolling-boulder'],
+        grantsBearerLethal: true,
+      } as unknown as GameCardDefinition,
+    },
+    seed: 1,
+  }), /exactly one supported Artifact effect/);
+  const rollingManifest = createGameManifest({ ...input, seed: 1 });
+  assert.deepEqual(rollingManifest.cards['rolling-boulder'], cards['rolling-boulder']);
+
+  let session = keep(keep(createGameSession(rollingManifest)));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'boulder-pusher' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'boulder-origin-target' && descriptor.cell === 'C4');
+  const pusher = session.state.realm.units.find(({ cardId }) => cardId === 'boulder-pusher');
+  const originTarget = session.state.realm.units.find(({ cardId }) =>
+    cardId === 'boulder-origin-target');
+  assert.ok(pusher && originTarget);
+  take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+    && descriptor.cardId === 'rolling-boulder'
+    && descriptor.bearer === undefined
+    && descriptor.cell === 'C4');
+  const boulder = session.state.realm.artifacts?.find(({ cardId }) => cardId === 'rolling-boulder');
+  assert.ok(boulder);
+  const freshRolls = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-roll-damage');
+  assert.equal(freshRolls.some(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-roll-damage'
+      && descriptor.pusher.instanceId === pusher.instanceId), false);
+  assert.deepEqual({
+    avatarLocation: session.state.players.north.avatar.location,
+    avatarTapped: session.state.players.north.avatar.tapped,
+    pushers: freshRolls.flatMap(({ descriptor }) =>
+      descriptor.kind === 'activate-artifact-roll-damage'
+        ? [descriptor.pusher.kind]
+        : []),
+  }, {
+    avatarLocation: 'C4',
+    avatarTapped: true,
+    pushers: [],
+  });
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'boulder-warded-target'
+    && descriptor.cell === 'C2'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'boulder-underground-target'
+    && descriptor.cell === 'C2'
+    && descriptor.region === 'underground');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'boulder-off-path-target'
+    && descriptor.cell === 'B1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+
+  const warded = session.state.realm.units.find(({ cardId }) => cardId === 'boulder-warded-target');
+  const underground = session.state.realm.units.find(({ cardId }) =>
+    cardId === 'boulder-underground-target');
+  const offPath = session.state.realm.units.find(({ cardId }) =>
+    cardId === 'boulder-off-path-target');
+  assert.ok(warded && underground && offPath);
+  const rolls = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-roll-damage'
+      && descriptor.artifactInstanceId === boulder.instanceId
+      && descriptor.pusher.instanceId === pusher.instanceId);
+  assert.deepEqual(rolls.flatMap(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-roll-damage'
+      ? [[descriptor.direction, descriptor.path.map(({ cell }) => cell)]]
+      : []), [
+    ['east', ['C4']],
+    ['north', ['C4']],
+    ['south', ['C4', 'C3', 'C2', 'C1']],
+    ['west', ['C4']],
+  ]);
+  const southRoll = rolls.find(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-roll-damage' && descriptor.direction === 'south');
+  const zeroRoll = rolls.find(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-roll-damage' && descriptor.direction === 'north');
+  assert.ok(southRoll && zeroRoll);
+  if (southRoll.descriptor.kind !== 'activate-artifact-roll-damage') return;
+  const shortenedDescriptor = {
+    ...southRoll.descriptor,
+    path: southRoll.descriptor.path.slice(0, 2),
+  };
+  const beforeForge = hashGameState(session.state);
+  const forged = stepGame(session, {
+    actionId: opaqueActionId(
+      'sorcery-core-v1',
+      'north',
+      session.state.stateVersion,
+      shortenedDescriptor,
+    ),
+    seat: 'north',
+    stateVersion: session.state.stateVersion,
+  });
+  assert.equal(forged.accepted, false);
+  assert.equal(forged.reason.code, 'unknown_action');
+  assert.equal(hashGameState(forged.session.state), beforeForge);
+
+  const zeroResult = stepGame(session, zeroRoll);
+  assert.equal(zeroResult.accepted, true);
+  if (!zeroResult.accepted) return;
+  assert.equal(zeroResult.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === pusher.instanceId)?.tapped, true);
+  assert.equal(zeroResult.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === originTarget.instanceId)?.damage, 0);
+  assert.deepEqual(zeroResult.receipt.events.map(({ type }) => type), [
+    'artifact-roll-damage-activated',
+  ]);
+  assert.equal(observeGame(zeroResult.session.state, 'north').realm.artifacts
+    ?.find(({ instanceId }) => instanceId === boulder.instanceId)?.location, 'C4');
+  assert.equal(verifyGameReplay(zeroResult.session), true);
+
+  const carriedSession: GameSession = {
+    ...session,
+    state: {
+      ...session.state,
+      realm: {
+        ...session.state.realm,
+        artifacts: session.state.realm.artifacts!.map((artifact) =>
+          artifact.instanceId === boulder.instanceId
+            ? {
+              bearer: { instanceId: pusher.instanceId, kind: 'minion' as const, seat: 'north' as const },
+              cardId: artifact.cardId,
+              instanceId: artifact.instanceId,
+              owner: artifact.owner,
+              source: artifact.source,
+            }
+            : artifact),
+      },
+    },
+  };
+  const carriedResult = stepGame(carriedSession, action(carriedSession, ({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-roll-damage'
+      && descriptor.artifactInstanceId === boulder.instanceId
+      && descriptor.pusher.instanceId === pusher.instanceId
+      && descriptor.direction === 'south'));
+  assert.equal(carriedResult.accepted, true);
+  if (!carriedResult.accepted) return;
+  assert.deepEqual(observeGame(carriedResult.session.state, 'north').realm.artifacts
+    ?.filter(({ instanceId }) => instanceId === boulder.instanceId)
+    .map(({ bearer, controller, location, region }) => ({ bearer, controller, location, region })),
+  [{ bearer: undefined, controller: null, location: 'C1', region: 'surface' }]);
+
+  const result = stepGame(session, southRoll);
+  assert.equal(result.accepted, true);
+  if (!result.accepted) return;
+  session = result.session;
+  const survivingPusher = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === pusher.instanceId);
+  const survivingWard = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === warded.instanceId);
+  assert.deepEqual({
+    northLife: session.state.players.north.avatar.life,
+    offPathDamage: session.state.realm.units.find(({ instanceId }) =>
+      instanceId === offPath.instanceId)?.damage,
+    originTargetPresent: session.state.realm.units.some(({ instanceId }) =>
+      instanceId === originTarget.instanceId),
+    pusherDamage: survivingPusher?.damage,
+    pusherLance: survivingPusher?.carriedLanceCount,
+    pusherStealth: survivingPusher?.stealthed,
+    pusherTapped: survivingPusher?.tapped,
+    southLife: session.state.players.south.avatar.life,
+    undergroundDamage: session.state.realm.units.find(({ instanceId }) =>
+      instanceId === underground.instanceId)?.damage,
+    wardDamage: survivingWard?.damage,
+    wardStealth: survivingWard?.stealthed,
+    warded: survivingWard?.warded,
+  }, {
+    northLife: 16,
+    offPathDamage: 0,
+    originTargetPresent: false,
+    pusherDamage: 0,
+    pusherLance: 1,
+    pusherStealth: true,
+    pusherTapped: true,
+    southLife: 16,
+    undergroundDamage: 0,
+    wardDamage: 0,
+    wardStealth: true,
+    warded: false,
+  });
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === originTarget.instanceId), true);
+  assert.deepEqual(observeGame(session.state, 'north').realm.artifacts
+    ?.filter(({ instanceId }) => instanceId === boulder.instanceId)
+    .map(({ bearer, controller, location, region }) => ({ bearer, controller, location, region })),
+  [{ bearer: undefined, controller: null, location: 'C1', region: 'surface' }]);
+  const allocations = result.receipt.events.filter(({ type }) =>
+    type === 'artifact-roll-damage-allocated');
+  const expectedTargetIds = [
+    session.state.players.north.avatar.card.instanceId,
+    originTarget.instanceId,
+    session.state.players.south.avatar.card.instanceId,
+    warded.instanceId,
+  ].sort((left, right) => left.localeCompare(right));
+  assert.deepEqual(allocations.map(({ payload }) =>
+    (payload as { targetInstanceId: string }).targetInstanceId), expectedTargetIds);
+  assert.equal(allocations.every(({ payload }) => {
+    const allocation = payload as { amount?: number; sourceInstanceId?: string };
+    return allocation.amount === 4 && allocation.sourceInstanceId === boulder.instanceId;
+  }), true);
+  assert.equal(result.receipt.events[0]?.type, 'artifact-roll-damage-activated');
+  assert.equal(canonicalJson(result.receipt.events[0]!.payload)
+    .includes('C4'), true);
+  assert.equal(canonicalJson(result.receipt.events[0]!.payload)
+    .includes('C1'), true);
+  assert.equal(result.receipt.events.some(({ type }) =>
+    type === 'fight-started'
+      || type === 'strike-damage-allocated'
+      || type === 'lance-broken'
+      || type === 'lethal-damage'), false);
+  assert.equal(result.receipt.randomDraws.length, 0);
+  assert.equal(session.transcript.every(({ randomDraws }) => randomDraws.length === 0), true);
+  assert.equal(verifyGameReplay(session), true);
+});
+
 test('RULE-03/05 Mesmerism transfers a minion and its Deathrite to the new controller', () => {
   const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
   const north: GameDeckSpec = {

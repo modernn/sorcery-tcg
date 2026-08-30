@@ -646,6 +646,24 @@ export type PrivateGameCheck = Readonly<{
     threeStepRangeVerified: boolean;
     trebuchetRemainedCarried: boolean;
   }>;
+  earthRollingBoulder: Readonly<{
+    acceptedActionCount: number;
+    boulderLooseAtDestination: boolean;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    exactCastAndRoll: boolean;
+    legalConstructedDeck: boolean;
+    noRandomDraws: boolean;
+    noStrikeOrLethal: boolean;
+    originAndPathTargetsDamaged: boolean;
+    pusherExcludedAndTapped: boolean;
+    replayVerified: boolean;
+    rollingBoulder: string;
+    scentHounds: string;
+    seed: number;
+    targetDeathsVerified: boolean;
+    wildBoars: string;
+  }>;
   earthRescue: Readonly<{
     acceptedActionCount: number;
     boskTroll: string;
@@ -1401,6 +1419,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   caveIn: NormalizedCard;
   siegeBallista: NormalizedCard;
   payloadTrebuchet: NormalizedCard;
+  rollingBoulder: NormalizedCard;
   borderMilitia: NormalizedCard;
   burrowingMinion: NormalizedCard;
   cards: readonly NormalizedCard[];
@@ -2266,6 +2285,28 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || payloadTrebuchet.thresholds.water !== 0
     || payloadTrebuchet.rarity !== 'elite') {
     throw new Error('private carried discard-area-damage Artifact no longer matches its supported facts');
+  }
+  const rollingBoulder = snapshot.cards.find(({ name }) => name === 'Rolling Boulder');
+  const rollingBoulderTokens = rollingBoulder?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
+  if (!rollingBoulder
+    || rollingBoulder.stableId
+      !== 'card:00eac8d87deef008cafc64b7c66ad528004222fa44fe672b94e0cd442dac8f85'
+    || rollingBoulder.officialSourceId !== '001-rolling_boulder-b-f'
+    || rollingBoulder.cardType !== 'artifact'
+    || rollingBoulderTokens.length !== 25
+    || identityHash(rollingBoulderTokens as unknown as JsonValue)
+      !== 'sha256:365c9b56f15e06ac49e9d2a59445686c6bcebc9d2bb869de3161a6fbf2083bf7'
+    || rollingBoulder.manaCost !== 4
+    || rollingBoulder.attack !== null
+    || rollingBoulder.defense !== null
+    || rollingBoulder.life !== null
+    || rollingBoulder.elements.length !== 0
+    || rollingBoulder.thresholds.air !== 0
+    || rollingBoulder.thresholds.earth !== 0
+    || rollingBoulder.thresholds.fire !== 0
+    || rollingBoulder.thresholds.water !== 0
+    || rollingBoulder.rarity !== 'exceptional') {
+    throw new Error('private rolling path-damage Artifact no longer matches its supported facts');
   }
   const duel = snapshot.cards.find(({ name }) => name === 'Duel');
   if (!duel
@@ -3534,6 +3575,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     caveIn,
     siegeBallista,
     payloadTrebuchet,
+    rollingBoulder,
     burrowingMinion,
     cards: snapshot.cards,
     cannotDefendMinion,
@@ -3766,6 +3808,7 @@ function gameDefinition(
   burrowAllMinionsAndArtifactsAtTargetLandSite = false,
   tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps = false,
   tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps = false,
+  tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -3795,7 +3838,8 @@ function gameDefinition(
       + Number(tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps)
       + Number(
         tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps,
-      ) === 1) {
+      )
+      + Number(tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath) === 1) {
     return {
       cardType: 'artifact',
       ...(grantsBearerPower === 2
@@ -3804,10 +3848,14 @@ function gameDefinition(
           ? { grantsBearerLethal: true as const }
           : tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps
             ? { tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps: 3 as const }
-            : {
-              tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps:
-                true as const,
-            }),
+            : tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
+              ? {
+                tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps:
+                  true as const,
+              }
+              : {
+                tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath: 4 as const,
+              }),
       manaCost: card.manaCost,
       thresholds: card.thresholds,
     };
@@ -3991,7 +4039,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -4194,6 +4242,17 @@ function buildManifest(
       ...earthPayloadTrebuchetBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
     ],
   };
+  const earthRollingBoulderBase = elementalDeck(
+    'earth',
+    [input.scentHounds, input.wildBoars],
+  );
+  const earthRollingBoulderDeck: GameDeckSpec = {
+    ...earthRollingBoulderBase,
+    spellbook: [
+      input.rollingBoulder.stableId,
+      ...earthRollingBoulderBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
+    ],
+  };
   const earthBorderMilitiaDeck = elementalDeck('earth', [], [], [input.borderMilitia]);
   const earthHumbleVillageDeck = elementalDeck('earth', [], [input.humbleVillage]);
   const earthDuelDeck = elementalDeck(
@@ -4294,6 +4353,7 @@ function buildManifest(
       input.caveIn.stableId,
       input.siegeBallista.stableId,
       input.payloadTrebuchet.stableId,
+      input.rollingBoulder.stableId,
     ],
   };
   const fireStarterDeck = elementalDeck(
@@ -4572,6 +4632,8 @@ function buildManifest(
         ? earthSiegeBallistaDeck
       : scenario === 'earth-payload-trebuchet'
         ? earthPayloadTrebuchetDeck
+      : scenario === 'earth-rolling-boulder'
+        ? earthRollingBoulderDeck
       : scenario === 'earth-quagmire'
         ? earthQuagmireDeck
       : scenario === 'earth-holy-ground'
@@ -4753,6 +4815,8 @@ function buildManifest(
         ? earthSiegeBallistaDeck
       : scenario === 'earth-payload-trebuchet'
         ? earthPayloadTrebuchetDeck
+      : scenario === 'earth-rolling-boulder'
+        ? earthRollingBoulderDeck
       : scenario === 'earth-quagmire'
         ? earthQuagmireDeck
       : scenario === 'earth-holy-ground'
@@ -4950,6 +5014,7 @@ function buildManifest(
       card.stableId === input.caveIn.stableId,
       card.stableId === input.siegeBallista.stableId,
       card.stableId === input.payloadTrebuchet.stableId,
+      card.stableId === input.rollingBoulder.stableId,
     ),
   ]));
   return {
@@ -6558,6 +6623,86 @@ function findEarthPayloadTrebuchetOpening(
     };
   }
   throw new Error('private Payload Trebuchet scenario no longer produces its supported opening');
+}
+
+type EarthRollingBoulderOpening = Readonly<{
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string, string];
+  rollingBoulderInstanceId: string;
+  scentHoundsInstanceId: string;
+  seed: number;
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string];
+  wildBoarsInstanceId: string;
+}>;
+
+function earthRollingBoulderOpeningAtSeed(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+  seed: number,
+): EarthRollingBoulderOpening | null {
+  const built = buildManifest(input, seed, 'earth-rolling-boulder');
+  const session = createGameSession(built.manifest);
+  const northHandSites = session.state.players.north.hand.atlas;
+  const northEarthSite = northHandSites.find(({ cardId }) => {
+    const definition = session.state.cards[cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('earth');
+  });
+  const northOtherSite = northHandSites.find(({ instanceId }) =>
+    instanceId !== northEarthSite?.instanceId);
+  const northDrawSites = session.state.players.north.atlas.slice(0, 2);
+  const southHandSites = session.state.players.south.hand.atlas;
+  const southEarthSite = southHandSites.find(({ cardId }) => {
+    const definition = session.state.cards[cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('earth');
+  });
+  const southOtherSite = southHandSites.find(({ instanceId }) =>
+    instanceId !== southEarthSite?.instanceId);
+  const northWindow = [
+    ...session.state.players.north.hand.spellbook,
+    ...session.state.players.north.spellbook.slice(0, 1),
+  ];
+  const southWindow = [
+    ...session.state.players.south.hand.spellbook,
+    ...session.state.players.south.spellbook.slice(0, 1),
+  ];
+  const rollingBoulder = northWindow.find(({ cardId }) =>
+    cardId === input.rollingBoulder.stableId);
+  const scentHounds = northWindow.find(({ cardId }) => cardId === input.scentHounds.stableId);
+  const wildBoars = southWindow.find(({ cardId }) => cardId === input.wildBoars.stableId);
+  if (!northEarthSite
+    || !northOtherSite
+    || northDrawSites.length < 2
+    || !southEarthSite
+    || !southOtherSite
+    || !rollingBoulder
+    || !scentHounds
+    || !wildBoars) return null;
+  return {
+    ...built,
+    northSiteInstanceIds: [
+      northEarthSite.instanceId,
+      northOtherSite.instanceId,
+      northDrawSites[0]!.instanceId,
+      northDrawSites[1]!.instanceId,
+    ],
+    rollingBoulderInstanceId: rollingBoulder.instanceId,
+    scentHoundsInstanceId: scentHounds.instanceId,
+    seed,
+    session,
+    southSiteInstanceIds: [southEarthSite.instanceId, southOtherSite.instanceId],
+    wildBoarsInstanceId: wildBoars.instanceId,
+  };
+}
+
+function findEarthRollingBoulderOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): EarthRollingBoulderOpening {
+  // Calibrated against the ignored exact-card authority snapshot.
+  const seed = 378;
+  const opening = earthRollingBoulderOpeningAtSeed(input, seed);
+  if (opening) return opening;
+  throw new Error('private Rolling Boulder scenario no longer produces its supported opening');
 }
 
 function findEarthRescueOpening(
@@ -11299,6 +11444,184 @@ function runEarthPayloadTrebuchet(
       && 'bearer' in trebuchetAfter
       && trebuchetAfter.bearer.kind === 'minion'
       && trebuchetAfter.bearer.instanceId === opening.bearerInstanceId,
+  });
+}
+
+function runEarthRollingBoulder(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthRollingBoulder'] {
+  const opening = findEarthRollingBoulderOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.scentHoundsInstanceId
+    && descriptor.cell === 'C4'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.wildBoarsInstanceId);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+    && descriptor.cell === 'B4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[3]
+    && descriptor.cell === 'A4');
+  const castResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-artifact'
+      && descriptor.cardInstanceId === opening.rollingBoulderInstanceId
+      && descriptor.bearer === undefined
+      && descriptor.cell === 'C4'));
+  if (!castResult.accepted) throw new Error('private Rolling Boulder cast was rejected');
+  session = castResult.session;
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const pusherBefore = session.state.players.north.avatar;
+  const originTargetBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.scentHoundsInstanceId);
+  const pathTargetBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.wildBoarsInstanceId);
+  const southAvatarBefore = session.state.players.south.avatar;
+  const pusherInstanceId = pusherBefore.card.instanceId;
+  const activationChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-roll-damage'
+      && descriptor.artifactInstanceId === opening.rollingBoulderInstanceId
+      && descriptor.direction === 'south'
+      && descriptor.pusher.kind === 'avatar'
+      && descriptor.pusher.instanceId === pusherInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3,C2,C1');
+  const activation = activationChoices[0];
+  if (!activation || activationChoices.length !== 1) {
+    throw new Error('private Rolling Boulder exact activation is unavailable or ambiguous');
+  }
+  const activationResult = stepGame(session, activation);
+  if (!activationResult.accepted) throw new Error('private Rolling Boulder activation was rejected');
+  session = activationResult.session;
+
+  const castEvent = castResult.receipt.events[0];
+  const castPayload = castEvent && isJsonRecord(castEvent.payload) ? castEvent.payload : undefined;
+  const events = activationResult.receipt.events;
+  const activatedEvent = events[0];
+  const activatedPayload = activatedEvent && isJsonRecord(activatedEvent.payload)
+    ? activatedEvent.payload
+    : undefined;
+  const allocationEvents = events.filter(({ type }) =>
+    type === 'artifact-roll-damage-allocated');
+  const expectedTargetIds = [
+    opening.scentHoundsInstanceId,
+    opening.wildBoarsInstanceId,
+    southAvatarBefore.card.instanceId,
+  ].sort((left, right) => left.localeCompare(right));
+  const allocationTargetIds = allocationEvents.flatMap(({ payload }) =>
+    isJsonRecord(payload) && typeof payload.targetInstanceId === 'string'
+      ? [payload.targetInstanceId]
+      : []);
+  const boulderAfter = session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === opening.rollingBoulderInstanceId);
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    boulderLooseAtDestination: boulderAfter !== undefined
+      && !('bearer' in boulderAfter)
+      && boulderAfter.location === 'C1'
+      && boulderAfter.region === 'surface',
+    causalEventsVerified: activatedEvent?.type === 'artifact-roll-damage-activated'
+      && activatedPayload?.direction === 'south'
+      && activatedPayload.fromCell === 'C4'
+      && activatedPayload.fromRegion === 'surface'
+      && activatedPayload.pusherInstanceId === pusherInstanceId
+      && activatedPayload.pusherKind === 'avatar'
+      && activatedPayload.pusherSeat === 'north'
+      && activatedPayload.seat === 'north'
+      && activatedPayload.sourceInstanceId === opening.rollingBoulderInstanceId
+      && activatedPayload.toCell === 'C1'
+      && activatedPayload.toRegion === 'surface'
+      && allocationEvents.length === expectedTargetIds.length
+      && canonicalJson(allocationTargetIds as unknown as JsonValue)
+        === canonicalJson(expectedTargetIds as unknown as JsonValue)
+      && events.slice(1, 1 + allocationEvents.length).every((event, index) =>
+        event === allocationEvents[index])
+      && allocationEvents.every(({ payload }) => isJsonRecord(payload)
+        && payload.amount === 4
+        && payload.sourceInstanceId === opening.rollingBoulderInstanceId),
+    deck,
+    exactCastAndRoll: castResult.receipt.events.length === 1
+      && castEvent?.type === 'artifact-conjured'
+      && castPayload?.cardId === input.rollingBoulder.stableId
+      && castPayload.instanceId === opening.rollingBoulderInstanceId
+      && castPayload.manaPaid === 4
+      && castPayload.cell === 'C4'
+      && castPayload.region === 'surface'
+      && !('bearerInstanceId' in castPayload)
+      && activationChoices.length === 1,
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && deck.spellbook.find(({ name }) => name === input.rollingBoulder.name)?.copies === 1,
+    noRandomDraws: activationResult.receipt.randomDraws.length === 0
+      && session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    noStrikeOrLethal: events.every(({ type }) =>
+      type !== 'fight-started'
+        && type !== 'strike-damage-allocated'
+        && type !== 'lethal-damage'),
+    originAndPathTargetsDamaged: originTargetBefore?.damage === 0
+      && pathTargetBefore?.damage === 0
+      && southAvatarBefore.life - session.state.players.south.avatar.life === 4
+      && allocationTargetIds.includes(opening.scentHoundsInstanceId)
+      && allocationTargetIds.includes(opening.wildBoarsInstanceId)
+      && allocationTargetIds.includes(southAvatarBefore.card.instanceId),
+    pusherExcludedAndTapped: pusherBefore.tapped === false
+      && session.state.players.north.avatar.tapped === true
+      && session.state.players.north.avatar.life === pusherBefore.life
+      && !allocationTargetIds.includes(pusherInstanceId),
+    replayVerified: verifyGameReplay(session),
+    rollingBoulder:
+      opening.names.get(input.rollingBoulder.stableId) ?? input.rollingBoulder.stableId,
+    scentHounds: opening.names.get(input.scentHounds.stableId) ?? input.scentHounds.stableId,
+    seed: opening.seed,
+    targetDeathsVerified: session.state.players.north.cemetery.some(({ instanceId }) =>
+      instanceId === opening.scentHoundsInstanceId)
+      && session.state.players.south.cemetery.some(({ instanceId }) =>
+        instanceId === opening.wildBoarsInstanceId)
+      && session.state.realm.units.every(({ instanceId }) =>
+        instanceId !== opening.scentHoundsInstanceId
+          && instanceId !== opening.wildBoarsInstanceId),
+    wildBoars: opening.names.get(input.wildBoars.stableId) ?? input.wildBoars.stableId,
   });
 }
 
@@ -18868,6 +19191,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthCaveIn = runEarthCaveIn(input);
   const earthSiegeBallista = runEarthSiegeBallista(input);
   const earthPayloadTrebuchet = runEarthPayloadTrebuchet(input);
+  const earthRollingBoulder = runEarthRollingBoulder(input);
   const earthBorderMilitia = runEarthBorderMilitia(input);
   const earthHumbleVillage = runEarthHumbleVillage(input);
   const earthDuel = runEarthDuel(input);
@@ -19084,6 +19408,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthCaveIn,
     earthSiegeBallista,
     earthPayloadTrebuchet,
+    earthRollingBoulder,
     earthBorderMilitia,
     earthHumbleVillage,
     earthDuel,

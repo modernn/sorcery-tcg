@@ -922,7 +922,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 23 : 31,
+        preset.id === 'air-vs-earth-lesson' ? 23 : 32,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -930,7 +930,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 31 : 23,
+        preset.id === 'air-vs-earth-lesson' ? 32 : 23,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -1001,6 +1001,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     Overpower: 2,
     'Payload Trebuchet': 1,
     'Pudge Butcher': 1,
+    'Rolling Boulder': 1,
     'Scent Hounds': 2,
     'Siege Ballista': 1,
     'Slumbering Giantess': 1,
@@ -1154,6 +1155,23 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     }, {
       manaCost: 5,
       tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps: true,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    });
+  }
+  const rollingBoulderId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Rolling Boulder')?.[0];
+  assert.ok(rollingBoulderId);
+  const rollingBoulder = airLesson.manifest.cards[rollingBoulderId];
+  assert.equal(rollingBoulder?.cardType, 'artifact');
+  if (rollingBoulder?.cardType === 'artifact') {
+    assert.deepEqual({
+      manaCost: rollingBoulder.manaCost,
+      tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath:
+        rollingBoulder.tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath,
+      thresholds: rollingBoulder.thresholds,
+    }, {
+      manaCost: 4,
+      tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath: 4,
       thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
     });
   }
@@ -1822,6 +1840,27 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthPayloadTrebuchet.deck.spellbook
     .find(({ name }) => name === 'Payload Trebuchet')?.copies, 1);
   assert.equal(result.earthPayloadTrebuchet.replayVerified, true);
+  assert.equal(result.earthRollingBoulder.rollingBoulder, 'Rolling Boulder');
+  assert.equal(result.earthRollingBoulder.scentHounds, 'Scent Hounds');
+  assert.equal(result.earthRollingBoulder.wildBoars, 'Wild Boars');
+  assert.equal(result.earthRollingBoulder.seed, 378);
+  assert.equal(result.earthRollingBoulder.acceptedActionCount, 28);
+  assert.equal(result.earthRollingBoulder.exactCastAndRoll, true);
+  assert.equal(result.earthRollingBoulder.pusherExcludedAndTapped, true);
+  assert.equal(result.earthRollingBoulder.originAndPathTargetsDamaged, true);
+  assert.equal(result.earthRollingBoulder.targetDeathsVerified, true);
+  assert.equal(result.earthRollingBoulder.boulderLooseAtDestination, true);
+  assert.equal(result.earthRollingBoulder.causalEventsVerified, true);
+  assert.equal(result.earthRollingBoulder.noStrikeOrLethal, true);
+  assert.equal(result.earthRollingBoulder.legalConstructedDeck, true);
+  assert.equal(result.earthRollingBoulder.noRandomDraws, true);
+  assert.equal(result.earthRollingBoulder.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthRollingBoulder.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthRollingBoulder.deck.spellbook
+    .find(({ name }) => name === 'Rolling Boulder')?.copies, 1);
+  assert.equal(result.earthRollingBoulder.replayVerified, true);
   assert.equal(result.earthBorderMilitia.borderMilitia, 'Border Militia');
   assert.equal(result.earthBorderMilitia.footSoldier, 'Foot Soldier');
   assert.equal(result.earthBorderMilitia.seed, 7688);
