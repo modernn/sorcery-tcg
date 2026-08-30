@@ -946,7 +946,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 33 : 35,
+        preset.id === 'air-vs-earth-lesson' ? 34 : 35,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -954,7 +954,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 35 : 33,
+        preset.id === 'air-vs-earth-lesson' ? 35 : 34,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -1002,6 +1002,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Nimbus Jinn': 1,
     'Plumed Pegasus': 2,
     'Roaming Monster': 1,
+    'Skirmishers of Mu': 1,
     'Sling Pixies': 1,
     'Snow Leopard': 2,
     'Spire Lich': 1,
@@ -1087,6 +1088,20 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     assert.equal(kiteArcher.ranged, true);
     assert.equal(kiteArcher.mayStepAfterRangedStrike, true);
     assert.deepEqual(kiteArcher.thresholds, { air: 1, earth: 0, fire: 0, water: 0 });
+  }
+  const skirmishersOfMuId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Skirmishers of Mu')?.[0];
+  assert.ok(skirmishersOfMuId);
+  const skirmishersOfMu = airLesson.manifest.cards[skirmishersOfMuId];
+  assert.equal(skirmishersOfMu?.cardType, 'minion');
+  if (skirmishersOfMu?.cardType === 'minion') {
+    assert.equal(skirmishersOfMu.attack, 3);
+    assert.equal(skirmishersOfMu.defense, 3);
+    assert.equal(skirmishersOfMu.manaCost, 4);
+    assert.equal(skirmishersOfMu.mortal, true);
+    assert.equal(skirmishersOfMu.ranged, true);
+    assert.equal(skirmishersOfMu.mayRangedStrikeOnceDuringBasicMovement, true);
+    assert.deepEqual(skirmishersOfMu.thresholds, { air: 2, earth: 0, fire: 0, water: 0 });
   }
   const chainLightningId = Object.entries(airLesson.cardNames)
     .find(([, name]) => name === 'Chain Lightning')?.[0];
@@ -1656,6 +1671,23 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airKiteArcher.deck.spellbook
     .find(({ name }) => name === 'Kite Archer')?.copies, 3);
   assert.equal(result.airKiteArcher.replayVerified, true);
+  assert.equal(result.airSkirmishersOfMu.skirmishersOfMu, 'Skirmishers of Mu');
+  assert.equal(result.airSkirmishersOfMu.seed, 29);
+  assert.equal(result.airSkirmishersOfMu.acceptedActionCount, 33);
+  assert.equal(result.airSkirmishersOfMu.causalEventsVerified, true);
+  assert.equal(result.airSkirmishersOfMu.continueBranchVerified, true);
+  assert.equal(result.airSkirmishersOfMu.exactMovementShotVerified, true);
+  assert.equal(result.airSkirmishersOfMu.structuralFactsVerified, true);
+  assert.equal(result.airSkirmishersOfMu.noRandomDraws, true);
+  assert.equal(result.airSkirmishersOfMu.unsupportedMechanicsAbsent, true);
+  assert.equal(result.airSkirmishersOfMu.legalConstructedDeck, true);
+  assert.equal(result.airSkirmishersOfMu.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airSkirmishersOfMu.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airSkirmishersOfMu.deck.spellbook
+    .find(({ name }) => name === 'Skirmishers of Mu')?.copies, 3);
+  assert.equal(result.airSkirmishersOfMu.replayVerified, true);
   assert.equal(result.airChainLightning.chainLightning, 'Chain Lightning');
   assert.equal(result.airChainLightning.seed, 508);
   assert.equal(result.airChainLightning.acceptedActionCount, 26);

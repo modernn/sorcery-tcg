@@ -239,6 +239,7 @@ export type GameCardDefinition =
     lanceCount?: 1 | 2 | 3;
     lethal?: boolean;
     manaCost: number;
+    mayRangedStrikeOnceDuringBasicMovement?: true;
     mayStepAfterRangedStrike?: true;
     mortal?: true;
     movementBonus?: 1 | 2;
@@ -423,6 +424,15 @@ type DamageContribution = Readonly<{
   source: DamageSourceSnapshot;
 }>;
 
+type PendingBasicMovement = Readonly<{
+  path: readonly GameLocation[];
+  pathIndex: number;
+  purpose: 'defend' | 'move-and-attack';
+  rangedStrikeUsed: boolean;
+  seat: GameSeat;
+  sourceInstanceId: StateHash;
+}>;
+
 type PendingGenesisSpell = Readonly<{
   seat: GameSeat;
   sourceInstanceId: StateHash;
@@ -481,6 +491,7 @@ export type GameState = Readonly<{
   cards: Readonly<Record<string, GameCardDefinition>>;
   decisionSeat: GameSeat;
   engine: EngineState;
+  pendingBasicMovement?: PendingBasicMovement | null;
   pendingChainMagic?: PendingChainMagic | null;
   pendingCombat: PendingCombat | null;
   pendingEndTurnAura?: PendingEndTurnAura | null;
@@ -488,7 +499,7 @@ export type GameState = Readonly<{
   pendingGenesisToken?: PendingGenesisToken | null;
   pendingRandomOutcome?: PendingRandomOutcome | null;
   pendingRangedStep?: PendingRangedStep | null;
-  phase: 'allocate' | 'attack' | 'chain-magic' | 'defend' | 'draw' | 'end-turn-aura' | 'genesis' | 'intercept' | 'main' | 'mulligan' | 'random-choice' | 'ranged-step' | 'terminal';
+  phase: 'allocate' | 'attack' | 'chain-magic' | 'defend' | 'draw' | 'end-turn-aura' | 'genesis' | 'intercept' | 'main' | 'movement' | 'mulligan' | 'random-choice' | 'ranged-step' | 'terminal';
   players: Readonly<Record<GameSeat, PlayerState>>;
   realm: Readonly<{
     artifacts?: readonly ArtifactInstance[];
@@ -705,6 +716,10 @@ type GameActionDescriptor =
     kind: 'move-and-attack';
     path: readonly GameLocation[];
     to: GameLocation;
+    unitInstanceId: StateHash;
+  }>
+  | Readonly<{
+    kind: 'continue-basic-movement';
     unitInstanceId: StateHash;
   }>
   | Readonly<{
@@ -1673,7 +1688,8 @@ const SUPPORTED_CARD_FIELDS = {
     genesisDisableSelfUntilDamaged genesisDrawSite genesisDrawSpells genesisHealController
     genesisLoseControllerLife genesisMayDamageTargetAdjacentUnit genesisStrikeEachEnemyHere
     gainsPowerRangedAndSpellcasterAtopTower gainsStealthAtEndOfTurn immobile lanceCount lethal
-    manaCost mayStepAfterRangedStrike mortal movementBonus movesOnlyForward movesOnlySideways
+    manaCost mayRangedStrikeOnceDuringBasicMovement mayStepAfterRangedStrike mortal movementBonus
+    movesOnlyForward movesOnlySideways
     mustBeCastBurrowed mustBeCastSubmerged mustBeCastToOuterColumn mustBeCastToWaterSite
     nearbyEnemiesPermanentlyLoseStealth occupiesSquareArea ordinary otherControlledMortalsPowerBonus
     otherNearbyAlliesPowerBonus preventsDamageFromUnitsWithPowerAtLeast provides ranged
@@ -2261,6 +2277,19 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && card.mayStepAfterRangedStrike !== true) {
     throw new RangeError(`${path}.mayStepAfterRangedStrike must be true when defined`);
   }
+  if (card.mayRangedStrikeOnceDuringBasicMovement !== undefined
+    && card.mayRangedStrikeOnceDuringBasicMovement !== true) {
+    throw new RangeError(
+      `${path}.mayRangedStrikeOnceDuringBasicMovement must be true when defined`,
+    );
+  }
+  if (card.mayRangedStrikeOnceDuringBasicMovement === true && card.ranged !== true) {
+    throw new RangeError(`${path}.mayRangedStrikeOnceDuringBasicMovement requires ranged`);
+  }
+  if (card.mayRangedStrikeOnceDuringBasicMovement === true
+    && card.mayStepAfterRangedStrike === true) {
+    throw new RangeError(`${path} simultaneous during-movement and post-Ranged movement is unsupported`);
+  }
   if (card.movementBonus !== undefined
     && (!Number.isSafeInteger(card.movementBonus)
       || card.movementBonus < 1
@@ -2753,6 +2782,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.lanceCount !== undefined ? { lanceCount: card.lanceCount } : {}),
             ...(card.lethal === true ? { lethal: true } : {}),
             manaCost: card.manaCost,
+            ...(card.mayRangedStrikeOnceDuringBasicMovement === true
+              ? { mayRangedStrikeOnceDuringBasicMovement: true as const }
+              : {}),
             ...(card.mayStepAfterRangedStrike === true
               ? { mayStepAfterRangedStrike: true as const }
               : {}),
@@ -4278,67 +4310,93 @@ function rangedProjectileRange(
   return definition.cardType === 'site' && definition.rangedUnitsHereRangeBonus === 1 ? 2 : 1;
 }
 
-function rangedDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
+function projectileDescriptorsForShooter(
+  state: GameState,
+  shooter: GameUnitRef,
+  allowTapped = false,
+): readonly GameActionDescriptor[] {
+  const seat = shooter.seat;
   const directions = ['east', 'north', 'south', 'west'] as const;
   const allUnits = [...unitRefs(state, 'north'), ...unitRefs(state, 'south')];
-  return unitRefs(state, seat).flatMap((shooter) => {
-    const status = unitStatus(state, shooter);
-    if (!status.ranged || status.tapped || status.summoningSickness) return [];
-    const range = rangedProjectileRange(state, status.location, status.region);
-    const startingEnemies = allUnits
-      .filter((ref) => {
-        const target = unitStatus(state, ref);
-        return ref.seat !== seat
-          && !target.stealthed
-          && target.occupiedCells.some((cell) => status.occupiedCells.includes(cell))
-          && target.region === status.region;
-      })
-      .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
-    return directions.flatMap<GameActionDescriptor>((direction) => {
-      if (startingEnemies.length > 0) {
-        return startingEnemies.map((hit) => ({
+  const status = unitStatus(state, shooter);
+  if (!status.ranged || (!allowTapped && status.tapped) || status.summoningSickness) return [];
+  const range = rangedProjectileRange(state, status.location, status.region);
+  const startingEnemies = allUnits
+    .filter((ref) => {
+      const target = unitStatus(state, ref);
+      return ref.seat !== seat
+        && !target.stealthed
+        && target.occupiedCells.some((cell) => status.occupiedCells.includes(cell))
+        && target.region === status.region;
+    })
+    .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+  return directions.flatMap<GameActionDescriptor>((direction) => {
+    if (startingEnemies.length > 0) {
+      return startingEnemies.map((hit) => ({
+        direction,
+        hit,
+        kind: 'shoot-projectile' as const,
+        path: pathLocations([status.location], status.region),
+        shooterInstanceId: shooter.instanceId,
+      }));
+    }
+    const cells: RealmCell[] = [status.location];
+    let current = status.location;
+    for (let step = 0; step < range; step += 1) {
+      const next = projectileStep(current, direction);
+      if (!next || !locationExists(state, { cell: next, region: status.region })) break;
+      cells.push(next);
+      const hits = allUnits
+        .filter((ref) => {
+          const target = unitStatus(state, ref);
+          return !target.stealthed
+            && target.occupiedCells.includes(next)
+            && target.region === status.region;
+        })
+        .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+      const path = pathLocations(cells, status.region);
+      if (hits.length > 0) {
+        return hits.map((hit) => ({
           direction,
           hit,
           kind: 'shoot-projectile' as const,
-          path: pathLocations([status.location], status.region),
+          path,
           shooterInstanceId: shooter.instanceId,
         }));
       }
-      const cells: RealmCell[] = [status.location];
-      let current = status.location;
-      for (let step = 0; step < range; step += 1) {
-        const next = projectileStep(current, direction);
-        if (!next || !locationExists(state, { cell: next, region: status.region })) break;
-        cells.push(next);
-        const hits = allUnits
-          .filter((ref) => {
-            const target = unitStatus(state, ref);
-            return !target.stealthed
-              && target.occupiedCells.includes(next)
-              && target.region === status.region;
-          })
-          .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
-        const path = pathLocations(cells, status.region);
-        if (hits.length > 0) {
-          return hits.map((hit) => ({
-            direction,
-            hit,
-            kind: 'shoot-projectile' as const,
-            path,
-            shooterInstanceId: shooter.instanceId,
-          }));
-        }
-        current = next;
-      }
-      return [{
-        direction,
-        hit: null,
-        kind: 'shoot-projectile' as const,
-        path: pathLocations(cells, status.region),
-        shooterInstanceId: shooter.instanceId,
-      }];
-    });
+      current = next;
+    }
+    return [{
+      direction,
+      hit: null,
+      kind: 'shoot-projectile' as const,
+      path: pathLocations(cells, status.region),
+      shooterInstanceId: shooter.instanceId,
+    }];
   });
+}
+
+function rangedDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
+  return unitRefs(state, seat).flatMap((shooter) =>
+    projectileDescriptorsForShooter(state, shooter));
+}
+
+function basicMovementDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
+  const pending = state.pendingBasicMovement;
+  if (!pending || pending.seat !== seat) throw new Error('unreachable missing pending basic movement');
+  const continuation: GameActionDescriptor = {
+    kind: 'continue-basic-movement',
+    unitInstanceId: pending.sourceInstanceId,
+  };
+  if (pending.rangedStrikeUsed) return [continuation];
+  const unit = state.realm.units.find(({ controller, instanceId }) =>
+    controller === seat && instanceId === pending.sourceInstanceId);
+  if (!unit) return [continuation];
+  const definition = cardDefinition(state, unit.cardId);
+  if (definition.cardType !== 'minion'
+    || definition.mayRangedStrikeOnceDuringBasicMovement !== true) return [continuation];
+  const shooter: GameUnitRef = { instanceId: unit.instanceId, kind: 'minion', seat };
+  return [continuation, ...projectileDescriptorsForShooter(state, shooter, true)];
 }
 
 function rangedStepDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
@@ -4621,6 +4679,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
   const player = state.players[seat];
   if (state.phase === 'mulligan') return mulliganDescriptors(player);
   if (state.phase === 'draw') return [{ kind: 'draw', zone: 'atlas' }, { kind: 'draw', zone: 'spellbook' }];
+  if (state.phase === 'movement') return basicMovementDescriptors(state, seat);
   if (state.phase === 'ranged-step') return rangedStepDescriptors(state, seat);
   if (state.phase === 'chain-magic') return chainMagicDescriptors(state, seat);
   if (state.phase === 'random-choice') {
@@ -4959,6 +5018,13 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
     return descriptor.path.length === 1
       ? `Tap ${descriptor.unitInstanceId.slice(0, 15)}… without moving${descriptor.to.region === 'surface' ? '' : ` ${descriptor.to.region}`}`
       : `Move ${descriptor.unitInstanceId.slice(0, 15)}… ${descriptor.path.map(({ cell, region }) => `${cell}${region === 'surface' ? '' : ` ${region}`}`).join(' → ')}`;
+  }
+  if (descriptor.kind === 'continue-basic-movement') {
+    const pending = state.pendingBasicMovement;
+    const destination = pending?.path[pending.pathIndex + 1];
+    return destination
+      ? `Continue ${descriptor.unitInstanceId.slice(0, 15)}… to ${destination.cell}`
+      : `Finish ${pending?.purpose === 'defend' ? 'Defend' : 'Move and Attack'}`;
   }
   if (descriptor.kind === 'shoot-projectile') {
     const target = descriptor.hit
@@ -5753,20 +5819,17 @@ function settleStaticPowerDeaths(
     deaths,
     new Set<GameSeat>(),
   );
-  const survivingIds = new Set(resolution.units.map(({ instanceId }) => instanceId));
-  const unitSurvives = (ref: GameUnitRef): boolean =>
-    ref.kind === 'avatar' || survivingIds.has(ref.instanceId);
-  const pendingInvalid = state.pendingCombat !== null
-    && (!unitSurvives(state.pendingCombat.attacker)
-      || (state.pendingCombat.originalTarget?.kind === 'minion'
-        && !unitSurvives(state.pendingCombat.originalTarget)));
-  const pendingCombat = state.pendingCombat === null || pendingInvalid
+  const pendingCombat = state.pendingCombat === null
     ? null
-    : deepFreeze({
-      ...state.pendingCombat,
-      combatants: state.pendingCombat.combatants.filter(unitSurvives),
-      defenders: state.pendingCombat.defenders.filter(unitSurvives),
-    });
+    : reconcilePendingCombat(
+      deepFreeze({ ...state, realm: { ...state.realm, units: resolution.units } }),
+      state.pendingCombat,
+    );
+  const pendingInvalid = state.pendingCombat !== null && pendingCombat === null;
+  const movement = state.pendingBasicMovement;
+  const movementInvalid = movement !== null && movement !== undefined
+    && (!resolution.units.some(({ instanceId }) => instanceId === movement.sourceInstanceId)
+      || (movement.purpose === 'defend' && pendingCombat === null));
   const terminal = state.terminal.status === 'finished'
     ? state.terminal
     : resolution.terminal;
@@ -5775,10 +5838,25 @@ function settleStaticPowerDeaths(
     state: deepFreeze({
       ...state,
       ...(terminal.status === 'finished'
-        ? { pendingCombat: null, phase: 'terminal' as const }
-        : pendingInvalid
-          ? { decisionSeat: state.activeSeat, pendingCombat: null, phase: 'main' as const }
-          : { pendingCombat }),
+        ? {
+          ...(movement === undefined ? {} : { pendingBasicMovement: null }),
+          pendingCombat: null,
+          phase: 'terminal' as const,
+        }
+        : movementInvalid
+          ? {
+            decisionSeat: movement.purpose === 'defend' && pendingCombat !== null
+              ? movement.seat
+              : state.activeSeat,
+            pendingBasicMovement: null,
+            pendingCombat,
+            phase: movement.purpose === 'defend' && pendingCombat !== null
+              ? 'defend' as const
+              : 'main' as const,
+          }
+          : pendingInvalid
+            ? { decisionSeat: state.activeSeat, pendingCombat: null, phase: 'main' as const }
+            : { pendingCombat }),
       players: resolution.players,
       realm: {
         ...state.realm,
@@ -5788,6 +5866,19 @@ function settleStaticPowerDeaths(
       terminal,
     }),
   };
+}
+
+function reconcilePendingCombat(state: GameState, pending: PendingCombat): PendingCombat | null {
+  const survivingIds = new Set(state.realm.units.map(({ instanceId }) => instanceId));
+  const unitSurvives = (ref: GameUnitRef): boolean =>
+    ref.kind === 'avatar' || survivingIds.has(ref.instanceId);
+  if (!unitSurvives(pending.attacker)
+    || (pending.originalTarget?.kind === 'minion' && !unitSurvives(pending.originalTarget))) return null;
+  return deepFreeze({
+    ...pending,
+    combatants: pending.combatants.filter(unitSurvives),
+    defenders: pending.defenders.filter(unitSurvives),
+  });
 }
 
 function resolveEndOfTurnDeaths(
@@ -6047,6 +6138,165 @@ function resolveDeclaredPath(
       || current.terminal.status === 'finished') break;
   }
   return { outcomes, path: actualPath, removals, state: current };
+}
+
+function beginBasicMovement(
+  state: GameState,
+  ref: GameUnitRef,
+  path: readonly GameLocation[],
+  purpose: PendingBasicMovement['purpose'],
+): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
+  const started = resolveDeclaredPath(state, ref, path.slice(0, 1), true);
+  return [
+    withStateVersion(started.state, {
+      decisionSeat: ref.seat,
+      pendingBasicMovement: {
+        path: [...path],
+        pathIndex: 0,
+        purpose,
+        rangedStrikeUsed: false,
+        seat: ref.seat,
+        sourceInstanceId: ref.instanceId,
+      },
+      phase: 'movement',
+    }),
+    [{
+      payload: {
+        from: path[0]!,
+        path,
+        purpose,
+        seat: ref.seat,
+        sourceInstanceId: ref.instanceId,
+        to: path.at(-1)!,
+      },
+      type: 'basic-movement-started',
+    }],
+    [],
+  ];
+}
+
+function finishMoveAndAttackMovement(
+  state: GameState,
+  ref: GameUnitRef,
+  declaredTo: GameLocation,
+  path: readonly GameLocation[],
+  pathOutcomes: readonly GameOutcome[],
+): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
+  const from = path[0]!;
+  const actualTo = path.at(-1) ?? from;
+  const activated: GameOutcome = {
+    payload: {
+      from,
+      path,
+      seat: ref.seat,
+      steps: path.length - 1,
+      to: actualTo,
+      unitInstanceId: ref.instanceId,
+    },
+    type: 'move-and-attack-activated',
+  };
+  const moverArrived = ref.kind === 'avatar'
+    ? state.players[ref.seat].avatar.card.instanceId === ref.instanceId
+      && state.players[ref.seat].avatar.location === declaredTo.cell
+      && state.players[ref.seat].avatar.region === declaredTo.region
+    : state.realm.units.some(({ instanceId, location, region }) =>
+      instanceId === ref.instanceId && location === declaredTo.cell && region === declaredTo.region);
+  if (!moverArrived || state.terminal.status === 'finished') {
+    return [
+      withStateVersion(state, {
+        decisionSeat: state.activeSeat,
+        ...(state.pendingBasicMovement === undefined ? {} : { pendingBasicMovement: null }),
+        phase: state.terminal.status === 'finished' ? 'terminal' : 'main',
+      }),
+      [activated, ...pathOutcomes],
+      [],
+    ];
+  }
+  const pending: PendingCombat = deepFreeze({
+    allocations: [],
+    attacker: ref,
+    attackingSeat: ref.seat,
+    cell: declaredTo.cell,
+    combatants: [],
+    defenders: [],
+    originalTarget: null,
+    ...(declaredTo.region === 'surface' ? {} : { region: declaredTo.region }),
+    targetRemoved: false,
+  });
+  return [
+    withStateVersion(state, {
+      ...(state.pendingBasicMovement === undefined ? {} : { pendingBasicMovement: null }),
+      pendingCombat: pending,
+      phase: 'attack',
+    }),
+    [activated, ...pathOutcomes],
+    [],
+  ];
+}
+
+function finishDefendMovement(
+  state: GameState,
+  ref: GameUnitRef,
+  path: readonly GameLocation[],
+  pathOutcomes: readonly GameOutcome[],
+): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
+  const from = path[0]!;
+  const pending = state.pendingCombat;
+  const destination = pending
+    ? { cell: pending.cell, region: pending.region ?? 'surface' as const }
+    : state.pendingBasicMovement?.path.at(-1) ?? path.at(-1)!;
+  const defenderArrived = pending !== null && unitRefs(state, ref.seat).some((candidate) =>
+    candidate.instanceId === ref.instanceId
+    && candidate.kind === ref.kind
+    && unitOccupiesLocation(state, candidate, destination));
+  const movement: GameOutcome = {
+    payload: {
+      from,
+      instanceId: ref.instanceId,
+      path,
+      seat: ref.seat,
+      steps: path.length - 1,
+      to: path.at(-1) ?? from,
+    },
+    type: defenderArrived ? 'defender-joined' : 'defender-moved',
+  };
+  if (!defenderArrived || state.terminal.status === 'finished' || pending === null) {
+    return [
+      withStateVersion(state, {
+        decisionSeat: pending === null ? state.activeSeat : ref.seat,
+        ...(state.pendingBasicMovement === undefined ? {} : { pendingBasicMovement: null }),
+        phase: state.terminal.status === 'finished'
+          ? 'terminal'
+          : pending === null ? 'main' : 'defend',
+      }),
+      [movement, ...pathOutcomes],
+      [],
+    ];
+  }
+  const removesSite = pending.originalTarget?.kind === 'site' && !pending.targetRemoved;
+  return [
+    withStateVersion(state, {
+      decisionSeat: ref.seat,
+      ...(state.pendingBasicMovement === undefined ? {} : { pendingBasicMovement: null }),
+      pendingCombat: deepFreeze({
+        ...pending,
+        defenders: [...pending.defenders, ref],
+        targetRemoved: pending.targetRemoved || removesSite,
+      }),
+      phase: 'defend',
+    }),
+    [
+      movement,
+      ...pathOutcomes,
+      ...(removesSite
+        ? [{
+          payload: { instanceId: pending.originalTarget!.instanceId, kind: 'site' },
+          type: 'original-target-removed',
+        }]
+        : []),
+    ],
+    [],
+  ];
 }
 
 function resolveSiteDeaths(
@@ -6443,7 +6693,10 @@ function finishFight(
   pending: PendingCombat,
   outcomes: readonly GameOutcome[],
   returnStrikes = true,
+  incrementVersion = true,
 ): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
+  const finish = (candidate: GameState): GameState =>
+    incrementVersion ? withStateVersion(candidate, {}) : candidate;
   const attacker = unitStatus(state, pending.attacker);
   const attackerStrikesFirst = returnStrikes
     && !attacker.disabled
@@ -6467,7 +6720,7 @@ function finishFight(
     const attackerSurvived = pending.attacker.kind === 'avatar'
       || earlyState.realm.units.some(({ instanceId }) => instanceId === pending.attacker.instanceId);
     if (earlyState.terminal.status === 'finished' || !attackerSurvived || survivors.length === 0) {
-      return [withStateVersion(earlyState, {}), earlyOutcomes, earlyDraws];
+      return [finish(earlyState), earlyOutcomes, earlyDraws];
     }
     const firstIds = new Set(firstCombatants.map(({ instanceId }) => instanceId));
     const [resolved, resolvedOutcomes, normalDraws] = resolveFightWindow(
@@ -6478,7 +6731,7 @@ function finishFight(
       !attackerStrikesFirst,
       survivors.filter(({ instanceId }) => !firstIds.has(instanceId)),
     );
-    return [withStateVersion(resolved, {}), resolvedOutcomes, [...earlyDraws, ...normalDraws]];
+    return [finish(resolved), resolvedOutcomes, [...earlyDraws, ...normalDraws]];
   }
   const [resolved, resolvedOutcomes, draws] = resolveFightWindow(
     state,
@@ -6488,7 +6741,7 @@ function finishFight(
     true,
     returnStrikes,
   );
-  return [withStateVersion(resolved, {}), resolvedOutcomes, draws];
+  return [finish(resolved), resolvedOutcomes, draws];
 }
 
 function beginFight(
@@ -10154,7 +10407,9 @@ function applyDescriptor(
   }
 
   if (descriptor.kind === 'shoot-projectile') {
-    const legal = rangedDescriptors(state, seat).some((candidate) =>
+    const movement = state.phase === 'movement' ? state.pendingBasicMovement : null;
+    const legal = (movement ? basicMovementDescriptors(state, seat) : rangedDescriptors(state, seat))
+      .some((candidate) =>
       candidate.kind === 'shoot-projectile'
         && candidate.shooterInstanceId === descriptor.shooterInstanceId
         && candidate.direction === descriptor.direction
@@ -10179,6 +10434,9 @@ function applyDescriptor(
     }), [shooter]);
     const shotState = deepFreeze({
       ...state,
+      ...(movement
+        ? { pendingBasicMovement: { ...movement, rangedStrikeUsed: true } }
+        : {}),
       players: interaction.players,
       realm: { ...tapped.realm, units: interaction.units },
     });
@@ -10204,7 +10462,7 @@ function applyDescriptor(
       },
       type: 'strike-damage-allocated',
     };
-    return finishFight(shotState, deepFreeze({
+    const result = finishFight(shotState, deepFreeze({
       allocations: [{ amount, targetInstanceId: descriptor.hit.instanceId }],
       attacker: shooter,
       attackingSeat: seat,
@@ -10216,7 +10474,35 @@ function applyDescriptor(
         ? {}
         : { region: unitStatus(state, descriptor.hit).region as 'underground' | 'underwater' | 'void' }),
       targetRemoved: false,
-    }), [shot, ...interaction.outcomes, strike], false);
+    }), [shot, ...interaction.outcomes, strike], false, movement === null);
+    if (!movement) return result;
+    const [resolved, outcomes, draws] = result;
+    const pendingCombat = movement.purpose === 'defend' && state.pendingCombat
+      ? reconcilePendingCombat(resolved, state.pendingCombat)
+      : null;
+    const sourceRemains = resolved.realm.units.some(({ controller, instanceId }) =>
+      controller === seat && instanceId === movement.sourceInstanceId);
+    if (resolved.terminal.status === 'finished') {
+      return [withStateVersion(resolved, {
+        pendingBasicMovement: null,
+        pendingCombat: null,
+        phase: 'terminal',
+      }), outcomes, draws];
+    }
+    if (!sourceRemains || (movement.purpose === 'defend' && pendingCombat === null)) {
+      return [withStateVersion(resolved, {
+        decisionSeat: pendingCombat ? movement.seat : resolved.activeSeat,
+        pendingBasicMovement: null,
+        pendingCombat,
+        phase: pendingCombat ? 'defend' : 'main',
+      }), outcomes, draws];
+    }
+    return [withStateVersion(resolved, {
+      decisionSeat: movement.seat,
+      pendingBasicMovement: { ...movement, rangedStrikeUsed: true },
+      ...(movement.purpose === 'defend' ? { pendingCombat } : {}),
+      phase: 'movement',
+    }), outcomes, draws];
   }
 
   if (descriptor.kind === 'shoot-drag-projectile') {
@@ -10312,6 +10598,73 @@ function applyDescriptor(
     return beginFight(path.state, pending, [descriptor.hit], outcomes);
   }
 
+  if (descriptor.kind === 'continue-basic-movement') {
+    const pending = state.pendingBasicMovement;
+    const legal = state.phase === 'movement'
+      && pending?.sourceInstanceId === descriptor.unitInstanceId
+      && basicMovementDescriptors(state, seat).some((candidate) =>
+        candidate.kind === 'continue-basic-movement'
+        && candidate.unitInstanceId === descriptor.unitInstanceId);
+    if (!legal || !pending) throw new Error('unreachable illegal basic movement continuation');
+    const unit = state.realm.units.find(({ controller, instanceId }) =>
+      controller === seat && instanceId === pending.sourceInstanceId);
+    if (!unit) {
+      return [
+        withStateVersion(state, {
+          decisionSeat: pending.purpose === 'defend' && state.pendingCombat !== null
+            ? seat
+            : state.activeSeat,
+          pendingBasicMovement: null,
+          phase: pending.purpose === 'defend' && state.pendingCombat !== null ? 'defend' : 'main',
+        }),
+        [],
+        [],
+      ];
+    }
+    const ref: GameUnitRef = { instanceId: unit.instanceId, kind: 'minion', seat };
+    const reachedPath = pending.path.slice(0, pending.pathIndex + 1);
+    const next = pending.path[pending.pathIndex + 1];
+    if (!next) {
+      return pending.purpose === 'move-and-attack'
+        ? finishMoveAndAttackMovement(state, ref, pending.path.at(-1)!, reachedPath, [])
+        : finishDefendMovement(state, ref, reachedPath, []);
+    }
+    const edge = resolveDeclaredPath(
+      state,
+      ref,
+      [pending.path[pending.pathIndex]!, next],
+      false,
+    );
+    const path = [...reachedPath, ...edge.path.slice(1)];
+    const sourceRemains = edge.state.realm.units.some(({ controller, instanceId, location, region }) =>
+      controller === seat && instanceId === ref.instanceId
+      && location === next.cell && region === next.region);
+    const combatRemains = pending.purpose === 'move-and-attack' || edge.state.pendingCombat !== null;
+    if (!sourceRemains || !combatRemains || edge.state.terminal.status === 'finished') {
+      return pending.purpose === 'move-and-attack'
+        ? finishMoveAndAttackMovement(edge.state, ref, pending.path.at(-1)!, path, edge.outcomes)
+        : finishDefendMovement(edge.state, ref, path, edge.outcomes);
+    }
+    return [
+      withStateVersion(edge.state, {
+        decisionSeat: seat,
+        pendingBasicMovement: { ...pending, pathIndex: pending.pathIndex + 1 },
+        phase: 'movement',
+      }),
+      [{
+        payload: {
+          from: edge.path[0]!,
+          purpose: pending.purpose,
+          seat,
+          sourceInstanceId: ref.instanceId,
+          to: edge.path.at(-1)!,
+        },
+        type: 'basic-movement-continued',
+      }, ...edge.outcomes],
+      [],
+    ];
+  }
+
   if (descriptor.kind === 'move-and-attack') {
     const legal = movementDescriptors(state, seat).some((candidate) =>
       candidate.kind === 'move-and-attack'
@@ -10323,47 +10676,16 @@ function applyDescriptor(
         && candidate.to.region === descriptor.to.region);
     const ref = unitRefs(state, seat).find(({ instanceId }) => instanceId === descriptor.unitInstanceId);
     if (!legal || !ref) throw new Error('unreachable illegal Move and Attack');
-    const path = resolveDeclaredPath(state, ref, descriptor.path, true);
-    const actualTo = path.path.at(-1) ?? descriptor.from;
-    const activated: GameOutcome = {
-      payload: {
-        from: descriptor.from,
-        path: path.path,
-        seat,
-        steps: path.path.length - 1,
-        to: actualTo,
-        unitInstanceId: descriptor.unitInstanceId,
-      },
-      type: 'move-and-attack-activated',
-    };
-    const moverArrived = ref.kind === 'avatar'
-      ? path.state.players[ref.seat].avatar.card.instanceId === ref.instanceId
-        && path.state.players[ref.seat].avatar.location === descriptor.to.cell
-        && path.state.players[ref.seat].avatar.region === descriptor.to.region
-      : path.state.realm.units.some(({ instanceId, location, region }) =>
-        instanceId === ref.instanceId && location === descriptor.to.cell && region === descriptor.to.region);
-    if (!moverArrived || path.state.terminal.status === 'finished') {
-      return [withStateVersion(path.state, {}), [activated, ...path.outcomes], []];
+    const definition = ref.kind === 'minion'
+      ? cardDefinition(state, state.realm.units.find(({ instanceId }) =>
+        instanceId === ref.instanceId)!.cardId)
+      : undefined;
+    if (definition?.cardType === 'minion'
+      && definition.mayRangedStrikeOnceDuringBasicMovement === true) {
+      return beginBasicMovement(state, ref, descriptor.path, 'move-and-attack');
     }
-    const pending: PendingCombat = deepFreeze({
-      allocations: [],
-      attacker: ref,
-      attackingSeat: seat,
-      cell: descriptor.to.cell,
-      combatants: [],
-      defenders: [],
-      originalTarget: null,
-      ...(descriptor.to.region === 'surface' ? {} : { region: descriptor.to.region }),
-      targetRemoved: false,
-    });
-    return [
-      withStateVersion(path.state, {
-        pendingCombat: pending,
-        phase: 'attack',
-      }),
-      [activated, ...path.outcomes],
-      [],
-    ];
+    const path = resolveDeclaredPath(state, ref, descriptor.path, true);
+    return finishMoveAndAttackMovement(path.state, ref, descriptor.to, path.path, path.outcomes);
   }
 
   if (descriptor.kind === 'decline-attack') {
@@ -10439,7 +10761,6 @@ function applyDescriptor(
   }
 
   if (descriptor.kind === 'defend') {
-    const pending = pendingCombat(state);
     const legal = actionDescriptors(state, seat).some((candidate) =>
       candidate.kind === 'defend'
         && candidate.unitInstanceId === descriptor.unitInstanceId
@@ -10452,64 +10773,16 @@ function applyDescriptor(
     if (!legal || !ref) {
       throw new Error('unreachable illegal defender');
     }
-    const destination: GameLocation = { cell: pending.cell, region: pending.region ?? 'surface' };
-    const path = resolveDeclaredPath(state, ref, descriptor.path, true);
-    const defenderArrived = unitRefs(path.state, ref.seat).some((candidate) =>
-      candidate.instanceId === ref.instanceId
-      && candidate.kind === ref.kind
-      && unitOccupiesLocation(path.state, candidate, destination));
-    const reconciledPending = path.state.pendingCombat;
-    if (!defenderArrived
-      || path.state.terminal.status === 'finished'
-      || reconciledPending === null) {
-      return [
-        withStateVersion(path.state, {}),
-        [{
-          payload: {
-            from: descriptor.from,
-            instanceId: ref.instanceId,
-            path: path.path,
-            seat,
-            steps: path.path.length - 1,
-            to: path.path.at(-1) ?? descriptor.from,
-          },
-          type: 'defender-moved',
-        }, ...path.outcomes],
-        [],
-      ];
+    const definition = ref.kind === 'minion'
+      ? cardDefinition(state, state.realm.units.find(({ instanceId }) =>
+        instanceId === ref.instanceId)!.cardId)
+      : undefined;
+    if (definition?.cardType === 'minion'
+      && definition.mayRangedStrikeOnceDuringBasicMovement === true) {
+      return beginBasicMovement(state, ref, descriptor.path, 'defend');
     }
-    const removesSite = reconciledPending.originalTarget?.kind === 'site'
-      && !reconciledPending.targetRemoved;
-    return [
-      withStateVersion(path.state, {
-        pendingCombat: deepFreeze({
-          ...reconciledPending,
-          defenders: [...reconciledPending.defenders, ref],
-          targetRemoved: reconciledPending.targetRemoved || removesSite,
-        }),
-      }),
-      [
-        {
-          payload: {
-            from: descriptor.from,
-            instanceId: ref.instanceId,
-            path: path.path,
-            seat,
-            steps: path.path.length - 1,
-            to: path.path.at(-1) ?? descriptor.from,
-          },
-          type: 'defender-joined',
-        },
-        ...path.outcomes,
-        ...(removesSite
-          ? [{
-            payload: { instanceId: reconciledPending.originalTarget!.instanceId, kind: 'site' },
-            type: 'original-target-removed',
-          }]
-          : []),
-      ],
-      [],
-    ];
+    const path = resolveDeclaredPath(state, ref, descriptor.path, true);
+    return finishDefendMovement(path.state, ref, path.path, path.outcomes);
   }
 
   if (descriptor.kind === 'intercept') {
@@ -10953,7 +11226,8 @@ export function stepGame(session: GameSession, request: GameActionRequest): Game
         ...appliedOutcomes.slice(completionIndex),
         ...settlementAfterCompletion,
       ];
-  const nextState = action.descriptor.kind === 'shoot-projectile' && action.descriptor.hit
+  const nextState = state.phase !== 'movement'
+    && action.descriptor.kind === 'shoot-projectile' && action.descriptor.hit
     ? queueRangedStep(powerSettlement.state, action.descriptor.shooterInstanceId)
     : powerSettlement.state;
   const events: readonly EngineEvent[] = createEvents(

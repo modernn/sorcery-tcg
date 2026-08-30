@@ -403,6 +403,20 @@ export type PrivateGameCheck = Readonly<{
     structuralFactsVerified: boolean;
     unsupportedMechanicsAbsent: boolean;
   }>;
+  airSkirmishersOfMu: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    continueBranchVerified: boolean;
+    deck: DeckList;
+    exactMovementShotVerified: boolean;
+    legalConstructedDeck: boolean;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    seed: number;
+    skirmishersOfMu: string;
+    structuralFactsVerified: boolean;
+    unsupportedMechanicsAbsent: boolean;
+  }>;
   airChainLightning: Readonly<{
     acceptedActionCount: number;
     causalEventsVerified: boolean;
@@ -1665,6 +1679,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   nimbusJinn: NormalizedCard;
   devilsEgg: NormalizedCard;
   kiteArcher: NormalizedCard;
+  skirmishersOfMu: NormalizedCard;
   genesisMinion: NormalizedCard;
   geomancer: NormalizedCard;
   gothicTower: NormalizedCard;
@@ -3702,6 +3717,29 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || kiteArcher.subtypes[0] !== 'Mortal') {
     throw new Error('private post-Ranged-strike stepping minion no longer matches its supported facts');
   }
+  const skirmishersOfMu = snapshot.cards.find(({ name }) => name === 'Skirmishers of Mu');
+  if (!skirmishersOfMu
+    || skirmishersOfMu.stableId
+      !== 'card:6fb7f8f4b6ac34887d49ec3c6c3219e23c87cb284b01b82de9e6b8801cf4584e'
+    || skirmishersOfMu.officialSourceId !== '001-skirmishers_of_mu-b-f'
+    || skirmishersOfMu.cardType !== 'minion'
+    || ruleTextDigest(skirmishersOfMu.rulesText)
+      !== 'sha256:60b90233866053eeaaf14f0346f34f5d3c95e2751e57fa20b36f31f2121bd554'
+    || skirmishersOfMu.manaCost !== 4
+    || skirmishersOfMu.attack !== 3
+    || skirmishersOfMu.defense !== 3
+    || skirmishersOfMu.life !== null
+    || skirmishersOfMu.elements.length !== 1
+    || skirmishersOfMu.elements[0] !== 'air'
+    || skirmishersOfMu.thresholds.air !== 2
+    || skirmishersOfMu.thresholds.earth !== 0
+    || skirmishersOfMu.thresholds.fire !== 0
+    || skirmishersOfMu.thresholds.water !== 0
+    || skirmishersOfMu.rarity !== 'exceptional'
+    || skirmishersOfMu.subtypes.length !== 1
+    || skirmishersOfMu.subtypes[0] !== 'Mortal') {
+    throw new Error('private during-movement Ranged minion no longer matches its supported facts');
+  }
   const chainLightning = snapshot.cards.find(({ name }) => name === 'Chain Lightning');
   if (!chainLightning
     || chainLightning.stableId
@@ -4106,6 +4144,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     nimbusJinn,
     devilsEgg,
     kiteArcher,
+    skirmishersOfMu,
     genesisMinion,
     geomancer,
     gothicTower,
@@ -4328,6 +4367,7 @@ function gameDefinition(
   discardSpellToDamageRandomOtherUnitHere: 0 | 3 = 0,
   atEndOfEachTurnSiteControllerLosesLife: 0 | 1 = 0,
   mayStepAfterRangedStrike = false,
+  mayRangedStrikeOnceDuringBasicMovement = false,
   damageChainNearbyUnits = false,
   bearerControllerChoosesExtraRandomOutcome = false,
   atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep: 0 | 3 = 0,
@@ -4548,6 +4588,9 @@ function gameDefinition(
       ...(lanceCount ? { lanceCount } : {}),
       manaCost: card.manaCost ?? 0,
       ...(mayStepAfterRangedStrike ? { mayStepAfterRangedStrike: true as const } : {}),
+      ...(mayRangedStrikeOnceDuringBasicMovement
+        ? { mayRangedStrikeOnceDuringBasicMovement: true as const }
+        : {}),
       ...(card.subtypes.includes('Mortal') ? { mortal: true as const } : {}),
       movesOnlyForward,
       mustBeCastBurrowed,
@@ -4599,7 +4642,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-chain-lightning' | 'air-devils-egg' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-kite-archer' | 'air-leyline' | 'air-lightning-bolt' | 'air-lucky-charm' | 'air-nimbus-jinn' | 'air-rain-of-arrows' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-thunderstorm' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-chain-lightning' | 'air-devils-egg' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-kite-archer' | 'air-leyline' | 'air-lightning-bolt' | 'air-lucky-charm' | 'air-nimbus-jinn' | 'air-rain-of-arrows' | 'air-skirmishers-of-mu' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-thunderstorm' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -4903,6 +4946,7 @@ function buildManifest(
       input.nimbusJinn.stableId,
       input.devilsEgg.stableId,
       input.kiteArcher.stableId,
+      input.skirmishersOfMu.stableId,
       ...Array(2).fill(input.chainLightning.stableId),
       input.luckyCharm.stableId,
       input.thunderstorm.stableId,
@@ -5089,6 +5133,10 @@ function buildManifest(
   const airKiteArcherDeck = elementalDeck(
     'air',
     [input.kiteArcher, input.stealthTargetMinion],
+  );
+  const airSkirmishersOfMuDeck = elementalDeck(
+    'air',
+    [input.skirmishersOfMu, input.stealthTargetMinion],
   );
   const airChainLightningBase = elementalDeck('air', [input.stealthTargetMinion]);
   const airChainLightningDeck: GameDeckSpec = {
@@ -5296,6 +5344,8 @@ function buildManifest(
       ? airDevilsEggDeck
       : scenario === 'air-kite-archer'
       ? airKiteArcherDeck
+      : scenario === 'air-skirmishers-of-mu'
+      ? airSkirmishersOfMuDeck
       : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
       : scenario === 'air-void-artifact'
@@ -5473,6 +5523,8 @@ function buildManifest(
       ? airDevilsEggDeck
       : scenario === 'air-kite-archer'
       ? airKiteArcherDeck
+      : scenario === 'air-skirmishers-of-mu'
+      ? airSkirmishersOfMuDeck
       : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
       : scenario === 'air-void-artifact'
@@ -5634,7 +5686,8 @@ function buildManifest(
       card.stableId === input.rangedMinion.stableId
         || card.stableId === input.midnightRogue.stableId
         || card.stableId === input.slingPixies.stableId
-        || card.stableId === input.kiteArcher.stableId,
+        || card.stableId === input.kiteArcher.stableId
+        || card.stableId === input.skirmishersOfMu.stableId,
       card.stableId === input.firstStrikeMinion.stableId,
       card.stableId === input.wardMinion.stableId
         || card.stableId === input.malakhim.stableId,
@@ -5756,6 +5809,7 @@ function buildManifest(
       card.stableId === input.nimbusJinn.stableId ? 3 : 0,
       card.stableId === input.devilsEgg.stableId ? 1 : 0,
       card.stableId === input.kiteArcher.stableId,
+      card.stableId === input.skirmishersOfMu.stableId,
       card.stableId === input.chainLightning.stableId,
       card.stableId === input.luckyCharm.stableId,
       card.stableId === input.thunderstorm.stableId ? 3 : 0,
@@ -9660,6 +9714,53 @@ function findAirKiteArcherOpening(
     northSiteInstanceIds: northSites.map(({ instanceId }) => instanceId) as [string, string, string],
     seed,
     session,
+    snowLeopardInstanceId: snowLeopard.instanceId,
+    southSiteInstanceIds: southSites.slice(0, 2)
+      .map(({ instanceId }) => instanceId) as [string, string],
+  };
+}
+
+function findAirSkirmishersOfMuOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string, string];
+  seed: number;
+  session: GameSession;
+  skirmishersInstanceId: string;
+  snowLeopardInstanceId: string;
+  southSiteInstanceIds: readonly [string, string];
+}> {
+  const seed = 29;
+  const built = buildManifest(input, seed, 'air-skirmishers-of-mu');
+  const session = createGameSession(built.manifest);
+  const north = session.state.players.north;
+  const south = session.state.players.south;
+  const skirmishers = [...north.hand.spellbook, ...north.spellbook.slice(0, 2)]
+    .find(({ cardId }) => cardId === input.skirmishersOfMu.stableId);
+  const snowLeopard = [...south.hand.spellbook, ...south.spellbook.slice(0, 1)]
+    .find(({ cardId }) => cardId === input.stealthTargetMinion.stableId);
+  const isAirSite = ({ cardId }: { cardId: string }): boolean => {
+    const definition = built.manifest.cards[cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('air');
+  };
+  const airSiteFirst = (left: { cardId: string }, right: { cardId: string }): number =>
+    Number(isAirSite(right)) - Number(isAirSite(left));
+  const northSites = [...north.hand.atlas].sort(airSiteFirst);
+  const nextNorthSite = north.atlas[0];
+  const southSites = [...south.hand.atlas].sort(airSiteFirst);
+  if (!skirmishers || !snowLeopard || !nextNorthSite
+    || !isAirSite(northSites[0]!) || !isAirSite(southSites[0]!)) {
+    throw new Error('private Skirmishers of Mu seed 29 no longer produces its supported opening');
+  }
+  return {
+    ...built,
+    northSiteInstanceIds: [...northSites, nextNorthSite]
+      .map(({ instanceId }) => instanceId) as [string, string, string, string],
+    seed,
+    session,
+    skirmishersInstanceId: skirmishers.instanceId,
     snowLeopardInstanceId: snowLeopard.instanceId,
     southSiteInstanceIds: southSites.slice(0, 2)
       .map(({ instanceId }) => instanceId) as [string, string],
@@ -18656,6 +18757,181 @@ function runAirKiteArcher(
   });
 }
 
+function runAirSkirmishersOfMu(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airSkirmishersOfMu'] {
+  const opening = findAirSkirmishersOfMuOpening(input);
+  let session = keep(keep(opening.session));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  const drawSpell = (): void => take(({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const playSite = (instanceId: string, cell: RealmCell): void => take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === instanceId
+      && descriptor.cell === cell);
+  const endTurn = (): void => take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  playSite(opening.northSiteInstanceIds[0], 'C4');
+  endTurn();
+  drawSpell();
+  playSite(opening.southSiteInstanceIds[0], 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.snowLeopardInstanceId
+    && descriptor.cell === 'C1');
+  endTurn();
+
+  drawSpell();
+  playSite(opening.northSiteInstanceIds[1], 'C3');
+  endTurn();
+  drawSpell();
+  playSite(opening.southSiteInstanceIds[1], 'C2');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === opening.snowLeopardInstanceId
+    && descriptor.from.cell === 'C1'
+    && descriptor.to.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  endTurn();
+
+  drawSpell();
+  playSite(opening.northSiteInstanceIds[2], 'B3');
+  endTurn();
+  drawSpell();
+  endTurn();
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  playSite(opening.northSiteInstanceIds[3], 'B4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.skirmishersInstanceId
+    && descriptor.cell === 'C3');
+  endTurn();
+  drawSpell();
+  endTurn();
+  drawSpell();
+
+  const staged = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.skirmishersInstanceId
+      && descriptor.from.cell === 'C3'
+      && descriptor.to.cell === 'C4'));
+  if (!staged.accepted) throw new Error('private Skirmishers basic movement was rejected');
+  const pending = staged.session;
+  const continueEdge = stepGame(pending, action(pending, ({ descriptor }) =>
+    descriptor.kind === 'continue-basic-movement'
+      && descriptor.unitInstanceId === opening.skirmishersInstanceId));
+  if (!continueEdge.accepted) throw new Error('private Skirmishers decline branch edge was rejected');
+  const continueFinish = stepGame(continueEdge.session, action(continueEdge.session, ({ descriptor }) =>
+    descriptor.kind === 'continue-basic-movement'
+      && descriptor.unitInstanceId === opening.skirmishersInstanceId));
+  if (!continueFinish.accepted) throw new Error('private Skirmishers decline branch finish was rejected');
+  const continueDecline = stepGame(continueFinish.session, action(continueFinish.session, ({ descriptor }) =>
+    descriptor.kind === 'decline-attack'));
+  if (!continueDecline.accepted) throw new Error('private Skirmishers decline branch attack close was rejected');
+
+  const shot = stepGame(pending, action(pending, ({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.shooterInstanceId === opening.skirmishersInstanceId
+      && descriptor.hit?.instanceId === opening.snowLeopardInstanceId));
+  if (!shot.accepted) throw new Error('private Skirmishers during-movement Ranged strike was rejected');
+  const shotEdge = stepGame(shot.session, action(shot.session, ({ descriptor }) =>
+    descriptor.kind === 'continue-basic-movement'
+      && descriptor.unitInstanceId === opening.skirmishersInstanceId));
+  if (!shotEdge.accepted) throw new Error('private Skirmishers shot branch edge was rejected');
+  const shotFinish = stepGame(shotEdge.session, action(shotEdge.session, ({ descriptor }) =>
+    descriptor.kind === 'continue-basic-movement'
+      && descriptor.unitInstanceId === opening.skirmishersInstanceId));
+  if (!shotFinish.accepted) throw new Error('private Skirmishers shot branch finish was rejected');
+  const shotDecline = stepGame(shotFinish.session, action(shotFinish.session, ({ descriptor }) =>
+    descriptor.kind === 'decline-attack'));
+  if (!shotDecline.accepted) throw new Error('private Skirmishers shot branch attack close was rejected');
+  session = shotDecline.session;
+
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+  const southDeck = deckList(opening.manifest.decks.south, opening.names);
+  const definition = session.state.cards[input.skirmishersOfMu.stableId];
+  const receipts = [
+    staged.receipt,
+    continueEdge.receipt,
+    continueFinish.receipt,
+    continueDecline.receipt,
+    shot.receipt,
+    shotEdge.receipt,
+    shotFinish.receipt,
+    shotDecline.receipt,
+  ];
+  const causal = receipts.every((receipt) => {
+    const firstSequence = receipt.events[0]?.eventSequence;
+    return firstSequence !== undefined && receipt.events.every((event, index) =>
+      event.cause.actionId === receipt.actionId
+        && event.cause.receiptSequence === receipt.receiptSequence
+        && event.eventSequence === firstSequence + index);
+  });
+  const skirmishers = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.skirmishersInstanceId);
+  const continueSkirmishers = continueDecline.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.skirmishersInstanceId);
+  const initialActions = legalGameActions(pending.state, 'north');
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified: causal,
+    continueBranchVerified: continueDecline.session.state.phase === 'main'
+      && continueDecline.session.state.pendingBasicMovement === null
+      && continueSkirmishers?.location === 'C4'
+      && continueSkirmishers.tapped
+      && continueDecline.session.state.realm.units.some(({ instanceId, damage }) =>
+        instanceId === opening.snowLeopardInstanceId && damage === 0)
+      && continueEdge.receipt.events.map(({ type }) => type).join(',') === 'basic-movement-continued'
+      && continueFinish.receipt.events.map(({ type }) => type).join(',') === 'move-and-attack-activated'
+      && continueDecline.receipt.events.map(({ type }) => type).join(',') === 'attack-declined'
+      && verifyGameReplay(continueDecline.session),
+    deck,
+    exactMovementShotVerified: staged.receipt.events.map(({ type }) => type).join(',')
+      === 'basic-movement-started'
+      && pending.state.phase === 'movement'
+      && pending.state.pendingBasicMovement?.pathIndex === 0
+      && pending.state.pendingBasicMovement.rangedStrikeUsed === false
+      && initialActions.some(({ descriptor }) => descriptor.kind === 'continue-basic-movement')
+      && initialActions.some(({ descriptor }) => descriptor.kind === 'shoot-projectile'
+        && descriptor.hit?.instanceId === opening.snowLeopardInstanceId)
+      && shot.receipt.events.map(({ type }) => type).join(',')
+        === 'projectile-shot,strike-damage-allocated,damage-dealt,minion-died'
+      && shot.session.state.phase === 'movement'
+      && shot.session.state.pendingBasicMovement?.rangedStrikeUsed === true
+      && shotEdge.receipt.events.map(({ type }) => type).join(',') === 'basic-movement-continued'
+      && shotFinish.receipt.events.map(({ type }) => type).join(',') === 'move-and-attack-activated'
+      && shotDecline.receipt.events.map(({ type }) => type).join(',') === 'attack-declined'
+      && skirmishers?.location === 'C4'
+      && skirmishers.tapped
+      && session.state.players.south.cemetery.some(({ instanceId }) =>
+        instanceId === opening.snowLeopardInstanceId),
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && southDeck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && southDeck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && (deck.spellbook.find(({ name }) => name === input.skirmishersOfMu.name)?.copies ?? 0)
+        <= input.format.copyLimits[input.skirmishersOfMu.rarity!],
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0)
+      && continueDecline.session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    skirmishersOfMu: input.skirmishersOfMu.name,
+    structuralFactsVerified: definition?.cardType === 'minion'
+      && definition.attack === 3
+      && definition.defense === 3
+      && definition.manaCost === 4
+      && definition.mortal === true
+      && definition.ranged === true
+      && definition.mayRangedStrikeOnceDuringBasicMovement === true
+      && canonicalJson(definition.thresholds)
+        === canonicalJson({ air: 2, earth: 0, fire: 0, water: 0 }),
+    unsupportedMechanicsAbsent: session.state.phase === 'main'
+      && session.state.pendingBasicMovement === null
+      && shot.session.state.pendingBasicMovement?.rangedStrikeUsed === true
+      && legalGameActions(shot.session.state, 'north').every(({ descriptor }) =>
+        descriptor.kind !== 'shoot-projectile'),
+  });
+}
+
 function runAirChainLightning(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['airChainLightning'] {
@@ -23089,6 +23365,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airNimbusJinn = runAirNimbusJinn(input);
   const airDevilsEgg = runAirDevilsEgg(input);
   const airKiteArcher = runAirKiteArcher(input);
+  const airSkirmishersOfMu = runAirSkirmishersOfMu(input);
   const airChainLightning = runAirChainLightning(input);
   const airSpellcasterFreeze = runAirSpellcasterFreeze(input);
   const airArcLightning = runAirArcLightning(input);
@@ -23305,6 +23582,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     airNimbusJinn,
     airDevilsEgg,
     airKiteArcher,
+    airSkirmishersOfMu,
     airChainLightning,
     airSpellcasterFreeze,
     airArcLightning,

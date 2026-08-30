@@ -58,6 +58,7 @@ type SpellFacts = Readonly<{
   lanceCount?: 1 | 2 | 3;
   lethal?: boolean;
   manaCost: number;
+  mayRangedStrikeOnceDuringBasicMovement?: true;
   mayStepAfterRangedStrike?: true;
   movementBonus?: 1 | 2;
   nearbyEnemiesPermanentlyLoseStealth?: true;
@@ -233,6 +234,9 @@ function cardsFor(
         ...(facts.lanceCount ? { lanceCount: facts.lanceCount } : {}),
         lethal: facts.lethal ?? false,
         manaCost: facts.manaCost,
+        ...(facts.mayRangedStrikeOnceDuringBasicMovement === true
+          ? { mayRangedStrikeOnceDuringBasicMovement: true as const }
+          : {}),
         ...(facts.mayStepAfterRangedStrike === true
           ? { mayStepAfterRangedStrike: true as const }
           : {}),
@@ -11466,6 +11470,236 @@ test('RULE-04 a Ranged striker that dies during the hit cannot leave a pending s
   assert.equal(session.state.players.south.cemetery.some(({ instanceId }) =>
     instanceId === setup.targetInstanceId), true);
   assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 a Ranged unit may strike once during Move and Attack or Defend', () => {
+  const base = manifest(179, {
+    site: { rangedUnitsHereRangeBonus: 1 },
+    spell: {
+      attack: 1,
+      defense: 5,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+  });
+  const preview = createGameSession(base);
+  const [shooterCard, defendedCard] = preview.state.players.north.hand.spellbook;
+  const [attackerCard, visibleCard, stealthedCard] = preview.state.players.south.hand.spellbook;
+  assert.ok(shooterCard);
+  assert.ok(defendedCard);
+  assert.ok(attackerCard);
+  assert.ok(visibleCard);
+  assert.ok(stealthedCard);
+  const cards: Record<string, GameCardDefinition> = { ...base.cards };
+  cards[shooterCard.cardId] = {
+    ...cards[shooterCard.cardId]!,
+    mayRangedStrikeOnceDuringBasicMovement: true,
+    movementBonus: 1,
+    ranged: true,
+    stealth: true,
+  } as GameCardDefinition;
+  for (const card of [attackerCard, visibleCard, stealthedCard]) {
+    cards[card.cardId] = {
+      ...cards[card.cardId]!,
+      summonToAnySite: true,
+    } as GameCardDefinition;
+  }
+  cards[stealthedCard.cardId] = {
+    ...cards[stealthedCard.cardId]!,
+    stealth: true,
+  } as GameCardDefinition;
+  const gameManifest = createGameManifest({ ...base, cards });
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === shooterCard.cardId && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === attackerCard.cardId && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === visibleCard.cardId && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === stealthedCard.cardId && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === defendedCard.cardId && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === session.state.realm.units
+      .find(({ cardId }) => cardId === attackerCard.cardId)?.instanceId
+    && descriptor.path.map(({ cell }) => cell).join(',') === 'C1,C2');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  if (session.state.phase === 'intercept') {
+    take(({ descriptor }) => descriptor.kind === 'close-intercept');
+  }
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+
+  const checkpoint = session;
+  const shooter = checkpoint.state.realm.units.find(({ cardId }) =>
+    cardId === shooterCard.cardId);
+  const defended = checkpoint.state.realm.units.find(({ cardId }) =>
+    cardId === defendedCard.cardId);
+  const attacker = checkpoint.state.realm.units.find(({ cardId }) =>
+    cardId === attackerCard.cardId);
+  const visible = checkpoint.state.realm.units.find(({ cardId }) =>
+    cardId === visibleCard.cardId);
+  const stealthed = checkpoint.state.realm.units.find(({ cardId }) =>
+    cardId === stealthedCard.cardId);
+  assert.ok(shooter);
+  assert.ok(defended);
+  assert.ok(attacker);
+  assert.ok(visible);
+  assert.ok(stealthed);
+  const findUnit = (state: typeof checkpoint.state, instanceId: string) =>
+    state.realm.units.find((unit) => unit.instanceId === instanceId);
+  const shooterShots = (state: typeof checkpoint.state) =>
+    legalGameActions(state, 'north').filter(({ descriptor }) =>
+      descriptor.kind === 'shoot-projectile'
+        && descriptor.shooterInstanceId === shooter.instanceId);
+
+  const move = action(checkpoint, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === shooter.instanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3,C2');
+  const moveStarted = stepGame(checkpoint, move);
+  assert.equal(moveStarted.accepted, true);
+  if (!moveStarted.accepted) return;
+  let moving = moveStarted.session;
+  assert.equal(moving.state.phase, 'movement');
+  assert.equal(findUnit(moving.state, shooter.instanceId)?.location, 'C4');
+  const originShots = shooterShots(moving.state);
+  const originShot = originShots.find(({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.direction === 'south'
+      && descriptor.hit?.instanceId === visible.instanceId);
+  assert.ok(originShot);
+  assert.deepEqual(originShot.descriptor.kind === 'shoot-projectile'
+    ? originShot.descriptor.path.map(({ cell }) => cell)
+    : [], ['C4', 'C3']);
+  assert.equal(originShots.some(({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.hit?.instanceId === stealthed.instanceId), false);
+  assert.equal(originShots.some(({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.hit?.instanceId === attacker.instanceId), false);
+
+  const originFired = stepGame(moving, originShot);
+  assert.equal(originFired.accepted, true);
+  if (!originFired.accepted) return;
+  moving = originFired.session;
+  assert.equal(moving.state.phase, 'movement');
+  assert.equal(findUnit(moving.state, visible.instanceId)?.damage, 1);
+  assert.equal(findUnit(moving.state, shooter.instanceId)?.stealthed, false);
+  assert.equal(originFired.receipt.events.some(({ payload, type }) =>
+    type === 'stealth-lost' && canonicalJson(payload).includes(shooter.instanceId)), true);
+  assert.equal(shooterShots(moving.state).length, 0);
+
+  const beforeForgeHash = hashGameState(moving.state);
+  const beforeForgeTranscript = moving.transcript.length;
+  const forged = stepGame(moving, {
+    actionId: opaqueActionId(
+      'sorcery-core-v1',
+      'north',
+      moving.state.stateVersion,
+      originShot.descriptor,
+    ),
+    seat: 'north',
+    stateVersion: moving.state.stateVersion,
+  });
+  assert.equal(forged.accepted, false);
+  if (!forged.accepted) assert.equal(forged.reason.code, 'unknown_action');
+  assert.equal(hashGameState(forged.session.state), beforeForgeHash);
+  assert.equal(forged.session.transcript.length, beforeForgeTranscript);
+  moving = accept(forged.session, action(forged.session, ({ descriptor }) =>
+    descriptor.kind === 'continue-basic-movement'));
+  assert.equal(findUnit(moving.state, shooter.instanceId)?.location, 'C3');
+  moving = accept(moving, action(moving, ({ descriptor }) =>
+    descriptor.kind === 'continue-basic-movement'));
+  assert.equal(findUnit(moving.state, shooter.instanceId)?.location, 'C2');
+  moving = accept(moving, action(moving, ({ descriptor }) =>
+    descriptor.kind === 'continue-basic-movement'));
+  assert.equal(moving.state.phase, 'attack');
+  const movedShooter = findUnit(moving.state, shooter.instanceId);
+  assert.deepEqual(movedShooter && {
+    location: movedShooter.location,
+    tapped: movedShooter.tapped,
+  }, { location: 'C2', tapped: true });
+  assert.equal(moving.transcript.flatMap(({ events }) => events)
+    .filter(({ type }) => type === 'projectile-shot').length, 1);
+  assert.equal(verifyGameReplay(moving), true);
+
+  let defending = accept(checkpoint, action(checkpoint, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  defending = accept(defending, action(defending, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  defending = accept(defending, action(defending, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === attacker.instanceId
+      && descriptor.path.length === 1));
+  defending = accept(defending, action(defending, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === defended.instanceId));
+  const defend = action(defending, ({ descriptor }) =>
+    descriptor.kind === 'defend'
+      && descriptor.unitInstanceId === shooter.instanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3,C2');
+  const defendStarted = stepGame(defending, defend);
+  assert.equal(defendStarted.accepted, true);
+  if (!defendStarted.accepted) return;
+  defending = accept(defendStarted.session, action(defendStarted.session, ({ descriptor }) =>
+    descriptor.kind === 'continue-basic-movement'));
+  assert.equal(defending.state.phase, 'movement');
+  assert.equal(findUnit(defending.state, shooter.instanceId)?.location, 'C3');
+  const intermediateShots = shooterShots(defending.state);
+  const intermediateShot = intermediateShots.find(({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.hit?.instanceId === visible.instanceId);
+  assert.ok(intermediateShot);
+  assert.deepEqual(intermediateShot.descriptor.kind === 'shoot-projectile'
+    ? intermediateShot.descriptor.path.map(({ cell }) => cell)
+    : [], ['C3']);
+  assert.equal(intermediateShots.some(({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.hit?.instanceId === stealthed.instanceId), false);
+  assert.equal(intermediateShots.some(({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.hit?.instanceId === attacker.instanceId), false);
+  const intermediateFired = stepGame(defending, intermediateShot);
+  assert.equal(intermediateFired.accepted, true);
+  if (!intermediateFired.accepted) return;
+  defending = intermediateFired.session;
+  assert.equal(findUnit(defending.state, visible.instanceId)?.damage, 1);
+  assert.equal(shooterShots(defending.state).length, 0);
+  defending = accept(defending, action(defending, ({ descriptor }) =>
+    descriptor.kind === 'continue-basic-movement'));
+  assert.equal(findUnit(defending.state, shooter.instanceId)?.location, 'C2');
+  const defendFinished = stepGame(defending, action(defending, ({ descriptor }) =>
+    descriptor.kind === 'continue-basic-movement'));
+  assert.equal(defendFinished.accepted, true);
+  if (!defendFinished.accepted) return;
+  assert.equal(defendFinished.session.state.phase, 'defend');
+  assert.equal(defendFinished.session.state.pendingCombat?.defenders.some(({ instanceId }) =>
+    instanceId === shooter.instanceId), true);
+  assert.equal(defendFinished.receipt.events.some(({ type }) => type === 'defender-joined'), true);
+  assert.equal(defendFinished.session.transcript.flatMap(({ events }) => events)
+    .filter(({ type }) => type === 'projectile-shot').length, 1);
+  assert.equal(verifyGameReplay(defendFinished.session), true);
 });
 
 test('RULE-04 a drag projectile stops at the first visible unit and may fight after arrival', () => {
