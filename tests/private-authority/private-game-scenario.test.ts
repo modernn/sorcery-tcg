@@ -922,7 +922,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 23 : 27,
+        preset.id === 'air-vs-earth-lesson' ? 23 : 28,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -930,7 +930,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 27 : 23,
+        preset.id === 'air-vs-earth-lesson' ? 28 : 23,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -1000,6 +1000,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     Overpower: 2,
     'Pudge Butcher': 1,
     'Scent Hounds': 2,
+    'Slumbering Giantess': 1,
     'Wild Boars': 2,
     'Wraetannis Titan': 1,
   });
@@ -1079,6 +1080,26 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       genesisStrikeEachEnemyHere: true,
       manaCost: 7,
       thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+    });
+  }
+  const slumberingGiantessId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Slumbering Giantess')?.[0];
+  assert.ok(slumberingGiantessId);
+  const slumberingGiantess = airLesson.manifest.cards[slumberingGiantessId];
+  assert.equal(slumberingGiantess?.cardType, 'minion');
+  if (slumberingGiantess?.cardType === 'minion') {
+    assert.deepEqual({
+      attack: slumberingGiantess.attack,
+      defense: slumberingGiantess.defense,
+      genesisDisableSelfUntilDamaged: slumberingGiantess.genesisDisableSelfUntilDamaged,
+      manaCost: slumberingGiantess.manaCost,
+      thresholds: slumberingGiantess.thresholds,
+    }, {
+      attack: 5,
+      defense: 5,
+      genesisDisableSelfUntilDamaged: true,
+      manaCost: 3,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
     });
   }
   const scentHoundsId = Object.entries(airLesson.cardNames)
@@ -1662,6 +1683,26 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthWraetannisTitan.deck.spellbook
     .find(({ name }) => name === 'House Arn Bannerman')?.copies, 3);
   assert.equal(result.earthWraetannisTitan.replayVerified, true);
+  assert.equal(result.earthSlumberingGiantess.slumberingGiantess, 'Slumbering Giantess');
+  assert.equal(result.earthSlumberingGiantess.albespinePikemen, 'Albespine Pikemen');
+  assert.equal(result.earthSlumberingGiantess.seed, 8883);
+  assert.equal(result.earthSlumberingGiantess.acceptedActionCount, 27);
+  assert.equal(result.earthSlumberingGiantess.disabledOnSummon, true);
+  assert.equal(result.earthSlumberingGiantess.firstStrikeDamage, 3);
+  assert.equal(result.earthSlumberingGiantess.giantessReturnedStrike, true);
+  assert.equal(result.earthSlumberingGiantess.giantessSurvivedAwake, true);
+  assert.equal(result.earthSlumberingGiantess.causalEventsVerified, true);
+  assert.equal(result.earthSlumberingGiantess.legalConstructedDeck, true);
+  assert.equal(result.earthSlumberingGiantess.noRandomDraws, true);
+  assert.equal(result.earthSlumberingGiantess.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthSlumberingGiantess.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthSlumberingGiantess.deck.spellbook
+    .find(({ name }) => name === 'Slumbering Giantess')?.copies, 1);
+  assert.equal(result.earthSlumberingGiantess.deck.spellbook
+    .find(({ name }) => name === 'Albespine Pikemen')?.copies, 3);
+  assert.equal(result.earthSlumberingGiantess.replayVerified, true);
   assert.equal(result.earthBorderMilitia.borderMilitia, 'Border Militia');
   assert.equal(result.earthBorderMilitia.footSoldier, 'Foot Soldier');
   assert.equal(result.earthBorderMilitia.seed, 7688);

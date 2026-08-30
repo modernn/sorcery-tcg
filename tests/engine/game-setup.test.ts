@@ -50,6 +50,7 @@ type SpellFacts = Readonly<{
   genesisHealController?: 2;
   genesisLoseControllerLife?: 2;
   genesisMayDamageTargetAdjacentUnit?: 2;
+  genesisDisableSelfUntilDamaged?: true;
   genesisStrikeEachEnemyHere?: true;
   immobile?: boolean;
   lanceCount?: 1 | 2 | 3;
@@ -205,6 +206,9 @@ function cardsFor(
         ...(facts.genesisLoseControllerLife === 2 ? { genesisLoseControllerLife: 2 as const } : {}),
         ...(facts.genesisMayDamageTargetAdjacentUnit === 2
           ? { genesisMayDamageTargetAdjacentUnit: 2 as const }
+          : {}),
+        ...(facts.genesisDisableSelfUntilDamaged === true
+          ? { genesisDisableSelfUntilDamaged: true as const }
           : {}),
         ...(facts.genesisStrikeEachEnemyHere === true
           ? { genesisStrikeEachEnemyHere: true as const }
@@ -7021,6 +7025,31 @@ test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', (
     ...input,
     cards: {
       ...cards,
+      [alliedMinionId]: {
+        ...cards[alliedMinionId]!,
+        genesisDisableSelfUntilDamaged: false,
+      } as unknown as GameCardDefinition,
+    },
+    seed: 1,
+  }), /genesisDisableSelfUntilDamaged must be true when defined/);
+  for (const incompatible of [{ token: true }, { waterbound: true }]) {
+    assert.throws(() => createGameManifest({
+      ...input,
+      cards: {
+        ...cards,
+        [alliedMinionId]: {
+          ...cards[alliedMinionId]!,
+          ...incompatible,
+          genesisDisableSelfUntilDamaged: true,
+        } as unknown as GameCardDefinition,
+      },
+      seed: 1,
+    }), /Genesis/);
+  }
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
       [staticId]: {
         ...cards[staticId]!,
         genesisDrawSpell: true,
@@ -9004,6 +9033,63 @@ test('RULE-04 attacking-only first strike resolves deaths before normal strikes 
   assert.equal(session.state.players.south.cemetery
     .some(({ instanceId }) => instanceId === defending.targetInstanceId), true);
   assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03/04 Genesis sleep ends on real damage without retroactive strikes', () => {
+  const attacker = {
+    attack: 2,
+    defense: 6,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  } as const;
+  const sleeper = {
+    attack: 5,
+    defense: 5,
+    genesisDisableSelfUntilDamaged: true,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  } as const;
+  const fight = (seed: number, northSpell: SpellFacts, southSpell: SpellFacts) => {
+    const setup = northAttacksAtC2(seed, northSpell, undefined, false, southSpell);
+    assert.equal(observeGame(setup.session.state, 'north').realm.units
+      .find(({ instanceId }) => instanceId === setup.targetInstanceId)?.disabled, true);
+    let session = accept(setup.session, action(setup.session, ({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === setup.targetInstanceId));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+    return { ...setup, session };
+  };
+
+  const ordinary = fight(119, attacker, sleeper);
+  assert.equal(ordinary.session.state.realm.units
+    .find(({ instanceId }) => instanceId === ordinary.attackerInstanceId)?.damage, 0);
+  assert.equal(ordinary.session.state.realm.units
+    .find(({ instanceId }) => instanceId === ordinary.targetInstanceId)?.damage, 2);
+  assert.equal(observeGame(ordinary.session.state, 'north').realm.units
+    .find(({ instanceId }) => instanceId === ordinary.targetInstanceId)?.disabled, false);
+  assert.equal(ordinary.session.transcript.at(-1)?.events
+    .filter(({ type }) => type === 'minion-awakened').length, 1);
+  assert.equal(verifyGameReplay(ordinary.session), true);
+
+  const early = fight(120, { ...attacker, strikesFirstWhileAttacking: true }, sleeper);
+  assert.equal(early.session.state.realm.units
+    .find(({ instanceId }) => instanceId === early.attackerInstanceId)?.damage, 5);
+  assert.equal(early.session.state.realm.units
+    .find(({ instanceId }) => instanceId === early.targetInstanceId)?.damage, 2);
+  assert.equal(observeGame(early.session.state, 'north').realm.units
+    .find(({ instanceId }) => instanceId === early.targetInstanceId)?.disabled, false);
+  assert.equal(verifyGameReplay(early.session), true);
+
+  const warded = fight(121, attacker, { ...sleeper, ward: true });
+  assert.equal(warded.session.state.realm.units
+    .find(({ instanceId }) => instanceId === warded.targetInstanceId)?.damage, 0);
+  assert.equal(observeGame(warded.session.state, 'north').realm.units
+    .find(({ instanceId }) => instanceId === warded.targetInstanceId)?.disabled, true);
+  assert.equal(warded.session.transcript.at(-1)?.events
+    .some(({ type }) => type === 'minion-awakened'), false);
+  assert.equal(verifyGameReplay(warded.session), true);
 });
 
 test('RULE-04 Lance buffs and breaks on the next unit strike but not a site strike', () => {

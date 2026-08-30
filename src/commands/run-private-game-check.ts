@@ -576,6 +576,21 @@ export type PrivateGameCheck = Readonly<{
     wildBoars: string;
     wraetannisTitan: string;
   }>;
+  earthSlumberingGiantess: Readonly<{
+    acceptedActionCount: number;
+    albespinePikemen: string;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    disabledOnSummon: boolean;
+    firstStrikeDamage: number;
+    giantessReturnedStrike: boolean;
+    giantessSurvivedAwake: boolean;
+    legalConstructedDeck: boolean;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    seed: number;
+    slumberingGiantess: string;
+  }>;
   earthRescue: Readonly<{
     acceptedActionCount: number;
     boskTroll: string;
@@ -1427,6 +1442,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   wasteland: NormalizedCard;
   wildBoars: NormalizedCard;
   wraetannisTitan: NormalizedCard;
+  slumberingGiantess: NormalizedCard;
   polarBears: NormalizedCard;
   pirateShip: NormalizedCard;
   pudgeButcher: NormalizedCard;
@@ -1848,6 +1864,28 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || wraetannisTitan.thresholds.water !== 0
     || wraetannisTitan.rarity !== 'elite') {
     throw new Error('private Genesis enemy-strike minion no longer matches its supported facts');
+  }
+  const slumberingGiantess = snapshot.cards.find(({ name }) => name === 'Slumbering Giantess');
+  const slumberingGiantessTokens = slumberingGiantess?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
+  if (!slumberingGiantess
+    || slumberingGiantess.stableId
+      !== 'card:a6412a930fcd9c78a2cd43bc2644275d20484f87398b028e2d8efc17949bd2e6'
+    || slumberingGiantess.officialSourceId !== '001-slumbering_giantess-b-f'
+    || slumberingGiantess.cardType !== 'minion'
+    || identityHash(slumberingGiantessTokens as unknown as JsonValue)
+      !== 'sha256:a22a9aaad6e40f10e2ec95cff81de879a43dca4e17712a176d90251dc036aacb'
+    || slumberingGiantess.manaCost !== 3
+    || slumberingGiantess.attack !== 5
+    || slumberingGiantess.defense !== 5
+    || slumberingGiantess.life !== null
+    || slumberingGiantess.elements.length !== 1
+    || slumberingGiantess.elements[0] !== 'earth'
+    || slumberingGiantess.thresholds.air !== 0
+    || slumberingGiantess.thresholds.earth !== 1
+    || slumberingGiantess.thresholds.fire !== 0
+    || slumberingGiantess.thresholds.water !== 0
+    || slumberingGiantess.rarity !== 'exceptional') {
+    throw new Error('private Genesis sleeper minion no longer matches its supported facts');
   }
   const scentHounds = snapshot.cards.find(({ name }) => name === 'Scent Hounds');
   const scentHoundsTokens = scentHounds?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
@@ -3474,6 +3512,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     wasteland,
     wildBoars,
     wraetannisTitan,
+    slumberingGiantess,
     zap,
   };
 }
@@ -3596,6 +3635,7 @@ function gameDefinition(
   genesisHealNearbyAvatars: 0 | 3 = 0,
   cannotBeMovedDestroyedOrModified = false,
   genesisStrikeEachEnemyHere = false,
+  genesisDisableSelfUntilDamaged = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -3750,6 +3790,9 @@ function gameDefinition(
       ...(genesisHealController ? { genesisHealController } : {}),
       ...(genesisDamageEachOtherUnitHere ? { genesisDamageEachOtherUnitHere } : {}),
       ...(genesisStrikeEachEnemyHere ? { genesisStrikeEachEnemyHere: true as const } : {}),
+      ...(genesisDisableSelfUntilDamaged
+        ? { genesisDisableSelfUntilDamaged: true as const }
+        : {}),
       ...(genesisMayDamageTargetAdjacentUnit ? { genesisMayDamageTargetAdjacentUnit } : {}),
       genesisDrawSpell,
       genesisDrawSite,
@@ -3802,7 +3845,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -3960,6 +4003,14 @@ function buildManifest(
       ...earthWraetannisTitanBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
     ],
   };
+  const earthSlumberingGiantessBase = elementalDeck('earth', [input.firstStrikeMinion]);
+  const earthSlumberingGiantessDeck: GameDeckSpec = {
+    ...earthSlumberingGiantessBase,
+    spellbook: [
+      input.slumberingGiantess.stableId,
+      ...earthSlumberingGiantessBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
+    ],
+  };
   const earthBorderMilitiaDeck = elementalDeck('earth', [], [], [input.borderMilitia]);
   const earthHumbleVillageDeck = elementalDeck('earth', [], [input.humbleVillage]);
   const earthDuelDeck = elementalDeck(
@@ -4056,6 +4107,7 @@ function buildManifest(
       ...Array(2).fill(input.overpower.stableId),
       ...Array(2).fill(input.bury.stableId),
       input.wraetannisTitan.stableId,
+      input.slumberingGiantess.stableId,
     ],
   };
   const fireStarterDeck = elementalDeck(
@@ -4336,6 +4388,8 @@ function buildManifest(
         ? earthBedrockDeck
       : scenario === 'earth-wraetannis-titan'
         ? earthWraetannisTitanDeck
+      : scenario === 'earth-slumbering-giantess'
+        ? earthSlumberingGiantessDeck
       : scenario === 'earth-duel'
         ? earthDuelDeck
       : scenario === 'earth-sword-and-shield'
@@ -4509,6 +4563,8 @@ function buildManifest(
         ? earthBedrockDeck
       : scenario === 'earth-wraetannis-titan'
         ? earthWraetannisTitanDeck
+      : scenario === 'earth-slumbering-giantess'
+        ? earthSlumberingGiantessDeck
       : scenario === 'earth-duel'
         ? earthDuelDeck
       : scenario === 'earth-sword-and-shield'
@@ -4692,6 +4748,7 @@ function buildManifest(
       card.stableId === input.holyGround.stableId ? 3 : 0,
       card.stableId === input.bedrock.stableId,
       card.stableId === input.wraetannisTitan.stableId,
+      card.stableId === input.slumberingGiantess.stableId,
     ),
   ]));
   return {
@@ -5994,6 +6051,62 @@ function findEarthWraetannisTitanOpening(
     };
   }
   throw new Error('private Wraetannis Titan seed no longer produces its supported opening');
+}
+
+function findEarthSlumberingGiantessOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  albespinePikemenInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string];
+  seed: number;
+  session: GameSession;
+  slumberingGiantessInstanceId: string;
+  southSiteInstanceIds: readonly [string, string, string];
+}> {
+  // ponytail: pinned seed keeps this private proof fast and deterministic.
+  const seed = 8883;
+  const built = buildManifest(input, seed, 'earth-slumbering-giantess');
+  const session = createGameSession(built.manifest);
+  const earthSites = (seat: GameSeat) => session.state.players[seat].hand.atlas
+    .filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('earth');
+    });
+  const northSites = earthSites('north');
+  const southSites = earthSites('south');
+  const slumberingGiantessInstanceId = [
+    ...session.state.players.north.hand.spellbook,
+    ...session.state.players.north.spellbook.slice(0, 2),
+  ].find(({ cardId }) => cardId === input.slumberingGiantess.stableId)?.instanceId;
+  const albespinePikemenInstanceId = [
+    ...session.state.players.south.hand.spellbook,
+    ...session.state.players.south.spellbook.slice(0, 3),
+  ].find(({ cardId }) => cardId === input.firstStrikeMinion.stableId)?.instanceId;
+  if (northSites.length >= 3
+    && southSites.length >= 3
+    && slumberingGiantessInstanceId
+    && albespinePikemenInstanceId) {
+    return {
+      ...built,
+      albespinePikemenInstanceId,
+      northSiteInstanceIds: [
+        northSites[0]!.instanceId,
+        northSites[1]!.instanceId,
+        northSites[2]!.instanceId,
+      ],
+      seed,
+      session,
+      slumberingGiantessInstanceId,
+      southSiteInstanceIds: [
+        southSites[0]!.instanceId,
+        southSites[1]!.instanceId,
+        southSites[2]!.instanceId,
+      ],
+    };
+  }
+  throw new Error('private Slumbering Giantess seed no longer produces its supported opening');
 }
 
 function findEarthRescueOpening(
@@ -9994,6 +10107,151 @@ function runEarthWraetannisTitan(
     wildBoars: opening.names.get(input.wildBoars.stableId) ?? input.wildBoars.stableId,
     wraetannisTitan:
       opening.names.get(input.wraetannisTitan.stableId) ?? input.wraetannisTitan.stableId,
+  });
+}
+
+function runEarthSlumberingGiantess(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthSlumberingGiantess'] {
+  const opening = findEarthSlumberingGiantessOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  const playSite = (instanceId: string, cell: string): void => {
+    take(({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === instanceId
+      && descriptor.cell === cell);
+  };
+
+  playSite(opening.northSiteInstanceIds[0], 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playSite(opening.southSiteInstanceIds[0], 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playSite(opening.northSiteInstanceIds[1], 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playSite(opening.southSiteInstanceIds[1], 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playSite(opening.northSiteInstanceIds[2], 'B4');
+  const summonResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.slumberingGiantessInstanceId
+      && descriptor.cell === 'C3'
+      && descriptor.region === undefined));
+  if (!summonResult.accepted) {
+    throw new Error(`private Slumbering Giantess summon rejected: ${summonResult.reason.code}`);
+  }
+  session = summonResult.session;
+  const summoned = observeGame(session.state, 'north').realm.units
+    .find(({ instanceId }) => instanceId === opening.slumberingGiantessInstanceId);
+  const summonEvents = summonResult.receipt.events;
+  const summonPayload = summonEvents.find(({ type }) => type === 'minion-summoned');
+  const disabledPayload = summonEvents.find(({ type }) => type === 'minion-disabled');
+  const exactSummonEvents = summonPayload && disabledPayload
+    && isJsonRecord(summonPayload.payload)
+    && isJsonRecord(disabledPayload.payload)
+    && summonPayload.payload.cardId === input.slumberingGiantess.stableId
+    && summonPayload.payload.instanceId === opening.slumberingGiantessInstanceId
+    && summonPayload.payload.cell === 'C3'
+    && summonPayload.payload.manaPaid === 3
+    && summonPayload.payload.seat === 'north'
+    && disabledPayload.payload.instanceId === opening.slumberingGiantessInstanceId
+    && disabledPayload.payload.seat === 'north';
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playSite(opening.southSiteInstanceIds[2], 'B1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.albespinePikemenInstanceId
+    && descriptor.cell === 'C2'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === opening.albespinePikemenInstanceId
+    && descriptor.from.cell === 'C2'
+    && descriptor.to.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+    && descriptor.target.kind === 'minion'
+    && descriptor.target.instanceId === opening.slumberingGiantessInstanceId);
+  const fightResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  if (!fightResult.accepted) {
+    throw new Error(`private Giantess first-strike fight rejected: ${fightResult.reason.code}`);
+  }
+  session = fightResult.session;
+
+  const events = fightResult.receipt.events;
+  const eventPayload = (index: number): Readonly<Record<string, JsonValue>> | undefined => {
+    const payload = events[index]?.payload;
+    return isJsonRecord(payload) ? payload : undefined;
+  };
+  const firstStrikeDamageIndex = events.findIndex(({ payload, type }) =>
+    type === 'damage-dealt'
+      && isJsonRecord(payload)
+      && payload.instanceId === opening.slumberingGiantessInstanceId
+      && payload.amount === 3);
+  const awakenedIndex = events.findIndex(({ payload, type }) =>
+    type === 'minion-awakened'
+      && isJsonRecord(payload)
+      && payload.instanceId === opening.slumberingGiantessInstanceId);
+  const returnStrikeDamageIndex = events.findIndex(({ payload, type }) =>
+    type === 'damage-dealt'
+      && isJsonRecord(payload)
+      && payload.instanceId === opening.albespinePikemenInstanceId
+      && payload.amount === 5);
+  const pikemenDeathIndex = events.findIndex(({ payload, type }) =>
+    type === 'minion-died'
+      && isJsonRecord(payload)
+      && payload.instanceId === opening.albespinePikemenInstanceId);
+  const giantess = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.slumberingGiantessInstanceId);
+  const observedGiantess = observeGame(session.state, 'north').realm.units
+    .find(({ instanceId }) => instanceId === opening.slumberingGiantessInstanceId);
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    albespinePikemen:
+      opening.names.get(input.firstStrikeMinion.stableId) ?? input.firstStrikeMinion.stableId,
+    causalEventsVerified: Boolean(exactSummonEvents)
+      && firstStrikeDamageIndex >= 0
+      && awakenedIndex > firstStrikeDamageIndex
+      && returnStrikeDamageIndex > awakenedIndex
+      && pikemenDeathIndex > returnStrikeDamageIndex
+      && eventPayload(firstStrikeDamageIndex)?.accumulated === 3
+      && eventPayload(returnStrikeDamageIndex)?.accumulated === 5,
+    deck,
+    disabledOnSummon: summoned?.disabled === true && Boolean(exactSummonEvents),
+    firstStrikeDamage: typeof eventPayload(firstStrikeDamageIndex)?.amount === 'number'
+      ? eventPayload(firstStrikeDamageIndex)!.amount as number
+      : 0,
+    giantessReturnedStrike: returnStrikeDamageIndex > awakenedIndex
+      && session.state.players.south.cemetery
+        .some(({ instanceId }) => instanceId === opening.albespinePikemenInstanceId),
+    giantessSurvivedAwake: giantess?.damage === 3
+      && observedGiantess?.disabled === false
+      && giantess.location === 'C3',
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && deck.spellbook.find(({ name }) => name === input.slumberingGiantess.name)?.copies === 1
+      && deck.spellbook.find(({ name }) => name === input.firstStrikeMinion.name)?.copies
+        === input.format.copyLimits[input.firstStrikeMinion.rarity!],
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    slumberingGiantess:
+      opening.names.get(input.slumberingGiantess.stableId) ?? input.slumberingGiantess.stableId,
   });
 }
 
@@ -17559,6 +17817,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthHolyGround = runEarthHolyGround(input);
   const earthBedrock = runEarthBedrock(input);
   const earthWraetannisTitan = runEarthWraetannisTitan(input);
+  const earthSlumberingGiantess = runEarthSlumberingGiantess(input);
   const earthBorderMilitia = runEarthBorderMilitia(input);
   const earthHumbleVillage = runEarthHumbleVillage(input);
   const earthDuel = runEarthDuel(input);
@@ -17771,6 +18030,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthHolyGround,
     earthBedrock,
     earthWraetannisTitan,
+    earthSlumberingGiantess,
     earthBorderMilitia,
     earthHumbleVillage,
     earthDuel,

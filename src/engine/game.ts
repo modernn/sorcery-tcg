@@ -125,6 +125,7 @@ export type GameCardDefinition =
     discardRandomCardInsteadOfMana?: true;
     diesAtEndOfControllerTurn?: true;
     genesisDamageEachOtherUnitHere?: 1;
+    genesisDisableSelfUntilDamaged?: true;
     genesisStrikeEachEnemyHere?: true;
     genesisMayDamageTargetAdjacentUnit?: 2;
     genesisDrawSpell?: boolean;
@@ -225,6 +226,7 @@ type UnitInstance = Readonly<CardInstance & {
   controller: GameSeat;
   damage: number;
   disableEffects?: readonly DisableEffect[];
+  disabledUntilDamaged?: true;
   lastDroppedArtifactsTurn?: number;
   lastInteractedTurn?: number;
   lastPickedUpArtifactsTurn?: number;
@@ -1486,6 +1488,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && card.genesisDamageEachOtherUnitHere !== 1) {
     throw new RangeError(`${path}.genesisDamageEachOtherUnitHere must be 1`);
   }
+  if (card.genesisDisableSelfUntilDamaged !== undefined
+    && card.genesisDisableSelfUntilDamaged !== true) {
+    throw new RangeError(`${path}.genesisDisableSelfUntilDamaged must be true when defined`);
+  }
   if (card.genesisStrikeEachEnemyHere !== undefined
     && card.genesisStrikeEachEnemyHere !== true) {
     throw new RangeError(`${path}.genesisStrikeEachEnemyHere must be true when defined`);
@@ -1536,6 +1542,15 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.genesisHealController !== undefined
       || card.genesisLoseControllerLife !== undefined)) {
     throw new RangeError(`${path} simultaneous Genesis strikes and another effect are unsupported`);
+  }
+  if (card.genesisDisableSelfUntilDamaged === true
+    && (card.genesisDrawSite || card.genesisDrawSpell
+      || card.genesisDamageEachOtherUnitHere === 1
+      || card.genesisMayDamageTargetAdjacentUnit === 2
+      || card.genesisStrikeEachEnemyHere === true
+      || card.genesisHealController !== undefined
+      || card.genesisLoseControllerLife !== undefined)) {
+    throw new RangeError(`${path} Genesis disable with another effect is unsupported`);
   }
   if (card.genesisMayDamageTargetAdjacentUnit === 2
     && (card.discardRandomCardInsteadOfMana === true
@@ -1623,6 +1638,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.token === true
     && (card.genesisDrawSite || card.genesisDrawSpell
       || card.genesisDamageEachOtherUnitHere === 1
+      || card.genesisDisableSelfUntilDamaged === true
       || card.genesisMayDamageTargetAdjacentUnit === 2
       || card.genesisStrikeEachEnemyHere === true
       || card.genesisHealController !== undefined
@@ -1648,6 +1664,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.waterbound
     && (card.genesisDrawSite || card.genesisDrawSpell
       || card.genesisDamageEachOtherUnitHere === 1
+      || card.genesisDisableSelfUntilDamaged === true
       || card.genesisMayDamageTargetAdjacentUnit === 2
       || card.genesisStrikeEachEnemyHere === true
       || card.genesisHealController !== undefined
@@ -1906,6 +1923,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               : {}),
             ...(card.genesisDamageEachOtherUnitHere === 1
               ? { genesisDamageEachOtherUnitHere: 1 as const }
+              : {}),
+            ...(card.genesisDisableSelfUntilDamaged === true
+              ? { genesisDisableSelfUntilDamaged: true as const }
               : {}),
             ...(card.genesisMayDamageTargetAdjacentUnit === 2
               ? { genesisMayDamageTargetAdjacentUnit: 2 as const }
@@ -2175,7 +2195,7 @@ function cardDefinition(state: GameState, cardId: string): GameCardDefinition {
 function minionDisabled(state: GameState, unit: UnitInstance): boolean {
   const definition = cardDefinition(state, unit.cardId);
   if (definition.cardType !== 'minion') throw new Error('realm minion lacks minion definition');
-  return Boolean(unit.disableEffects?.length)
+  return Boolean(unit.disableEffects?.length) || unit.disabledUntilDamaged === true
     || definition.waterbound === true && !isWaterSite(state, unit.location);
 }
 
@@ -4332,7 +4352,10 @@ function resolveFightWindow(
     const reduction = unitStatus(state, ref).takesLessDamage;
     const dealt = sources.reduce((total, source) => total + Math.max(0, source - reduction), 0);
     const accumulated = unit.damage + dealt;
-    units[index] = deepFreeze({ ...unit, damage: accumulated });
+    const awakened = dealt > 0 && unit.disabledUntilDamaged === true;
+    const updated = { ...unit, damage: accumulated };
+    if (awakened) delete updated.disabledUntilDamaged;
+    units[index] = deepFreeze(updated);
     damageOutcomes.push({
       payload: {
         accumulated,
@@ -4344,6 +4367,12 @@ function resolveFightWindow(
       },
       type: 'damage-dealt',
     });
+    if (awakened) {
+      damageOutcomes.push({
+        payload: { instanceId: ref.instanceId, seat: ref.seat },
+        type: 'minion-awakened',
+      });
+    }
     if (accumulated > 0
       && (accumulated >= unitStatus(state, ref).defense
         || (dealt > 0 && lethalDamage.has(ref.instanceId)))) {
@@ -6628,6 +6657,28 @@ function applyDescriptor(
     const genesisDrawZone = definition.genesisDrawSite
       ? 'atlas'
       : definition.genesisDrawSpell ? 'spellbook' : undefined;
+    if (definition.genesisDisableSelfUntilDamaged === true) {
+      const disabled = withStateVersion(settlement.state, {
+        realm: {
+          ...settlement.state.realm,
+          units: settlement.state.realm.units.map((candidate) => candidate.instanceId === unit.instanceId
+            ? deepFreeze({ ...candidate, disabledUntilDamaged: true as const })
+            : candidate),
+        },
+      });
+      return [
+        disabled,
+        [
+          ...summonOutcomes,
+          ...settlement.outcomes,
+          {
+            payload: { instanceId: unit.instanceId, seat, sourceInstanceId: unit.instanceId },
+            type: 'minion-disabled',
+          },
+        ],
+        paymentRandomDraws,
+      ];
+    }
     if (definition.genesisDamageEachOtherUnitHere === 1
       || definition.genesisStrikeEachEnemyHere === true) {
       const source: GameUnitRef = {
