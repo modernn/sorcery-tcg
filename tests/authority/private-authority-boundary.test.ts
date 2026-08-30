@@ -13,6 +13,9 @@ import {
 import {
   createPrivateCandidateInspectorForTest,
   type PrivateInspectionSource,
+  verifyPrivateNormalizedRetentionForTest,
+  verifyPrivatePreparationBudgetForTest,
+  verifyPrivateSemanticRetentionForTest,
 } from '../../scripts/verify-private-authority-boundary.ts';
 import { runBounded } from '../helpers/bounded-process.ts';
 
@@ -300,6 +303,164 @@ test('pure detector allows project-owned HTML embedded in TypeScript', async () 
     path: 'src/prototype/local-page.ts',
     bytes: 'const PAGE = String.raw`' + page + '`;',
   }));
+});
+
+test('sampled raw fingerprints detect every 32-byte source alignment', () => {
+  const source = Buffer.from(Array.from({ length: 64 }, (_, index) => index));
+  const inspect = createPrivateCandidateInspectorForTest([{ bytes: source, kind: 'binary' }], []);
+  for (let offset = 0; offset < 9; offset += 1) {
+    assertViolation(inspect, 'candidate.bin', source.subarray(offset, offset + 32), /source-derived/i);
+  }
+});
+
+test('sampled raw fingerprints require an exact 32-byte extension', () => {
+  const token = Buffer.from('shared-24-byte-token-123', 'ascii');
+  assert.equal(token.length, 24);
+  const source = Buffer.concat([Buffer.alloc(9, 0x11), token, Buffer.alloc(8, 0x22)]);
+  const inspect = createPrivateCandidateInspectorForTest([{ bytes: source, kind: 'binary' }], []);
+  assert.doesNotThrow(() => inspect({ path: 'candidate.bin', bytes: source.subarray(3, 34) }));
+  assert.doesNotThrow(() => inspect({
+    path: 'candidate.bin',
+    bytes: Buffer.concat([Buffer.alloc(4, 0x33), token, Buffer.alloc(4, 0x44)]),
+  }));
+
+  const edgeToken = Buffer.concat([
+    Buffer.from('edge'),
+    Buffer.alloc(16, 0x55),
+    Buffer.from('tail'),
+  ]);
+  const edgeInspect = createPrivateCandidateInspectorForTest([{
+    bytes: Buffer.concat([Buffer.alloc(9, 0x11), edgeToken, Buffer.alloc(8, 0x22)]),
+    kind: 'binary',
+  }], []);
+  assert.doesNotThrow(() => edgeInspect({
+    path: 'candidate.bin',
+    bytes: Buffer.concat([
+      Buffer.alloc(4, 0x33),
+      Buffer.from('edge'),
+      Buffer.alloc(16, 0x66),
+      Buffer.from('tail'),
+      Buffer.alloc(4, 0x44),
+    ]),
+  }));
+});
+
+test('Bloom gate indexes original fingerprints before ordinal packing', async () => {
+  const fixture = await privateInspector();
+  const source = fixture.sourceBytes.get(PRIVATE_AUTHORITY_SOURCE_PATHS[0])!;
+  assertViolation(fixture.inspect, 'candidate.bin', source.subarray(32, 64), /source-derived/i);
+});
+
+test('aggregate private preparation budget charges every retained lock estimate', () => {
+  const halfBudget = 384 * 1024 * 1024;
+  assert.doesNotThrow(() => verifyPrivatePreparationBudgetForTest([halfBudget, halfBudget]));
+  assert.throws(
+    () => verifyPrivatePreparationBudgetForTest([halfBudget, halfBudget, 1]),
+    /preparation allocation exceeded the fixed limit/i,
+  );
+});
+
+test('normalized HTML retention counts Unicode lowercase expansion', () => {
+  const ascii = Buffer.from('<p>' + 'A'.repeat(80) + '</p>', 'utf8');
+  const expanding = Buffer.from('<p>' + '\u0130'.repeat(40) + '</p>', 'utf8');
+  assert.equal(verifyPrivateNormalizedRetentionForTest([ascii], 80), 80);
+  assert.equal(verifyPrivateNormalizedRetentionForTest([expanding], 120), 120);
+  assert.throws(
+    () => verifyPrivateNormalizedRetentionForTest([expanding], 119),
+    /text normalization exceeded the fixed byte limit/i,
+  );
+});
+
+test('semantic retention caps cumulative many and nested canonical values', () => {
+  const many = Array.from({ length: 8 }, (_, index) => Buffer.from(JSON.stringify({
+    id: index,
+    rulesText: `private semantic record ${index} ` + 'x'.repeat(120),
+  }), 'utf8'));
+  const manyBytes = verifyPrivateSemanticRetentionForTest(many, 1_000_000);
+  assert.ok(manyBytes > many[0]!.length);
+  assert.throws(
+    () => verifyPrivateSemanticRetentionForTest(many, manyBytes - 1),
+    /semantic JSON retention exceeded the fixed limit/i,
+  );
+
+  const nested = Buffer.from(JSON.stringify({
+    outer: {
+      middle: {
+        records: Array.from({ length: 4 }, (_, index) => ({
+          id: index,
+          rulesText: `nested private semantic record ${index} ` + 'y'.repeat(120),
+        })),
+      },
+    },
+  }), 'utf8');
+  const nestedBytes = verifyPrivateSemanticRetentionForTest([nested], 1_000_000);
+  assert.ok(nestedBytes > nested.length);
+  assert.throws(
+    () => verifyPrivateSemanticRetentionForTest([nested], nestedBytes - 1),
+    /semantic JSON retention exceeded the fixed limit/i,
+  );
+});
+
+test('packed ordinals continue past an earlier collision to a later EOF match', () => {
+  const token = Buffer.concat([Buffer.from('edge'), Buffer.alloc(16, 0x55), Buffer.from('tail')]);
+  const decoy = Buffer.concat([token, Buffer.alloc(8, 0x11)]);
+  const match = Buffer.concat([token, Buffer.alloc(8, 0x22)]);
+  const inspect = createPrivateCandidateInspectorForTest([
+    { bytes: decoy, kind: 'binary' },
+    { bytes: match, kind: 'binary' },
+  ], []);
+  assertViolation(
+    inspect,
+    'candidate.bin',
+    Buffer.concat([Buffer.alloc(3, 0x33), match, Buffer.alloc(2, 0x44)]),
+    /source-derived/i,
+  );
+});
+
+test('strong raw keys separate large coarse buckets and retain a later match', () => {
+  const tokenCount = 100_001;
+  const source = Buffer.alloc(tokenCount * 27 + 8, 0x2e);
+  for (let index = 0; index < tokenCount; index += 1) {
+    const offset = index * 27;
+    source.write('edge', offset, 'ascii');
+    source.writeUInt32LE(index, offset + 4);
+    source.writeUInt32LE(0x7777_7777, offset + 10);
+    source.writeUInt32LE((index ^ 0xa5a5_a5a5) >>> 0, offset + 14);
+    source.write('tail', offset + 20, 'ascii');
+  }
+  const matchOffset = (tokenCount - 1) * 27;
+  const inspect = createPrivateCandidateInspectorForTest([{ bytes: source, kind: 'binary' }], []);
+  assertViolation(
+    inspect,
+    'candidate.bin',
+    source.subarray(matchOffset, matchOffset + 32),
+    /source-derived/i,
+  );
+});
+
+test('adversarial equal-edge collision buckets fail closed at the work cap', () => {
+  const tokenCount = 100_001;
+  const source = Buffer.alloc(tokenCount * 27, 0x2e);
+  const token = Buffer.concat([
+    Buffer.from('edge'),
+    Buffer.alloc(16, 0x55),
+    Buffer.from('tail'),
+  ]);
+  for (let index = 0; index < tokenCount; index += 1) {
+    const offset = index * 27;
+    token.copy(source, offset);
+  }
+  const inspect = createPrivateCandidateInspectorForTest([{ bytes: source, kind: 'binary' }], []);
+  assertViolation(
+    inspect,
+    'candidate.bin',
+    Buffer.concat([
+      Buffer.alloc(4, 0x33),
+      token,
+      Buffer.alloc(4, 0x44),
+    ]),
+    /fingerprint-collision-work-limit/i,
+  );
 });
 
 async function cleanupFixture(fixture: Fixture): Promise<void> {

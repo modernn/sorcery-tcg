@@ -244,7 +244,7 @@ test('historical and final v3 locks pass one production boundary scan', async ()
     process.execPath,
     [BOUNDARY_SCRIPT, '--repository-root', REPOSITORY_ROOT, ...lockArguments],
     REPOSITORY_ROOT,
-    { maxBuffer: 268_435_456 },
+    { maxBuffer: 268_435_456, timeout: 180_000 },
   );
   assert.equal(result.code, 0, 'production private authority boundary scanner failed');
   assert.equal(result.stdout, 'Private authority boundary verified.\n');

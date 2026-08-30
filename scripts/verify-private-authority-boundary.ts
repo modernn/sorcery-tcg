@@ -30,14 +30,24 @@ type Locator = Readonly<{ bytes: Buffer; caseInsensitive: boolean }>;
 type SemanticIndex = Map<string, string[]>;
 type RawFingerprintIndex = Readonly<{
   fingerprints: BigUint64Array;
+  fingerprintBloom: Uint8Array;
+  fingerprintBloomMask: number;
   sources: readonly Buffer[];
-  minimumBytes: number;
+  sourceFingerprintStarts: readonly number[];
+  sourceStride: number;
+  ordinalBits: number;
+  fingerprintMode: 'edges' | 'rolling';
+  fingerprintBytes: number;
+  minimumMatchBytes: number;
 }>;
 type InspectionState = {
   candidateBytes: number;
+  collisionComparisons: number;
   decodedBytes: number;
   decodedStrings: number;
 };
+type PreparationBudget = { reservedBytes: number };
+type PrivateRetentionBudget = { normalizedBytes: number; semanticBytes: number };
 type PrivateEvidence = Readonly<{
   privateHashes: ReadonlySet<string>;
   rawIndex: RawFingerprintIndex;
@@ -53,14 +63,23 @@ export type PrivateInspectionSource = Readonly<{
 }>;
 
 const MIN_PROTECTED_EXCERPT_BYTES = 32;
+const RAW_FINGERPRINT_BYTES = 24;
+const RAW_FINGERPRINT_STRIDE = MIN_PROTECTED_EXCERPT_BYTES - RAW_FINGERPRINT_BYTES + 1;
 const MIN_NORMALIZED_TEXT_BYTES = 96;
 const MIN_SEMANTIC_RECORD_BYTES = 96;
 const MAX_PRIVATE_BYTES = 128_000_000;
 const MAX_PRIVATE_FINGERPRINTS = 128_000_000;
+const MAX_PRIVATE_PREPARATION_BYTES = 768 * 1024 * 1024;
+// Four MiB covers the official text-only HTML corpus with case-fold growth while preserving two-lock headroom.
+const MAX_PRIVATE_NORMALIZED_HTML_BYTES = 4 * 1024 * 1024;
+// Ninety-six MiB accommodates the canonical card root plus retained nested records within the two-lock budget.
+const MAX_PRIVATE_SEMANTIC_BYTES = 96 * 1024 * 1024;
 const MAX_CANDIDATE_BYTES = 64_000_000;
 const MAX_CANDIDATE_WORK_BYTES = 1_073_741_824;
 const MAX_DECODED_BYTES = 64_000_000;
 const MAX_DECODED_STRINGS = 100_000;
+// The fail-closed cap retains 4.6x headroom over the 21,713-comparison production baseline.
+const MAX_COLLISION_COMPARISONS = 100_000;
 const MAX_DECODE_DEPTH = 4;
 const MAX_SEMANTIC_SUBTREES = 200_000;
 const MAX_COMMAND_BUFFER = 268_435_456;
@@ -268,18 +287,79 @@ function multiplyAdd(hash: number, base: number, byte: number): number {
   return (Math.imul(hash, base) + byte) >>> 0;
 }
 
+function rotateLeft32(value: number, distance: number): number {
+  return ((value << distance) | (value >>> (32 - distance))) >>> 0;
+}
+
+function avalanche32(value: number): number {
+  value = Math.imul(value ^ (value >>> 16), 0x7feb_352d) >>> 0;
+  value = Math.imul(value ^ (value >>> 15), 0x846c_a68b) >>> 0;
+  return (value ^ (value >>> 16)) >>> 0;
+}
+
+function strongRawFingerprints(bytes: Buffer, offset: number): readonly [number, number] {
+  let first = 0x243f_6a88;
+  let second = 0x85a3_08d3;
+  for (let wordIndex = 0; wordIndex < 6; wordIndex += 1) {
+    const word = bytes.readUInt32LE(offset + wordIndex * 4);
+    first = rotateLeft32(Math.imul(first ^ word, 0x9e37_79b1) >>> 0, 13);
+    second = rotateLeft32(Math.imul(second ^ word, 0x85eb_ca77) >>> 0, 15);
+  }
+  return [avalanche32(first), avalanche32(second)];
+}
+
 function power(base: number, exponent: number): number {
   let value = 1;
   for (let index = 0; index < exponent; index += 1) value = Math.imul(value, base) >>> 0;
   return value;
 }
 
+function fingerprintWindowCount(byteLength: number, fingerprintBytes: number, stride: number): number {
+  return byteLength < fingerprintBytes
+    ? 0
+    : Math.floor((byteLength - fingerprintBytes) / stride) + 1;
+}
+
+function fingerprintBloomBytes(count: number): number {
+  return 2 ** Math.min(30, Math.max(3, Math.ceil(Math.log2(Math.max(1, count * 8))))) / 8;
+}
+
+function reservePrivatePreparationBytes(budget: PreparationBudget, bytes: number): void {
+  if (!Number.isSafeInteger(bytes) || bytes < 0) {
+    throw new BoundaryViolation('Private preparation estimate is invalid.');
+  }
+  const reservedBytes = budget.reservedBytes + bytes;
+  if (!Number.isSafeInteger(reservedBytes) || reservedBytes > MAX_PRIVATE_PREPARATION_BYTES) {
+    throw new BoundaryViolation('Private preparation allocation exceeded the fixed limit.');
+  }
+  budget.reservedBytes = reservedBytes;
+}
+
+export function verifyPrivatePreparationBudgetForTest(estimates: readonly number[]): void {
+  const budget: PreparationBudget = { reservedBytes: 0 };
+  for (const bytes of estimates) reservePrivatePreparationBytes(budget, bytes);
+}
+
 function windowFingerprints(
   bytes: Buffer,
   minimumBytes: number,
-  visit: (fingerprint: bigint, offset: number) => void,
+  visit: (first: number, second: number, offset: number, firstProbe?: number) => void,
+  stride = 1,
+  mode: RawFingerprintIndex['fingerprintMode'] = 'rolling',
 ): void {
   if (bytes.length < minimumBytes) return;
+  if (mode === 'edges') {
+    for (let offset = 0; offset <= bytes.length - minimumBytes; offset += stride) {
+      const head = bytes.readUInt32LE(offset);
+      const middle = bytes.readUInt32LE(offset + 10);
+      const tail = bytes.readUInt32LE(offset + minimumBytes - 4);
+      const firstSeed = (head ^ ((tail << 13) | (tail >>> 19)) ^ ((middle << 7) | (middle >>> 25))) >>> 0;
+      const firstProbe = Math.imul(firstSeed ^ (firstSeed >>> 16), 0x7feb_352d) >>> 0;
+      const [first, second] = strongRawFingerprints(bytes, offset);
+      visit(first, second, offset, firstProbe);
+    }
+    return;
+  }
   const windowPowerA = power(HASH_BASE_A, minimumBytes - 1);
   const windowPowerB = power(HASH_BASE_B, minimumBytes - 1);
   let first = 0;
@@ -288,7 +368,7 @@ function windowFingerprints(
     first = multiplyAdd(first, HASH_BASE_A, bytes[index]!);
     second = multiplyAdd(second, HASH_BASE_B, bytes[index]!);
   }
-  visit((BigInt(first) << 32n) | BigInt(second), 0);
+  visit(first, second, 0);
   for (let offset = 1; offset <= bytes.length - minimumBytes; offset += 1) {
     const previous = bytes[offset - 1]!;
     const next = bytes[offset + minimumBytes - 1]!;
@@ -302,11 +382,11 @@ function windowFingerprints(
       HASH_BASE_B,
       next,
     );
-    visit((BigInt(first) << 32n) | BigInt(second), offset);
+    if (offset % stride === 0) visit(first, second, offset);
   }
 }
 
-function normalizedVisibleText(bytes: Buffer): Buffer | null {
+function normalizedVisibleText(bytes: Buffer, maximumOutputBytes = MAX_PRIVATE_BYTES): Buffer | null {
   let text: string;
   try {
     text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -344,33 +424,100 @@ function normalizedVisibleText(bytes: Buffer): Buffer | null {
     .toLowerCase()
     .replace(/\s+/gu, ' ')
     .trim();
+  if (Buffer.byteLength(decoded, 'utf8') > maximumOutputBytes) {
+    throw new BoundaryViolation('Text normalization exceeded the fixed byte limit.');
+  }
   return Buffer.from(decoded, 'utf8');
+}
+
+function reservePrivateRetentionBytes(
+  budget: PrivateRetentionBudget,
+  field: keyof PrivateRetentionBudget,
+  bytes: number,
+  maximumBytes: number,
+  category: 'normalized HTML' | 'semantic JSON',
+): void {
+  if (!Number.isSafeInteger(bytes) || bytes < 0 || !Number.isSafeInteger(maximumBytes) || maximumBytes < 0) {
+    throw new BoundaryViolation('Private retention estimate is invalid.');
+  }
+  const retainedBytes = budget[field] + bytes;
+  if (!Number.isSafeInteger(retainedBytes) || retainedBytes > maximumBytes) {
+    throw new BoundaryViolation(`Private ${category} retention exceeded the fixed limit.`);
+  }
+  budget[field] = retainedBytes;
+}
+
+function addPrivateNormalizedHtml(
+  bytes: Buffer,
+  normalizedTextBuffers: Map<string, Buffer>,
+  retentionBudget: PrivateRetentionBudget,
+  maximumBytes = MAX_PRIVATE_NORMALIZED_HTML_BYTES,
+): void {
+  const normalized = normalizedVisibleText(bytes, maximumBytes);
+  if (normalized === null || normalized.length < MIN_PROTECTED_EXCERPT_BYTES) return;
+  const fingerprint = sha256Hex(normalized);
+  if (normalizedTextBuffers.has(fingerprint)) return;
+  reservePrivateRetentionBytes(
+    retentionBudget,
+    'normalizedBytes',
+    normalized.length,
+    maximumBytes,
+    'normalized HTML',
+  );
+  normalizedTextBuffers.set(fingerprint, normalized);
 }
 
 function buildRawFingerprintIndex(
   privateBuffers: readonly Buffer[],
-  minimumBytes: number,
+  fingerprintBytes: number,
+  minimumMatchBytes = fingerprintBytes,
+  stride = 1,
+  fingerprintMode: RawFingerprintIndex['fingerprintMode'] = 'rolling',
 ): RawFingerprintIndex {
   let fingerprintCount = 0;
   let privateBytes = 0;
+  const sourceFingerprintStarts = [0];
   for (const bytes of privateBuffers) {
     privateBytes += bytes.length;
-    fingerprintCount += Math.max(0, bytes.length - minimumBytes + 1);
+    fingerprintCount += fingerprintWindowCount(bytes.length, fingerprintBytes, stride);
+    sourceFingerprintStarts.push(fingerprintCount);
   }
   if (privateBytes > MAX_PRIVATE_BYTES || fingerprintCount > MAX_PRIVATE_FINGERPRINTS) {
     throw new BoundaryViolation('Private fingerprint work exceeded the fixed limit.');
   }
+  const ordinalBits = Math.max(1, Math.ceil(Math.log2(Math.max(2, fingerprintCount))));
+  if (ordinalBits >= 64) throw new BoundaryViolation('Private fingerprint index exceeded its fixed width.');
+  const ordinalShift = BigInt(ordinalBits);
+  const fingerprintBloom = new Uint8Array(fingerprintBloomBytes(fingerprintCount));
+  const fingerprintBloomBits = fingerprintBloom.length * 8;
+  const fingerprintBloomMask = fingerprintBloomBits - 1;
   const fingerprints = new BigUint64Array(fingerprintCount);
   let index = 0;
   for (const bytes of privateBuffers) {
-    windowFingerprints(bytes, minimumBytes, (fingerprint) => {
-      fingerprints[index] = fingerprint;
+    windowFingerprints(bytes, fingerprintBytes, (first, second, _offset, firstProbe = first) => {
+      const firstBit = firstProbe & fingerprintBloomMask;
+      const secondBit = second & fingerprintBloomMask;
+      fingerprintBloom[firstBit >>> 3] = fingerprintBloom[firstBit >>> 3]! | (1 << (firstBit & 7));
+      fingerprintBloom[secondBit >>> 3] = fingerprintBloom[secondBit >>> 3]! | (1 << (secondBit & 7));
+      const fingerprint = (BigInt(first) << 32n) | BigInt(second);
+      fingerprints[index] = ((fingerprint >> ordinalShift) << ordinalShift) | BigInt(index);
       index += 1;
-    });
+    }, stride, fingerprintMode);
   }
   const protectedFingerprints = fingerprints.subarray(0, index);
   protectedFingerprints.sort();
-  return { fingerprints: protectedFingerprints, sources: privateBuffers, minimumBytes };
+  return {
+    fingerprints: protectedFingerprints,
+    fingerprintBloom,
+    fingerprintBloomMask,
+    sources: privateBuffers,
+    sourceFingerprintStarts,
+    sourceStride: stride,
+    ordinalBits,
+    fingerprintMode,
+    fingerprintBytes,
+    minimumMatchBytes,
+  };
 }
 
 function addRawFingerprintSegments(
@@ -382,25 +529,120 @@ function addRawFingerprintSegments(
   }
 }
 
-function containsFingerprint(fingerprints: BigUint64Array, fingerprint: bigint): boolean {
+function lowerBoundFingerprint(fingerprints: BigUint64Array, fingerprint: bigint): number {
   let low = 0;
   let high = fingerprints.length;
   while (low < high) {
     const middle = low + Math.floor((high - low) / 2);
-    const value = fingerprints[middle]!;
-    if (value < fingerprint) low = middle + 1;
+    if (fingerprints[middle]! < fingerprint) low = middle + 1;
     else high = middle;
   }
-  return low < fingerprints.length && fingerprints[low] === fingerprint;
+  return low;
 }
 
-function containsProtectedWindow(bytes: Buffer, index: RawFingerprintIndex): boolean {
+function containsProtectedWindow(
+  bytes: Buffer,
+  indexes: readonly RawFingerprintIndex[],
+  candidate: Candidate,
+  state: InspectionState,
+): boolean {
+  if (indexes.length === 0) return false;
+  const fingerprintBytes = indexes[0]!.fingerprintBytes;
+  const minimumMatchBytes = indexes[0]!.minimumMatchBytes;
+  const fingerprintMode = indexes[0]!.fingerprintMode;
+  if (indexes.some((index) =>
+    index.fingerprintBytes !== fingerprintBytes ||
+    index.minimumMatchBytes !== minimumMatchBytes ||
+    index.fingerprintMode !== fingerprintMode
+  )) {
+    throw new BoundaryViolation('Private fingerprint indexes are incompatible.');
+  }
   let matched = false;
-  windowFingerprints(bytes, index.minimumBytes, (fingerprint, offset) => {
-    if (matched || !containsFingerprint(index.fingerprints, fingerprint)) return;
-    const window = bytes.subarray(offset, offset + index.minimumBytes);
-    matched = index.sources.some((source) => source.includes(window));
-  });
+  const leadingBytes = minimumMatchBytes - fingerprintBytes;
+  const inspectFingerprint = (
+    first: number,
+    second: number,
+    offset: number,
+    firstProbe = first,
+  ): void => {
+    if (matched) return;
+    let fingerprint: bigint | undefined;
+    for (const index of indexes) {
+      const firstBit = firstProbe & index.fingerprintBloomMask;
+      const secondBit = second & index.fingerprintBloomMask;
+      if (
+        (index.fingerprintBloom[firstBit >>> 3]! & (1 << (firstBit & 7))) === 0 ||
+        (index.fingerprintBloom[secondBit >>> 3]! & (1 << (secondBit & 7))) === 0
+      ) continue;
+      fingerprint ??= (BigInt(first) << 32n) | BigInt(second);
+      const ordinalShift = BigInt(index.ordinalBits);
+      const ordinalMask = (1n << ordinalShift) - 1n;
+      const prefix = fingerprint >> ordinalShift;
+      let recordIndex = lowerBoundFingerprint(index.fingerprints, prefix << ordinalShift);
+      const token = bytes.subarray(offset, offset + fingerprintBytes);
+      while (
+        recordIndex < index.fingerprints.length &&
+        index.fingerprints[recordIndex]! >> ordinalShift === prefix
+      ) {
+        state.collisionComparisons += 1;
+        if (state.collisionComparisons > MAX_COLLISION_COMPARISONS) {
+          fail('fingerprint-collision-work-limit', candidate);
+        }
+        const ordinal = Number(index.fingerprints[recordIndex]! & ordinalMask);
+        let sourceIndex = 0;
+        while (index.sourceFingerprintStarts[sourceIndex + 1]! <= ordinal) sourceIndex += 1;
+        const source = index.sources[sourceIndex]!;
+        const sourceOffset =
+          (ordinal - index.sourceFingerprintStarts[sourceIndex]!) * index.sourceStride;
+        if (source.subarray(sourceOffset, sourceOffset + fingerprintBytes).equals(token)) {
+          for (let leading = 0; leading <= leadingBytes; leading += 1) {
+            const candidateStart = offset - leading;
+            const sourceStart = sourceOffset - leading;
+            if (
+              candidateStart >= 0 &&
+              sourceStart >= 0 &&
+              candidateStart + minimumMatchBytes <= bytes.length &&
+              sourceStart + minimumMatchBytes <= source.length &&
+              bytes.subarray(candidateStart, candidateStart + minimumMatchBytes)
+                .equals(source.subarray(sourceStart, sourceStart + minimumMatchBytes))
+            ) {
+              matched = true;
+              return;
+            }
+          }
+        }
+        recordIndex += 1;
+      }
+    }
+  };
+  if (fingerprintMode === 'edges') {
+    for (let offset = 0; offset <= bytes.length - fingerprintBytes; offset += 1) {
+      const head = bytes.readUInt32LE(offset);
+      const middle = bytes.readUInt32LE(offset + 10);
+      const tail = bytes.readUInt32LE(offset + fingerprintBytes - 4);
+      const firstSeed = (head ^ ((tail << 13) | (tail >>> 19)) ^ ((middle << 7) | (middle >>> 25))) >>> 0;
+      const coarseProbe = Math.imul(firstSeed ^ (firstSeed >>> 16), 0x7feb_352d) >>> 0;
+      let firstMayMatch = false;
+      for (const index of indexes) {
+        const bit = coarseProbe & index.fingerprintBloomMask;
+        if ((index.fingerprintBloom[bit >>> 3]! & (1 << (bit & 7))) !== 0) {
+          firstMayMatch = true;
+          break;
+        }
+      }
+      if (!firstMayMatch) continue;
+      const [first, second] = strongRawFingerprints(bytes, offset);
+      inspectFingerprint(
+        first,
+        second,
+        offset,
+        coarseProbe,
+      );
+      if (matched) break;
+    }
+  } else {
+    windowFingerprints(bytes, fingerprintBytes, inspectFingerprint);
+  }
   return matched;
 }
 
@@ -461,9 +703,16 @@ function publicProvenanceFreeSegments(bytes: Buffer): readonly Buffer[] {
   return segments;
 }
 
-function containsProtectedContent(bytes: Buffer, index: RawFingerprintIndex): boolean {
+function containsProtectedContent(
+  bytes: Buffer,
+  indexes: readonly RawFingerprintIndex[],
+  candidate: Candidate,
+  state: InspectionState,
+): boolean {
   if (PUBLIC_PROVENANCE_VALUE_HASHES.has(sha256Hex(bytes))) return false;
-  return publicProvenanceFreeSegments(bytes).some((segment) => containsProtectedWindow(segment, index));
+  return publicProvenanceFreeSegments(bytes).some((segment) =>
+    containsProtectedWindow(segment, indexes, candidate, state)
+  );
 }
 
 function semanticFingerprint(canonical: string): string {
@@ -474,6 +723,8 @@ function addSemanticValue(
   value: JsonValue,
   semanticIndex: SemanticIndex,
   work: { subtrees: number },
+  retentionBudget: PrivateRetentionBudget,
+  maximumBytes: number,
 ): void {
   if (value === null || typeof value !== 'object') return;
   work.subtrees += 1;
@@ -481,27 +732,72 @@ function addSemanticValue(
     throw new BoundaryViolation('Private semantic fingerprint work exceeded the fixed limit.');
   }
   const canonical = canonicalJson(value);
-  if (Buffer.byteLength(canonical, 'utf8') >= MIN_SEMANTIC_RECORD_BYTES) {
+  const canonicalBytes = Buffer.byteLength(canonical, 'utf8');
+  if (canonicalBytes >= MIN_SEMANTIC_RECORD_BYTES) {
     const fingerprint = semanticFingerprint(canonical);
     const matches = semanticIndex.get(fingerprint) ?? [];
-    if (!matches.includes(canonical)) matches.push(canonical);
+    if (!matches.includes(canonical)) {
+      reservePrivateRetentionBytes(
+        retentionBudget,
+        'semanticBytes',
+        canonicalBytes,
+        maximumBytes,
+        'semantic JSON',
+      );
+      matches.push(canonical);
+    }
     semanticIndex.set(fingerprint, matches);
   }
   if (Array.isArray(value)) {
-    for (const child of value) addSemanticValue(child, semanticIndex, work);
+    for (const child of value) {
+      addSemanticValue(child, semanticIndex, work, retentionBudget, maximumBytes);
+    }
   } else {
-    for (const child of Object.values(value)) addSemanticValue(child, semanticIndex, work);
+    for (const child of Object.values(value)) {
+      addSemanticValue(child, semanticIndex, work, retentionBudget, maximumBytes);
+    }
   }
 }
 
-function addPrivateJsonSemantics(bytes: Buffer, semanticIndex: SemanticIndex): void {
+function addPrivateJsonSemantics(
+  bytes: Buffer,
+  semanticIndex: SemanticIndex,
+  retentionBudget: PrivateRetentionBudget,
+  maximumBytes = MAX_PRIVATE_SEMANTIC_BYTES,
+): void {
   let value: JsonValue;
   try {
     value = parseJsonWithDuplicateKeyCheck(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
   } catch {
     throw new BoundaryViolation('Private JSON could not be fingerprinted safely.');
   }
-  addSemanticValue(value, semanticIndex, { subtrees: 0 });
+  addSemanticValue(value, semanticIndex, { subtrees: 0 }, retentionBudget, maximumBytes);
+}
+
+export function verifyPrivateNormalizedRetentionForTest(
+  sources: readonly Uint8Array[],
+  maximumBytes: number,
+): number {
+  const retentionBudget: PrivateRetentionBudget = { normalizedBytes: 0, semanticBytes: 0 };
+  const normalizedTextBuffers = new Map<string, Buffer>();
+  reservePrivateRetentionBytes(retentionBudget, 'normalizedBytes', 0, maximumBytes, 'normalized HTML');
+  for (const source of sources) {
+    addPrivateNormalizedHtml(Buffer.from(source), normalizedTextBuffers, retentionBudget, maximumBytes);
+  }
+  return retentionBudget.normalizedBytes;
+}
+
+export function verifyPrivateSemanticRetentionForTest(
+  sources: readonly Uint8Array[],
+  maximumBytes: number,
+): number {
+  const retentionBudget: PrivateRetentionBudget = { normalizedBytes: 0, semanticBytes: 0 };
+  const semanticIndex: SemanticIndex = new Map();
+  reservePrivateRetentionBytes(retentionBudget, 'semanticBytes', 0, maximumBytes, 'semantic JSON');
+  for (const source of sources) {
+    addPrivateJsonSemantics(Buffer.from(source), semanticIndex, retentionBudget, maximumBytes);
+  }
+  return retentionBudget.semanticBytes;
 }
 
 function inspectJsonSemantics(bytes: Buffer, semanticIndex: SemanticIndex): boolean {
@@ -654,25 +950,24 @@ function fail(category: string, candidate: Candidate, redactPath = false): never
 function inspectContent(
   candidate: Candidate,
   bytes: Buffer,
-  privateHashes: ReadonlySet<string>,
-  rawIndex: RawFingerprintIndex,
-  normalizedIndex: RawFingerprintIndex,
-  semanticIndex: SemanticIndex,
+  privateHashes: readonly ReadonlySet<string>[],
+  rawIndexes: readonly RawFingerprintIndex[],
+  normalizedIndexes: readonly RawFingerprintIndex[],
+  semanticIndexes: readonly SemanticIndex[],
   locators: readonly Locator[],
   depth: number,
   state: InspectionState,
 ): void {
-  if (privateHashes.has(sha256Hex(bytes))) fail('exact-private-bytes', candidate);
+  const byteHash = sha256Hex(bytes);
+  if (privateHashes.some((hashes) => hashes.has(byteHash))) fail('exact-private-bytes', candidate);
   const normalized = normalizedVisibleText(bytes);
-  if (
-    normalized !== null &&
-    normalized.length >= normalizedIndex.minimumBytes &&
-    containsProtectedWindow(normalized, normalizedIndex)
-  ) {
+  if (normalized !== null && containsProtectedWindow(normalized, normalizedIndexes, candidate, state)) {
     fail('source-derived-normalized-text', candidate);
   }
-  if (containsProtectedContent(bytes, rawIndex)) fail('source-derived-content', candidate);
-  if (inspectJsonSemantics(bytes, semanticIndex)) fail('semantic-private-content', candidate);
+  if (containsProtectedContent(bytes, rawIndexes, candidate, state)) fail('source-derived-content', candidate);
+  if (semanticIndexes.some((index) => inspectJsonSemantics(bytes, index))) {
+    fail('semantic-private-content', candidate);
+  }
   if (matchesLocator(bytes, locators)) fail('private-locator', candidate);
 
   const prefix = bytes.subarray(0, 512).toString('utf8');
@@ -719,9 +1014,9 @@ function inspectContent(
         candidate,
         decodedBytes,
         privateHashes,
-        rawIndex,
-        normalizedIndex,
-        semanticIndex,
+        rawIndexes,
+        normalizedIndexes,
+        semanticIndexes,
         locators,
         depth + 1,
         state,
@@ -733,10 +1028,10 @@ function inspectContent(
 
 function inspectCandidate(
   candidate: Candidate,
-  privateHashes: ReadonlySet<string>,
-  rawIndex: RawFingerprintIndex,
-  normalizedIndex: RawFingerprintIndex,
-  semanticIndex: SemanticIndex,
+  privateHashes: readonly ReadonlySet<string>[],
+  rawIndexes: readonly RawFingerprintIndex[],
+  normalizedIndexes: readonly RawFingerprintIndex[],
+  semanticIndexes: readonly SemanticIndex[],
   locators: readonly Locator[],
   state: InspectionState,
 ): void {
@@ -751,13 +1046,12 @@ function inspectCandidate(
   }
   const pathBytes = Buffer.from(normalizedPath, 'utf8');
   const normalizedPathBytes = normalizedVisibleText(pathBytes);
-  if (containsProtectedContent(pathBytes, rawIndex)) {
+  if (containsProtectedContent(pathBytes, rawIndexes, candidate, state)) {
     fail('source-derived-path', candidate, true);
   }
   if (
     normalizedPathBytes !== null &&
-    normalizedPathBytes.length >= normalizedIndex.minimumBytes &&
-    containsProtectedWindow(normalizedPathBytes, normalizedIndex)
+    containsProtectedWindow(normalizedPathBytes, normalizedIndexes, candidate, state)
   ) {
     fail('source-derived-normalized-path', candidate, true);
   }
@@ -770,9 +1064,9 @@ function inspectCandidate(
     candidate,
     candidate.bytes,
     privateHashes,
-    rawIndex,
-    normalizedIndex,
-    semanticIndex,
+    rawIndexes,
+    normalizedIndexes,
+    semanticIndexes,
     locators,
     0,
     state,
@@ -787,43 +1081,124 @@ export function createPrivateCandidateInspectorForTest(
   const rawFingerprintBuffers = new Map<string, Buffer>();
   const normalizedTextBuffers = new Map<string, Buffer>();
   const semanticIndex: SemanticIndex = new Map();
+  const retentionBudget: PrivateRetentionBudget = { normalizedBytes: 0, semanticBytes: 0 };
   for (const source of sources) {
     const bytes = Buffer.from(source.bytes);
     privateHashes.add(sha256Hex(bytes));
     addRawFingerprintSegments(bytes, rawFingerprintBuffers);
-    if (source.kind === 'json') addPrivateJsonSemantics(bytes, semanticIndex);
+    if (source.kind === 'json') addPrivateJsonSemantics(bytes, semanticIndex, retentionBudget);
     if (source.kind === 'html') {
-      const normalized = normalizedVisibleText(bytes);
-      if (normalized !== null && normalized.length >= MIN_PROTECTED_EXCERPT_BYTES) {
-        normalizedTextBuffers.set(sha256Hex(normalized), normalized);
-      }
+      addPrivateNormalizedHtml(bytes, normalizedTextBuffers, retentionBudget);
     }
   }
-  const rawIndex = buildRawFingerprintIndex([...rawFingerprintBuffers.values()], MIN_PROTECTED_EXCERPT_BYTES);
+  const rawIndex = buildRawFingerprintIndex(
+    [...rawFingerprintBuffers.values()],
+    RAW_FINGERPRINT_BYTES,
+    MIN_PROTECTED_EXCERPT_BYTES,
+    RAW_FINGERPRINT_STRIDE,
+    'edges',
+  );
   const normalizedIndex = buildRawFingerprintIndex([...normalizedTextBuffers.values()], MIN_NORMALIZED_TEXT_BYTES);
   const locators = buildLocators(locatorTexts);
   return ({ path, bytes }): void => {
     inspectCandidate(
       { path, bytes: typeof bytes === 'string' ? Buffer.from(bytes, 'utf8') : Buffer.from(bytes), surface: 'worktree' },
-      privateHashes,
-      rawIndex,
-      normalizedIndex,
-      semanticIndex,
+      [privateHashes],
+      [rawIndex],
+      [normalizedIndex],
+      [semanticIndex],
       locators,
-      { candidateBytes: 0, decodedBytes: 0, decodedStrings: 0 },
+      { candidateBytes: 0, collisionComparisons: 0, decodedBytes: 0, decodedStrings: 0 },
     );
   };
 }
 
-function readConfinedPrivateFile(root: string, relativePath: string): Buffer {
+function confinedPrivateFilePath(root: string, relativePath: string): string {
   const rootReal = realpathSync(root);
   const candidate = confinedPath(rootReal, join(...relativePath.split('/')), 'Private source path');
-  if (lstatSync(candidate).isSymbolicLink()) {
+  const metadata = lstatSync(candidate);
+  if (metadata.isSymbolicLink()) {
     throw new BoundaryViolation('Private source path is a symbolic link.');
   }
+  if (!metadata.isFile()) throw new BoundaryViolation('Private source path is not a file.');
   const real = realpathSync(candidate);
   confinedPath(rootReal, real, 'Private source real path');
-  return readFileSync(real);
+  return real;
+}
+
+function readConfinedPrivateFile(root: string, relativePath: string): Buffer {
+  return readFileSync(confinedPrivateFilePath(root, relativePath));
+}
+
+function readPrivateLock(lockPath: string): PrivateLock {
+  const lock = JSON.parse(readFileSync(lockPath, 'utf8')) as PrivateLock;
+  if (typeof lock.primaryRoot !== 'string' || typeof lock.backupRoot !== 'string' || !Array.isArray(lock.entries)) {
+    throw new BoundaryViolation('Private lock is missing required boundary metadata.');
+  }
+  return lock;
+}
+
+function fingerprintAllocationEstimate(
+  byteLengths: readonly number[],
+  fingerprintBytes: number,
+  stride: number,
+): number {
+  const privateBytes = byteLengths.reduce((sum, bytes) => sum + bytes, 0);
+  const fingerprints = byteLengths.reduce(
+    (sum, bytes) => sum + fingerprintWindowCount(bytes, fingerprintBytes, stride),
+    0,
+  );
+  if (
+    !Number.isSafeInteger(privateBytes) ||
+    !Number.isSafeInteger(fingerprints) ||
+    privateBytes > MAX_PRIVATE_BYTES ||
+    fingerprints > MAX_PRIVATE_FINGERPRINTS
+  ) {
+    throw new BoundaryViolation('Private fingerprint work exceeded the fixed limit.');
+  }
+  return fingerprints * BigUint64Array.BYTES_PER_ELEMENT +
+    fingerprintBloomBytes(fingerprints) +
+    (byteLengths.length + 1) * Float64Array.BYTES_PER_ELEMENT;
+}
+
+function privatePreparationEstimate(repositoryRoot: string, lockPath: string): number {
+  const lock = readPrivateLock(lockPath);
+  const primaryRoot = isAbsolute(lock.primaryRoot) ? lock.primaryRoot : resolve(repositoryRoot, lock.primaryRoot);
+  const backupRoot = isAbsolute(lock.backupRoot) ? lock.backupRoot : resolve(repositoryRoot, lock.backupRoot);
+  const primaryBytes: number[] = [];
+  let htmlSources = 0;
+  const budget: PreparationBudget = { reservedBytes: 0 };
+  for (const entry of lock.entries) {
+    if (typeof entry.relativePath !== 'string' || typeof entry.byteHash !== 'string') {
+      throw new BoundaryViolation('Private lock contains an invalid source entry.');
+    }
+    const primarySize = lstatSync(confinedPrivateFilePath(primaryRoot, entry.relativePath)).size;
+    const backupSize = lstatSync(confinedPrivateFilePath(backupRoot, entry.relativePath)).size;
+    reservePrivatePreparationBytes(budget, primarySize + backupSize);
+    primaryBytes.push(primarySize);
+    if (entry.relativePath.endsWith('.html')) htmlSources += 1;
+  }
+  reservePrivatePreparationBytes(
+    budget,
+    fingerprintAllocationEstimate(primaryBytes, RAW_FINGERPRINT_BYTES, RAW_FINGERPRINT_STRIDE),
+  );
+  reservePrivatePreparationBytes(
+    budget,
+    MAX_PRIVATE_NORMALIZED_HTML_BYTES,
+  );
+  reservePrivatePreparationBytes(
+    budget,
+    fingerprintAllocationEstimate(
+      Array.from(
+        { length: Math.max(1, htmlSources) },
+        (_, index) => index === 0 ? MAX_PRIVATE_NORMALIZED_HTML_BYTES : 0,
+      ),
+      MIN_NORMALIZED_TEXT_BYTES,
+      1,
+    ),
+  );
+  reservePrivatePreparationBytes(budget, MAX_PRIVATE_SEMANTIC_BYTES);
+  return budget.reservedBytes;
 }
 
 function addSelectedRevisionEvidence(
@@ -831,6 +1206,7 @@ function addSelectedRevisionEvidence(
   lockPath: string,
   privateHashes: Set<string>,
   semanticIndex: SemanticIndex,
+  retentionBudget: PrivateRetentionBudget,
 ): void {
   const revisionId = basename(dirname(lockPath));
   if (!/^[a-z0-9][a-z0-9._-]{0,99}$/.test(revisionId)) return;
@@ -846,7 +1222,7 @@ function addSelectedRevisionEvidence(
     privateHashes.add(hash);
     const path = relative(revisionReal, absolute).replaceAll('\\', '/');
     if (path === 'cards.normalized.json') {
-      addPrivateJsonSemantics(bytes, semanticIndex);
+      addPrivateJsonSemantics(bytes, semanticIndex, retentionBudget);
     }
   }
 }
@@ -901,12 +1277,10 @@ async function preparePrivateEvidence(repositoryRoot: string, lockPath: string):
   const rawFingerprintBuffers = new Map<string, Buffer>();
   const normalizedTextBuffers = new Map<string, Buffer>();
   const semanticIndex: SemanticIndex = new Map();
+  const retentionBudget: PrivateRetentionBudget = { normalizedBytes: 0, semanticBytes: 0 };
   const locatorTexts: string[] = [];
   const localFileEvidence = ['user-provided', 'manual-local-file'].join('-');
-  const lock = JSON.parse(readFileSync(lockPath, 'utf8')) as PrivateLock;
-  if (typeof lock.primaryRoot !== 'string' || typeof lock.backupRoot !== 'string' || !Array.isArray(lock.entries)) {
-    throw new BoundaryViolation('Private lock is missing required boundary metadata.');
-  }
+  const lock = readPrivateLock(lockPath);
   const verified = await verifyPrivateSourceSet({
     repositoryRoot,
     primaryRoot: lock.primaryRoot,
@@ -929,17 +1303,14 @@ async function preparePrivateEvidence(repositoryRoot: string, lockPath: string):
       privateHashes.add(hash);
       if (rootIndex === 0) addRawFingerprintSegments(bytes, rawFingerprintBuffers);
       if (rootIndex === 0 && entry.relativePath.endsWith('.json')) {
-        addPrivateJsonSemantics(bytes, semanticIndex);
+        addPrivateJsonSemantics(bytes, semanticIndex, retentionBudget);
       }
       if (rootIndex === 0 && entry.relativePath.endsWith('.html')) {
-        const normalized = normalizedVisibleText(bytes);
-        if (normalized !== null && normalized.length >= MIN_PROTECTED_EXCERPT_BYTES) {
-          normalizedTextBuffers.set(sha256Hex(normalized), normalized);
-        }
+        addPrivateNormalizedHtml(bytes, normalizedTextBuffers, retentionBudget);
       }
     }
   }
-  addSelectedRevisionEvidence(repositoryRoot, lockPath, privateHashes, semanticIndex);
+  addSelectedRevisionEvidence(repositoryRoot, lockPath, privateHashes, semanticIndex, retentionBudget);
   const privateLocatorEvidence = lock.rulebookAcquisitionEvidence?.privateLocatorEvidence;
   locatorTexts.push(lock.primaryRoot, lock.backupRoot);
   if (typeof privateLocatorEvidence === 'string' && privateLocatorEvidence.length > 0 && privateLocatorEvidence !== localFileEvidence) {
@@ -948,18 +1319,37 @@ async function preparePrivateEvidence(repositoryRoot: string, lockPath: string):
 
   return {
     privateHashes,
-    rawIndex: buildRawFingerprintIndex([...rawFingerprintBuffers.values()], MIN_PROTECTED_EXCERPT_BYTES),
+    rawIndex: buildRawFingerprintIndex(
+      [...rawFingerprintBuffers.values()],
+      RAW_FINGERPRINT_BYTES,
+      MIN_PROTECTED_EXCERPT_BYTES,
+      RAW_FINGERPRINT_STRIDE,
+      'edges',
+    ),
     normalizedIndex: buildRawFingerprintIndex([...normalizedTextBuffers.values()], MIN_NORMALIZED_TEXT_BYTES),
     semanticIndex,
     locators: buildLocators(locatorTexts),
-    state: { candidateBytes: 0, decodedBytes: 0, decodedStrings: 0 },
+    state: { candidateBytes: 0, collisionComparisons: 0, decodedBytes: 0, decodedStrings: 0 },
   };
 }
 
 async function main(): Promise<void> {
   const { repositoryRoot, lockPaths } = parseArguments(process.argv.slice(2));
+  const preparationBudget: PreparationBudget = { reservedBytes: 0 };
+  for (const lockPath of lockPaths) {
+    reservePrivatePreparationBytes(
+      preparationBudget,
+      privatePreparationEstimate(repositoryRoot, lockPath),
+    );
+  }
   const evidenceSets: PrivateEvidence[] = [];
   for (const lockPath of lockPaths) evidenceSets.push(await preparePrivateEvidence(repositoryRoot, lockPath));
+  const privateHashes = evidenceSets.map((evidence) => evidence.privateHashes);
+  const rawIndexes = evidenceSets.map((evidence) => evidence.rawIndex);
+  const normalizedIndexes = evidenceSets.map((evidence) => evidence.normalizedIndex);
+  const semanticIndexes = evidenceSets.map((evidence) => evidence.semanticIndex);
+  const locators = evidenceSets.flatMap((evidence) => evidence.locators);
+  const state = evidenceSets[0]!.state;
   for (const enumerate of [
     reachableHistoryCandidates,
     indexCandidates,
@@ -974,17 +1364,15 @@ async function main(): Promise<void> {
       throw new BoundaryViolation(`Candidate enumeration failed [${enumerate.name}].`);
     }
     for (const candidate of candidates) {
-      for (const evidence of evidenceSets) {
-        inspectCandidate(
-          candidate,
-          evidence.privateHashes,
-          evidence.rawIndex,
-          evidence.normalizedIndex,
-          evidence.semanticIndex,
-          evidence.locators,
-          evidence.state,
-        );
-      }
+      inspectCandidate(
+        candidate,
+        privateHashes,
+        rawIndexes,
+        normalizedIndexes,
+        semanticIndexes,
+        locators,
+        state,
+      );
     }
   }
   process.stdout.write('Private authority boundary verified.\n');
