@@ -8310,6 +8310,189 @@ test('RULE-03 site Genesis makes units at nearby sites Immobile until its contro
   assert.equal(verifyGameReplay(session), true);
 });
 
+test('RULE-03 Aura occupies any canonical 2x2 area and grounds site minions for three controller turns', () => {
+  const base = manifest(247);
+  const preview = createGameSession(base);
+  const [auraCardId, airborneCardId, burrowingCardId] =
+    preview.state.players.north.hand.spellbook.map(({ cardId }) => cardId);
+  const northSiteId = preview.state.players.north.hand.atlas[0]?.cardId;
+  const southSiteId = preview.state.players.south.hand.atlas[0]?.cardId;
+  const voidwalkCardId = preview.state.players.south.hand.spellbook[0]?.cardId;
+  assert.ok(auraCardId);
+  assert.ok(airborneCardId);
+  assert.ok(burrowingCardId);
+  assert.ok(northSiteId);
+  assert.ok(southSiteId);
+  assert.ok(voidwalkCardId);
+
+  const cards: Record<string, GameCardDefinition> = {
+    ...base.cards,
+    [auraCardId]: {
+      cardType: 'aura',
+      immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns: true,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+    [airborneCardId]: {
+      airborne: true,
+      attack: 2,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+    [burrowingCardId]: {
+      attack: 2,
+      burrowing: true,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+    [voidwalkCardId]: {
+      attack: 2,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      voidwalk: true,
+    },
+  };
+  const input = {
+    authority: base.authority,
+    cards,
+    decks: base.decks,
+    firstSeat: base.firstSeat,
+    seed: base.seed,
+  };
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [auraCardId]: {
+        ...cards[auraCardId]!,
+        immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns: false,
+      } as unknown as GameCardDefinition,
+    },
+  }), /immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns/);
+  const gameManifest = createGameManifest(input);
+  assert.deepEqual(gameManifest.cards[auraCardId], cards[auraCardId]);
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardId === northSiteId && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === airborneCardId && descriptor.cell === 'C4'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === burrowingCardId && descriptor.cell === 'C4'
+    && descriptor.region === 'underground');
+
+  const auraCasts = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-aura' && descriptor.cardId === auraCardId);
+  assert.equal(auraCasts.length, 12);
+  assert.deepEqual(auraCasts.flatMap(({ descriptor }) =>
+    descriptor.kind === 'cast-aura' ? [descriptor.cells] : []), [
+    ['A1', 'A2', 'B1', 'B2'],
+    ['A2', 'A3', 'B2', 'B3'],
+    ['A3', 'A4', 'B3', 'B4'],
+    ['B1', 'B2', 'C1', 'C2'],
+    ['B2', 'B3', 'C2', 'C3'],
+    ['B3', 'B4', 'C3', 'C4'],
+    ['C1', 'C2', 'D1', 'D2'],
+    ['C2', 'C3', 'D2', 'D3'],
+    ['C3', 'C4', 'D3', 'D4'],
+    ['D1', 'D2', 'E1', 'E2'],
+    ['D2', 'D3', 'E2', 'E3'],
+    ['D3', 'D4', 'E3', 'E4'],
+  ]);
+  const affectedCells = ['B3', 'B4', 'C3', 'C4'] as const;
+  take(({ descriptor }) => descriptor.kind === 'cast-aura'
+    && descriptor.cells.every((cell, index) => cell === affectedCells[index]));
+
+  const auraInstance = session.state.realm.auras?.[0];
+  const airborne = session.state.realm.units.find(({ cardId }) => cardId === airborneCardId);
+  const burrowing = session.state.realm.units.find(({ cardId }) => cardId === burrowingCardId);
+  assert.ok(auraInstance);
+  assert.ok(airborne);
+  assert.ok(burrowing);
+  let view = observeGame(session.state, 'north');
+  assert.deepEqual(view.realm.auras, [{
+    cardId: auraCardId,
+    cells: affectedCells,
+    controller: 'north',
+    instanceId: auraInstance.instanceId,
+    owner: 'north',
+    turnCounters: 0,
+  }]);
+  assert.deepEqual(view.realm.immobileAreas, [{
+    cells: affectedCells,
+    minionsAtSitesOnly: true,
+    sourceInstanceId: auraInstance.instanceId,
+    suppressesAirborne: true,
+  }]);
+  assert.equal(view.players.north.avatar.immobile, false);
+  assert.deepEqual(view.realm.units
+    .filter(({ instanceId }) => instanceId === airborne.instanceId
+      || instanceId === burrowing.instanceId)
+    .map(({ airborne: observedAirborne, immobile, region }) => ({
+      airborne: observedAirborne,
+      immobile,
+      region,
+    })), [
+    { airborne: false, immobile: true, region: 'surface' },
+    { airborne: false, immobile: true, region: 'underground' },
+  ]);
+  assert.equal(session.transcript.at(-1)?.events.some(({ type }) => type === 'aura-conjured'), true);
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  assert.equal(observeGame(session.state, 'north').realm.auras?.[0]?.turnCounters, 1);
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardId === southSiteId && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === voidwalkCardId && descriptor.cell === 'B3'
+    && descriptor.region === 'void');
+  const voidwalk = session.state.realm.units.find(({ cardId }) => cardId === voidwalkCardId);
+  assert.ok(voidwalk);
+  view = observeGame(session.state, 'south');
+  assert.equal(view.realm.units.find(({ instanceId }) =>
+    instanceId === voidwalk.instanceId)?.immobile, false);
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  assert.equal(observeGame(session.state, 'north').realm.auras?.[0]?.turnCounters, 2);
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  view = observeGame(session.state, 'north');
+  assert.equal(view.realm.auras, undefined);
+  assert.equal(view.realm.immobileAreas, undefined);
+  assert.deepEqual(view.realm.units
+    .filter(({ instanceId }) => instanceId === airborne.instanceId
+      || instanceId === burrowing.instanceId)
+    .map(({ airborne: observedAirborne, immobile, region }) => ({
+      airborne: observedAirborne,
+      immobile,
+      region,
+    })), [
+    { airborne: true, immobile: false, region: 'surface' },
+    { airborne: false, immobile: false, region: 'underground' },
+  ]);
+  assert.equal(view.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === auraInstance.instanceId), true);
+  assert.deepEqual(session.transcript.at(-1)?.events
+    .filter(({ type }) => type.startsWith('aura-'))
+    .map(({ type }) => type), ['aura-turn-counted', 'aura-dispelled']);
+  assert.equal(verifyGameReplay(session), true);
+});
+
 test('RULE-03 Tower Genesis grants mana only for the first controlled copy', () => {
   const north = deck('tower-north');
   let session = keep(keep(createGameSession(manifest(56, {

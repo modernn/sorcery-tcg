@@ -33,9 +33,19 @@ export type GameElement = 'air' | 'earth' | 'fire' | 'water';
 export type GameThresholds = Readonly<Record<GameElement, number>>;
 export type GameRegion = 'surface' | 'underground' | 'underwater' | 'void';
 type MovementPurpose = 'defend' | 'effect' | 'move-and-attack';
+type TwoByTwoArea = readonly [RealmCell, RealmCell, RealmCell, RealmCell];
 
-const REALM_CELLS = (['A', 'B', 'C', 'D', 'E'] as const)
-  .flatMap((file) => ([1, 2, 3, 4] as const).map((rank) => `${file}${rank}` as RealmCell));
+const REALM_FILES = ['A', 'B', 'C', 'D', 'E'] as const;
+const REALM_RANKS = [1, 2, 3, 4] as const;
+const REALM_CELLS = REALM_FILES
+  .flatMap((file) => REALM_RANKS.map((rank) => `${file}${rank}` as RealmCell));
+const TWO_BY_TWO_AREAS: readonly TwoByTwoArea[] = REALM_FILES.slice(0, -1)
+  .flatMap((file, fileIndex) => REALM_RANKS.slice(0, -1).map((rank, rankIndex) => [
+    `${file}${rank}` as RealmCell,
+    `${file}${REALM_RANKS[rankIndex + 1]!}` as RealmCell,
+    `${REALM_FILES[fileIndex + 1]!}${rank}` as RealmCell,
+    `${REALM_FILES[fileIndex + 1]!}${REALM_RANKS[rankIndex + 1]!}` as RealmCell,
+  ] as TwoByTwoArea));
 
 export type GameCardDefinition =
   | Readonly<{
@@ -117,6 +127,12 @@ export type GameCardDefinition =
     ordinaryMinionManaDiscount?: 1;
     rangedUnitsHereRangeBonus?: 1;
     sacrificeToDestroyNearbySite?: true;
+  }>
+  | Readonly<{
+    cardType: 'aura';
+    immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns: true;
+    manaCost: number;
+    thresholds: GameThresholds;
   }>
   | Readonly<{
     burrowAllMinionsAndArtifactsAtTargetLandSite?: true;
@@ -240,6 +256,12 @@ type CardInstance = Readonly<{
 
 type SiteInstance = Readonly<CardInstance & { controller: GameSeat }>;
 
+type AuraInstance = Readonly<CardInstance & {
+  cells: TwoByTwoArea;
+  controller: GameSeat;
+  turnCounters: number;
+}>;
+
 type RubbleInstance = Readonly<{
   controller: null;
   instanceId: StateHash;
@@ -255,8 +277,10 @@ type DisableEffect = Readonly<{
 
 type ImmobileArea = Readonly<{
   cells: readonly RealmCell[];
-  expiresAtSeat: GameSeat;
+  expiresAtSeat?: GameSeat;
+  minionsAtSitesOnly?: true;
   sourceInstanceId: StateHash;
+  suppressesAirborne?: true;
 }>;
 
 type UnitInstance = Readonly<CardInstance & {
@@ -372,6 +396,7 @@ export type GameState = Readonly<{
   players: Readonly<Record<GameSeat, PlayerState>>;
   realm: Readonly<{
     artifacts?: readonly ArtifactInstance[];
+    auras?: readonly AuraInstance[];
     immobileAreas?: readonly ImmobileArea[];
     sites: Readonly<Partial<Record<RealmCell, RealmSiteInstance>>>;
     units: readonly UnitInstance[];
@@ -425,6 +450,14 @@ export type GameObservation = Readonly<{
       owner: GameSeat;
       region: GameRegion;
     }>[];
+    auras?: readonly Readonly<{
+      cardId: string;
+      cells: TwoByTwoArea;
+      controller: GameSeat;
+      instanceId: StateHash;
+      owner: GameSeat;
+      turnCounters: number;
+    }>[];
     immobileAreas?: readonly ImmobileArea[];
     sites: Readonly<Partial<Record<RealmCell,
       | Readonly<{
@@ -442,6 +475,7 @@ export type GameObservation = Readonly<{
         owner: GameSeat;
       }>>>>;
     units: readonly Readonly<{
+      airborne: boolean;
       attack: number;
       cardId: string;
       carriedLanceCount?: number;
@@ -527,6 +561,13 @@ type GameActionDescriptor =
     paymentMode?: 'random-card-discard';
     region?: 'underground' | 'underwater' | 'void';
     sacrificedMinionInstanceIds?: readonly StateHash[];
+  }>
+  | Readonly<{
+    cardId: string;
+    cardInstanceId: string;
+    casterInstanceId: StateHash;
+    cells: TwoByTwoArea;
+    kind: 'cast-aura';
   }>
   | Readonly<{
     cardId: string;
@@ -1085,6 +1126,25 @@ function dropArtifactDescriptors(state: GameState, seat: GameSeat): readonly Gam
   });
 }
 
+function auraDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
+  const player = state.players[seat];
+  const casters = spellcasterRefs(state, seat);
+  return player.hand.spellbook.flatMap(({ cardId, instanceId }) => {
+    const definition = cardDefinition(state, cardId);
+    if (definition.cardType !== 'aura'
+      || player.mana < definition.manaCost
+      || !meetsThresholds(state, seat, definition.thresholds)) return [];
+    return casters.flatMap(({ instanceId: casterInstanceId }) =>
+      TWO_BY_TWO_AREAS.map((cells) => ({
+        cardId,
+        cardInstanceId: instanceId,
+        casterInstanceId,
+        cells,
+        kind: 'cast-aura' as const,
+      })));
+  });
+}
+
 function magicDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   const player = state.players[seat];
   const casters = spellcasterRefs(state, seat);
@@ -1504,6 +1564,22 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath === 4)
         !== 1) {
       throw new RangeError(`${path} must define exactly one supported Artifact effect`);
+    }
+    if (!Number.isSafeInteger(card.manaCost) || card.manaCost < 0) {
+      throw new RangeError(`${path}.manaCost must be a supported nonnegative safe integer`);
+    }
+    for (const element of elements) {
+      if (!Number.isSafeInteger(card.thresholds[element]) || card.thresholds[element] < 0) {
+        throw new RangeError(`${path}.thresholds.${element} must be a nonnegative safe integer`);
+      }
+    }
+    return;
+  }
+  if (card.cardType === 'aura') {
+    if (card.immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns !== true) {
+      throw new RangeError(
+        `${path}.immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns must be true`,
+      );
     }
     if (!Number.isSafeInteger(card.manaCost) || card.manaCost < 0) {
       throw new RangeError(`${path}.manaCost must be a supported nonnegative safe integer`);
@@ -1959,6 +2035,7 @@ function validateDeck(
   deck.spellbook.forEach((cardId, index) => {
     const definition = cards[cardId];
     if ((definition?.cardType !== 'artifact'
+      && definition?.cardType !== 'aura'
       && definition?.cardType !== 'minion'
       && definition?.cardType !== 'magic')
       || definition?.cardType === 'minion' && definition.token === true) {
@@ -2097,6 +2174,13 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? { sacrificeToDestroyNearbySite: true as const }
               : {}),
           }
+          : card.cardType === 'aura'
+            ? {
+              cardType: 'aura' as const,
+              immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns: true as const,
+              manaCost: card.manaCost,
+              thresholds: { ...card.thresholds },
+            }
           : card.cardType === 'magic'
             ? {
               cardType: 'magic' as const,
@@ -2529,8 +2613,29 @@ function controlledMortalsPowerBonus(state: GameState, ref: GameUnitRef): number
   }).length;
 }
 
-function locationInImmobileArea(state: GameState, location: RealmCell): boolean {
-  return state.realm.immobileAreas?.some(({ cells }) => cells.includes(location)) ?? false;
+function immobileAreaApplies(
+  state: GameState,
+  area: ImmobileArea,
+  location: GameLocation,
+  minion: boolean,
+): boolean {
+  return area.cells.includes(location.cell)
+    && (area.minionsAtSitesOnly !== true
+      || minion && location.region !== 'void' && state.realm.sites[location.cell] !== undefined);
+}
+
+function locationInImmobileArea(
+  state: GameState,
+  location: GameLocation,
+  minion: boolean,
+): boolean {
+  return state.realm.immobileAreas?.some((area) =>
+    immobileAreaApplies(state, area, location, minion)) ?? false;
+}
+
+function locationSuppressesAirborne(state: GameState, location: GameLocation): boolean {
+  return state.realm.immobileAreas?.some((area) =>
+    area.suppressesAirborne === true && immobileAreaApplies(state, area, location, true)) ?? false;
 }
 
 function observePlayer(state: GameState, player: PlayerState, owner: GameSeat, viewer: GameSeat): ObservedPlayer {
@@ -2595,6 +2700,14 @@ export function observeGame(state: GameState, viewer: GameSeat): GameObservation
       region: artifact.region,
     };
   });
+  const auras = state.realm.auras?.map((aura) => ({
+    cardId: aura.cardId,
+    cells: [...aura.cells] as TwoByTwoArea,
+    controller: aura.controller,
+    instanceId: aura.instanceId,
+    owner: aura.owner,
+    turnCounters: aura.turnCounters,
+  }));
   const sites = Object.fromEntries(
     Object.entries(state.realm.sites).map(([cell, card]) => {
       if (isRubble(card)) {
@@ -2626,6 +2739,7 @@ export function observeGame(state: GameState, viewer: GameSeat): GameObservation
       seat: unit.controller,
     });
     return {
+      airborne: status.airborne,
       attack: status.attack,
       cardId: unit.cardId,
       ...(unit.carriedLanceCount ? { carriedLanceCount: unit.carriedLanceCount } : {}),
@@ -2656,6 +2770,7 @@ export function observeGame(state: GameState, viewer: GameSeat): GameObservation
     },
     realm: {
       ...(artifacts ? { artifacts } : {}),
+      ...(auras ? { auras } : {}),
       ...(state.realm.immobileAreas
         ? {
           immobileAreas: state.realm.immobileAreas.map((area) => ({
@@ -2770,7 +2885,11 @@ function unitStatus(
       connectsTopBottom: false,
       defense: definition.defense + powerBonus,
       disabled: false,
-      immobile: locationInImmobileArea(state, avatar.location),
+      immobile: locationInImmobileArea(
+        state,
+        { cell: avatar.location, region: avatar.region },
+        false,
+      ),
       lethal: bearerHasLethal(state, ref),
       location: avatar.location,
       movementSteps: 1,
@@ -2797,7 +2916,10 @@ function unitStatus(
     + controlledMortalsPowerBonus(state, ref)
     + nearbyAlliesPowerBonus(state, ref);
   return {
-    airborne: !disabled && definition.airborne === true && unit.region === 'surface',
+    airborne: !disabled
+      && definition.airborne === true
+      && unit.region === 'surface'
+      && !locationSuppressesAirborne(state, { cell: unit.location, region: unit.region }),
     attack: definition.attack + powerBonus,
     burrowing: !disabled && definition.burrowing === true,
     canAttackSites: !disabled && definition.cannotAttackSites !== true,
@@ -2808,7 +2930,11 @@ function unitStatus(
     connectsTopBottom: !disabled && definition.connectsTopBottom === true,
     defense: definition.defense + powerBonus,
     disabled,
-    immobile: locationInImmobileArea(state, unit.location)
+    immobile: locationInImmobileArea(
+      state,
+      { cell: unit.location, region: unit.region },
+      true,
+    )
       || (!disabled && definition.immobile === true),
     lethal: !disabled && (definition.lethal === true || bearerHasLethal(state, ref)),
     location: unit.location,
@@ -2987,7 +3113,7 @@ function movementPaths(
   while (frontier.length > 0) {
     frontier = frontier.flatMap(({ cost, path }) => {
       const current = path.at(-1)!;
-      if (movingUnit && locationInImmobileArea(state, current.cell)) return [];
+      if (movingUnit && locationInImmobileArea(state, current, movingMinion)) return [];
       const tunnelHops = current.region === 'underground' && burrowing
         ? burrowedConnectionLocations(state, seat, current.cell, connectsTopBottom, submerge)
         : [];
@@ -3544,6 +3670,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     ...(!player.avatar.tapped && avatarDefinition.drawSpell ? [{ kind: 'draw-spell' as const }] : []),
     ...summonDescriptors(state, seat),
     ...artifactDescriptors(state, seat),
+    ...auraDescriptors(state, seat),
     ...magicDescriptors(state, seat),
     ...artifactDamageAbilityDescriptors(state, seat),
     ...artifactDiscardAreaDamageAbilityDescriptors(state, seat),
@@ -3608,6 +3735,9 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
       ? `carried by ${descriptor.bearer.kind} ${descriptor.bearer.instanceId.slice(0, 15)}…`
       : `uncarried at ${descriptor.cell}`;
     return `Cast ${descriptor.cardId} ${destination} (${descriptor.manaCost} mana)`;
+  }
+  if (descriptor.kind === 'cast-aura') {
+    return `Conjure ${descriptor.cardId} across ${descriptor.cells.join(', ')}`;
   }
   if (descriptor.kind === 'activate-site-destruction') {
     return `Sacrifice site to destroy ${descriptor.targetCell}`;
@@ -5595,6 +5725,77 @@ function applyDescriptor(
           type: 'artifacts-dropped',
         },
         ...deathResolution.outcomes,
+      ],
+      [],
+    ];
+  }
+
+  if (descriptor.kind === 'cast-aura') {
+    const card = player.hand.spellbook.find(({ cardId, instanceId }) =>
+      instanceId === descriptor.cardInstanceId && cardId === descriptor.cardId);
+    const definition = card && cardDefinition(state, card.cardId);
+    const legal = auraDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'cast-aura'
+        && candidate.cardInstanceId === descriptor.cardInstanceId
+        && candidate.casterInstanceId === descriptor.casterInstanceId
+        && candidate.cells.every((cell, index) => cell === descriptor.cells[index]));
+    const caster = spellcasterRefs(state, seat).find(({ instanceId }) =>
+      instanceId === descriptor.casterInstanceId);
+    if (!card || !definition || definition.cardType !== 'aura' || !legal || !caster) {
+      throw new Error('unreachable illegal Aura cast');
+    }
+    const paidPlayer = deepFreeze({
+      ...player,
+      ...(player.airThresholdsCastThisTurn !== undefined
+        ? {
+          airThresholdsCastThisTurn:
+            player.airThresholdsCastThisTurn + definition.thresholds.air,
+        }
+        : {}),
+      hand: {
+        ...player.hand,
+        spellbook: player.hand.spellbook.filter(({ instanceId }) => instanceId !== card.instanceId),
+      },
+      mana: player.mana - definition.manaCost,
+    });
+    const paidState = deepFreeze({ ...state, players: replacePlayer(state, seat, paidPlayer) });
+    const interaction = recordInteraction(paidState, [caster]);
+    const aura: AuraInstance = deepFreeze({
+      ...card,
+      cells: [...descriptor.cells] as TwoByTwoArea,
+      controller: seat,
+      turnCounters: 0,
+    });
+    const immobileArea: ImmobileArea = deepFreeze({
+      cells: [...descriptor.cells],
+      minionsAtSitesOnly: true,
+      sourceInstanceId: card.instanceId,
+      suppressesAirborne: true,
+    });
+    return [
+      withStateVersion(paidState, {
+        players: interaction.players,
+        realm: {
+          ...paidState.realm,
+          auras: [...(paidState.realm.auras ?? []), aura],
+          immobileAreas: [...(paidState.realm.immobileAreas ?? []), immobileArea],
+          units: interaction.units,
+        },
+      }),
+      [
+        ...interaction.outcomes,
+        {
+          payload: {
+            cardId: card.cardId,
+            casterInstanceId: descriptor.casterInstanceId,
+            cells: descriptor.cells,
+            instanceId: card.instanceId,
+            manaPaid: definition.manaCost,
+            owner: card.owner,
+            seat,
+          },
+          type: 'aura-conjured',
+        },
       ],
       [],
     ];
@@ -8432,7 +8633,34 @@ function applyDescriptor(
     avatar: { ...nextPlayer.avatar, tapped: false },
     mana: siteCount(endState, nextSeat),
   });
-  const players = deepFreeze({ ...endState.players, [seat]: endingPlayer, [nextSeat]: startingPlayer });
+  const {
+    auras: previousAuras,
+    immobileAreas: previousImmobileAreas,
+    ...endingRealm
+  } = endState.realm;
+  let players = deepFreeze({ ...endState.players, [seat]: endingPlayer, [nextSeat]: startingPlayer });
+  const countedAuras = (previousAuras ?? [])
+    .filter(({ controller }) => controller === seat);
+  const expiredAuras = countedAuras.filter(({ turnCounters }) => turnCounters >= 2);
+  const expiredAuraIds = new Set(expiredAuras.map(({ instanceId }) => instanceId));
+  const activeAuras = (previousAuras ?? []).flatMap((aura): readonly AuraInstance[] => {
+    if (aura.controller !== seat) return [aura];
+    const turnCounters = aura.turnCounters + 1;
+    return turnCounters < 3 ? [deepFreeze({ ...aura, turnCounters })] : [];
+  });
+  for (const aura of expiredAuras) {
+    const owner = players[aura.owner];
+    const card: CardInstance = deepFreeze({
+      cardId: aura.cardId,
+      instanceId: aura.instanceId,
+      owner: aura.owner,
+      source: aura.source,
+    });
+    players = deepFreeze({
+      ...players,
+      [aura.owner]: deepFreeze({ ...owner, cemetery: [...owner.cemetery, card] }),
+    });
+  }
   const stealthGained = endState.realm.units.filter((unit) => {
     if (unit.controller !== seat || minionDisabled(endState, unit) || unit.stealthed) return false;
     const definition = cardDefinition(endState, unit.cardId);
@@ -8450,12 +8678,9 @@ function applyDescriptor(
     (unit.disableEffects ?? [])
       .filter(({ expiresAtSeat }) => expiresAtSeat === nextSeat)
       .map((effect) => ({ effect, unit })));
-  const {
-    immobileAreas: previousImmobileAreas,
-    ...endingRealm
-  } = endState.realm;
   const immobileAreas = (previousImmobileAreas ?? [])
-    .filter(({ expiresAtSeat }) => expiresAtSeat !== nextSeat);
+    .filter(({ expiresAtSeat, sourceInstanceId }) =>
+      expiresAtSeat !== nextSeat && !expiredAuraIds.has(sourceInstanceId));
   const chargeExpired: GameOutcome[] = [];
   const units = endState.realm.units.map((unit) => {
     const {
@@ -8504,6 +8729,7 @@ function applyDescriptor(
       players,
       realm: {
         ...endingRealm,
+        ...(activeAuras.length > 0 ? { auras: activeAuras } : {}),
         ...(immobileAreas.length > 0 ? { immobileAreas } : {}),
         units,
       },
@@ -8521,6 +8747,19 @@ function applyDescriptor(
       })),
       ...chargeExpired,
       ...powerExpired,
+      ...countedAuras.map(({ controller, instanceId, turnCounters }) => ({
+        payload: {
+          count: turnCounters + 1,
+          instanceId,
+          seat: controller,
+          sourceInstanceId: instanceId,
+        },
+        type: 'aura-turn-counted',
+      })),
+      ...expiredAuras.map(({ controller, instanceId, owner }) => ({
+        payload: { instanceId, owner, seat: controller, sourceInstanceId: instanceId },
+        type: 'aura-dispelled',
+      })),
       { payload: { seat, turnNumber: endState.turnNumber }, type: 'turn-ended' },
       ...expiredDisableEffects.map(({ effect, unit }) => ({
         payload: {

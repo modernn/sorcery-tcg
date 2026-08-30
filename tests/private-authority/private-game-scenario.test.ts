@@ -922,7 +922,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 23 : 33,
+        preset.id === 'air-vs-earth-lesson' ? 23 : 34,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -930,7 +930,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 33 : 23,
+        preset.id === 'air-vs-earth-lesson' ? 34 : 23,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -996,6 +996,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Cave Trolls': 3,
     'Dalcean Phalanx': 1,
     'Divine Healing': 1,
+    'Entangle Terrain': 1,
     'House Arn Bannerman': 2,
     'King of the Realm': 1,
     'Land Surveyor': 2,
@@ -1256,6 +1257,15 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     elements: ['earth'],
     genesisImmobilizeNearbyUntilNextTurn: true,
   });
+  const entangleTerrainId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Entangle Terrain')?.[0];
+  assert.ok(entangleTerrainId);
+  assert.deepEqual(airLesson.manifest.cards[entangleTerrainId], {
+    cardType: 'aura',
+    immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns: true,
+    manaCost: 4,
+    thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+  });
   const holyGroundId = Object.entries(airLesson.cardNames)
     .find(([, name]) => name === 'Holy Ground')?.[0];
   assert.ok(holyGroundId);
@@ -1299,6 +1309,8 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     });
   }
   const earthLesson = starterCatalog[1]!;
+  assert.equal(airLesson.manifest.decks.south.spellbook
+    .filter((cardId) => cardId === entangleTerrainId).length, 1);
   assert.deepEqual(earthLesson.manifest.decks.north, airLesson.manifest.decks.south);
   assert.deepEqual(earthLesson.manifest.decks.south, airLesson.manifest.decks.north);
   assert.equal(airLesson.cardNames[airLesson.manifest.decks.north.avatar], 'Sparkmage');
@@ -1724,6 +1736,30 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthQuagmire.deck.spellbook
     .find(({ name }) => name === 'Wild Boars')?.copies, 4);
   assert.equal(result.earthQuagmire.replayVerified, true);
+  assert.equal(result.earthEntangleTerrain.entangleTerrain, 'Entangle Terrain');
+  assert.equal(result.earthEntangleTerrain.malakhim, 'Malakhim');
+  assert.equal(result.earthEntangleTerrain.caveTrolls, 'Cave Trolls');
+  assert.equal(result.earthEntangleTerrain.seed, 2);
+  assert.equal(result.earthEntangleTerrain.acceptedActionCount, 49);
+  assert.equal(result.earthEntangleTerrain.exactCast, true);
+  assert.equal(result.earthEntangleTerrain.canonicalCastVerified, true);
+  assert.equal(result.earthEntangleTerrain.auraIdentityVerified, true);
+  assert.equal(result.earthEntangleTerrain.surfaceAndSubsurfaceMinionsAffected, true);
+  assert.equal(result.earthEntangleTerrain.airborneRestoredAfterDispel, true);
+  assert.equal(result.earthEntangleTerrain.countersVerified, true);
+  assert.equal(result.earthEntangleTerrain.dispelledToOwnerCemetery, true);
+  assert.equal(result.earthEntangleTerrain.causalEventsVerified, true);
+  assert.equal(result.earthEntangleTerrain.legalConstructedDeck, true);
+  assert.equal(result.earthEntangleTerrain.noRandomDraws, true);
+  assert.equal(result.earthEntangleTerrain.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthEntangleTerrain.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthEntangleTerrain.deck.spellbook
+    .find(({ name }) => name === 'Entangle Terrain')?.copies, 1);
+  assert.equal(result.earthEntangleTerrain.deck.spellbook
+    .find(({ name }) => name === 'Cave Trolls')?.copies, 4);
+  assert.equal(result.earthEntangleTerrain.replayVerified, true);
   assert.equal(result.earthHolyGround.holyGround, 'Holy Ground');
   assert.equal(result.earthHolyGround.lesserBloodDemon, 'Lesser Blood Demon');
   assert.equal(result.earthHolyGround.seed, 7398);

@@ -529,6 +529,25 @@ export type PrivateGameCheck = Readonly<{
     unitImmobileThroughOpponentTurn: boolean;
     wildBoars: string;
   }>;
+  earthEntangleTerrain: Readonly<{
+    acceptedActionCount: number;
+    airborneRestoredAfterDispel: boolean;
+    auraIdentityVerified: boolean;
+    canonicalCastVerified: boolean;
+    causalEventsVerified: boolean;
+    caveTrolls: string;
+    countersVerified: boolean;
+    deck: DeckList;
+    dispelledToOwnerCemetery: boolean;
+    entangleTerrain: string;
+    exactCast: boolean;
+    legalConstructedDeck: boolean;
+    malakhim: string;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    seed: number;
+    surfaceAndSubsurfaceMinionsAffected: boolean;
+  }>;
   earthBedrock: Readonly<{
     acceptedActionCount: number;
     bedrock: string;
@@ -1454,6 +1473,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   drowned: NormalizedCard;
   earthProviderMinion: NormalizedCard;
   elthamTownsfolk: NormalizedCard;
+  entangleTerrain: NormalizedCard;
   entombed: NormalizedCard;
   format: FormatDefinition;
   formatStableId: string;
@@ -2044,6 +2064,27 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || vantageHills.thresholds.water !== 0
     || vantageHills.rarity !== 'exceptional') {
     throw new Error('private ranged-range site no longer matches its supported facts');
+  }
+  const entangleTerrain = snapshot.cards.find(({ name }) => name === 'Entangle Terrain');
+  if (!entangleTerrain
+    || entangleTerrain.stableId
+      !== 'card:f4490ba84e57e159902b0e935c13ae07806a7888efab32850e33be257b349525'
+    || entangleTerrain.officialSourceId !== '001-entangle_terrain-b-f'
+    || entangleTerrain.cardType !== 'aura'
+    || ruleTextDigest(entangleTerrain.rulesText)
+      !== 'sha256:c4635557892015cbbc7d6aa87af4deb90fb08b6cd269603e9f44224020024b9c'
+    || entangleTerrain.manaCost !== 4
+    || entangleTerrain.attack !== null
+    || entangleTerrain.defense !== null
+    || entangleTerrain.life !== null
+    || entangleTerrain.elements.length !== 1
+    || entangleTerrain.elements[0] !== 'earth'
+    || entangleTerrain.thresholds.air !== 0
+    || entangleTerrain.thresholds.earth !== 2
+    || entangleTerrain.thresholds.fire !== 0
+    || entangleTerrain.thresholds.water !== 0
+    || entangleTerrain.rarity !== 'ordinary') {
+    throw new Error('private three-turn terrain Aura no longer matches its supported facts');
   }
   const quagmire = snapshot.cards.find(({ name }) => name === 'Quagmire');
   const quagmireTokens: readonly string[] =
@@ -3616,6 +3657,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     drowned,
     earthProviderMinion,
     elthamTownsfolk,
+    entangleTerrain,
     entombed,
     format: selected.identity.payload,
     formatStableId: selected.identity.stableId,
@@ -3835,6 +3877,7 @@ function gameDefinition(
   tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps = false,
   tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath = false,
   otherControlledMortalsPowerBonus = false,
+  immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -3920,6 +3963,16 @@ function gameDefinition(
         ? { genesisImmobilizeNearbyUntilNextTurn: true as const }
         : {}),
       ...(genesisHealNearbyAvatars ? { genesisHealNearbyAvatars } : {}),
+    };
+  }
+  if (card.cardType === 'aura'
+    && card.manaCost !== null
+    && immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns) {
+    return {
+      cardType: 'aura',
+      immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns: true,
+      manaCost: card.manaCost,
+      thresholds: card.thresholds,
     };
   }
   const supportedMagicEffects = Number(damageTargetUnit !== 0)
@@ -4069,7 +4122,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -4198,6 +4251,17 @@ function buildManifest(
       input.quagmire.stableId,
       input.quagmire.stableId,
       ...earthQuagmireBase.atlas.slice(0, input.format.atlasMinimum - 2),
+    ],
+  };
+  const earthEntangleTerrainBase = elementalDeck(
+    'earth',
+    [input.malakhim, input.burrowingMinion],
+  );
+  const earthEntangleTerrainDeck: GameDeckSpec = {
+    ...earthEntangleTerrainBase,
+    spellbook: [
+      input.entangleTerrain.stableId,
+      ...earthEntangleTerrainBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
     ],
   };
   const earthHolyGroundBase = elementalDeck('fire', [input.lesserBloodDemon]);
@@ -4396,6 +4460,7 @@ function buildManifest(
       input.payloadTrebuchet.stableId,
       input.rollingBoulder.stableId,
       input.kingOfRealm.stableId,
+      input.entangleTerrain.stableId,
     ],
   };
   const fireStarterDeck = elementalDeck(
@@ -4678,6 +4743,8 @@ function buildManifest(
         ? earthRollingBoulderDeck
       : scenario === 'earth-quagmire'
         ? earthQuagmireDeck
+      : scenario === 'earth-entangle-terrain'
+        ? earthEntangleTerrainDeck
       : scenario === 'earth-holy-ground'
         ? earthHolyGroundDeck
       : scenario === 'earth-bedrock'
@@ -4863,6 +4930,8 @@ function buildManifest(
         ? earthRollingBoulderDeck
       : scenario === 'earth-quagmire'
         ? earthQuagmireDeck
+      : scenario === 'earth-entangle-terrain'
+        ? earthEntangleTerrainDeck
       : scenario === 'earth-holy-ground'
         ? earthHolyGroundDeck
       : scenario === 'earth-bedrock'
@@ -5062,6 +5131,7 @@ function buildManifest(
       card.stableId === input.payloadTrebuchet.stableId,
       card.stableId === input.rollingBoulder.stableId,
       card.stableId === input.kingOfRealm.stableId,
+      card.stableId === input.entangleTerrain.stableId,
     ),
   ]));
   return {
@@ -6182,6 +6252,73 @@ function findEarthQuagmireOpening(
     }
   }
   throw new Error('private Quagmire scenario no longer produces its supported opening');
+}
+
+function findEarthEntangleTerrainOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  caveTrollsInstanceId: string;
+  entangleTerrainInstanceId: string;
+  malakhimInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string, string, string, string];
+  seed: number;
+  session: GameSession;
+  southSiteInstanceId: string;
+}> {
+  // ponytail: pinned seed keeps the actual-card proof fast and deterministic.
+  const seed = 2;
+  {
+    const built = buildManifest(input, seed, 'earth-entangle-terrain');
+    const session = createGameSession(built.manifest);
+    const startingNorthSites = session.state.players.north.hand.atlas;
+    const firstLandSite = startingNorthSites.find(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && !definition.elements.includes('water');
+    });
+    const northSites = [
+      ...(firstLandSite ? [firstLandSite] : []),
+      ...startingNorthSites.filter(({ instanceId }) => instanceId !== firstLandSite?.instanceId),
+      ...session.state.players.north.atlas.slice(0, 3),
+    ];
+    const northSpells = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 3),
+    ];
+    const caveTrollsInstanceId = northSpells
+      .find(({ cardId }) => cardId === input.burrowingMinion.stableId)?.instanceId;
+    const entangleTerrainInstanceId = northSpells
+      .find(({ cardId }) => cardId === input.entangleTerrain.stableId)?.instanceId;
+    const malakhimInstanceId = northSpells
+      .find(({ cardId }) => cardId === input.malakhim.stableId)?.instanceId;
+    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+    if (firstLandSite
+      && northSites.length >= 6
+      && caveTrollsInstanceId
+      && entangleTerrainInstanceId
+      && malakhimInstanceId
+      && southSiteInstanceId) {
+      return {
+        ...built,
+        caveTrollsInstanceId,
+        entangleTerrainInstanceId,
+        malakhimInstanceId,
+        northSiteInstanceIds: [
+          northSites[0]!.instanceId,
+          northSites[1]!.instanceId,
+          northSites[2]!.instanceId,
+          northSites[3]!.instanceId,
+          northSites[4]!.instanceId,
+          northSites[5]!.instanceId,
+        ],
+        seed,
+        session,
+        southSiteInstanceId,
+      };
+    }
+  }
+  throw new Error('private terrain Aura scenario no longer produces its supported opening');
 }
 
 function findEarthHolyGroundOpening(
@@ -10442,6 +10579,196 @@ function runEarthQuagmire(
     seed: opening.seed,
     unitImmobileThroughOpponentTurn,
     wildBoars: opening.names.get(input.wildBoars.stableId) ?? input.wildBoars.stableId,
+  });
+}
+
+function runEarthEntangleTerrain(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthEntangleTerrain'] {
+  const opening = findEarthEntangleTerrainOpening(input);
+  let session = keep(keep(opening.session));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  const playNorthSite = (index: number, cell: string): void => {
+    take(({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[index]
+      && descriptor.cell === cell);
+  };
+  const drawAndEndSouthTurn = (): void => {
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+  };
+
+  playNorthSite(0, 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playNorthSite(1, 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  drawAndEndSouthTurn();
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playNorthSite(2, 'B4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  drawAndEndSouthTurn();
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.caveTrollsInstanceId
+    && descriptor.cell === 'C4'
+    && descriptor.region === 'underground');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  drawAndEndSouthTurn();
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  playNorthSite(3, 'B3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  drawAndEndSouthTurn();
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  playNorthSite(4, 'A4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  drawAndEndSouthTurn();
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  playNorthSite(5, 'A3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.malakhimInstanceId
+    && descriptor.cell === 'C4'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  drawAndEndSouthTurn();
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const beforeView = observeGame(session.state, 'north');
+  const affectedCells = ['B3', 'B4', 'C3', 'C4'] as const;
+  const castActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-aura'
+      && descriptor.cardInstanceId === opening.entangleTerrainInstanceId);
+  const exactActions = castActions.filter(({ descriptor }) =>
+    descriptor.kind === 'cast-aura'
+      && descriptor.cells.every((cell, index) => cell === affectedCells[index]));
+  if (exactActions.length !== 1) {
+    throw new Error('private terrain Aura exact canonical cast is unavailable or ambiguous');
+  }
+  const castResult = stepGame(session, exactActions[0]!);
+  if (!castResult.accepted) throw new Error('private terrain Aura cast was rejected');
+  session = castResult.session;
+  const castEvent = castResult.receipt.events.find(({ type }) => type === 'aura-conjured');
+  const castPayload = castEvent && isJsonRecord(castEvent.payload) ? castEvent.payload : undefined;
+  const aura = session.state.realm.auras?.find(({ instanceId }) =>
+    instanceId === opening.entangleTerrainInstanceId);
+  const auraView = observeGame(session.state, 'north');
+  const malakhimBefore = beforeView.realm.units.find(({ instanceId }) =>
+    instanceId === opening.malakhimInstanceId);
+  const malakhimDuring = auraView.realm.units.find(({ instanceId }) =>
+    instanceId === opening.malakhimInstanceId);
+  const caveTrollsDuring = auraView.realm.units.find(({ instanceId }) =>
+    instanceId === opening.caveTrollsInstanceId);
+  const observedAura = auraView.realm.auras?.find(({ instanceId }) =>
+    instanceId === opening.entangleTerrainInstanceId);
+
+  const counters: (number | undefined)[] = [];
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  counters.push(session.state.realm.auras?.[0]?.turnCounters);
+  drawAndEndSouthTurn();
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  counters.push(session.state.realm.auras?.[0]?.turnCounters);
+  drawAndEndSouthTurn();
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  counters.push(session.state.realm.auras?.[0]?.turnCounters);
+
+  const finalView = observeGame(session.state, 'north');
+  const malakhimAfter = finalView.realm.units.find(({ instanceId }) =>
+    instanceId === opening.malakhimInstanceId);
+  const caveTrollsAfter = finalView.realm.units.find(({ instanceId }) =>
+    instanceId === opening.caveTrollsInstanceId);
+  const auraEvents = session.transcript
+    .flatMap(({ events }) => events)
+    .filter(({ type }) => type.startsWith('aura-'));
+  const counterEventCounts = auraEvents.flatMap(({ payload, type }) =>
+    type === 'aura-turn-counted' && isJsonRecord(payload) && typeof payload.count === 'number'
+      ? [payload.count]
+      : []);
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    airborneRestoredAfterDispel: malakhimBefore?.airborne === true
+      && malakhimDuring?.airborne === false
+      && malakhimAfter?.airborne === true,
+    auraIdentityVerified: aura?.cardId === input.entangleTerrain.stableId
+      && aura.instanceId === opening.entangleTerrainInstanceId
+      && aura.owner === 'north'
+      && aura.controller === 'north'
+      && canonicalJson(aura.cells) === canonicalJson(affectedCells)
+      && observedAura?.cardId === input.entangleTerrain.stableId
+      && observedAura.owner === 'north'
+      && observedAura.controller === 'north'
+      && observedAura.turnCounters === 0,
+    canonicalCastVerified: castActions.length === 12
+      && exactActions.length === 1
+      && canonicalJson(exactActions[0]!.descriptor) === canonicalJson({
+        cardId: input.entangleTerrain.stableId,
+        cardInstanceId: opening.entangleTerrainInstanceId,
+        casterInstanceId: exactActions[0]!.descriptor.kind === 'cast-aura'
+          ? exactActions[0]!.descriptor.casterInstanceId
+          : '',
+        cells: affectedCells,
+        kind: 'cast-aura',
+      }),
+    causalEventsVerified: castPayload?.cardId === input.entangleTerrain.stableId
+      && castPayload.instanceId === opening.entangleTerrainInstanceId
+      && castPayload.manaPaid === 4
+      && castPayload.owner === 'north'
+      && castPayload.seat === 'north'
+      && canonicalJson(castPayload.cells as JsonValue) === canonicalJson(affectedCells)
+      && canonicalJson(auraEvents.map(({ type }) => type)) === canonicalJson([
+        'aura-conjured',
+        'aura-turn-counted',
+        'aura-turn-counted',
+        'aura-turn-counted',
+        'aura-dispelled',
+      ]),
+    caveTrolls: opening.names.get(input.burrowingMinion.stableId)
+      ?? input.burrowingMinion.stableId,
+    countersVerified: counters[0] === 1
+      && counters[1] === 2
+      && counters[2] === undefined
+      && canonicalJson(counterEventCounts) === canonicalJson([1, 2, 3]),
+    deck,
+    dispelledToOwnerCemetery: finalView.realm.auras === undefined
+      && finalView.realm.immobileAreas === undefined
+      && session.state.players.north.cemetery.some(({ instanceId }) =>
+        instanceId === opening.entangleTerrainInstanceId),
+    entangleTerrain: opening.names.get(input.entangleTerrain.stableId)
+      ?? input.entangleTerrain.stableId,
+    exactCast: exactActions.length === 1,
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && deck.spellbook.find(({ name }) => name === input.entangleTerrain.name)?.copies === 1
+      && deck.spellbook.find(({ name }) => name === input.malakhim.name)?.copies
+        === input.format.copyLimits[input.malakhim.rarity!]
+      && deck.spellbook.find(({ name }) => name === input.burrowingMinion.name)?.copies
+        === input.format.copyLimits[input.burrowingMinion.rarity!],
+    malakhim: opening.names.get(input.malakhim.stableId) ?? input.malakhim.stableId,
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    surfaceAndSubsurfaceMinionsAffected: malakhimDuring?.region === 'surface'
+      && malakhimDuring.immobile
+      && caveTrollsDuring?.region === 'underground'
+      && caveTrollsDuring.immobile
+      && malakhimAfter?.immobile === false
+      && caveTrollsAfter?.immobile === false,
   });
 }
 
@@ -19428,6 +19755,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthOverpower = runEarthOverpower(input);
   const earthBury = runEarthBury(input);
   const earthQuagmire = runEarthQuagmire(input);
+  const earthEntangleTerrain = runEarthEntangleTerrain(input);
   const earthHolyGround = runEarthHolyGround(input);
   const earthBedrock = runEarthBedrock(input);
   const earthWraetannisTitan = runEarthWraetannisTitan(input);
@@ -19646,6 +19974,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthOverpower,
     earthBury,
     earthQuagmire,
+    earthEntangleTerrain,
     earthHolyGround,
     earthBedrock,
     earthWraetannisTitan,
