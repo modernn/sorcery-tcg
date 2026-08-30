@@ -201,6 +201,24 @@ export type PrivateGameCheck = Readonly<{
     snowLeopardDied: boolean;
     spellEnteredCemetery: boolean;
   }>;
+  airLuckyCharm: Readonly<{
+    acceptedActionCount: number;
+    artifactAttached: boolean;
+    causalEventsVerified: boolean;
+    chosenNonFirstOutcome: boolean;
+    chosenTargetResolved: boolean;
+    deck: DeckList;
+    legalConstructedDeck: boolean;
+    lightningBolt: string;
+    luckyCharm: string;
+    offeredOutcomeCount: number;
+    randomDrawCount: number;
+    replayVerified: boolean;
+    seed: number;
+    structuralFactsVerified: boolean;
+    twoDistinctOutcomesOffered: boolean;
+    unsupportedMechanicsAbsent: boolean;
+  }>;
   airRainOfArrows: Readonly<{
     acceptedActionCount: number;
     avatarsPreserved: boolean;
@@ -1654,6 +1672,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   lash: NormalizedCard;
   leapAttack: NormalizedCard;
   lightningBolt: NormalizedCard;
+  luckyCharm: NormalizedCard;
   lugbogCat: NormalizedCard;
   lure: NormalizedCard;
   malakhim: NormalizedCard;
@@ -2699,6 +2718,28 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || lightningBolt.thresholds.water !== 0
     || lightningBolt.rarity !== 'ordinary') {
     throw new Error('private random location-damage Magic no longer matches its supported facts');
+  }
+  const luckyCharm = snapshot.cards.find(({ name }) => name === 'Lucky Charm');
+  if (!luckyCharm
+    || luckyCharm.stableId
+      !== 'card:634145a04916555128716df317c5c46bcfd84f0d7dbc5531a60e628f4e628c05'
+    || luckyCharm.officialSourceId !== '001-lucky_charm-b-f'
+    || luckyCharm.cardType !== 'artifact'
+    || ruleTextDigest(luckyCharm.rulesText)
+      !== 'sha256:84703d1fbc043ebd952d3dafc74b8aecda1e1cf144caad25937f5c868bf7465f'
+    || luckyCharm.manaCost !== 1
+    || luckyCharm.attack !== null
+    || luckyCharm.defense !== null
+    || luckyCharm.life !== null
+    || luckyCharm.elements.length !== 0
+    || luckyCharm.thresholds.air !== 0
+    || luckyCharm.thresholds.earth !== 0
+    || luckyCharm.thresholds.fire !== 0
+    || luckyCharm.thresholds.water !== 0
+    || luckyCharm.rarity !== 'exceptional'
+    || luckyCharm.subtypes.length !== 1
+    || luckyCharm.subtypes[0] !== 'Relic') {
+    throw new Error('private extra random-outcome artifact no longer matches its supported facts');
   }
   const bladderblimp = snapshot.cards.find(({ name }) => name === 'Bladderblimp');
   if (!bladderblimp
@@ -4049,6 +4090,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     lash,
     leapAttack,
     lightningBolt,
+    luckyCharm,
     lugbogCat,
     lure,
     malakhim,
@@ -4246,6 +4288,7 @@ function gameDefinition(
   atEndOfEachTurnSiteControllerLosesLife: 0 | 1 = 0,
   mayStepAfterRangedStrike = false,
   damageChainNearbyUnits = false,
+  bearerControllerChoosesExtraRandomOutcome = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4277,7 +4320,8 @@ function gameDefinition(
         tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps,
       )
       + Number(tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath)
-      + Number(atEndOfEachTurnSiteControllerLosesLife !== 0) === 1) {
+      + Number(atEndOfEachTurnSiteControllerLosesLife !== 0)
+      + Number(bearerControllerChoosesExtraRandomOutcome) === 1) {
     return {
       cardType: 'artifact',
       ...(grantsBearerPower === 2
@@ -4295,7 +4339,9 @@ function gameDefinition(
                 ? {
                   tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath: 4 as const,
                 }
-                : { atEndOfEachTurnSiteControllerLosesLife }),
+                : bearerControllerChoosesExtraRandomOutcome
+                  ? { bearerControllerChoosesExtraRandomOutcome: true as const }
+                  : { atEndOfEachTurnSiteControllerLosesLife }),
       manaCost: card.manaCost,
       thresholds: card.thresholds,
     };
@@ -4508,7 +4554,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-chain-lightning' | 'air-devils-egg' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-kite-archer' | 'air-leyline' | 'air-lightning-bolt' | 'air-nimbus-jinn' | 'air-rain-of-arrows' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-chain-lightning' | 'air-devils-egg' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-kite-archer' | 'air-leyline' | 'air-lightning-bolt' | 'air-lucky-charm' | 'air-nimbus-jinn' | 'air-rain-of-arrows' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -4813,6 +4859,7 @@ function buildManifest(
       input.devilsEgg.stableId,
       input.kiteArcher.stableId,
       ...Array(2).fill(input.chainLightning.stableId),
+      input.luckyCharm.stableId,
       ...Array(2).fill(input.movementTwoMinion.stableId),
       ...Array(2).fill(input.airborneMinion.stableId),
       ...Array(2).fill(input.stealthTargetMinion.stableId),
@@ -4924,6 +4971,19 @@ function buildManifest(
     [input.lightningBolt],
   );
   const airLightningBoltDeck = elementalDeck('air', airMinions, [], [input.lightningBolt]);
+  const airLuckyCharmBase = elementalDeck(
+    'air',
+    [input.stealthTargetMinion],
+    [],
+    [input.lightningBolt],
+  );
+  const airLuckyCharmDeck: GameDeckSpec = {
+    ...airLuckyCharmBase,
+    spellbook: [
+      input.luckyCharm.stableId,
+      ...airLuckyCharmBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
+    ],
+  };
   const airRainOfArrowsDeck = elementalDeck(
     'air',
     [input.shellycoat, input.stealthTargetMinion],
@@ -5156,6 +5216,8 @@ function buildManifest(
       ? airChainLightningDeck
       : scenario === 'air-lightning-bolt'
       ? airLightningBoltDeck
+      : scenario === 'air-lucky-charm'
+      ? airLuckyCharmDeck
       : scenario === 'air-rain-of-arrows'
       ? airRainOfArrowsDeck
       : scenario === 'air-static-servant'
@@ -5329,6 +5391,8 @@ function buildManifest(
       ? airChainLightningDeck
       : scenario === 'air-lightning-bolt'
       ? airLightningBoltDeck
+      : scenario === 'air-lucky-charm'
+      ? airLuckyCharmDeck
       : scenario === 'air-rain-of-arrows'
       ? airRainOfArrowsDeck
       : scenario === 'air-static-servant'
@@ -5635,6 +5699,7 @@ function buildManifest(
       card.stableId === input.devilsEgg.stableId ? 1 : 0,
       card.stableId === input.kiteArcher.stableId,
       card.stableId === input.chainLightning.stableId,
+      card.stableId === input.luckyCharm.stableId,
     ),
   ]));
   return {
@@ -8147,6 +8212,57 @@ function findAirLightningBoltOpening(
     }
   }
   throw new Error('private random location-damage Magic scenario no longer produces its supported opening');
+}
+
+function findAirLuckyCharmOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  lightningBoltInstanceId: string;
+  luckyCharmInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string];
+  seed: number;
+  session: GameSession;
+  snowLeopardInstanceId: string;
+  southSiteInstanceId: string;
+}> {
+  const seed = 859;
+  const built = buildManifest(input, seed, 'air-lucky-charm');
+  const session = createGameSession(built.manifest);
+  const north = session.state.players.north;
+  const south = session.state.players.south;
+  const isAirSite = ({ cardId }: { cardId: string }): boolean => {
+    const definition = built.manifest.cards[cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('air');
+  };
+  const northSites = [...north.hand.atlas]
+    .sort((left, right) => Number(isAirSite(right)) - Number(isAirSite(left)));
+  const luckyCharm = north.hand.spellbook
+    .find(({ cardId }) => cardId === input.luckyCharm.stableId);
+  const lightningBolt = [...north.hand.spellbook, ...north.spellbook.slice(0, 1)]
+    .find(({ cardId }) => cardId === input.lightningBolt.stableId);
+  const snowLeopard = [...south.hand.spellbook, ...south.spellbook.slice(0, 1)]
+    .find(({ cardId }) => cardId === input.stealthTargetMinion.stableId);
+  const southSite = south.hand.atlas.find(isAirSite);
+  if (!isAirSite(northSites[0]!)
+    || northSites.length < 2
+    || !luckyCharm
+    || !lightningBolt
+    || !snowLeopard
+    || !southSite) {
+    throw new Error('private Lucky Charm seed 859 no longer produces its supported opening');
+  }
+  return {
+    ...built,
+    lightningBoltInstanceId: lightningBolt.instanceId,
+    luckyCharmInstanceId: luckyCharm.instanceId,
+    northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
+    seed,
+    session,
+    snowLeopardInstanceId: snowLeopard.instanceId,
+    southSiteInstanceId: southSite.instanceId,
+  };
 }
 
 function findAirBladderblimpOpening(
@@ -16100,6 +16216,127 @@ function runAirLightningBolt(
   });
 }
 
+function runAirLuckyCharm(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airLuckyCharm'] {
+  const opening = findAirLuckyCharmOpening(input);
+  let session = keep(keep(opening.session));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+    && descriptor.cardInstanceId === opening.luckyCharmInstanceId
+    && descriptor.bearer?.kind === 'avatar');
+  const northAvatarId = session.state.players.north.avatar.card.instanceId;
+  const artifactAttached = session.state.realm.artifacts?.some((artifact) =>
+    artifact.instanceId === opening.luckyCharmInstanceId
+      && 'bearer' in artifact
+      && artifact.bearer.kind === 'avatar'
+      && artifact.bearer.instanceId === northAvatarId) === true;
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.snowLeopardInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+
+  const casts = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.lightningBoltInstanceId
+      && descriptor.targetLocation?.cell === 'C1'
+      && descriptor.targetLocation.region === 'surface');
+  if (casts.length !== 1) throw new Error('private Lucky Charm base Magic cast is not unique');
+  const baseCastHasNoOutcome = !('randomOutcomeInstanceId' in casts[0]!.descriptor)
+    && !legalGameActions(session.state, 'north').some(({ descriptor }) =>
+      descriptor.kind === 'resolve-random-outcome');
+  const committed = stepGame(session, casts[0]!);
+  if (!committed.accepted) throw new Error('private Lucky Charm base Magic cast was rejected');
+  session = committed.session;
+  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'resolve-random-outcome');
+  if (choices.length !== 2 || choices[1]?.descriptor.kind !== 'resolve-random-outcome') {
+    throw new Error('private Lucky Charm seed lacks two distinct post-commit outcomes');
+  }
+  const offeredIds = choices.map(({ descriptor }) => descriptor.kind === 'resolve-random-outcome'
+    ? descriptor.outcomeInstanceId
+    : '');
+  const chosenId = choices[1].descriptor.outcomeInstanceId;
+  const southAvatarId = session.state.players.south.avatar.card.instanceId;
+  const southAvatarLifeBefore = session.state.players.south.avatar.life;
+  const resolved = stepGame(session, choices[1]);
+  if (!resolved.accepted) throw new Error('private Lucky Charm chosen outcome was rejected');
+  session = resolved.session;
+  const allocation = resolved.receipt.events.find(({ payload, type }) =>
+    type === 'magic-damage-allocated'
+      && isJsonRecord(payload)
+      && payload.amount === 3
+      && payload.targetInstanceId === chosenId);
+  const chosenTargetResolved = allocation !== undefined
+    && (chosenId === southAvatarId
+      ? session.state.players.south.avatar.life === southAvatarLifeBefore - 3
+      : session.state.players.south.cemetery.some(({ instanceId }) => instanceId === chosenId));
+  const events = resolved.receipt.events;
+  const causalEventsVerified = events.length > 0 && events.every((event, index) =>
+    event.cause.actionId === resolved.receipt.actionId
+      && event.cause.receiptSequence === resolved.receipt.receiptSequence
+      && event.eventSequence === events[0]!.eventSequence + index);
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+  const southDeck = deckList(opening.manifest.decks.south, opening.names);
+  const definition = session.state.cards[input.luckyCharm.stableId];
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    artifactAttached,
+    causalEventsVerified,
+    chosenNonFirstOutcome: offeredIds[0] !== chosenId,
+    chosenTargetResolved,
+    deck,
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && southDeck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && southDeck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && (deck.spellbook.find(({ name }) => name === input.luckyCharm.name)?.copies ?? 0) === 1
+      && 1 <= input.format.copyLimits[input.luckyCharm.rarity!],
+    lightningBolt: input.lightningBolt.name,
+    luckyCharm: input.luckyCharm.name,
+    offeredOutcomeCount: choices.length,
+    randomDrawCount: committed.receipt.randomDraws.length,
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    structuralFactsVerified: definition?.cardType === 'artifact'
+      && definition.bearerControllerChoosesExtraRandomOutcome === true
+      && definition.manaCost === 1
+      && canonicalJson(definition.thresholds)
+        === canonicalJson({ air: 0, earth: 0, fire: 0, water: 0 }),
+    twoDistinctOutcomesOffered: new Set(offeredIds).size === 2
+      && choices.every(({ descriptor, label }) => descriptor.kind === 'resolve-random-outcome'
+        && label.includes('Lucky Charm chooses')),
+    unsupportedMechanicsAbsent: baseCastHasNoOutcome
+      && committed.receipt.events.length === 0
+      && committed.receipt.randomDraws.length === 2
+      && committed.receipt.randomDraws.every(({ purpose }) =>
+        purpose === 'magic_random_unit_at_location')
+      && committed.session.state.phase === 'random-choice'
+      && committed.session.state.pendingRandomOutcome !== null
+      && resolved.receipt.randomDraws.length === 0
+      && session.state.phase === 'main'
+      && session.state.pendingRandomOutcome === null
+      && session.state.players.north.cemetery.some(({ instanceId }) =>
+        instanceId === opening.lightningBoltInstanceId)
+      && session.state.terminal.status === 'active',
+  });
+}
+
 function runAirBladderblimp(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['airBladderblimp'] {
@@ -22542,6 +22779,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airSpellcasterFreeze = runAirSpellcasterFreeze(input);
   const airArcLightning = runAirArcLightning(input);
   const airLightningBolt = runAirLightningBolt(input);
+  const airLuckyCharm = runAirLuckyCharm(input);
   const airRainOfArrows = runAirRainOfArrows(input);
   const airStaticServant = runAirStaticServant(input);
   const airTeleport = runAirTeleport(input);
@@ -22756,6 +22994,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     airSpellcasterFreeze,
     airArcLightning,
     airLightningBolt,
+    airLuckyCharm,
     airRainOfArrows,
     airStaticServant,
     airTeleport,

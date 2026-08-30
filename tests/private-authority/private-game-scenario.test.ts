@@ -927,7 +927,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 31 : 35,
+        preset.id === 'air-vs-earth-lesson' ? 32 : 35,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -935,7 +935,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 35 : 31,
+        preset.id === 'air-vs-earth-lesson' ? 35 : 32,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -978,6 +978,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Highland Clansmen': 1,
     'Kite Archer': 1,
     'Lightning Bolt': 3,
+    'Lucky Charm': 1,
     'Midnight Rogue': 2,
     'Nimbus Jinn': 1,
     'Plumed Pegasus': 2,
@@ -1654,6 +1655,27 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airChainLightning.deck.spellbook
     .find(({ name }) => name === 'Chain Lightning')?.copies, 2);
   assert.equal(result.airChainLightning.replayVerified, true);
+  assert.equal(result.airLuckyCharm.luckyCharm, 'Lucky Charm');
+  assert.equal(result.airLuckyCharm.lightningBolt, 'Lightning Bolt');
+  assert.equal(result.airLuckyCharm.seed, 859);
+  assert.equal(result.airLuckyCharm.acceptedActionCount, 13);
+  assert.equal(result.airLuckyCharm.artifactAttached, true);
+  assert.equal(result.airLuckyCharm.causalEventsVerified, true);
+  assert.equal(result.airLuckyCharm.chosenNonFirstOutcome, true);
+  assert.equal(result.airLuckyCharm.chosenTargetResolved, true);
+  assert.equal(result.airLuckyCharm.offeredOutcomeCount, 2);
+  assert.equal(result.airLuckyCharm.randomDrawCount, 2);
+  assert.equal(result.airLuckyCharm.structuralFactsVerified, true);
+  assert.equal(result.airLuckyCharm.twoDistinctOutcomesOffered, true);
+  assert.equal(result.airLuckyCharm.unsupportedMechanicsAbsent, true);
+  assert.equal(result.airLuckyCharm.legalConstructedDeck, true);
+  assert.equal(result.airLuckyCharm.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airLuckyCharm.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airLuckyCharm.deck.spellbook
+    .find(({ name }) => name === 'Lucky Charm')?.copies, 1);
+  assert.equal(result.airLuckyCharm.replayVerified, true);
   assert.equal(result.airSpellcasterFreeze.apprenticeWizard, 'Apprentice Wizard');
   assert.equal(result.airSpellcasterFreeze.freeze, 'Freeze');
   assert.equal(result.airSpellcasterFreeze.seravaTownsfolk, 'Serava Townsfolk');

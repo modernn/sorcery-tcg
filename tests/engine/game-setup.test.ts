@@ -3925,6 +3925,148 @@ test('RULE-03 Lightning Bolt targets a location and deterministically damages on
   assert.equal(verifyGameReplay(session), true);
 });
 
+test('RULE-03 Lucky Charm commits the random action before exposing two deterministic outcomes', () => {
+  const north = deck('charm-north', 4, 6);
+  const south = deck('charm-south', 4, 6);
+  const luckyCharmId = north.spellbook[0]!;
+  const cards = cardsFor({ north, south }, {
+    defense: 5,
+    manaCost: 0,
+    stealth: true,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  }, undefined, { elements: ['air'] });
+  cards[luckyCharmId] = {
+    bearerControllerChoosesExtraRandomOutcome: true,
+    cardType: 'artifact',
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  };
+  for (const cardId of north.spellbook.slice(1)) {
+    cards[cardId] = {
+      cardType: 'magic',
+      damageRandomUnitAtLocation: 3,
+      manaCost: 1,
+      thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+    };
+  }
+
+  const setup = (seed: number): GameSession | undefined => {
+    let candidate = keep(keep(createGameSession(createGameManifest({
+      authority: {
+        contentHash: SYNTHETIC_AUTHORITY_HASH,
+        mode: 'synthetic',
+        revisionId: 'synthetic-lucky-charm-v1',
+      },
+      cards,
+      decks: { north, south },
+      firstSeat: 'north',
+      seed,
+    }))));
+    if (!candidate.state.players.north.hand.spellbook.some(({ cardId }) =>
+      cardId === luckyCharmId)) return undefined;
+    candidate = accept(candidate, action(candidate, ({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+    candidate = accept(candidate, action(candidate, ({ descriptor }) =>
+      descriptor.kind === 'cast-artifact'
+        && descriptor.cardId === luckyCharmId
+        && descriptor.bearer?.kind === 'avatar'));
+    candidate = accept(candidate, action(candidate, ({ descriptor }) =>
+      descriptor.kind === 'end-turn'));
+    candidate = accept(candidate, action(candidate, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    candidate = accept(candidate, action(candidate, ({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
+    for (let count = 0; count < 2; count += 1) {
+      candidate = accept(candidate, action(candidate, ({ descriptor }) =>
+        descriptor.kind === 'summon-minion' && descriptor.cell === 'C1'));
+    }
+    candidate = accept(candidate, action(candidate, ({ descriptor }) =>
+      descriptor.kind === 'end-turn'));
+    candidate = accept(candidate, action(candidate, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    return candidate;
+  };
+
+  let beforeCommit: GameSession | undefined;
+  let session: GameSession | undefined;
+  let choices: readonly GameLegalAction[] = [];
+  for (let seed = 1; seed <= 100 && choices.length !== 2; seed += 1) {
+    const candidate = setup(seed);
+    if (!candidate) continue;
+    const bolt = candidate.state.players.north.hand.spellbook.find(({ cardId }) =>
+      cardId !== luckyCharmId);
+    if (!bolt) continue;
+    const casts = legalGameActions(candidate.state, 'north').filter(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === bolt.instanceId
+        && descriptor.targetLocation?.cell === 'C1');
+    if (casts.length !== 1) continue;
+    const committed = stepGame(candidate, casts[0]!);
+    if (!committed.accepted) continue;
+    const candidateChoices = legalGameActions(committed.session.state, 'north').filter(
+      ({ descriptor }) => descriptor.kind === 'resolve-random-outcome',
+    );
+    if (candidateChoices.length === 2) {
+      beforeCommit = candidate;
+      session = committed.session;
+      choices = candidateChoices;
+    }
+  }
+  assert.ok(beforeCommit && session);
+  assert.equal(legalGameActions(beforeCommit.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'resolve-random-outcome'), false);
+  assert.equal(session.state.phase, 'random-choice');
+  assert.equal(choices.every(({ descriptor, label }) =>
+    descriptor.kind === 'resolve-random-outcome'
+      && label.includes('Lucky Charm chooses')), true);
+  const committedReceipt = session.transcript.at(-1)!;
+  assert.equal(committedReceipt.events.length, 0);
+  assert.equal(committedReceipt.randomDraws.length, 2);
+  assert.equal(committedReceipt.randomDraws.every(({ purpose }) =>
+    purpose === 'magic_random_unit_at_location'), true);
+
+  const chosen = choices[1]!;
+  assert.equal(chosen.descriptor.kind, 'resolve-random-outcome');
+  if (chosen.descriptor.kind !== 'resolve-random-outcome') return;
+  const chosenId = chosen.descriptor.outcomeInstanceId;
+  const occupants = [
+    session.state.players.south.avatar.card.instanceId,
+    ...session.state.realm.units
+      .filter(({ location, region }) => location === 'C1' && region === 'surface')
+      .map(({ instanceId }) => instanceId),
+  ].sort();
+  const offeredIds = choices.flatMap(({ descriptor }) =>
+    descriptor.kind === 'resolve-random-outcome'
+    ? [descriptor.outcomeInstanceId]
+    : []);
+  const unofferedId = occupants.find((instanceId) => !offeredIds.includes(instanceId));
+  assert.ok(unofferedId);
+  const forgedDescriptor = { kind: 'resolve-random-outcome' as const, outcomeInstanceId: unofferedId };
+  const forged = stepGame(session, {
+    actionId: opaqueActionId(
+      'sorcery-core-v1',
+      'north',
+      session.state.stateVersion,
+      forgedDescriptor,
+    ),
+    seat: 'north',
+    stateVersion: session.state.stateVersion,
+  });
+  assert.equal(forged.accepted, false);
+  if (!forged.accepted) assert.equal(forged.reason.code, 'unknown_action');
+
+  const result = stepGame(session, chosen);
+  assert.equal(result.accepted, true);
+  if (!result.accepted) return;
+  assert.equal(result.receipt.randomDraws.length, 0);
+  const allocation = result.receipt.events.find(({ type }) => type === 'magic-damage-allocated');
+  assert.equal(allocation?.payload !== null
+    && typeof allocation?.payload === 'object'
+    && 'targetInstanceId' in allocation.payload
+    && allocation.payload.targetInstanceId === chosenId, true);
+  assert.equal(verifyGameReplay(result.session), true);
+});
+
 test('RULE-03/04 Minor Explosion damages every unit at a location up to two cardinal steps away', () => {
   const decks = { north: deck('explosion-north', 4, 6), south: deck('explosion-south', 4, 6) };
   const baseCards = cardsFor(decks, {

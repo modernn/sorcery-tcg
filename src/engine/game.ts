@@ -62,6 +62,7 @@ export type GameCardDefinition =
   }>
   | Readonly<{
     atEndOfEachTurnSiteControllerLosesLife?: never;
+    bearerControllerChoosesExtraRandomOutcome?: never;
     cardType: 'artifact';
     grantsBearerLethal?: never;
     grantsBearerPower: 2;
@@ -73,6 +74,7 @@ export type GameCardDefinition =
   }>
   | Readonly<{
     atEndOfEachTurnSiteControllerLosesLife?: never;
+    bearerControllerChoosesExtraRandomOutcome?: never;
     cardType: 'artifact';
     grantsBearerLethal: true;
     grantsBearerPower?: never;
@@ -84,6 +86,7 @@ export type GameCardDefinition =
   }>
   | Readonly<{
     atEndOfEachTurnSiteControllerLosesLife?: never;
+    bearerControllerChoosesExtraRandomOutcome?: never;
     cardType: 'artifact';
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
@@ -95,6 +98,7 @@ export type GameCardDefinition =
   }>
   | Readonly<{
     atEndOfEachTurnSiteControllerLosesLife?: never;
+    bearerControllerChoosesExtraRandomOutcome?: never;
     cardType: 'artifact';
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
@@ -106,6 +110,7 @@ export type GameCardDefinition =
   }>
   | Readonly<{
     atEndOfEachTurnSiteControllerLosesLife?: never;
+    bearerControllerChoosesExtraRandomOutcome?: never;
     cardType: 'artifact';
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
@@ -117,6 +122,19 @@ export type GameCardDefinition =
   }>
   | Readonly<{
     atEndOfEachTurnSiteControllerLosesLife: number;
+    bearerControllerChoosesExtraRandomOutcome?: never;
+    cardType: 'artifact';
+    grantsBearerLethal?: never;
+    grantsBearerPower?: never;
+    manaCost: number;
+    tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps?: never;
+    tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
+    tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
+    thresholds: GameThresholds;
+  }>
+  | Readonly<{
+    atEndOfEachTurnSiteControllerLosesLife?: never;
+    bearerControllerChoosesExtraRandomOutcome: true;
     cardType: 'artifact';
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
@@ -371,6 +389,12 @@ type PendingChainMagic = Readonly<{
   targets: readonly GameUnitRef[];
 }>;
 
+type PendingRandomOutcome = Readonly<{
+  action: GameActionDescriptor;
+  outcomeInstanceIds: readonly StateHash[];
+  seat: GameSeat;
+}>;
+
 type DamageAllocationSource = 'attacker-unit' | 'non-unit';
 
 type DamageSourceSnapshot =
@@ -445,8 +469,9 @@ export type GameState = Readonly<{
   pendingCombat: PendingCombat | null;
   pendingGenesisSpell?: PendingGenesisSpell | null;
   pendingGenesisToken?: PendingGenesisToken | null;
+  pendingRandomOutcome?: PendingRandomOutcome | null;
   pendingRangedStep?: PendingRangedStep | null;
-  phase: 'allocate' | 'attack' | 'chain-magic' | 'defend' | 'draw' | 'genesis' | 'intercept' | 'main' | 'mulligan' | 'ranged-step' | 'terminal';
+  phase: 'allocate' | 'attack' | 'chain-magic' | 'defend' | 'draw' | 'genesis' | 'intercept' | 'main' | 'mulligan' | 'random-choice' | 'ranged-step' | 'terminal';
   players: Readonly<Record<GameSeat, PlayerState>>;
   realm: Readonly<{
     artifacts?: readonly ArtifactInstance[];
@@ -752,6 +777,10 @@ type GameActionDescriptor =
     kind: 'activate-sparkmage';
     sourceInstanceId: StateHash;
     targetLocation: GameLocation;
+  }>
+  | Readonly<{
+    kind: 'resolve-random-outcome';
+    outcomeInstanceId: StateHash;
   }>
   | Readonly<{ amount: number; kind: 'activate-mana'; unitInstanceId: StateHash }>
   | Readonly<{ kind: 'end-turn' }>;
@@ -1741,6 +1770,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     if (card.grantsBearerLethal !== undefined && card.grantsBearerLethal !== true) {
       throw new RangeError(`${path}.grantsBearerLethal must be true`);
     }
+    if (card.bearerControllerChoosesExtraRandomOutcome !== undefined
+      && card.bearerControllerChoosesExtraRandomOutcome !== true) {
+      throw new RangeError(
+        `${path}.bearerControllerChoosesExtraRandomOutcome must be true`,
+      );
+    }
     if (card.tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps !== undefined
       && card.tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps !== 3) {
       throw new RangeError(
@@ -1764,6 +1799,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       );
     }
     if (Number(card.atEndOfEachTurnSiteControllerLosesLife !== undefined)
+      + Number(card.bearerControllerChoosesExtraRandomOutcome === true)
       + Number(card.grantsBearerPower === 2)
       + Number(card.grantsBearerLethal === true)
       + Number(card.tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps === 3)
@@ -2398,7 +2434,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? {
                 atEndOfEachTurnSiteControllerLosesLife:
                   card.atEndOfEachTurnSiteControllerLosesLife,
-              }
+                }
+              : card.bearerControllerChoosesExtraRandomOutcome === true
+                ? { bearerControllerChoosesExtraRandomOutcome: true as const }
               : card.grantsBearerPower === 2
               ? { grantsBearerPower: 2 as const }
               : card.grantsBearerLethal === true
@@ -2752,6 +2790,76 @@ function drawCandidate(
       return deepFreeze({ engine: nextEngine, index: draw.value % exclusiveMaximum, randomDraws });
     }
   }
+}
+
+function luckyCharmCount(state: GameState, seat: GameSeat): number {
+  return (state.realm.artifacts ?? []).filter((artifact) => {
+    if (!('bearer' in artifact) || artifact.bearer.seat !== seat) return false;
+    const definition = cardDefinition(state, artifact.cardId);
+    return definition.cardType === 'artifact'
+      && definition.bearerControllerChoosesExtraRandomOutcome === true;
+  }).length;
+}
+
+function drawRandomOutcomes(
+  state: GameState,
+  seat: GameSeat,
+  candidateInstanceIds: readonly StateHash[],
+  purpose: string,
+  domainKind: string,
+): Readonly<{
+  engine: EngineState;
+  outcomeInstanceIds: readonly StateHash[];
+  randomDraws: readonly EngineRandomDraw[];
+}> {
+  let engine = state.engine;
+  const outcomeInstanceIds: StateHash[] = [];
+  const randomDraws: EngineRandomDraw[] = [];
+  for (let index = 0; index <= luckyCharmCount(state, seat); index += 1) {
+    const selected = drawCandidate(engine, candidateInstanceIds.length, purpose, domainKind);
+    engine = selected.engine;
+    outcomeInstanceIds.push(candidateInstanceIds[selected.index]!);
+    randomDraws.push(...selected.randomDraws);
+  }
+  return deepFreeze({ engine, outcomeInstanceIds, randomDraws });
+}
+
+function resolveRandomOutcome(
+  state: GameState,
+  candidateInstanceIds: readonly StateHash[],
+  purpose: string,
+  domainKind: string,
+  forcedOutcomeInstanceId?: StateHash,
+): Readonly<{
+  engine: EngineState;
+  outcomeInstanceId: StateHash;
+  randomDraws: readonly EngineRandomDraw[];
+}> {
+  if (forcedOutcomeInstanceId !== undefined) {
+    if (!candidateInstanceIds.includes(forcedOutcomeInstanceId)) {
+      throw new Error('unreachable invalid forced random outcome');
+    }
+    return deepFreeze({
+      engine: state.engine,
+      outcomeInstanceId: forcedOutcomeInstanceId,
+      randomDraws: [],
+    });
+  }
+  const selected = drawCandidate(
+    state.engine,
+    candidateInstanceIds.length,
+    purpose,
+    domainKind,
+  );
+  const outcomeInstanceId = candidateInstanceIds[selected.index];
+  if (!outcomeInstanceId) {
+    throw new Error('unreachable invalid random outcome choice');
+  }
+  return deepFreeze({
+    engine: selected.engine,
+    outcomeInstanceId,
+    randomDraws: selected.randomDraws,
+  });
 }
 
 function shuffle(
@@ -3343,6 +3451,90 @@ function sameOptionalUnitRefs(
         target.instanceId === right[index]!.instanceId
         && target.kind === right[index]!.kind
         && target.seat === right[index]!.seat);
+}
+
+function randomUnitCandidatesAtLocation(
+  state: GameState,
+  location: GameLocation,
+  excludedInstanceId?: StateHash,
+): readonly GameUnitRef[] {
+  return (['north', 'south'] as const)
+    .flatMap((targetSeat) => unitRefs(state, targetSeat))
+    .filter((target) => {
+      if (target.instanceId === excludedInstanceId) return false;
+      const status = unitStatus(state, target);
+      return status.region === location.region && status.occupiedCells.includes(location.cell);
+    })
+    .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+}
+
+function luckyRandomOutcomeRequest(
+  state: GameState,
+  seat: GameSeat,
+  descriptor: GameActionDescriptor,
+): Readonly<{
+  candidateInstanceIds: readonly StateHash[];
+  domainKind: string;
+  purpose: string;
+}> | undefined {
+  if (luckyCharmCount(state, seat) === 0) return undefined;
+  const player = state.players[seat];
+  if (descriptor.kind === 'cast-magic' && descriptor.targetLocation) {
+    const card = player.hand.spellbook.find(({ instanceId }) =>
+      instanceId === descriptor.cardInstanceId);
+    const definition = card && cardDefinition(state, card.cardId);
+    if (definition?.cardType === 'magic'
+      && definition.damageRandomUnitAtLocation !== undefined) {
+      return {
+        candidateInstanceIds: randomUnitCandidatesAtLocation(
+          state,
+          descriptor.targetLocation,
+        ).map(({ instanceId }) => instanceId),
+        domainKind: 'unit_index_candidate',
+        purpose: 'magic_random_unit_at_location',
+      };
+    }
+  }
+  if (descriptor.kind === 'summon-minion'
+    && descriptor.paymentMode === 'random-card-discard') {
+    return {
+      candidateInstanceIds: [
+        ...player.hand.atlas.map(({ instanceId }) => instanceId),
+        ...player.hand.spellbook
+          .filter(({ instanceId }) => instanceId !== descriptor.cardInstanceId)
+          .map(({ instanceId }) => instanceId),
+      ],
+      domainKind: 'card_index_candidate',
+      purpose: 'summon_random_card_discard_cost',
+    };
+  }
+  if (descriptor.kind === 'activate-discard-random-damage') {
+    const source = state.realm.units.find(({ instanceId }) =>
+      instanceId === descriptor.sourceInstanceId);
+    if (source) {
+      return {
+        candidateInstanceIds: randomUnitCandidatesAtLocation(
+          state,
+          { cell: source.location, region: source.region },
+          source.instanceId,
+        ).map(({ instanceId }) => instanceId),
+        domainKind: 'unit_index_candidate',
+        purpose: 'discard_spell_random_other_unit_here',
+      };
+    }
+  }
+  if (descriptor.kind === 'activate-sparkmage') {
+    return {
+      candidateInstanceIds: randomUnitCandidatesAtLocation(
+        state,
+        descriptor.targetLocation,
+        descriptor.sourceInstanceId,
+      ).map(({ instanceId }) => instanceId),
+      domainKind: 'unit_index_candidate',
+      purpose: 'sparkmage_random_other_unit_at_nearby_location',
+    };
+  }
+  return undefined;
 }
 
 function unitOccupiedCells(unit: Readonly<Pick<UnitInstance, 'location' | 'occupiedCells'>>):
@@ -4104,6 +4296,16 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
   if (state.phase === 'draw') return [{ kind: 'draw', zone: 'atlas' }, { kind: 'draw', zone: 'spellbook' }];
   if (state.phase === 'ranged-step') return rangedStepDescriptors(state, seat);
   if (state.phase === 'chain-magic') return chainMagicDescriptors(state, seat);
+  if (state.phase === 'random-choice') {
+    const pending = state.pendingRandomOutcome;
+    if (!pending || pending.seat !== seat || pending.outcomeInstanceIds.length === 0) {
+      throw new Error('unreachable missing pending random outcome');
+    }
+    return pending.outcomeInstanceIds.map((outcomeInstanceId) => ({
+      kind: 'resolve-random-outcome' as const,
+      outcomeInstanceId,
+    }));
+  }
   if (state.phase === 'genesis') {
     if (state.pendingGenesisToken?.seat === seat) {
       return [
@@ -4457,6 +4659,9 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
   if (descriptor.kind === 'activate-sparkmage') {
     const amount = state.players[state.decisionSeat].airThresholdsCastThisTurn ?? 0;
     return `Tap Sparkmage to deal ${amount} to a random other unit at ${descriptor.targetLocation.cell}`;
+  }
+  if (descriptor.kind === 'resolve-random-outcome') {
+    return `Lucky Charm chooses ${descriptor.outcomeInstanceId.slice(0, 15)}…`;
   }
   if (descriptor.kind === 'activate-mana') {
     return 'Tap ' + descriptor.unitInstanceId.slice(0, 15) + '… for ' + descriptor.amount + ' mana';
@@ -6023,9 +6228,50 @@ function applyDescriptor(
   state: GameState,
   descriptor: GameActionDescriptor,
   manifest: GameManifest,
+  forcedRandomOutcomeInstanceId?: StateHash,
 ): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
   const seat = state.decisionSeat;
   const player = state.players[seat];
+  if (descriptor.kind === 'resolve-random-outcome') {
+    const pending = state.pendingRandomOutcome;
+    if (state.phase !== 'random-choice'
+      || !pending
+      || pending.seat !== seat
+      || !pending.outcomeInstanceIds.includes(descriptor.outcomeInstanceId)) {
+      throw new Error('unreachable illegal random outcome choice');
+    }
+    return applyDescriptor(
+      deepFreeze({ ...state, pendingRandomOutcome: null, phase: 'main' }),
+      pending.action,
+      manifest,
+      descriptor.outcomeInstanceId,
+    );
+  }
+  const randomRequest = forcedRandomOutcomeInstanceId === undefined
+    ? luckyRandomOutcomeRequest(state, seat, descriptor)
+    : undefined;
+  if (randomRequest && randomRequest.candidateInstanceIds.length > 0) {
+    const drawn = drawRandomOutcomes(
+      state,
+      seat,
+      randomRequest.candidateInstanceIds,
+      randomRequest.purpose,
+      randomRequest.domainKind,
+    );
+    return [
+      withStateVersion(state, {
+        engine: drawn.engine,
+        pendingRandomOutcome: {
+          action: descriptor,
+          outcomeInstanceIds: [...new Set(drawn.outcomeInstanceIds)],
+          seat,
+        },
+        phase: 'random-choice',
+      }),
+      [],
+      drawn.randomDraws,
+    ];
+  }
   if (descriptor.kind === 'mulligan') {
     const atlas = resolveMulliganZone(player.hand.atlas, player.atlas, descriptor.atlasOrder);
     const spellbook = resolveMulliganZone(player.hand.spellbook, player.spellbook, descriptor.spellbookOrder);
@@ -8131,24 +8377,19 @@ function applyDescriptor(
     }
     if (definition.damageRandomUnitAtLocation !== undefined) {
       if (!descriptor.targetLocation) throw new Error('unreachable random-location Magic cast');
-      const candidates = (['north', 'south'] as const)
-        .flatMap((targetSeat) => unitRefs(castState, targetSeat))
-        .filter((target) => {
-          const status = unitStatus(castState, target);
-          return status.occupiedCells.includes(descriptor.targetLocation!.cell)
-            && status.region === descriptor.targetLocation!.region;
-        })
-        .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+      const candidates = randomUnitCandidatesAtLocation(castState, descriptor.targetLocation);
       if (candidates.length === 0) {
         return [withStateVersion(castState, {}), [...castOutcomes, resolved], []];
       }
-      const selected = drawCandidate(
-        castState.engine,
-        candidates.length,
+      const selected = resolveRandomOutcome(
+        castState,
+        candidates.map(({ instanceId }) => instanceId),
         'magic_random_unit_at_location',
         'unit_index_candidate',
+        forcedRandomOutcomeInstanceId,
       );
-      const targetRef = candidates[selected.index]!;
+      const targetRef = candidates.find(({ instanceId }) =>
+        instanceId === selected.outcomeInstanceId)!;
       const randomizedState = deepFreeze({ ...castState, engine: selected.engine });
       const pending: PendingCombat = deepFreeze({
         allocations: [{ amount: definition.damageRandomUnitAtLocation, targetInstanceId: targetRef.instanceId }],
@@ -8302,14 +8543,18 @@ function applyDescriptor(
       ]
       : [];
     const randomCost = descriptor.paymentMode === 'random-card-discard'
-      ? drawCandidate(
-        state.engine,
-        discardCandidates.length,
+      ? resolveRandomOutcome(
+        state,
+        discardCandidates.map(({ card: { instanceId } }) => instanceId),
         'summon_random_card_discard_cost',
         'card_index_candidate',
+        forcedRandomOutcomeInstanceId,
       )
       : undefined;
-    const discardedCard = randomCost ? discardCandidates[randomCost.index] : undefined;
+    const discardedCard = randomCost
+      ? discardCandidates.find(({ card: { instanceId } }) =>
+        instanceId === randomCost.outcomeInstanceId)
+      : undefined;
     if (descriptor.paymentMode === 'random-card-discard' && !discardedCard) {
       throw new Error('unreachable random card discard cost without another card');
     }
@@ -9197,15 +9442,11 @@ function applyDescriptor(
       players: interaction.players,
       realm: { ...paidState.realm, units: interaction.units },
     });
-    const candidates = (['north', 'south'] as const)
-      .flatMap((targetSeat) => unitRefs(activatedState, targetSeat))
-      .filter((target) => {
-        if (target.instanceId === source.instanceId) return false;
-        const status = unitStatus(activatedState, target);
-        return status.region === sourceStatus.region
-          && status.occupiedCells.includes(sourceStatus.location);
-      })
-      .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+    const candidates = randomUnitCandidatesAtLocation(
+      activatedState,
+      { cell: sourceStatus.location, region: sourceStatus.region },
+      source.instanceId,
+    );
     const discarded: GameOutcome = {
       payload: {
         cardId: discardedCard.cardId,
@@ -9229,13 +9470,15 @@ function applyDescriptor(
         type: 'discard-random-damage-activated',
       }, ...interaction.outcomes], []];
     }
-    const selected = drawCandidate(
-      activatedState.engine,
-      candidates.length,
+    const selected = resolveRandomOutcome(
+      activatedState,
+      candidates.map(({ instanceId }) => instanceId),
       'discard_spell_random_other_unit_here',
       'unit_index_candidate',
+      forcedRandomOutcomeInstanceId,
     );
-    const targetRef = candidates[selected.index]!;
+    const targetRef = candidates.find(({ instanceId }) =>
+      instanceId === selected.outcomeInstanceId)!;
     const randomizedState = deepFreeze({ ...activatedState, engine: selected.engine });
     const activated: GameOutcome = {
       payload: {
@@ -9318,15 +9561,11 @@ function applyDescriptor(
       }),
       realm: { ...state.realm, units: interaction.units },
     });
-    const candidates = (['north', 'south'] as const)
-      .flatMap((targetSeat) => unitRefs(activatedState, targetSeat))
-      .filter((target) => {
-        if (target.instanceId === sourceRef.instanceId) return false;
-        const status = unitStatus(activatedState, target);
-        return status.occupiedCells.includes(descriptor.targetLocation.cell)
-          && status.region === descriptor.targetLocation.region;
-      })
-      .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+    const candidates = randomUnitCandidatesAtLocation(
+      activatedState,
+      descriptor.targetLocation,
+      sourceRef.instanceId,
+    );
     if (candidates.length === 0) {
       return [
         withStateVersion(activatedState, {}),
@@ -9342,13 +9581,15 @@ function applyDescriptor(
         [],
       ];
     }
-    const selected = drawCandidate(
-      activatedState.engine,
-      candidates.length,
+    const selected = resolveRandomOutcome(
+      activatedState,
+      candidates.map(({ instanceId }) => instanceId),
       'sparkmage_random_other_unit_at_nearby_location',
       'unit_index_candidate',
+      forcedRandomOutcomeInstanceId,
     );
-    const targetRef = candidates[selected.index]!;
+    const targetRef = candidates.find(({ instanceId }) =>
+      instanceId === selected.outcomeInstanceId)!;
     const randomizedState = deepFreeze({ ...activatedState, engine: selected.engine });
     const activated: GameOutcome = {
       payload: {
