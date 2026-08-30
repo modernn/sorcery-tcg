@@ -922,7 +922,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 23 : 30,
+        preset.id === 'air-vs-earth-lesson' ? 23 : 31,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -930,7 +930,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 30 : 23,
+        preset.id === 'air-vs-earth-lesson' ? 31 : 23,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -999,6 +999,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'House Arn Bannerman': 2,
     'Land Surveyor': 2,
     Overpower: 2,
+    'Payload Trebuchet': 1,
     'Pudge Butcher': 1,
     'Scent Hounds': 2,
     'Siege Ballista': 1,
@@ -1135,6 +1136,24 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     }, {
       manaCost: 3,
       tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps: 3,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    });
+  }
+  const payloadTrebuchetId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Payload Trebuchet')?.[0];
+  assert.ok(payloadTrebuchetId);
+  const payloadTrebuchet = airLesson.manifest.cards[payloadTrebuchetId];
+  assert.equal(payloadTrebuchet?.cardType, 'artifact');
+  if (payloadTrebuchet?.cardType === 'artifact') {
+    assert.deepEqual({
+      manaCost: payloadTrebuchet.manaCost,
+      tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps:
+        payloadTrebuchet
+          .tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps,
+      thresholds: payloadTrebuchet.thresholds,
+    }, {
+      manaCost: 5,
+      tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps: true,
       thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
     });
   }
@@ -1781,6 +1800,28 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthSiegeBallista.deck.spellbook
     .find(({ name }) => name === 'Siege Ballista')?.copies, 1);
   assert.equal(result.earthSiegeBallista.replayVerified, true);
+  assert.equal(result.earthPayloadTrebuchet.payloadTrebuchet, 'Payload Trebuchet');
+  assert.equal(result.earthPayloadTrebuchet.scentHounds, 'Scent Hounds');
+  assert.equal(result.earthPayloadTrebuchet.caveTrolls, 'Cave Trolls');
+  assert.equal(result.earthPayloadTrebuchet.seed, 188);
+  assert.equal(result.earthPayloadTrebuchet.acceptedActionCount, 45);
+  assert.equal(result.earthPayloadTrebuchet.threeStepRangeVerified, true);
+  assert.equal(result.earthPayloadTrebuchet.exactCastAndActivation, true);
+  assert.equal(result.earthPayloadTrebuchet.bothCostsTapped, true);
+  assert.equal(result.earthPayloadTrebuchet.discardedToCemetery, true);
+  assert.equal(result.earthPayloadTrebuchet.targetsKilledByArtifact, true);
+  assert.equal(result.earthPayloadTrebuchet.noStrikeOrLethal, true);
+  assert.equal(result.earthPayloadTrebuchet.trebuchetRemainedCarried, true);
+  assert.equal(result.earthPayloadTrebuchet.causalEventsVerified, true);
+  assert.equal(result.earthPayloadTrebuchet.legalConstructedDeck, true);
+  assert.equal(result.earthPayloadTrebuchet.noRandomDraws, true);
+  assert.equal(result.earthPayloadTrebuchet.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthPayloadTrebuchet.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthPayloadTrebuchet.deck.spellbook
+    .find(({ name }) => name === 'Payload Trebuchet')?.copies, 1);
+  assert.equal(result.earthPayloadTrebuchet.replayVerified, true);
   assert.equal(result.earthBorderMilitia.borderMilitia, 'Border Militia');
   assert.equal(result.earthBorderMilitia.footSoldier, 'Foot Soldier');
   assert.equal(result.earthBorderMilitia.seed, 7688);

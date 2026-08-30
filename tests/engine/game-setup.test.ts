@@ -13523,6 +13523,314 @@ test('RULE-03 Siege Ballista taps its bearer and another ally for measured artif
   assert.equal(verifyGameReplay(session), true);
 });
 
+test('RULE-03 Payload Trebuchet discards a card for measured location damage', () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const north: GameDeckSpec = {
+    atlas: Array(6).fill('payload-north-site'),
+    avatar: 'payload-north-avatar',
+    spellbook: [
+      'payload-trebuchet',
+      'payload-bearer',
+      'payload-helper',
+      'payload-discard',
+      'payload-trebuchet',
+      'payload-bearer',
+      'payload-helper',
+      'payload-discard',
+    ],
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(6).fill('payload-south-site'),
+    avatar: 'payload-south-avatar',
+    spellbook: [
+      'payload-target',
+      'payload-warded-target',
+      'payload-burrowed-target',
+      'payload-target',
+      'payload-warded-target',
+      'payload-burrowed-target',
+    ],
+  };
+  const cards: Record<string, GameCardDefinition> = {
+    'payload-bearer': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 5,
+      lanceCount: 1,
+      lethal: true,
+      manaCost: 0,
+      stealth: true,
+      thresholds,
+    },
+    'payload-burrowed-target': {
+      attack: 1,
+      burrowing: true,
+      cardType: 'minion',
+      defense: 5,
+      manaCost: 0,
+      thresholds,
+    },
+    'payload-discard': {
+      attack: 4,
+      cardType: 'minion',
+      defense: 4,
+      manaCost: 4,
+      thresholds,
+    },
+    'payload-helper': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 5,
+      manaCost: 0,
+      thresholds,
+    },
+    'payload-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'payload-north-site': { cardType: 'site', elements: ['earth'] },
+    'payload-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'payload-south-site': { cardType: 'site', elements: ['earth'] },
+    'payload-target': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 4,
+      manaCost: 0,
+      thresholds,
+    },
+    'payload-trebuchet': {
+      cardType: 'artifact',
+      manaCost: 0,
+      tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps: true,
+      thresholds,
+    },
+    'payload-warded-target': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 5,
+      manaCost: 0,
+      stealth: true,
+      thresholds,
+      ward: true,
+    },
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-payload-trebuchet-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north' as const,
+  };
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      'payload-trebuchet': {
+        ...cards['payload-trebuchet'],
+        tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps: false,
+      } as unknown as GameCardDefinition,
+    },
+    seed: 5,
+  }), /tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps must be true/);
+  const manifest = createGameManifest({ ...input, seed: 5 });
+  assert.deepEqual(manifest.cards['payload-trebuchet'], cards['payload-trebuchet']);
+
+  let session = keep(keep(createGameSession(manifest)));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'payload-bearer' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'payload-helper' && descriptor.cell === 'C4');
+  const bearer = session.state.realm.units.find(({ cardId }) => cardId === 'payload-bearer');
+  const helper = session.state.realm.units.find(({ cardId }) => cardId === 'payload-helper');
+  assert.ok(bearer && helper);
+  take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+    && descriptor.cardId === 'payload-trebuchet'
+    && descriptor.bearer?.instanceId === bearer.instanceId);
+  const payload = session.state.realm.artifacts?.find(({ cardId }) => cardId === 'payload-trebuchet');
+  assert.ok(payload);
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-discard-area-damage'), false);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'payload-target'
+    && descriptor.cell === 'C1'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'payload-warded-target'
+    && descriptor.cell === 'C1'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'payload-burrowed-target'
+    && descriptor.cell === 'C1'
+    && descriptor.region === 'underground');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+
+  const discard = session.state.players.north.hand.spellbook.find(({ cardId }) =>
+    cardId === 'payload-discard');
+  const siteDiscard = session.state.players.north.hand.atlas[0];
+  const target = session.state.realm.units.find(({ cardId }) => cardId === 'payload-target');
+  const warded = session.state.realm.units.find(({ cardId }) => cardId === 'payload-warded-target');
+  const burrowed = session.state.realm.units.find(({ cardId }) =>
+    cardId === 'payload-burrowed-target');
+  assert.ok(discard && siteDiscard && target && warded && burrowed);
+  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-discard-area-damage'
+      && descriptor.artifactInstanceId === payload.instanceId
+      && descriptor.helper.instanceId === helper.instanceId);
+  assert.equal(choices.some(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-discard-area-damage'
+      && descriptor.discardCardInstanceId === discard.instanceId
+      && descriptor.discardZone === 'spellbook'
+      && descriptor.targetLocation.cell === 'C1'
+      && descriptor.targetLocation.region === 'surface'), true);
+  assert.equal(choices.some(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-discard-area-damage'
+      && descriptor.targetLocation.cell === 'C1'
+      && descriptor.targetLocation.region === 'underground'), false);
+
+  const friendly = choices.find(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-discard-area-damage'
+      && descriptor.discardCardInstanceId === discard.instanceId
+      && descriptor.targetLocation.cell === 'C4');
+  assert.ok(friendly);
+  const friendlyResult = stepGame(session, friendly);
+  assert.equal(friendlyResult.accepted, true);
+  if (!friendlyResult.accepted) return;
+  const friendlyBearer = friendlyResult.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === bearer.instanceId);
+  assert.deepEqual({
+    avatarLife: friendlyResult.session.state.players.north.avatar.life,
+    bearerDamage: friendlyBearer?.damage,
+    bearerLance: friendlyBearer?.carriedLanceCount,
+    bearerStealth: friendlyBearer?.stealthed,
+    helperDamage: friendlyResult.session.state.realm.units.find(({ instanceId }) =>
+      instanceId === helper.instanceId)?.damage,
+  }, {
+    avatarLife: 16,
+    bearerDamage: 4,
+    bearerLance: 1,
+    bearerStealth: true,
+    helperDamage: 4,
+  });
+  assert.equal(verifyGameReplay(friendlyResult.session), true);
+
+  const zero = choices.find(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-discard-area-damage'
+      && descriptor.discardCardInstanceId === siteDiscard.instanceId
+      && descriptor.discardZone === 'atlas'
+      && descriptor.targetLocation.cell === 'C1');
+  assert.ok(zero);
+  const zeroResult = stepGame(session, zero);
+  assert.equal(zeroResult.accepted, true);
+  if (!zeroResult.accepted) return;
+  assert.equal(zeroResult.session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === siteDiscard.instanceId), true);
+  assert.equal(zeroResult.receipt.events.filter(({ type }) =>
+    type === 'artifact-discard-area-damage-allocated').every(({ payload }) =>
+    (payload as { amount: number }).amount === 0), true);
+  assert.equal(zeroResult.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === warded.instanceId)?.warded, true);
+  assert.equal(zeroResult.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === target.instanceId)?.damage, 0);
+  assert.equal(verifyGameReplay(zeroResult.session), true);
+
+  const activation = choices.find(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-discard-area-damage'
+      && descriptor.discardCardInstanceId === discard.instanceId
+      && descriptor.discardZone === 'spellbook'
+      && descriptor.targetLocation.cell === 'C1');
+  assert.ok(activation);
+  const result = stepGame(session, activation);
+  assert.equal(result.accepted, true);
+  if (!result.accepted) return;
+  session = result.session;
+  const survivingBearer = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === bearer.instanceId);
+  const survivingHelper = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === helper.instanceId);
+  const survivingWard = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === warded.instanceId);
+  assert.deepEqual({
+    bearerDamage: survivingBearer?.damage,
+    bearerLance: survivingBearer?.carriedLanceCount,
+    bearerStealth: survivingBearer?.stealthed,
+    bearerTapped: survivingBearer?.tapped,
+    burrowedDamage: session.state.realm.units.find(({ instanceId }) =>
+      instanceId === burrowed.instanceId)?.damage,
+    helperDamage: survivingHelper?.damage,
+    helperTapped: survivingHelper?.tapped,
+    southLife: session.state.players.south.avatar.life,
+    targetPresent: session.state.realm.units.some(({ instanceId }) =>
+      instanceId === target.instanceId),
+    wardDamage: survivingWard?.damage,
+    wardStealth: survivingWard?.stealthed,
+    warded: survivingWard?.warded,
+  }, {
+    bearerDamage: 0,
+    bearerLance: 1,
+    bearerStealth: true,
+    bearerTapped: true,
+    burrowedDamage: 0,
+    helperDamage: 0,
+    helperTapped: true,
+    southLife: 16,
+    targetPresent: false,
+    wardDamage: 0,
+    wardStealth: true,
+    warded: false,
+  });
+  assert.equal(session.state.players.north.hand.spellbook.some(({ instanceId }) =>
+    instanceId === discard.instanceId), false);
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === discard.instanceId), true);
+  const allocations = result.receipt.events.filter(({ type }) =>
+    type === 'artifact-discard-area-damage-allocated');
+  assert.equal(allocations.length, 3);
+  assert.equal(allocations.every(({ payload: allocationPayload }) => {
+    const allocation = allocationPayload as {
+      amount?: number;
+      sourceInstanceId?: string;
+    };
+    return allocation.amount === 4 && allocation.sourceInstanceId === payload.instanceId;
+  }), true);
+  assert.deepEqual(result.receipt.events.slice(0, 2).map(({ type }) => type), [
+    'card-discarded',
+    'artifact-discard-area-damage-activated',
+  ]);
+  assert.equal(result.receipt.events.some(({ type }) =>
+    type === 'fight-started' || type === 'strike-damage-allocated' || type === 'lance-broken'), false);
+  assert.equal(result.receipt.randomDraws.length, 0);
+  assert.equal(session.transcript.every(({ randomDraws }) => randomDraws.length === 0), true);
+  assert.equal(verifyGameReplay(session), true);
+});
+
 test('RULE-03/05 Mesmerism transfers a minion and its Deathrite to the new controller', () => {
   const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
   const north: GameDeckSpec = {

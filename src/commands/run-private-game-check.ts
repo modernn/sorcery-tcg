@@ -627,6 +627,25 @@ export type PrivateGameCheck = Readonly<{
     snowLeopard: string;
     twoStepRangeVerified: boolean;
   }>;
+  earthPayloadTrebuchet: Readonly<{
+    acceptedActionCount: number;
+    bothCostsTapped: boolean;
+    causalEventsVerified: boolean;
+    caveTrolls: string;
+    deck: DeckList;
+    discardedToCemetery: boolean;
+    exactCastAndActivation: boolean;
+    legalConstructedDeck: boolean;
+    noRandomDraws: boolean;
+    noStrikeOrLethal: boolean;
+    payloadTrebuchet: string;
+    replayVerified: boolean;
+    scentHounds: string;
+    seed: number;
+    targetsKilledByArtifact: boolean;
+    threeStepRangeVerified: boolean;
+    trebuchetRemainedCarried: boolean;
+  }>;
   earthRescue: Readonly<{
     acceptedActionCount: number;
     boskTroll: string;
@@ -1381,6 +1400,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   bury: NormalizedCard;
   caveIn: NormalizedCard;
   siegeBallista: NormalizedCard;
+  payloadTrebuchet: NormalizedCard;
   borderMilitia: NormalizedCard;
   burrowingMinion: NormalizedCard;
   cards: readonly NormalizedCard[];
@@ -2224,6 +2244,28 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || siegeBallista.thresholds.water !== 0
     || siegeBallista.rarity !== 'exceptional') {
     throw new Error('private carried ranged-damage Artifact no longer matches its supported facts');
+  }
+  const payloadTrebuchet = snapshot.cards.find(({ name }) => name === 'Payload Trebuchet');
+  const payloadTrebuchetTokens = payloadTrebuchet?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
+  if (!payloadTrebuchet
+    || payloadTrebuchet.stableId
+      !== 'card:5137edfbed9848ba5758d36ee904327f98fc4d0ce4c579393980f43e9032f356'
+    || payloadTrebuchet.officialSourceId !== '001-payload_trebuchet-b-f'
+    || payloadTrebuchet.cardType !== 'artifact'
+    || payloadTrebuchetTokens.length !== 30
+    || identityHash(payloadTrebuchetTokens as unknown as JsonValue)
+      !== 'sha256:664cb874957044571ccaadc8b5bed6891fa24c583c70870bb74b6dfbf4fa75c9'
+    || payloadTrebuchet.manaCost !== 5
+    || payloadTrebuchet.attack !== null
+    || payloadTrebuchet.defense !== null
+    || payloadTrebuchet.life !== null
+    || payloadTrebuchet.elements.length !== 0
+    || payloadTrebuchet.thresholds.air !== 0
+    || payloadTrebuchet.thresholds.earth !== 0
+    || payloadTrebuchet.thresholds.fire !== 0
+    || payloadTrebuchet.thresholds.water !== 0
+    || payloadTrebuchet.rarity !== 'elite') {
+    throw new Error('private carried discard-area-damage Artifact no longer matches its supported facts');
   }
   const duel = snapshot.cards.find(({ name }) => name === 'Duel');
   if (!duel
@@ -3491,6 +3533,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     bury,
     caveIn,
     siegeBallista,
+    payloadTrebuchet,
     burrowingMinion,
     cards: snapshot.cards,
     cannotDefendMinion,
@@ -3722,6 +3765,7 @@ function gameDefinition(
   genesisDisableSelfUntilDamaged = false,
   burrowAllMinionsAndArtifactsAtTargetLandSite = false,
   tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps = false,
+  tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -3748,14 +3792,22 @@ function gameDefinition(
     && card.manaCost !== null
     && Number(grantsBearerPower === 2)
       + Number(grantsBearerLethal)
-      + Number(tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps) === 1) {
+      + Number(tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps)
+      + Number(
+        tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps,
+      ) === 1) {
     return {
       cardType: 'artifact',
       ...(grantsBearerPower === 2
         ? { grantsBearerPower }
         : grantsBearerLethal
           ? { grantsBearerLethal: true as const }
-          : { tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps: 3 as const }),
+          : tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps
+            ? { tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps: 3 as const }
+            : {
+              tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps:
+                true as const,
+            }),
       manaCost: card.manaCost,
       thresholds: card.thresholds,
     };
@@ -3939,7 +3991,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -4131,6 +4183,17 @@ function buildManifest(
       ...earthSiegeBallistaBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
     ],
   };
+  const earthPayloadTrebuchetBase = elementalDeck(
+    'earth',
+    [input.scentHounds, input.wildBoars, input.burrowingMinion],
+  );
+  const earthPayloadTrebuchetDeck: GameDeckSpec = {
+    ...earthPayloadTrebuchetBase,
+    spellbook: [
+      input.payloadTrebuchet.stableId,
+      ...earthPayloadTrebuchetBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
+    ],
+  };
   const earthBorderMilitiaDeck = elementalDeck('earth', [], [], [input.borderMilitia]);
   const earthHumbleVillageDeck = elementalDeck('earth', [], [input.humbleVillage]);
   const earthDuelDeck = elementalDeck(
@@ -4230,6 +4293,7 @@ function buildManifest(
       input.slumberingGiantess.stableId,
       input.caveIn.stableId,
       input.siegeBallista.stableId,
+      input.payloadTrebuchet.stableId,
     ],
   };
   const fireStarterDeck = elementalDeck(
@@ -4506,6 +4570,8 @@ function buildManifest(
         ? earthCaveInDeck
       : scenario === 'earth-siege-ballista'
         ? earthSiegeBallistaDeck
+      : scenario === 'earth-payload-trebuchet'
+        ? earthPayloadTrebuchetDeck
       : scenario === 'earth-quagmire'
         ? earthQuagmireDeck
       : scenario === 'earth-holy-ground'
@@ -4685,6 +4751,8 @@ function buildManifest(
         ? earthCaveInDeck
       : scenario === 'earth-siege-ballista'
         ? earthSiegeBallistaDeck
+      : scenario === 'earth-payload-trebuchet'
+        ? earthPayloadTrebuchetDeck
       : scenario === 'earth-quagmire'
         ? earthQuagmireDeck
       : scenario === 'earth-holy-ground'
@@ -4881,6 +4949,7 @@ function buildManifest(
       card.stableId === input.slumberingGiantess.stableId,
       card.stableId === input.caveIn.stableId,
       card.stableId === input.siegeBallista.stableId,
+      card.stableId === input.payloadTrebuchet.stableId,
     ),
   ]));
   return {
@@ -6410,6 +6479,85 @@ function findEarthSiegeBallistaOpening(
       };
   }
   throw new Error('private Siege Ballista scenario no longer produces its supported opening');
+}
+
+function findEarthPayloadTrebuchetOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  bearerInstanceId: string;
+  caveTrollsInstanceId: string;
+  helperInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSpellDrawCount: number;
+  payloadTrebuchetInstanceId: string;
+  seed: number;
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string];
+  targetMinionInstanceId: string;
+}> {
+  // Calibrated against the ignored exact-card authority snapshot.
+  const seed = 188;
+  const built = buildManifest(input, seed, 'earth-payload-trebuchet');
+  const session = createGameSession(built.manifest);
+  const northEarthSites = [
+    ...session.state.players.north.hand.atlas,
+    ...session.state.players.north.atlas.slice(0, 4),
+  ].filter(({ cardId }) => {
+    const definition = session.state.cards[cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('earth');
+  });
+  const southEarthSites = session.state.players.south.hand.atlas.filter(({ cardId }) => {
+    const definition = session.state.cards[cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('earth');
+  });
+  const northWindow = [
+    ...session.state.players.north.hand.spellbook,
+    ...session.state.players.north.spellbook.slice(0, 4),
+  ];
+  const scentHounds = session.state.players.north.hand.spellbook
+    .find(({ cardId }) => cardId === input.scentHounds.stableId);
+  const payloadTrebuchet = northWindow
+    .find(({ cardId }) => cardId === input.payloadTrebuchet.stableId);
+  const caveTrolls = northWindow
+    .find(({ cardId }) => cardId === input.burrowingMinion.stableId);
+  const targetMinion = [
+    ...session.state.players.south.hand.spellbook,
+    ...session.state.players.south.spellbook.slice(0, 2),
+  ].find(({ cardId }) =>
+    cardId === input.scentHounds.stableId || cardId === input.wildBoars.stableId);
+  if (northEarthSites.length >= 5
+    && southEarthSites.length >= 2
+    && scentHounds
+    && payloadTrebuchet
+    && caveTrolls
+    && targetMinion) {
+    const northDrawCount = (instanceId: string): number => {
+      if (session.state.players.north.hand.spellbook
+        .some((candidate) => candidate.instanceId === instanceId)) return 0;
+      return session.state.players.north.spellbook
+        .findIndex((candidate) => candidate.instanceId === instanceId) + 1;
+    };
+    return {
+      ...built,
+      bearerInstanceId: scentHounds.instanceId,
+      caveTrollsInstanceId: caveTrolls.instanceId,
+      helperInstanceId: session.state.players.north.avatar.card.instanceId,
+      northSpellDrawCount: Math.max(
+        northDrawCount(payloadTrebuchet.instanceId),
+        northDrawCount(caveTrolls.instanceId),
+      ),
+      payloadTrebuchetInstanceId: payloadTrebuchet.instanceId,
+      seed,
+      session,
+      southSiteInstanceIds: [
+        southEarthSites[0]!.instanceId,
+        southEarthSites[1]!.instanceId,
+      ],
+      targetMinionInstanceId: targetMinion.instanceId,
+    };
+  }
+  throw new Error('private Payload Trebuchet scenario no longer produces its supported opening');
 }
 
 function findEarthRescueOpening(
@@ -10936,6 +11084,221 @@ function runEarthSiegeBallista(
       && targetBefore?.location === 'C1'
       && targetBefore.region === 'surface'
       && session.state.realm.sites.C2 !== undefined,
+  });
+}
+
+function runEarthPayloadTrebuchet(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthPayloadTrebuchet'] {
+  const opening = findEarthPayloadTrebuchetOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.bearerInstanceId
+    && descriptor.cell === 'C4'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.targetMinionInstanceId
+    && descriptor.cell === 'C1'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cell === 'B4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cell === 'A4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cell === 'A3');
+  for (let draw = 0; draw < opening.northSpellDrawCount; draw += 1) {
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  }
+
+  const castResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-artifact'
+      && descriptor.cardInstanceId === opening.payloadTrebuchetInstanceId
+      && descriptor.bearer?.kind === 'minion'
+      && descriptor.bearer.instanceId === opening.bearerInstanceId));
+  if (!castResult.accepted) throw new Error('private Payload Trebuchet cast was rejected');
+  session = castResult.session;
+
+  const bearerBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.bearerInstanceId);
+  const helperBefore = session.state.players.north.avatar;
+  const targetBefore = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.targetMinionInstanceId);
+  const activationChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'activate-artifact-discard-area-damage'
+      && descriptor.artifactInstanceId === opening.payloadTrebuchetInstanceId
+      && descriptor.helper.kind === 'avatar'
+      && descriptor.helper.instanceId === opening.helperInstanceId
+      && descriptor.discardCardInstanceId === opening.caveTrollsInstanceId
+      && descriptor.discardZone === 'spellbook'
+      && descriptor.targetLocation.cell === 'C1'
+      && descriptor.targetLocation.region === 'surface');
+  const activation = activationChoices[0];
+  if (!activation || activationChoices.length !== 1) {
+    throw new Error('private Payload Trebuchet exact activation is unavailable or ambiguous');
+  }
+  const activationResult = stepGame(session, activation);
+  if (!activationResult.accepted) {
+    throw new Error('private Payload Trebuchet activation was rejected');
+  }
+  session = activationResult.session;
+
+  const castEvent = castResult.receipt.events[0];
+  const castPayload = castEvent && isJsonRecord(castEvent.payload) ? castEvent.payload : undefined;
+  const events = activationResult.receipt.events;
+  const discardEvent = events[0];
+  const discardPayload = discardEvent && isJsonRecord(discardEvent.payload)
+    ? discardEvent.payload
+    : undefined;
+  const activatedEvent = events[1];
+  const activatedPayload = activatedEvent && isJsonRecord(activatedEvent.payload)
+    ? activatedEvent.payload
+    : undefined;
+  const allocationEvents = events.filter(({ type }) =>
+    type === 'artifact-discard-area-damage-allocated');
+  const expectedTargetIds = [
+    session.state.players.south.avatar.card.instanceId,
+    opening.targetMinionInstanceId,
+  ].sort((left, right) => left.localeCompare(right));
+  const allocationTargetIds = allocationEvents.flatMap(({ payload }) =>
+    isJsonRecord(payload) && typeof payload.targetInstanceId === 'string'
+      ? [payload.targetInstanceId]
+      : []);
+  const targetDamageEvents = events.filter(({ payload, type }) =>
+    type === 'damage-dealt'
+      && isJsonRecord(payload)
+      && payload.instanceId === opening.targetMinionInstanceId);
+  const targetDeathEvents = events.filter(({ payload, type }) =>
+    type === 'minion-died'
+      && isJsonRecord(payload)
+      && payload.instanceId === opening.targetMinionInstanceId);
+  const bearerAfter = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.bearerInstanceId);
+  const helperAfter = session.state.players.north.avatar;
+  const trebuchetAfter = session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === opening.payloadTrebuchetInstanceId);
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    bothCostsTapped: bearerBefore?.tapped === false
+      && helperBefore?.tapped === false
+      && bearerAfter?.tapped === true
+      && helperAfter?.tapped === true,
+    causalEventsVerified: discardEvent?.type === 'card-discarded'
+      && activatedEvent?.type === 'artifact-discard-area-damage-activated'
+      && discardPayload?.cardId === input.burrowingMinion.stableId
+      && discardPayload.instanceId === opening.caveTrollsInstanceId
+      && discardPayload.owner === 'north'
+      && discardPayload.seat === 'north'
+      && discardPayload.sourceInstanceId === opening.payloadTrebuchetInstanceId
+      && discardPayload.zone === 'spellbook'
+      && activatedPayload?.bearerInstanceId === opening.bearerInstanceId
+      && activatedPayload.discardCardInstanceId === opening.caveTrollsInstanceId
+      && activatedPayload.helperInstanceId === opening.helperInstanceId
+      && activatedPayload.seat === 'north'
+      && activatedPayload.sourceInstanceId === opening.payloadTrebuchetInstanceId
+      && activatedPayload.targetCell === 'C1'
+      && activatedPayload.targetRegion === 'surface'
+      && allocationEvents.length === expectedTargetIds.length
+      && canonicalJson(allocationTargetIds as unknown as JsonValue)
+        === canonicalJson(expectedTargetIds as unknown as JsonValue)
+      && events.slice(2, 2 + allocationEvents.length).every((event, index) =>
+        event === allocationEvents[index])
+      && allocationEvents.every(({ payload }) => isJsonRecord(payload)
+        && payload.amount === 3
+        && payload.sourceInstanceId === opening.payloadTrebuchetInstanceId),
+    caveTrolls:
+      opening.names.get(input.burrowingMinion.stableId) ?? input.burrowingMinion.stableId,
+    deck,
+    discardedToCemetery: session.state.players.north.hand.spellbook
+      .every(({ instanceId }) => instanceId !== opening.caveTrollsInstanceId)
+      && session.state.players.north.cemetery.some(({ instanceId }) =>
+        instanceId === opening.caveTrollsInstanceId),
+    exactCastAndActivation: castResult.receipt.events.length === 1
+      && castEvent?.type === 'artifact-conjured'
+      && castPayload?.cardId === input.payloadTrebuchet.stableId
+      && castPayload.instanceId === opening.payloadTrebuchetInstanceId
+      && castPayload.manaPaid === 5
+      && castPayload.bearerInstanceId === opening.bearerInstanceId
+      && castPayload.bearerKind === 'minion'
+      && castPayload.bearerSeat === 'north'
+      && activationChoices.length === 1,
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && deck.spellbook.find(({ name }) => name === input.payloadTrebuchet.name)?.copies === 1,
+    noRandomDraws: activationResult.receipt.randomDraws.length === 0
+      && session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    noStrikeOrLethal: events.every(({ type }) =>
+      type !== 'fight-started'
+        && type !== 'strike-damage-allocated'
+        && type !== 'lethal-damage')
+      && bearerAfter?.damage === 0
+      && helperAfter.life === helperBefore.life,
+    payloadTrebuchet:
+      opening.names.get(input.payloadTrebuchet.stableId) ?? input.payloadTrebuchet.stableId,
+    replayVerified: verifyGameReplay(session),
+    scentHounds: opening.names.get(input.scentHounds.stableId) ?? input.scentHounds.stableId,
+    seed: opening.seed,
+    targetsKilledByArtifact: targetBefore?.damage === 0
+      && targetDamageEvents.length === 1
+      && targetDamageEvents.every(({ payload }) =>
+        isJsonRecord(payload)
+          && payload.amount === 3
+          && payload.accumulated === 3)
+      && targetDeathEvents.length === 1
+      && session.state.realm.units.every((candidate) =>
+        candidate.instanceId !== opening.targetMinionInstanceId)
+      && session.state.players.south.cemetery.some((card) =>
+        card.instanceId === opening.targetMinionInstanceId),
+    threeStepRangeVerified: bearerBefore?.location === 'C4'
+      && bearerBefore.region === 'surface'
+      && targetBefore?.location === 'C1'
+      && targetBefore.region === 'surface'
+      && session.state.realm.sites.C3 !== undefined
+      && session.state.realm.sites.C2 !== undefined,
+    trebuchetRemainedCarried: trebuchetAfter !== undefined
+      && 'bearer' in trebuchetAfter
+      && trebuchetAfter.bearer.kind === 'minion'
+      && trebuchetAfter.bearer.instanceId === opening.bearerInstanceId,
   });
 }
 
@@ -18504,6 +18867,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthSlumberingGiantess = runEarthSlumberingGiantess(input);
   const earthCaveIn = runEarthCaveIn(input);
   const earthSiegeBallista = runEarthSiegeBallista(input);
+  const earthPayloadTrebuchet = runEarthPayloadTrebuchet(input);
   const earthBorderMilitia = runEarthBorderMilitia(input);
   const earthHumbleVillage = runEarthHumbleVillage(input);
   const earthDuel = runEarthDuel(input);
@@ -18719,6 +19083,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthSlumberingGiantess,
     earthCaveIn,
     earthSiegeBallista,
+    earthPayloadTrebuchet,
     earthBorderMilitia,
     earthHumbleVillage,
     earthDuel,
