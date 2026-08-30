@@ -203,6 +203,7 @@ export type GameCardDefinition =
     occupiesSquareArea?: 2;
     otherControlledMortalsPowerBonus?: 1;
     otherNearbyAlliesPowerBonus?: 1;
+    preventsDamageFromUnitsWithPowerAtLeast?: number;
     provides?: GameElement;
     ranged?: boolean;
     sacrificeMinionAtSummoningLocationForManaDiscount?: 2;
@@ -337,6 +338,18 @@ type PendingCombat = Readonly<{
   originalTarget: CombatTarget | null;
   region?: 'underground' | 'underwater' | 'void';
   targetRemoved: boolean;
+}>;
+
+type DamageAllocationSource = 'attacker-unit' | 'non-unit';
+
+type DamageSourceSnapshot =
+  | Readonly<{ currentPower: number; instanceId: StateHash; kind: 'unit' }>
+  | Readonly<{ kind: 'non-unit' }>;
+
+type DamageContribution = Readonly<{
+  amount: number;
+  lethal: boolean;
+  source: DamageSourceSnapshot;
 }>;
 
 type PendingGenesisSpell = Readonly<{
@@ -1961,6 +1974,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && card.otherControlledMortalsPowerBonus !== 1) {
     throw new RangeError(`${path}.otherControlledMortalsPowerBonus must be 1`);
   }
+  if (card.preventsDamageFromUnitsWithPowerAtLeast !== undefined
+    && (!Number.isSafeInteger(card.preventsDamageFromUnitsWithPowerAtLeast)
+      || card.preventsDamageFromUnitsWithPowerAtLeast < 1
+      || card.preventsDamageFromUnitsWithPowerAtLeast > MAX_COMBAT_STAT)) {
+    throw new RangeError(
+      `${path}.preventsDamageFromUnitsWithPowerAtLeast must be a safe integer between 1 and ${MAX_COMBAT_STAT}`,
+    );
+  }
   if (card.occupiesSquareArea !== undefined && card.occupiesSquareArea !== 2) {
     throw new RangeError(`${path}.occupiesSquareArea must be 2`);
   }
@@ -2062,7 +2083,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.ward !== undefined && typeof card.ward !== 'boolean') {
     throw new RangeError(`${path}.ward must be boolean`);
   }
-  if (card.takesLessDamage === 1 && card.ward) {
+  if (Number(card.takesLessDamage === 1)
+      + Number(card.ward === true)
+      + Number(card.preventsDamageFromUnitsWithPowerAtLeast !== undefined) > 1) {
     throw new RangeError(`${path} competing damage prevention effects are unsupported`);
   }
   if (card.voidwalk !== undefined && typeof card.voidwalk !== 'boolean') {
@@ -2403,6 +2426,12 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               : {}),
             ...(card.otherNearbyAlliesPowerBonus === 1
               ? { otherNearbyAlliesPowerBonus: 1 as const }
+              : {}),
+            ...(card.preventsDamageFromUnitsWithPowerAtLeast !== undefined
+              ? {
+                preventsDamageFromUnitsWithPowerAtLeast:
+                  card.preventsDamageFromUnitsWithPowerAtLeast,
+              }
               : {}),
             ...(card.provides ? { provides: card.provides } : {}),
             ...(card.ranged === true ? { ranged: true } : {}),
@@ -4426,6 +4455,29 @@ function resolveMinionDeaths(
   };
   const deathOutcomes: GameOutcome[] = [];
   let artifacts = state.realm.artifacts;
+  const initialSourceState: GameState = deepFreeze({
+    ...state,
+    players: {
+      north: startingPlayers.north,
+      south: startingPlayers.south,
+    },
+    realm: {
+      ...state.realm,
+      ...(artifacts ? { artifacts } : {}),
+      units: [...units],
+    },
+  });
+  const damageSourceSnapshots = new Map<StateHash, DamageSourceSnapshot>(
+    deaths.map((dead) => [dead.instanceId, {
+      currentPower: unitStatus(initialSourceState, {
+        instanceId: dead.instanceId,
+        kind: 'minion',
+        seat: dead.controller,
+      }).attack,
+      instanceId: dead.instanceId,
+      kind: 'unit' as const,
+    }]),
+  );
   const resolvedDeaths = [...deaths];
   const deadIds = new Set(resolvedDeaths.map(({ instanceId }) => instanceId));
   const resolvedDefeatedAvatars = new Set(defeatedAvatars);
@@ -4453,6 +4505,15 @@ function resolveMinionDeaths(
         }).defense);
       if (newlyLethal.length === 0) break;
       newlyLethal.forEach((unit) => {
+        damageSourceSnapshots.set(unit.instanceId, {
+          currentPower: unitStatus(projectedState, {
+            instanceId: unit.instanceId,
+            kind: 'minion',
+            seat: unit.controller,
+          }).attack,
+          instanceId: unit.instanceId,
+          kind: 'unit',
+        });
         deadIds.add(unit.instanceId);
         resolvedDeaths.push(unit);
       });
@@ -4460,8 +4521,18 @@ function resolveMinionDeaths(
     }
   };
   const appendDeaths = (newDeaths: readonly UnitInstance[]): void => {
+    const projectedState = projectedDeathState();
     for (const dead of newDeaths) {
       if (deadIds.has(dead.instanceId)) continue;
+      damageSourceSnapshots.set(dead.instanceId, {
+        currentPower: unitStatus(projectedState, {
+          instanceId: dead.instanceId,
+          kind: 'minion',
+          seat: dead.controller,
+        }).attack,
+        instanceId: dead.instanceId,
+        kind: 'unit',
+      });
       deadIds.add(dead.instanceId);
       resolvedDeaths.push(dead);
     }
@@ -4500,6 +4571,8 @@ function resolveMinionDeaths(
           kind: 'minion',
           seat: dead.controller,
         }));
+      const sourceSnapshot = damageSourceSnapshots.get(dead.instanceId);
+      if (!sourceSnapshot) throw new Error('missing Deathrite damage-source snapshot');
       const triggeredDeaths: UnitInstance[] = [];
       for (const target of targets) {
         const amount = deathriteDamage;
@@ -4577,7 +4650,19 @@ function resolveMinionDeaths(
           instanceId === target.instanceId);
         const unit = survivingUnits[index];
         if (!unit) continue;
-        if (unit.warded) {
+        const sources: readonly DamageContribution[] = [{
+          amount,
+          lethal: sourceLethal,
+          source: sourceSnapshot,
+        }];
+        const unpreventedSources = unpreventedDamageContributions(
+          projectedState,
+          target,
+          sources,
+        );
+        const unpreventedAmount = unpreventedSources.reduce((total, source) =>
+          total + source.amount, 0);
+        if (unpreventedAmount > 0 && unit.warded) {
           survivingUnits[index] = deepFreeze({ ...unit, warded: false });
           deathOutcomes.push(
             {
@@ -4599,7 +4684,10 @@ function resolveMinionDeaths(
           continue;
         }
         const status = unitStatus(projectedState, target);
-        const dealt = Math.max(0, amount - status.takesLessDamage);
+        const dealt = unpreventedSources.reduce((total, source) =>
+          total + Math.max(0, source.amount - status.takesLessDamage), 0);
+        const lethalDealt = unpreventedSources.some((source) =>
+          source.lethal && Math.max(0, source.amount - status.takesLessDamage) > 0);
         const accumulated = unit.damage + dealt;
         const awakened = dealt > 0 && unit.disabledUntilDamaged === true;
         const updated = { ...unit, damage: accumulated };
@@ -4623,7 +4711,7 @@ function resolveMinionDeaths(
           });
         }
         if (accumulated > 0
-          && (accumulated >= status.defense || (dealt > 0 && sourceLethal))) {
+          && (accumulated >= status.defense || lethalDealt)) {
           triggeredDeaths.push(survivingUnits[index]!);
         }
       }
@@ -5095,10 +5183,35 @@ function resolveSiteDeaths(
   };
 }
 
+function unpreventedDamageContributions(
+  state: GameState,
+  target: GameUnitRef,
+  sources: readonly DamageContribution[],
+): readonly DamageContribution[] {
+  if (target.kind === 'avatar') return sources;
+  const unit = state.realm.units.find(({ instanceId }) => instanceId === target.instanceId);
+  if (!unit) throw new Error('unreachable damage-prevention minion');
+  const definition = cardDefinition(state, unit.cardId);
+  if (definition.cardType !== 'minion') {
+    throw new Error('damage-prevention minion lacks minion definition');
+  }
+  const status = unitStatus(state, target);
+  const threshold = status.disabled
+    ? undefined
+    : definition.preventsDamageFromUnitsWithPowerAtLeast;
+  if (threshold === undefined) return sources;
+  if (unit.warded || status.takesLessDamage > 0) {
+    throw new Error('unsupported competing damage prevention effects');
+  }
+  return sources.filter(({ source }) =>
+    source.kind !== 'unit' || source.currentPower < threshold);
+}
+
 function resolveFightWindow(
   state: GameState,
   pending: PendingCombat,
   outcomes: readonly GameOutcome[],
+  allocationSource: DamageAllocationSource,
   attackerStrikes: boolean,
   combatantsStrike: boolean | readonly GameUnitRef[],
   interactingRefs?: readonly GameUnitRef[],
@@ -5107,8 +5220,12 @@ function resolveFightWindow(
 ): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
   const allocations = new Map(pending.allocations.map(({ amount, targetInstanceId }) =>
     [targetInstanceId, amount]));
-  const damageSources = new Map<StateHash, readonly number[]>();
-  const lethalDamage = new Set<StateHash>();
+  const unitSource = (ref: GameUnitRef): DamageSourceSnapshot => ({
+    currentPower: unitStatus(state, ref).attack,
+    instanceId: ref.instanceId,
+    kind: 'unit',
+  });
+  const damageSources = new Map<StateHash, readonly DamageContribution[]>();
   const attackerStatus = unitStatus(state, pending.attacker);
   const attackerCanStrike = attackerStrikes && !attackerStatus.disabled;
   const requestedCombatants = typeof combatantsStrike === 'boolean'
@@ -5119,27 +5236,26 @@ function resolveFightWindow(
   if (strikingCombatants.length > 0) {
     damageSources.set(
       pending.attacker.instanceId,
-      strikingCombatants.map((ref) => strikeDamage(state, ref)),
+      strikingCombatants.map((ref) => ({
+        amount: strikeDamage(state, ref),
+        lethal: unitStatus(state, ref).lethal,
+        source: unitSource(ref),
+      })),
     );
   }
   if (attackerCanStrike) {
+    const source = allocationSource === 'attacker-unit'
+      ? unitSource(pending.attacker)
+      : { kind: 'non-unit' as const };
     pending.combatants.forEach((ref) =>
-      damageSources.set(ref.instanceId, [allocations.get(ref.instanceId) ?? 0]));
+      damageSources.set(ref.instanceId, [{
+        amount: allocations.get(ref.instanceId) ?? 0,
+        lethal: allocationSource === 'attacker-unit'
+          && allocationsUseAttackerLethal
+          && attackerStatus.lethal,
+        source,
+      }]));
   }
-  pending.combatants.forEach((ref) => {
-    const striker = unitStatus(state, ref);
-    if (strikingCombatants.some(({ instanceId }) => instanceId === ref.instanceId)
-      && striker.lethal
-      && strikeDamage(state, ref) > attackerStatus.takesLessDamage) {
-      lethalDamage.add(pending.attacker.instanceId);
-    }
-    if (attackerCanStrike
-      && allocationsUseAttackerLethal
-      && attackerStatus.lethal
-      && (allocations.get(ref.instanceId) ?? 0) > unitStatus(state, ref).takesLessDamage) {
-      lethalDamage.add(ref.instanceId);
-    }
-  });
 
   const interaction = recordInteraction(state, interactingRefs ?? [
     ...(attackerCanStrike ? [pending.attacker] : []),
@@ -5161,7 +5277,7 @@ function resolveFightWindow(
   ];
   for (const ref of damagedRefs) {
     const sources = damageSources.get(ref.instanceId) ?? [];
-    const amount = sources.reduce((total, source) => total + source, 0);
+    const amount = sources.reduce((total, source) => total + source.amount, 0);
     if (ref.kind === 'avatar') {
       const player = players[ref.seat];
       const avatar = player.avatar;
@@ -5215,7 +5331,11 @@ function resolveFightWindow(
     const index = units.findIndex(({ instanceId }) => instanceId === ref.instanceId);
     const unit = units[index];
     if (!unit) throw new Error('unreachable fight minion');
-    if (amount > 0 && unit.warded) {
+    const status = unitStatus(state, ref);
+    const unpreventedSources = unpreventedDamageContributions(state, ref, sources);
+    const unpreventedAmount = unpreventedSources.reduce((total, source) =>
+      total + source.amount, 0);
+    if (unpreventedAmount > 0 && unit.warded) {
       units[index] = deepFreeze({ ...unit, warded: false });
       damageOutcomes.push(
         {
@@ -5233,8 +5353,11 @@ function resolveFightWindow(
       );
       continue;
     }
-    const reduction = unitStatus(state, ref).takesLessDamage;
-    const dealt = sources.reduce((total, source) => total + Math.max(0, source - reduction), 0);
+    const reduction = status.takesLessDamage;
+    const dealt = unpreventedSources.reduce((total, source) =>
+      total + Math.max(0, source.amount - reduction), 0);
+    const lethalDealt = unpreventedSources.some((source) =>
+      source.lethal && Math.max(0, source.amount - reduction) > 0);
     const accumulated = unit.damage + dealt;
     const awakened = dealt > 0 && unit.disabledUntilDamaged === true;
     const updated = { ...unit, damage: accumulated };
@@ -5258,8 +5381,7 @@ function resolveFightWindow(
       });
     }
     if (accumulated > 0
-      && (accumulated >= unitStatus(state, ref).defense
-        || (dealt > 0 && lethalDamage.has(ref.instanceId)))) {
+      && (accumulated >= status.defense || lethalDealt)) {
       deaths.push(units[index]!);
     }
   }
@@ -5331,6 +5453,7 @@ function finishFight(
       state,
       pending,
       outcomes,
+      'attacker-unit',
       attackerStrikesFirst,
       firstCombatants,
     );
@@ -5347,6 +5470,7 @@ function finishFight(
       earlyState,
       deepFreeze({ ...pending, combatants: survivors }),
       earlyOutcomes,
+      'attacker-unit',
       !attackerStrikesFirst,
       survivors.filter(({ instanceId }) => !firstIds.has(instanceId)),
     );
@@ -5356,6 +5480,7 @@ function finishFight(
     state,
     pending,
     outcomes,
+    'attacker-unit',
     true,
     returnStrikes,
   );
@@ -6687,6 +6812,7 @@ function applyDescriptor(
         path.state,
         pending,
         [...outcomesBeforeStrike, ...allocationOutcomes],
+        'attacker-unit',
         true,
         false,
         [descriptor.ally],
@@ -7350,6 +7476,7 @@ function applyDescriptor(
         castState,
         pending,
         [...castOutcomes, ...allocationOutcomes],
+        'non-unit',
         true,
         false,
         [caster],
@@ -7405,6 +7532,7 @@ function applyDescriptor(
         castState,
         pending,
         [...castOutcomes, ...allocationOutcomes],
+        'non-unit',
         true,
         false,
         [caster],
@@ -7464,6 +7592,7 @@ function applyDescriptor(
           },
           type: 'magic-damage-allocated',
         }],
+        'non-unit',
         true,
         false,
         [caster],
@@ -7502,9 +7631,10 @@ function applyDescriptor(
           amount: definition.damageTargetUnit,
           sourceInstanceId: card.instanceId,
           targetInstanceId: targetRef.instanceId,
-        },
-        type: 'magic-damage-allocated',
-      }],
+          },
+          type: 'magic-damage-allocated',
+        }],
+      'non-unit',
       true,
       false,
       [caster],
@@ -7840,6 +7970,7 @@ function applyDescriptor(
         settlement.state,
         pending,
         [...summonOutcomes, ...settlement.outcomes, ...allocationOutcomes],
+        'attacker-unit',
         true,
         false,
         [source],
@@ -7911,6 +8042,7 @@ function applyDescriptor(
             type: 'genesis-damage-allocated',
           },
         ],
+        'attacker-unit',
         true,
         false,
         [source],
@@ -8109,6 +8241,7 @@ function applyDescriptor(
         },
         type: 'artifact-damage-allocated',
       }],
+      'non-unit',
       true,
       false,
       [],
@@ -8225,6 +8358,7 @@ function applyDescriptor(
       costState,
       pending,
       events,
+      'non-unit',
       true,
       false,
       [],
@@ -8345,6 +8479,7 @@ function applyDescriptor(
       costState,
       pending,
       events,
+      'non-unit',
       true,
       false,
       [],
@@ -8431,6 +8566,7 @@ function applyDescriptor(
       activatedState,
       pending,
       [activated, ...interaction.outcomes, ...allocationOutcomes],
+      'attacker-unit',
       true,
       false,
       [],
@@ -8542,6 +8678,7 @@ function applyDescriptor(
       randomizedState,
       pending,
       [activated, ...interaction.outcomes],
+      'attacker-unit',
       true,
       false,
       [],

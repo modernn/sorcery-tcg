@@ -922,7 +922,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 24 : 35,
+        preset.id === 'air-vs-earth-lesson' ? 25 : 35,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -930,7 +930,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 35 : 24,
+        preset.id === 'air-vs-earth-lesson' ? 35 : 25,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -973,6 +973,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Midnight Rogue': 2,
     'Plumed Pegasus': 2,
     'Roaming Monster': 1,
+    'Sling Pixies': 1,
     'Snow Leopard': 2,
     'Spectral Stalker': 2,
     Teleport: 1,
@@ -990,6 +991,20 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     assert.equal(grandmasterWizard.spellcaster, true);
     assert.equal(grandmasterWizard.genesisDrawSpells, 3);
     assert.deepEqual(grandmasterWizard.thresholds, { air: 2, earth: 0, fire: 0, water: 0 });
+  }
+  const slingPixiesId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Sling Pixies')?.[0];
+  assert.ok(slingPixiesId);
+  const slingPixies = airLesson.manifest.cards[slingPixiesId];
+  assert.equal(slingPixies?.cardType, 'minion');
+  if (slingPixies?.cardType === 'minion') {
+    assert.equal(slingPixies.attack, 1);
+    assert.equal(slingPixies.defense, 1);
+    assert.equal(slingPixies.manaCost, 1);
+    assert.equal(slingPixies.airborne, true);
+    assert.equal(slingPixies.ranged, true);
+    assert.equal(slingPixies.preventsDamageFromUnitsWithPowerAtLeast, 4);
+    assert.deepEqual(slingPixies.thresholds, { air: 1, earth: 0, fire: 0, water: 0 });
   }
   assert.deepEqual(summarize(airLesson, 'south', 'atlas'), {
     Bedrock: 1,
@@ -1450,6 +1465,25 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airGrandmasterWizard.deck.spellbook
     .find(({ name }) => name === 'Grandmaster Wizard')?.copies, 1);
   assert.equal(result.airGrandmasterWizard.replayVerified, true);
+  assert.equal(result.airSlingPixies.slingPixies, 'Sling Pixies');
+  assert.equal(result.airSlingPixies.vikings, 'Vikings');
+  assert.equal(result.airSlingPixies.raalDromedary, 'Raal Dromedary');
+  assert.equal(result.airSlingPixies.seed, 280);
+  assert.equal(result.airSlingPixies.acceptedActionCount, 53);
+  assert.equal(result.airSlingPixies.currentPowersVerified, true);
+  assert.equal(result.airSlingPixies.firstFightPrevented, true);
+  assert.equal(result.airSlingPixies.secondFightKilledSling, true);
+  assert.equal(result.airSlingPixies.causalEventsVerified, true);
+  assert.equal(result.airSlingPixies.noRandomDraws, true);
+  assert.equal(result.airSlingPixies.unsupportedMechanicsAbsent, true);
+  assert.equal(result.airSlingPixies.legalConstructedDeck, true);
+  assert.equal(result.airSlingPixies.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airSlingPixies.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airSlingPixies.deck.spellbook
+    .find(({ name }) => name === 'Sling Pixies')?.copies, 3);
+  assert.equal(result.airSlingPixies.replayVerified, true);
   assert.equal(result.airSpellcasterFreeze.apprenticeWizard, 'Apprentice Wizard');
   assert.equal(result.airSpellcasterFreeze.freeze, 'Freeze');
   assert.equal(result.airSpellcasterFreeze.seravaTownsfolk, 'Serava Townsfolk');

@@ -293,6 +293,22 @@ export type PrivateGameCheck = Readonly<{
     spellcasterAndZeroPowerVerified: boolean;
     unsupportedMechanicsAbsent: boolean;
   }>;
+  airSlingPixies: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    currentPowersVerified: boolean;
+    deck: DeckList;
+    firstFightPrevented: boolean;
+    legalConstructedDeck: boolean;
+    noRandomDraws: boolean;
+    raalDromedary: string;
+    replayVerified: boolean;
+    secondFightKilledSling: boolean;
+    seed: number;
+    slingPixies: string;
+    unsupportedMechanicsAbsent: boolean;
+    vikings: string;
+  }>;
   airLeyline: Readonly<{
     acceptedActionCount: number;
     deck: DeckList;
@@ -1533,6 +1549,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   fatality: NormalizedCard;
   genesisSpellMinion: NormalizedCard;
   grandmasterWizard: NormalizedCard;
+  slingPixies: NormalizedCard;
   genesisMinion: NormalizedCard;
   geomancer: NormalizedCard;
   gothicTower: NormalizedCard;
@@ -3410,6 +3427,29 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || grandmasterWizard.subtypes[0] !== 'Mortal') {
     throw new Error('private multi-spell Genesis Spellcaster no longer matches its supported facts');
   }
+  const slingPixies = snapshot.cards.find(({ name }) => name === 'Sling Pixies');
+  if (!slingPixies
+    || slingPixies.stableId
+      !== 'card:1f463746a43c01c5deee69146de10c3421ea3b457700b7a4b46e341bdd139ad5'
+    || slingPixies.officialSourceId !== '001-sling_pixies-b-f'
+    || slingPixies.cardType !== 'minion'
+    || ruleTextDigest(slingPixies.rulesText)
+      !== 'sha256:23c997d5d73ae337aaa54a7b689325ab873dc7fa1e6ec330df5671dce31d41ac'
+    || slingPixies.manaCost !== 1
+    || slingPixies.attack !== 1
+    || slingPixies.defense !== 1
+    || slingPixies.life !== null
+    || slingPixies.elements.length !== 1
+    || slingPixies.elements[0] !== 'air'
+    || slingPixies.thresholds.air !== 1
+    || slingPixies.thresholds.earth !== 0
+    || slingPixies.thresholds.fire !== 0
+    || slingPixies.thresholds.water !== 0
+    || slingPixies.rarity !== 'exceptional'
+    || slingPixies.subtypes.length !== 1
+    || slingPixies.subtypes[0] !== 'Faerie') {
+    throw new Error('private unit-source damage prevention minion no longer matches its supported facts');
+  }
   const polarBears = snapshot.cards.find(({ name }) => name === 'Polar Bears');
   if (!polarBears
     || polarBears.cardType !== 'minion'
@@ -3786,6 +3826,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     fatality,
     genesisSpellMinion,
     grandmasterWizard,
+    slingPixies,
     genesisMinion,
     geomancer,
     gothicTower,
@@ -4000,6 +4041,7 @@ function gameDefinition(
   immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns = false,
   occupiesSquareArea: 0 | 2 = 0,
   deathriteDamageEachUnitHere: 0 | 3 = 0,
+  preventsDamageFromUnitsWithPowerAtLeast: 0 | 4 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4215,6 +4257,9 @@ function gameDefinition(
         ? { otherControlledMortalsPowerBonus: 1 as const }
         : {}),
       ...(occupiesSquareArea ? { occupiesSquareArea } : {}),
+      ...(preventsDamageFromUnitsWithPowerAtLeast
+        ? { preventsDamageFromUnitsWithPowerAtLeast }
+        : {}),
       ...(provides ? { provides } : {}),
       ranged,
       ...(sacrificeMinionAtSummoningLocationForManaDiscount
@@ -4246,7 +4291,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -4545,6 +4590,7 @@ function buildManifest(
     spellbook: [
       ...Array(2).fill(input.genesisSpellMinion.stableId),
       input.grandmasterWizard.stableId,
+      input.slingPixies.stableId,
       ...Array(2).fill(input.movementTwoMinion.stableId),
       ...Array(2).fill(input.airborneMinion.stableId),
       ...Array(2).fill(input.stealthTargetMinion.stableId),
@@ -4683,6 +4729,8 @@ function buildManifest(
       ...airGrandmasterWizardBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
     ],
   };
+  const airSlingPixiesDeck = elementalDeck('air', [input.slingPixies]);
+  const fireSlingPixiesDeck = elementalDeck('fire', [input.vikings, input.raalDromedary]);
   const airLeylineDeck = elementalDeck('air', airMinions, [input.leylineHenge]);
   const airVoidwalkDeck = elementalDeck('air', [
     ...airMinions,
@@ -4863,6 +4911,8 @@ function buildManifest(
       ? airGenesisSpellDeck
       : scenario === 'air-grandmaster-wizard'
       ? airGrandmasterWizardDeck
+      : scenario === 'air-sling-pixies'
+      ? airSlingPixiesDeck
       : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
       : scenario === 'air-void-artifact'
@@ -5024,6 +5074,8 @@ function buildManifest(
       ? airGenesisSpellDeck
       : scenario === 'air-grandmaster-wizard'
       ? airGrandmasterWizardDeck
+      : scenario === 'air-sling-pixies'
+      ? fireSlingPixiesDeck
       : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
       : scenario === 'air-void-artifact'
@@ -5183,7 +5235,8 @@ function buildManifest(
       card.stableId === input.lumberingMinion.stableId,
       card.stableId === input.monstrousLion.stableId,
       card.stableId === input.rangedMinion.stableId
-        || card.stableId === input.midnightRogue.stableId,
+        || card.stableId === input.midnightRogue.stableId
+        || card.stableId === input.slingPixies.stableId,
       card.stableId === input.firstStrikeMinion.stableId,
       card.stableId === input.wardMinion.stableId
         || card.stableId === input.malakhim.stableId,
@@ -5192,7 +5245,8 @@ function buildManifest(
         || card.stableId === input.movementTwoMinion.stableId
         || card.stableId === input.grainSparrow.stableId
         || card.stableId === input.bladderblimp.stableId
-        || card.stableId === input.malakhim.stableId,
+        || card.stableId === input.malakhim.stableId
+        || card.stableId === input.slingPixies.stableId,
       card.stableId === input.stealthMinion.stableId
         || card.stableId === input.midnightRogue.stableId
         || card.stableId === input.deadOfNightDemon.stableId,
@@ -5295,6 +5349,7 @@ function buildManifest(
       card.stableId === input.entangleTerrain.stableId,
       card.stableId === input.mountainGiant.stableId ? 2 : 0,
       card.stableId === input.sacredScarabs.stableId ? 3 : 0,
+      card.stableId === input.slingPixies.stableId ? 4 : 0,
     ),
   ]));
   return {
@@ -7331,7 +7386,7 @@ export async function loadPrivateStarterCatalog(
     [
       'air-vs-earth-lesson',
       'Air Beta vs Earth Beta — supported cards from one boxed precon each',
-      input.config.airSeed + 4,
+      input.config.airSeed,
     ],
     [
       'earth-vs-air-lesson',
@@ -16645,6 +16700,229 @@ function runAirGrandmasterWizard(
   });
 }
 
+function runAirSlingPixies(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airSlingPixies'] {
+  const seed = 280;
+  const built = buildManifest(input, seed, 'air-sling-pixies');
+  let session = keep(keep(createGameSession(built.manifest)));
+  const slingInstanceId = session.state.players.north.hand.spellbook
+    .find(({ cardId }) => cardId === input.slingPixies.stableId)?.instanceId;
+  const vikingsInstanceId = session.state.players.south.hand.spellbook
+    .find(({ cardId }) => cardId === input.vikings.stableId)?.instanceId;
+  const raalInstanceId = session.state.players.south.hand.spellbook
+    .find(({ cardId }) => cardId === input.raalDromedary.stableId)?.instanceId;
+  if (!slingInstanceId || !vikingsInstanceId || !raalInstanceId) {
+    throw new Error('private Sling Pixies seed 280 no longer produces its supported opening');
+  }
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  const draw = (zone: 'atlas' | 'spellbook'): void => {
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === zone);
+  };
+  const endTurn = (): void => take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === slingInstanceId && descriptor.cell === 'C4');
+  endTurn();
+  draw('atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  endTurn();
+
+  draw('atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === slingInstanceId
+    && descriptor.from.cell === 'C4'
+    && descriptor.to.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  endTurn();
+  draw('spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === raalInstanceId && descriptor.cell === 'C2');
+  endTurn();
+
+  draw('spellbook');
+  endTurn();
+  draw('spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B1');
+  endTurn();
+  draw('spellbook');
+  endTurn();
+  draw('spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'A1');
+  endTurn();
+
+  draw('spellbook');
+  endTurn();
+  draw('atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === vikingsInstanceId && descriptor.cell === 'C2');
+  endTurn();
+
+  draw('spellbook');
+  endTurn();
+  draw('spellbook');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === vikingsInstanceId
+    && descriptor.from.cell === 'C2'
+    && descriptor.to.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'close-intercept');
+  endTurn();
+
+  draw('spellbook');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === slingInstanceId
+    && descriptor.from.cell === 'C3'
+    && descriptor.to.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+    && descriptor.target.kind === 'minion'
+    && descriptor.target.instanceId === vikingsInstanceId);
+  const firstFight = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  if (!firstFight.accepted) throw new Error('private Sling Pixies first fight was rejected');
+  session = firstFight.session;
+  const firstExpected = [
+    {
+      payload: { defenderCount: 0, originalTargetParticipates: true },
+      type: 'defend-window-closed',
+    },
+    {
+      payload: {
+        attackerInstanceId: slingInstanceId,
+        combatantInstanceIds: [vikingsInstanceId],
+      },
+      type: 'fight-started',
+    },
+    {
+      payload: { amount: 1, strikerInstanceId: slingInstanceId, targetInstanceId: vikingsInstanceId },
+      type: 'strike-damage-allocated',
+    },
+    {
+      payload: {
+        accumulated: 0,
+        amount: 0,
+        attemptedAmount: 4,
+        direct: true,
+        instanceId: slingInstanceId,
+        prevented: true,
+        seat: 'north',
+      },
+      type: 'damage-dealt',
+    },
+    {
+      payload: { accumulated: 1, amount: 1, direct: true, instanceId: vikingsInstanceId, seat: 'south' },
+      type: 'damage-dealt',
+    },
+  ];
+  const firstFightPrevented = canonicalJson(firstFight.receipt.events
+    .map(({ payload, type }) => ({ payload, type })) as unknown as JsonValue)
+    === canonicalJson(firstExpected as unknown as JsonValue);
+  endTurn();
+
+  draw('spellbook');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === raalInstanceId
+    && descriptor.from.cell === 'C2'
+    && descriptor.to.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  endTurn();
+
+  draw('spellbook');
+  const beforeSecond = observeGame(session.state, 'north').realm.units;
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === slingInstanceId
+    && descriptor.from.cell === 'C3'
+    && descriptor.to.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+    && descriptor.target.kind === 'minion'
+    && descriptor.target.instanceId === raalInstanceId);
+  const secondFight = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  if (!secondFight.accepted) throw new Error('private Sling Pixies second fight was rejected');
+  session = secondFight.session;
+  const secondExpected = [
+    {
+      payload: { defenderCount: 0, originalTargetParticipates: true },
+      type: 'defend-window-closed',
+    },
+    {
+      payload: {
+        attackerInstanceId: slingInstanceId,
+        combatantInstanceIds: [raalInstanceId],
+      },
+      type: 'fight-started',
+    },
+    {
+      payload: { amount: 1, strikerInstanceId: slingInstanceId, targetInstanceId: raalInstanceId },
+      type: 'strike-damage-allocated',
+    },
+    {
+      payload: { accumulated: 2, amount: 2, direct: true, instanceId: slingInstanceId, seat: 'north' },
+      type: 'damage-dealt',
+    },
+    {
+      payload: { accumulated: 1, amount: 1, direct: true, instanceId: raalInstanceId, seat: 'south' },
+      type: 'damage-dealt',
+    },
+    {
+      payload: {
+        cardId: input.slingPixies.stableId,
+        instanceId: slingInstanceId,
+        owner: 'north',
+      },
+      type: 'minion-died',
+    },
+  ];
+  const secondFightKilledSling = canonicalJson(secondFight.receipt.events
+    .map(({ payload, type }) => ({ payload, type })) as unknown as JsonValue)
+    === canonicalJson(secondExpected as unknown as JsonValue)
+    && session.state.players.north.cemetery.some(({ instanceId }) => instanceId === slingInstanceId);
+  const exactCausalEnvelope = (receipt: typeof firstFight.receipt): boolean => {
+    const firstSequence = receipt.events[0]?.eventSequence;
+    return firstSequence !== undefined && receipt.events.every((event, index) =>
+      event.cause.actionId === receipt.actionId
+        && event.cause.receiptSequence === receipt.receiptSequence
+        && event.eventSequence === firstSequence + index);
+  };
+  const definition = session.state.cards[input.slingPixies.stableId];
+  const deck = deckList(built.manifest.decks.north, built.names);
+  const southDeck = deckList(built.manifest.decks.south, built.names);
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified: exactCausalEnvelope(firstFight.receipt)
+      && exactCausalEnvelope(secondFight.receipt),
+    currentPowersVerified: beforeSecond.find(({ instanceId }) => instanceId === slingInstanceId)?.attack === 1
+      && beforeSecond.find(({ instanceId }) => instanceId === vikingsInstanceId)?.attack === 4
+      && beforeSecond.find(({ instanceId }) => instanceId === raalInstanceId)?.attack === 2
+      && definition?.cardType === 'minion'
+      && definition.airborne === true
+      && definition.ranged === true
+      && definition.preventsDamageFromUnitsWithPowerAtLeast === 4,
+    deck,
+    firstFightPrevented,
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && southDeck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && southDeck.spellbook.reduce((total, card) => total + card.copies, 0) === 60,
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    raalDromedary: input.raalDromedary.name,
+    replayVerified: verifyGameReplay(session),
+    secondFightKilledSling,
+    seed,
+    slingPixies: input.slingPixies.name,
+    unsupportedMechanicsAbsent: session.state.terminal.status === 'active'
+      && firstFight.receipt.events.length === firstExpected.length
+      && secondFight.receipt.events.length === secondExpected.length,
+    vikings: input.vikings.name,
+  });
+}
+
 function runAirSpellcasterFreeze(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['airSpellcasterFreeze'] {
@@ -20735,6 +21013,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airBladderblimp = runAirBladderblimp(input);
   const airGenesisSpell = runAirGenesisSpell(input);
   const airGrandmasterWizard = runAirGrandmasterWizard(input);
+  const airSlingPixies = runAirSlingPixies(input);
   const airSpellcasterFreeze = runAirSpellcasterFreeze(input);
   const airArcLightning = runAirArcLightning(input);
   const airLightningBolt = runAirLightningBolt(input);
@@ -20943,6 +21222,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     airBladderblimp,
     airGenesisSpell,
     airGrandmasterWizard,
+    airSlingPixies,
     airSpellcasterFreeze,
     airArcLightning,
     airLightningBolt,

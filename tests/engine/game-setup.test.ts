@@ -67,6 +67,7 @@ type SpellFacts = Readonly<{
   mustBeCastSubmerged?: boolean;
   mustBeCastToWaterSite?: boolean;
   provides?: 'air' | 'earth' | 'fire' | 'water';
+  preventsDamageFromUnitsWithPowerAtLeast?: number;
   ranged?: boolean;
   sacrificeMinionAtSummoningLocationForManaDiscount?: 2;
   shootsDragProjectile?: boolean;
@@ -237,6 +238,12 @@ function cardsFor(
         mustBeCastSubmerged: facts.mustBeCastSubmerged ?? false,
         mustBeCastToWaterSite: facts.mustBeCastToWaterSite ?? false,
         ...(facts.provides ? { provides: facts.provides } : {}),
+        ...(facts.preventsDamageFromUnitsWithPowerAtLeast !== undefined
+          ? {
+            preventsDamageFromUnitsWithPowerAtLeast:
+              facts.preventsDamageFromUnitsWithPowerAtLeast,
+          }
+          : {}),
         ranged: facts.ranged ?? false,
         ...(facts.sacrificeMinionAtSummoningLocationForManaDiscount === 2
           ? { sacrificeMinionAtSummoningLocationForManaDiscount: 2 as const }
@@ -814,6 +821,44 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as GameCardDefinition,
     },
   }), /competing damage prevention/);
+  const sourcePreventionManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        preventsDamageFromUnitsWithPowerAtLeast: 4,
+      } as GameCardDefinition,
+    },
+  });
+  assert.equal(sourcePreventionManifest.cards[firstSpell]?.cardType === 'minion'
+    && sourcePreventionManifest.cards[firstSpell]
+      .preventsDamageFromUnitsWithPowerAtLeast, 4);
+  for (const invalid of [0, 1.5, 101]) {
+    assert.throws(() => createGameManifest({
+      ...input,
+      cards: {
+        ...cards,
+        [firstSpell]: {
+          ...cards[firstSpell]!,
+          preventsDamageFromUnitsWithPowerAtLeast: invalid,
+        } as GameCardDefinition,
+      },
+    }), /preventsDamageFromUnitsWithPowerAtLeast/);
+  }
+  for (const competing of [{ takesLessDamage: 1 }, { ward: true }]) {
+    assert.throws(() => createGameManifest({
+      ...input,
+      cards: {
+        ...cards,
+        [firstSpell]: {
+          ...cards[firstSpell]!,
+          ...competing,
+          preventsDamageFromUnitsWithPowerAtLeast: 4,
+        } as GameCardDefinition,
+      },
+    }), /competing damage prevention/);
+  }
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -2721,14 +2766,15 @@ test('RULE-03 printed Spellcasters cast while tapped or summoning sick from thei
   assert.equal(verifyGameReplay(summoned), true);
 });
 
-test('RULE-03/05 targeted Magic pays mana, damages any unit, resolves Deathrite, and enters the cemetery', () => {
+test('RULE-03/05 targeted Magic is a non-unit source and resolves damage, Deathrite, and cemetery entry', () => {
   const decks = { north: deck('magic-north', 4, 6), south: deck('magic-south', 4, 6) };
   const cards = cardsFor(decks, {
     deathriteDrawSite: true,
     defense: 1,
     manaCost: 1,
+    preventsDamageFromUnitsWithPowerAtLeast: 4,
     thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
-  }, { attack: 1, defense: 1, drawSpell: false, life: 1 }, { elements: ['air'] });
+  }, { attack: 4, defense: 4, drawSpell: false, life: 1 }, { elements: ['air'] });
   for (const cardId of decks.north.spellbook) {
     cards[cardId] = {
       cardType: 'magic',
@@ -4346,7 +4392,7 @@ test('RULE-03 Charge Magic grants an untargeted ally Charge only for the current
   assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-03 Overpower gives a chosen ally +2 power until the current End Phase', () => {
+test('RULE-03 Overpower changes current power for source-aware prevention until the current End Phase', () => {
   const decks = { north: deck('overpower-north', 4, 6), south: deck('overpower-south', 4, 6) };
   const baseCards = cardsFor(decks, {
     attack: 1,
@@ -4385,6 +4431,11 @@ test('RULE-03 Overpower gives a chosen ally +2 power until the current End Phase
     manaCost: 1,
     thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
   } as unknown as GameCardDefinition;
+  cards[fighterCardId] = {
+    ...baseCards[fighterCardId]!,
+    attack: 2,
+    defense: 2,
+  } as GameCardDefinition;
   cards[hiddenCardId] = {
     ...baseCards[hiddenCardId]!,
     burrowing: true,
@@ -4399,6 +4450,7 @@ test('RULE-03 Overpower gives a chosen ally +2 power until the current End Phase
     ...baseCards[enemyCardId]!,
     attack: 2,
     defense: 2,
+    preventsDamageFromUnitsWithPowerAtLeast: 4,
     summonToAnySite: true,
   } as GameCardDefinition;
   assert.throws(() => createGameManifest({
@@ -4522,8 +4574,8 @@ test('RULE-03 Overpower gives a chosen ally +2 power until the current End Phase
   const poweredView = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
     instanceId === fighter.instanceId);
   assert.deepEqual({ attack: poweredView?.attack, defense: poweredView?.defense }, {
-    attack: 3,
-    defense: 3,
+    attack: 4,
+    defense: 4,
   });
   take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === fighter.instanceId && descriptor.path.length === 1);
@@ -4534,12 +4586,19 @@ test('RULE-03 Overpower gives a chosen ally +2 power until the current End Phase
   assert.equal(fought.accepted, true);
   if (!fought.accepted) return;
   session = fought.session;
-  assert.equal(fought.receipt.events.some(({ payload, type }) => type === 'damage-dealt'
-    && (payload as { amount?: number; instanceId?: string }).amount === 3
-    && (payload as { instanceId?: string }).instanceId === enemy.instanceId), true);
+  assert.deepEqual(fought.receipt.events.find(({ payload, type }) => type === 'damage-dealt'
+    && (payload as { instanceId?: string }).instanceId === enemy.instanceId)?.payload, {
+    accumulated: 0,
+    amount: 0,
+    attemptedAmount: 4,
+    direct: true,
+    instanceId: enemy.instanceId,
+    prevented: true,
+    seat: 'south',
+  });
   const survivor = session.state.realm.units.find(({ instanceId }) => instanceId === fighter.instanceId);
   assert.equal(survivor?.damage, 2);
-  assert.equal(session.state.realm.units.some(({ instanceId }) => instanceId === enemy.instanceId), false);
+  assert.equal(session.state.realm.units.some(({ instanceId }) => instanceId === enemy.instanceId), true);
 
   const ended = stepGame(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
   assert.equal(ended.accepted, true);
@@ -4560,7 +4619,7 @@ test('RULE-03 Overpower gives a chosen ally +2 power until the current End Phase
     attack: expired?.attack,
     damage: expired?.damage,
     defense: expired?.defense,
-  }, { attack: 1, damage: 0, defense: 1 });
+  }, { attack: 2, damage: 0, defense: 2 });
   assert.equal(session.state.realm.units.some(({ instanceId }) => instanceId === fighter.instanceId), true);
   assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
     instanceId === overpower.instanceId), true);
@@ -10159,6 +10218,115 @@ test('RULE-03/04 an undamaged 0/0 Genesis minion survives until it takes positiv
   assert.equal(verifyGameReplay(session), true);
 });
 
+test('RULE-04 an active minion prevents damage from a unit at its current-power threshold', () => {
+  for (const [seed, sourcePower, disabled, expectedDamage] of [
+    [170, 4, false, 0],
+    [172, 3, false, 3],
+    [173, 4, true, 4],
+  ] as const) {
+    const setup = northAttacksAtC2(seed, {
+      attack: sourcePower,
+      defense: 5,
+      manaCost: 1,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    }, undefined, false, {
+      attack: 1,
+      defense: 10,
+      ...(disabled ? { genesisDisableSelfUntilDamaged: true as const } : {}),
+      manaCost: 1,
+      preventsDamageFromUnitsWithPowerAtLeast: 4,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    });
+    assert.equal(observeGame(setup.session.state, 'south').realm.units.find(({ instanceId }) =>
+      instanceId === setup.targetInstanceId)?.disabled, disabled);
+    let session = accept(setup.session, action(setup.session, ({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === setup.targetInstanceId));
+    const fought = stepGame(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+    assert.equal(fought.accepted, true);
+    if (!fought.accepted) return;
+    session = fought.session;
+    const target = observeGame(session.state, 'south').realm.units.find(({ instanceId }) =>
+      instanceId === setup.targetInstanceId);
+    assert.deepEqual({ damage: target?.damage, disabled: target?.disabled }, {
+      damage: expectedDamage,
+      disabled: false,
+    });
+    assert.equal(observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
+      instanceId === setup.targetInstanceId)?.damage, expectedDamage);
+    const targetDamage = fought.receipt.events.find(({ payload, type }) =>
+      type === 'damage-dealt' && canonicalJson(payload).includes(setup.targetInstanceId));
+    assert.equal((targetDamage?.payload as { amount?: number }).amount, expectedDamage);
+    assert.equal((targetDamage?.payload as { prevented?: boolean }).prevented,
+      expectedDamage < sourcePower ? true : undefined);
+    assert.equal(fought.receipt.randomDraws.length, 0);
+    assert.equal(verifyGameReplay(session), true);
+  }
+});
+
+test('RULE-04 Ranged damage retains its attacking unit source classification', () => {
+  const gameManifest = manifest(174, {
+    northSpell: {
+      attack: 4,
+      defense: 4,
+      manaCost: 1,
+      ranged: true,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+    southSpell: {
+      attack: 1,
+      defense: 5,
+      manaCost: 1,
+      preventsDamageFromUnitsWithPowerAtLeast: 4,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+    site: { rangedUnitsHereRangeBonus: 1 },
+  });
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C4');
+  const shooter = session.state.realm.units.find(({ controller }) => controller === 'north');
+  assert.ok(shooter);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C1');
+  const target = session.state.realm.units.find(({ controller }) => controller === 'south');
+  assert.ok(target);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === shooter.instanceId && descriptor.to.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const shot = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.shooterInstanceId === shooter.instanceId
+      && descriptor.hit?.instanceId === target.instanceId));
+  assert.equal(shot.accepted, true);
+  if (!shot.accepted) return;
+  session = shot.session;
+  assert.equal(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === target.instanceId)?.damage, 0);
+  assert.deepEqual(shot.receipt.events.map(({ type }) => type), [
+    'projectile-shot',
+    'strike-damage-allocated',
+    'damage-dealt',
+  ]);
+  assert.equal(shot.receipt.randomDraws.length, 0);
+  assert.equal(verifyGameReplay(session), true);
+});
+
 test('RULE-04 a restricted attacker can target units but not sites', () => {
   const setup = northAttacksAtC2(114, {
     attack: 4,
@@ -13275,6 +13443,56 @@ test('RULE-05 Deathrite uses its moved last location with Ward, reduction, and L
   assert.equal(verifyGameReplay(lethal.session), true);
 });
 
+test('RULE-05 Deathrite preserves its unit-source power snapshot before cemetery entry', () => {
+  const setup = northAttacksAtC2(171, {
+    attack: 4,
+    deathriteDamageEachUnitHere: 1,
+    defense: 1,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  }, undefined, false, {
+    attack: 1,
+    defense: 10,
+    manaCost: 1,
+    preventsDamageFromUnitsWithPowerAtLeast: 4,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  });
+  let session = accept(setup.session, action(setup.session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === setup.targetInstanceId));
+  const fought = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  assert.equal(fought.accepted, true);
+  if (!fought.accepted) return;
+  session = fought.session;
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === setup.attackerInstanceId), true);
+  assert.equal(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === setup.targetInstanceId)?.damage, 0);
+  assert.deepEqual(fought.receipt.events.filter(({ payload, type }) =>
+    type === 'damage-dealt'
+      && canonicalJson(payload).includes(setup.targetInstanceId)).map(({ payload }) => payload), [{
+    accumulated: 0,
+    amount: 0,
+    attemptedAmount: 4,
+    direct: true,
+    instanceId: setup.targetInstanceId,
+    prevented: true,
+    seat: 'south',
+  }, {
+    accumulated: 0,
+    amount: 0,
+    attemptedAmount: 1,
+    direct: true,
+    instanceId: setup.targetInstanceId,
+    prevented: true,
+    seat: 'south',
+  }]);
+  assert.equal(fought.receipt.randomDraws.length, 0);
+  assert.equal(verifyGameReplay(session), true);
+});
+
 test('RULE-05 Deathrite healing caps at maximum, fails at Death\'s Door, and precedes cemetery entry', () => {
   const resolveHealingFight = (life: number, seed: number): GameSession => {
     const setup = northAttacksAtC2(seed, {
@@ -14504,7 +14722,7 @@ test('RULE-03 Siege Ballista taps its bearer and another ally for measured artif
   };
   const cards: Record<string, GameCardDefinition> = {
     'ballista-bearer': {
-      attack: 1,
+      attack: 4,
       burrowing: true,
       cardType: 'minion',
       defense: 2,
@@ -14541,6 +14759,7 @@ test('RULE-03 Siege Ballista taps its bearer and another ally for measured artif
       cardType: 'minion',
       defense: 5,
       manaCost: 0,
+      preventsDamageFromUnitsWithPowerAtLeast: 4,
       thresholds,
     },
     'ballista-north-avatar': {
@@ -16044,10 +16263,15 @@ test('RULE-03 Sparkmage counts every player-cast spell source, resets, and damag
   };
   const cards = cardsFor(
     { north, south },
-    { defense: 4, manaCost: 0, thresholds: { air: 1, earth: 0, fire: 0, water: 0 } },
     {
-      attack: 1,
-      defense: 1,
+      defense: 4,
+      manaCost: 0,
+      preventsDamageFromUnitsWithPowerAtLeast: 4,
+      thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+    },
+    {
+      attack: 4,
+      defense: 4,
       drawSpell: false,
       life: 20,
       tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn: true,
@@ -16094,9 +16318,9 @@ test('RULE-03 Sparkmage counts every player-cast spell source, resets, and damag
     .every((cardId) => opening.includes(cardId)), true);
   assert.equal(preview.spellbook[0]?.cardId, 'sparkmage-magic');
   assert.deepEqual(gameManifest.cards['sparkmage-avatar'], {
-    attack: 1,
+    attack: 4,
     cardType: 'avatar',
-    defense: 1,
+    defense: 4,
     drawSpell: false,
     life: 20,
     tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn: true,
@@ -16165,7 +16389,7 @@ test('RULE-03 Sparkmage counts every player-cast spell source, resets, and damag
 
   assert.equal(session.state.players.north.avatar.tapped, true);
   assert.equal(session.state.realm.units.find(({ instanceId }) =>
-    instanceId === caster.instanceId)?.damage, 1);
+    instanceId === caster.instanceId)?.damage, 0);
   assert.equal(result.receipt.randomDraws.length, 1);
   assert.equal(
     result.receipt.randomDraws[0]?.purpose,
@@ -16175,6 +16399,15 @@ test('RULE-03 Sparkmage counts every player-cast spell source, resets, and damag
     'sparkmage-activated',
     'damage-dealt',
   ]);
+  assert.deepEqual(result.receipt.events[1]?.payload, {
+    accumulated: 0,
+    amount: 0,
+    attemptedAmount: 1,
+    direct: true,
+    instanceId: caster.instanceId,
+    prevented: true,
+    seat: 'north',
+  });
   assert.match(canonicalJson(result.receipt.events[0]!.payload), new RegExp(caster.instanceId));
   assert.equal(verifyGameReplay(session), true);
 });
