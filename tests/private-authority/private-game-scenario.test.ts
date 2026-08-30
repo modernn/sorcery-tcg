@@ -880,6 +880,7 @@ test('private actual-card browser presets reach combat, terminal state, and exac
 test('private actual-card manifests produce identical summary-only worker batches', async () => {
   const lessons = (await loadPrivateStarterCatalog()).filter(({ id }) => id.endsWith('-lesson'));
   assert.deepEqual(lessons.map(({ id }) => id), ['air-vs-earth-lesson', 'earth-vs-air-lesson']);
+  assert.equal(lessons[1]?.manifest.seed, 7_382);
   const manifests = lessons.map(({ manifest }) => manifest);
   const oneWorker = await runGameBatch(manifests, 1);
   const twoWorkers = await runGameBatch(manifests, 2);
@@ -922,7 +923,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 25 : 35,
+        preset.id === 'air-vs-earth-lesson' ? 26 : 35,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -930,7 +931,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 35 : 25,
+        preset.id === 'air-vs-earth-lesson' ? 35 : 26,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -975,6 +976,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Roaming Monster': 1,
     'Sling Pixies': 1,
     'Snow Leopard': 2,
+    'Spire Lich': 1,
     'Spectral Stalker': 2,
     Teleport: 1,
   });
@@ -1005,6 +1007,28 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     assert.equal(slingPixies.ranged, true);
     assert.equal(slingPixies.preventsDamageFromUnitsWithPowerAtLeast, 4);
     assert.deepEqual(slingPixies.thresholds, { air: 1, earth: 0, fire: 0, water: 0 });
+  }
+  const spireLichId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Spire Lich')?.[0];
+  assert.ok(spireLichId);
+  const spireLich = airLesson.manifest.cards[spireLichId];
+  assert.equal(spireLich?.cardType, 'minion');
+  if (spireLich?.cardType === 'minion') {
+    assert.equal(spireLich.attack, 1);
+    assert.equal(spireLich.defense, 1);
+    assert.equal(spireLich.manaCost, 3);
+    assert.equal(spireLich.ranged, undefined);
+    assert.equal(spireLich.spellcaster, undefined);
+    assert.equal(spireLich.gainsPowerRangedAndSpellcasterAtopTower, 2);
+    assert.deepEqual(spireLich.thresholds, { air: 1, earth: 0, fire: 0, water: 0 });
+  }
+  for (const towerName of ['Dark Tower', 'Gothic Tower', 'Lone Tower']) {
+    const towerId = Object.entries(airLesson.cardNames)
+      .find(([, name]) => name === towerName)?.[0];
+    assert.ok(towerId);
+    assert.equal(airLesson.manifest.cards[towerId]?.cardType, 'site');
+    assert.equal(airLesson.manifest.cards[towerId]?.cardType === 'site'
+      && airLesson.manifest.cards[towerId].isTower, true);
   }
   assert.deepEqual(summarize(airLesson, 'south', 'atlas'), {
     Bedrock: 1,
@@ -1357,6 +1381,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       cardType: 'site',
       elements: ['air'],
       genesisGainManaIfOnlyControlledCopy: 1,
+      isTower: true,
     });
   }
   const earthLesson = starterCatalog[1]!;
@@ -1484,6 +1509,24 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airSlingPixies.deck.spellbook
     .find(({ name }) => name === 'Sling Pixies')?.copies, 3);
   assert.equal(result.airSlingPixies.replayVerified, true);
+  assert.equal(result.airSpireLich.spireLich, 'Spire Lich');
+  assert.equal(result.airSpireLich.seed, 220);
+  assert.equal(result.airSpireLich.acceptedActionCount, 38);
+  assert.equal(result.airSpireLich.towerBonusVerified, true);
+  assert.equal(result.airSpireLich.spellcasterActionResolved, true);
+  assert.equal(result.airSpireLich.rangedActionResolved, true);
+  assert.equal(result.airSpireLich.capabilitiesRemovedOffTower, true);
+  assert.equal(result.airSpireLich.causalEventsVerified, true);
+  assert.equal(result.airSpireLich.noRandomDraws, true);
+  assert.equal(result.airSpireLich.unsupportedMechanicsAbsent, true);
+  assert.equal(result.airSpireLich.legalConstructedDeck, true);
+  assert.equal(result.airSpireLich.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airSpireLich.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airSpireLich.deck.spellbook
+    .find(({ name }) => name === 'Spire Lich')?.copies, 3);
+  assert.equal(result.airSpireLich.replayVerified, true);
   assert.equal(result.airSpellcasterFreeze.apprenticeWizard, 'Apprentice Wizard');
   assert.equal(result.airSpellcasterFreeze.freeze, 'Freeze');
   assert.equal(result.airSpellcasterFreeze.seravaTownsfolk, 'Serava Townsfolk');

@@ -309,6 +309,21 @@ export type PrivateGameCheck = Readonly<{
     unsupportedMechanicsAbsent: boolean;
     vikings: string;
   }>;
+  airSpireLich: Readonly<{
+    acceptedActionCount: number;
+    capabilitiesRemovedOffTower: boolean;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    legalConstructedDeck: boolean;
+    noRandomDraws: boolean;
+    rangedActionResolved: boolean;
+    replayVerified: boolean;
+    seed: number;
+    spellcasterActionResolved: boolean;
+    spireLich: string;
+    towerBonusVerified: boolean;
+    unsupportedMechanicsAbsent: boolean;
+  }>;
   airLeyline: Readonly<{
     acceptedActionCount: number;
     deck: DeckList;
@@ -1550,6 +1565,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   genesisSpellMinion: NormalizedCard;
   grandmasterWizard: NormalizedCard;
   slingPixies: NormalizedCard;
+  spireLich: NormalizedCard;
   genesisMinion: NormalizedCard;
   geomancer: NormalizedCard;
   gothicTower: NormalizedCard;
@@ -3450,6 +3466,29 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || slingPixies.subtypes[0] !== 'Faerie') {
     throw new Error('private unit-source damage prevention minion no longer matches its supported facts');
   }
+  const spireLich = snapshot.cards.find(({ name }) => name === 'Spire Lich');
+  if (!spireLich
+    || spireLich.stableId
+      !== 'card:ebdab8d1f6b83f6f2132251a46368839fe22e3e292e6b478f506f427a0dbb3e2'
+    || spireLich.officialSourceId !== '001-spire_lich-b-f'
+    || spireLich.cardType !== 'minion'
+    || ruleTextDigest(spireLich.rulesText)
+      !== 'sha256:c209d0a6b468ac6034e310b9861d7ba33e3f7dcd10730cc3ab2165ad65a77e2d'
+    || spireLich.manaCost !== 3
+    || spireLich.attack !== 1
+    || spireLich.defense !== 1
+    || spireLich.life !== null
+    || spireLich.elements.length !== 1
+    || spireLich.elements[0] !== 'air'
+    || spireLich.thresholds.air !== 1
+    || spireLich.thresholds.earth !== 0
+    || spireLich.thresholds.fire !== 0
+    || spireLich.thresholds.water !== 0
+    || spireLich.rarity !== 'exceptional'
+    || spireLich.subtypes.length !== 1
+    || spireLich.subtypes[0] !== 'Undead') {
+    throw new Error('private Tower-conditional minion no longer matches its supported facts');
+  }
   const polarBears = snapshot.cards.find(({ name }) => name === 'Polar Bears');
   if (!polarBears
     || polarBears.cardType !== 'minion'
@@ -3827,6 +3866,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     genesisSpellMinion,
     grandmasterWizard,
     slingPixies,
+    spireLich,
     genesisMinion,
     geomancer,
     gothicTower,
@@ -4042,6 +4082,8 @@ function gameDefinition(
   occupiesSquareArea: 0 | 2 = 0,
   deathriteDamageEachUnitHere: 0 | 3 = 0,
   preventsDamageFromUnitsWithPowerAtLeast: 0 | 4 = 0,
+  isTower = false,
+  gainsPowerRangedAndSpellcasterAtopTower: 0 | 2 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4127,6 +4169,7 @@ function gameDefinition(
         ? { genesisImmobilizeNearbyUntilNextTurn: true as const }
         : {}),
       ...(genesisHealNearbyAvatars ? { genesisHealNearbyAvatars } : {}),
+      ...(isTower ? { isTower: true as const } : {}),
     };
   }
   if (card.cardType === 'aura'
@@ -4226,6 +4269,9 @@ function gameDefinition(
       ...(discardRandomCardInsteadOfMana ? { discardRandomCardInsteadOfMana: true } : {}),
       ...(diesAtEndOfControllerTurn ? { diesAtEndOfControllerTurn: true } : {}),
       ...(genesisHealController ? { genesisHealController } : {}),
+      ...(gainsPowerRangedAndSpellcasterAtopTower
+        ? { gainsPowerRangedAndSpellcasterAtopTower }
+        : {}),
       ...(genesisDamageEachOtherUnitHere ? { genesisDamageEachOtherUnitHere } : {}),
       ...(genesisStrikeEachEnemyHere ? { genesisStrikeEachEnemyHere: true as const } : {}),
       ...(genesisDisableSelfUntilDamaged
@@ -4291,7 +4337,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -4591,6 +4637,7 @@ function buildManifest(
       ...Array(2).fill(input.genesisSpellMinion.stableId),
       input.grandmasterWizard.stableId,
       input.slingPixies.stableId,
+      input.spireLich.stableId,
       ...Array(2).fill(input.movementTwoMinion.stableId),
       ...Array(2).fill(input.airborneMinion.stableId),
       ...Array(2).fill(input.stealthTargetMinion.stableId),
@@ -4730,6 +4777,12 @@ function buildManifest(
     ],
   };
   const airSlingPixiesDeck = elementalDeck('air', [input.slingPixies]);
+  const airSpireLichDeck = elementalDeck(
+    'air',
+    [input.spireLich],
+    [input.darkTower],
+    [input.zap],
+  );
   const fireSlingPixiesDeck = elementalDeck('fire', [input.vikings, input.raalDromedary]);
   const airLeylineDeck = elementalDeck('air', airMinions, [input.leylineHenge]);
   const airVoidwalkDeck = elementalDeck('air', [
@@ -4913,6 +4966,8 @@ function buildManifest(
       ? airGrandmasterWizardDeck
       : scenario === 'air-sling-pixies'
       ? airSlingPixiesDeck
+      : scenario === 'air-spire-lich'
+      ? airSpireLichDeck
       : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
       : scenario === 'air-void-artifact'
@@ -5076,6 +5131,8 @@ function buildManifest(
       ? airGrandmasterWizardDeck
       : scenario === 'air-sling-pixies'
       ? fireSlingPixiesDeck
+      : scenario === 'air-spire-lich'
+      ? airSpireLichDeck
       : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
       : scenario === 'air-void-artifact'
@@ -5350,6 +5407,10 @@ function buildManifest(
       card.stableId === input.mountainGiant.stableId ? 2 : 0,
       card.stableId === input.sacredScarabs.stableId ? 3 : 0,
       card.stableId === input.slingPixies.stableId ? 4 : 0,
+      card.stableId === input.darkTower.stableId
+        || card.stableId === input.gothicTower.stableId
+        || card.stableId === input.loneTower.stableId,
+      card.stableId === input.spireLich.stableId ? 2 : 0,
     ),
   ]));
   return {
@@ -5629,47 +5690,45 @@ function findEarthMalakhimOpening(
   southSiteInstanceId: string;
   session: GameSession;
 }> {
-  // ponytail: bounded opening scan avoids another private seed field.
-  for (let offset = 1; offset <= 8192; offset += 1) {
-    const built = buildManifest(input, input.config.earthSeed + offset, 'earth-malakhim');
-    const session = createGameSession(built.manifest);
-    const accessibleSites = [
-      ...session.state.players.north.hand.atlas,
-      ...session.state.players.north.atlas.slice(0, 2),
-    ];
-    const playedSites = accessibleSites.slice(0, 5);
-    const earthSites = playedSites.filter(({ cardId }) => {
-      const definition = session.state.cards[cardId];
-      return definition?.cardType === 'site' && definition.elements.includes('earth');
-    });
-    const ghostTowns = playedSites.filter(({ cardId }) =>
-      cardId === input.ghostTownSite.stableId);
-    const malakhimInstanceId = [
-      ...session.state.players.north.hand.spellbook,
-      ...session.state.players.north.spellbook.slice(0, 2),
-    ].find(({ cardId }) => cardId === input.malakhim.stableId)?.instanceId;
-    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
-    if (earthSites.length >= 3
-      && ghostTowns.length >= 2
-      && playedSites[4]?.cardId === input.ghostTownSite.stableId
-      && malakhimInstanceId
-      && southSiteInstanceId) {
-      return {
-        ...built,
-        malakhimInstanceId,
-        siteInstanceIds: [
-          playedSites[0]!.instanceId,
-          playedSites[1]!.instanceId,
-          playedSites[2]!.instanceId,
-          playedSites[3]!.instanceId,
-          playedSites[4]!.instanceId,
-        ],
-        southSiteInstanceId,
-        session,
-      };
-    }
+  const seed = 13_389;
+  const built = buildManifest(input, seed, 'earth-malakhim');
+  const session = createGameSession(built.manifest);
+  const accessibleSites = [
+    ...session.state.players.north.hand.atlas,
+    ...session.state.players.north.atlas.slice(0, 2),
+  ];
+  const playedSites = accessibleSites.slice(0, 5);
+  const earthSites = playedSites.filter(({ cardId }) => {
+    const definition = session.state.cards[cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('earth');
+  });
+  const ghostTowns = playedSites.filter(({ cardId }) =>
+    cardId === input.ghostTownSite.stableId);
+  const malakhimInstanceId = [
+    ...session.state.players.north.hand.spellbook,
+    ...session.state.players.north.spellbook.slice(0, 2),
+  ].find(({ cardId }) => cardId === input.malakhim.stableId)?.instanceId;
+  const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+  if (earthSites.length < 3
+    || ghostTowns.length < 2
+    || playedSites[4]?.cardId !== input.ghostTownSite.stableId
+    || !malakhimInstanceId
+    || !southSiteInstanceId) {
+    throw new Error(`private Malakhim seed ${seed} no longer produces its supported opening`);
   }
-  throw new Error('private Malakhim scenario lacks its supported opening');
+  return {
+    ...built,
+    malakhimInstanceId,
+    siteInstanceIds: [
+      playedSites[0]!.instanceId,
+      playedSites[1]!.instanceId,
+      playedSites[2]!.instanceId,
+      playedSites[3]!.instanceId,
+      playedSites[4]!.instanceId,
+    ],
+    southSiteInstanceId,
+    session,
+  };
 }
 
 function findEarthDuelOpening(
@@ -5906,9 +5965,12 @@ function findEarthArtifactOpening(
   zapDrawCount?: number;
   zapInstanceIds?: readonly [string, string];
 }> {
-  // ponytail: bounded opening scan avoids another private seed/config field.
-  for (let offset = 1; offset <= 4096; offset += 1) {
-    const built = buildManifest(input, input.config.earthSeed + offset, scenario);
+  const offsetLimit = scenario === 'earth-sword-and-shield' ? 1 : 4096;
+  for (let offset = 1; offset <= offsetLimit; offset += 1) {
+    const seed = scenario === 'earth-sword-and-shield'
+      ? 9_492
+      : input.config.earthSeed + offset;
+    const built = buildManifest(input, seed, scenario);
     const session = createGameSession(built.manifest);
     const earthSites = (seat: GameSeat) => session.state.players[seat].hand.atlas.filter(({ cardId }) => {
       if (cardId === input.ghostTownSite.stableId) return false;
@@ -6332,45 +6394,43 @@ function findEarthGrainSparrowOpening(
   southSiteInstanceId: string;
   steppeInstanceId: string;
 }> {
-  // ponytail: a bounded deterministic scan is acceptable for private verification; lock a seed only if material.
-  for (let offset = 1; offset <= 4_096; offset += 1) {
-    const built = buildManifest(input, input.config.earthSeed + offset, 'earth-grain-sparrow');
-    const session = createGameSession(built.manifest);
-    const northAtlasHand = session.state.players.north.hand.atlas;
-    const steppeInstanceId = northAtlasHand
-      .find(({ cardId }) => cardId === input.steppe.stableId)?.instanceId;
-    const ghostTownInstanceId = northAtlasHand
-      .find(({ cardId }) => cardId === input.ghostTownSite.stableId)?.instanceId;
-    const demonInstanceId = availableMinionInstance(
-      session,
-      'north',
-      input.lesserBloodDemon.stableId,
-      1,
-    );
-    const grainSparrowInstanceId = availableMinionInstance(
-      session,
-      'north',
-      input.grainSparrow.stableId,
-      1,
-    );
-    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
-    if (demonInstanceId
-      && ghostTownInstanceId
-      && grainSparrowInstanceId
-      && southSiteInstanceId
-      && steppeInstanceId) {
-      return {
-        ...built,
-        demonInstanceId,
-        ghostTownInstanceId,
-        grainSparrowInstanceId,
-        session,
-        southSiteInstanceId,
-        steppeInstanceId,
-      };
-    }
+  const seed = 8_016;
+  const built = buildManifest(input, seed, 'earth-grain-sparrow');
+  const session = createGameSession(built.manifest);
+  const northAtlasHand = session.state.players.north.hand.atlas;
+  const steppeInstanceId = northAtlasHand
+    .find(({ cardId }) => cardId === input.steppe.stableId)?.instanceId;
+  const ghostTownInstanceId = northAtlasHand
+    .find(({ cardId }) => cardId === input.ghostTownSite.stableId)?.instanceId;
+  const demonInstanceId = availableMinionInstance(
+    session,
+    'north',
+    input.lesserBloodDemon.stableId,
+    1,
+  );
+  const grainSparrowInstanceId = availableMinionInstance(
+    session,
+    'north',
+    input.grainSparrow.stableId,
+    1,
+  );
+  const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+  if (!demonInstanceId
+    || !ghostTownInstanceId
+    || !grainSparrowInstanceId
+    || !southSiteInstanceId
+    || !steppeInstanceId) {
+    throw new Error(`private Grain Sparrow seed ${seed} no longer produces its supported opening`);
   }
-  throw new Error('private Grain Sparrow Genesis-healing scenario no longer produces its supported opening');
+  return {
+    ...built,
+    demonInstanceId,
+    ghostTownInstanceId,
+    grainSparrowInstanceId,
+    session,
+    southSiteInstanceId,
+    steppeInstanceId,
+  };
 }
 
 function findEarthBuryOpening(
@@ -6441,35 +6501,32 @@ function findEarthQuagmireOpening(
       && card.elements.length === 1
       && card.elements[0] === 'earth'
       && card.rulesText.trim() === '').map(({ stableId }) => stableId));
-  // ponytail: bounded opening scan avoids adding another private config field.
-  for (let offset = 1; offset <= 4096; offset += 1) {
-    const seed = input.config.earthSeed + offset;
-    const built = buildManifest(input, seed, 'earth-quagmire');
-    const session = createGameSession(built.manifest);
-    const ordinarySites = (seat: GameSeat) => session.state.players[seat].hand.atlas
-      .filter(({ cardId }) => ordinaryEarthSiteIds.has(cardId));
-    const northSites = ordinarySites('north');
-    const southSites = ordinarySites('south');
-    const quagmireInstanceId = session.state.players.north.hand.atlas
-      .find(({ cardId }) => cardId === input.quagmire.stableId)?.instanceId;
-    const wildBoarsInstanceId = session.state.players.south.hand.spellbook
-      .find(({ cardId }) => cardId === input.wildBoars.stableId)?.instanceId;
-    if (northSites.length >= 2
-      && southSites.length >= 2
-      && quagmireInstanceId
-      && wildBoarsInstanceId) {
-      return {
-        ...built,
-        northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
-        quagmireInstanceId,
-        seed,
-        session,
-        southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
-        wildBoarsInstanceId,
-      };
-    }
+  const seed = 10_583;
+  const built = buildManifest(input, seed, 'earth-quagmire');
+  const session = createGameSession(built.manifest);
+  const ordinarySites = (seat: GameSeat) => session.state.players[seat].hand.atlas
+    .filter(({ cardId }) => ordinaryEarthSiteIds.has(cardId));
+  const northSites = ordinarySites('north');
+  const southSites = ordinarySites('south');
+  const quagmireInstanceId = session.state.players.north.hand.atlas
+    .find(({ cardId }) => cardId === input.quagmire.stableId)?.instanceId;
+  const wildBoarsInstanceId = session.state.players.south.hand.spellbook
+    .find(({ cardId }) => cardId === input.wildBoars.stableId)?.instanceId;
+  if (northSites.length < 2
+    || southSites.length < 2
+    || !quagmireInstanceId
+    || !wildBoarsInstanceId) {
+    throw new Error(`private Quagmire seed ${seed} no longer produces its supported opening`);
   }
-  throw new Error('private Quagmire scenario no longer produces its supported opening');
+  return {
+    ...built,
+    northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
+    quagmireInstanceId,
+    seed,
+    session,
+    southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
+    wildBoarsInstanceId,
+  };
 }
 
 function findEarthEntangleTerrainOpening(
@@ -7391,7 +7448,7 @@ export async function loadPrivateStarterCatalog(
     [
       'earth-vs-air-lesson',
       'Earth Beta vs Air Beta — supported cards from one boxed precon each',
-      input.config.earthSeed,
+      7_382,
     ],
   ] as const;
   const starters = [
@@ -8318,55 +8375,53 @@ function findFireLeapAttackOpening(
   southRaalInstanceIds: readonly [string, string];
   southSiteInstanceIds: readonly [string, string];
 }> {
-  // ponytail: this bounded deterministic scan avoids another private seed field.
-  for (let offset = 1; offset <= 4096; offset += 1) {
-    const built = buildManifest(input, input.config.fireSeed + offset, 'fire-leap-attack');
-    const session = createGameSession(built.manifest);
-    const fireSites = (seat: GameSeat) => session.state.players[seat].hand.atlas
-      .filter(({ cardId }) => {
-        const definition = session.state.cards[cardId];
-        return definition?.cardType === 'site' && definition.elements.includes('fire');
-      });
-    const northSites = fireSites('north');
-    const southSites = fireSites('south');
-    const ghostTownInstanceId = session.state.players.north.hand.atlas
-      .find(({ cardId }) => cardId === input.ghostTownSite.stableId)?.instanceId;
-    const northRaalInstanceId = availableMinionInstance(
-      session,
-      'north',
-      input.raalDromedary.stableId,
-      1,
-    );
-    const leapAttackInstanceId = availableMinionInstance(
-      session,
-      'north',
-      input.leapAttack.stableId,
-      2,
-    );
-    const southRaalInstanceIds = [
-      ...session.state.players.south.hand.spellbook,
-      ...session.state.players.south.spellbook.slice(0, 1),
-    ].filter(({ cardId }) => cardId === input.raalDromedary.stableId)
-      .map(({ instanceId }) => instanceId);
-    if (northSites.length >= 2
-      && southSites.length >= 2
-      && ghostTownInstanceId
-      && northRaalInstanceId
-      && leapAttackInstanceId
-      && southRaalInstanceIds.length >= 2) {
-      return {
-        ...built,
-        ghostTownInstanceId,
-        leapAttackInstanceId,
-        northRaalInstanceId,
-        northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
-        session,
-        southRaalInstanceIds: [southRaalInstanceIds[0]!, southRaalInstanceIds[1]!],
-        southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
-      };
-    }
+  const seed = 2_822;
+  const built = buildManifest(input, seed, 'fire-leap-attack');
+  const session = createGameSession(built.manifest);
+  const fireSites = (seat: GameSeat) => session.state.players[seat].hand.atlas
+    .filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('fire');
+    });
+  const northSites = fireSites('north');
+  const southSites = fireSites('south');
+  const ghostTownInstanceId = session.state.players.north.hand.atlas
+    .find(({ cardId }) => cardId === input.ghostTownSite.stableId)?.instanceId;
+  const northRaalInstanceId = availableMinionInstance(
+    session,
+    'north',
+    input.raalDromedary.stableId,
+    1,
+  );
+  const leapAttackInstanceId = availableMinionInstance(
+    session,
+    'north',
+    input.leapAttack.stableId,
+    2,
+  );
+  const southRaalInstanceIds = [
+    ...session.state.players.south.hand.spellbook,
+    ...session.state.players.south.spellbook.slice(0, 1),
+  ].filter(({ cardId }) => cardId === input.raalDromedary.stableId)
+    .map(({ instanceId }) => instanceId);
+  if (northSites.length < 2
+    || southSites.length < 2
+    || !ghostTownInstanceId
+    || !northRaalInstanceId
+    || !leapAttackInstanceId
+    || southRaalInstanceIds.length < 2) {
+    throw new Error(`private Leap Attack seed ${seed} no longer produces its supported opening`);
   }
-  throw new Error('private Leap Attack optional-step strike-all scenario lacks its supported opening');
+  return {
+    ...built,
+    ghostTownInstanceId,
+    leapAttackInstanceId,
+    northRaalInstanceId,
+    northSiteInstanceIds: [northSites[0]!.instanceId, northSites[1]!.instanceId],
+    session,
+    southRaalInstanceIds: [southRaalInstanceIds[0]!, southRaalInstanceIds[1]!],
+    southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
+  };
 }
 
 function findFireRecklessSquireOpening(
@@ -8381,52 +8436,50 @@ function findFireRecklessSquireOpening(
   southFireSiteInstanceIds: readonly [string, string];
   southRaalInstanceIds: readonly [string, string];
 }> {
-  // ponytail: bounded deterministic scan avoids another private seed field.
-  for (let offset = 1; offset <= 4096; offset += 1) {
-    const built = buildManifest(input, input.config.fireSeed + offset, 'fire-reckless-squire');
-    const session = createGameSession(built.manifest);
-    const northFireSiteInstanceId = session.state.players.north.hand.atlas
-      .find(({ cardId }) => {
-        const definition = session.state.cards[cardId];
-        return cardId !== input.ghostTownSite.stableId
-          && definition?.cardType === 'site'
-          && definition.elements.includes('fire');
-      })?.instanceId;
-    const ghostTownInstanceId = session.state.players.north.hand.atlas
-      .find(({ cardId }) => cardId === input.ghostTownSite.stableId)?.instanceId;
-    const recklessSquireInstanceId = [
-      ...session.state.players.north.hand.spellbook,
-      ...session.state.players.north.spellbook.slice(0, 1),
-    ].find(({ cardId }) => cardId === input.recklessSquire.stableId)?.instanceId;
-    const southFireSites = session.state.players.south.hand.atlas.filter(({ cardId }) => {
+  const seed = 1_163;
+  const built = buildManifest(input, seed, 'fire-reckless-squire');
+  const session = createGameSession(built.manifest);
+  const northFireSiteInstanceId = session.state.players.north.hand.atlas
+    .find(({ cardId }) => {
       const definition = session.state.cards[cardId];
-      return definition?.cardType === 'site' && definition.elements.includes('fire');
-    });
-    const southRaalInstanceIds = [
-      ...session.state.players.south.hand.spellbook,
-      ...session.state.players.south.spellbook.slice(0, 1),
-    ].filter(({ cardId }) => cardId === input.raalDromedary.stableId)
-      .map(({ instanceId }) => instanceId);
-    if (northFireSiteInstanceId
-      && ghostTownInstanceId
-      && recklessSquireInstanceId
-      && southFireSites.length >= 2
-      && southRaalInstanceIds.length >= 2) {
-      return {
-        ...built,
-        ghostTownInstanceId,
-        northFireSiteInstanceId,
-        recklessSquireInstanceId,
-        session,
-        southFireSiteInstanceIds: [
-          southFireSites[0]!.instanceId,
-          southFireSites[1]!.instanceId,
-        ],
-        southRaalInstanceIds: [southRaalInstanceIds[0]!, southRaalInstanceIds[1]!],
-      };
-    }
+      return cardId !== input.ghostTownSite.stableId
+        && definition?.cardType === 'site'
+        && definition.elements.includes('fire');
+    })?.instanceId;
+  const ghostTownInstanceId = session.state.players.north.hand.atlas
+    .find(({ cardId }) => cardId === input.ghostTownSite.stableId)?.instanceId;
+  const recklessSquireInstanceId = [
+    ...session.state.players.north.hand.spellbook,
+    ...session.state.players.north.spellbook.slice(0, 1),
+  ].find(({ cardId }) => cardId === input.recklessSquire.stableId)?.instanceId;
+  const southFireSites = session.state.players.south.hand.atlas.filter(({ cardId }) => {
+    const definition = session.state.cards[cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('fire');
+  });
+  const southRaalInstanceIds = [
+    ...session.state.players.south.hand.spellbook,
+    ...session.state.players.south.spellbook.slice(0, 1),
+  ].filter(({ cardId }) => cardId === input.raalDromedary.stableId)
+    .map(({ instanceId }) => instanceId);
+  if (!northFireSiteInstanceId
+    || !ghostTownInstanceId
+    || !recklessSquireInstanceId
+    || southFireSites.length < 2
+    || southRaalInstanceIds.length < 2) {
+    throw new Error(`private Reckless Squire seed ${seed} no longer produces its supported opening`);
   }
-  throw new Error('private Reckless Squire Lance scenario lacks its supported opening');
+  return {
+    ...built,
+    ghostTownInstanceId,
+    northFireSiteInstanceId,
+    recklessSquireInstanceId,
+    session,
+    southFireSiteInstanceIds: [
+      southFireSites[0]!.instanceId,
+      southFireSites[1]!.instanceId,
+    ],
+    southRaalInstanceIds: [southRaalInstanceIds[0]!, southRaalInstanceIds[1]!],
+  };
 }
 
 function findFireIgnitedOpening(
@@ -8902,6 +8955,80 @@ function findAirGrandmasterWizardOpening(
     seed,
     session,
     southSiteInstanceId: southSite.instanceId,
+  };
+}
+
+function findAirSpireLichOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  darkTowerInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string];
+  seed: number;
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string, string];
+  southTargetInstanceId: string;
+  spireLichInstanceId: string;
+  zapInstanceIds: readonly [string, string];
+}> {
+  const seed = 220;
+  const built = buildManifest(input, seed, 'air-spire-lich');
+  const session = createGameSession(built.manifest);
+  const north = session.state.players.north;
+  const south = session.state.players.south;
+  const darkTower = north.hand.atlas.find(({ cardId }) =>
+    cardId === input.darkTower.stableId);
+  const nonTowerSite = north.hand.atlas.find(({ instanceId, cardId }) => {
+    const definition = session.state.cards[cardId];
+    return instanceId !== darkTower?.instanceId
+      && definition?.cardType === 'site'
+      && definition.isTower !== true;
+  });
+  const thirdNorthSite = north.hand.atlas.find(({ instanceId }) =>
+    instanceId !== darkTower?.instanceId && instanceId !== nonTowerSite?.instanceId);
+  const spireLich = [...north.hand.spellbook, ...north.spellbook.slice(0, 3)]
+    .find(({ cardId }) =>
+      cardId === input.spireLich.stableId);
+  const southTargetInstanceId = availableMinionInstance(
+    session,
+    'south',
+    input.spireLich.stableId,
+    3,
+  );
+  const firstZap = [...north.hand.spellbook, ...north.spellbook.slice(0, 4)]
+    .find(({ cardId }) => cardId === input.zap.stableId);
+  const secondZap = [...north.hand.spellbook, ...north.spellbook.slice(0, 6)]
+    .find(({ cardId, instanceId }) => cardId === input.zap.stableId
+      && instanceId !== firstZap?.instanceId);
+  if (!darkTower
+    || !nonTowerSite
+    || !thirdNorthSite
+    || south.hand.atlas.length !== 3
+    || !southTargetInstanceId
+    || !spireLich
+    || !firstZap
+    || !secondZap) {
+    throw new Error('private Spire Lich seed 220 no longer produces its supported opening');
+  }
+  return {
+    ...built,
+    darkTowerInstanceId: darkTower.instanceId,
+    northSiteInstanceIds: [
+      darkTower.instanceId,
+      nonTowerSite.instanceId,
+      thirdNorthSite.instanceId,
+    ],
+    seed,
+    session,
+    southSiteInstanceIds: south.hand.atlas.map(({ instanceId }) => instanceId) as [
+      string,
+      string,
+      string,
+    ],
+    southTargetInstanceId,
+    spireLichInstanceId: spireLich.instanceId,
+    zapInstanceIds: [firstZap.instanceId, secondZap.instanceId],
   };
 }
 
@@ -16923,6 +17050,267 @@ function runAirSlingPixies(
   });
 }
 
+function runAirSpireLich(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airSpireLich'] {
+  const opening = findAirSpireLichOpening(input);
+  let session = keep(keep(opening.session));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  const drawSpell = (): void => take(({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const endTurn = (): void => take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  endTurn();
+  drawSpell();
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
+    && descriptor.cell === 'C1');
+  endTurn();
+
+  drawSpell();
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'B4');
+  endTurn();
+  drawSpell();
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
+    && descriptor.cell === 'C2');
+  endTurn();
+
+  drawSpell();
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+    && descriptor.cell === 'A4');
+  endTurn();
+  drawSpell();
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceIds[2]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.southTargetInstanceId
+    && descriptor.cell === 'C3');
+  endTurn();
+
+  drawSpell();
+  const summonAction = action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.spireLichInstanceId
+      && descriptor.cell === 'C4');
+  const summoned = stepGame(session, summonAction);
+  if (!summoned.accepted || summonAction.descriptor.kind !== 'summon-minion') {
+    throw new Error('private Spire Lich summon was rejected');
+  }
+  session = summoned.session;
+  const expectedSummon = [{
+    payload: {
+      cardId: input.spireLich.stableId,
+      casterInstanceId: summonAction.descriptor.casterInstanceId,
+      cell: 'C4',
+      instanceId: opening.spireLichInstanceId,
+      manaPaid: 3,
+      seat: 'north',
+    },
+    type: 'minion-summoned',
+  }];
+  endTurn();
+  drawSpell();
+  endTurn();
+
+  drawSpell();
+  const towerView = observeGame(session.state, 'north').realm.units
+    .find(({ instanceId }) => instanceId === opening.spireLichInstanceId);
+  const spireDefinition = session.state.cards[input.spireLich.stableId];
+  const darkTowerDefinition = session.state.cards[input.darkTower.stableId];
+  const northActions = legalGameActions(session.state, 'north');
+  const spellAction = northActions.find(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.cardInstanceId === opening.zapInstanceIds[0]
+    && descriptor.casterInstanceId === opening.spireLichInstanceId
+    && descriptor.target?.kind === 'avatar'
+    && descriptor.target.seat === 'south');
+  if (!spellAction) throw new Error('private Spire Lich lacks its derived Spellcaster Zap action');
+  const southAvatarInstanceId = session.state.players.south.avatar.card.instanceId;
+  const lifeBeforeSpell = session.state.players.south.avatar.life;
+  const spell = stepGame(session, spellAction);
+  if (!spell.accepted || spellAction.descriptor.kind !== 'cast-magic') {
+    throw new Error('private Spire Lich Zap was rejected');
+  }
+  session = spell.session;
+  const expectedSpell = [
+    {
+      payload: {
+        cardId: input.zap.stableId,
+        casterInstanceId: opening.spireLichInstanceId,
+        instanceId: opening.zapInstanceIds[0],
+        manaPaid: 1,
+        seat: 'north',
+        targetInstanceId: southAvatarInstanceId,
+        targetSeat: 'south',
+      },
+      type: 'magic-cast',
+    },
+    {
+      payload: {
+        amount: 1,
+        sourceInstanceId: opening.zapInstanceIds[0],
+        targetInstanceId: southAvatarInstanceId,
+      },
+      type: 'magic-damage-allocated',
+    },
+    {
+      payload: {
+        amount: 1,
+        direct: true,
+        instanceId: southAvatarInstanceId,
+        seat: 'south',
+      },
+      type: 'damage-dealt',
+    },
+    {
+      payload: { amount: 1, life: lifeBeforeSpell - 1, seat: 'south' },
+      type: 'avatar-life-lost',
+    },
+    {
+      payload: {
+        cardId: input.zap.stableId,
+        instanceId: opening.zapInstanceIds[0],
+        owner: 'north',
+      },
+      type: 'magic-resolved',
+    },
+  ];
+
+  const shotAction = legalGameActions(session.state, 'north').find(({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.shooterInstanceId === opening.spireLichInstanceId
+      && descriptor.direction === 'south'
+      && descriptor.hit?.kind === 'minion'
+      && descriptor.hit.instanceId === opening.southTargetInstanceId);
+  if (!shotAction || shotAction.descriptor.kind !== 'shoot-projectile') {
+    throw new Error('private Spire Lich lacks its derived Ranged action');
+  }
+  const shot = stepGame(session, shotAction);
+  if (!shot.accepted) throw new Error('private Spire Lich projectile was rejected');
+  session = shot.session;
+  const expectedShot = [
+    {
+      payload: {
+        direction: 'south',
+        hit: { instanceId: opening.southTargetInstanceId, kind: 'minion', seat: 'south' },
+        path: [
+          { cell: 'C4', region: 'surface' },
+          { cell: 'C3', region: 'surface' },
+        ],
+        seat: 'north',
+        shooterInstanceId: opening.spireLichInstanceId,
+      },
+      type: 'projectile-shot',
+    },
+    {
+      payload: {
+        amount: 3,
+        strikerInstanceId: opening.spireLichInstanceId,
+        targetInstanceId: opening.southTargetInstanceId,
+      },
+      type: 'strike-damage-allocated',
+    },
+    {
+      payload: {
+        accumulated: 3,
+        amount: 3,
+        direct: true,
+        instanceId: opening.southTargetInstanceId,
+        seat: 'south',
+      },
+      type: 'damage-dealt',
+    },
+    {
+      payload: {
+        cardId: input.spireLich.stableId,
+        instanceId: opening.southTargetInstanceId,
+        owner: 'south',
+      },
+      type: 'minion-died',
+    },
+  ];
+
+  endTurn();
+  drawSpell();
+  endTurn();
+  drawSpell();
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === opening.spireLichInstanceId
+    && descriptor.from.cell === 'C4'
+    && descriptor.to.cell === 'B4');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  endTurn();
+  drawSpell();
+  endTurn();
+  drawSpell();
+
+  const offTowerView = observeGame(session.state, 'north').realm.units
+    .find(({ instanceId }) => instanceId === opening.spireLichInstanceId);
+  const offTowerActions = legalGameActions(session.state, 'north');
+  const secondZapInHand = session.state.players.north.hand.spellbook
+    .some(({ instanceId }) => instanceId === opening.zapInstanceIds[1]);
+  const exactEvents = (actual: typeof summoned.receipt.events, expected: unknown): boolean =>
+    canonicalJson(actual.map(({ payload, type }) => ({ payload, type })) as unknown as JsonValue)
+      === canonicalJson(expected as JsonValue);
+  const exactCausalEnvelope = (receipt: typeof summoned.receipt): boolean => {
+    const firstEventSequence = receipt.events[0]?.eventSequence;
+    return firstEventSequence !== undefined && receipt.events.every((event, index) =>
+      event.cause.actionId === receipt.actionId
+        && event.cause.receiptSequence === receipt.receiptSequence
+        && event.eventSequence === firstEventSequence + index);
+  };
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    capabilitiesRemovedOffTower: secondZapInHand
+      && offTowerView?.attack === 1
+      && offTowerView.defense === 1
+      && offTowerView.tapped === false
+      && !offTowerActions.some(({ descriptor }) => descriptor.kind === 'shoot-projectile'
+        && descriptor.shooterInstanceId === opening.spireLichInstanceId)
+      && !offTowerActions.some(({ descriptor }) => descriptor.kind === 'cast-magic'
+        && descriptor.casterInstanceId === opening.spireLichInstanceId),
+    causalEventsVerified: exactCausalEnvelope(summoned.receipt)
+      && exactCausalEnvelope(spell.receipt)
+      && exactCausalEnvelope(shot.receipt),
+    deck,
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && (deck.spellbook.find(({ name }) => name === input.spireLich.name)?.copies ?? 0)
+        <= input.format.copyLimits[input.spireLich.rarity!],
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    rangedActionResolved: exactEvents(shot.receipt.events, expectedShot)
+      && session.state.players.south.cemetery.some(({ instanceId }) =>
+        instanceId === opening.southTargetInstanceId),
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    spellcasterActionResolved: exactEvents(spell.receipt.events, expectedSpell)
+      && session.state.players.north.cemetery.some(({ instanceId }) =>
+        instanceId === opening.zapInstanceIds[0]),
+    spireLich: input.spireLich.name,
+    towerBonusVerified: exactEvents(summoned.receipt.events, expectedSummon)
+      && spireDefinition?.cardType === 'minion'
+      && spireDefinition.gainsPowerRangedAndSpellcasterAtopTower === 2
+      && darkTowerDefinition?.cardType === 'site'
+      && darkTowerDefinition.isTower === true
+      && towerView?.attack === 3
+      && towerView.defense === 3,
+    unsupportedMechanicsAbsent: session.state.terminal.status === 'active'
+      && summoned.receipt.events.length === expectedSummon.length
+      && spell.receipt.events.length === expectedSpell.length
+      && shot.receipt.events.length === expectedShot.length,
+  });
+}
+
 function runAirSpellcasterFreeze(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['airSpellcasterFreeze'] {
@@ -21014,6 +21402,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airGenesisSpell = runAirGenesisSpell(input);
   const airGrandmasterWizard = runAirGrandmasterWizard(input);
   const airSlingPixies = runAirSlingPixies(input);
+  const airSpireLich = runAirSpireLich(input);
   const airSpellcasterFreeze = runAirSpellcasterFreeze(input);
   const airArcLightning = runAirArcLightning(input);
   const airLightningBolt = runAirLightningBolt(input);
@@ -21223,6 +21612,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     airGenesisSpell,
     airGrandmasterWizard,
     airSlingPixies,
+    airSpireLich,
     airSpellcasterFreeze,
     airArcLightning,
     airLightningBolt,

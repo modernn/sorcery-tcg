@@ -16516,3 +16516,271 @@ test('RULE-03 Sparkmage chooses among multiple other units with deterministic pr
   assert.equal(session.state.players.north.airThresholdsCastThisTurn, 1);
   assert.equal(verifyGameReplay(session), true);
 });
+
+test('RULE-04 an active surface minion derives power, Ranged, and Spellcaster atop a Tower', () => {
+  const decks = {
+    north: deck('tower-minion-north', 6, 8),
+    south: deck('tower-minion-south', 6, 8),
+  };
+  const cards = cardsFor(decks, {
+    attack: 1,
+    defense: 1,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  });
+  const towerId = decks.north.atlas[0]!;
+  const nonTowerId = decks.north.atlas[1]!;
+  const conditionalId = decks.north.spellbook[0]!;
+  const magicId = decks.north.spellbook[1]!;
+  const targetId = decks.south.spellbook[0]!;
+  const disableMagicId = decks.south.spellbook[1]!;
+  cards[towerId] = {
+    ...cards[towerId]!,
+    isTower: true,
+  } as unknown as GameCardDefinition;
+  cards[conditionalId] = {
+    ...cards[conditionalId]!,
+    burrowing: true,
+    gainsPowerRangedAndSpellcasterAtopTower: 2,
+  } as unknown as GameCardDefinition;
+  cards[nonTowerId] = {
+    ...cards[nonTowerId]!,
+    sacrificeToDestroyNearbySite: true,
+  } as GameCardDefinition;
+  cards[magicId] = {
+    cardType: 'magic',
+    damageTargetUnit: 1,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  };
+  cards[targetId] = {
+    ...cards[targetId]!,
+    defense: 5,
+    spellcaster: true,
+    summonToAnySite: true,
+  } as GameCardDefinition;
+  cards[disableMagicId] = {
+    cardType: 'magic',
+    disableTargetNearbyMinionUntilNextTurn: true,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-tower-minion-v1',
+    },
+    cards,
+    decks,
+    firstSeat: 'north' as const,
+  };
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [towerId]: { ...cards[towerId], isTower: false } as unknown as GameCardDefinition,
+    },
+    seed: 1,
+  }), /isTower must be true/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [conditionalId]: {
+        ...cards[conditionalId],
+        gainsPowerRangedAndSpellcasterAtopTower: 1,
+      } as unknown as GameCardDefinition,
+    },
+    seed: 1,
+  }), /gainsPowerRangedAndSpellcasterAtopTower must be 2/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [conditionalId]: {
+        ...cards[conditionalId],
+        occupiesSquareArea: 2,
+      } as unknown as GameCardDefinition,
+    },
+    seed: 1,
+  }), /occupiesSquareArea has an unsupported ability combination/);
+
+  let gameManifest: GameManifest | undefined;
+  for (let seed = 1; seed <= 16_384; seed += 1) {
+    const candidate = createGameManifest({ ...input, seed });
+    const preview = createGameSession(candidate).state.players;
+    const northAtlas = preview.north.hand.atlas.map(({ cardId }) => cardId);
+    const northSpells = preview.north.hand.spellbook.map(({ cardId }) => cardId);
+    const southSpells = preview.south.hand.spellbook.map(({ cardId }) => cardId);
+    if (northAtlas.includes(towerId)
+      && northAtlas.includes(nonTowerId)
+      && northSpells.includes(conditionalId)
+      && northSpells.includes(magicId)
+      && [targetId, disableMagicId].every((cardId) =>
+        southSpells.includes(cardId))) {
+      gameManifest = candidate;
+      break;
+    }
+  }
+  assert.ok(gameManifest);
+  assert.deepEqual(gameManifest.cards[towerId], {
+    cardType: 'site',
+    elements: ['earth'],
+    isTower: true,
+  });
+  assert.equal(gameManifest.cards[conditionalId]?.cardType === 'minion'
+    && gameManifest.cards[conditionalId].gainsPowerRangedAndSpellcasterAtopTower, 2);
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardId === towerId && descriptor.cell === 'C4');
+  const beforeSurfaceSummon = session;
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === conditionalId && descriptor.cell === 'C4' && !descriptor.region);
+  const conditional = session.state.realm.units.find(({ cardId }) => cardId === conditionalId);
+  assert.ok(conditional);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === targetId && descriptor.cell === 'C4');
+  const target = session.state.realm.units.find(({ cardId }) => cardId === targetId);
+  assert.ok(target);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardId === nonTowerId && descriptor.cell === 'C3');
+
+  const atopTower = observeGame(session.state, 'north').realm.units
+    .find(({ instanceId }) => instanceId === conditional.instanceId);
+  assert.deepEqual({ attack: atopTower?.attack, defense: atopTower?.defense }, {
+    attack: 3,
+    defense: 3,
+  });
+  const tower = session.state.realm.sites.C4;
+  assert.ok(tower && !('rubble' in tower));
+  const foreignTowerState = {
+    ...session.state,
+    realm: {
+      ...session.state.realm,
+      sites: {
+        ...session.state.realm.sites,
+        C4: { ...tower, controller: 'south' as const },
+      },
+    },
+  };
+  const atopForeignTower = observeGame(foreignTowerState, 'north').realm.units
+    .find(({ instanceId }) => instanceId === conditional.instanceId);
+  assert.deepEqual({ attack: atopForeignTower?.attack, defense: atopForeignTower?.defense }, {
+    attack: 3,
+    defense: 3,
+  });
+  const towerActions = legalGameActions(session.state, 'north');
+  assert.equal(towerActions.some(({ descriptor }) => descriptor.kind === 'shoot-projectile'
+    && descriptor.shooterInstanceId === conditional.instanceId
+    && descriptor.hit?.instanceId === target.instanceId), true);
+  assert.equal(towerActions.some(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.cardId === magicId
+    && descriptor.casterInstanceId === conditional.instanceId), true);
+
+  const towerCheckpoint = session;
+
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === conditional.instanceId
+    && descriptor.from.cell === 'C4'
+    && descriptor.to.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  const offTower = observeGame(session.state, 'north').realm.units
+    .find(({ instanceId }) => instanceId === conditional.instanceId);
+  assert.deepEqual({ attack: offTower?.attack, defense: offTower?.defense }, {
+    attack: 1,
+    defense: 1,
+  });
+  const offTowerActions = legalGameActions(session.state, 'north');
+  assert.equal(offTowerActions.some(({ descriptor }) => descriptor.kind === 'shoot-projectile'
+    && descriptor.shooterInstanceId === conditional.instanceId), false);
+  assert.equal(offTowerActions.some(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.casterInstanceId === conditional.instanceId), false);
+  assert.equal(session.transcript.every(({ randomDraws }) => randomDraws.length === 0), true);
+  assert.equal(verifyGameReplay(session), true);
+
+  let towerLoss = towerCheckpoint;
+  const takeTowerLoss = (predicate: Parameters<typeof action>[1]): void => {
+    towerLoss = accept(towerLoss, action(towerLoss, predicate));
+  };
+  takeTowerLoss(({ descriptor }) => descriptor.kind === 'end-turn');
+  takeTowerLoss(({ descriptor }) => descriptor.kind === 'draw');
+  takeTowerLoss(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.cardId === disableMagicId
+    && descriptor.casterInstanceId === target.instanceId
+    && descriptor.target?.instanceId === conditional.instanceId);
+  const disabled = observeGame(towerLoss.state, 'north').realm.units
+    .find(({ instanceId }) => instanceId === conditional.instanceId);
+  assert.deepEqual({
+    attack: disabled?.attack,
+    defense: disabled?.defense,
+    disabled: disabled?.disabled,
+  }, { attack: 1, defense: 1, disabled: true });
+  takeTowerLoss(({ descriptor }) => descriptor.kind === 'end-turn');
+  takeTowerLoss(({ descriptor }) => descriptor.kind === 'draw');
+  assert.equal(towerLoss.state.activeSeat, 'north');
+  assert.equal(legalGameActions(towerLoss.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.casterInstanceId === conditional.instanceId), false);
+  takeTowerLoss(({ descriptor }) => descriptor.kind === 'end-turn');
+  takeTowerLoss(({ descriptor }) => descriptor.kind === 'draw');
+  const awakened = observeGame(towerLoss.state, 'north').realm.units
+    .find(({ instanceId }) => instanceId === conditional.instanceId);
+  assert.deepEqual({
+    attack: awakened?.attack,
+    defense: awakened?.defense,
+    disabled: awakened?.disabled,
+  }, { attack: 3, defense: 3, disabled: false });
+  takeTowerLoss(({ descriptor }) => descriptor.kind === 'end-turn');
+  takeTowerLoss(({ descriptor }) => descriptor.kind === 'draw');
+  takeTowerLoss(({ descriptor }) => descriptor.kind === 'cast-magic'
+    && descriptor.cardId === magicId
+    && descriptor.casterInstanceId === conditional.instanceId
+    && descriptor.target?.instanceId === conditional.instanceId);
+  assert.equal(towerLoss.state.realm.units.find(({ instanceId }) =>
+    instanceId === conditional.instanceId)?.damage, 1);
+  const destroyed = stepGame(towerLoss, action(towerLoss, ({ descriptor }) =>
+    descriptor.kind === 'activate-site-destruction'
+      && descriptor.sourceSiteInstanceId === towerLoss.state.realm.sites.C3?.instanceId
+      && descriptor.targetCell === 'C4'));
+  assert.equal(destroyed.accepted, true);
+  if (destroyed.accepted) {
+    assert.equal(destroyed.receipt.events.some(({ payload, type }) =>
+      type === 'minion-died'
+        && canonicalJson(payload).includes(conditional.instanceId)), true);
+    assert.equal(destroyed.session.state.realm.units.some(({ instanceId }) =>
+      instanceId === conditional.instanceId), false);
+    assert.equal(destroyed.session.state.players.north.cemetery.some(({ instanceId }) =>
+      instanceId === conditional.instanceId), true);
+    assert.equal(destroyed.receipt.randomDraws.length, 0);
+    assert.equal(verifyGameReplay(destroyed.session), true);
+  }
+
+  let underground = accept(beforeSurfaceSummon, action(beforeSurfaceSummon, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardId === conditionalId
+      && descriptor.cell === 'C4'
+      && descriptor.region === 'underground'));
+  const buried = underground.state.realm.units.find(({ cardId }) => cardId === conditionalId);
+  assert.ok(buried);
+  const buriedObserved = observeGame(underground.state, 'north').realm.units
+    .find(({ instanceId }) => instanceId === buried.instanceId);
+  assert.deepEqual({ attack: buriedObserved?.attack, defense: buriedObserved?.defense }, {
+    attack: 1,
+    defense: 1,
+  });
+  assert.equal(legalGameActions(underground.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.casterInstanceId === buried.instanceId), false);
+  underground = accept(underground, action(underground, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  assert.equal(verifyGameReplay(underground), true);
+});

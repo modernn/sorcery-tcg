@@ -124,6 +124,7 @@ export type GameCardDefinition =
     genesisImmobilizeNearbyUntilNextTurn?: true;
     genesisMayBottomNextSpell?: true;
     genesisPayOneManaToSummonToken?: string;
+    isTower?: true;
     ordinaryMinionManaDiscount?: 1;
     rangedUnitsHereRangeBonus?: 1;
     sacrificeToDestroyNearbySite?: true;
@@ -186,6 +187,7 @@ export type GameCardDefinition =
     genesisDrawSite?: boolean;
     genesisHealController?: 2;
     genesisLoseControllerLife?: 2;
+    gainsPowerRangedAndSpellcasterAtopTower?: 2;
     gainsStealthAtEndOfTurn?: boolean;
     immobile?: boolean;
     lanceCount?: 1 | 2 | 3;
@@ -1535,6 +1537,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         `${path}.genesisImmobilizeNearbyUntilNextTurn must be true when defined`,
       );
     }
+    if (card.isTower !== undefined && card.isTower !== true) {
+      throw new RangeError(`${path}.isTower must be true when defined`);
+    }
     if (card.genesisPayOneManaToSummonToken !== undefined) {
       requireCardId(
         card.genesisPayOneManaToSummonToken,
@@ -1892,6 +1897,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.genesisLoseControllerLife !== undefined && card.genesisLoseControllerLife !== 2) {
     throw new RangeError(`${path}.genesisLoseControllerLife must be 2`);
   }
+  if (card.gainsPowerRangedAndSpellcasterAtopTower !== undefined
+    && card.gainsPowerRangedAndSpellcasterAtopTower !== 2) {
+    throw new RangeError(`${path}.gainsPowerRangedAndSpellcasterAtopTower must be 2`);
+  }
   if (card.diesAtEndOfControllerTurn !== undefined
     && card.diesAtEndOfControllerTurn !== true) {
     throw new RangeError(`${path}.diesAtEndOfControllerTurn must be true when defined`);
@@ -2000,6 +2009,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.shootsDragProjectile === true
       || card.siteProvidesNoThreshold === true
       || card.spellcaster === true
+      || card.gainsPowerRangedAndSpellcasterAtopTower === 2
       || card.summonToAnySite === true
       || card.mustBeCastToOuterColumn === true
       || card.token === true
@@ -2292,6 +2302,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.genesisPayOneManaToSummonToken
               ? { genesisPayOneManaToSummonToken: card.genesisPayOneManaToSummonToken }
               : {}),
+            ...(card.isTower === true ? { isTower: true as const } : {}),
             ...(card.ordinaryMinionManaDiscount === 1
               ? { ordinaryMinionManaDiscount: 1 as const }
               : {}),
@@ -2404,6 +2415,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.genesisDrawSite === true ? { genesisDrawSite: true } : {}),
             ...(card.genesisHealController === 2 ? { genesisHealController: 2 as const } : {}),
             ...(card.genesisLoseControllerLife === 2 ? { genesisLoseControllerLife: 2 as const } : {}),
+            ...(card.gainsPowerRangedAndSpellcasterAtopTower === 2
+              ? { gainsPowerRangedAndSpellcasterAtopTower: 2 as const }
+              : {}),
             ...(card.gainsStealthAtEndOfTurn === true ? { gainsStealthAtEndOfTurn: true } : {}),
             ...(card.immobile === true ? { immobile: true } : {}),
             ...(card.lanceCount !== undefined ? { lanceCount: card.lanceCount } : {}),
@@ -2967,13 +2981,22 @@ function unitRefs(state: GameState, seat: GameSeat): readonly GameUnitRef[] {
 }
 
 function spellcasterRefs(state: GameState, seat: GameSeat): readonly GameUnitRef[] {
-  return unitRefs(state, seat).filter((ref) => {
-    if (ref.kind === 'avatar') return true;
-    const unit = state.realm.units.find(({ instanceId }) => instanceId === ref.instanceId);
-    if (!unit || minionDisabled(state, unit)) return false;
-    const definition = cardDefinition(state, unit.cardId);
-    return definition.cardType === 'minion' && definition.spellcaster === true;
-  });
+  return unitRefs(state, seat).filter((ref) => unitStatus(state, ref).spellcaster);
+}
+
+function atopTowerPowerBonus(
+  state: GameState,
+  unit: UnitInstance,
+  definition: Extract<GameCardDefinition, { readonly cardType: 'minion' }>,
+  disabled: boolean,
+): number {
+  if (disabled
+    || unit.region !== 'surface'
+    || definition.gainsPowerRangedAndSpellcasterAtopTower !== 2) return 0;
+  const site = state.realm.sites[unit.location];
+  if (!site || isRubble(site)) return 0;
+  const siteDefinition = cardDefinition(state, site.cardId);
+  return siteDefinition.cardType === 'site' && siteDefinition.isTower === true ? 2 : 0;
 }
 
 function unitStatus(
@@ -2999,6 +3022,7 @@ function unitStatus(
   movesOnlySideways: boolean;
   ranged: boolean;
   region: GameRegion;
+  spellcaster: boolean;
   stealthed: boolean;
   strikesFirstWhileAttacking: boolean;
   submerge: boolean;
@@ -3039,6 +3063,7 @@ function unitStatus(
       movesOnlySideways: false,
       ranged: false,
       region: avatar.region,
+      spellcaster: true,
       stealthed: false,
       strikesFirstWhileAttacking: false,
       submerge: false,
@@ -3053,10 +3078,12 @@ function unitStatus(
   const definition = cardDefinition(state, unit.cardId);
   if (definition.cardType !== 'minion') throw new Error('minion lacks minion definition');
   const disabled = minionDisabled(state, unit);
+  const towerPowerBonus = atopTowerPowerBonus(state, unit, definition, disabled);
   const powerBonus = temporaryPowerBonus(unit.temporaryPowerSources)
     + bearerPowerBonus(state, ref)
     + controlledMortalsPowerBonus(state, ref)
-    + nearbyAlliesPowerBonus(state, ref);
+    + nearbyAlliesPowerBonus(state, ref)
+    + towerPowerBonus;
   return {
     airborne: !disabled
       && definition.airborne === true
@@ -3082,8 +3109,9 @@ function unitStatus(
     movementSteps: disabled ? 0 : 1 + (definition.movementBonus ?? 0),
     movesOnlyForward: !disabled && definition.movesOnlyForward === true,
     movesOnlySideways: !disabled && definition.movesOnlySideways === true,
-    ranged: !disabled && definition.ranged === true,
+    ranged: !disabled && (definition.ranged === true || towerPowerBonus > 0),
     region: unit.region,
+    spellcaster: !disabled && (definition.spellcaster === true || towerPowerBonus > 0),
     stealthed: !disabled && unit.stealthed,
     strikesFirstWhileAttacking: !disabled && definition.strikesFirstWhileAttacking === true,
     submerge: !disabled && definition.submerge === true,
