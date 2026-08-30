@@ -162,6 +162,7 @@ export type GameCardDefinition =
     genesisPayOneManaToSummonToken?: string;
     isTower?: true;
     ordinaryMinionManaDiscount?: 1;
+    preventsUnitsWithPowerAtLeastFromEntering?: number;
     rangedUnitsHereRangeBonus?: 1;
     sacrificeToDestroyNearbySite?: true;
   }>
@@ -239,6 +240,7 @@ export type GameCardDefinition =
     lanceCount?: 1 | 2 | 3;
     lethal?: boolean;
     manaCost: number;
+    atStartOfControllerTurnTeleportToRandomSiteOrVoid?: true;
     mayRangedStrikeOnceDuringBasicMovement?: true;
     mayStepAfterRangedStrike?: true;
     mortal?: true;
@@ -404,6 +406,11 @@ type PendingRandomOutcome = Readonly<{
   seat: GameSeat;
 }>;
 
+type PendingStartTurn = Readonly<{
+  remainingTriggerInstanceIds: readonly StateHash[];
+  seat: GameSeat;
+}>;
+
 type PendingEndTurnAura = Readonly<{
   auraInstanceId: StateHash;
   outcomeInstanceIds?: readonly StateHash[];
@@ -499,7 +506,8 @@ export type GameState = Readonly<{
   pendingGenesisToken?: PendingGenesisToken | null;
   pendingRandomOutcome?: PendingRandomOutcome | null;
   pendingRangedStep?: PendingRangedStep | null;
-  phase: 'allocate' | 'attack' | 'chain-magic' | 'defend' | 'draw' | 'end-turn-aura' | 'genesis' | 'intercept' | 'main' | 'movement' | 'mulligan' | 'random-choice' | 'ranged-step' | 'terminal';
+  pendingStartTurn?: PendingStartTurn;
+  phase: 'allocate' | 'attack' | 'chain-magic' | 'defend' | 'draw' | 'end-turn-aura' | 'genesis' | 'intercept' | 'main' | 'movement' | 'mulligan' | 'random-choice' | 'ranged-step' | 'start-turn' | 'terminal';
   players: Readonly<Record<GameSeat, PlayerState>>;
   realm: Readonly<{
     artifacts?: readonly ArtifactInstance[];
@@ -815,6 +823,10 @@ type GameActionDescriptor =
     outcomeInstanceId: StateHash;
   }>
   | Readonly<{
+    kind: 'resolve-start-turn-trigger';
+    sourceInstanceId: StateHash;
+  }>
+  | Readonly<{
     auraInstanceId: StateHash;
     kind: 'resolve-end-turn-aura-random';
     outcomeInstanceId: StateHash;
@@ -1015,8 +1027,18 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
           .map((cell) => ({ cell, region: 'void' as const }))
         : []),
       ];
+    const legalSummonLocations = summonLocations.filter(({ cell, cells, region }) =>
+      (cells ?? [cell]).every((enteredCell) => unitEntryAllowed(
+        state,
+        undefined,
+        { cell: enteredCell, region: region ?? 'surface' },
+        definition.airborne === true,
+        true,
+        definition.attack,
+        'summon',
+      )));
     return casters.flatMap(({ instanceId: casterInstanceId }) =>
-      summonLocations.flatMap(({ cell, cells, region }) => {
+      legalSummonLocations.flatMap(({ cell, cells, region }) => {
         const exactRegion: GameRegion = region ?? 'surface';
         const baseManaCost = minionManaCostAtSite(state, definition, cell);
         const basePaymentOptions: readonly Readonly<{
@@ -1383,6 +1405,7 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
           true,
           'effect',
           status.occupiedCells,
+          status.attack,
         ).map((path) => path.at(-1)!);
         return [...new Map(destinations.map((allyDestination) => [
           `${allyDestination.cell}:${allyDestination.region}`,
@@ -1472,6 +1495,7 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
             true,
             'effect',
             enemyStatus.occupiedCells,
+            enemyStatus.attack,
           ).flatMap((path) => path.length === 2 ? [path[1]!] : [])
             .filter(({ cell }) => {
               const footprint = translatedFootprint(
@@ -1523,15 +1547,28 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
               ? destinationFootprintsContaining(state, targetLocation)
               : locationExists(state, targetLocation) ? [undefined] : [];
           const site = state.realm.sites[cell];
-          return destinationAreas.flatMap((allyDestinationCells) =>
-            (['atlas', 'spellbook'] as const).map((drawZone) => ({
+          return destinationAreas
+            .filter((allyDestinationCells) =>
+              (allyDestinationCells ?? [cell])
+                .filter((enteredCell) => !status.occupiedCells.includes(enteredCell))
+                .every((enteredCell) => unitEntryAllowed(
+                  state,
+                  { cell: status.location, region: status.region },
+                  { cell: enteredCell, region: targetLocation.region },
+                  status.airborne,
+                  ally.kind === 'minion',
+                  status.attack,
+                  'teleport',
+                )))
+            .flatMap((allyDestinationCells) =>
+              (['atlas', 'spellbook'] as const).map((drawZone) => ({
               ...cast,
               ally,
               ...(allyDestinationCells ? { allyDestinationCells } : {}),
               drawZone,
               targetLocation,
               ...(site ? { targetSiteInstanceId: site.instanceId } : {}),
-            })));
+              })));
         });
       });
     }
@@ -1548,13 +1585,26 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
             status.occupiedCells.length > 1
               ? destinationFootprintsContaining(state, targetLocation)
               : [undefined];
-          return destinationAreas.map((allyDestinationCells) => ({
-            ...cast,
-            ally,
-            ...(allyDestinationCells ? { allyDestinationCells } : {}),
-            targetLocation,
-            targetSiteInstanceId: site.instanceId,
-          }));
+          return destinationAreas
+            .filter((allyDestinationCells) =>
+              (allyDestinationCells ?? [targetLocation.cell])
+                .filter((enteredCell) => !status.occupiedCells.includes(enteredCell))
+                .every((enteredCell) => unitEntryAllowed(
+                  state,
+                  { cell: status.location, region: status.region },
+                  { cell: enteredCell, region: targetLocation.region },
+                  status.airborne,
+                  ally.kind === 'minion',
+                  status.attack,
+                  'teleport',
+                )))
+            .map((allyDestinationCells) => ({
+              ...cast,
+              ally,
+              ...(allyDestinationCells ? { allyDestinationCells } : {}),
+              targetLocation,
+              targetSiteInstanceId: site.instanceId,
+            }));
         });
       });
     }
@@ -1681,7 +1731,8 @@ const SUPPORTED_CARD_FIELDS = {
     teleportNearbyAllyThenDrawCard thresholds untapTargetMinionAfterDamage
   `.trim().split(/\s+/)),
   minion: new Set(`
-    airborne attack burrowing cardType cannotAttackSites cannotDefend cannotDefendOrIntercept
+    airborne atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cardType
+    cannotAttackSites cannotDefend cannotDefendOrIntercept
     charge connectsTopBottom deathriteDamageEachUnitHere deathriteDrawSite deathriteHeal
     deathriteLoseLifePerNearbySiteControlled defense discardRandomCardInsteadOfMana
     discardSpellToDamageRandomOtherUnitHere diesAtEndOfControllerTurn genesisDamageEachOtherUnitHere
@@ -1705,6 +1756,7 @@ const SUPPORTED_CARD_FIELDS = {
     genesisGainMana genesisGainManaIfOnlyControlledCopy genesisHealNearbyAvatars
     genesisImmobilizeNearbyUntilNextTurn genesisMayBottomNextSpell genesisPayOneManaToSummonToken
     isTower ordinaryMinionManaDiscount rangedUnitsHereRangeBonus sacrificeToDestroyNearbySite
+    preventsUnitsWithPowerAtLeastFromEntering
   `.trim().split(/\s+/)),
 } satisfies Readonly<Record<GameCardDefinition['cardType'], ReadonlySet<string>>>;
 
@@ -1772,6 +1824,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.cannotBeMovedDestroyedOrModified !== true) {
       throw new RangeError(
         `${path}.cannotBeMovedDestroyedOrModified must be true when defined`,
+      );
+    }
+    if (card.preventsUnitsWithPowerAtLeastFromEntering !== undefined
+      && (!Number.isSafeInteger(card.preventsUnitsWithPowerAtLeastFromEntering)
+        || card.preventsUnitsWithPowerAtLeastFromEntering < 1
+        || card.preventsUnitsWithPowerAtLeastFromEntering > MAX_COMBAT_STAT)) {
+      throw new RangeError(
+        `${path}.preventsUnitsWithPowerAtLeastFromEntering must be a safe integer between 1 and ${MAX_COMBAT_STAT}`,
       );
     }
     if (!Array.isArray(card.elements)
@@ -2290,6 +2350,24 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && card.mayStepAfterRangedStrike === true) {
     throw new RangeError(`${path} simultaneous during-movement and post-Ranged movement is unsupported`);
   }
+  if (card.atStartOfControllerTurnTeleportToRandomSiteOrVoid !== undefined
+    && card.atStartOfControllerTurnTeleportToRandomSiteOrVoid !== true) {
+    throw new RangeError(
+      `${path}.atStartOfControllerTurnTeleportToRandomSiteOrVoid must be true when defined`,
+    );
+  }
+  if (card.atStartOfControllerTurnTeleportToRandomSiteOrVoid === true
+    && card.voidwalk !== true) {
+    throw new RangeError(
+      `${path}.atStartOfControllerTurnTeleportToRandomSiteOrVoid requires voidwalk`,
+    );
+  }
+  if (card.atStartOfControllerTurnTeleportToRandomSiteOrVoid === true
+    && card.occupiesSquareArea === 2) {
+    throw new RangeError(
+      `${path} oversized start-turn random teleport is unsupported`,
+    );
+  }
   if (card.movementBonus !== undefined
     && (!Number.isSafeInteger(card.movementBonus)
       || card.movementBonus < 1
@@ -2649,6 +2727,12 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.ordinaryMinionManaDiscount === 1
               ? { ordinaryMinionManaDiscount: 1 as const }
               : {}),
+            ...(card.preventsUnitsWithPowerAtLeastFromEntering !== undefined
+              ? {
+                preventsUnitsWithPowerAtLeastFromEntering:
+                  card.preventsUnitsWithPowerAtLeastFromEntering,
+                }
+              : {}),
             ...(card.rangedUnitsHereRangeBonus === 1
               ? { rangedUnitsHereRangeBonus: 1 as const }
               : {}),
@@ -2727,6 +2811,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             }
           : {
             ...(card.airborne === true ? { airborne: true } : {}),
+            ...(card.atStartOfControllerTurnTeleportToRandomSiteOrVoid === true
+              ? { atStartOfControllerTurnTeleportToRandomSiteOrVoid: true as const }
+              : {}),
             attack: card.attack,
             ...(card.burrowing === true ? { burrowing: true } : {}),
             cardType: 'minion' as const,
@@ -3643,6 +3730,24 @@ function randomUnitCandidatesAtLocation(
     .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
 }
 
+function randomSiteOrVoidLocations(
+  state: GameState,
+): readonly Readonly<{ instanceId: StateHash; location: GameLocation }>[] {
+  return REALM_CELLS.flatMap((cell) => {
+    const site = state.realm.sites[cell];
+    if (site && isRubble(site)) return [];
+    const location: GameLocation = { cell, region: site ? 'surface' : 'void' };
+    return [{
+      instanceId: identityHash(asJson({
+        cell,
+        kind: 'random-site-or-void-location',
+        region: location.region,
+      })),
+      location,
+    }];
+  });
+}
+
 function luckyRandomOutcomeRequest(
   state: GameState,
   seat: GameSeat,
@@ -3654,6 +3759,14 @@ function luckyRandomOutcomeRequest(
 }> | undefined {
   if (luckyCharmCount(state, seat) === 0) return undefined;
   const player = state.players[seat];
+  if (descriptor.kind === 'resolve-start-turn-trigger') {
+    return {
+      candidateInstanceIds: randomSiteOrVoidLocations(state)
+        .map(({ instanceId }) => instanceId),
+      domainKind: 'realm_site_or_void_location',
+      purpose: 'start_turn_random_teleport',
+    };
+  }
   if (descriptor.kind === 'cast-magic' && descriptor.targetLocation) {
     const card = player.hand.spellbook.find(({ instanceId }) =>
       instanceId === descriptor.cardInstanceId);
@@ -4042,19 +4155,28 @@ function burrowedConnectionLocations(
       : [{ cell: candidate, region: 'underground' as const }]);
 }
 
-function groundMinionEntryAllowed(
+function unitEntryAllowed(
   state: GameState,
-  current: GameLocation,
+  current: GameLocation | undefined,
   candidate: GameLocation,
   airborne: boolean,
   movingMinion: boolean,
+  power: number,
+  method: 'movement' | 'summon' | 'teleport',
 ): boolean {
-  if (!movingMinion
+  const site = state.realm.sites[candidate.cell];
+  if (candidate.region === 'surface' && site && !isRubble(site)) {
+    const definition = cardDefinition(state, site.cardId);
+    if (definition.cardType === 'site'
+      && definition.preventsUnitsWithPowerAtLeastFromEntering !== undefined
+      && power >= definition.preventsUnitsWithPowerAtLeastFromEntering) return false;
+  }
+  if (method !== 'movement'
+    || !movingMinion
     || airborne
-    || current.region !== 'surface'
+    || current?.region !== 'surface'
     || candidate.region !== 'surface'
     || current.cell === candidate.cell) return true;
-  const site = state.realm.sites[candidate.cell];
   if (!site || isRubble(site)) return true;
   const definition = cardDefinition(state, site.cardId);
   return definition.cardType !== 'site'
@@ -4100,6 +4222,7 @@ function movementPaths(
   movingUnit = false,
   purpose: MovementPurpose = 'effect',
   occupiedCells: readonly RealmCell[] = [start.cell],
+  power = 0,
 ): readonly (readonly GameLocation[])[] {
   if (!footprintLocationExists(state, occupiedCells, start.region)) return [];
   if (immobile) return [[start]];
@@ -4173,12 +4296,14 @@ function movementPaths(
           // ponytail: tunnel-hop direction stays implicit until direction-sensitive effects need path metadata.
           return candidateCells !== undefined
             && footprintLocationExists(state, candidateCells, candidate.region)
-            && enteredCells.every((cell) => groundMinionEntryAllowed(
+            && enteredCells.every((cell) => unitEntryAllowed(
               state,
               current,
               { cell, region: candidate.region },
               airborne,
               movingMinion,
+              power,
+              'movement',
             ))
             && (tunnelHop || (
               (!movesOnlySideways
@@ -4250,6 +4375,7 @@ function defendPaths(
     true,
     unit.canMoveToDefend ? 'defend' : 'effect',
     unit.occupiedCells,
+    unit.attack,
   ).filter((path) => {
     const end = path.at(-1)!;
     const occupied = translatedFootprint(unit.occupiedCells, unit.location, end.cell);
@@ -4279,6 +4405,7 @@ function movementDescriptors(state: GameState, seat: GameSeat): readonly GameAct
       true,
       'move-and-attack',
       unit.occupiedCells,
+      unit.attack,
     )
       .map((path) => ({
         from: { cell: unit.location, region: unit.region },
@@ -4435,6 +4562,7 @@ function rangedStepDescriptors(state: GameState, seat: GameSeat): readonly GameA
       true,
       'effect',
       status.occupiedCells,
+      status.attack,
     ).filter((path) => path.length > 1).map((path) => ({
       choice: 'step' as const,
       from,
@@ -4682,6 +4810,16 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
   if (state.phase === 'movement') return basicMovementDescriptors(state, seat);
   if (state.phase === 'ranged-step') return rangedStepDescriptors(state, seat);
   if (state.phase === 'chain-magic') return chainMagicDescriptors(state, seat);
+  if (state.phase === 'start-turn') {
+    const pending = state.pendingStartTurn;
+    if (!pending || pending.seat !== seat || pending.remainingTriggerInstanceIds.length === 0) {
+      throw new Error('unreachable missing pending start-turn trigger');
+    }
+    return pending.remainingTriggerInstanceIds.map((sourceInstanceId) => ({
+      kind: 'resolve-start-turn-trigger' as const,
+      sourceInstanceId,
+    }));
+  }
   if (state.phase === 'random-choice') {
     const pending = state.pendingRandomOutcome;
     if (!pending || pending.seat !== seat || pending.outcomeInstanceIds.length === 0) {
@@ -5088,7 +5226,15 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
     return `Tap Sparkmage to deal ${amount} to a random other unit at ${descriptor.targetLocation.cell}`;
   }
   if (descriptor.kind === 'resolve-random-outcome') {
+    const location = state.pendingRandomOutcome?.action.kind === 'resolve-start-turn-trigger'
+      ? randomSiteOrVoidLocations(state).find(({ instanceId }) =>
+        instanceId === descriptor.outcomeInstanceId)?.location
+      : undefined;
+    if (location) return `Lucky Charm chooses ${location.cell} ${location.region}`;
     return `Lucky Charm chooses ${descriptor.outcomeInstanceId.slice(0, 15)}…`;
+  }
+  if (descriptor.kind === 'resolve-start-turn-trigger') {
+    return `Resolve start-turn trigger for ${descriptor.sourceInstanceId.slice(0, 15)}…`;
   }
   if (descriptor.kind === 'activate-mana') {
     return 'Tap ' + descriptor.unitInstanceId.slice(0, 15) + '… for ' + descriptor.amount + ' mana';
@@ -5257,6 +5403,147 @@ function moveUnit(
         : unit),
     },
   };
+}
+
+function startTurnTriggerUnit(
+  state: GameState,
+  seat: GameSeat,
+  sourceInstanceId: StateHash,
+): UnitInstance | undefined {
+  const unit = state.realm.units.find(({ instanceId }) => instanceId === sourceInstanceId);
+  if (!unit || unit.controller !== seat || minionDisabled(state, unit)) return undefined;
+  const definition = cardDefinition(state, unit.cardId);
+  return definition.cardType === 'minion'
+    && definition.atStartOfControllerTurnTeleportToRandomSiteOrVoid === true
+    ? unit
+    : undefined;
+}
+
+function startTurnTriggerInstanceIds(
+  state: GameState,
+  seat: GameSeat,
+): readonly StateHash[] {
+  return state.realm.units
+    .flatMap(({ instanceId }) => startTurnTriggerUnit(state, seat, instanceId)
+      ? [instanceId]
+      : [])
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function finishStartTurnTrigger(
+  state: GameState,
+  sourceInstanceId: StateHash,
+): GameState {
+  const pending = state.pendingStartTurn;
+  if (!pending) throw new Error('unreachable missing pending start-turn trigger');
+  const remainingTriggerInstanceIds = pending.remainingTriggerInstanceIds
+    .filter((instanceId) => instanceId !== sourceInstanceId)
+    .filter((instanceId) => startTurnTriggerUnit(state, pending.seat, instanceId));
+  if (remainingTriggerInstanceIds.length > 0 && state.terminal.status === 'active') {
+    return deepFreeze({
+      ...state,
+      pendingStartTurn: { ...pending, remainingTriggerInstanceIds },
+      phase: 'start-turn',
+    });
+  }
+  const withoutPending = { ...state };
+  delete withoutPending.pendingStartTurn;
+  return deepFreeze({
+    ...withoutPending,
+    phase: state.terminal.status === 'finished' ? 'terminal' : 'draw',
+  });
+}
+
+function resolveStartTurnTrigger(
+  state: GameState,
+  sourceInstanceId: StateHash,
+  forcedRandomOutcomeInstanceId?: StateHash,
+): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
+  const pending = state.pendingStartTurn;
+  const source = pending && startTurnTriggerUnit(state, pending.seat, sourceInstanceId);
+  if (state.phase !== 'start-turn'
+    || !pending
+    || pending.seat !== state.decisionSeat
+    || !pending.remainingTriggerInstanceIds.includes(sourceInstanceId)
+    || !source) {
+    throw new Error('unreachable illegal start-turn trigger');
+  }
+  const candidates = randomSiteOrVoidLocations(state);
+  if (candidates.length === 0) {
+    const completed = finishStartTurnTrigger(state, sourceInstanceId);
+    return [
+      withStateVersion(completed, {}),
+      [{
+        payload: { reason: 'no-site-or-void', seat: pending.seat, sourceInstanceId },
+        type: 'unit-teleport-failed',
+      }],
+      [],
+    ];
+  }
+  const selected = resolveRandomOutcome(
+    state,
+    candidates.map(({ instanceId }) => instanceId),
+    'start_turn_random_teleport',
+    'realm_site_or_void_location',
+    forcedRandomOutcomeInstanceId,
+  );
+  const destination = candidates.find(({ instanceId }) =>
+    instanceId === selected.outcomeInstanceId)!.location;
+  const ref: GameUnitRef = {
+    instanceId: source.instanceId,
+    kind: 'minion',
+    seat: source.controller,
+  };
+  const status = unitStatus(state, ref);
+  const from: GameLocation = { cell: status.location, region: status.region };
+  const stays = from.cell === destination.cell && from.region === destination.region;
+  const legal = stays || locationExists(state, destination)
+    && (destination.region !== 'void' || status.voidwalk)
+    && unitEntryAllowed(
+      state,
+      from,
+      destination,
+      status.airborne,
+      true,
+      status.attack,
+      'teleport',
+    );
+  const selectedState = deepFreeze({ ...state, engine: selected.engine });
+  const outcomes: GameOutcome[] = [];
+  let effectState = selectedState;
+  if (legal && !stays) {
+    const moved = moveUnit(selectedState, ref, destination, false);
+    const teleported = deepFreeze({ ...selectedState, players: moved.players, realm: moved.realm });
+    outcomes.push({
+      payload: {
+        from,
+        outcomeInstanceId: selected.outcomeInstanceId,
+        seat: pending.seat,
+        sourceInstanceId,
+        targetInstanceId: sourceInstanceId,
+        to: destination,
+      },
+      type: 'unit-teleported',
+    });
+    const regionSettlement = settleRegionOccupancy(teleported);
+    const powerSettlement = settleStaticPowerDeaths(regionSettlement.state);
+    effectState = powerSettlement.state;
+    outcomes.push(...regionSettlement.outcomes, ...powerSettlement.outcomes);
+  } else {
+    outcomes.push({
+      payload: {
+        from,
+        outcomeInstanceId: selected.outcomeInstanceId,
+        reason: legal ? 'already-there' : 'illegal-entry',
+        seat: pending.seat,
+        sourceInstanceId,
+        to: destination,
+      },
+      type: legal ? 'unit-teleport-resolved' : 'unit-teleport-failed',
+    });
+  }
+  const completed = finishStartTurnTrigger(effectState, sourceInstanceId);
+  return [withStateVersion(completed, {}), outcomes, selected.randomDraws];
 }
 
 function moveAndTapUnit(
@@ -6114,12 +6401,14 @@ function resolveDeclaredPath(
     const enteredCells = nextCells?.filter((cell) => !currentStatus.occupiedCells.includes(cell));
     if (!nextCells
       || !footprintLocationExists(current, nextCells, next.region)
-      || !enteredCells?.every((cell) => groundMinionEntryAllowed(
+      || !enteredCells?.every((cell) => unitEntryAllowed(
         current,
         expectedFrom,
         { cell, region: next.region },
         currentStatus.airborne,
         ref.kind === 'minion',
+        currentStatus.attack,
+        'movement',
       ))) break;
     const moved = moveUnit(current, ref, next, false);
     current = deepFreeze({ ...current, players: moved.players, realm: moved.realm });
@@ -6856,7 +7145,11 @@ function applyDescriptor(
       throw new Error('unreachable illegal random outcome choice');
     }
     return applyDescriptor(
-      deepFreeze({ ...state, pendingRandomOutcome: null, phase: 'main' }),
+      deepFreeze({
+        ...state,
+        pendingRandomOutcome: null,
+        phase: pending.action.kind === 'resolve-start-turn-trigger' ? 'start-turn' : 'main',
+      }),
       pending.action,
       manifest,
       descriptor.outcomeInstanceId,
@@ -6982,6 +7275,9 @@ function applyDescriptor(
       [],
       drawn.randomDraws,
     ];
+  }
+  if (descriptor.kind === 'resolve-start-turn-trigger') {
+    return resolveStartTurnTrigger(state, descriptor.sourceInstanceId, forcedRandomOutcomeInstanceId);
   }
   if (descriptor.kind === 'mulligan') {
     const atlas = resolveMulliganZone(player.hand.atlas, player.atlas, descriptor.atlasOrder);
@@ -11109,21 +11405,34 @@ function applyDescriptor(
     });
   });
   const turnNumber = endState.turnNumber + 1;
-  return [
-    withStateVersion(endState, {
-      activeSeat: nextSeat,
-      decisionSeat: nextSeat,
-      pendingCombat: null,
-      phase: 'draw',
-      players,
-      realm: {
-        ...endingRealm,
-        ...(activeAuras.length > 0 ? { auras: activeAuras } : {}),
-        ...(immobileAreas.length > 0 ? { immobileAreas } : {}),
-        units,
+  const nextTurnState = deepFreeze({
+    ...endState,
+    activeSeat: nextSeat,
+    decisionSeat: nextSeat,
+    pendingCombat: null,
+    phase: 'draw' as const,
+    players,
+    realm: {
+      ...endingRealm,
+      ...(activeAuras.length > 0 ? { auras: activeAuras } : {}),
+      ...(immobileAreas.length > 0 ? { immobileAreas } : {}),
+      units,
+    },
+    turnNumber,
+  });
+  const startTurnTriggerIds = startTurnTriggerInstanceIds(nextTurnState, nextSeat);
+  const startedState: GameState = startTurnTriggerIds.length === 0
+    ? nextTurnState
+    : deepFreeze({
+      ...nextTurnState,
+      pendingStartTurn: {
+        remainingTriggerInstanceIds: startTurnTriggerIds,
+        seat: nextSeat,
       },
-      turnNumber,
-    }),
+      phase: 'start-turn',
+    });
+  return [
+    withStateVersion(startedState, {}),
     [
       ...endOfTurnLifeLoss.outcomes,
       ...endOfTurnDeaths.outcomes,

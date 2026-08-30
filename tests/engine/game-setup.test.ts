@@ -18577,3 +18577,202 @@ test('RULE-03 end-turn Artifact life loss respects regions, Rubble, stacking, an
   assert.equal(ended.receipt.events.some(({ type }) => type === 'game-ended'), false);
   assert.equal(ended.receipt.randomDraws.length, 0);
 });
+
+test('RULE-04 start-turn random teleports resolve in controller-chosen order through Lucky Charm', () => {
+  const sourceCardId = 'headless-source';
+  const luckyCharmCardId = 'headless-lucky-charm';
+  const blockedSiteCardId = 'headless-blocked-site';
+  const north: GameDeckSpec = {
+    atlas: Array(6).fill('headless-open-site'),
+    avatar: 'headless-north-avatar',
+    spellbook: [
+      ...Array(4).fill(sourceCardId),
+      ...Array(2).fill(luckyCharmCardId),
+    ],
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(6).fill(blockedSiteCardId),
+    avatar: 'headless-south-avatar',
+    spellbook: Array(6).fill('headless-blocker'),
+  };
+  const cards = cardsFor(
+    { north, south },
+    {
+      attack: 1,
+      defense: 2,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+  );
+  cards[sourceCardId] = {
+    ...cards[sourceCardId]!,
+    atStartOfControllerTurnTeleportToRandomSiteOrVoid: true,
+    attack: 3,
+    voidwalk: true,
+  } as GameCardDefinition;
+  cards[luckyCharmCardId] = {
+    bearerControllerChoosesExtraRandomOutcome: true,
+    cardType: 'artifact',
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  };
+  cards['headless-blocker'] = {
+    ...cards['headless-blocker']!,
+    attack: 2,
+    defense: 5,
+  } as GameCardDefinition;
+  cards[blockedSiteCardId] = {
+    ...cards[blockedSiteCardId]!,
+    preventsUnitsWithPowerAtLeastFromEntering: 3,
+  } as GameCardDefinition;
+
+  let checkpoint = keep(keep(createGameSession(createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic',
+      revisionId: 'synthetic-headless-start-turn-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north',
+    seed: 10,
+  }))));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    checkpoint = accept(checkpoint, action(checkpoint, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+    && descriptor.cardId === luckyCharmCardId
+    && descriptor.bearer?.kind === 'avatar');
+  for (let count = 0; count < 2; count += 1) {
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === sourceCardId
+      && descriptor.cell === 'C4');
+  }
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardId === blockedSiteCardId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'headless-blocker'
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  const sourceIds = checkpoint.state.realm.units
+    .filter(({ cardId }) => cardId === sourceCardId)
+    .map(({ instanceId }) => instanceId)
+    .sort();
+  const triggers = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'resolve-start-turn-trigger');
+  const firstTrigger = triggers.find(({ descriptor }) =>
+    descriptor.kind === 'resolve-start-turn-trigger'
+      && descriptor.sourceInstanceId === sourceIds[1]);
+  assert.ok(firstTrigger);
+  const committed = stepGame(checkpoint, firstTrigger);
+  assert.equal(committed.accepted, true);
+  if (!committed.accepted) return;
+  const choices = legalGameActions(committed.session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'resolve-random-outcome');
+  const blockedChoice = choices.find(({ label }) => label === 'Lucky Charm chooses C1 surface');
+  assert.ok(blockedChoice);
+  const blocked = stepGame(committed.session, blockedChoice);
+  assert.equal(blocked.accepted, true);
+  if (!blocked.accepted) return;
+  const secondTrigger = legalGameActions(blocked.session.state, 'north')
+    .find(({ descriptor }) => descriptor.kind === 'resolve-start-turn-trigger');
+  assert.ok(secondTrigger);
+  const secondCommitted = stepGame(blocked.session, secondTrigger);
+  assert.equal(secondCommitted.accepted, true);
+  if (!secondCommitted.accepted) return;
+  const movedChoice = legalGameActions(secondCommitted.session.state, 'north')
+    .filter(({ descriptor }) => descriptor.kind === 'resolve-random-outcome')
+    .find((choice) => {
+      const result = stepGame(secondCommitted.session, choice);
+      return result.accepted && result.receipt.events.some(({ type }) => type === 'unit-teleported');
+    });
+  assert.ok(movedChoice);
+  assert.match(movedChoice.label, /^Lucky Charm chooses [A-E][1-4] (surface|void)$/);
+
+  assert.equal(checkpoint.state.phase, 'start-turn');
+  assert.deepEqual(triggers.flatMap(({ descriptor }) =>
+    descriptor.kind === 'resolve-start-turn-trigger'
+      ? [descriptor.sourceInstanceId]
+      : []).sort(), sourceIds);
+  assert.equal(firstTrigger.descriptor.kind, 'resolve-start-turn-trigger');
+  if (firstTrigger.descriptor.kind !== 'resolve-start-turn-trigger') return;
+  assert.equal(firstTrigger.descriptor.sourceInstanceId, sourceIds[1]);
+  assert.equal(checkpoint.state.realm.units.some(({ cardId, location }) =>
+    cardId === 'headless-blocker' && location === 'C1'), true);
+  assert.equal(checkpoint.state.cards[blockedSiteCardId]?.cardType === 'site'
+    && checkpoint.state.cards[blockedSiteCardId].preventsUnitsWithPowerAtLeastFromEntering, 3);
+
+  const repeated = stepGame(checkpoint, firstTrigger);
+  assert.equal(repeated.accepted, true);
+  if (!repeated.accepted) return;
+  assert.deepEqual(repeated.receipt, committed.receipt);
+  assert.equal(committed.receipt.events.length, 0);
+  assert.equal(committed.receipt.randomDraws.length, 2);
+  assert.equal(committed.receipt.randomDraws.every(({ purpose }) =>
+    purpose === 'start_turn_random_teleport'), true);
+  assert.equal(committed.session.state.phase, 'random-choice');
+  assert.equal(blockedChoice.descriptor.kind, 'resolve-random-outcome');
+  if (blockedChoice.descriptor.kind !== 'resolve-random-outcome') return;
+  assert.deepEqual(blocked.receipt.events.map(({ payload, type }) => ({ payload, type })), [{
+    payload: {
+      from: { cell: 'C4', region: 'surface' },
+      outcomeInstanceId: blockedChoice.descriptor.outcomeInstanceId,
+      reason: 'illegal-entry',
+      seat: 'north',
+      sourceInstanceId: sourceIds[1],
+      to: { cell: 'C1', region: 'surface' },
+    },
+    type: 'unit-teleport-failed',
+  }]);
+  assert.deepEqual(blocked.receipt.randomDraws, []);
+  assert.equal(blocked.session.state.phase, 'start-turn');
+  assert.equal(blocked.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === sourceIds[1])?.location, 'C4');
+  assert.equal(secondTrigger.descriptor.kind, 'resolve-start-turn-trigger');
+  if (secondTrigger.descriptor.kind !== 'resolve-start-turn-trigger') return;
+  assert.equal(secondTrigger.descriptor.sourceInstanceId, sourceIds[0]);
+
+  const beforeForgeHash = hashGameState(blocked.session.state);
+  const beforeForgeTranscript = blocked.session.transcript.length;
+  const forgedDescriptor = {
+    kind: 'resolve-start-turn-trigger' as const,
+    sourceInstanceId: sourceIds[1]!,
+  };
+  const forged = stepGame(blocked.session, {
+    actionId: opaqueActionId(
+      'sorcery-core-v1',
+      'north',
+      blocked.session.state.stateVersion,
+      forgedDescriptor,
+    ),
+    seat: 'north',
+    stateVersion: blocked.session.state.stateVersion,
+  });
+  assert.equal(forged.accepted, false);
+  if (!forged.accepted) assert.equal(forged.reason.code, 'unknown_action');
+  assert.equal(hashGameState(forged.session.state), beforeForgeHash);
+  assert.equal(forged.session.transcript.length, beforeForgeTranscript);
+
+  const committedAfterForge = stepGame(forged.session, secondTrigger);
+  assert.equal(committedAfterForge.accepted, true);
+  if (!committedAfterForge.accepted) return;
+  assert.deepEqual(committedAfterForge.receipt, secondCommitted.receipt);
+  const moved = stepGame(committedAfterForge.session, movedChoice);
+  assert.equal(moved.accepted, true);
+  if (!moved.accepted) return;
+  assert.equal(moved.receipt.events.some(({ payload, type }) =>
+    type === 'unit-teleported'
+      && canonicalJson(payload).includes(sourceIds[0]!)
+      && canonicalJson(payload).includes('"region":"void"')), true);
+  assert.deepEqual(moved.receipt.randomDraws, []);
+  assert.equal(moved.session.state.phase, 'draw');
+  assert.equal(moved.session.state.pendingStartTurn, undefined);
+  assert.equal(moved.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === sourceIds[0])?.region, 'void');
+  assert.equal(verifyGameReplay(moved.session), true);
+});

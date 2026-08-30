@@ -376,6 +376,20 @@ export type PrivateGameCheck = Readonly<{
     structuralFactsVerified: boolean;
     unsupportedMechanicsAbsent: boolean;
   }>;
+  airHeadlessHaunt: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    headlessHaunt: string;
+    legalTriggerVerified: boolean;
+    randomSelectionRecorded: boolean;
+    replayVerified: boolean;
+    seed: number;
+    startTurnPhaseVerified: boolean;
+    structuralFactsVerified: boolean;
+    supportedSpellbookCopies: number;
+    teleportOutcomeVerified: boolean;
+  }>;
   airDevilsEgg: Readonly<{
     acceptedActionCount: number;
     causalEventsVerified: boolean;
@@ -1677,6 +1691,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   slingPixies: NormalizedCard;
   spireLich: NormalizedCard;
   nimbusJinn: NormalizedCard;
+  headlessHaunt: NormalizedCard;
   devilsEgg: NormalizedCard;
   kiteArcher: NormalizedCard;
   skirmishersOfMu: NormalizedCard;
@@ -3672,6 +3687,29 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || nimbusJinn.subtypes[0] !== 'Spirit') {
     throw new Error('private discard-for-random-damage minion no longer matches its supported facts');
   }
+  const headlessHaunt = snapshot.cards.find(({ name }) => name === 'Headless Haunt');
+  if (!headlessHaunt
+    || headlessHaunt.stableId
+      !== 'card:18472f490c9f34ccce76fd16c3f99895a17bcd93be97d73936f2d4f55631bc45'
+    || headlessHaunt.officialSourceId !== '001-headless_haunt-b-f'
+    || headlessHaunt.cardType !== 'minion'
+    || ruleTextDigest(headlessHaunt.rulesText)
+      !== 'sha256:9070316e9a907642deb4922775bf664ec33f25d075b3214bbc7e78e978c96bb7'
+    || headlessHaunt.manaCost !== 3
+    || headlessHaunt.attack !== 4
+    || headlessHaunt.defense !== 4
+    || headlessHaunt.life !== null
+    || headlessHaunt.elements.length !== 1
+    || headlessHaunt.elements[0] !== 'air'
+    || headlessHaunt.thresholds.air !== 2
+    || headlessHaunt.thresholds.earth !== 0
+    || headlessHaunt.thresholds.fire !== 0
+    || headlessHaunt.thresholds.water !== 0
+    || headlessHaunt.rarity !== 'exceptional'
+    || headlessHaunt.subtypes.length !== 1
+    || headlessHaunt.subtypes[0] !== 'Spirit') {
+    throw new Error('private start-turn random-teleport minion no longer matches its supported facts');
+  }
   const devilsEgg = snapshot.cards.find(({ name }) => name === "Devil's Egg");
   if (!devilsEgg
     || devilsEgg.stableId
@@ -4142,6 +4180,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     slingPixies,
     spireLich,
     nimbusJinn,
+    headlessHaunt,
     devilsEgg,
     kiteArcher,
     skirmishersOfMu,
@@ -4371,6 +4410,7 @@ function gameDefinition(
   damageChainNearbyUnits = false,
   bearerControllerChoosesExtraRandomOutcome = false,
   atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep: 0 | 3 = 0,
+  atStartOfControllerTurnTeleportToRandomSiteOrVoid = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4549,6 +4589,9 @@ function gameDefinition(
     && (card.manaCost !== null || token)) {
     return {
       airborne,
+      ...(atStartOfControllerTurnTeleportToRandomSiteOrVoid
+        ? { atStartOfControllerTurnTeleportToRandomSiteOrVoid: true as const }
+        : {}),
       attack: card.attack,
       burrowing,
       cardType: 'minion',
@@ -4944,7 +4987,7 @@ function buildManifest(
       input.slingPixies.stableId,
       input.spireLich.stableId,
       input.nimbusJinn.stableId,
-      input.devilsEgg.stableId,
+      ...Array(2).fill(input.headlessHaunt.stableId),
       input.kiteArcher.stableId,
       input.skirmishersOfMu.stableId,
       ...Array(2).fill(input.chainLightning.stableId),
@@ -5711,7 +5754,8 @@ function buildManifest(
       card.stableId === input.burrowingMinion.stableId
         || card.stableId === input.entombed.stableId,
       card.stableId === input.voidwalkMinion.stableId
-        || card.stableId === input.forsaken.stableId,
+        || card.stableId === input.forsaken.stableId
+        || card.stableId === input.headlessHaunt.stableId,
       card.stableId === input.genesisSpellMinion.stableId
         ? 1
         : card.stableId === input.grandmasterWizard.stableId ? 3 : 0,
@@ -5813,6 +5857,7 @@ function buildManifest(
       card.stableId === input.chainLightning.stableId,
       card.stableId === input.luckyCharm.stableId,
       card.stableId === input.thunderstorm.stableId ? 3 : 0,
+      card.stableId === input.headlessHaunt.stableId,
     ),
   ]));
   return {
@@ -9673,6 +9718,41 @@ function findAirDevilsEggOpening(
     session,
     southSiteInstanceIds: south.hand.atlas.slice(0, 2)
       .map(({ instanceId }) => instanceId) as [string, string],
+  };
+}
+
+function findAirHeadlessHauntOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  headlessHauntInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string];
+  seed: number;
+  session: GameSession;
+  southSiteInstanceId: string;
+}> {
+  const seed = 7;
+  const built = buildManifest(input, seed, 'air-vs-earth-lesson');
+  const session = createGameSession(built.manifest);
+  const north = session.state.players.north;
+  const south = session.state.players.south;
+  const headlessHaunt = [...north.hand.spellbook, ...north.spellbook.slice(0, 2)]
+    .find(({ cardId }) => cardId === input.headlessHaunt.stableId);
+  if (north.hand.atlas.length !== 3 || south.hand.atlas.length === 0 || !headlessHaunt) {
+    throw new Error('private Headless Haunt seed 7 no longer produces its supported opening');
+  }
+  return {
+    ...built,
+    headlessHauntInstanceId: headlessHaunt.instanceId,
+    northSiteInstanceIds: north.hand.atlas.map(({ instanceId }) => instanceId) as [
+      string,
+      string,
+      string,
+    ],
+    seed,
+    session,
+    southSiteInstanceId: south.hand.atlas[0]!.instanceId,
   };
 }
 
@@ -19103,6 +19183,110 @@ function runAirChainLightning(
   });
 }
 
+function runAirHeadlessHaunt(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airHeadlessHaunt'] {
+  const opening = findAirHeadlessHauntOpening(input);
+  let session = keep(keep(opening.session));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  const drawSpell = (): void => take(({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const playSite = (instanceId: string, cell: RealmCell): void => take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === instanceId
+      && descriptor.cell === cell);
+  const endTurn = (): void => take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  playSite(opening.northSiteInstanceIds[0], 'C4');
+  endTurn();
+  drawSpell();
+  playSite(opening.southSiteInstanceId, 'C1');
+  endTurn();
+
+  drawSpell();
+  playSite(opening.northSiteInstanceIds[1], 'B4');
+  endTurn();
+  drawSpell();
+  endTurn();
+
+  drawSpell();
+  playSite(opening.northSiteInstanceIds[2], 'A4');
+  take(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.headlessHauntInstanceId
+      && descriptor.cell === 'C4');
+  endTurn();
+  drawSpell();
+  endTurn();
+
+  const startTurnPhaseVerified = session.state.phase === 'start-turn'
+    && session.state.decisionSeat === 'north';
+  const trigger = action(session, ({ descriptor }) =>
+    descriptor.kind === 'resolve-start-turn-trigger'
+      && descriptor.sourceInstanceId === opening.headlessHauntInstanceId);
+  const legalTriggerVerified = legalGameActions(session.state, 'north')
+    .some(({ actionId }) => actionId === trigger.actionId);
+  const randomCandidateCount = 20 - Object.values(session.state.realm.sites)
+    .filter((site) => 'rubble' in site).length;
+  const resolved = stepGame(session, trigger);
+  if (!resolved.accepted) throw new Error('private Headless Haunt start-turn trigger was rejected');
+  session = resolved.session;
+
+  const teleportEvent = resolved.receipt.events.find(({ type }) =>
+    type === 'unit-teleported'
+      || type === 'unit-teleport-resolved'
+      || type === 'unit-teleport-failed');
+  const payload = teleportEvent && isJsonRecord(teleportEvent.payload)
+    ? teleportEvent.payload
+    : undefined;
+  const from = payload && isJsonRecord(payload.from) ? payload.from : undefined;
+  const to = payload && isJsonRecord(payload.to) ? payload.to : undefined;
+  const random = resolved.receipt.randomDraws[0];
+  const randomDomain = random && isJsonRecord(random.domain) ? random.domain : undefined;
+  const finalHeadlessHaunt = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.headlessHauntInstanceId);
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+  const definition = session.state.cards[input.headlessHaunt.stableId];
+  const firstEventSequence = resolved.receipt.events[0]?.eventSequence;
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified: firstEventSequence !== undefined
+      && resolved.receipt.events.every((event, index) =>
+        event.cause.actionId === resolved.receipt.actionId
+          && event.cause.receiptSequence === resolved.receipt.receiptSequence
+          && event.eventSequence === firstEventSequence + index),
+    deck,
+    headlessHaunt: input.headlessHaunt.name,
+    legalTriggerVerified,
+    randomSelectionRecorded: resolved.receipt.randomDraws.length === 1
+      && random?.purpose === 'start_turn_random_teleport'
+      && randomDomain?.accepted === true
+      && randomDomain.exclusiveMaximum === randomCandidateCount
+      && randomDomain.kind === 'realm_site_or_void_location',
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    startTurnPhaseVerified,
+    structuralFactsVerified: definition?.cardType === 'minion'
+      && definition.atStartOfControllerTurnTeleportToRandomSiteOrVoid === true
+      && definition.voidwalk === true,
+    supportedSpellbookCopies: deck.spellbook
+      .reduce((total, card) => total + card.copies, 0),
+    teleportOutcomeVerified: (teleportEvent?.type === 'unit-teleported'
+      || teleportEvent?.type === 'unit-teleport-resolved'
+        && payload?.reason === 'already-there'
+        && from?.cell === to?.cell
+        && from?.region === to?.region)
+      && payload?.sourceInstanceId === opening.headlessHauntInstanceId
+      && payload.seat === 'north'
+      && finalHeadlessHaunt?.location === to?.cell
+      && finalHeadlessHaunt?.region === to?.region
+      && session.state.phase === 'draw',
+  });
+}
+
 function runAirDevilsEgg(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['airDevilsEgg'] {
@@ -23363,6 +23547,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airSlingPixies = runAirSlingPixies(input);
   const airSpireLich = runAirSpireLich(input);
   const airNimbusJinn = runAirNimbusJinn(input);
+  const airHeadlessHaunt = runAirHeadlessHaunt(input);
   const airDevilsEgg = runAirDevilsEgg(input);
   const airKiteArcher = runAirKiteArcher(input);
   const airSkirmishersOfMu = runAirSkirmishersOfMu(input);
@@ -23580,6 +23765,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     airSlingPixies,
     airSpireLich,
     airNimbusJinn,
+    airHeadlessHaunt,
     airDevilsEgg,
     airKiteArcher,
     airSkirmishersOfMu,

@@ -946,7 +946,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 34 : 35,
+        35,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -954,7 +954,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 35 : 34,
+        35,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -991,9 +991,9 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Chain Lightning': 2,
     'Cloud Spirit': 2,
     'Dead of Night Demon': 2,
-    "Devil's Egg": 1,
     'Gyre Hippogriffs': 1,
     'Grandmaster Wizard': 1,
+    'Headless Haunt': 2,
     'Highland Clansmen': 1,
     'Kite Archer': 1,
     'Lightning Bolt': 3,
@@ -1065,15 +1065,18 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     assert.equal(nimbusJinn.discardSpellToDamageRandomOtherUnitHere, 3);
     assert.deepEqual(nimbusJinn.thresholds, { air: 2, earth: 0, fire: 0, water: 0 });
   }
-  const devilsEggId = Object.entries(airLesson.cardNames)
-    .find(([, name]) => name === "Devil's Egg")?.[0];
-  assert.ok(devilsEggId);
-  const devilsEgg = airLesson.manifest.cards[devilsEggId];
-  assert.equal(devilsEgg?.cardType, 'artifact');
-  if (devilsEgg?.cardType === 'artifact') {
-    assert.equal(devilsEgg.manaCost, 3);
-    assert.equal(devilsEgg.atEndOfEachTurnSiteControllerLosesLife, 1);
-    assert.deepEqual(devilsEgg.thresholds, { air: 0, earth: 0, fire: 0, water: 0 });
+  const headlessHauntId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Headless Haunt')?.[0];
+  assert.ok(headlessHauntId);
+  const headlessHaunt = airLesson.manifest.cards[headlessHauntId];
+  assert.equal(headlessHaunt?.cardType, 'minion');
+  if (headlessHaunt?.cardType === 'minion') {
+    assert.equal(headlessHaunt.manaCost, 3);
+    assert.equal(headlessHaunt.attack, 4);
+    assert.equal(headlessHaunt.defense, 4);
+    assert.equal(headlessHaunt.atStartOfControllerTurnTeleportToRandomSiteOrVoid, true);
+    assert.equal(headlessHaunt.voidwalk, true);
+    assert.deepEqual(headlessHaunt.thresholds, { air: 2, earth: 0, fire: 0, water: 0 });
   }
   const kiteArcherId = Object.entries(airLesson.cardNames)
     .find(([, name]) => name === 'Kite Archer')?.[0];
@@ -1638,6 +1641,17 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airNimbusJinn.deck.spellbook
     .find(({ name }) => name === 'Nimbus Jinn')?.copies, 2);
   assert.equal(result.airNimbusJinn.replayVerified, true);
+  assert.equal(result.airHeadlessHaunt.headlessHaunt, 'Headless Haunt');
+  assert.equal(result.airHeadlessHaunt.seed, 7);
+  assert.equal(result.airHeadlessHaunt.acceptedActionCount > 0, true);
+  assert.equal(result.airHeadlessHaunt.startTurnPhaseVerified, true);
+  assert.equal(result.airHeadlessHaunt.legalTriggerVerified, true);
+  assert.equal(result.airHeadlessHaunt.randomSelectionRecorded, true);
+  assert.equal(result.airHeadlessHaunt.teleportOutcomeVerified, true);
+  assert.equal(result.airHeadlessHaunt.causalEventsVerified, true);
+  assert.equal(result.airHeadlessHaunt.structuralFactsVerified, true);
+  assert.equal(result.airHeadlessHaunt.supportedSpellbookCopies, 35);
+  assert.equal(result.airHeadlessHaunt.replayVerified, true);
   assert.equal(result.airDevilsEgg.devilsEgg, "Devil's Egg");
   assert.equal(result.airDevilsEgg.seed, 2);
   assert.equal(result.airDevilsEgg.acceptedActionCount, 19);
