@@ -1638,11 +1638,82 @@ function requireCardId(value: string, path: string): void {
   if (!value.trim() || value.length > 256) throw new RangeError(`${path} must be 1-256 characters`);
 }
 
+const SUPPORTED_CARD_FIELDS = {
+  artifact: new Set(`
+    atEndOfEachTurnSiteControllerLosesLife bearerControllerChoosesExtraRandomOutcome cardType
+    grantsBearerLethal grantsBearerPower manaCost
+    tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
+    tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps
+    tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath thresholds
+  `.trim().split(/\s+/)),
+  aura: new Set(`
+    atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep cardType
+    immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns manaCost thresholds
+  `.trim().split(/\s+/)),
+  avatar: new Set(`
+    attack cardType defense drawSpell earthSitePlayCreatesAdjacentRubble life
+    replaceAdjacentRubbleWithTopAtlasSite
+    tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn
+  `.trim().split(/\s+/)),
+  magic: new Set(`
+    burrowAllMinionsAndArtifactsAtTargetLandSite burrowTargetMinionOrArtifact cardType
+    damageChainNearbyUnits damageEachAbovegroundMinion damageEachUnitAtLocationWithinTwoSteps
+    damageRandomUnitAtLocation damageTargetUnit disableTargetNearbyMinionUntilNextTurn
+    fightAllyWithAdjacentEnemy gainControlOfTargetNearbyMinion grantChargeToAllyThisTurn
+    grantPowerToAllyThisTurn healController killTargetWoundedMinion leapAttackAlly
+    lureEnemyMinionOneStepCloser manaCost returnMinionFromOwnCemetery submergeTargetMinion
+    summonTokenToEachControlledSiteBorderingEnemySite targetNearby teleportAllyToTargetSite
+    teleportNearbyAllyThenDrawCard thresholds untapTargetMinionAfterDamage
+  `.trim().split(/\s+/)),
+  minion: new Set(`
+    airborne attack burrowing cardType cannotAttackSites cannotDefend cannotDefendOrIntercept
+    charge connectsTopBottom deathriteDamageEachUnitHere deathriteDrawSite deathriteHeal
+    deathriteLoseLifePerNearbySiteControlled defense discardRandomCardInsteadOfMana
+    discardSpellToDamageRandomOtherUnitHere diesAtEndOfControllerTurn genesisDamageEachOtherUnitHere
+    genesisDisableSelfUntilDamaged genesisDrawSite genesisDrawSpells genesisHealController
+    genesisLoseControllerLife genesisMayDamageTargetAdjacentUnit genesisStrikeEachEnemyHere
+    gainsPowerRangedAndSpellcasterAtopTower gainsStealthAtEndOfTurn immobile lanceCount lethal
+    manaCost mayStepAfterRangedStrike mortal movementBonus movesOnlyForward movesOnlySideways
+    mustBeCastBurrowed mustBeCastSubmerged mustBeCastToOuterColumn mustBeCastToWaterSite
+    nearbyEnemiesPermanentlyLoseStealth occupiesSquareArea ordinary otherControlledMortalsPowerBonus
+    otherNearbyAlliesPowerBonus preventsDamageFromUnitsWithPowerAtLeast provides ranged
+    sacrificeMinionAtSummoningLocationForManaDiscount shootsDragProjectile siteProvidesNoThreshold
+    spellcaster stealth strikesFirstWhileAttacking submerge summonToAnySite
+    tapToDamageEachUnitAtAdjacentLocation tapForMana takesLessDamage thresholds token
+    untapsAtEndOfControllerTurn voidwalk ward waterbound
+  `.trim().split(/\s+/)),
+  site: new Set(`
+    airborneMinionsAtopMoveFreelyAway blocksGroundMinionEntryWhileMinionAtop
+    cannotBeMovedDestroyedOrModified cardType connectsBurrowedAllies elements
+    genesisDiscardTopSpells genesisDrawSpellPerAdjacentSameCard genesisEnemiesLoseStealth
+    genesisGainMana genesisGainManaIfOnlyControlledCopy genesisHealNearbyAvatars
+    genesisImmobilizeNearbyUntilNextTurn genesisMayBottomNextSpell genesisPayOneManaToSummonToken
+    isTower ordinaryMinionManaDiscount rangedUnitsHereRangeBonus sacrificeToDestroyNearbySite
+  `.trim().split(/\s+/)),
+} satisfies Readonly<Record<GameCardDefinition['cardType'], ReadonlySet<string>>>;
+
+function rejectUnknownCardFields(card: GameCardDefinition, path: string): void {
+  const fields = SUPPORTED_CARD_FIELDS[card.cardType as keyof typeof SUPPORTED_CARD_FIELDS];
+  if (!fields) throw new RangeError(`${path}.cardType is unsupported`);
+  const unknown = Object.keys(card).find((field) => !fields.has(field));
+  if (unknown) throw new RangeError(`${path}.${unknown} is unsupported`);
+}
+
+function rejectUnknownThresholds(
+  thresholds: GameThresholds,
+  path: string,
+  elements: readonly GameElement[],
+): void {
+  const unknown = Object.keys(thresholds).find((field) => !elements.includes(field as GameElement));
+  if (unknown) throw new RangeError(`${path}.thresholds.${unknown} is unsupported`);
+}
+
 function validateCardDefinition(card: GameCardDefinition, path: string): void {
   const elements: readonly GameElement[] = ['earth', 'fire', 'water', 'air'];
   if (Object.prototype.hasOwnProperty.call(card, 'genesisDrawSpell')) {
     throw new RangeError(`${path}.genesisDrawSpell is obsolete; use genesisDrawSpells`);
   }
+  rejectUnknownCardFields(card, path);
   if (card.cardType === 'avatar') {
     if (typeof card.drawSpell !== 'boolean') throw new RangeError(`${path}.drawSpell must be boolean`);
     if (card.earthSitePlayCreatesAdjacentRubble !== undefined
@@ -1840,6 +1911,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     if (!Number.isSafeInteger(card.manaCost) || card.manaCost < 0) {
       throw new RangeError(`${path}.manaCost must be a supported nonnegative safe integer`);
     }
+    rejectUnknownThresholds(card.thresholds, path, elements);
     for (const element of elements) {
       if (!Number.isSafeInteger(card.thresholds[element]) || card.thresholds[element] < 0) {
         throw new RangeError(`${path}.thresholds.${element} must be a nonnegative safe integer`);
@@ -1869,6 +1941,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     if (!Number.isSafeInteger(card.manaCost) || card.manaCost < 0) {
       throw new RangeError(`${path}.manaCost must be a supported nonnegative safe integer`);
     }
+    rejectUnknownThresholds(card.thresholds, path, elements);
     for (const element of elements) {
       if (!Number.isSafeInteger(card.thresholds[element]) || card.thresholds[element] < 0) {
         throw new RangeError(`${path}.thresholds.${element} must be a nonnegative safe integer`);
@@ -2007,6 +2080,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     if (!Number.isSafeInteger(card.manaCost) || card.manaCost < 0) {
       throw new RangeError(`${path}.manaCost must be a supported nonnegative safe integer`);
     }
+    rejectUnknownThresholds(card.thresholds, path, elements);
     for (const element of elements) {
       if (!Number.isSafeInteger(card.thresholds[element]) || card.thresholds[element] < 0) {
         throw new RangeError(`${path}.thresholds.${element} must be a nonnegative safe integer`);
@@ -2373,6 +2447,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       throw new RangeError(`${path}.${field} must be a supported nonnegative safe integer`);
     }
   }
+  rejectUnknownThresholds(card.thresholds, path, elements);
   for (const element of elements) {
     if (!Number.isSafeInteger(card.thresholds[element]) || card.thresholds[element] < 0) {
       throw new RangeError(`${path}.thresholds.${element} must be a nonnegative safe integer`);
@@ -2410,6 +2485,12 @@ function validateDeck(
 
 export function createGameManifest(input: GameManifestInput): GameManifest {
   createEngineState(input.seed);
+  if (input.firstSeat !== 'north' && input.firstSeat !== 'south') {
+    throw new RangeError('firstSeat is unsupported');
+  }
+  if (input.authority.mode !== 'private-local' && input.authority.mode !== 'synthetic') {
+    throw new RangeError('authority.mode is unsupported');
+  }
   const cardEntries = Object.entries(input.cards).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
   if (cardEntries.length === 0 || cardEntries.length > 5_000) {
     throw new RangeError('cards must contain 1-5000 definitions');
@@ -2749,6 +2830,19 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
   return deepFreeze({ ...body, manifestId: identityHash(asJson(body)) });
 }
 
+export function assertCanonicalGameManifest(manifest: GameManifest): void {
+  const rebuilt = createGameManifest({
+    authority: manifest.authority,
+    cards: manifest.cards,
+    decks: manifest.decks,
+    firstSeat: manifest.firstSeat,
+    seed: manifest.seed,
+  });
+  if (canonicalJson(asJson(rebuilt)) !== canonicalJson(asJson(manifest))) {
+    throw new RangeError('game manifest is not canonical');
+  }
+}
+
 function cardInstance(
   manifest: GameManifest,
   owner: GameSeat,
@@ -2970,6 +3064,7 @@ function createPlayer(
 }
 
 export function createGameSession(manifest: GameManifest): GameSession {
+  assertCanonicalGameManifest(manifest);
   const initialEngine = createEngineState(manifest.seed);
   const north = createPlayer(manifest, 'north', initialEngine);
   const south = createPlayer(manifest, 'south', north.engine);

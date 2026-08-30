@@ -376,7 +376,33 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
     firstSeat: 'north' as const,
     seed: 3,
   };
-  assert.doesNotThrow(() => createGameManifest({ ...input, cards }));
+  const validManifest = createGameManifest({ ...input, cards });
+  assert.throws(() => createGameSession({
+    ...validManifest,
+    firstSeat: 'east',
+  } as unknown as GameManifest), /firstSeat is unsupported/);
+  const firstSpell = decks.north.spellbook[0];
+  assert.ok(firstSpell);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        futureUnsupportedMechanic: true,
+      } as unknown as GameCardDefinition,
+    },
+  }), /futureUnsupportedMechanic is unsupported/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        thresholds: { air: 0, earth: 1, fire: 0, futureElement: 1, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /thresholds.futureElement is unsupported/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -384,8 +410,6 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       unused: { attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20 },
     },
   }), /exactly the deck-referenced definitions/);
-  const firstSpell = decks.north.spellbook[0];
-  assert.ok(firstSpell);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {

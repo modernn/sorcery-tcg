@@ -5,7 +5,7 @@ import { isMainThread, parentPort, Worker, workerData } from 'node:worker_thread
 
 import { canonicalJson, type JsonValue } from '../authority/canonical-json.ts';
 import { deepFreeze } from '../engine/contract.ts';
-import type { GameManifest } from '../engine/game.ts';
+import { assertCanonicalGameManifest, type GameManifest } from '../engine/game.ts';
 import {
   createSyntheticDemoManifest,
   runDeterministicGame,
@@ -114,6 +114,13 @@ export async function runGameBatch(
   if (Buffer.byteLength(canonicalJson(manifests as unknown as JsonValue)) > MAX_BATCH_BYTES) {
     throw new RangeError(`game batch exceeds ${MAX_BATCH_BYTES} bytes`);
   }
+  manifests.forEach((manifest, jobIndex) => {
+    try {
+      assertCanonicalGameManifest(manifest);
+    } catch {
+      throw new RangeError(`game batch manifest ${jobIndex} is invalid`);
+    }
+  });
   const workerCount = Math.min(requestedWorkers, manifests.length);
   const chunks = Array.from({ length: workerCount }, () => [] as BatchItem[]);
   manifests.forEach((manifest, jobIndex) => {
