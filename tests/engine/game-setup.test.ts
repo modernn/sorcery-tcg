@@ -59,6 +59,7 @@ type SpellFacts = Readonly<{
   movementBonus?: 1 | 2;
   nearbyEnemiesPermanentlyLoseStealth?: true;
   otherNearbyAlliesPowerBonus?: 1;
+  occupiesSquareArea?: 2;
   movesOnlyForward?: boolean;
   movesOnlySideways?: boolean;
   mustBeCastBurrowed?: boolean;
@@ -8491,6 +8492,410 @@ test('RULE-03 Aura occupies any canonical 2x2 area and grounds site minions for 
     .filter(({ type }) => type.startsWith('aura-'))
     .map(({ type }) => type), ['aura-turn-counted', 'aura-dispelled']);
   assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement, combat, Auras, and terrain', () => {
+  const base = manifest(248);
+  const preview = createGameSession(base);
+  const [giantCardId, auraCardId, artifactCardId] = preview.state.players.north.hand.spellbook
+    .map(({ cardId }) => cardId);
+  const [enemyCardId, caveInCardId] = preview.state.players.south.hand.spellbook
+    .map(({ cardId }) => cardId);
+  const remoteEnemyCardId = preview.state.players.south.spellbook[0]?.cardId;
+  const [teleportCardId, blinkCardId, leapCardId] = preview.state.players.north.spellbook
+    .slice(0, 3)
+    .map(({ cardId }) => cardId);
+  const waterSiteCardId = preview.state.players.north.hand.atlas[0]?.cardId;
+  assert.ok(giantCardId);
+  assert.ok(auraCardId);
+  assert.ok(artifactCardId);
+  assert.ok(enemyCardId);
+  assert.ok(caveInCardId);
+  assert.ok(remoteEnemyCardId);
+  assert.ok(teleportCardId);
+  assert.ok(blinkCardId);
+  assert.ok(leapCardId);
+  assert.ok(waterSiteCardId);
+
+  const cards: Record<string, GameCardDefinition> = {
+    ...base.cards,
+    [giantCardId]: {
+      attack: 8,
+      cardType: 'minion',
+      defense: 8,
+      manaCost: 0,
+      occupiesSquareArea: 2,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+    [auraCardId]: {
+      cardType: 'aura',
+      immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns: true,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+    [artifactCardId]: {
+      cardType: 'artifact',
+      grantsBearerPower: 2,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+    [enemyCardId]: {
+      attack: 2,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+    [remoteEnemyCardId]: {
+      attack: 2,
+      cardType: 'minion',
+      charge: true,
+      defense: 2,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+    [caveInCardId]: {
+      burrowAllMinionsAndArtifactsAtTargetLandSite: true,
+      cardType: 'magic',
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+    [teleportCardId]: {
+      cardType: 'magic',
+      manaCost: 0,
+      teleportAllyToTargetSite: true,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+    [blinkCardId]: {
+      cardType: 'magic',
+      manaCost: 0,
+      teleportNearbyAllyThenDrawCard: true,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+    [leapCardId]: {
+      cardType: 'magic',
+      leapAttackAlly: true,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+    [waterSiteCardId]: {
+      cardType: 'site',
+      elements: ['water'],
+    },
+  };
+  const input = {
+    authority: base.authority,
+    cards,
+    decks: base.decks,
+    firstSeat: base.firstSeat,
+    seed: base.seed,
+  };
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [giantCardId]: {
+        ...cards[giantCardId]!,
+        occupiesSquareArea: 3,
+      } as unknown as GameCardDefinition,
+    },
+  }), /occupiesSquareArea must be 2/);
+  for (const incompatibleFact of [
+    { connectsTopBottom: true as const },
+    { siteProvidesNoThreshold: true as const },
+    { spellcaster: true as const },
+  ]) {
+    assert.throws(() => createGameManifest({
+      ...input,
+      cards: {
+        ...cards,
+        [giantCardId]: {
+          ...cards[giantCardId]!,
+          ...incompatibleFact,
+        },
+      },
+    }), /occupiesSquareArea has an unsupported ability combination/);
+  }
+  const gameManifest = createGameManifest(input);
+  assert.equal(gameManifest.cards[giantCardId]?.cardType === 'minion'
+    && gameManifest.cards[giantCardId].occupiesSquareArea, 2);
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  const northSites = [
+    ...session.state.players.north.hand.atlas,
+    session.state.players.north.atlas[0]!,
+  ];
+  const southSites = [
+    ...session.state.players.south.hand.atlas,
+    session.state.players.south.atlas[0]!,
+  ];
+  const play = (
+    seat: 'north' | 'south',
+    index: number,
+    cell: 'B1' | 'B2' | 'B3' | 'B4' | 'C1' | 'C2' | 'C3' | 'C4',
+  ): void => {
+    const card = (seat === 'north' ? northSites : southSites)[index];
+    assert.ok(card);
+    take(({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === card.instanceId && descriptor.cell === cell);
+  };
+  const endAndDraw = (zone: 'atlas' | 'spellbook' = 'spellbook'): void => {
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === zone);
+  };
+
+  play('north', 0, 'C4');
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cardId === giantCardId), false);
+  endAndDraw();
+  play('south', 0, 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === enemyCardId && descriptor.cell === 'C1');
+  endAndDraw();
+  play('north', 1, 'B4');
+  endAndDraw('atlas');
+  play('south', 1, 'B1');
+  endAndDraw();
+  play('north', 2, 'C3');
+  endAndDraw('atlas');
+  play('south', 2, 'C2');
+  const enemy = session.state.realm.units.find(({ cardId }) => cardId === enemyCardId);
+  assert.ok(enemy);
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === enemy.instanceId
+    && descriptor.to.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  endAndDraw('atlas');
+
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cardId === giantCardId), false);
+  play('north', 3, 'B3');
+  const giantSummons = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cardId === giantCardId);
+  assert.deepEqual(giantSummons.flatMap(({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cells ? [descriptor.cells] : []), [
+    ['B3', 'B4', 'C3', 'C4'],
+  ]);
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === giantCardId
+    && descriptor.cells?.every((cell, index) =>
+      cell === ['B3', 'B4', 'C3', 'C4'][index]) === true);
+  const giant = session.state.realm.units.find(({ cardId }) => cardId === giantCardId);
+  assert.ok(giant);
+  assert.deepEqual(giant.occupiedCells, ['B3', 'B4', 'C3', 'C4']);
+  assert.deepEqual(observeGame(session.state, 'south').realm.units
+    .find(({ instanceId }) => instanceId === giant.instanceId)?.occupiedCells,
+  ['B3', 'B4', 'C3', 'C4']);
+  take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+    && descriptor.cardId === artifactCardId
+    && descriptor.bearer?.instanceId === giant.instanceId
+    && descriptor.bearerCell === 'C4');
+  const artifact = session.state.realm.artifacts?.find(({ cardId }) =>
+    cardId === artifactCardId);
+  assert.ok(artifact);
+  assert.deepEqual(observeGame(session.state, 'north').realm.artifacts
+    ?.find(({ instanceId }) => instanceId === artifact.instanceId)?.location, 'C4');
+
+  take(({ descriptor }) => descriptor.kind === 'cast-aura'
+    && descriptor.cardId === auraCardId
+    && descriptor.cells.every((cell, index) =>
+      cell === ['A2', 'A3', 'B2', 'B3'][index]));
+  assert.equal(observeGame(session.state, 'north').realm.units
+    .find(({ instanceId }) => instanceId === giant.instanceId)?.immobile, true);
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === giant.instanceId
+      && descriptor.path.length > 1), false);
+
+  for (let round = 0; round < 3; round += 1) {
+    endAndDraw(round === 2 ? 'atlas' : 'spellbook');
+    if (round === 0) {
+      play('south', 3, 'B2');
+      take(({ descriptor }) => descriptor.kind === 'summon-minion'
+        && descriptor.cardId === remoteEnemyCardId && descriptor.cell === 'B2');
+    }
+    endAndDraw('spellbook');
+  }
+  const remoteInterceptor = session.state.realm.units.find(({ cardId, location }) =>
+    cardId === remoteEnemyCardId && location === 'B2');
+  assert.ok(remoteInterceptor);
+  const teleportTargetSite = session.state.realm.sites.C3;
+  assert.ok(teleportTargetSite);
+  const destinationAreas = [
+    ['B2', 'B3', 'C2', 'C3'],
+    ['B3', 'B4', 'C3', 'C4'],
+  ];
+  const teleportActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardId === teleportCardId
+      && descriptor.ally?.instanceId === giant.instanceId
+      && descriptor.targetLocation?.cell === 'C3'
+      && descriptor.targetSiteInstanceId === teleportTargetSite.instanceId);
+  assert.deepEqual(teleportActions.flatMap(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.allyDestinationCells
+      ? [descriptor.allyDestinationCells]
+      : []), destinationAreas);
+  assert.equal(new Set(teleportActions.map(({ actionId }) => actionId)).size, 2);
+  const shiftedTeleport = teleportActions.find(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.allyDestinationCells?.[0] === 'B2');
+  assert.ok(shiftedTeleport);
+  const teleported = stepGame(session, shiftedTeleport);
+  assert.equal(teleported.accepted, true);
+  if (!teleported.accepted) return;
+  assert.deepEqual(teleported.session.state.realm.units
+    .find(({ instanceId }) => instanceId === giant.instanceId)?.occupiedCells,
+  destinationAreas[0]);
+  const teleportPayload = teleported.receipt.events
+    .find(({ type }) => type === 'unit-teleported')?.payload;
+  assert.ok(teleportPayload
+    && typeof teleportPayload === 'object'
+    && !Array.isArray(teleportPayload)
+    && 'cells' in teleportPayload);
+  if (teleportPayload
+    && typeof teleportPayload === 'object'
+    && !Array.isArray(teleportPayload)
+    && 'cells' in teleportPayload) {
+    assert.deepEqual(teleportPayload.cells, destinationAreas[0]);
+  }
+  assert.equal(verifyGameReplay(teleported.session), true);
+  const leapActions = legalGameActions(teleported.session.state, 'north')
+    .filter(({ descriptor }) => descriptor.kind === 'cast-magic'
+      && descriptor.cardId === leapCardId
+      && descriptor.ally?.instanceId === giant.instanceId
+      && descriptor.allyDestination?.cell === 'B2');
+  assert.deepEqual(leapActions.flatMap(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.allyStrikeLocation
+      ? [descriptor.allyStrikeLocation.cell]
+      : []), ['B2', 'B3', 'C2', 'C3']);
+  assert.equal(new Set(leapActions.map(({ actionId }) => actionId)).size, 4);
+  const focusedLeap = leapActions.find(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.allyStrikeLocation?.cell === 'B2');
+  assert.ok(focusedLeap);
+  if (focusedLeap.descriptor.kind !== 'cast-magic') throw new Error('expected Leap Attack cast');
+  const leaped = stepGame(teleported.session, focusedLeap);
+  assert.equal(leaped.accepted, true);
+  if (!leaped.accepted) return;
+  assert.equal(leaped.receipt.events[0]?.type, 'magic-cast');
+  assert.deepEqual(leaped.receipt.events[0]?.payload, {
+    allyDestination: { cell: 'B2', region: 'surface' },
+    allyInstanceId: giant.instanceId,
+    allySeat: 'north',
+    allyStrikeLocation: { cell: 'B2', region: 'surface' },
+    cardId: leapCardId,
+    casterInstanceId: focusedLeap.descriptor.casterInstanceId,
+    instanceId: focusedLeap.descriptor.cardInstanceId,
+    manaPaid: 0,
+    seat: 'north',
+  });
+  assert.deepEqual(leaped.receipt.events
+    .filter(({ type }) => type === 'strike-damage-allocated')
+    .map(({ payload }) => payload), [{
+    amount: 10,
+    strikerInstanceId: giant.instanceId,
+    targetInstanceId: remoteInterceptor.instanceId,
+  }]);
+  assert.equal(leaped.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === remoteInterceptor.instanceId), false);
+  assert.equal(leaped.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === enemy.instanceId), true);
+  assert.equal(verifyGameReplay(leaped.session), true);
+
+  const blinkActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardId === blinkCardId
+      && descriptor.ally?.instanceId === giant.instanceId
+      && descriptor.targetLocation?.cell === 'C3'
+      && descriptor.drawZone === 'spellbook');
+  assert.deepEqual(blinkActions.flatMap(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.allyDestinationCells
+      ? [descriptor.allyDestinationCells]
+      : []), destinationAreas);
+  assert.equal(new Set(blinkActions.map(({ actionId }) => actionId)).size, 2);
+  const shiftedBlink = blinkActions.find(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.allyDestinationCells?.[0] === 'B2');
+  assert.ok(shiftedBlink);
+  const blinked = stepGame(session, shiftedBlink);
+  assert.equal(blinked.accepted, true);
+  if (!blinked.accepted) return;
+  assert.deepEqual(blinked.session.state.realm.units
+    .find(({ instanceId }) => instanceId === giant.instanceId)?.occupiedCells,
+  destinationAreas[0]);
+  assert.equal(verifyGameReplay(blinked.session), true);
+
+  const translated = action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === giant.instanceId
+      && descriptor.from.cell === 'B3' && descriptor.to.cell === 'B2');
+  assert.deepEqual(translated.descriptor.kind === 'move-and-attack'
+    ? translated.descriptor.path.map(({ cell }) => cell)
+    : [], ['B3', 'B2']);
+  take(({ actionId }) => actionId === translated.actionId);
+  assert.deepEqual(session.state.realm.units
+    .find(({ instanceId }) => instanceId === giant.instanceId)?.occupiedCells,
+  ['B2', 'B3', 'C2', 'C3']);
+  assert.equal(observeGame(session.state, 'north').realm.artifacts
+    ?.find(({ instanceId }) => instanceId === artifact.instanceId)?.location, 'C3');
+  const attackCheckpoint = session;
+  const declined = stepGame(attackCheckpoint, action(attackCheckpoint, ({ descriptor }) =>
+    descriptor.kind === 'decline-attack'));
+  assert.equal(declined.accepted, true);
+  if (!declined.accepted) return;
+  assert.equal(declined.session.state.pendingCombat?.cell, 'B2');
+  assert.equal(legalGameActions(declined.session.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'intercept'
+      && descriptor.unitInstanceId === enemy.instanceId), false);
+  const intercepted = stepGame(declined.session, action(declined.session, ({ descriptor }) =>
+    descriptor.kind === 'intercept'
+      && descriptor.unitInstanceId === remoteInterceptor.instanceId));
+  assert.equal(intercepted.accepted, true);
+  if (!intercepted.accepted) return;
+  assert.equal(intercepted.session.state.pendingCombat?.cell, 'B2');
+  assert.equal(intercepted.receipt.events[0]?.type, 'interceptor-joined');
+  assert.deepEqual(intercepted.receipt.events[0]?.payload, {
+    cell: 'B2',
+    instanceId: remoteInterceptor.instanceId,
+    seat: 'south',
+  });
+  assert.equal(verifyGameReplay(intercepted.session), true);
+
+  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+    && descriptor.target.kind === 'minion'
+    && descriptor.target.instanceId === enemy.instanceId);
+  assert.equal(session.state.pendingCombat?.cell, 'C2');
+  take(({ descriptor }) => descriptor.kind === 'close-defend'
+    && descriptor.originalTargetParticipates);
+  assert.equal(session.state.realm.units.some(({ cardId }) => cardId === enemyCardId), false);
+  assert.equal(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === giant.instanceId)?.damage, 2);
+
+  endAndDraw();
+  const targetSite = session.state.realm.sites.C2;
+  assert.ok(targetSite);
+  const caveIn = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.cardId === caveInCardId
+      && descriptor.targetLocation?.cell === 'C2'
+      && descriptor.targetSiteInstanceId === targetSite.instanceId));
+  assert.equal(caveIn.accepted, true);
+  if (!caveIn.accepted) return;
+  assert.equal(caveIn.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === giant.instanceId), false);
+  assert.deepEqual(caveIn.session.state.realm.artifacts?.find(({ instanceId }) =>
+    instanceId === artifact.instanceId), {
+    cardId: artifactCardId,
+    instanceId: artifact.instanceId,
+    location: 'C3',
+    owner: 'north',
+    region: 'underground',
+    source: 'spellbook',
+  });
+  assert.deepEqual(caveIn.receipt.events
+    .filter(({ type }) => type === 'minion-burrowed' || type === 'minion-died')
+    .map(({ type }) => type), ['minion-burrowed', 'minion-died']);
+  assert.deepEqual(caveIn.receipt.randomDraws, []);
+  assert.equal(verifyGameReplay(caveIn.session), true);
 });
 
 test('RULE-03 Tower Genesis grants mana only for the first controlled copy', () => {

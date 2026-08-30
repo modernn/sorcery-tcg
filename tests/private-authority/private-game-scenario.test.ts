@@ -922,7 +922,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 23 : 34,
+        preset.id === 'air-vs-earth-lesson' ? 23 : 35,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -930,7 +930,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 34 : 23,
+        preset.id === 'air-vs-earth-lesson' ? 35 : 23,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -1000,6 +1000,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'House Arn Bannerman': 2,
     'King of the Realm': 1,
     'Land Surveyor': 2,
+    'Mountain Giant': 1,
     Overpower: 2,
     'Payload Trebuchet': 1,
     'Pudge Butcher': 1,
@@ -1110,6 +1111,26 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       mortal: true,
       otherControlledMortalsPowerBonus: 1,
       thresholds: { air: 0, earth: 3, fire: 0, water: 0 },
+    });
+  }
+  const mountainGiantId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Mountain Giant')?.[0];
+  assert.ok(mountainGiantId);
+  const mountainGiant = airLesson.manifest.cards[mountainGiantId];
+  assert.equal(mountainGiant?.cardType, 'minion');
+  if (mountainGiant?.cardType === 'minion') {
+    assert.deepEqual({
+      attack: mountainGiant.attack,
+      defense: mountainGiant.defense,
+      manaCost: mountainGiant.manaCost,
+      occupiesSquareArea: mountainGiant.occupiesSquareArea,
+      thresholds: mountainGiant.thresholds,
+    }, {
+      attack: 8,
+      defense: 8,
+      manaCost: 8,
+      occupiesSquareArea: 2,
+      thresholds: { air: 0, earth: 4, fire: 0, water: 0 },
     });
   }
   const landSurveyorId = Object.entries(airLesson.cardNames)
@@ -1760,6 +1781,27 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthEntangleTerrain.deck.spellbook
     .find(({ name }) => name === 'Cave Trolls')?.copies, 4);
   assert.equal(result.earthEntangleTerrain.replayVerified, true);
+  assert.equal(result.earthMountainGiant.mountainGiant, 'Mountain Giant');
+  assert.equal(result.earthMountainGiant.wildBoars, 'Wild Boars');
+  assert.equal(result.earthMountainGiant.seed, 25);
+  assert.equal(result.earthMountainGiant.acceptedActionCount, 54);
+  assert.equal(result.earthMountainGiant.canonicalSummonVerified, true);
+  assert.equal(result.earthMountainGiant.initialFootprintVerified, true);
+  assert.equal(result.earthMountainGiant.movedFootprintVerified, true);
+  assert.equal(result.earthMountainGiant.footprintInteractionVerified, true);
+  assert.equal(result.earthMountainGiant.causalEventsVerified, true);
+  assert.equal(result.earthMountainGiant.legalConstructedDeck, true);
+  assert.equal(result.earthMountainGiant.noRandomDraws, true);
+  assert.equal(result.earthMountainGiant.unsupportedMechanicsAbsent, true);
+  assert.equal(result.earthMountainGiant.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthMountainGiant.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthMountainGiant.deck.spellbook
+    .find(({ name }) => name === 'Mountain Giant')?.copies, 1);
+  assert.equal(result.earthMountainGiant.deck.spellbook
+    .find(({ name }) => name === 'Wild Boars')?.copies, 4);
+  assert.equal(result.earthMountainGiant.replayVerified, true);
   assert.equal(result.earthHolyGround.holyGround, 'Holy Ground');
   assert.equal(result.earthHolyGround.lesserBloodDemon, 'Lesser Blood Demon');
   assert.equal(result.earthHolyGround.seed, 7398);

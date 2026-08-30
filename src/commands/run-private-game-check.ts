@@ -612,6 +612,22 @@ export type PrivateGameCheck = Readonly<{
     scentHounds: string;
     seed: number;
   }>;
+  earthMountainGiant: Readonly<{
+    acceptedActionCount: number;
+    canonicalSummonVerified: boolean;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    footprintInteractionVerified: boolean;
+    initialFootprintVerified: boolean;
+    legalConstructedDeck: boolean;
+    mountainGiant: string;
+    movedFootprintVerified: boolean;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    seed: number;
+    unsupportedMechanicsAbsent: boolean;
+    wildBoars: string;
+  }>;
   earthSlumberingGiantess: Readonly<{
     acceptedActionCount: number;
     albespinePikemen: string;
@@ -1511,6 +1527,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   lugbogCat: NormalizedCard;
   lure: NormalizedCard;
   malakhim: NormalizedCard;
+  mountainGiant: NormalizedCard;
   mesmerism: NormalizedCard;
   lumberingMinion: NormalizedCard;
   loneTower: NormalizedCard;
@@ -2085,6 +2102,28 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || entangleTerrain.thresholds.water !== 0
     || entangleTerrain.rarity !== 'ordinary') {
     throw new Error('private three-turn terrain Aura no longer matches its supported facts');
+  }
+  const mountainGiant = snapshot.cards.find(({ name }) => name === 'Mountain Giant');
+  if (!mountainGiant
+    || mountainGiant.stableId
+      !== 'card:8d25d67585569c09080ccfa671158f897363611b862f12ee5310fe44325c9f77'
+    || mountainGiant.officialSourceId !== '001-mountain_giant-b-f'
+    || mountainGiant.cardType !== 'minion'
+    || ruleTextDigest(mountainGiant.rulesText)
+      !== 'sha256:84839f2a41f8fa4e36b15544f2a9b8dedc5e740c1d1c1215cfa94478a9afe198'
+    || canonicalJson(mountainGiant.subtypes as unknown as JsonValue) !== '["Giant"]'
+    || mountainGiant.manaCost !== 8
+    || mountainGiant.attack !== 8
+    || mountainGiant.defense !== 8
+    || mountainGiant.life !== null
+    || mountainGiant.elements.length !== 1
+    || mountainGiant.elements[0] !== 'earth'
+    || mountainGiant.thresholds.air !== 0
+    || mountainGiant.thresholds.earth !== 4
+    || mountainGiant.thresholds.fire !== 0
+    || mountainGiant.thresholds.water !== 0
+    || mountainGiant.rarity !== 'elite') {
+    throw new Error('private four-location Giant no longer matches its supported facts');
   }
   const quagmire = snapshot.cards.find(({ name }) => name === 'Quagmire');
   const quagmireTokens: readonly string[] =
@@ -3695,6 +3734,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     lugbogCat,
     lure,
     malakhim,
+    mountainGiant,
     mesmerism,
     lumberingMinion,
     loneTower,
@@ -3878,6 +3918,7 @@ function gameDefinition(
   tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath = false,
   otherControlledMortalsPowerBonus = false,
   immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns = false,
+  occupiesSquareArea: 0 | 2 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4091,6 +4132,7 @@ function gameDefinition(
       ...(otherControlledMortalsPowerBonus
         ? { otherControlledMortalsPowerBonus: 1 as const }
         : {}),
+      ...(occupiesSquareArea ? { occupiesSquareArea } : {}),
       ...(provides ? { provides } : {}),
       ranged,
       ...(sacrificeMinionAtSummoningLocationForManaDiscount
@@ -4122,7 +4164,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -4302,6 +4344,14 @@ function buildManifest(
       ...earthKingOfRealmBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
     ],
   };
+  const earthMountainGiantBase = elementalDeck('earth', [input.wildBoars]);
+  const earthMountainGiantDeck: GameDeckSpec = {
+    ...earthMountainGiantBase,
+    spellbook: [
+      input.mountainGiant.stableId,
+      ...earthMountainGiantBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
+    ],
+  };
   const earthSlumberingGiantessBase = elementalDeck('earth', [input.firstStrikeMinion]);
   const earthSlumberingGiantessDeck: GameDeckSpec = {
     ...earthSlumberingGiantessBase,
@@ -4461,6 +4511,7 @@ function buildManifest(
       input.rollingBoulder.stableId,
       input.kingOfRealm.stableId,
       input.entangleTerrain.stableId,
+      input.mountainGiant.stableId,
     ],
   };
   const fireStarterDeck = elementalDeck(
@@ -4753,6 +4804,8 @@ function buildManifest(
         ? earthWraetannisTitanDeck
       : scenario === 'earth-king-of-realm'
         ? earthKingOfRealmDeck
+      : scenario === 'earth-mountain-giant'
+        ? earthMountainGiantDeck
       : scenario === 'earth-slumbering-giantess'
         ? earthSlumberingGiantessDeck
       : scenario === 'earth-duel'
@@ -4940,6 +4993,8 @@ function buildManifest(
         ? earthWraetannisTitanDeck
       : scenario === 'earth-king-of-realm'
         ? earthKingOfRealmDeck
+      : scenario === 'earth-mountain-giant'
+        ? earthMountainGiantDeck
       : scenario === 'earth-slumbering-giantess'
         ? earthSlumberingGiantessDeck
       : scenario === 'earth-duel'
@@ -5132,6 +5187,7 @@ function buildManifest(
       card.stableId === input.rollingBoulder.stableId,
       card.stableId === input.kingOfRealm.stableId,
       card.stableId === input.entangleTerrain.stableId,
+      card.stableId === input.mountainGiant.stableId ? 2 : 0,
     ),
   ]));
   return {
@@ -6573,6 +6629,83 @@ function findEarthKingOfRealmOpening(
     };
   }
   throw new Error('private King of the Realm seed no longer produces its supported opening');
+}
+
+function findEarthMountainGiantOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  manifest: GameManifest;
+  mountainGiantInstanceId: string;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+  ];
+  seed: number;
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string, string];
+  wildBoarsInstanceId: string;
+}> {
+  // ponytail: pinned seed keeps the actual-card proof fast and deterministic.
+  const seed = 25;
+  const built = buildManifest(input, seed, 'earth-mountain-giant');
+  const session = createGameSession(built.manifest);
+  const northSites = [
+    ...session.state.players.north.hand.atlas,
+    ...session.state.players.north.atlas.slice(0, 5),
+  ];
+  const southSites = session.state.players.south.hand.atlas;
+  const mountainGiantInstanceId = availableMinionInstance(
+    session,
+    'north',
+    input.mountainGiant.stableId,
+    2,
+  );
+  const wildBoarsInstanceId = availableMinionInstance(
+    session,
+    'south',
+    input.wildBoars.stableId,
+    2,
+  );
+  const northEarthSites = northSites.filter(({ cardId }) => {
+    const definition = session.state.cards[cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('earth');
+  });
+  if (northSites.length >= 8
+    && northEarthSites.length >= 4
+    && southSites.length >= 3
+    && mountainGiantInstanceId
+    && wildBoarsInstanceId) {
+    return {
+      ...built,
+      mountainGiantInstanceId,
+      northSiteInstanceIds: [
+        northSites[0]!.instanceId,
+        northSites[1]!.instanceId,
+        northSites[2]!.instanceId,
+        northSites[3]!.instanceId,
+        northSites[4]!.instanceId,
+        northSites[5]!.instanceId,
+        northSites[6]!.instanceId,
+        northSites[7]!.instanceId,
+      ],
+      seed,
+      session,
+      southSiteInstanceIds: [
+        southSites[0]!.instanceId,
+        southSites[1]!.instanceId,
+        southSites[2]!.instanceId,
+      ],
+      wildBoarsInstanceId,
+    };
+  }
+  throw new Error('private Mountain Giant seed no longer produces its supported opening');
 }
 
 function findEarthSlumberingGiantessOpening(
@@ -11274,6 +11407,267 @@ function runEarthKingOfRealm(
     replayVerified: verifyGameReplay(session),
     scentHounds: opening.names.get(input.scentHounds.stableId) ?? input.scentHounds.stableId,
     seed: opening.seed,
+  });
+}
+
+function runEarthMountainGiant(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthMountainGiant'] {
+  const opening = findEarthMountainGiantOpening(input);
+  let session = keep(keep(opening.session));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  const playSite = (instanceId: string, cell: string): void => {
+    take(({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === instanceId
+      && descriptor.cell === cell);
+  };
+  const drawAndEndSouthTurn = (): void => {
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+  };
+  const initialCells = ['B3', 'B4', 'C3', 'C4'] as const;
+  const movedCells = ['C3', 'C4', 'D3', 'D4'] as const;
+
+  playSite(opening.northSiteInstanceIds[0], 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playSite(opening.southSiteInstanceIds[0], 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playSite(opening.northSiteInstanceIds[1], 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playSite(opening.southSiteInstanceIds[1], 'D1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.wildBoarsInstanceId
+    && descriptor.cell === 'D1'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playSite(opening.northSiteInstanceIds[2], 'B4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playSite(opening.southSiteInstanceIds[2], 'D2');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === opening.wildBoarsInstanceId
+    && descriptor.from.cell === 'D1'
+    && descriptor.to.cell === 'D2');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  const laterNorthSites = [
+    ['B3', opening.northSiteInstanceIds[3]],
+    ['A4', opening.northSiteInstanceIds[4]],
+    ['A3', opening.northSiteInstanceIds[5]],
+    ['D4', opening.northSiteInstanceIds[6]],
+    ['D3', opening.northSiteInstanceIds[7]],
+  ] as const;
+  for (const [cell, siteInstanceId] of laterNorthSites) {
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    playSite(siteInstanceId, cell);
+    if (cell === 'D3') break;
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    drawAndEndSouthTurn();
+  }
+
+  const exactSummons = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.mountainGiantInstanceId
+      && descriptor.cell === 'B3'
+      && descriptor.region === undefined
+      && canonicalJson(descriptor.cells as JsonValue) === canonicalJson(initialCells));
+  if (exactSummons.length !== 1) {
+    throw new Error(
+      `private Mountain Giant seed ${opening.seed} has ${exactSummons.length} exact summons`,
+    );
+  }
+  const summonResult = stepGame(session, exactSummons[0]!);
+  if (!summonResult.accepted) {
+    throw new Error(
+      `private Mountain Giant seed ${opening.seed} summon rejected: ${summonResult.reason.code}`,
+    );
+  }
+  session = summonResult.session;
+  const initialStateGiant = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.mountainGiantInstanceId);
+  const initialObservedGiant = observeGame(session.state, 'south').realm.units
+    .find(({ instanceId }) => instanceId === opening.mountainGiantInstanceId);
+  const mountainDefinition = session.state.cards[input.mountainGiant.stableId];
+
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const boarMoveResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.wildBoarsInstanceId
+      && descriptor.from.cell === 'D2'
+      && descriptor.to.cell === 'D3'));
+  if (!boarMoveResult.accepted) {
+    throw new Error(
+      `private Mountain Giant seed ${opening.seed} target move rejected: ${boarMoveResult.reason.code}`,
+    );
+  }
+  session = boarMoveResult.session;
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const exactMoves = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.mountainGiantInstanceId
+      && descriptor.from.cell === 'B3'
+      && descriptor.to.cell === 'C3'
+      && canonicalJson(descriptor.path as unknown as JsonValue) === canonicalJson([
+        { cell: 'B3', region: 'surface' },
+        { cell: 'C3', region: 'surface' },
+      ]));
+  if (exactMoves.length !== 1) {
+    throw new Error(
+      `private Mountain Giant seed ${opening.seed} has ${exactMoves.length} exact moves`,
+    );
+  }
+  const moveResult = stepGame(session, exactMoves[0]!);
+  if (!moveResult.accepted) {
+    throw new Error(
+      `private Mountain Giant seed ${opening.seed} move rejected: ${moveResult.reason.code}`,
+    );
+  }
+  session = moveResult.session;
+  const movedGiant = observeGame(session.state, 'north').realm.units
+    .find(({ instanceId }) => instanceId === opening.mountainGiantInstanceId);
+  const attackResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === opening.wildBoarsInstanceId));
+  if (!attackResult.accepted) {
+    throw new Error(
+      `private Mountain Giant seed ${opening.seed} attack rejected: ${attackResult.reason.code}`,
+    );
+  }
+  session = attackResult.session;
+  const combatCell = session.state.pendingCombat?.cell;
+  const combatResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend'
+      && descriptor.originalTargetParticipates));
+  if (!combatResult.accepted) {
+    throw new Error(
+      `private Mountain Giant seed ${opening.seed} fight rejected: ${combatResult.reason.code}`,
+    );
+  }
+  session = combatResult.session;
+
+  const summonPayload = summonResult.receipt.events[0]
+    && isJsonRecord(summonResult.receipt.events[0].payload)
+    ? summonResult.receipt.events[0].payload
+    : undefined;
+  const movePayload = moveResult.receipt.events[0]
+    && isJsonRecord(moveResult.receipt.events[0].payload)
+    ? moveResult.receipt.events[0].payload
+    : undefined;
+  const attackPayload = attackResult.receipt.events[0]
+    && isJsonRecord(attackResult.receipt.events[0].payload)
+    ? attackResult.receipt.events[0].payload
+    : undefined;
+  const giantAfterCombat = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.mountainGiantInstanceId);
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    canonicalSummonVerified: exactSummons.length === 1
+      && mountainDefinition?.cardType === 'minion'
+      && mountainDefinition.occupiesSquareArea === 2
+      && summonPayload?.cardId === input.mountainGiant.stableId
+      && summonPayload.instanceId === opening.mountainGiantInstanceId
+      && summonPayload.cell === 'B3'
+      && summonPayload.manaPaid === 8
+      && summonPayload.seat === 'north'
+      && canonicalJson(summonPayload.cells as JsonValue) === canonicalJson(initialCells),
+    causalEventsVerified: summonResult.receipt.events.map(({ type }) => type).join(',')
+        === 'minion-summoned'
+      && moveResult.receipt.events.map(({ type }) => type).join(',')
+        === 'move-and-attack-activated'
+      && movePayload?.unitInstanceId === opening.mountainGiantInstanceId
+      && movePayload.steps === 1
+      && canonicalJson(movePayload.path as JsonValue) === canonicalJson([
+        { cell: 'B3', region: 'surface' },
+        { cell: 'C3', region: 'surface' },
+      ])
+      && attackResult.receipt.events.map(({ type }) => type).join(',') === 'attack-declared'
+      && attackPayload?.cell === 'D3'
+      && combatResult.receipt.events.map(({ type }) => type).join(',')
+        === 'defend-window-closed,fight-started,strike-damage-allocated,damage-dealt,damage-dealt,minion-died',
+    deck,
+    footprintInteractionVerified: combatCell === 'D3'
+      && session.state.players.south.cemetery
+        .some(({ instanceId }) => instanceId === opening.wildBoarsInstanceId)
+      && !session.state.realm.units
+        .some(({ instanceId }) => instanceId === opening.wildBoarsInstanceId)
+      && giantAfterCombat?.damage === 2,
+    initialFootprintVerified: initialStateGiant?.cardId === input.mountainGiant.stableId
+      && initialStateGiant.owner === 'north'
+      && initialStateGiant.controller === 'north'
+      && initialStateGiant.location === 'B3'
+      && canonicalJson(initialStateGiant.occupiedCells as JsonValue) === canonicalJson(initialCells)
+      && initialObservedGiant?.owner === 'north'
+      && initialObservedGiant.controller === 'north'
+      && canonicalJson(initialObservedGiant.occupiedCells as JsonValue) === canonicalJson(initialCells),
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && deck.spellbook.find(({ name }) => name === input.mountainGiant.name)?.copies === 1
+      && deck.spellbook.find(({ name }) => name === input.wildBoars.name)?.copies
+        === input.format.copyLimits[input.wildBoars.rarity!],
+    mountainGiant:
+      opening.names.get(input.mountainGiant.stableId) ?? input.mountainGiant.stableId,
+    movedFootprintVerified: exactMoves.length === 1
+      && movedGiant?.location === 'C3'
+      && canonicalJson(movedGiant.occupiedCells as JsonValue) === canonicalJson(movedCells),
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    unsupportedMechanicsAbsent: mountainDefinition?.cardType === 'minion'
+      && mountainDefinition.occupiesSquareArea === 2
+      && Object.keys(mountainDefinition).every((key) => [
+        'airborne',
+        'attack',
+        'burrowing',
+        'cannotAttackSites',
+        'cannotDefend',
+        'cannotDefendOrIntercept',
+        'cardType',
+        'charge',
+        'connectsTopBottom',
+        'deathriteDrawSite',
+        'defense',
+        'gainsStealthAtEndOfTurn',
+        'genesisDrawSite',
+        'genesisDrawSpell',
+        'immobile',
+        'lethal',
+        'manaCost',
+        'movesOnlyForward',
+        'movesOnlySideways',
+        'mustBeCastBurrowed',
+        'mustBeCastSubmerged',
+        'mustBeCastToOuterColumn',
+        'mustBeCastToWaterSite',
+        'occupiesSquareArea',
+        'ranged',
+        'shootsDragProjectile',
+        'spellcaster',
+        'stealth',
+        'strikesFirstWhileAttacking',
+        'submerge',
+        'summonToAnySite',
+        'thresholds',
+        'voidwalk',
+        'waterbound',
+        'ward',
+      ].includes(key)),
+    wildBoars: opening.names.get(input.wildBoars.stableId) ?? input.wildBoars.stableId,
   });
 }
 
@@ -19760,6 +20154,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthBedrock = runEarthBedrock(input);
   const earthWraetannisTitan = runEarthWraetannisTitan(input);
   const earthKingOfRealm = runEarthKingOfRealm(input);
+  const earthMountainGiant = runEarthMountainGiant(input);
   const earthSlumberingGiantess = runEarthSlumberingGiantess(input);
   const earthCaveIn = runEarthCaveIn(input);
   const earthSiegeBallista = runEarthSiegeBallista(input);
@@ -19979,6 +20374,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthBedrock,
     earthWraetannisTitan,
     earthKingOfRealm,
+    earthMountainGiant,
     earthSlumberingGiantess,
     earthCaveIn,
     earthSiegeBallista,
