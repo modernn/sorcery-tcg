@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 
-import { runGameBatch } from '../../src/commands/run-game-batch.ts';
 import {
   loadPrivateStarterCatalog,
   type PrivateGameCheck,
@@ -10,6 +9,7 @@ import {
   runPrivateGameCheck,
 } from '../../src/commands/run-private-game-check.ts';
 import { createGamePrototypeServer } from '../../src/prototype/game-server.ts';
+import { runTwoDeckGauntlet } from '../../src/simulator/gauntlet.ts';
 
 type JsonObject = Record<string, unknown>;
 
@@ -881,18 +881,37 @@ test('private actual-card browser presets reach combat, terminal state, and exac
   await verifyPrivateStarterHttp(await loadPrivateStarterCatalog());
 });
 
-test('private actual-card manifests produce identical summary-only worker batches', async () => {
+test('private actual-card decks produce identical summary-only gauntlets', async () => {
   const lessons = (await loadPrivateStarterCatalog()).filter(({ id }) => id.endsWith('-lesson'));
   assert.deepEqual(lessons.map(({ id }) => id), ['air-vs-earth-lesson', 'earth-vs-air-lesson']);
   assert.equal(lessons[1]?.manifest.seed, 7_382);
-  const manifests = lessons.map(({ manifest }) => manifest);
-  const oneWorker = await runGameBatch(manifests, 1);
-  const twoWorkers = await runGameBatch(manifests, 2);
+  const base = lessons[0]!.manifest;
+  const input = {
+    authority: base.authority,
+    cards: base.cards,
+    decks: [
+      { deck: base.decks.north, id: 'deck-a' },
+      { deck: base.decks.south, id: 'deck-b' },
+    ],
+    seeds: lessons.map(({ manifest }) => manifest.seed),
+  } as const;
+  const oneWorker = await runTwoDeckGauntlet(input, 1);
+  const twoWorkers = await runTwoDeckGauntlet(input, 2);
   assert.deepEqual(oneWorker, twoWorkers);
-  assert.equal(oneWorker.every(({ report }) =>
+  assert.equal(oneWorker.games.every(({ report }) =>
     report.fightCount > 0
       && report.replayVerified
       && report.terminal.status === 'finished'), true);
+  assert.equal(oneWorker.gameCount, 4);
+  assert.equal(oneWorker.byDeck['deck-a']?.asNorth.games, 2);
+  assert.equal(oneWorker.byDeck['deck-a']?.asSouth.games, 2);
+  assert.deepEqual(oneWorker.games.map(({ northDeckId, seed, southDeckId }) =>
+    ({ northDeckId, seed, southDeckId })), [
+    { northDeckId: 'deck-a', seed: input.seeds[0], southDeckId: 'deck-b' },
+    { northDeckId: 'deck-b', seed: input.seeds[0], southDeckId: 'deck-a' },
+    { northDeckId: 'deck-a', seed: input.seeds[1], southDeckId: 'deck-b' },
+    { northDeckId: 'deck-b', seed: input.seeds[1], southDeckId: 'deck-a' },
+  ]);
 
   const serialized = JSON.stringify(oneWorker);
   assert.doesNotMatch(serialized, /\.local|officialSourceId|rulesText/);
