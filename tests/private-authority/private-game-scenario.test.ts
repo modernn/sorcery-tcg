@@ -927,7 +927,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 28 : 35,
+        preset.id === 'air-vs-earth-lesson' ? 29 : 35,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -935,7 +935,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 35 : 28,
+        preset.id === 'air-vs-earth-lesson' ? 35 : 29,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -975,6 +975,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Gyre Hippogriffs': 1,
     'Grandmaster Wizard': 1,
     'Highland Clansmen': 1,
+    'Kite Archer': 1,
     'Lightning Bolt': 3,
     'Midnight Rogue': 2,
     'Nimbus Jinn': 1,
@@ -1050,6 +1051,20 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     assert.equal(devilsEgg.manaCost, 3);
     assert.equal(devilsEgg.atEndOfEachTurnSiteControllerLosesLife, 1);
     assert.deepEqual(devilsEgg.thresholds, { air: 0, earth: 0, fire: 0, water: 0 });
+  }
+  const kiteArcherId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Kite Archer')?.[0];
+  assert.ok(kiteArcherId);
+  const kiteArcher = airLesson.manifest.cards[kiteArcherId];
+  assert.equal(kiteArcher?.cardType, 'minion');
+  if (kiteArcher?.cardType === 'minion') {
+    assert.equal(kiteArcher.attack, 2);
+    assert.equal(kiteArcher.defense, 2);
+    assert.equal(kiteArcher.manaCost, 3);
+    assert.equal(kiteArcher.mortal, true);
+    assert.equal(kiteArcher.ranged, true);
+    assert.equal(kiteArcher.mayStepAfterRangedStrike, true);
+    assert.deepEqual(kiteArcher.thresholds, { air: 1, earth: 0, fire: 0, water: 0 });
   }
   for (const towerName of ['Dark Tower', 'Gothic Tower', 'Lone Tower']) {
     const towerId = Object.entries(airLesson.cardNames)
@@ -1592,6 +1607,23 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airDevilsEgg.deck.spellbook
     .find(({ name }) => name === "Devil's Egg")?.copies, 1);
   assert.equal(result.airDevilsEgg.replayVerified, true);
+  assert.equal(result.airKiteArcher.kiteArcher, 'Kite Archer');
+  assert.equal(result.airKiteArcher.seed, 29);
+  assert.equal(result.airKiteArcher.acceptedActionCount, 25);
+  assert.equal(result.airKiteArcher.causalEventsVerified, true);
+  assert.equal(result.airKiteArcher.declineBranchVerified, true);
+  assert.equal(result.airKiteArcher.exactStepVerified, true);
+  assert.equal(result.airKiteArcher.structuralFactsVerified, true);
+  assert.equal(result.airKiteArcher.noRandomDraws, true);
+  assert.equal(result.airKiteArcher.unsupportedMechanicsAbsent, true);
+  assert.equal(result.airKiteArcher.legalConstructedDeck, true);
+  assert.equal(result.airKiteArcher.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airKiteArcher.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airKiteArcher.deck.spellbook
+    .find(({ name }) => name === 'Kite Archer')?.copies, 3);
+  assert.equal(result.airKiteArcher.replayVerified, true);
   assert.equal(result.airSpellcasterFreeze.apprenticeWizard, 'Apprentice Wizard');
   assert.equal(result.airSpellcasterFreeze.freeze, 'Freeze');
   assert.equal(result.airSpellcasterFreeze.seravaTownsfolk, 'Serava Townsfolk');

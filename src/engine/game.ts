@@ -210,6 +210,7 @@ export type GameCardDefinition =
     lanceCount?: 1 | 2 | 3;
     lethal?: boolean;
     manaCost: number;
+    mayStepAfterRangedStrike?: true;
     mortal?: true;
     movementBonus?: 1 | 2;
     movesOnlyForward?: boolean;
@@ -382,6 +383,11 @@ type PendingGenesisToken = Readonly<{
   sourceInstanceId: StateHash;
 }>;
 
+type PendingRangedStep = Readonly<{
+  seat: GameSeat;
+  sourceInstanceId: StateHash;
+}>;
+
 type PlayerState = Readonly<{
   airThresholdsCastThisTurn?: number;
   atlas: readonly CardInstance[];
@@ -427,7 +433,8 @@ export type GameState = Readonly<{
   pendingCombat: PendingCombat | null;
   pendingGenesisSpell?: PendingGenesisSpell | null;
   pendingGenesisToken?: PendingGenesisToken | null;
-  phase: 'allocate' | 'attack' | 'defend' | 'draw' | 'genesis' | 'intercept' | 'main' | 'mulligan' | 'terminal';
+  pendingRangedStep?: PendingRangedStep | null;
+  phase: 'allocate' | 'attack' | 'defend' | 'draw' | 'genesis' | 'intercept' | 'main' | 'mulligan' | 'ranged-step' | 'terminal';
   players: Readonly<Record<GameSeat, PlayerState>>;
   realm: Readonly<{
     artifacts?: readonly ArtifactInstance[];
@@ -639,6 +646,19 @@ type GameActionDescriptor =
     kind: 'shoot-projectile';
     path: readonly GameLocation[];
     shooterInstanceId: StateHash;
+  }>
+  | Readonly<{
+    choice: 'decline';
+    kind: 'resolve-ranged-step';
+    unitInstanceId: StateHash;
+  }>
+  | Readonly<{
+    choice: 'step';
+    from: GameLocation;
+    kind: 'resolve-ranged-step';
+    path: readonly GameLocation[];
+    to: GameLocation;
+    unitInstanceId: StateHash;
   }>
   | Readonly<{
     direction: ProjectileDirection;
@@ -2001,6 +2021,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && (!Number.isSafeInteger(card.lanceCount) || card.lanceCount < 1 || card.lanceCount > 3)) {
     throw new RangeError(`${path}.lanceCount must be a safe integer between 1 and 3`);
   }
+  if (card.mayStepAfterRangedStrike !== undefined
+    && card.mayStepAfterRangedStrike !== true) {
+    throw new RangeError(`${path}.mayStepAfterRangedStrike must be true when defined`);
+  }
   if (card.movementBonus !== undefined
     && (!Number.isSafeInteger(card.movementBonus)
       || card.movementBonus < 1
@@ -2474,6 +2498,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.lanceCount !== undefined ? { lanceCount: card.lanceCount } : {}),
             ...(card.lethal === true ? { lethal: true } : {}),
             manaCost: card.manaCost,
+            ...(card.mayStepAfterRangedStrike === true
+              ? { mayStepAfterRangedStrike: true as const }
+              : {}),
             ...(card.mortal === true ? { mortal: true as const } : {}),
             ...(card.movementBonus ? { movementBonus: card.movementBonus } : {}),
             ...(card.movesOnlyForward === true ? { movesOnlyForward: true } : {}),
@@ -3693,6 +3720,73 @@ function rangedDescriptors(state: GameState, seat: GameSeat): readonly GameActio
   });
 }
 
+function rangedStepDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
+  const pending = state.pendingRangedStep;
+  if (!pending || pending.seat !== seat) throw new Error('unreachable missing pending Ranged step');
+  const unit = state.realm.units.find(({ controller, instanceId }) =>
+    controller === seat && instanceId === pending.sourceInstanceId);
+  const decline: GameActionDescriptor = {
+    choice: 'decline',
+    kind: 'resolve-ranged-step',
+    unitInstanceId: pending.sourceInstanceId,
+  };
+  if (!unit) return [decline];
+  const definition = cardDefinition(state, unit.cardId);
+  if (definition.cardType !== 'minion'
+    || definition.mayStepAfterRangedStrike !== true
+    || minionDisabled(state, unit)) return [decline];
+  const status = unitStatus(state, { instanceId: unit.instanceId, kind: 'minion', seat });
+  const from = { cell: status.location, region: status.region };
+  return [
+    decline,
+    ...movementPaths(
+      state,
+      from,
+      1,
+      seat,
+      status.airborne,
+      status.movesOnlySideways,
+      status.movesOnlyForward,
+      status.burrowing,
+      status.submerge,
+      status.voidwalk,
+      status.connectsTopBottom,
+      status.immobile,
+      true,
+      true,
+      'effect',
+      status.occupiedCells,
+    ).filter((path) => path.length > 1).map((path) => ({
+      choice: 'step' as const,
+      from,
+      kind: 'resolve-ranged-step' as const,
+      path,
+      to: path.at(-1)!,
+      unitInstanceId: unit.instanceId,
+    })),
+  ];
+}
+
+function queueRangedStep(state: GameState, sourceInstanceId: StateHash): GameState {
+  if (state.terminal.status === 'finished') return state;
+  const unit = state.realm.units.find(({ instanceId }) => instanceId === sourceInstanceId);
+  if (!unit) return state;
+  const definition = cardDefinition(state, unit.cardId);
+  if (definition.cardType !== 'minion'
+    || definition.mayStepAfterRangedStrike !== true
+    || minionDisabled(state, unit)) return state;
+  const pending = deepFreeze({
+    ...state,
+    decisionSeat: unit.controller,
+    pendingRangedStep: { seat: unit.controller, sourceInstanceId },
+    phase: 'ranged-step' as const,
+  });
+  return rangedStepDescriptors(pending, unit.controller)
+    .some((descriptor) => descriptor.kind === 'resolve-ranged-step' && descriptor.choice === 'step')
+    ? pending
+    : state;
+}
+
 function dragProjectileDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   const directions = ['east', 'north', 'south', 'west'] as const;
   const allUnits = [...unitRefs(state, 'north'), ...unitRefs(state, 'south')];
@@ -3906,6 +4000,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
   const player = state.players[seat];
   if (state.phase === 'mulligan') return mulliganDescriptors(player);
   if (state.phase === 'draw') return [{ kind: 'draw', zone: 'atlas' }, { kind: 'draw', zone: 'spellbook' }];
+  if (state.phase === 'ranged-step') return rangedStepDescriptors(state, seat);
   if (state.phase === 'genesis') {
     if (state.pendingGenesisToken?.seat === seat) {
       return [
@@ -4189,6 +4284,11 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
       ? `${descriptor.hit.kind} ${descriptor.hit.instanceId.slice(0, 15)}…`
       : 'nothing';
     return `Shoot ${descriptor.direction} at ${target}`;
+  }
+  if (descriptor.kind === 'resolve-ranged-step') {
+    return descriptor.choice === 'decline'
+      ? 'Decline the optional step after the Ranged strike'
+      : `Step ${descriptor.unitInstanceId.slice(0, 15)}… to ${descriptor.to.cell}`;
   }
   if (descriptor.kind === 'shoot-drag-projectile') {
     const target = descriptor.hit
@@ -5794,6 +5894,54 @@ function applyDescriptor(
         payload: { drawSkipped: true, seat: manifest.firstSeat, turnNumber: 1 },
         type: 'turn-started',
       }],
+      [],
+    ];
+  }
+
+  if (descriptor.kind === 'resolve-ranged-step') {
+    const pending = state.pendingRangedStep;
+    const legal = state.phase === 'ranged-step'
+      && pending?.seat === seat
+      && rangedStepDescriptors(state, seat).some((candidate) =>
+        candidate.kind === 'resolve-ranged-step'
+        && candidate.choice === descriptor.choice
+        && candidate.unitInstanceId === descriptor.unitInstanceId
+        && (candidate.choice === 'decline' && descriptor.choice === 'decline'
+          || candidate.choice === 'step' && descriptor.choice === 'step'
+            && samePath(candidate.path, descriptor.path)));
+    if (!legal || !pending) throw new Error('unreachable illegal Ranged step choice');
+    if (descriptor.choice === 'decline') {
+      return [withStateVersion(state, {
+        decisionSeat: state.activeSeat,
+        pendingRangedStep: null,
+        phase: 'main',
+      }), [], []];
+    }
+    const ref: GameUnitRef = {
+      instanceId: pending.sourceInstanceId,
+      kind: 'minion',
+      seat,
+    };
+    const path = resolveDeclaredPath(state, ref, descriptor.path, false);
+    const from = path.path[0]!;
+    const to = path.path.at(-1)!;
+    return [
+      withStateVersion(path.state, {
+        decisionSeat: path.state.activeSeat,
+        pendingRangedStep: null,
+        phase: path.state.terminal.status === 'finished' ? 'terminal' : 'main',
+      }),
+      [{
+        payload: {
+          from,
+          instanceId: pending.sourceInstanceId,
+          seat,
+          sourceInstanceId: pending.sourceInstanceId,
+          steps: path.path.length - 1,
+          to,
+        },
+        type: 'unit-stepped',
+      }, ...path.outcomes],
       [],
     ];
   }
@@ -9810,7 +9958,9 @@ export function stepGame(session: GameSession, request: GameActionRequest): Game
         ...appliedOutcomes.slice(completionIndex),
         ...settlementAfterCompletion,
       ];
-  const nextState = powerSettlement.state;
+  const nextState = action.descriptor.kind === 'shoot-projectile' && action.descriptor.hit
+    ? queueRangedStep(powerSettlement.state, action.descriptor.shooterInstanceId)
+    : powerSettlement.state;
   const events: readonly EngineEvent[] = createEvents(
     command.actionId,
     receiptSequence,

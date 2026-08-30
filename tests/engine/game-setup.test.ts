@@ -58,6 +58,7 @@ type SpellFacts = Readonly<{
   lanceCount?: 1 | 2 | 3;
   lethal?: boolean;
   manaCost: number;
+  mayStepAfterRangedStrike?: true;
   movementBonus?: 1 | 2;
   nearbyEnemiesPermanentlyLoseStealth?: true;
   otherNearbyAlliesPowerBonus?: 1;
@@ -232,6 +233,9 @@ function cardsFor(
         ...(facts.lanceCount ? { lanceCount: facts.lanceCount } : {}),
         lethal: facts.lethal ?? false,
         manaCost: facts.manaCost,
+        ...(facts.mayStepAfterRangedStrike === true
+          ? { mayStepAfterRangedStrike: true as const }
+          : {}),
         ...(facts.movementBonus ? { movementBonus: facts.movementBonus } : {}),
         ...(facts.nearbyEnemiesPermanentlyLoseStealth === true
           ? { nearbyEnemiesPermanentlyLoseStealth: true as const }
@@ -10768,6 +10772,164 @@ test('RULE-04 Ranged strikes without return damage and Ward prevents the first p
       && descriptor.shooterInstanceId === shooterInstanceId
       && descriptor.hit?.instanceId === targetInstanceId));
   assert.equal(session.state.players.south.cemetery.some(({ instanceId }) => instanceId === targetInstanceId), true);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 a surviving enabled minion may take one legal step after its Ranged strike', () => {
+  const setup = northAttacksAtC2(176, {
+    attack: 1,
+    defense: 3,
+    manaCost: 1,
+    mayStepAfterRangedStrike: true,
+    ranged: true,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  }, undefined, false, {
+    attack: 1,
+    defense: 5,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  });
+  let session = accept(setup.session, action(setup.session, ({ descriptor }) =>
+    descriptor.kind === 'decline-attack'));
+  if (session.state.phase === 'intercept') {
+    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'close-intercept'));
+  }
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+
+  const shot = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.shooterInstanceId === setup.attackerInstanceId
+      && descriptor.hit?.instanceId === setup.targetInstanceId));
+  assert.equal(shot.accepted, true);
+  if (!shot.accepted) return;
+  const pending = shot.session;
+  assert.deepEqual({
+    decisionSeat: pending.state.decisionSeat,
+    phase: pending.state.phase,
+    sourceInstanceId: pending.state.pendingRangedStep?.sourceInstanceId,
+  }, {
+    decisionSeat: 'north',
+    phase: 'ranged-step',
+    sourceInstanceId: setup.attackerInstanceId,
+  });
+  const choices = legalGameActions(pending.state, 'north');
+  assert.equal(choices.every(({ descriptor }) => descriptor.kind === 'resolve-ranged-step'), true);
+  assert.deepEqual(choices.flatMap(({ descriptor }) =>
+    descriptor.kind === 'resolve-ranged-step' && descriptor.choice === 'step'
+      ? [descriptor.to.cell]
+      : []).sort(), ['C1', 'C3']);
+  const decline = choices.find(({ descriptor }) =>
+    descriptor.kind === 'resolve-ranged-step' && descriptor.choice === 'decline');
+  const step = choices.find(({ descriptor }) =>
+    descriptor.kind === 'resolve-ranged-step'
+      && descriptor.choice === 'step'
+      && descriptor.to.cell === 'C3');
+  assert.ok(decline);
+  assert.ok(step);
+
+  const declined = stepGame(pending, decline);
+  assert.equal(declined.accepted, true);
+  if (!declined.accepted) return;
+  assert.equal(declined.session.state.phase, 'main');
+  assert.equal(declined.session.state.pendingRangedStep, null);
+  assert.deepEqual(declined.receipt.events, []);
+  assert.equal(verifyGameReplay(declined.session), true);
+
+  const stepped = stepGame(pending, step);
+  assert.equal(stepped.accepted, true);
+  if (!stepped.accepted) return;
+  const steppedUnit = stepped.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === setup.attackerInstanceId);
+  assert.deepEqual(
+    steppedUnit && { location: steppedUnit.location, tapped: steppedUnit.tapped },
+    { location: 'C3', tapped: true },
+  );
+  assert.deepEqual(stepped.receipt.events.map(({ type }) => type), ['unit-stepped']);
+  assert.deepEqual(stepped.receipt.events[0]?.payload, {
+    from: { cell: 'C2', region: 'surface' },
+    instanceId: setup.attackerInstanceId,
+    seat: 'north',
+    sourceInstanceId: setup.attackerInstanceId,
+    steps: 1,
+    to: { cell: 'C3', region: 'surface' },
+  });
+  assert.equal(verifyGameReplay(stepped.session), true);
+  assert.equal(stepGame(stepped.session, decline).accepted, false);
+});
+
+test('RULE-04 an empty Ranged projectile does not offer the post-strike step', () => {
+  let session = keep(keep(createGameSession(manifest(177, {
+    northSpell: {
+      attack: 1,
+      defense: 3,
+      manaCost: 1,
+      mayStepAfterRangedStrike: true,
+      ranged: true,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+  }))));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion' && descriptor.cell === 'C4'));
+  const shooterInstanceId = session.state.realm.units[0]?.instanceId;
+  assert.ok(shooterInstanceId);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.shooterInstanceId === shooterInstanceId
+      && descriptor.hit === null));
+  assert.equal(session.state.phase, 'main');
+  assert.equal(session.state.pendingRangedStep, undefined);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 a Ranged striker that dies during the hit cannot leave a pending step', () => {
+  const setup = northAttacksAtC2(178, {
+    attack: 1,
+    defense: 1,
+    manaCost: 1,
+    mayStepAfterRangedStrike: true,
+    ranged: true,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  }, undefined, false, {
+    attack: 1,
+    deathriteDamageEachUnitHere: 1,
+    defense: 1,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  });
+  let session = accept(setup.session, action(setup.session, ({ descriptor }) =>
+    descriptor.kind === 'decline-attack'));
+  if (session.state.phase === 'intercept') {
+    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'close-intercept'));
+  }
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.shooterInstanceId === setup.attackerInstanceId
+      && descriptor.hit?.instanceId === setup.targetInstanceId));
+  assert.equal(session.state.phase, 'main');
+  assert.equal(session.state.pendingRangedStep, undefined);
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === setup.attackerInstanceId), true);
+  assert.equal(session.state.players.south.cemetery.some(({ instanceId }) =>
+    instanceId === setup.targetInstanceId), true);
   assert.equal(verifyGameReplay(session), true);
 });
 

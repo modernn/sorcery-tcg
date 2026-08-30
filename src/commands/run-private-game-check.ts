@@ -354,6 +354,20 @@ export type PrivateGameCheck = Readonly<{
     structuralFactsVerified: boolean;
     unsupportedMechanicsAbsent: boolean;
   }>;
+  airKiteArcher: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    declineBranchVerified: boolean;
+    exactStepVerified: boolean;
+    kiteArcher: string;
+    legalConstructedDeck: boolean;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    seed: number;
+    structuralFactsVerified: boolean;
+    unsupportedMechanicsAbsent: boolean;
+  }>;
   airLeyline: Readonly<{
     acceptedActionCount: number;
     deck: DeckList;
@@ -1598,6 +1612,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   spireLich: NormalizedCard;
   nimbusJinn: NormalizedCard;
   devilsEgg: NormalizedCard;
+  kiteArcher: NormalizedCard;
   genesisMinion: NormalizedCard;
   geomancer: NormalizedCard;
   gothicTower: NormalizedCard;
@@ -3566,6 +3581,29 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || devilsEgg.subtypes[0] !== 'Relic') {
     throw new Error('private end-turn Site life-loss Artifact no longer matches its supported facts');
   }
+  const kiteArcher = snapshot.cards.find(({ name }) => name === 'Kite Archer');
+  if (!kiteArcher
+    || kiteArcher.stableId
+      !== 'card:417068bf04cb314bc0db638ed7285327796dfe91afd13f8a5e7a40c1155b25a9'
+    || kiteArcher.officialSourceId !== '001-kite_archer-b-f'
+    || kiteArcher.cardType !== 'minion'
+    || ruleTextDigest(kiteArcher.rulesText)
+      !== 'sha256:799f132ebd662126d370666db3f9d2bf857ba75b8c5e363068811ddb76f17993'
+    || kiteArcher.manaCost !== 3
+    || kiteArcher.attack !== 2
+    || kiteArcher.defense !== 2
+    || kiteArcher.life !== null
+    || kiteArcher.elements.length !== 1
+    || kiteArcher.elements[0] !== 'air'
+    || kiteArcher.thresholds.air !== 1
+    || kiteArcher.thresholds.earth !== 0
+    || kiteArcher.thresholds.fire !== 0
+    || kiteArcher.thresholds.water !== 0
+    || kiteArcher.rarity !== 'exceptional'
+    || kiteArcher.subtypes.length !== 1
+    || kiteArcher.subtypes[0] !== 'Mortal') {
+    throw new Error('private post-Ranged-strike stepping minion no longer matches its supported facts');
+  }
   const polarBears = snapshot.cards.find(({ name }) => name === 'Polar Bears');
   if (!polarBears
     || polarBears.cardType !== 'minion'
@@ -3946,6 +3984,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     spireLich,
     nimbusJinn,
     devilsEgg,
+    kiteArcher,
     genesisMinion,
     geomancer,
     gothicTower,
@@ -4165,6 +4204,7 @@ function gameDefinition(
   gainsPowerRangedAndSpellcasterAtopTower: 0 | 2 = 0,
   discardSpellToDamageRandomOtherUnitHere: 0 | 3 = 0,
   atEndOfEachTurnSiteControllerLosesLife: 0 | 1 = 0,
+  mayStepAfterRangedStrike = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4373,6 +4413,7 @@ function gameDefinition(
       lethal,
       ...(lanceCount ? { lanceCount } : {}),
       manaCost: card.manaCost ?? 0,
+      ...(mayStepAfterRangedStrike ? { mayStepAfterRangedStrike: true as const } : {}),
       ...(card.subtypes.includes('Mortal') ? { mortal: true as const } : {}),
       movesOnlyForward,
       mustBeCastBurrowed,
@@ -4424,7 +4465,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-devils-egg' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-leyline' | 'air-lightning-bolt' | 'air-nimbus-jinn' | 'air-rain-of-arrows' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-devils-egg' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-kite-archer' | 'air-leyline' | 'air-lightning-bolt' | 'air-nimbus-jinn' | 'air-rain-of-arrows' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -4727,6 +4768,7 @@ function buildManifest(
       input.spireLich.stableId,
       input.nimbusJinn.stableId,
       input.devilsEgg.stableId,
+      input.kiteArcher.stableId,
       ...Array(2).fill(input.movementTwoMinion.stableId),
       ...Array(2).fill(input.airborneMinion.stableId),
       ...Array(2).fill(input.stealthTargetMinion.stableId),
@@ -4886,6 +4928,10 @@ function buildManifest(
       ...airDevilsEggBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
     ],
   };
+  const airKiteArcherDeck = elementalDeck(
+    'air',
+    [input.kiteArcher, input.stealthTargetMinion],
+  );
   const fireNimbusJinnDeck = elementalDeck('fire', [input.raalDromedary]);
   const fireSlingPixiesDeck = elementalDeck('fire', [input.vikings, input.raalDromedary]);
   const airLeylineDeck = elementalDeck('air', airMinions, [input.leylineHenge]);
@@ -5076,6 +5122,8 @@ function buildManifest(
       ? airNimbusJinnDeck
       : scenario === 'air-devils-egg'
       ? airDevilsEggDeck
+      : scenario === 'air-kite-archer'
+      ? airKiteArcherDeck
       : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
       : scenario === 'air-void-artifact'
@@ -5245,6 +5293,8 @@ function buildManifest(
       ? fireNimbusJinnDeck
       : scenario === 'air-devils-egg'
       ? airDevilsEggDeck
+      : scenario === 'air-kite-archer'
+      ? airKiteArcherDeck
       : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
       : scenario === 'air-void-artifact'
@@ -5405,7 +5455,8 @@ function buildManifest(
       card.stableId === input.monstrousLion.stableId,
       card.stableId === input.rangedMinion.stableId
         || card.stableId === input.midnightRogue.stableId
-        || card.stableId === input.slingPixies.stableId,
+        || card.stableId === input.slingPixies.stableId
+        || card.stableId === input.kiteArcher.stableId,
       card.stableId === input.firstStrikeMinion.stableId,
       card.stableId === input.wardMinion.stableId
         || card.stableId === input.malakhim.stableId,
@@ -5526,6 +5577,7 @@ function buildManifest(
       card.stableId === input.spireLich.stableId ? 2 : 0,
       card.stableId === input.nimbusJinn.stableId ? 3 : 0,
       card.stableId === input.devilsEgg.stableId ? 1 : 0,
+      card.stableId === input.kiteArcher.stableId,
     ),
   ]));
   return {
@@ -9250,6 +9302,50 @@ function findAirDevilsEggOpening(
     seed,
     session,
     southSiteInstanceIds: south.hand.atlas.slice(0, 2)
+      .map(({ instanceId }) => instanceId) as [string, string],
+  };
+}
+
+function findAirKiteArcherOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  kiteArcherInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string];
+  seed: number;
+  session: GameSession;
+  snowLeopardInstanceId: string;
+  southSiteInstanceIds: readonly [string, string];
+}> {
+  const seed = 29;
+  const built = buildManifest(input, seed, 'air-kite-archer');
+  const session = createGameSession(built.manifest);
+  const north = session.state.players.north;
+  const south = session.state.players.south;
+  const kiteArcher = [...north.hand.spellbook, ...north.spellbook.slice(0, 2)]
+    .find(({ cardId }) => cardId === input.kiteArcher.stableId);
+  const snowLeopard = [...south.hand.spellbook, ...south.spellbook.slice(0, 1)]
+    .find(({ cardId }) => cardId === input.stealthTargetMinion.stableId);
+  const isAirSite = ({ cardId }: { cardId: string }): boolean => {
+    const definition = built.manifest.cards[cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('air');
+  };
+  const airSiteFirst = (left: { cardId: string }, right: { cardId: string }): number =>
+    Number(isAirSite(right)) - Number(isAirSite(left));
+  const northSites = [...north.hand.atlas].sort(airSiteFirst);
+  const southSites = [...south.hand.atlas].sort(airSiteFirst);
+  if (!kiteArcher || !snowLeopard || !isAirSite(northSites[0]!) || !isAirSite(southSites[0]!)) {
+    throw new Error('private Kite Archer seed 29 no longer produces its supported opening');
+  }
+  return {
+    ...built,
+    kiteArcherInstanceId: kiteArcher.instanceId,
+    northSiteInstanceIds: northSites.map(({ instanceId }) => instanceId) as [string, string, string],
+    seed,
+    session,
+    snowLeopardInstanceId: snowLeopard.instanceId,
+    southSiteInstanceIds: southSites.slice(0, 2)
       .map(({ instanceId }) => instanceId) as [string, string],
   };
 }
@@ -17755,6 +17851,141 @@ function runAirNimbusJinn(
   });
 }
 
+function runAirKiteArcher(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airKiteArcher'] {
+  const opening = findAirKiteArcherOpening(input);
+  let session = keep(keep(opening.session));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  const drawSpell = (): void => take(({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const playSite = (instanceId: string, cell: RealmCell): void => take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === instanceId
+      && descriptor.cell === cell);
+  const endTurn = (): void => take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  playSite(opening.northSiteInstanceIds[0], 'C4');
+  endTurn();
+  drawSpell();
+  playSite(opening.southSiteInstanceIds[0], 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.snowLeopardInstanceId
+    && descriptor.cell === 'C1');
+  endTurn();
+
+  drawSpell();
+  playSite(opening.northSiteInstanceIds[1], 'C3');
+  endTurn();
+  drawSpell();
+  playSite(opening.southSiteInstanceIds[1], 'C2');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === opening.snowLeopardInstanceId
+    && descriptor.from.cell === 'C1'
+    && descriptor.to.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  endTurn();
+
+  drawSpell();
+  playSite(opening.northSiteInstanceIds[2], 'B3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.kiteArcherInstanceId
+    && descriptor.cell === 'C3');
+  endTurn();
+  drawSpell();
+  endTurn();
+  drawSpell();
+
+  const shot = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.shooterInstanceId === opening.kiteArcherInstanceId
+      && descriptor.hit?.instanceId === opening.snowLeopardInstanceId));
+  if (!shot.accepted) throw new Error('private Kite Archer Ranged strike was rejected');
+  const pending = shot.session;
+  const choices = legalGameActions(pending.state, 'north');
+  const declineAction = choices.find(({ descriptor }) =>
+    descriptor.kind === 'resolve-ranged-step' && descriptor.choice === 'decline');
+  const stepAction = choices.find(({ descriptor }) =>
+    descriptor.kind === 'resolve-ranged-step'
+      && descriptor.choice === 'step'
+      && descriptor.to.cell === 'C4');
+  if (!declineAction || !stepAction) {
+    throw new Error('private Kite Archer lacks both supported optional step branches');
+  }
+  const declined = stepGame(pending, declineAction);
+  const stepped = stepGame(pending, stepAction);
+  if (!declined.accepted || !stepped.accepted) {
+    throw new Error('private Kite Archer optional step branch was rejected');
+  }
+  session = stepped.session;
+  const kite = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.kiteArcherInstanceId);
+  const exactStepEvent = [{
+    payload: {
+      from: { cell: 'C3', region: 'surface' },
+      instanceId: opening.kiteArcherInstanceId,
+      seat: 'north',
+      sourceInstanceId: opening.kiteArcherInstanceId,
+      steps: 1,
+      to: { cell: 'C4', region: 'surface' },
+    },
+    type: 'unit-stepped',
+  }];
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+  const southDeck = deckList(opening.manifest.decks.south, opening.names);
+  const definition = session.state.cards[input.kiteArcher.stableId];
+  const causal = [shot.receipt, stepped.receipt].every((receipt) => {
+    const firstSequence = receipt.events[0]?.eventSequence;
+    return firstSequence !== undefined && receipt.events.every((event, index) =>
+      event.cause.actionId === receipt.actionId
+        && event.cause.receiptSequence === receipt.receiptSequence
+        && event.eventSequence === firstSequence + index);
+  });
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified: causal,
+    deck,
+    declineBranchVerified: declined.session.state.phase === 'main'
+      && declined.session.state.pendingRangedStep === null
+      && declined.receipt.events.length === 0
+      && declined.session.state.realm.units.some(({ instanceId, location, tapped }) =>
+        instanceId === opening.kiteArcherInstanceId && location === 'C3' && tapped)
+      && verifyGameReplay(declined.session),
+    exactStepVerified: kite?.location === 'C4'
+      && kite.tapped
+      && session.state.phase === 'main'
+      && session.state.pendingRangedStep === null
+      && canonicalJson(stepped.receipt.events.map(({ payload, type }) => ({ payload, type })) as unknown as JsonValue)
+        === canonicalJson(exactStepEvent as unknown as JsonValue),
+    kiteArcher: input.kiteArcher.name,
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && southDeck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && southDeck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && (deck.spellbook.find(({ name }) => name === input.kiteArcher.name)?.copies ?? 0)
+        <= input.format.copyLimits[input.kiteArcher.rarity!],
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0)
+      && declined.session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    structuralFactsVerified: definition?.cardType === 'minion'
+      && definition.attack === 2
+      && definition.defense === 2
+      && definition.manaCost === 3
+      && definition.mortal === true
+      && definition.ranged === true
+      && definition.mayStepAfterRangedStrike === true
+      && canonicalJson(definition.thresholds) === canonicalJson({ air: 1, earth: 0, fire: 0, water: 0 }),
+    unsupportedMechanicsAbsent: pending.state.phase === 'ranged-step'
+      && pending.state.players.south.cemetery.some(({ instanceId }) =>
+        instanceId === opening.snowLeopardInstanceId)
+      && shot.receipt.events.map(({ type }) => type).join(',')
+        === 'projectile-shot,strike-damage-allocated,damage-dealt,minion-died',
+  });
+}
+
 function runAirDevilsEgg(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['airDevilsEgg'] {
@@ -22016,6 +22247,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airSpireLich = runAirSpireLich(input);
   const airNimbusJinn = runAirNimbusJinn(input);
   const airDevilsEgg = runAirDevilsEgg(input);
+  const airKiteArcher = runAirKiteArcher(input);
   const airSpellcasterFreeze = runAirSpellcasterFreeze(input);
   const airArcLightning = runAirArcLightning(input);
   const airLightningBolt = runAirLightningBolt(input);
@@ -22228,6 +22460,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     airSpireLich,
     airNimbusJinn,
     airDevilsEgg,
+    airKiteArcher,
     airSpellcasterFreeze,
     airArcLightning,
     airLightningBolt,
