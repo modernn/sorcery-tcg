@@ -32,9 +32,11 @@ const SELECTED_REVISION = `${LOCAL_ROOT}/revisions/${REVISION_ID}`;
 const RECEIPT_PATH = `data/authority/receipts/${REVISION_ID}.json`;
 const SUMMARY_PATH = '.planning/phases/01-rules-and-data-authority/01-07-SUMMARY.md';
 const ZERO_HASH = `sha256:${'0'.repeat(64)}` as Hash;
-const FINAL_REVISION_ID = 'official-2026-08-27-v3';
+const FINAL_SOURCE_REVISION_ID = 'official-2026-08-27-v3';
+const FINAL_REVISION_ID = 'official-2026-08-27-v4';
 const FINAL_STABLE_ID = `bundle:${FINAL_REVISION_ID}`;
-const FINAL_LOCK_PATH = `${LOCAL_ROOT}/locks/${FINAL_REVISION_ID}/source-set-lock.json`;
+const FINAL_LOCK_PATH =
+  `${LOCAL_ROOT}/locks/${FINAL_SOURCE_REVISION_ID}/source-set-lock.json`;
 const FINAL_SELECTED_REVISION = `${LOCAL_ROOT}/revisions/${FINAL_REVISION_ID}`;
 const FINAL_RECEIPT_PATH = `data/authority/receipts/${FINAL_REVISION_ID}.json`;
 const FINAL_SUMMARY_PATH = '.planning/phases/01-rules-and-data-authority/01-15-SUMMARY.md';
@@ -132,8 +134,10 @@ function validFinalEvidence(lock: Evidence, summary: string): lock is LiveLock {
     typeof lock.backupRoot !== 'string' ||
     !Array.isArray(lock.entries)
   ) return false;
-  const expectedPrimary = resolve(REPOSITORY_ROOT, LOCAL_ROOT, 'inputs', FINAL_REVISION_ID, 'primary');
-  const expectedBackup = resolve(REPOSITORY_ROOT, '..', `sorcery-tcg-authority-backup-${FINAL_REVISION_ID}`);
+  const expectedPrimary =
+    resolve(REPOSITORY_ROOT, LOCAL_ROOT, 'inputs', FINAL_SOURCE_REVISION_ID, 'primary');
+  const expectedBackup =
+    resolve(REPOSITORY_ROOT, '..', `sorcery-tcg-authority-backup-${FINAL_SOURCE_REVISION_ID}`);
   return resolve(lock.primaryRoot) === expectedPrimary &&
     resolve(lock.backupRoot) === expectedBackup &&
     summary.includes('plan: "15"') &&
@@ -402,7 +406,7 @@ test('publication evidence accepts only the two closed structures and exact curr
   }
 });
 
-test('fresh v3 roots build final v3 candidates while historical evidence remains immutable', async () => {
+test('fresh locked roots build selected v4 candidates while historical evidence remains immutable', async () => {
   const sandbox = await mkdtemp(join(tmpdir(), 'sorcery-private-revision-'));
   const summary = await readFile(FINAL_SUMMARY_PATH, 'utf8');
   const lock = JSON.parse(await readFile(FINAL_LOCK_PATH, 'utf8')) as Evidence;
@@ -503,7 +507,7 @@ test('fresh v3 roots build final v3 candidates while historical evidence remains
   }
 });
 
-test('official-2026-08-27-v3 safe receipt and preinstalled selected root validate', async () => {
+test('official-2026-08-27-v4 safe receipt and preinstalled selected root validate', async () => {
   const summary = await readFile(FINAL_SUMMARY_PATH, 'utf8');
   const lock = JSON.parse(await readFile(FINAL_LOCK_PATH, 'utf8')) as LiveLock & Evidence;
   assert.ok(validFinalEvidence(lock, summary), 'Fresh v3 publication evidence is invalid.');
@@ -526,7 +530,7 @@ test('official-2026-08-27-v3 safe receipt and preinstalled selected root validat
   const selection = readme.split(/\r?\n\r?\n/)[1] ?? '';
   assert.ok(selection.includes(FINAL_STABLE_ID) && selection.includes(`receipts/${FINAL_REVISION_ID}.json`));
   assert.equal(selection.includes(STABLE_ID), false);
-  assert.equal(/bundle:(?:latest|official-\d{4}-\d{2}-\d{2})(?!-v3)/.test(selection), false);
+  assert.equal(/bundle:(?:latest|official-\d{4}-\d{2}-\d{2})(?!-v4)/.test(selection), false);
   for (const statement of ['private', 'local', 'noncommercial', 'no-redistribution', 'release', 'hosting', 'upload', 'artwork', 'public API', 'recurring acquisition', 'legal permission']) {
     assert.ok(readme.toLowerCase().includes(statement.toLowerCase()), `README is missing the ${statement} boundary.`);
   }

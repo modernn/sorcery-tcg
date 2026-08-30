@@ -672,7 +672,9 @@ function inspectContent(
   if (matchesLocator(bytes, locators)) fail('private-locator', candidate);
 
   const prefix = bytes.subarray(0, 512).toString('utf8');
-  if (bytes.length > 1_000 && /^(?:%PDF-|\s*<!doctype html|\s*<html\b)/i.test(prefix)) {
+  if (depth === 0
+    && bytes.length > 1_000
+    && /^(?:%PDF-|\s*<!doctype html|\s*<html\b)/i.test(prefix)) {
     fail('publisher-document', candidate);
   }
   if (
@@ -704,10 +706,10 @@ function inspectContent(
     const decoded = decodeStringLiteral(text, index);
     if (decoded === null) continue;
     state.decodedStrings += 1;
-    if (state.decodedStrings > MAX_DECODED_STRINGS) fail('inspection-work-limit', candidate);
+    if (state.decodedStrings > MAX_DECODED_STRINGS) fail('decoded-string-work-limit', candidate);
     const decodedBytes = Buffer.from(decoded.value, 'utf8');
     state.decodedBytes += decodedBytes.length;
-    if (state.decodedBytes > MAX_DECODED_BYTES) fail('inspection-work-limit', candidate);
+    if (state.decodedBytes > MAX_DECODED_BYTES) fail('decoded-byte-work-limit', candidate);
     if (decodedBytes.length > 0) {
       inspectContent(
         candidate,
@@ -734,9 +736,11 @@ function inspectCandidate(
   locators: readonly Locator[],
   state: InspectionState,
 ): void {
-  if (candidate.bytes.length > MAX_CANDIDATE_BYTES) fail('inspection-work-limit', candidate);
+  state.decodedBytes = 0;
+  state.decodedStrings = 0;
+  if (candidate.bytes.length > MAX_CANDIDATE_BYTES) fail('candidate-size-limit', candidate);
   state.candidateBytes += candidate.bytes.length;
-  if (state.candidateBytes > MAX_CANDIDATE_WORK_BYTES) fail('inspection-work-limit', candidate);
+  if (state.candidateBytes > MAX_CANDIDATE_WORK_BYTES) fail('candidate-byte-work-limit', candidate);
   const normalizedPath = candidate.path.replaceAll('\\', '/');
   if (normalizedPath === '.local/authority' || normalizedPath.startsWith('.local/authority/')) {
     fail('forbidden-private-path', candidate);

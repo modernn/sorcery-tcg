@@ -9,7 +9,7 @@ import {
   parseAuthorityJson,
   sortDiagnostics,
   validateFormatArtifact,
-  validateNormalizedCardSnapshot,
+  validateCompatibleNormalizedCardSnapshot,
   validateAuthorityBundle as validateBundleSchema,
   validateCanonicalArtifact,
   type ArtifactKind,
@@ -462,7 +462,7 @@ function validateGraph(bundle: AuthorityBundle): void {
     }
     if (artifact.identity.artifactKind === 'card-snapshot') {
       try {
-        validateNormalizedCardSnapshot(artifact.identity.payload);
+        validateCompatibleNormalizedCardSnapshot(artifact.identity.payload);
       } catch (error: unknown) {
         appendValidationDiagnostics(diagnostics, error, path + '/identity/payload');
       }
@@ -820,7 +820,7 @@ async function validateImportedRevisionFiles(
     });
   }
   try {
-    validateNormalizedCardSnapshot(cardSnapshot.identity.payload);
+    validateCompatibleNormalizedCardSnapshot(cardSnapshot.identity.payload);
   } catch (error: unknown) {
     appendValidationDiagnostics(diagnostics, error, '/identity/payload/artifacts');
   }

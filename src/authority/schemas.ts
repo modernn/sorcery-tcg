@@ -104,6 +104,7 @@ export type RawCard = Readonly<{
     water: number;
   }>;
   rulesText: string;
+  subtypes: readonly string[];
   printingSlugs: readonly string[];
   releasedAt: string | null;
 }>;
@@ -125,6 +126,7 @@ export type NormalizedCard = Readonly<{
   life: RawCard['life'];
   thresholds: RawCard['thresholds'];
   rulesText: string;
+  subtypes: readonly string[];
   printingSlugs: readonly string[];
 }>;
 
@@ -194,6 +196,7 @@ const HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const STABLE_ID_PATTERN = /^[a-z][a-z0-9-]*(?::[a-z0-9][a-z0-9._-]*)+$/;
 const SOURCE_ID_PATTERN = /^source:[a-z0-9][a-z0-9._-]*$/;
 const SLUG_PATTERN = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/;
+const SUBTYPE_PATTERN = /^[A-Za-z][A-Za-z0-9]*(?: [A-Za-z][A-Za-z0-9]*)*$/;
 const MEDIA_TYPE_PATTERN = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i;
 const OFFICIAL_HOSTS = new Set([
   'sorcerytcg.com',
@@ -422,6 +425,7 @@ const cardFields = {
     water: nonnegativeInteger,
   }),
   rulesText: z.string().max(20_000),
+  subtypes: z.array(z.string().min(1).max(200).regex(SUBTYPE_PATTERN)).max(100),
   printingSlugs: z.array(z.string().min(1).max(200).regex(SLUG_PATTERN)).min(1).max(100),
 };
 
@@ -461,11 +465,34 @@ function addElementIssues(
   });
 }
 
+function addSubtypeIssues(
+  card: { subtypes?: readonly string[] | undefined },
+  context: z.RefinementCtx,
+): void {
+  const found = new Set<string>();
+  card.subtypes?.forEach((subtype, index) => {
+    if (found.has(subtype)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['subtypes', index],
+        message: 'duplicate subtype',
+        params: { diagnosticCode: 'duplicate_subtype' },
+      });
+    }
+    found.add(subtype);
+  });
+}
+
 function addCardIssues(
-  card: { elements: readonly string[]; printingSlugs: readonly string[] },
+  card: {
+    elements: readonly string[];
+    printingSlugs: readonly string[];
+    subtypes?: readonly string[] | undefined;
+  },
   context: z.RefinementCtx,
 ): void {
   addElementIssues(card, context);
+  addSubtypeIssues(card, context);
   addPrintingSlugIssues(card, context);
 }
 
@@ -503,33 +530,48 @@ export const rawCardSnapshotSchema = z
   })
   .superRefine(addSnapshotPrintingSlugIssues);
 
-export const normalizedCardSchema = z
-  .strictObject({
-    stableId: stableIdSchema,
-    officialSourceId: z.string().min(1).max(200).nullable(),
-    ...cardFields,
-  })
+const normalizedCardObjectSchema = z.strictObject({
+  stableId: stableIdSchema,
+  officialSourceId: z.string().min(1).max(200).nullable(),
+  ...cardFields,
+});
+
+export const normalizedCardSchema = normalizedCardObjectSchema.superRefine(addCardIssues);
+
+const legacyNormalizedCardSchema = normalizedCardObjectSchema
+  .omit({ subtypes: true })
   .superRefine(addCardIssues);
+
+function addNormalizedCardSnapshotIssues(
+  snapshot: Readonly<{ cards: readonly Readonly<{ stableId: string; printingSlugs: readonly string[] }>[] }>,
+  context: z.RefinementCtx,
+): void {
+  const found = new Set<string>();
+  snapshot.cards.forEach((card, index) => {
+    if (found.has(card.stableId)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['cards', index, 'stableId'],
+        message: 'duplicate card stable ID',
+        params: { diagnosticCode: 'duplicate_stable_id' },
+      });
+    }
+    found.add(card.stableId);
+  });
+  addSnapshotPrintingSlugIssues(snapshot, context);
+}
 
 export const normalizedCardSnapshotSchema = z
   .strictObject({
     cards: z.array(normalizedCardSchema).max(MAX_CANONICAL_NODES),
   })
-  .superRefine((snapshot, context) => {
-    const found = new Set<string>();
-    snapshot.cards.forEach((card, index) => {
-      if (found.has(card.stableId)) {
-        context.addIssue({
-          code: 'custom',
-          path: ['cards', index, 'stableId'],
-          message: 'duplicate card stable ID',
-          params: { diagnosticCode: 'duplicate_stable_id' },
-        });
-      }
-      found.add(card.stableId);
-    });
-    addSnapshotPrintingSlugIssues(snapshot, context);
-  });
+  .superRefine(addNormalizedCardSnapshotIssues);
+
+const legacyNormalizedCardSnapshotSchema = z
+  .strictObject({
+    cards: z.array(legacyNormalizedCardSchema).max(MAX_CANONICAL_NODES),
+  })
+  .superRefine(addNormalizedCardSnapshotIssues);
 
 export const formatDefinitionSchema = z.strictObject({
   name: z.string().min(1).max(300),
@@ -753,6 +795,15 @@ export function validateNormalizedCard(input: unknown): NormalizedCard {
 
 export function validateNormalizedCardSnapshot(input: unknown): NormalizedCardSnapshot {
   return validateWithSchema(input, normalizedCardSnapshotSchema) as NormalizedCardSnapshot;
+}
+
+export function validateCompatibleNormalizedCardSnapshot(input: unknown): JsonValue {
+  try {
+    return validateWithSchema(input, normalizedCardSnapshotSchema) as JsonValue;
+  } catch (error: unknown) {
+    if (!(error instanceof AuthorityValidationError)) throw error;
+    return validateWithSchema(input, legacyNormalizedCardSnapshotSchema) as JsonValue;
+  }
 }
 
 export function validateIdentityDocument(input: unknown): IdentityDocument<JsonValue> {

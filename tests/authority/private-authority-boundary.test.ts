@@ -291,6 +291,17 @@ function escapedTemplate(value: string): string {
   return '`' + [...value].map((character) => `\\u{${character.codePointAt(0)!.toString(16)}}`).join('') + '`';
 }
 
+test('pure detector allows project-owned HTML embedded in TypeScript', async () => {
+  const { inspect } = await privateInspector();
+  const page = '<!doctype html><html><body>'
+    + 'synthetic-project-owned-panel '.repeat(80)
+    + '</body></html>';
+  assert.doesNotThrow(() => inspect({
+    path: 'src/prototype/local-page.ts',
+    bytes: 'const PAGE = String.raw`' + page + '`;',
+  }));
+});
+
 async function cleanupFixture(fixture: Fixture): Promise<void> {
   const sandbox = resolve(fixture.sandbox);
   assert.equal(dirname(sandbox), resolve(tmpdir()));

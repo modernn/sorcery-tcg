@@ -50,6 +50,7 @@ function normalizeCard(card: RawCard, source: SourceMetadata): NormalizedCard {
       water: card.thresholds.water,
     },
     rulesText: card.rulesText,
+    subtypes: [...card.subtypes].sort(compareText),
     printingSlugs: [...card.printingSlugs].sort(compareText),
   };
 }

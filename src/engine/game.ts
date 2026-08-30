@@ -174,6 +174,7 @@ export type GameCardDefinition =
     lanceCount?: 1 | 2 | 3;
     lethal?: boolean;
     manaCost: number;
+    mortal?: true;
     movementBonus?: 1 | 2;
     movesOnlyForward?: boolean;
     movesOnlySideways?: boolean;
@@ -182,6 +183,7 @@ export type GameCardDefinition =
     mustBeCastToWaterSite?: boolean;
     nearbyEnemiesPermanentlyLoseStealth?: true;
     ordinary?: true;
+    otherControlledMortalsPowerBonus?: 1;
     otherNearbyAlliesPowerBonus?: 1;
     provides?: GameElement;
     ranged?: boolean;
@@ -1797,6 +1799,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.movementBonus > 2)) {
     throw new RangeError(`${path}.movementBonus must be a safe integer between 1 and 2`);
   }
+  if (card.mortal !== undefined && card.mortal !== true) {
+    throw new RangeError(`${path}.mortal must be true when defined`);
+  }
   if (card.nearbyEnemiesPermanentlyLoseStealth !== undefined
     && card.nearbyEnemiesPermanentlyLoseStealth !== true) {
     throw new RangeError(`${path}.nearbyEnemiesPermanentlyLoseStealth must be true when defined`);
@@ -1804,6 +1809,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.otherNearbyAlliesPowerBonus !== undefined
     && card.otherNearbyAlliesPowerBonus !== 1) {
     throw new RangeError(`${path}.otherNearbyAlliesPowerBonus must be 1`);
+  }
+  if (card.otherControlledMortalsPowerBonus !== undefined
+    && card.otherControlledMortalsPowerBonus !== 1) {
+    throw new RangeError(`${path}.otherControlledMortalsPowerBonus must be 1`);
   }
   if (card.movesOnlySideways !== undefined && typeof card.movesOnlySideways !== 'boolean') {
     throw new RangeError(`${path}.movesOnlySideways must be boolean`);
@@ -2183,6 +2192,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.lanceCount !== undefined ? { lanceCount: card.lanceCount } : {}),
             ...(card.lethal === true ? { lethal: true } : {}),
             manaCost: card.manaCost,
+            ...(card.mortal === true ? { mortal: true as const } : {}),
             ...(card.movementBonus ? { movementBonus: card.movementBonus } : {}),
             ...(card.movesOnlyForward === true ? { movesOnlyForward: true } : {}),
             ...(card.movesOnlySideways === true ? { movesOnlySideways: true } : {}),
@@ -2193,6 +2203,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? { nearbyEnemiesPermanentlyLoseStealth: true as const }
               : {}),
             ...(card.ordinary === true ? { ordinary: true as const } : {}),
+            ...(card.otherControlledMortalsPowerBonus === 1
+              ? { otherControlledMortalsPowerBonus: 1 as const }
+              : {}),
             ...(card.otherNearbyAlliesPowerBonus === 1
               ? { otherNearbyAlliesPowerBonus: 1 as const }
               : {}),
@@ -2499,6 +2512,23 @@ function nearbyAlliesPowerBonus(state: GameState, ref: GameUnitRef): number {
   }).length;
 }
 
+function controlledMortalsPowerBonus(state: GameState, ref: GameUnitRef): number {
+  if (ref.kind === 'avatar') return 0;
+  const target = state.realm.units.find(({ controller, instanceId }) =>
+    controller === ref.seat && instanceId === ref.instanceId);
+  if (!target) throw new Error('unreachable Mortal-power target');
+  const targetDefinition = cardDefinition(state, target.cardId);
+  if (targetDefinition.cardType !== 'minion' || targetDefinition.mortal !== true) return 0;
+  return state.realm.units.filter((source) => {
+    if (source.controller !== target.controller
+      || source.instanceId === target.instanceId
+      || minionDisabled(state, source)) return false;
+    const definition = cardDefinition(state, source.cardId);
+    return definition.cardType === 'minion'
+      && definition.otherControlledMortalsPowerBonus === 1;
+  }).length;
+}
+
 function locationInImmobileArea(state: GameState, location: RealmCell): boolean {
   return state.realm.immobileAreas?.some(({ cells }) => cells.includes(location)) ?? false;
 }
@@ -2764,6 +2794,7 @@ function unitStatus(
   const disabled = minionDisabled(state, unit);
   const powerBonus = temporaryPowerBonus(unit.temporaryPowerSources)
     + bearerPowerBonus(state, ref)
+    + controlledMortalsPowerBonus(state, ref)
     + nearbyAlliesPowerBonus(state, ref);
   return {
     airborne: !disabled && definition.airborne === true && unit.region === 'surface',
@@ -6139,21 +6170,26 @@ function applyDescriptor(
             : unit),
         },
       });
-      return [
-        withStateVersion(controlledState, {}),
-        [
-          ...castOutcomes,
-          {
-            payload: {
-              fromSeat: target.controller,
-              instanceId: target.instanceId,
-              seat,
-              sourceInstanceId: card.instanceId,
-            },
-            type: 'minion-control-changed',
+      const powerSettlement = settleStaticPowerDeaths(controlledState);
+      const outcomes: readonly GameOutcome[] = [
+        ...castOutcomes,
+        {
+          payload: {
+            fromSeat: target.controller,
+            instanceId: target.instanceId,
+            seat,
+            sourceInstanceId: card.instanceId,
           },
-          resolved,
-        ],
+          type: 'minion-control-changed',
+        },
+        ...powerSettlement.outcomes,
+      ];
+      const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
+      return [
+        withStateVersion(powerSettlement.state, {}),
+        terminalIndex < 0
+          ? [...outcomes, resolved]
+          : [...outcomes.slice(0, terminalIndex), resolved, ...outcomes.slice(terminalIndex)],
         [],
       ];
     }

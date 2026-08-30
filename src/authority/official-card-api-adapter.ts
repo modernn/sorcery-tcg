@@ -9,8 +9,10 @@ import {
 
 const MAX_OFFICIAL_CARDS = 2_000;
 const MAX_SETS_PER_CARD = 50;
+const MAX_SUBTYPES_PER_CARD = 100;
 const MAX_VARIANTS_PER_SET = 100;
 const PRINTING_ID_PATTERN = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/;
+const SUBTYPE_PATTERN = /^[A-Za-z][A-Za-z0-9]*(?: [A-Za-z][A-Za-z0-9]*)*$/;
 
 const elementNames = ['Air', 'Earth', 'Fire', 'Water'] as const;
 const elementMap = {
@@ -47,6 +49,30 @@ function validElements(value: string): boolean {
     parts.every((part, index) =>
       (elementNames as readonly string[]).includes(part) && parts.indexOf(part) === index)
   );
+}
+
+function addOfficialSubtypeIssues(value: string, context: z.RefinementCtx): void {
+  if (value === '') return;
+  const parts = value.split(', ');
+  if (
+    parts.join(', ') !== value ||
+    parts.length > MAX_SUBTYPES_PER_CARD ||
+    parts.some((part) => !SUBTYPE_PATTERN.test(part))
+  ) {
+    context.addIssue({
+      code: 'custom',
+      message: 'subTypes must use the audited official grammar',
+      params: { diagnosticCode: 'invalid_subtype_grammar' },
+    });
+    return;
+  }
+  if (parts.some((part, index) => parts.indexOf(part) !== index)) {
+    context.addIssue({
+      code: 'custom',
+      message: 'duplicate subtype',
+      params: { diagnosticCode: 'duplicate_subtype' },
+    });
+  }
 }
 
 const nonnegativeInteger = z.number().int().nonnegative().safe();
@@ -86,7 +112,7 @@ const officialCardSchema = z.strictObject({
   guardian: metadataSchema,
   name: z.string().min(1).max(300),
   sets: z.array(setSchema).min(1).max(MAX_SETS_PER_CARD),
-  subTypes: z.string().max(1_000),
+  subTypes: z.string().max(1_000).superRefine(addOfficialSubtypeIssues),
 });
 const officialCardApiSchema = z.array(officialCardSchema).min(1).max(MAX_OFFICIAL_CARDS);
 
@@ -123,6 +149,7 @@ function adaptCard(card: OfficialCard): RawCard {
       water: card.guardian.thresholds.water,
     },
     rulesText: card.guardian.rulesText,
+    subtypes: card.subTypes === '' ? [] : card.subTypes.split(', ').sort(compareText),
     printingSlugs: printings.map(({ slug }) => slug).sort(compareText),
     releasedAt: new Date(first.releasedAt).toISOString().slice(0, 10),
   };

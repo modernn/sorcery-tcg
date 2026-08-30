@@ -14,6 +14,7 @@ import {
   type Diagnostic,
   type SourceMetadata,
   validateNormalizedCardSnapshot,
+  validateCompatibleNormalizedCardSnapshot,
   validateRawCardSnapshot,
 } from '../../src/authority/schemas.ts';
 import { importAuthority } from '../../src/commands/import-authority.ts';
@@ -134,6 +135,7 @@ test('DATA-02 life and threshold schemas require exact nonnegative safe-integer 
       life: card.life,
       thresholds: card.thresholds,
       rulesText: card.rulesText,
+      subtypes: card.subtypes,
       printingSlugs: card.printingSlugs,
     })),
   }));
@@ -170,8 +172,40 @@ test('DATA-02 normalizes the same pinned synthetic card input byte-identically o
   assert.equal(second.contentHash, first.contentHash);
 });
 
+test('DATA-02 keeps legacy normalized cards valid while new normalization emits subtypes', () => {
+  const normalized = normalizeCards(VALID_BYTES, sourceMetadata(VALID_BYTES));
+  const legacy = structuredClone(normalized.identity.payload);
+  legacy.cards.forEach((card) => {
+    delete (card as { subtypes?: readonly string[] }).subtypes;
+  });
+  assert.doesNotThrow(() => validateCompatibleNormalizedCardSnapshot(legacy));
+  const duplicateStableId = structuredClone(legacy) as unknown as {
+    cards: Array<{ printingSlugs: string[]; stableId: string }>;
+  };
+  duplicateStableId.cards[1]!.stableId = duplicateStableId.cards[0]!.stableId;
+  assert.deepEqual(
+    pathsAndCodes(captureDiagnostics(() =>
+      validateCompatibleNormalizedCardSnapshot(duplicateStableId)
+    )),
+    [{ path: '/cards/1/stableId', code: 'duplicate_stable_id' }],
+  );
+  const duplicatePrintingSlug = structuredClone(legacy) as unknown as {
+    cards: Array<{ printingSlugs: string[]; stableId: string }>;
+  };
+  duplicatePrintingSlug.cards[1]!.printingSlugs[0] =
+    duplicatePrintingSlug.cards[0]!.printingSlugs[0]!;
+  assert.deepEqual(
+    pathsAndCodes(captureDiagnostics(() =>
+      validateCompatibleNormalizedCardSnapshot(duplicatePrintingSlug)
+    )),
+    [{ path: '/cards/1/printingSlugs/0', code: 'duplicate_printing_slug' }],
+  );
+  assert.equal(normalized.identity.payload.cards.every(({ subtypes }) =>
+    Array.isArray(subtypes)), true);
+});
+
 test('DATA-02 strictly adapts the audited official API shape without changing source provenance', () => {
-  const first = officialApiCard(1);
+  const first = officialApiCard(1, { subTypes: 'Spellcaster, Mortal' });
   const second = officialApiCard(2, {
     elements: 'None',
     guardian: {
@@ -196,6 +230,7 @@ test('DATA-02 strictly adapts the audited official API shape without changing so
   assert.equal(adapted.cards[0]?.sourceCardId, 'synthetic_card_2');
   assert.equal(adapted.cards[0]?.life, 20);
   assert.deepEqual(adapted.cards[0]?.thresholds, { air: 1, earth: 2, fire: 3, water: 4 });
+  assert.deepEqual(adapted.cards[1]?.subtypes, ['Mortal', 'Spellcaster']);
   assert.equal(normalized.identity.sourceRefs[0]?.byteHash, sha256(rawBytes));
   const normalizedAvatar = normalized.identity.payload.cards.find(
     ({ officialSourceId }) => officialSourceId === 'synthetic_card_2',
@@ -213,6 +248,22 @@ test('DATA-02 strictly adapts the audited official API shape without changing so
     identityHash(normalizeCards(reorderedBytes, officialSourceMetadata(reorderedBytes)).identity.payload),
     identityHash(normalized.identity.payload),
   );
+});
+
+test('DATA-02 rejects malformed or duplicate official subtype lists deterministically', () => {
+  const cases = [
+    ['Mortal,Mage', 'invalid_subtype_grammar'],
+    [' Mortal', 'invalid_subtype_grammar'],
+    ['Mortal, Mortal', 'duplicate_subtype'],
+  ] as const;
+
+  for (const [subTypes, code] of cases) {
+    const rawBytes = bytes([officialApiCard(1, { subTypes })]);
+    assert.deepEqual(
+      pathsAndCodes(captureDiagnostics(() => normalizeCards(rawBytes, officialSourceMetadata(rawBytes)))),
+      [{ path: '/0/subTypes', code }],
+    );
+  }
 });
 
 test('DATA-02 rejects malformed and unknown official API fields at exact paths', () => {
@@ -330,14 +381,16 @@ test('DATA-02 valid generic cards retain printing slugs and deterministic projec
   );
 });
 
-test('DATA-02 canonicalizes set-like card fields and rejects duplicate elements', () => {
+test('DATA-02 canonicalizes set-like card fields and rejects duplicate elements and subtypes', () => {
   const parsed = JSON.parse(new TextDecoder().decode(VALID_BYTES)) as {
     cards: Array<Record<string, unknown>>;
   };
   parsed.cards[0]!.elements = ['air', 'fire'];
+  parsed.cards[0]!.subtypes = ['Spellcaster', 'Mortal'];
   parsed.cards[0]!.printingSlugs = ['synthetic-fire-keeper-zeta', 'synthetic-fire-keeper-alpha'];
   const reordered = structuredClone(parsed);
   (reordered.cards[0]!.elements as unknown[]).reverse();
+  (reordered.cards[0]!.subtypes as unknown[]).reverse();
   (reordered.cards[0]!.printingSlugs as unknown[]).reverse();
   const originalBytes = bytes(parsed);
   const reorderedBytes = bytes(reordered);
@@ -349,12 +402,20 @@ test('DATA-02 canonicalizes set-like card fields and rejects duplicate elements'
   );
   assert.ok(card);
   assert.deepEqual(card.elements, ['fire', 'air']);
+  assert.deepEqual(card.subtypes, ['Mortal', 'Spellcaster']);
   assert.deepEqual(card.printingSlugs, ['synthetic-fire-keeper-alpha', 'synthetic-fire-keeper-zeta']);
 
   parsed.cards[0]!.elements = ['fire', 'fire'];
   assert.deepEqual(
     pathsAndCodes(captureDiagnostics(() => validateRawCardSnapshot(parsed))),
     [{ path: '/cards/0/elements/1', code: 'duplicate_element' }],
+  );
+
+  parsed.cards[0]!.elements = ['fire'];
+  parsed.cards[0]!.subtypes = ['Mortal', 'Mortal'];
+  assert.deepEqual(
+    pathsAndCodes(captureDiagnostics(() => validateRawCardSnapshot(parsed))),
+    [{ path: '/cards/0/subtypes/1', code: 'duplicate_subtype' }],
   );
 });
 
@@ -538,6 +599,7 @@ test('DATA-02 returns a defensive deeply frozen artifact that cannot change afte
   assert.ok(Object.isFrozen(artifact.identity.payload.cards));
   assert.ok(Object.isFrozen(firstCard));
   assert.ok(Object.isFrozen(firstCard.elements));
+  assert.ok(Object.isFrozen(firstCard.subtypes));
   assert.ok(Object.isFrozen(firstCard.printingSlugs));
   assert.throws(() => {
     (firstCard as unknown as { name: string }).name = 'Tampered';

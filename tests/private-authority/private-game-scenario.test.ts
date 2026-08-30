@@ -922,7 +922,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 23 : 32,
+        preset.id === 'air-vs-earth-lesson' ? 23 : 33,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -930,7 +930,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 32 : 23,
+        preset.id === 'air-vs-earth-lesson' ? 33 : 23,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -997,6 +997,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Dalcean Phalanx': 1,
     'Divine Healing': 1,
     'House Arn Bannerman': 2,
+    'King of the Realm': 1,
     'Land Surveyor': 2,
     Overpower: 2,
     'Payload Trebuchet': 1,
@@ -1056,12 +1057,14 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       attack: houseArn.attack,
       defense: houseArn.defense,
       manaCost: houseArn.manaCost,
+      mortal: houseArn.mortal,
       otherNearbyAlliesPowerBonus: houseArn.otherNearbyAlliesPowerBonus,
       thresholds: houseArn.thresholds,
     }, {
       attack: 2,
       defense: 2,
       manaCost: 4,
+      mortal: true,
       otherNearbyAlliesPowerBonus: 1,
       thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
     });
@@ -1086,6 +1089,34 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
     });
   }
+  const kingOfRealmId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'King of the Realm')?.[0];
+  assert.ok(kingOfRealmId);
+  const kingOfRealm = airLesson.manifest.cards[kingOfRealmId];
+  assert.equal(kingOfRealm?.cardType, 'minion');
+  if (kingOfRealm?.cardType === 'minion') {
+    assert.deepEqual({
+      attack: kingOfRealm.attack,
+      defense: kingOfRealm.defense,
+      manaCost: kingOfRealm.manaCost,
+      mortal: kingOfRealm.mortal,
+      otherControlledMortalsPowerBonus: kingOfRealm.otherControlledMortalsPowerBonus,
+      thresholds: kingOfRealm.thresholds,
+    }, {
+      attack: 3,
+      defense: 3,
+      manaCost: 7,
+      mortal: true,
+      otherControlledMortalsPowerBonus: 1,
+      thresholds: { air: 0, earth: 3, fire: 0, water: 0 },
+    });
+  }
+  const landSurveyorId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Land Surveyor')?.[0];
+  assert.ok(landSurveyorId);
+  const landSurveyor = airLesson.manifest.cards[landSurveyorId];
+  assert.equal(landSurveyor?.cardType, 'minion');
+  if (landSurveyor?.cardType === 'minion') assert.equal(landSurveyor.mortal, true);
   const slumberingGiantessId = Object.entries(airLesson.cardNames)
     .find(([, name]) => name === 'Slumbering Giantess')?.[0];
   assert.ok(slumberingGiantessId);
@@ -1185,6 +1216,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       attack: scentHounds.attack,
       defense: scentHounds.defense,
       manaCost: scentHounds.manaCost,
+      mortal: scentHounds.mortal,
       nearbyEnemiesPermanentlyLoseStealth:
         scentHounds.nearbyEnemiesPermanentlyLoseStealth,
       ordinary: scentHounds.ordinary,
@@ -1193,6 +1225,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       attack: 2,
       defense: 2,
       manaCost: 2,
+      mortal: undefined,
       nearbyEnemiesPermanentlyLoseStealth: true,
       ordinary: true,
       thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
@@ -1756,6 +1789,29 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthWraetannisTitan.deck.spellbook
     .find(({ name }) => name === 'House Arn Bannerman')?.copies, 3);
   assert.equal(result.earthWraetannisTitan.replayVerified, true);
+  assert.equal(result.earthKingOfRealm.kingOfRealm, 'King of the Realm');
+  assert.equal(result.earthKingOfRealm.landSurveyor, 'Land Surveyor');
+  assert.equal(result.earthKingOfRealm.scentHounds, 'Scent Hounds');
+  assert.equal(result.earthKingOfRealm.seed, 2);
+  assert.equal(result.earthKingOfRealm.acceptedActionCount, 37);
+  assert.equal(result.earthKingOfRealm.exactCast, true);
+  assert.equal(result.earthKingOfRealm.mortalBoosted, true);
+  assert.equal(result.earthKingOfRealm.kingSelfExcluded, true);
+  assert.equal(result.earthKingOfRealm.nonMortalUnaffected, true);
+  assert.equal(result.earthKingOfRealm.causalEventsVerified, true);
+  assert.equal(result.earthKingOfRealm.legalConstructedDeck, true);
+  assert.equal(result.earthKingOfRealm.noRandomDraws, true);
+  assert.equal(result.earthKingOfRealm.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthKingOfRealm.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthKingOfRealm.deck.spellbook
+    .find(({ name }) => name === 'King of the Realm')?.copies, 1);
+  assert.equal(result.earthKingOfRealm.deck.spellbook
+    .find(({ name }) => name === 'Land Surveyor')?.copies, 4);
+  assert.equal(result.earthKingOfRealm.deck.spellbook
+    .find(({ name }) => name === 'Scent Hounds')?.copies, 4);
+  assert.equal(result.earthKingOfRealm.replayVerified, true);
   assert.equal(result.earthSlumberingGiantess.slumberingGiantess, 'Slumbering Giantess');
   assert.equal(result.earthSlumberingGiantess.albespinePikemen, 'Albespine Pikemen');
   assert.equal(result.earthSlumberingGiantess.seed, 8883);

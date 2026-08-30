@@ -137,4 +137,5 @@ test('DATA-03 a payload change changes the artifact hash without self-hashing co
   };
 
   assert.notEqual(identityHash(identity), identityHash({ ...identity, payload: { cost: 2 } }));
+  assert.notEqual(identityHash('synthetic +1'), identityHash('synthetic +2'));
 });

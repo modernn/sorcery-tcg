@@ -12,6 +12,7 @@
       "life": null,
       "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
       "rulesText": "",
+      "subtypes": [],
       "printingSlugs": ["synthetic-unknown-field-alpha"],
       "releasedAt": "2026-02-03",
       "unexpected": true
@@ -27,6 +28,7 @@
       "life": null,
       "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 1 },
       "rulesText": "",
+      "subtypes": [],
       "printingSlugs": ["synthetic-missing-name-alpha"],
       "releasedAt": "2026-02-03"
     }

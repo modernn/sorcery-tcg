@@ -30,10 +30,6 @@ import {
 } from '../engine/game.ts';
 import { runCounterfactualRollouts } from '../simulator/counterfactual.ts';
 
-function ruleTextDigest(rulesText: string): Hash {
-  return identityHash(rulesText as JsonValue);
-}
-
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
 const DEFAULT_SCENARIO = resolve(
   REPOSITORY_ROOT,
@@ -42,6 +38,11 @@ const DEFAULT_SCENARIO = resolve(
   'scenarios',
   'vanilla-constructed.json',
 );
+
+function ruleTextDigest(rulesText: string): Hash {
+  return identityHash(rulesText as JsonValue);
+}
+
 type ScenarioConfig = Readonly<{
   airborneSeed: number;
   airSeed: number;
@@ -575,6 +576,22 @@ export type PrivateGameCheck = Readonly<{
     seed: number;
     wildBoars: string;
     wraetannisTitan: string;
+  }>;
+  earthKingOfRealm: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    exactCast: boolean;
+    kingOfRealm: string;
+    kingSelfExcluded: boolean;
+    landSurveyor: string;
+    legalConstructedDeck: boolean;
+    mortalBoosted: boolean;
+    noRandomDraws: boolean;
+    nonMortalUnaffected: boolean;
+    replayVerified: boolean;
+    scentHounds: string;
+    seed: number;
   }>;
   earthSlumberingGiantess: Readonly<{
     acceptedActionCount: number;
@@ -1463,6 +1480,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   huntersLodge: NormalizedCard;
   highlandClansmen: NormalizedCard;
   humbleVillage: NormalizedCard;
+  kingOfRealm: NormalizedCard;
   lethalMinion: NormalizedCard;
   leylineHenge: NormalizedCard;
   lesserBloodDemon: NormalizedCard;
@@ -1921,14 +1939,12 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     throw new Error('private nearby-allies power minion no longer matches its supported facts');
   }
   const wraetannisTitan = snapshot.cards.find(({ name }) => name === 'Wraetannis Titan');
-  const wraetannisTokens = wraetannisTitan?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
   if (!wraetannisTitan
     || wraetannisTitan.stableId
       !== 'card:c3554884b00abe3ace6d5ba9d51c4ab87611bebee660530a7fcb81719312edc8'
     || wraetannisTitan.officialSourceId !== '001-wraetannis_titan-b-f'
     || wraetannisTitan.cardType !== 'minion'
-    || identityHash(wraetannisTokens as unknown as JsonValue)
-      !== 'sha256:db1b06ac4f1f9cc286d04d5095e64cb4c6ddb257805c4e88a2a7826de48dc1eb'
+    || ruleTextDigest(wraetannisTitan.rulesText) !== 'sha256:c61b05fade24e6c33533d53ed718a919143a29a4bc1f9e36b59ac0bb05dcf020'
     || wraetannisTitan.manaCost !== 7
     || wraetannisTitan.attack !== 6
     || wraetannisTitan.defense !== 6
@@ -1942,15 +1958,34 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || wraetannisTitan.rarity !== 'elite') {
     throw new Error('private Genesis enemy-strike minion no longer matches its supported facts');
   }
+  const kingOfRealm = snapshot.cards.find(({ name }) => name === 'King of the Realm');
+  if (!kingOfRealm
+    || kingOfRealm.stableId
+      !== 'card:8cfda8a220af7c24f5ea9ac611ddcd63a5c6e69d473162db9a2361697c675df4'
+    || kingOfRealm.officialSourceId !== '001-king_of_the_realm-b-f'
+    || kingOfRealm.cardType !== 'minion'
+    || ruleTextDigest(kingOfRealm.rulesText) !== 'sha256:5fa3ef09903cf0fb85bac3e6919d278dda66fc47534c4c09c794db0de10bf8d3'
+    || canonicalJson(kingOfRealm.subtypes as unknown as JsonValue) !== '["Mortal"]'
+    || kingOfRealm.manaCost !== 7
+    || kingOfRealm.attack !== 3
+    || kingOfRealm.defense !== 3
+    || kingOfRealm.life !== null
+    || kingOfRealm.elements.length !== 1
+    || kingOfRealm.elements[0] !== 'earth'
+    || kingOfRealm.thresholds.air !== 0
+    || kingOfRealm.thresholds.earth !== 3
+    || kingOfRealm.thresholds.fire !== 0
+    || kingOfRealm.thresholds.water !== 0
+    || kingOfRealm.rarity !== 'unique') {
+    throw new Error('private controlled-Mortal power minion no longer matches its supported facts');
+  }
   const slumberingGiantess = snapshot.cards.find(({ name }) => name === 'Slumbering Giantess');
-  const slumberingGiantessTokens = slumberingGiantess?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
   if (!slumberingGiantess
     || slumberingGiantess.stableId
       !== 'card:a6412a930fcd9c78a2cd43bc2644275d20484f87398b028e2d8efc17949bd2e6'
     || slumberingGiantess.officialSourceId !== '001-slumbering_giantess-b-f'
     || slumberingGiantess.cardType !== 'minion'
-    || identityHash(slumberingGiantessTokens as unknown as JsonValue)
-      !== 'sha256:a22a9aaad6e40f10e2ec95cff81de879a43dca4e17712a176d90251dc036aacb'
+    || ruleTextDigest(slumberingGiantess.rulesText) !== 'sha256:e94c26a01edd3e1f3d1c5554c6db3d078b9764984a3c8d27c5bcdf4dfe93272b'
     || slumberingGiantess.manaCost !== 3
     || slumberingGiantess.attack !== 5
     || slumberingGiantess.defense !== 5
@@ -2221,14 +2256,12 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     throw new Error('private forced-burrow Magic no longer matches its supported facts');
   }
   const caveIn = snapshot.cards.find(({ name }) => name === 'Cave-In');
-  const caveInTokens = caveIn?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
   if (!caveIn
     || caveIn.stableId
       !== 'card:65a2a0672cf7ced121c3b204e56ef2779bc9501e49d68413fb45b89641bc6a15'
     || caveIn.officialSourceId !== '001-cave_in-b-f'
     || caveIn.cardType !== 'magic'
-    || identityHash(caveInTokens as unknown as JsonValue)
-      !== 'sha256:139b7689e0ead9b8c22d2fe7f631281d32833567138da027cfe5dcc6813fe9c9'
+    || ruleTextDigest(caveIn.rulesText) !== 'sha256:d4822b8f9cd19cf588cdd681a4cd70aa01ded88f51431a23e4f36afb57ec4f3a'
     || caveIn.manaCost !== 4
     || caveIn.attack !== null
     || caveIn.defense !== null
@@ -2243,15 +2276,12 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     throw new Error('private site-wide forced-burrow Magic no longer matches its supported facts');
   }
   const siegeBallista = snapshot.cards.find(({ name }) => name === 'Siege Ballista');
-  const siegeBallistaTokens = siegeBallista?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
   if (!siegeBallista
     || siegeBallista.stableId
       !== 'card:76ed02aea74e242ac32b426a7fb87769474bfb54287a4b7b1f30d2ce9fc9440e'
     || siegeBallista.officialSourceId !== '001-siege_ballista-b-f'
     || siegeBallista.cardType !== 'artifact'
-    || siegeBallistaTokens.length !== 16
-    || identityHash(siegeBallistaTokens as unknown as JsonValue)
-      !== 'sha256:d6a31b7f3c30bd67cb0db944dc2db4bd35785991c2b77a803c12e96a639df5eb'
+    || ruleTextDigest(siegeBallista.rulesText) !== 'sha256:733abb80ea9aa05a815f4906352b4f43d3af1e5e8aa10efd8801bb8bf7bd0836'
     || siegeBallista.manaCost !== 3
     || siegeBallista.attack !== null
     || siegeBallista.defense !== null
@@ -2265,15 +2295,12 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     throw new Error('private carried ranged-damage Artifact no longer matches its supported facts');
   }
   const payloadTrebuchet = snapshot.cards.find(({ name }) => name === 'Payload Trebuchet');
-  const payloadTrebuchetTokens = payloadTrebuchet?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
   if (!payloadTrebuchet
     || payloadTrebuchet.stableId
       !== 'card:5137edfbed9848ba5758d36ee904327f98fc4d0ce4c579393980f43e9032f356'
     || payloadTrebuchet.officialSourceId !== '001-payload_trebuchet-b-f'
     || payloadTrebuchet.cardType !== 'artifact'
-    || payloadTrebuchetTokens.length !== 30
-    || identityHash(payloadTrebuchetTokens as unknown as JsonValue)
-      !== 'sha256:664cb874957044571ccaadc8b5bed6891fa24c583c70870bb74b6dfbf4fa75c9'
+    || ruleTextDigest(payloadTrebuchet.rulesText) !== 'sha256:c3af6ef0afd3c79cb614b8ca2425a0047107903152c2b1d2292c3a5d26c80351'
     || payloadTrebuchet.manaCost !== 5
     || payloadTrebuchet.attack !== null
     || payloadTrebuchet.defense !== null
@@ -2287,15 +2314,12 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     throw new Error('private carried discard-area-damage Artifact no longer matches its supported facts');
   }
   const rollingBoulder = snapshot.cards.find(({ name }) => name === 'Rolling Boulder');
-  const rollingBoulderTokens = rollingBoulder?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
   if (!rollingBoulder
     || rollingBoulder.stableId
       !== 'card:00eac8d87deef008cafc64b7c66ad528004222fa44fe672b94e0cd442dac8f85'
     || rollingBoulder.officialSourceId !== '001-rolling_boulder-b-f'
     || rollingBoulder.cardType !== 'artifact'
-    || rollingBoulderTokens.length !== 25
-    || identityHash(rollingBoulderTokens as unknown as JsonValue)
-      !== 'sha256:365c9b56f15e06ac49e9d2a59445686c6bcebc9d2bb869de3161a6fbf2083bf7'
+    || ruleTextDigest(rollingBoulder.rulesText) !== 'sha256:f65af8cb3db80a4e595f5e1bcbff19571db0f64ffe1b4d6d155196f231ed875c'
     || rollingBoulder.manaCost !== 4
     || rollingBoulder.attack !== null
     || rollingBoulder.defense !== null
@@ -3053,7 +3077,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   const drowned = snapshot.cards.find(({ name }) => name === 'Drowned');
   if (!drowned
     || drowned.cardType !== 'minion'
-    || ruleTextDigest(drowned.rulesText) !== 'sha256:63ab2bc0d85e0078829cb2b1634ffd6a1648b263205c7319c80f9382d03f13e2'
+    || ruleTextDigest(drowned.rulesText) !== 'sha256:dcef5fe1550de3acb14d5739239359062753d3d5acf0c7c3eecf84dc6ff01661'
     || drowned.manaCost !== 2
     || drowned.attack !== 3
     || drowned.defense !== 3
@@ -3215,7 +3239,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   const genesisSpellMinion = snapshot.cards.find(({ name }) => name === 'Apprentice Wizard');
   if (!genesisSpellMinion
     || genesisSpellMinion.cardType !== 'minion'
-    || ruleTextDigest(genesisSpellMinion.rulesText) !== 'sha256:68d830060466474e941ec22dd993d25c829c61d629e5c0bf512d02c72ec269db'
+    || ruleTextDigest(genesisSpellMinion.rulesText) !== 'sha256:543756db07eec03e1bc9d754dd0a2d380831f8bd3c42d5dce207cd709b3fa9f9'
     || genesisSpellMinion.manaCost !== 3
     || genesisSpellMinion.attack !== 1
     || genesisSpellMinion.defense !== 1
@@ -3247,7 +3271,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   const pudgeButcher = snapshot.cards.find(({ name }) => name === 'Pudge Butcher');
   if (!pudgeButcher
     || pudgeButcher.cardType !== 'minion'
-    || ruleTextDigest(pudgeButcher.rulesText) !== 'sha256:51aa969acdb41dfff7b923d4be18389f425a94d1aafe8390afdb65a8497f8cd4'
+    || ruleTextDigest(pudgeButcher.rulesText) !== 'sha256:29ab0883ebe8a60f2ece5f7f0de239ef1ba5f908666de8f412b9cf323092b22f'
     || pudgeButcher.manaCost !== 4
     || pudgeButcher.attack !== 5
     || pudgeButcher.defense !== 5
@@ -3618,6 +3642,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     huntersLodge,
     highlandClansmen,
     humbleVillage,
+    kingOfRealm,
     lethalMinion,
     leylineHenge,
     lesserBloodDemon,
@@ -3809,6 +3834,7 @@ function gameDefinition(
   tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps = false,
   tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps = false,
   tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath = false,
+  otherControlledMortalsPowerBonus = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -3996,6 +4022,7 @@ function gameDefinition(
       lethal,
       ...(lanceCount ? { lanceCount } : {}),
       manaCost: card.manaCost ?? 0,
+      ...(card.subtypes.includes('Mortal') ? { mortal: true as const } : {}),
       movesOnlyForward,
       mustBeCastBurrowed,
       mustBeCastSubmerged,
@@ -4008,6 +4035,9 @@ function gameDefinition(
       movesOnlySideways,
       ...(card.rarity === 'ordinary' ? { ordinary: true as const } : {}),
       ...(otherNearbyAlliesPowerBonus ? { otherNearbyAlliesPowerBonus: 1 as const } : {}),
+      ...(otherControlledMortalsPowerBonus
+        ? { otherControlledMortalsPowerBonus: 1 as const }
+        : {}),
       ...(provides ? { provides } : {}),
       ranged,
       ...(sacrificeMinionAtSummoningLocationForManaDiscount
@@ -4039,7 +4069,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -4195,6 +4225,17 @@ function buildManifest(
     spellbook: [
       input.wraetannisTitan.stableId,
       ...earthWraetannisTitanBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
+    ],
+  };
+  const earthKingOfRealmBase = elementalDeck(
+    'earth',
+    [input.genesisMinion, input.scentHounds],
+  );
+  const earthKingOfRealmDeck: GameDeckSpec = {
+    ...earthKingOfRealmBase,
+    spellbook: [
+      input.kingOfRealm.stableId,
+      ...earthKingOfRealmBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
     ],
   };
   const earthSlumberingGiantessBase = elementalDeck('earth', [input.firstStrikeMinion]);
@@ -4354,6 +4395,7 @@ function buildManifest(
       input.siegeBallista.stableId,
       input.payloadTrebuchet.stableId,
       input.rollingBoulder.stableId,
+      input.kingOfRealm.stableId,
     ],
   };
   const fireStarterDeck = elementalDeck(
@@ -4642,6 +4684,8 @@ function buildManifest(
         ? earthBedrockDeck
       : scenario === 'earth-wraetannis-titan'
         ? earthWraetannisTitanDeck
+      : scenario === 'earth-king-of-realm'
+        ? earthKingOfRealmDeck
       : scenario === 'earth-slumbering-giantess'
         ? earthSlumberingGiantessDeck
       : scenario === 'earth-duel'
@@ -4825,6 +4869,8 @@ function buildManifest(
         ? earthBedrockDeck
       : scenario === 'earth-wraetannis-titan'
         ? earthWraetannisTitanDeck
+      : scenario === 'earth-king-of-realm'
+        ? earthKingOfRealmDeck
       : scenario === 'earth-slumbering-giantess'
         ? earthSlumberingGiantessDeck
       : scenario === 'earth-duel'
@@ -5015,6 +5061,7 @@ function buildManifest(
       card.stableId === input.siegeBallista.stableId,
       card.stableId === input.payloadTrebuchet.stableId,
       card.stableId === input.rollingBoulder.stableId,
+      card.stableId === input.kingOfRealm.stableId,
     ),
   ]));
   return {
@@ -6317,6 +6364,78 @@ function findEarthWraetannisTitanOpening(
     };
   }
   throw new Error('private Wraetannis Titan seed no longer produces its supported opening');
+}
+
+function findEarthKingOfRealmOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  kingOfRealmInstanceId: string;
+  landSurveyorInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string, string, string, string, string];
+  scentHoundsInstanceId: string;
+  seed: number;
+  session: GameSession;
+  southSiteInstanceId: string;
+}> {
+  // ponytail: pinned seed keeps the actual-card proof fast and deterministic.
+  const seed = 2;
+  const built = buildManifest(input, seed, 'earth-king-of-realm');
+  const session = createGameSession(built.manifest);
+  const northSites = [
+    ...session.state.players.north.hand.atlas,
+    ...session.state.players.north.atlas.slice(0, 4),
+  ];
+  const kingOfRealmInstanceId = availableMinionInstance(
+    session,
+    'north',
+    input.kingOfRealm.stableId,
+    3,
+  );
+  const landSurveyorInstanceId = availableMinionInstance(
+    session,
+    'north',
+    input.genesisMinion.stableId,
+    3,
+  );
+  const scentHoundsInstanceId = availableMinionInstance(
+    session,
+    'north',
+    input.scentHounds.stableId,
+    3,
+  );
+  const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+  const earthSiteCount = northSites.filter(({ cardId }) => {
+    const definition = session.state.cards[cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('earth');
+  }).length;
+  if (northSites.length >= 7
+    && earthSiteCount >= 3
+    && kingOfRealmInstanceId
+    && landSurveyorInstanceId
+    && scentHoundsInstanceId
+    && southSiteInstanceId) {
+    return {
+      ...built,
+      kingOfRealmInstanceId,
+      landSurveyorInstanceId,
+      northSiteInstanceIds: [
+        northSites[0]!.instanceId,
+        northSites[1]!.instanceId,
+        northSites[2]!.instanceId,
+        northSites[3]!.instanceId,
+        northSites[4]!.instanceId,
+        northSites[5]!.instanceId,
+        northSites[6]!.instanceId,
+      ],
+      scentHoundsInstanceId,
+      seed,
+      session,
+      southSiteInstanceId,
+    };
+  }
+  throw new Error('private King of the Realm seed no longer produces its supported opening');
 }
 
 function findEarthSlumberingGiantessOpening(
@@ -10703,6 +10822,131 @@ function runEarthWraetannisTitan(
     wildBoars: opening.names.get(input.wildBoars.stableId) ?? input.wildBoars.stableId,
     wraetannisTitan:
       opening.names.get(input.wraetannisTitan.stableId) ?? input.wraetannisTitan.stableId,
+  });
+}
+
+function runEarthKingOfRealm(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthKingOfRealm'] {
+  const opening = findEarthKingOfRealmOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  const playSite = (instanceId: string, cell: string): void => {
+    take(({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === instanceId
+      && descriptor.cell === cell);
+  };
+  const drawAndEndSouthTurn = (): void => {
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+  };
+
+  playSite(opening.northSiteInstanceIds[0], 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playSite(opening.southSiteInstanceId, 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playSite(opening.northSiteInstanceIds[1], 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  drawAndEndSouthTurn();
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playSite(opening.northSiteInstanceIds[2], 'B4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  drawAndEndSouthTurn();
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.landSurveyorInstanceId
+    && descriptor.cell === 'C4'
+    && descriptor.region === undefined);
+  playSite(opening.northSiteInstanceIds[3], 'A4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  drawAndEndSouthTurn();
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  playSite(opening.northSiteInstanceIds[4], 'A3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.scentHoundsInstanceId
+    && descriptor.cell === 'C4'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  drawAndEndSouthTurn();
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  playSite(opening.northSiteInstanceIds[5], 'A2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  drawAndEndSouthTurn();
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  playSite(opening.northSiteInstanceIds[6], 'A1');
+  const beforeView = observeGame(session.state, 'north');
+  const beforeLandSurveyor = beforeView.realm.units.find(({ instanceId }) =>
+    instanceId === opening.landSurveyorInstanceId);
+  const beforeScentHounds = beforeView.realm.units.find(({ instanceId }) =>
+    instanceId === opening.scentHoundsInstanceId);
+  const exactActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.kingOfRealmInstanceId
+      && descriptor.cell === 'C4'
+      && descriptor.region === undefined);
+  if (exactActions.length !== 1) {
+    throw new Error('private King of the Realm exact summon is unavailable or ambiguous');
+  }
+  const castResult = stepGame(session, exactActions[0]!);
+  if (!castResult.accepted) throw new Error('private King of the Realm summon was rejected');
+  session = castResult.session;
+
+  const afterView = observeGame(session.state, 'north');
+  const afterLandSurveyor = afterView.realm.units.find(({ instanceId }) =>
+    instanceId === opening.landSurveyorInstanceId);
+  const afterScentHounds = afterView.realm.units.find(({ instanceId }) =>
+    instanceId === opening.scentHoundsInstanceId);
+  const king = afterView.realm.units.find(({ instanceId }) =>
+    instanceId === opening.kingOfRealmInstanceId);
+  const summonedPayload = castResult.receipt.events[0]
+    && isJsonRecord(castResult.receipt.events[0].payload)
+    ? castResult.receipt.events[0].payload
+    : undefined;
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified: castResult.receipt.events.map(({ type }) => type).join(',') === 'minion-summoned'
+      && summonedPayload?.cardId === input.kingOfRealm.stableId
+      && summonedPayload.instanceId === opening.kingOfRealmInstanceId
+      && summonedPayload.cell === 'C4'
+      && summonedPayload.manaPaid === 7
+      && summonedPayload.seat === 'north',
+    deck,
+    exactCast: exactActions.length === 1,
+    kingOfRealm: opening.names.get(input.kingOfRealm.stableId) ?? input.kingOfRealm.stableId,
+    kingSelfExcluded: king?.attack === 3 && king.defense === 3,
+    landSurveyor: opening.names.get(input.genesisMinion.stableId) ?? input.genesisMinion.stableId,
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && deck.spellbook.find(({ name }) => name === input.kingOfRealm.name)?.copies === 1
+      && deck.spellbook.find(({ name }) => name === input.genesisMinion.name)?.copies
+        === input.format.copyLimits[input.genesisMinion.rarity!]
+      && deck.spellbook.find(({ name }) => name === input.scentHounds.name)?.copies
+        === input.format.copyLimits[input.scentHounds.rarity!],
+    mortalBoosted: beforeLandSurveyor?.attack === 1
+      && beforeLandSurveyor.defense === 1
+      && afterLandSurveyor?.attack === 2
+      && afterLandSurveyor.defense === 2,
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    nonMortalUnaffected: beforeScentHounds?.attack === 2
+      && beforeScentHounds.defense === 2
+      && afterScentHounds?.attack === 2
+      && afterScentHounds.defense === 2,
+    replayVerified: verifyGameReplay(session),
+    scentHounds: opening.names.get(input.scentHounds.stableId) ?? input.scentHounds.stableId,
+    seed: opening.seed,
   });
 }
 
@@ -19187,6 +19431,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthHolyGround = runEarthHolyGround(input);
   const earthBedrock = runEarthBedrock(input);
   const earthWraetannisTitan = runEarthWraetannisTitan(input);
+  const earthKingOfRealm = runEarthKingOfRealm(input);
   const earthSlumberingGiantess = runEarthSlumberingGiantess(input);
   const earthCaveIn = runEarthCaveIn(input);
   const earthSiegeBallista = runEarthSiegeBallista(input);
@@ -19404,6 +19649,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthHolyGround,
     earthBedrock,
     earthWraetannisTitan,
+    earthKingOfRealm,
     earthSlumberingGiantess,
     earthCaveIn,
     earthSiegeBallista,
