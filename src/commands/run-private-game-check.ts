@@ -368,6 +368,22 @@ export type PrivateGameCheck = Readonly<{
     structuralFactsVerified: boolean;
     unsupportedMechanicsAbsent: boolean;
   }>;
+  airChainLightning: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    chainLightning: string;
+    deck: DeckList;
+    exactEventsVerified: boolean;
+    legalConstructedDeck: boolean;
+    legalLinkedDistinctTargets: boolean;
+    manaPerExtraTargetVerified: boolean;
+    noActionTimeRandomness: boolean;
+    replayVerified: boolean;
+    seed: number;
+    simultaneousDeathsVerified: boolean;
+    structuralFactsVerified: boolean;
+    unsupportedMechanicsAbsent: boolean;
+  }>;
   airLeyline: Readonly<{
     acceptedActionCount: number;
     deck: DeckList;
@@ -1584,6 +1600,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   cards: readonly NormalizedCard[];
   cannotDefendMinion: NormalizedCard;
   chargeMagic: NormalizedCard;
+  chainLightning: NormalizedCard;
   chargeMinion: NormalizedCard;
   config: ScenarioConfig;
   deathriteMinion: NormalizedCard;
@@ -3604,6 +3621,28 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || kiteArcher.subtypes[0] !== 'Mortal') {
     throw new Error('private post-Ranged-strike stepping minion no longer matches its supported facts');
   }
+  const chainLightning = snapshot.cards.find(({ name }) => name === 'Chain Lightning');
+  if (!chainLightning
+    || chainLightning.stableId
+      !== 'card:7e009be1dc5faef2fe966e19ce7dbee8e3248fe3bd721b3902e73a5ab2c65a57'
+    || chainLightning.officialSourceId !== '001-chain_lightning-b-f'
+    || chainLightning.cardType !== 'magic'
+    || ruleTextDigest(chainLightning.rulesText)
+      !== 'sha256:4a05e992b5c361286128212ca6239ebdaccc27ae3f2f2bf82d3b19dc69ea65c8'
+    || chainLightning.manaCost !== 2
+    || chainLightning.attack !== null
+    || chainLightning.defense !== null
+    || chainLightning.life !== null
+    || chainLightning.elements.length !== 1
+    || chainLightning.elements[0] !== 'air'
+    || chainLightning.thresholds.air !== 2
+    || chainLightning.thresholds.earth !== 0
+    || chainLightning.thresholds.fire !== 0
+    || chainLightning.thresholds.water !== 0
+    || chainLightning.rarity !== 'exceptional'
+    || chainLightning.subtypes.length !== 0) {
+    throw new Error('private linked-target damage Magic no longer matches its supported facts');
+  }
   const polarBears = snapshot.cards.find(({ name }) => name === 'Polar Bears');
   if (!polarBears
     || polarBears.cardType !== 'minion'
@@ -3956,6 +3995,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     cards: snapshot.cards,
     cannotDefendMinion,
     chargeMagic,
+    chainLightning,
     chargeMinion,
     config,
     dalceanPhalanx,
@@ -4205,6 +4245,7 @@ function gameDefinition(
   discardSpellToDamageRandomOtherUnitHere: 0 | 3 = 0,
   atEndOfEachTurnSiteControllerLosesLife: 0 | 1 = 0,
   mayStepAfterRangedStrike = false,
+  damageChainNearbyUnits = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4307,6 +4348,7 @@ function gameDefinition(
     };
   }
   const supportedMagicEffects = Number(damageTargetUnit !== 0)
+    + Number(damageChainNearbyUnits)
     + Number(damageEachAbovegroundMinion !== 0)
     + Number(damageEachUnitAtLocationWithinTwoSteps !== 0)
     + Number(damageRandomUnitAtLocation !== 0)
@@ -4335,6 +4377,7 @@ function gameDefinition(
         : {}),
       ...(burrowTargetMinionOrArtifact ? { burrowTargetMinionOrArtifact: true } : {}),
       cardType: 'magic',
+      ...(damageChainNearbyUnits ? { damageChainNearbyUnits: true as const } : {}),
       ...(damageEachAbovegroundMinion !== 0 ? { damageEachAbovegroundMinion } : {}),
       ...(fightAllyWithAdjacentEnemy ? { fightAllyWithAdjacentEnemy: true } : {}),
       ...(gainControlOfTargetNearbyMinion ? { gainControlOfTargetNearbyMinion: true } : {}),
@@ -4465,7 +4508,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-devils-egg' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-kite-archer' | 'air-leyline' | 'air-lightning-bolt' | 'air-nimbus-jinn' | 'air-rain-of-arrows' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-chain-lightning' | 'air-devils-egg' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-kite-archer' | 'air-leyline' | 'air-lightning-bolt' | 'air-nimbus-jinn' | 'air-rain-of-arrows' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -4769,6 +4812,7 @@ function buildManifest(
       input.nimbusJinn.stableId,
       input.devilsEgg.stableId,
       input.kiteArcher.stableId,
+      ...Array(2).fill(input.chainLightning.stableId),
       ...Array(2).fill(input.movementTwoMinion.stableId),
       ...Array(2).fill(input.airborneMinion.stableId),
       ...Array(2).fill(input.stealthTargetMinion.stableId),
@@ -4932,6 +4976,14 @@ function buildManifest(
     'air',
     [input.kiteArcher, input.stealthTargetMinion],
   );
+  const airChainLightningBase = elementalDeck('air', [input.stealthTargetMinion]);
+  const airChainLightningDeck: GameDeckSpec = {
+    ...airChainLightningBase,
+    spellbook: [
+      ...Array(2).fill(input.chainLightning.stableId),
+      ...airChainLightningBase.spellbook.slice(0, input.format.spellbookMinimum - 2),
+    ],
+  };
   const fireNimbusJinnDeck = elementalDeck('fire', [input.raalDromedary]);
   const fireSlingPixiesDeck = elementalDeck('fire', [input.vikings, input.raalDromedary]);
   const airLeylineDeck = elementalDeck('air', airMinions, [input.leylineHenge]);
@@ -5100,6 +5152,8 @@ function buildManifest(
       ? airArcLightningDeck
       : scenario === 'air-bladderblimp'
       ? airBladderblimpDeck
+      : scenario === 'air-chain-lightning'
+      ? airChainLightningDeck
       : scenario === 'air-lightning-bolt'
       ? airLightningBoltDeck
       : scenario === 'air-rain-of-arrows'
@@ -5271,6 +5325,8 @@ function buildManifest(
       ? airArcLightningDeck
       : scenario === 'air-bladderblimp'
       ? airBladderblimpDeck
+      : scenario === 'air-chain-lightning'
+      ? airChainLightningDeck
       : scenario === 'air-lightning-bolt'
       ? airLightningBoltDeck
       : scenario === 'air-rain-of-arrows'
@@ -5578,6 +5634,7 @@ function buildManifest(
       card.stableId === input.nimbusJinn.stableId ? 3 : 0,
       card.stableId === input.devilsEgg.stableId ? 1 : 0,
       card.stableId === input.kiteArcher.stableId,
+      card.stableId === input.chainLightning.stableId,
     ),
   ]));
   return {
@@ -9347,6 +9404,68 @@ function findAirKiteArcherOpening(
     snowLeopardInstanceId: snowLeopard.instanceId,
     southSiteInstanceIds: southSites.slice(0, 2)
       .map(({ instanceId }) => instanceId) as [string, string],
+  };
+}
+
+function findAirChainLightningOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  chainLightningInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northDrawnSiteInstanceId: string;
+  northSiteInstanceIds: readonly [string, string, string];
+  seed: number;
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string, string];
+  targetInstanceIds: readonly [string, string];
+}> {
+  const seed = 508;
+  const built = buildManifest(input, seed, 'air-chain-lightning');
+  const session = createGameSession(built.manifest);
+  const north = session.state.players.north;
+  const south = session.state.players.south;
+  const isAirSite = ({ cardId }: { cardId: string }): boolean => {
+    const definition = built.manifest.cards[cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('air');
+  };
+  const northSites = [...north.hand.atlas]
+    .sort((left, right) => Number(isAirSite(right)) - Number(isAirSite(left)));
+  const firstTarget = north.hand.spellbook
+    .find(({ cardId }) => cardId === input.stealthTargetMinion.stableId);
+  const secondTarget = [...north.hand.spellbook, ...north.spellbook.slice(0, 1)]
+    .find(({ cardId, instanceId }) => cardId === input.stealthTargetMinion.stableId
+      && instanceId !== firstTarget?.instanceId);
+  const chainLightning = [...north.hand.spellbook, ...north.spellbook.slice(0, 2)]
+    .find(({ cardId }) => cardId === input.chainLightning.stableId);
+  const drawnSite = north.atlas[0];
+  if (northSites.length !== 3
+    || !isAirSite(northSites[0]!)
+    || !isAirSite(northSites[1]!)
+    || !firstTarget
+    || !secondTarget
+    || !chainLightning
+    || !drawnSite
+    || south.hand.atlas.length !== 3) {
+    throw new Error('private Chain Lightning seed 508 no longer produces its supported opening');
+  }
+  return {
+    ...built,
+    chainLightningInstanceId: chainLightning.instanceId,
+    northDrawnSiteInstanceId: drawnSite.instanceId,
+    northSiteInstanceIds: northSites.map(({ instanceId }) => instanceId) as [
+      string,
+      string,
+      string,
+    ],
+    seed,
+    session,
+    southSiteInstanceIds: south.hand.atlas.map(({ instanceId }) => instanceId) as [
+      string,
+      string,
+      string,
+    ],
+    targetInstanceIds: [firstTarget.instanceId, secondTarget.instanceId],
   };
 }
 
@@ -17986,6 +18105,177 @@ function runAirKiteArcher(
   });
 }
 
+function runAirChainLightning(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airChainLightning'] {
+  const opening = findAirChainLightningOpening(input);
+  let session = keep(keep(opening.session));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  const drawSpell = (): void => take(({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const playSite = (instanceId: string, cell: RealmCell): void => take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === instanceId
+      && descriptor.cell === cell);
+  const summon = (instanceId: string): void => take(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === instanceId
+      && descriptor.cell === 'C4');
+  const endTurn = (): void => take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  playSite(opening.northSiteInstanceIds[0], 'C4');
+  summon(opening.targetInstanceIds[0]);
+  endTurn();
+  drawSpell();
+  playSite(opening.southSiteInstanceIds[0], 'C1');
+  endTurn();
+
+  drawSpell();
+  playSite(opening.northSiteInstanceIds[1], 'B4');
+  summon(opening.targetInstanceIds[1]);
+  endTurn();
+  drawSpell();
+  playSite(opening.southSiteInstanceIds[1], 'B1');
+  endTurn();
+
+  drawSpell();
+  playSite(opening.northSiteInstanceIds[2], 'A4');
+  endTurn();
+  drawSpell();
+  playSite(opening.southSiteInstanceIds[2], 'A1');
+  endTurn();
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  playSite(opening.northDrawnSiteInstanceId, 'D4');
+  const checkpoint = session;
+  const begins = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'begin-chain-magic'
+      && descriptor.cardInstanceId === opening.chainLightningInstanceId);
+  const beginAction = begins.find(({ descriptor }) => descriptor.kind === 'begin-chain-magic'
+    && descriptor.target.instanceId === opening.targetInstanceIds[0]);
+  if (!beginAction) throw new Error('private Chain Lightning lacks its first actual target');
+
+  const lowMana: GameSession = {
+    ...checkpoint,
+    state: {
+      ...checkpoint.state,
+      players: {
+        ...checkpoint.state.players,
+        north: { ...checkpoint.state.players.north, mana: 3 },
+      },
+    },
+  };
+  const lowBegin = stepGame(lowMana, action(lowMana, ({ descriptor }) =>
+    descriptor.kind === 'begin-chain-magic'
+      && descriptor.cardInstanceId === opening.chainLightningInstanceId
+      && descriptor.target.instanceId === opening.targetInstanceIds[0]));
+  const lowManaStopsExtraTarget = lowBegin.accepted
+    && !legalGameActions(lowBegin.session.state, 'north').some(({ descriptor }) =>
+      descriptor.kind === 'extend-chain-magic');
+
+  const beforeMana = checkpoint.state.players.north.mana;
+  const begin = stepGame(checkpoint, beginAction);
+  if (!begin.accepted) throw new Error('private Chain Lightning target selection was rejected');
+  session = begin.session;
+  const extensions = legalGameActions(session.state, 'north');
+  const extendAction = extensions.find(({ descriptor }) => descriptor.kind === 'extend-chain-magic'
+    && descriptor.target.instanceId === opening.targetInstanceIds[1]);
+  if (!extendAction) throw new Error('private Chain Lightning lacks its linked actual target');
+  const legalLinkedDistinctTargets = begins.some(({ descriptor }) =>
+    descriptor.kind === 'begin-chain-magic'
+      && descriptor.target.instanceId === opening.targetInstanceIds[1])
+    && !extensions.some(({ descriptor }) => descriptor.kind === 'extend-chain-magic'
+      && descriptor.target.instanceId === opening.targetInstanceIds[0])
+    && session.state.pendingChainMagic?.targets.length === 1
+    && session.state.pendingChainMagic.targets[0]?.instanceId === opening.targetInstanceIds[0];
+
+  const extend = stepGame(session, extendAction);
+  if (!extend.accepted) throw new Error('private Chain Lightning target extension was rejected');
+  session = extend.session;
+  const resolves = legalGameActions(session.state, 'north');
+  const resolveAction = resolves.find(({ descriptor }) => descriptor.kind === 'resolve-chain-magic');
+  if (!resolveAction) throw new Error('private Chain Lightning lacks its resolve action');
+  const selectionReceiptsVerified = begin.receipt.events.length === 0
+    && extend.receipt.events.length === 0
+    && session.state.players.north.mana === beforeMana
+    && session.state.players.north.hand.spellbook.some(({ instanceId }) =>
+      instanceId === opening.chainLightningInstanceId)
+    && session.state.pendingChainMagic?.targets.map(({ instanceId }) => instanceId).join(',')
+      === opening.targetInstanceIds.join(',')
+    && !resolves.some(({ descriptor }) => descriptor.kind === 'extend-chain-magic');
+
+  const resolved = stepGame(session, resolveAction);
+  if (!resolved.accepted) throw new Error('private Chain Lightning resolution was rejected');
+  session = resolved.session;
+  const events = resolved.receipt.events;
+  const firstDeath = events.findIndex(({ type }) => type === 'minion-died');
+  const damageIndices = events.flatMap(({ type }, index) => type === 'damage-dealt' ? [index] : []);
+  const expectedAllocations = opening.targetInstanceIds.map((targetInstanceId) => ({
+    amount: 2,
+    sourceInstanceId: opening.chainLightningInstanceId,
+    targetInstanceId,
+  }));
+  const eventTypes = events.map(({ type }) => type).join(',');
+  const expectedEventTypes = [
+    'magic-cast',
+    'magic-damage-allocated',
+    'magic-damage-allocated',
+    'damage-dealt',
+    'damage-dealt',
+    'minion-died',
+    'minion-died',
+    'magic-resolved',
+  ].join(',');
+  const causalEventsVerified = events.length > 0 && events.every((event, index) =>
+    event.cause.actionId === resolved.receipt.actionId
+      && event.cause.receiptSequence === resolved.receipt.receiptSequence
+      && event.eventSequence === events[0]!.eventSequence + index);
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+  const southDeck = deckList(opening.manifest.decks.south, opening.names);
+  const definition = session.state.cards[input.chainLightning.stableId];
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified,
+    chainLightning: input.chainLightning.name,
+    deck,
+    exactEventsVerified: selectionReceiptsVerified
+      && eventTypes === expectedEventTypes
+      && canonicalJson(events.filter(({ type }) => type === 'magic-damage-allocated')
+        .map(({ payload }) => payload) as unknown as JsonValue)
+        === canonicalJson(expectedAllocations as unknown as JsonValue),
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && southDeck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && southDeck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && (deck.spellbook.find(({ name }) => name === input.chainLightning.name)?.copies ?? 0) === 2
+      && 2 <= input.format.copyLimits[input.chainLightning.rarity!],
+    legalLinkedDistinctTargets,
+    manaPerExtraTargetVerified: lowManaStopsExtraTarget
+      && beforeMana - session.state.players.north.mana === 4,
+    noActionTimeRandomness: resolved.receipt.randomDraws.length === 0
+      && session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    simultaneousDeathsVerified: firstDeath > 0
+      && damageIndices.length === 2
+      && damageIndices.every((index) => index < firstDeath)
+      && opening.targetInstanceIds.every((instanceId) =>
+        session.state.players.north.cemetery.some((card) => card.instanceId === instanceId)),
+    structuralFactsVerified: definition?.cardType === 'magic'
+      && definition.damageChainNearbyUnits === true
+      && definition.manaCost === 2
+      && canonicalJson(definition.thresholds)
+        === canonicalJson({ air: 2, earth: 0, fire: 0, water: 0 }),
+    unsupportedMechanicsAbsent: session.state.phase === 'main'
+      && session.state.pendingChainMagic === null
+      && session.state.terminal.status === 'active'
+      && eventTypes === expectedEventTypes,
+  });
+}
+
 function runAirDevilsEgg(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['airDevilsEgg'] {
@@ -22248,6 +22538,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airNimbusJinn = runAirNimbusJinn(input);
   const airDevilsEgg = runAirDevilsEgg(input);
   const airKiteArcher = runAirKiteArcher(input);
+  const airChainLightning = runAirChainLightning(input);
   const airSpellcasterFreeze = runAirSpellcasterFreeze(input);
   const airArcLightning = runAirArcLightning(input);
   const airLightningBolt = runAirLightningBolt(input);
@@ -22461,6 +22752,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     airNimbusJinn,
     airDevilsEgg,
     airKiteArcher,
+    airChainLightning,
     airSpellcasterFreeze,
     airArcLightning,
     airLightningBolt,

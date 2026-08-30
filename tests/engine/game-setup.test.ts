@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { canonicalJson, type JsonValue } from '../../src/authority/canonical-json.ts';
-import { opaqueActionId } from '../../src/engine/contract.ts';
+import { opaqueActionId, type EngineActionDescriptor } from '../../src/engine/contract.ts';
 import {
   createGameManifest,
   createGameSession,
@@ -4076,6 +4076,234 @@ test('RULE-03/04 Minor Explosion damages every unit at a location up to two card
     result.receipt.events.indexOf(event) < firstDeath), true);
   assert.equal(result.receipt.events.findIndex(({ type }) => type === 'avatar-healed') < firstDeath, true);
   assert.equal(result.receipt.events.at(-1)?.type, 'magic-resolved');
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-03/04 Chain Magic stages distinct nearby hops and damages all chosen units simultaneously', () => {
+  const decks = { north: deck('chain-north', 8, 8), south: deck('chain-south', 8, 8) };
+  const baseCards = cardsFor(decks, {
+    defense: 2,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  }, undefined, { elements: ['air'] });
+  const authority = {
+    contentHash: SYNTHETIC_AUTHORITY_HASH,
+    mode: 'synthetic' as const,
+    revisionId: 'synthetic-chain-magic-v1',
+  };
+  const seed = 271;
+  const preview = createGameSession(createGameManifest({
+    authority,
+    cards: baseCards,
+    decks,
+    firstSeat: 'north',
+    seed,
+  }));
+  const [chainCard, firstTargetCard, secondTargetCard] = preview.state.players.north.hand.spellbook;
+  assert.ok(chainCard);
+  assert.ok(firstTargetCard);
+  assert.ok(secondTargetCard);
+
+  const cards: Record<string, GameCardDefinition> = {
+    ...baseCards,
+    [chainCard.cardId]: {
+      cardType: 'magic',
+      damageChainNearbyUnits: true,
+      manaCost: 2,
+      thresholds: { air: 2, earth: 0, fire: 0, water: 0 },
+    },
+  };
+  assert.throws(() => createGameManifest({
+    authority,
+    cards: {
+      ...cards,
+      [chainCard.cardId]: {
+        cardType: 'magic',
+        damageChainNearbyUnits: false,
+        manaCost: 2,
+        thresholds: { air: 2, earth: 0, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+    decks,
+    firstSeat: 'north',
+    seed,
+  }), /damageChainNearbyUnits/);
+  const gameManifest = createGameManifest({ authority, cards, decks, firstSeat: 'north', seed });
+  assert.deepEqual(gameManifest.cards[chainCard.cardId], {
+    cardType: 'magic',
+    damageChainNearbyUnits: true,
+    manaCost: 2,
+    thresholds: { air: 2, earth: 0, fire: 0, water: 0 },
+  });
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === firstTargetCard.cardId && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === secondTargetCard.cardId && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'A1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B4');
+
+  const checkpoint = session;
+  const chain = checkpoint.state.players.north.hand.spellbook.find(({ cardId }) =>
+    cardId === chainCard.cardId);
+  const firstTarget = checkpoint.state.realm.units.find(({ cardId }) =>
+    cardId === firstTargetCard.cardId);
+  const secondTarget = checkpoint.state.realm.units.find(({ cardId }) =>
+    cardId === secondTargetCard.cardId);
+  assert.ok(chain);
+  assert.ok(firstTarget);
+  assert.ok(secondTarget);
+  const avatarId = checkpoint.state.players.north.avatar.card.instanceId;
+  const southAvatarId = checkpoint.state.players.south.avatar.card.instanceId;
+  const starts = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'begin-chain-magic' && descriptor.cardInstanceId === chain.instanceId);
+  assert.deepEqual(starts.flatMap(({ descriptor }) => descriptor.kind === 'begin-chain-magic'
+    ? [descriptor.target.instanceId]
+    : []).sort(), [avatarId, firstTarget.instanceId].sort());
+  assert.equal(starts.some(({ descriptor }) => descriptor.kind === 'begin-chain-magic'
+    && descriptor.target.instanceId === secondTarget.instanceId), false);
+  assert.equal(starts.some(({ descriptor }) => descriptor.kind === 'begin-chain-magic'
+    && descriptor.target.instanceId === southAvatarId), false);
+
+  const lowMana: GameSession = {
+    ...checkpoint,
+    state: {
+      ...checkpoint.state,
+      players: {
+        ...checkpoint.state.players,
+        north: { ...checkpoint.state.players.north, mana: 1 },
+      },
+    },
+  };
+  assert.equal(legalGameActions(lowMana.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'begin-chain-magic'
+      && descriptor.cardInstanceId === chain.instanceId), false);
+
+  const begin = starts.find(({ descriptor }) => descriptor.kind === 'begin-chain-magic'
+    && descriptor.target.instanceId === firstTarget.instanceId);
+  assert.ok(begin);
+  const beforeMana = checkpoint.state.players.north.mana;
+  const beginResult = stepGame(checkpoint, begin);
+  assert.equal(beginResult.accepted, true);
+  if (!beginResult.accepted) return;
+  session = beginResult.session;
+  assert.equal(beginResult.receipt.events.length, 0);
+  assert.equal(session.state.phase, 'chain-magic');
+  assert.equal(session.state.players.north.mana, beforeMana);
+  assert.equal(session.state.players.north.hand.spellbook.some(({ instanceId }) =>
+    instanceId === chain.instanceId), true);
+
+  const extensions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'extend-chain-magic');
+  assert.deepEqual(extensions.flatMap(({ descriptor }) => descriptor.kind === 'extend-chain-magic'
+    ? [descriptor.target.instanceId]
+    : []).sort(), [avatarId, secondTarget.instanceId].sort());
+  assert.equal(extensions.some(({ descriptor }) => descriptor.kind === 'extend-chain-magic'
+    && descriptor.target.instanceId === firstTarget.instanceId), false);
+  assert.equal(extensions.some(({ descriptor }) => descriptor.kind === 'extend-chain-magic'
+    && descriptor.target.instanceId === southAvatarId), false);
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor, label }) =>
+    descriptor.kind === 'resolve-chain-magic' && /1 chosen unit \(2 mana\)/.test(label)), true);
+
+  const undergroundState: GameSession['state'] = {
+    ...session.state,
+    realm: {
+      ...session.state.realm,
+      units: session.state.realm.units.map((unit) => unit.instanceId === secondTarget.instanceId
+        ? { ...unit, region: 'underground' as const }
+        : unit),
+    },
+  };
+  assert.equal(legalGameActions(undergroundState, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'extend-chain-magic'
+      && descriptor.target.instanceId === secondTarget.instanceId), false);
+
+  const stealthState: GameSession['state'] = {
+    ...session.state,
+    realm: {
+      ...session.state.realm,
+      units: session.state.realm.units.map((unit) => unit.instanceId === secondTarget.instanceId
+        ? { ...unit, controller: 'south' as const, stealthed: true }
+        : unit),
+    },
+  };
+  assert.equal(legalGameActions(stealthState, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'extend-chain-magic'
+      && descriptor.target.instanceId === secondTarget.instanceId), false);
+
+  const forgedDescriptor = {
+    kind: 'extend-chain-magic',
+    target: { instanceId: firstTarget.instanceId, kind: 'minion', seat: 'north' },
+  };
+  const forged = stepGame(session, {
+    actionId: opaqueActionId(
+      'sorcery-core-v1',
+      'north',
+      session.state.stateVersion,
+      forgedDescriptor as unknown as EngineActionDescriptor,
+    ),
+    seat: 'north',
+    stateVersion: session.state.stateVersion,
+  });
+  assert.equal(forged.accepted, false);
+  assert.equal(forged.reason.code, 'unknown_action');
+
+  const extend = extensions.find(({ descriptor }) => descriptor.kind === 'extend-chain-magic'
+    && descriptor.target.instanceId === secondTarget.instanceId);
+  assert.ok(extend);
+  const extendResult = stepGame(session, extend);
+  assert.equal(extendResult.accepted, true);
+  if (!extendResult.accepted) return;
+  session = extendResult.session;
+  assert.equal(extendResult.receipt.events.length, 0);
+  assert.equal(session.state.players.north.mana, beforeMana);
+  const finalActions = legalGameActions(session.state, 'north');
+  assert.equal(finalActions.some(({ descriptor }) => descriptor.kind === 'extend-chain-magic'), false);
+  const finish = finalActions.find(({ descriptor }) => descriptor.kind === 'resolve-chain-magic');
+  assert.ok(finish);
+  assert.match(finish.label, /2 chosen units \(4 mana\)/);
+
+  const result = stepGame(session, finish);
+  assert.equal(result.accepted, true);
+  if (!result.accepted) return;
+  session = result.session;
+  assert.equal(session.state.players.north.mana, beforeMana - 4);
+  assert.deepEqual(result.receipt.events.filter(({ type }) => type === 'magic-damage-allocated')
+    .map(({ payload }) => payload), [firstTarget.instanceId, secondTarget.instanceId].map((instanceId) => ({
+    amount: 2,
+    sourceInstanceId: chain.instanceId,
+    targetInstanceId: instanceId,
+  })));
+  const firstDeath = result.receipt.events.findIndex(({ type }) => type === 'minion-died');
+  assert.equal(firstDeath > 0, true);
+  assert.equal(result.receipt.events.filter(({ type }) => type === 'damage-dealt').every((event) =>
+    result.receipt.events.indexOf(event) < firstDeath), true);
+  assert.equal([firstTarget.instanceId, secondTarget.instanceId].every((instanceId) =>
+    session.state.players.north.cemetery.some((card) => card.instanceId === instanceId)), true);
+  assert.equal(result.receipt.events.at(-1)?.type, 'magic-resolved');
+  assert.equal(result.receipt.randomDraws.length, 0);
+  assert.equal(session.transcript.length, checkpoint.transcript.length + 3);
   assert.equal(verifyGameReplay(session), true);
 });
 

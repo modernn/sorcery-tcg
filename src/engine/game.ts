@@ -23,6 +23,8 @@ import { createEngineState, drawUint32, type EngineState } from './determinism.t
 const UINT32_RANGE = 0x1_0000_0000;
 const MAX_DECK_CARDS = 200;
 const MAX_COMBAT_STAT = 100;
+const CHAIN_MAGIC_DAMAGE = 2;
+const CHAIN_MAGIC_EXTRA_TARGET_MANA = 2;
 const NORTH_START = 'C4';
 const SOUTH_START = 'C1';
 
@@ -155,6 +157,7 @@ export type GameCardDefinition =
     burrowAllMinionsAndArtifactsAtTargetLandSite?: true;
     burrowTargetMinionOrArtifact?: true;
     cardType: 'magic';
+    damageChainNearbyUnits?: true;
     damageEachAbovegroundMinion?: 1;
     damageEachUnitAtLocationWithinTwoSteps?: number;
     damageRandomUnitAtLocation?: number;
@@ -360,6 +363,14 @@ type PendingCombat = Readonly<{
   targetRemoved: boolean;
 }>;
 
+type PendingChainMagic = Readonly<{
+  cardId: string;
+  cardInstanceId: StateHash;
+  casterInstanceId: StateHash;
+  seat: GameSeat;
+  targets: readonly GameUnitRef[];
+}>;
+
 type DamageAllocationSource = 'attacker-unit' | 'non-unit';
 
 type DamageSourceSnapshot =
@@ -430,11 +441,12 @@ export type GameState = Readonly<{
   cards: Readonly<Record<string, GameCardDefinition>>;
   decisionSeat: GameSeat;
   engine: EngineState;
+  pendingChainMagic?: PendingChainMagic | null;
   pendingCombat: PendingCombat | null;
   pendingGenesisSpell?: PendingGenesisSpell | null;
   pendingGenesisToken?: PendingGenesisToken | null;
   pendingRangedStep?: PendingRangedStep | null;
-  phase: 'allocate' | 'attack' | 'defend' | 'draw' | 'genesis' | 'intercept' | 'main' | 'mulligan' | 'ranged-step' | 'terminal';
+  phase: 'allocate' | 'attack' | 'chain-magic' | 'defend' | 'draw' | 'genesis' | 'intercept' | 'main' | 'mulligan' | 'ranged-step' | 'terminal';
   players: Readonly<Record<GameSeat, PlayerState>>;
   realm: Readonly<{
     artifacts?: readonly ArtifactInstance[];
@@ -616,6 +628,18 @@ type GameActionDescriptor =
   }>
   | Readonly<{
     cardId: string;
+    cardInstanceId: StateHash;
+    casterInstanceId: StateHash;
+    kind: 'begin-chain-magic';
+    target: GameUnitRef;
+  }>
+  | Readonly<{
+    kind: 'extend-chain-magic';
+    target: GameUnitRef;
+  }>
+  | Readonly<{ kind: 'resolve-chain-magic' }>
+  | Readonly<{
+    cardId: string;
     cardInstanceId: string;
     casterInstanceId: StateHash;
     cemeteryMinionInstanceId?: StateHash;
@@ -626,6 +650,7 @@ type GameActionDescriptor =
     allyDestinationCells?: TwoByTwoArea;
     allyStrikeLocation?: GameLocation;
     target?: GameUnitRef;
+    targets?: readonly GameUnitRef[];
     targetArtifactInstanceId?: StateHash;
     targetLocation?: GameLocation;
     targetSiteInstanceId?: StateHash;
@@ -1221,6 +1246,28 @@ function auraDescriptors(state: GameState, seat: GameSeat): readonly GameActionD
   });
 }
 
+function chainMagicTargets(
+  state: GameState,
+  seat: GameSeat,
+  casterRef: GameUnitRef,
+  previousRef: GameUnitRef,
+  selected: readonly GameUnitRef[],
+): readonly GameUnitRef[] {
+  const caster = unitStatus(state, casterRef);
+  const previous = unitStatus(state, previousRef);
+  const selectedIds = new Set(selected.map(({ instanceId }) => instanceId));
+  return (['north', 'south'] as const)
+    .flatMap((targetSeat) => unitRefs(state, targetSeat))
+    .filter((target) => {
+      if (selectedIds.has(target.instanceId)) return false;
+      const status = unitStatus(state, target);
+      return status.region === caster.region
+        && (target.seat === seat || !status.stealthed)
+        && footprintNearby(previous.occupiedCells, status.occupiedCells);
+    })
+    .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+}
+
 function magicDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   const player = state.players[seat];
   const casters = spellcasterRefs(state, seat);
@@ -1230,7 +1277,7 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
     if (definition.cardType !== 'magic'
       || player.mana < definition.manaCost
       || !meetsThresholds(state, seat, definition.thresholds)) return [];
-    return casters.flatMap((casterRef) => {
+    return casters.flatMap<GameActionDescriptor>((casterRef) => {
       const caster = unitStatus(state, casterRef);
       const cast = {
         cardId,
@@ -1440,6 +1487,10 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
         });
       });
     }
+    if (definition.damageChainNearbyUnits === true) {
+      return chainMagicTargets(state, seat, casterRef, casterRef, [])
+        .map((target) => ({ ...cast, kind: 'begin-chain-magic' as const, target }));
+    }
     if (definition.damageEachAbovegroundMinion === 1) return [cast];
     if (definition.damageEachUnitAtLocationWithinTwoSteps !== undefined) {
       return locationsWithinMeasuredSteps(
@@ -1494,6 +1545,37 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
       }).map((target) => ({ ...cast, target }));
     });
   });
+}
+
+function chainMagicDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
+  const pending = state.pendingChainMagic;
+  const player = state.players[seat];
+  if (!pending || pending.seat !== seat || pending.targets.length === 0) {
+    throw new Error('unreachable missing pending chained Magic');
+  }
+  const card = player.hand.spellbook.find(({ cardId, instanceId }) =>
+    cardId === pending.cardId && instanceId === pending.cardInstanceId);
+  const definition = card && cardDefinition(state, card.cardId);
+  const caster = spellcasterRefs(state, seat).find(({ instanceId }) =>
+    instanceId === pending.casterInstanceId);
+  if (!card || definition?.cardType !== 'magic'
+    || definition.damageChainNearbyUnits !== true || !caster) {
+    throw new Error('unreachable invalid pending chained Magic');
+  }
+  const finish: GameActionDescriptor = { kind: 'resolve-chain-magic' };
+  const nextManaCost = definition.manaCost
+    + CHAIN_MAGIC_EXTRA_TARGET_MANA * pending.targets.length;
+  if (player.mana < nextManaCost) return [finish];
+  return [
+    finish,
+    ...chainMagicTargets(
+      state,
+      seat,
+      caster,
+      pending.targets.at(-1)!,
+      pending.targets,
+    ).map((target) => ({ kind: 'extend-chain-magic' as const, target })),
+  ];
 }
 
 function requireCardId(value: string, path: string): void {
@@ -1784,9 +1866,13 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.damageEachAbovegroundMinion !== 1) {
       throw new RangeError(`${path}.damageEachAbovegroundMinion must be 1`);
     }
+    if (card.damageChainNearbyUnits !== undefined && card.damageChainNearbyUnits !== true) {
+      throw new RangeError(`${path}.damageChainNearbyUnits must be true when defined`);
+    }
     const effectCount = Number(card.burrowAllMinionsAndArtifactsAtTargetLandSite === true)
       + Number(card.burrowTargetMinionOrArtifact === true)
       + Number(card.submergeTargetMinion === true)
+      + Number(card.damageChainNearbyUnits === true)
       + Number(card.damageEachAbovegroundMinion === 1)
       + Number(card.damageEachUnitAtLocationWithinTwoSteps !== undefined)
       + Number(card.damageRandomUnitAtLocation !== undefined)
@@ -2398,6 +2484,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                   ? { burrowTargetMinionOrArtifact: true as const }
                 : card.submergeTargetMinion === true
                   ? { submergeTargetMinion: true as const }
+                : card.damageChainNearbyUnits === true
+                  ? { damageChainNearbyUnits: true as const }
                 : card.damageEachAbovegroundMinion === 1
                   ? { damageEachAbovegroundMinion: 1 as const }
                 : card.damageEachUnitAtLocationWithinTwoSteps !== undefined
@@ -3243,6 +3331,20 @@ function sameLocation(left: GameLocation, right: GameLocation): boolean {
   return left.cell === right.cell && left.region === right.region;
 }
 
+function sameOptionalUnitRefs(
+  left: readonly GameUnitRef[] | undefined,
+  right: readonly GameUnitRef[] | undefined,
+): boolean {
+  return left === undefined && right === undefined
+    || left !== undefined
+      && right !== undefined
+      && left.length === right.length
+      && left.every((target, index) =>
+        target.instanceId === right[index]!.instanceId
+        && target.kind === right[index]!.kind
+        && target.seat === right[index]!.seat);
+}
+
 function unitOccupiedCells(unit: Readonly<Pick<UnitInstance, 'location' | 'occupiedCells'>>):
 readonly RealmCell[] {
   return unit.occupiedCells ?? [unit.location];
@@ -4001,6 +4103,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
   if (state.phase === 'mulligan') return mulliganDescriptors(player);
   if (state.phase === 'draw') return [{ kind: 'draw', zone: 'atlas' }, { kind: 'draw', zone: 'spellbook' }];
   if (state.phase === 'ranged-step') return rangedStepDescriptors(state, seat);
+  if (state.phase === 'chain-magic') return chainMagicDescriptors(state, seat);
   if (state.phase === 'genesis') {
     if (state.pendingGenesisToken?.seat === seat) {
       return [
@@ -4195,6 +4298,21 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
   }
   if (descriptor.kind === 'cast-aura') {
     return `Conjure ${descriptor.cardId} across ${descriptor.cells.join(', ')}`;
+  }
+  if (descriptor.kind === 'begin-chain-magic') {
+    return `Choose ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}… as the first target for ${descriptor.cardId}`;
+  }
+  if (descriptor.kind === 'extend-chain-magic') {
+    return `Add ${descriptor.target.kind} ${descriptor.target.instanceId.slice(0, 15)}… as a chained target (+${CHAIN_MAGIC_EXTRA_TARGET_MANA} mana)`;
+  }
+  if (descriptor.kind === 'resolve-chain-magic') {
+    const pending = state.pendingChainMagic;
+    if (!pending) throw new Error('unreachable missing chained Magic label');
+    const definition = cardDefinition(state, pending.cardId);
+    if (definition.cardType !== 'magic') throw new Error('chained targets require Magic');
+    const manaCost = definition.manaCost
+      + CHAIN_MAGIC_EXTRA_TARGET_MANA * (pending.targets.length - 1);
+    return `Cast ${pending.cardId} through ${pending.targets.length} chosen unit${pending.targets.length === 1 ? '' : 's'} (${manaCost} mana)`;
   }
   if (descriptor.kind === 'activate-site-destruction') {
     return `Sacrifice site to destroy ${descriptor.targetCell}`;
@@ -5704,6 +5822,56 @@ function resolveFightWindow(
   ];
 }
 
+function resolveChainMagicDamage(
+  state: GameState,
+  seat: GameSeat,
+  caster: GameUnitRef,
+  targets: readonly GameUnitRef[],
+  sourceInstanceId: StateHash,
+  outcomes: readonly GameOutcome[],
+  resolved: GameOutcome,
+): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
+  const pending: PendingCombat = deepFreeze({
+    allocations: targets.map(({ instanceId }) => ({
+      amount: CHAIN_MAGIC_DAMAGE,
+      targetInstanceId: instanceId,
+    })),
+    attacker: caster,
+    attackingSeat: seat,
+    cell: unitStatus(state, caster).location,
+    combatants: targets,
+    defenders: [],
+    originalTarget: targets[0]!,
+    targetRemoved: false,
+  });
+  const allocationOutcomes: readonly GameOutcome[] = targets.map(({ instanceId }) => ({
+    payload: {
+      amount: CHAIN_MAGIC_DAMAGE,
+      sourceInstanceId,
+      targetInstanceId: instanceId,
+    },
+    type: 'magic-damage-allocated',
+  }));
+  const [damaged, damageOutcomes, randomDraws] = resolveFightWindow(
+    state,
+    pending,
+    [...outcomes, ...allocationOutcomes],
+    'non-unit',
+    true,
+    false,
+    [caster],
+    false,
+  );
+  const terminalIndex = damageOutcomes.findIndex(({ type }) => type === 'game-ended');
+  return [
+    withStateVersion(damaged, {}),
+    terminalIndex < 0
+      ? [...damageOutcomes, resolved]
+      : [...damageOutcomes.slice(0, terminalIndex), resolved, ...damageOutcomes.slice(terminalIndex)],
+    randomDraws,
+  ];
+}
+
 function finishFight(
   state: GameState,
   pending: PendingCombat,
@@ -5896,6 +6064,67 @@ function applyDescriptor(
       }],
       [],
     ];
+  }
+
+  if (descriptor.kind === 'begin-chain-magic') {
+    const selected = descriptor;
+    const legal = magicDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'begin-chain-magic'
+        && candidate.cardInstanceId === selected.cardInstanceId
+        && candidate.casterInstanceId === selected.casterInstanceId
+        && candidate.target.instanceId === selected.target.instanceId
+        && candidate.target.kind === selected.target.kind
+        && candidate.target.seat === selected.target.seat);
+    if (!legal) throw new Error('unreachable illegal chained Magic target');
+    return [
+      withStateVersion(state, {
+        pendingChainMagic: {
+          cardId: selected.cardId,
+          cardInstanceId: selected.cardInstanceId,
+          casterInstanceId: selected.casterInstanceId,
+          seat,
+          targets: [selected.target],
+        },
+        phase: 'chain-magic',
+      }),
+      [],
+      [],
+    ];
+  }
+
+  if (descriptor.kind === 'extend-chain-magic') {
+    const selected = descriptor;
+    const pending = state.pendingChainMagic;
+    const legal = chainMagicDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'extend-chain-magic'
+        && candidate.target.instanceId === selected.target.instanceId
+        && candidate.target.kind === selected.target.kind
+        && candidate.target.seat === selected.target.seat);
+    if (!pending || !legal) throw new Error('unreachable illegal chained Magic extension');
+    return [
+      withStateVersion(state, {
+        pendingChainMagic: {
+          ...pending,
+          targets: [...pending.targets, selected.target],
+        },
+      }),
+      [],
+      [],
+    ];
+  }
+
+  if (descriptor.kind === 'resolve-chain-magic') {
+    const pending = state.pendingChainMagic;
+    const legal = chainMagicDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'resolve-chain-magic');
+    if (!pending || !legal) throw new Error('unreachable illegal chained Magic resolution');
+    descriptor = {
+      cardId: pending.cardId,
+      cardInstanceId: pending.cardInstanceId,
+      casterInstanceId: pending.casterInstanceId,
+      kind: 'cast-magic',
+      targets: pending.targets,
+    };
   }
 
   if (descriptor.kind === 'resolve-ranged-step') {
@@ -6703,8 +6932,17 @@ function applyDescriptor(
     const card = player.hand.spellbook.find(({ cardId, instanceId }) =>
       instanceId === descriptor.cardInstanceId && cardId === descriptor.cardId);
     const definition = card && cardDefinition(state, card.cardId);
-    const legal = magicDescriptors(state, seat).some((candidate) =>
-      candidate.kind === 'cast-magic'
+    const chainPending = state.pendingChainMagic;
+    const legal = definition?.cardType === 'magic'
+      && definition.damageChainNearbyUnits === true
+      ? state.phase === 'chain-magic'
+        && chainPending?.seat === seat
+        && chainPending.cardId === descriptor.cardId
+        && chainPending.cardInstanceId === descriptor.cardInstanceId
+        && chainPending.casterInstanceId === descriptor.casterInstanceId
+        && sameOptionalUnitRefs(chainPending.targets, descriptor.targets)
+      : magicDescriptors(state, seat).some((candidate) =>
+        candidate.kind === 'cast-magic'
         && candidate.cardInstanceId === descriptor.cardInstanceId
         && candidate.casterInstanceId === descriptor.casterInstanceId
         && candidate.cemeteryMinionInstanceId === descriptor.cemeteryMinionInstanceId
@@ -6735,6 +6973,7 @@ function applyDescriptor(
             && candidate.target.instanceId === descriptor.target.instanceId
             && candidate.target.kind === descriptor.target.kind
             && candidate.target.seat === descriptor.target.seat)
+        && sameOptionalUnitRefs(candidate.targets, descriptor.targets)
         && candidate.targetArtifactInstanceId === descriptor.targetArtifactInstanceId
         && (candidate.targetLocation === undefined && descriptor.targetLocation === undefined
           || candidate.targetLocation !== undefined
@@ -6756,6 +6995,9 @@ function applyDescriptor(
     if (!card || !definition || definition.cardType !== 'magic' || !legal || !caster) {
       throw new Error('unreachable illegal Magic cast');
     }
+    const manaPaid = definition.manaCost + (definition.damageChainNearbyUnits === true
+      ? CHAIN_MAGIC_EXTRA_TARGET_MANA * (descriptor.targets!.length - 1)
+      : 0);
     const paidPlayer = deepFreeze({
       ...player,
       ...(player.airThresholdsCastThisTurn !== undefined
@@ -6768,9 +7010,15 @@ function applyDescriptor(
         ...player.hand,
         spellbook: player.hand.spellbook.filter(({ instanceId }) => instanceId !== card.instanceId),
       },
-      mana: player.mana - definition.manaCost,
+      mana: player.mana - manaPaid,
     });
-    const paidState = deepFreeze({ ...state, players: replacePlayer(state, seat, paidPlayer) });
+    const paidState = deepFreeze({
+      ...state,
+      ...(definition.damageChainNearbyUnits === true
+        ? { decisionSeat: state.activeSeat, pendingChainMagic: null, phase: 'main' as const }
+        : {}),
+      players: replacePlayer(state, seat, paidPlayer),
+    });
     const interaction = recordInteraction(paidState, [caster]);
     const owner = interaction.players[card.owner];
     const castState = deepFreeze({
@@ -6786,13 +7034,16 @@ function applyDescriptor(
         cardId: card.cardId,
         casterInstanceId: descriptor.casterInstanceId,
         instanceId: card.instanceId,
-        manaPaid: definition.manaCost,
+        manaPaid,
         seat,
         ...(descriptor.target
           ? {
             targetInstanceId: descriptor.target.instanceId,
             targetSeat: descriptor.target.seat,
           }
+          : {}),
+        ...(descriptor.targets
+          ? { targetInstanceIds: descriptor.targets.map(({ instanceId }) => instanceId) }
           : {}),
         ...(descriptor.targetArtifactInstanceId
           ? { targetArtifactInstanceId: descriptor.targetArtifactInstanceId }
@@ -7759,6 +8010,19 @@ function applyDescriptor(
         ],
         [],
       ];
+    }
+    if (definition.damageChainNearbyUnits === true) {
+      const targets = descriptor.targets;
+      if (!targets?.length) throw new Error('unreachable chained Magic cast');
+      return resolveChainMagicDamage(
+        castState,
+        seat,
+        caster,
+        targets,
+        card.instanceId,
+        castOutcomes,
+        resolved,
+      );
     }
     if (definition.damageEachAbovegroundMinion === 1) {
       const amount = definition.damageEachAbovegroundMinion;
