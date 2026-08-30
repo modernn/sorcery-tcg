@@ -201,6 +201,7 @@ export type GameCardDefinition =
     manaCost: number;
     returnMinionFromOwnCemetery?: true;
     submergeTargetMinion?: true;
+    summonRandomMinionFromAnyCemetery?: true;
     summonTokenToEachControlledSiteBorderingEnemySite?: string;
     targetNearby?: boolean;
     teleportAllyToTargetSite?: true;
@@ -400,6 +401,14 @@ type PendingChainMagic = Readonly<{
   targets: readonly GameUnitRef[];
 }>;
 
+type PendingCemeterySummon = Readonly<{
+  cardInstanceId: StateHash;
+  cardOwner: GameSeat;
+  casterInstanceId: StateHash;
+  seat: GameSeat;
+  sourceMagicInstanceId: StateHash;
+}>;
+
 type PendingRandomOutcome = Readonly<{
   action: GameActionDescriptor;
   outcomeInstanceIds: readonly StateHash[];
@@ -499,6 +508,7 @@ export type GameState = Readonly<{
   decisionSeat: GameSeat;
   engine: EngineState;
   pendingBasicMovement?: PendingBasicMovement | null;
+  pendingCemeterySummon?: PendingCemeterySummon;
   pendingChainMagic?: PendingChainMagic | null;
   pendingCombat: PendingCombat | null;
   pendingEndTurnAura?: PendingEndTurnAura | null;
@@ -507,7 +517,7 @@ export type GameState = Readonly<{
   pendingRandomOutcome?: PendingRandomOutcome | null;
   pendingRangedStep?: PendingRangedStep | null;
   pendingStartTurn?: PendingStartTurn;
-  phase: 'allocate' | 'attack' | 'chain-magic' | 'defend' | 'draw' | 'end-turn-aura' | 'genesis' | 'intercept' | 'main' | 'movement' | 'mulligan' | 'random-choice' | 'ranged-step' | 'start-turn' | 'terminal';
+  phase: 'allocate' | 'attack' | 'cemetery-summon' | 'chain-magic' | 'defend' | 'draw' | 'end-turn-aura' | 'genesis' | 'intercept' | 'main' | 'movement' | 'mulligan' | 'random-choice' | 'ranged-step' | 'start-turn' | 'terminal';
   players: Readonly<Record<GameSeat, PlayerState>>;
   realm: Readonly<{
     artifacts?: readonly ArtifactInstance[];
@@ -987,56 +997,103 @@ function minionManaCostAtSite(
   return Math.max(0, definition.manaCost - discount);
 }
 
+type SummonLocation = Readonly<{
+  cell: RealmCell;
+  cells?: TwoByTwoArea;
+  region?: 'underground' | 'underwater' | 'void';
+}>;
+
+function minionSummonLocations(
+  state: GameState,
+  seat: GameSeat,
+  definition: Extract<GameCardDefinition, Readonly<{ cardType: 'minion' }>>,
+  anywhere = false,
+): readonly SummonLocation[] {
+  const controlledCells = controlledSiteCells(state, seat);
+  const siteCells = Object.keys(state.realm.sites).sort() as RealmCell[];
+  const summonCells = (anywhere || definition.summonToAnySite ? siteCells : controlledCells)
+    .filter((cell) => anywhere || !definition.mustBeCastToOuterColumn
+      || cell[0] === 'A' || cell[0] === 'E')
+    .filter((cell) => anywhere || !definition.mustBeCastToWaterSite || isWaterSite(state, cell));
+  const locations: readonly SummonLocation[] = definition.occupiesSquareArea === 2
+    ? TWO_BY_TWO_AREAS
+      .filter((cells) => cells.some((cell) => summonCells.includes(cell)))
+      .filter((cells) => footprintLocationExists(state, cells, 'surface'))
+      .map((cells) => ({ cell: cells[0], cells }))
+    : [
+      ...(anywhere || !definition.mustBeCastBurrowed && !definition.mustBeCastSubmerged
+        ? summonCells.map((cell) => ({ cell }))
+        : []),
+      ...(definition.burrowing && (anywhere || !definition.mustBeCastSubmerged)
+        ? summonCells.filter((cell) => !isWaterSite(state, cell))
+          .map((cell) => ({ cell, region: 'underground' as const }))
+        : []),
+      ...(definition.submerge && (anywhere || !definition.mustBeCastBurrowed)
+        ? summonCells.filter((cell) => isWaterSite(state, cell))
+          .map((cell) => ({ cell, region: 'underwater' as const }))
+        : []),
+      ...(definition.voidwalk
+        && (anywhere || !definition.mustBeCastBurrowed && !definition.mustBeCastSubmerged
+          && !definition.mustBeCastToWaterSite)
+        ? REALM_CELLS.filter((cell) => !state.realm.sites[cell]
+          && (anywhere || !definition.mustBeCastToOuterColumn
+            || cell[0] === 'A' || cell[0] === 'E'))
+          .map((cell) => ({ cell, region: 'void' as const }))
+        : []),
+    ];
+  return locations.filter(({ cell, cells, region }) =>
+    (cells ?? [cell]).every((enteredCell) => unitEntryAllowed(
+      state,
+      undefined,
+      { cell: enteredCell, region: region ?? 'surface' },
+      definition.airborne === true,
+      true,
+      definition.attack,
+      'summon',
+    )));
+}
+
+function genesisDamageChoices(
+  state: GameState,
+  seat: GameSeat,
+  definition: Extract<GameCardDefinition, Readonly<{ cardType: 'minion' }>>,
+  instanceId: StateHash,
+  cell: RealmCell,
+  region: GameRegion,
+): readonly Readonly<{
+  genesisDamageChoice?: 'decline' | 'target';
+  genesisDamageTarget?: GameUnitRef;
+}>[] {
+  if (definition.genesisMayDamageTargetAdjacentUnit !== 2) return [{}];
+  return [
+    { genesisDamageChoice: 'decline' as const },
+    ...[
+      { instanceId, kind: 'minion' as const, seat },
+      ...(['north', 'south'] as const)
+        .flatMap((targetSeat) => unitRefs(state, targetSeat))
+        .filter((target) => {
+          const status = unitStatus(state, target);
+          return status.region === region
+            && status.occupiedCells.some((occupiedCell) =>
+              occupiedCell === cell || borderingCells(cell).includes(occupiedCell))
+            && (target.seat === seat || !status.stealthed);
+        }),
+    ].sort((left, right) => left.instanceId.localeCompare(right.instanceId))
+      .map((genesisDamageTarget) => ({
+        genesisDamageChoice: 'target' as const,
+        genesisDamageTarget,
+      })),
+  ];
+}
+
 function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   const player = state.players[seat];
   const casters = spellcasterRefs(state, seat);
-  const controlledCells = controlledSiteCells(state, seat);
-  const siteCells = Object.keys(state.realm.sites).sort() as RealmCell[];
   return player.hand.spellbook.flatMap(({ cardId, instanceId }) => {
     const definition = cardDefinition(state, cardId);
     if (definition.cardType !== 'minion'
       || !meetsThresholds(state, seat, definition.thresholds)) return [];
-    const summonCells = (definition.summonToAnySite ? siteCells : controlledCells)
-      .filter((cell) => !definition.mustBeCastToOuterColumn || cell[0] === 'A' || cell[0] === 'E')
-      .filter((cell) => !definition.mustBeCastToWaterSite || isWaterSite(state, cell));
-    const summonLocations: readonly Readonly<{
-      cell: RealmCell;
-      cells?: TwoByTwoArea;
-      region?: 'underground' | 'underwater' | 'void';
-    }>[] = definition.occupiesSquareArea === 2
-      ? TWO_BY_TWO_AREAS
-        .filter((cells) => cells.some((cell) => summonCells.includes(cell)))
-        .filter((cells) => footprintLocationExists(state, cells, 'surface'))
-        .map((cells) => ({ cell: cells[0], cells }))
-      : [
-      ...(!definition.mustBeCastBurrowed && !definition.mustBeCastSubmerged
-        ? summonCells.map((cell) => ({ cell }))
-        : []),
-      ...(definition.burrowing && !definition.mustBeCastSubmerged
-        ? summonCells.filter((cell) => !isWaterSite(state, cell))
-          .map((cell) => ({ cell, region: 'underground' as const }))
-        : []),
-      ...(definition.submerge && !definition.mustBeCastBurrowed
-        ? summonCells.filter((cell) => isWaterSite(state, cell))
-          .map((cell) => ({ cell, region: 'underwater' as const }))
-        : []),
-      ...(definition.voidwalk && !definition.mustBeCastBurrowed && !definition.mustBeCastSubmerged
-        && !definition.mustBeCastToWaterSite
-        ? REALM_CELLS.filter((cell) => !state.realm.sites[cell]
-          && (!definition.mustBeCastToOuterColumn || cell[0] === 'A' || cell[0] === 'E'))
-          .map((cell) => ({ cell, region: 'void' as const }))
-        : []),
-      ];
-    const legalSummonLocations = summonLocations.filter(({ cell, cells, region }) =>
-      (cells ?? [cell]).every((enteredCell) => unitEntryAllowed(
-        state,
-        undefined,
-        { cell: enteredCell, region: region ?? 'surface' },
-        definition.airborne === true,
-        true,
-        definition.attack,
-        'summon',
-      )));
+    const legalSummonLocations = minionSummonLocations(state, seat, definition);
     return casters.flatMap(({ instanceId: casterInstanceId }) =>
       legalSummonLocations.flatMap(({ cell, cells, region }) => {
         const exactRegion: GameRegion = region ?? 'surface';
@@ -1070,27 +1127,14 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
             sacrificedMinionInstanceIds,
           }))
           .filter(({ manaCost }) => player.mana >= manaCost);
-        const genesisChoices = definition.genesisMayDamageTargetAdjacentUnit === 2
-          ? [
-            { genesisDamageChoice: 'decline' as const },
-            ...[
-              { instanceId, kind: 'minion' as const, seat },
-              ...(['north', 'south'] as const)
-                .flatMap((targetSeat) => unitRefs(state, targetSeat))
-                .filter((target) => {
-                  const status = unitStatus(state, target);
-                  return status.region === exactRegion
-                    && status.occupiedCells.some((occupiedCell) =>
-                      occupiedCell === cell || borderingCells(cell).includes(occupiedCell))
-                    && (target.seat === seat || !status.stealthed);
-                }),
-            ].sort((left, right) => left.instanceId.localeCompare(right.instanceId))
-              .map((genesisDamageTarget) => ({
-                genesisDamageChoice: 'target' as const,
-                genesisDamageTarget,
-              })),
-          ]
-          : [{}];
+        const genesisChoices = genesisDamageChoices(
+          state,
+          seat,
+          definition,
+          instanceId,
+          cell,
+          exactRegion,
+        );
         return [...basePaymentOptions, ...sacrificePayments].flatMap((payment) =>
           genesisChoices.map((choice) => ({
             cardId,
@@ -1111,6 +1155,48 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
           })));
       }));
   });
+}
+
+function cemeteryMinionCandidates(state: GameState): readonly CardInstance[] {
+  return (['north', 'south'] as const)
+    .flatMap((seat) => state.players[seat].cemetery)
+    .filter(({ cardId }) => cardDefinition(state, cardId).cardType === 'minion')
+    .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+}
+
+function cemeterySummonDescriptors(
+  state: GameState,
+  seat: GameSeat,
+): readonly GameActionDescriptor[] {
+  const pending = state.pendingCemeterySummon;
+  if (!pending || pending.seat !== seat) {
+    throw new Error('unreachable missing pending cemetery summon');
+  }
+  const card = state.players[pending.cardOwner].cemetery.find(({ instanceId }) =>
+    instanceId === pending.cardInstanceId);
+  const definition = card && cardDefinition(state, card.cardId);
+  if (!card || !definition || definition.cardType !== 'minion') {
+    throw new Error('unreachable missing selected cemetery minion');
+  }
+  return minionSummonLocations(state, seat, definition, true)
+    .flatMap(({ cell, cells, region }) => genesisDamageChoices(
+      state,
+      seat,
+      definition,
+      card.instanceId,
+      cell,
+      region ?? 'surface',
+    ).map((choice) => ({
+      cardId: card.cardId,
+      cardInstanceId: card.instanceId,
+      casterInstanceId: pending.casterInstanceId,
+      cell,
+      ...(cells ? { cells } : {}),
+      ...choice,
+      kind: 'summon-minion' as const,
+      manaCost: 0,
+      ...(region ? { region } : {}),
+    })));
 }
 
 function artifactDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
@@ -1532,6 +1618,7 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
     if (definition.summonTokenToEachControlledSiteBorderingEnemySite !== undefined) {
       return [cast];
     }
+    if (definition.summonRandomMinionFromAnyCemetery === true) return [cast];
     if (definition.teleportNearbyAllyThenDrawCard === true) {
       return unitRefs(state, seat).flatMap((ally) => {
         const status = unitStatus(state, ally);
@@ -1727,7 +1814,8 @@ const SUPPORTED_CARD_FIELDS = {
     fightAllyWithAdjacentEnemy gainControlOfTargetNearbyMinion grantChargeToAllyThisTurn
     grantPowerToAllyThisTurn healController killTargetWoundedMinion leapAttackAlly
     lureEnemyMinionOneStepCloser manaCost returnMinionFromOwnCemetery submergeTargetMinion
-    summonTokenToEachControlledSiteBorderingEnemySite targetNearby teleportAllyToTargetSite
+    summonRandomMinionFromAnyCemetery summonTokenToEachControlledSiteBorderingEnemySite
+    targetNearby teleportAllyToTargetSite
     teleportNearbyAllyThenDrawCard thresholds untapTargetMinionAfterDamage
   `.trim().split(/\s+/)),
   minion: new Set(`
@@ -2050,6 +2138,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.returnMinionFromOwnCemetery !== true) {
       throw new RangeError(`${path}.returnMinionFromOwnCemetery must be true when defined`);
     }
+    if (card.summonRandomMinionFromAnyCemetery !== undefined
+      && card.summonRandomMinionFromAnyCemetery !== true) {
+      throw new RangeError(
+        `${path}.summonRandomMinionFromAnyCemetery must be true when defined`,
+      );
+    }
     if (card.summonTokenToEachControlledSiteBorderingEnemySite !== undefined) {
       requireCardId(
         card.summonTokenToEachControlledSiteBorderingEnemySite,
@@ -2112,6 +2206,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.leapAttackAlly === true)
       + Number(card.lureEnemyMinionOneStepCloser === true)
       + Number(card.returnMinionFromOwnCemetery === true)
+      + Number(card.summonRandomMinionFromAnyCemetery === true)
       + Number(card.summonTokenToEachControlledSiteBorderingEnemySite !== undefined)
       + Number(card.teleportAllyToTargetSite === true)
       + Number(card.teleportNearbyAllyThenDrawCard === true);
@@ -2794,7 +2889,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? { healController: card.healController }
                     : card.returnMinionFromOwnCemetery === true
                       ? { returnMinionFromOwnCemetery: true as const }
-                      : card.summonTokenToEachControlledSiteBorderingEnemySite !== undefined
+                      : card.summonRandomMinionFromAnyCemetery === true
+                        ? { summonRandomMinionFromAnyCemetery: true as const }
+                        : card.summonTokenToEachControlledSiteBorderingEnemySite !== undefined
                         ? {
                           summonTokenToEachControlledSiteBorderingEnemySite:
                             card.summonTokenToEachControlledSiteBorderingEnemySite,
@@ -3759,6 +3856,20 @@ function luckyRandomOutcomeRequest(
 }> | undefined {
   if (luckyCharmCount(state, seat) === 0) return undefined;
   const player = state.players[seat];
+  if (descriptor.kind === 'cast-magic') {
+    const card = player.hand.spellbook.find(({ instanceId }) =>
+      instanceId === descriptor.cardInstanceId);
+    const definition = card && cardDefinition(state, card.cardId);
+    if (definition?.cardType === 'magic'
+      && definition.summonRandomMinionFromAnyCemetery === true) {
+      return {
+        candidateInstanceIds: cemeteryMinionCandidates(state)
+          .map(({ instanceId }) => instanceId),
+        domainKind: 'dead_minion_instance_candidate',
+        purpose: 'magic_random_dead_minion',
+      };
+    }
+  }
   if (descriptor.kind === 'resolve-start-turn-trigger') {
     return {
       candidateInstanceIds: randomSiteOrVoidLocations(state)
@@ -4809,6 +4920,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
   if (state.phase === 'draw') return [{ kind: 'draw', zone: 'atlas' }, { kind: 'draw', zone: 'spellbook' }];
   if (state.phase === 'movement') return basicMovementDescriptors(state, seat);
   if (state.phase === 'ranged-step') return rangedStepDescriptors(state, seat);
+  if (state.phase === 'cemetery-summon') return cemeterySummonDescriptors(state, seat);
   if (state.phase === 'chain-magic') return chainMagicDescriptors(state, seat);
   if (state.phase === 'start-turn') {
     const pending = state.pendingStartTurn;
@@ -5078,6 +5190,12 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
     return `Sacrifice site to destroy ${descriptor.targetCell}`;
   }
   if (descriptor.kind === 'summon-minion') {
+    const genesis = descriptor.genesisDamageChoice === 'target' && descriptor.genesisDamageTarget
+      ? `; Genesis targets ${descriptor.genesisDamageTarget.kind} ${descriptor.genesisDamageTarget.instanceId.slice(0, 15)}…`
+      : descriptor.genesisDamageChoice === 'decline' ? '; decline Genesis' : '';
+    if (state.phase === 'cemetery-summon') {
+      return `Summon selected dead minion ${descriptor.cardId} at ${descriptor.cell}${descriptor.region ? ` ${descriptor.region}` : ''}${genesis}`;
+    }
     const caster = state.realm.units.find(({ instanceId }) =>
       instanceId === descriptor.casterInstanceId);
     const payment = descriptor.paymentMode === 'random-card-discard'
@@ -5085,9 +5203,6 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
       : descriptor.sacrificedMinionInstanceIds
         ? `${descriptor.manaCost} mana + sacrifice ${descriptor.sacrificedMinionInstanceIds.length} minion${descriptor.sacrificedMinionInstanceIds.length === 1 ? '' : 's'}`
       : `${descriptor.manaCost} mana`;
-    const genesis = descriptor.genesisDamageChoice === 'target' && descriptor.genesisDamageTarget
-      ? `; Genesis targets ${descriptor.genesisDamageTarget.kind} ${descriptor.genesisDamageTarget.instanceId.slice(0, 15)}…`
-      : descriptor.genesisDamageChoice === 'decline' ? '; decline Genesis' : '';
     return `Summon ${descriptor.cardId} at ${descriptor.cell}${descriptor.region ? ` ${descriptor.region}` : ''} (${payment})${genesis}`
       + (caster ? ` with minion ${caster.instanceId.slice(0, 15)}…` : '');
   }
@@ -5226,6 +5341,20 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
     return `Tap Sparkmage to deal ${amount} to a random other unit at ${descriptor.targetLocation.cell}`;
   }
   if (descriptor.kind === 'resolve-random-outcome') {
+    const pendingAction = state.pendingRandomOutcome?.action;
+    const raiseDeadCard = pendingAction?.kind === 'cast-magic'
+      ? state.players[state.decisionSeat].hand.spellbook.find(({ instanceId }) =>
+        instanceId === pendingAction.cardInstanceId)
+      : undefined;
+    const raiseDeadDefinition = raiseDeadCard && cardDefinition(state, raiseDeadCard.cardId);
+    const deadMinion = raiseDeadDefinition?.cardType === 'magic'
+      && raiseDeadDefinition.summonRandomMinionFromAnyCemetery === true
+      ? cemeteryMinionCandidates(state).find(({ instanceId }) =>
+        instanceId === descriptor.outcomeInstanceId)
+      : undefined;
+    if (deadMinion) {
+      return `Lucky Charm chooses ${deadMinion.cardId} ${deadMinion.instanceId.slice(0, 15)}…`;
+    }
     const location = state.pendingRandomOutcome?.action.kind === 'resolve-start-turn-trigger'
       ? randomSiteOrVoidLocations(state).find(({ instanceId }) =>
         instanceId === descriptor.outcomeInstanceId)?.location
@@ -8340,6 +8469,71 @@ function applyDescriptor(
       payload: { cardId: card.cardId, instanceId: card.instanceId, owner: card.owner },
       type: 'magic-resolved',
     } as const;
+    if (definition.summonRandomMinionFromAnyCemetery === true) {
+      const candidates = cemeteryMinionCandidates(castState);
+      if (candidates.length === 0) {
+        return [withStateVersion(castState, {}), [...castOutcomes, resolved], []];
+      }
+      const selected = resolveRandomOutcome(
+        castState,
+        candidates.map(({ instanceId }) => instanceId),
+        'magic_random_dead_minion',
+        'dead_minion_instance_candidate',
+        forcedRandomOutcomeInstanceId,
+      );
+      const deadMinion = candidates.find(({ instanceId }) =>
+        instanceId === selected.outcomeInstanceId)!;
+      const deadDefinition = cardDefinition(castState, deadMinion.cardId);
+      if (deadDefinition.cardType !== 'minion') {
+        throw new Error('unreachable non-minion Raise Dead candidate');
+      }
+      const randomizedState = deepFreeze({ ...castState, engine: selected.engine });
+      const selectedOutcome: GameOutcome = {
+        payload: {
+          cardId: deadMinion.cardId,
+          instanceId: deadMinion.instanceId,
+          owner: deadMinion.owner,
+          seat,
+          sourceInstanceId: card.instanceId,
+        },
+        type: 'dead-minion-selected',
+      };
+      if (minionSummonLocations(randomizedState, seat, deadDefinition, true).length === 0) {
+        return [
+          withStateVersion(randomizedState, {}),
+          [
+            ...castOutcomes,
+            selectedOutcome,
+            {
+              payload: {
+                instanceId: deadMinion.instanceId,
+                owner: deadMinion.owner,
+                reason: 'no-legal-location',
+                seat,
+                sourceInstanceId: card.instanceId,
+              },
+              type: 'minion-summon-failed',
+            },
+            resolved,
+          ],
+          selected.randomDraws,
+        ];
+      }
+      return [
+        withStateVersion(randomizedState, {
+          pendingCemeterySummon: {
+            cardInstanceId: deadMinion.instanceId,
+            cardOwner: deadMinion.owner,
+            casterInstanceId: descriptor.casterInstanceId,
+            seat,
+            sourceMagicInstanceId: card.instanceId,
+          },
+          phase: 'cemetery-summon',
+        }),
+        [...castOutcomes, selectedOutcome],
+        selected.randomDraws,
+      ];
+    }
     if (definition.healController !== undefined) {
       const controller = castState.players[seat];
       const avatarDefinition = cardDefinition(castState, controller.avatar.card.cardId);
@@ -9517,10 +9711,48 @@ function applyDescriptor(
   }
 
   if (descriptor.kind === 'summon-minion') {
-    const card = player.hand.spellbook.find(({ cardId, instanceId }) =>
-      instanceId === descriptor.cardInstanceId && cardId === descriptor.cardId);
+    const pendingCemeterySummon = state.phase === 'cemetery-summon'
+      ? state.pendingCemeterySummon
+      : undefined;
+    const sourceMagic = pendingCemeterySummon
+      ? (['north', 'south'] as const)
+        .flatMap((owner) => state.players[owner].cemetery)
+        .find(({ instanceId }) => instanceId === pendingCemeterySummon.sourceMagicInstanceId)
+      : undefined;
+    if (pendingCemeterySummon && !sourceMagic) {
+      throw new Error('unreachable missing Raise Dead source Magic');
+    }
+    const completeSummon = (
+      result: readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]],
+    ): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] => {
+      if (!sourceMagic) return result;
+      const [summonedState, outcomes, randomDraws] = result;
+      const resolved: GameOutcome = {
+        payload: {
+          cardId: sourceMagic.cardId,
+          instanceId: sourceMagic.instanceId,
+          owner: sourceMagic.owner,
+        },
+        type: 'magic-resolved',
+      };
+      const gameEndedIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
+      return [
+        summonedState,
+        gameEndedIndex < 0
+          ? [...outcomes, resolved]
+          : [...outcomes.slice(0, gameEndedIndex), resolved, ...outcomes.slice(gameEndedIndex)],
+        randomDraws,
+      ];
+    };
+    const card = pendingCemeterySummon
+      ? state.players[pendingCemeterySummon.cardOwner].cemetery.find(({ cardId, instanceId }) =>
+        instanceId === descriptor.cardInstanceId && cardId === descriptor.cardId)
+      : player.hand.spellbook.find(({ cardId, instanceId }) =>
+        instanceId === descriptor.cardInstanceId && cardId === descriptor.cardId);
     const definition = card && cardDefinition(state, card.cardId);
-    const legal = summonDescriptors(state, seat).some((candidate) => {
+    const legal = (pendingCemeterySummon
+      ? cemeterySummonDescriptors(state, seat)
+      : summonDescriptors(state, seat)).some((candidate) => {
       if (candidate.kind !== 'summon-minion') return false;
       const candidateSacrifices = candidate.sacrificedMinionInstanceIds ?? [];
       const requestedSacrifices = descriptor.sacrificedMinionInstanceIds ?? [];
@@ -9543,7 +9775,11 @@ function applyDescriptor(
     });
     const caster = spellcasterRefs(state, seat).find(({ instanceId }) =>
       instanceId === descriptor.casterInstanceId);
-    if (!card || !definition || definition.cardType !== 'minion' || !legal || !caster) {
+    if (!card
+      || !definition
+      || definition.cardType !== 'minion'
+      || !legal
+      || !pendingCemeterySummon && !caster) {
       throw new Error('unreachable illegal minion summon');
     }
     const discardCandidates = descriptor.paymentMode === 'random-card-discard'
@@ -9600,28 +9836,48 @@ function applyDescriptor(
       tapped: false,
       warded: definition.ward === true,
     });
-    const updatedPlayer = deepFreeze({
-      ...player,
-      ...(player.airThresholdsCastThisTurn !== undefined
-        ? {
-          airThresholdsCastThisTurn:
-            player.airThresholdsCastThisTurn + definition.thresholds.air,
-        }
-        : {}),
-      cemetery: discardedCard ? [...player.cemetery, discardedCard.card] : player.cemetery,
-      hand: {
-        ...player.hand,
-        atlas: player.hand.atlas.filter(({ instanceId }) =>
-          instanceId !== discardedCard?.card.instanceId),
-        spellbook: player.hand.spellbook.filter(({ instanceId }) =>
-          instanceId !== card.instanceId && instanceId !== discardedCard?.card.instanceId),
-      },
-      mana: player.mana - descriptor.manaCost,
-    });
-    const paidState = deepFreeze({
-      ...randomizedState,
-      players: replacePlayer(randomizedState, seat, updatedPlayer),
-    });
+    let paidState: GameState;
+    if (pendingCemeterySummon) {
+      const cemeteryOwner = randomizedState.players[pendingCemeterySummon.cardOwner];
+      const withoutPending = { ...randomizedState };
+      delete withoutPending.pendingCemeterySummon;
+      paidState = deepFreeze({
+        ...withoutPending,
+        phase: 'main',
+        players: replacePlayer(
+          randomizedState,
+          pendingCemeterySummon.cardOwner,
+          deepFreeze({
+            ...cemeteryOwner,
+            cemetery: cemeteryOwner.cemetery.filter(({ instanceId }) =>
+              instanceId !== card.instanceId),
+          }),
+        ),
+      });
+    } else {
+      const updatedPlayer = deepFreeze({
+        ...player,
+        ...(player.airThresholdsCastThisTurn !== undefined
+          ? {
+            airThresholdsCastThisTurn:
+              player.airThresholdsCastThisTurn + definition.thresholds.air,
+          }
+          : {}),
+        cemetery: discardedCard ? [...player.cemetery, discardedCard.card] : player.cemetery,
+        hand: {
+          ...player.hand,
+          atlas: player.hand.atlas.filter(({ instanceId }) =>
+            instanceId !== discardedCard?.card.instanceId),
+          spellbook: player.hand.spellbook.filter(({ instanceId }) =>
+            instanceId !== card.instanceId && instanceId !== discardedCard?.card.instanceId),
+        },
+        mana: player.mana - descriptor.manaCost,
+      });
+      paidState = deepFreeze({
+        ...randomizedState,
+        players: replacePlayer(randomizedState, seat, updatedPlayer),
+      });
+    }
     const sacrificedUnits = (descriptor.sacrificedMinionInstanceIds ?? []).map((instanceId) => {
       const sacrificed = paidState.realm.units.find((unit) => unit.instanceId === instanceId);
       if (!sacrificed) throw new Error('unreachable missing minion sacrifice cost');
@@ -9665,13 +9921,19 @@ function applyDescriptor(
       ...(deathResolution?.outcomes ?? []),
     ];
     if (resolvedPaymentState.terminal.status === 'finished') {
-      return [
+      return completeSummon([
         withStateVersion(resolvedPaymentState, {}),
         paymentOutcomes,
         paymentRandomDraws,
-      ];
+      ]);
     }
-    const interaction = recordInteraction(resolvedPaymentState, [caster]);
+    const interaction = pendingCemeterySummon
+      ? {
+        outcomes: [] as readonly GameOutcome[],
+        players: resolvedPaymentState.players,
+        units: resolvedPaymentState.realm.units,
+      }
+      : recordInteraction(resolvedPaymentState, [caster!]);
     const realm = { ...resolvedPaymentState.realm, units: [...interaction.units, unit] };
     const summoned: GameOutcome = {
       payload: {
@@ -9681,6 +9943,9 @@ function applyDescriptor(
         ...(descriptor.cells ? { cells: descriptor.cells } : {}),
         instanceId: card.instanceId,
         manaPaid: descriptor.manaCost,
+        ...(pendingCemeterySummon
+          ? { owner: card.owner, sourceInstanceId: pendingCemeterySummon.sourceMagicInstanceId }
+          : {}),
         ...(descriptor.region ? { region: descriptor.region } : {}),
         seat,
       },
@@ -9710,11 +9975,11 @@ function applyDescriptor(
     const summonedUnitSurvived = settlement.state.realm.units
       .some(({ instanceId }) => instanceId === unit.instanceId);
     if (!summonedUnitSurvived || settlement.state.terminal.status === 'finished') {
-      return [
+      return completeSummon([
         withStateVersion(settlement.state, {}),
         [...summonOutcomes, ...settlement.outcomes],
         paymentRandomDraws,
-      ];
+      ]);
     }
     const settledPlayer = settlement.state.players[seat];
     const genesisDrawCount = definition.genesisDrawSite
@@ -9732,7 +9997,7 @@ function applyDescriptor(
             : candidate),
         },
       });
-      return [
+      return completeSummon([
         disabled,
         [
           ...summonOutcomes,
@@ -9743,7 +10008,7 @@ function applyDescriptor(
           },
         ],
         paymentRandomDraws,
-      ];
+      ]);
     }
     if (definition.genesisDamageEachOtherUnitHere === 1
       || definition.genesisStrikeEachEnemyHere === true) {
@@ -9755,11 +10020,11 @@ function applyDescriptor(
       const sourceUnit = settlement.state.realm.units.find(({ instanceId }) =>
         instanceId === unit.instanceId);
       if (!sourceUnit || minionDisabled(settlement.state, sourceUnit)) {
-        return [
+        return completeSummon([
           withStateVersion(settlement.state, {}),
           [...summonOutcomes, ...settlement.outcomes],
           paymentRandomDraws,
-        ];
+        ]);
       }
       const isStrike = definition.genesisStrikeEachEnemyHere === true;
       const targets = (isStrike ? [otherSeat(seat)] : ['north', 'south'] as const)
@@ -9772,11 +10037,11 @@ function applyDescriptor(
         })
         .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
       if (targets.length === 0) {
-        return [
+        return completeSummon([
           withStateVersion(settlement.state, {}),
           [...summonOutcomes, ...settlement.outcomes],
           paymentRandomDraws,
-        ];
+        ]);
       }
       const amount = isStrike
         ? strikeDamage(settlement.state, source)
@@ -9816,11 +10081,11 @@ function applyDescriptor(
         isStrike,
         true,
       );
-      return [
+      return completeSummon([
         withStateVersion(damaged, {}),
         outcomes,
         [...paymentRandomDraws, ...randomDraws],
-      ];
+      ]);
     }
     if (definition.genesisMayDamageTargetAdjacentUnit === 2
       && descriptor.genesisDamageChoice === 'target'
@@ -9846,11 +10111,11 @@ function applyDescriptor(
           unitOccupiedCells(sourceUnit),
           targetStatus.occupiedCells,
         )) {
-        return [
+        return completeSummon([
           withStateVersion(settlement.state, {}),
           [...summonOutcomes, ...settlement.outcomes],
           paymentRandomDraws,
-        ];
+        ]);
       }
       const pending: PendingCombat = deepFreeze({
         allocations: [{
@@ -9888,11 +10153,11 @@ function applyDescriptor(
         false,
         true,
       );
-      return [
+      return completeSummon([
         withStateVersion(damaged, {}),
         outcomes,
         [...paymentRandomDraws, ...randomDraws],
-      ];
+      ]);
     }
     if (definition.genesisHealController === 2) {
       const avatarDefinition = cardDefinition(settlement.state, settledPlayer.avatar.card.cardId);
@@ -9902,7 +10167,7 @@ function applyDescriptor(
         avatarDefinition.life,
         definition.genesisHealController,
       );
-      return [
+      return completeSummon([
         withStateVersion(settlement.state, {
           players: replacePlayer(settlement.state, seat, healed),
         }),
@@ -9923,7 +10188,7 @@ function applyDescriptor(
             : []),
         ],
         paymentRandomDraws,
-      ];
+      ]);
     }
     if (definition.genesisLoseControllerLife === 2) {
       const [lifePlayer, amount, reachedDeathsDoor] = loseAvatarLife(
@@ -9931,7 +10196,7 @@ function applyDescriptor(
         definition.genesisLoseControllerLife,
         state.turnNumber,
       );
-      return [
+      return completeSummon([
         withStateVersion(settlement.state, {
           players: replacePlayer(settlement.state, seat, lifePlayer),
         }),
@@ -9957,7 +10222,7 @@ function applyDescriptor(
             : []),
         ],
         paymentRandomDraws,
-      ];
+      ]);
     }
     if (genesisDrawZone) {
       const drawn = settledPlayer[genesisDrawZone].slice(0, genesisDrawCount);
@@ -9972,7 +10237,7 @@ function applyDescriptor(
         },
       });
       const winner = otherSeat(seat);
-      return [
+      return completeSummon([
         withStateVersion(settlement.state, {
           ...(drawFailed
             ? {
@@ -10000,13 +10265,13 @@ function applyDescriptor(
             : []),
         ],
         paymentRandomDraws,
-      ];
+      ]);
     }
-    return [
+    return completeSummon([
       withStateVersion(settlement.state, {}),
       [...summonOutcomes, ...settlement.outcomes],
       paymentRandomDraws,
-    ];
+    ]);
   }
 
   if (descriptor.kind === 'activate-artifact-damage') {

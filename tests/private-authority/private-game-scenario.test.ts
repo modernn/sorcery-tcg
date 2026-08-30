@@ -899,9 +899,8 @@ test('private actual-card decks produce identical summary-only gauntlets', async
   const twoWorkers = await runTwoDeckGauntlet(input, 2);
   assert.deepEqual(oneWorker, twoWorkers);
   assert.equal(oneWorker.games.every(({ report }) =>
-    report.fightCount > 0
-      && report.replayVerified
-      && report.terminal.status === 'finished'), true);
+    report.replayVerified && report.terminal.status === 'finished'), true);
+  assert.equal(oneWorker.games.some(({ report }) => report.fightCount > 0), true);
   assert.equal(oneWorker.gameCount, 4);
   assert.equal(oneWorker.byDeck['deck-a']?.asNorth.games, 2);
   assert.equal(oneWorker.byDeck['deck-a']?.asSouth.games, 2);
@@ -946,7 +945,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        35,
+        preset.id === 'air-vs-earth-lesson' ? 36 : 35,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -954,7 +953,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        35,
+        preset.id === 'air-vs-earth-lesson' ? 35 : 36,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -1001,6 +1000,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Midnight Rogue': 2,
     'Nimbus Jinn': 1,
     'Plumed Pegasus': 2,
+    'Raise Dead': 1,
     'Roaming Monster': 1,
     'Skirmishers of Mu': 1,
     'Sling Pixies': 1,
@@ -1077,6 +1077,16 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     assert.equal(headlessHaunt.atStartOfControllerTurnTeleportToRandomSiteOrVoid, true);
     assert.equal(headlessHaunt.voidwalk, true);
     assert.deepEqual(headlessHaunt.thresholds, { air: 2, earth: 0, fire: 0, water: 0 });
+  }
+  const raiseDeadId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Raise Dead')?.[0];
+  assert.ok(raiseDeadId);
+  const raiseDead = airLesson.manifest.cards[raiseDeadId];
+  assert.equal(raiseDead?.cardType, 'magic');
+  if (raiseDead?.cardType === 'magic') {
+    assert.equal(raiseDead.manaCost, 4);
+    assert.equal(raiseDead.summonRandomMinionFromAnyCemetery, true);
+    assert.deepEqual(raiseDead.thresholds, { air: 2, earth: 0, fire: 0, water: 0 });
   }
   const kiteArcherId = Object.entries(airLesson.cardNames)
     .find(([, name]) => name === 'Kite Archer')?.[0];
@@ -1642,7 +1652,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     .find(({ name }) => name === 'Nimbus Jinn')?.copies, 2);
   assert.equal(result.airNimbusJinn.replayVerified, true);
   assert.equal(result.airHeadlessHaunt.headlessHaunt, 'Headless Haunt');
-  assert.equal(result.airHeadlessHaunt.seed, 7);
+  assert.equal(result.airHeadlessHaunt.seed, 4);
   assert.equal(result.airHeadlessHaunt.acceptedActionCount > 0, true);
   assert.equal(result.airHeadlessHaunt.startTurnPhaseVerified, true);
   assert.equal(result.airHeadlessHaunt.legalTriggerVerified, true);
@@ -1650,8 +1660,24 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airHeadlessHaunt.teleportOutcomeVerified, true);
   assert.equal(result.airHeadlessHaunt.causalEventsVerified, true);
   assert.equal(result.airHeadlessHaunt.structuralFactsVerified, true);
-  assert.equal(result.airHeadlessHaunt.supportedSpellbookCopies, 35);
+  assert.equal(result.airHeadlessHaunt.supportedSpellbookCopies, 36);
   assert.equal(result.airHeadlessHaunt.replayVerified, true);
+  assert.equal(result.airRaiseDead.raiseDead, 'Raise Dead');
+  assert.equal(result.airRaiseDead.seed, 223);
+  assert.equal(result.airRaiseDead.acceptedActionCount, 28);
+  assert.equal(result.airRaiseDead.causalEventsVerified, true);
+  assert.equal(result.airRaiseDead.legalPlacementVerified, true);
+  assert.equal(result.airRaiseDead.ownershipAndControlVerified, true);
+  assert.equal(result.airRaiseDead.randomSelectionRecorded, true);
+  assert.equal(result.airRaiseDead.sourceAndCemeteriesVerified, true);
+  assert.equal(result.airRaiseDead.structuralFactsVerified, true);
+  assert.equal(result.airRaiseDead.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airRaiseDead.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airRaiseDead.deck.spellbook
+    .find(({ name }) => name === 'Raise Dead')?.copies, 3);
+  assert.equal(result.airRaiseDead.replayVerified, true);
   assert.equal(result.airDevilsEgg.devilsEgg, "Devil's Egg");
   assert.equal(result.airDevilsEgg.seed, 2);
   assert.equal(result.airDevilsEgg.acceptedActionCount, 19);

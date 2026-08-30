@@ -18776,3 +18776,307 @@ test('RULE-04 start-turn random teleports resolve in controller-chosen order thr
     instanceId === sourceIds[0])?.region, 'void');
   assert.equal(verifyGameReplay(moved.session), true);
 });
+
+test('RULE-03 Raise Dead selects a public random cemetery minion before free placement', () => {
+  const raiseDeadId = 'raise-dead';
+  const luckyCharmId = 'raise-dead-lucky-charm';
+  const northCorpseId = 'raise-dead-north-corpse';
+  const southCorpseId = 'raise-dead-south-corpse';
+  const discardSiteId = 'raise-dead-discard-site';
+  const fillerIds = Array.from({ length: 8 }, (_, index) => 'raise-dead-filler-' + (index + 1));
+  const north: GameDeckSpec = {
+    atlas: Array(6).fill(discardSiteId),
+    avatar: 'raise-dead-north-avatar',
+    spellbook: [raiseDeadId, luckyCharmId, northCorpseId, ...fillerIds.slice(0, 3)],
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(6).fill(discardSiteId),
+    avatar: 'raise-dead-south-avatar',
+    spellbook: [southCorpseId, ...fillerIds.slice(3)],
+  };
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const cards = cardsFor({ north, south }, { manaCost: 0, thresholds }, undefined, {
+    genesisDiscardTopSpells: 2,
+  });
+  cards[raiseDeadId] = {
+    cardType: 'magic',
+    manaCost: 0,
+    summonRandomMinionFromAnyCemetery: true,
+    thresholds,
+  };
+  cards[luckyCharmId] = {
+    bearerControllerChoosesExtraRandomOutcome: true,
+    cardType: 'artifact',
+    manaCost: 0,
+    thresholds,
+  };
+  for (const cardId of fillerIds) {
+    cards[cardId] = { cardType: 'magic', healController: 1, manaCost: 0, thresholds };
+  }
+  for (const cardId of [northCorpseId, southCorpseId]) {
+    cards[cardId] = {
+      attack: 2,
+      cardType: 'minion',
+      defense: 3,
+      ...(cardId === northCorpseId
+        ? { genesisMayDamageTargetAdjacentUnit: 2 as const }
+        : { genesisLoseControllerLife: 2 as const }),
+      manaCost: 9,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 4 },
+    };
+  }
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-raise-dead-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north' as const,
+    seed: 196,
+  };
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [raiseDeadId]: {
+        ...cards[raiseDeadId]!,
+        summonRandomMinionFromAnyCemetery: false,
+      } as unknown as GameCardDefinition,
+    },
+  }), /summonRandomMinionFromAnyCemetery must be true/);
+
+  const gameManifest = createGameManifest(input);
+  assert.deepEqual(gameManifest.cards[raiseDeadId], {
+    cardType: 'magic',
+    manaCost: 0,
+    summonRandomMinionFromAnyCemetery: true,
+    thresholds,
+  });
+
+  const emptyManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...gameManifest.cards,
+      [discardSiteId]: { cardType: 'site', elements: ['earth'] },
+    },
+    seed: gameManifest.seed,
+  });
+  let empty = keep(keep(createGameSession(emptyManifest)));
+  empty = accept(empty, action(empty, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+  assert.equal(empty.state.players.north.hand.spellbook.some(({ cardId }) =>
+    cardId === raiseDeadId), true);
+  const emptyCast = stepGame(empty, action(empty, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.cardId === raiseDeadId));
+  assert.equal(emptyCast.accepted, true);
+  if (!emptyCast.accepted) return;
+  assert.deepEqual(emptyCast.receipt.events.map(({ type }) => type), ['magic-cast', 'magic-resolved']);
+  assert.deepEqual(emptyCast.receipt.randomDraws, []);
+  assert.equal(emptyCast.session.state.phase, 'main');
+  assert.equal(verifyGameReplay(emptyCast.session), true);
+
+  const blockedManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...gameManifest.cards,
+      [discardSiteId]: {
+        ...gameManifest.cards[discardSiteId],
+        preventsUnitsWithPowerAtLeastFromEntering: 2,
+      } as GameCardDefinition,
+    },
+  });
+  let blocked = keep(keep(createGameSession(blockedManifest)));
+  const blockedTake = (predicate: Parameters<typeof action>[1]): void => {
+    blocked = accept(blocked, action(blocked, predicate));
+  };
+  blockedTake(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  blockedTake(({ descriptor }) => descriptor.kind === 'cast-artifact'
+    && descriptor.cardId === luckyCharmId && descriptor.bearer?.kind === 'avatar');
+  blockedTake(({ descriptor }) => descriptor.kind === 'end-turn');
+  blockedTake(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  blockedTake(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  blockedTake(({ descriptor }) => descriptor.kind === 'end-turn');
+  blockedTake(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  const blockedCorpse = blocked.state.players.south.cemetery.find(({ cardId }) =>
+    cardId === southCorpseId);
+  assert.ok(blockedCorpse);
+  const blockedCast = stepGame(blocked, action(blocked, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.cardId === raiseDeadId));
+  assert.equal(blockedCast.accepted, true);
+  if (!blockedCast.accepted) return;
+  const blockedChoice = legalGameActions(blockedCast.session.state, 'north')
+    .find(({ descriptor }) => descriptor.kind === 'resolve-random-outcome'
+      && descriptor.outcomeInstanceId === blockedCorpse.instanceId);
+  assert.ok(blockedChoice);
+  const failedPlacement = stepGame(blockedCast.session, blockedChoice);
+  assert.equal(failedPlacement.accepted, true);
+  if (!failedPlacement.accepted) return;
+  assert.equal(failedPlacement.session.state.phase, 'main');
+  assert.deepEqual(failedPlacement.receipt.events.map(({ type }) => type), [
+    'magic-cast',
+    'dead-minion-selected',
+    'minion-summon-failed',
+    'magic-resolved',
+  ]);
+  assert.equal(failedPlacement.session.state.players.south.cemetery.some(({ instanceId }) =>
+    instanceId === blockedCorpse.instanceId), true);
+  assert.equal(verifyGameReplay(failedPlacement.session), true);
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+    && descriptor.cardId === luckyCharmId
+    && descriptor.bearer?.kind === 'avatar');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+
+  const northCorpse = session.state.players.north.cemetery.find(({ cardId }) =>
+    cardId === northCorpseId);
+  const southCorpse = session.state.players.south.cemetery.find(({ cardId }) =>
+    cardId === southCorpseId);
+  const raiseDead = session.state.players.north.hand.spellbook.find(({ cardId }) =>
+    cardId === raiseDeadId);
+  assert.ok(northCorpse && southCorpse && raiseDead);
+  const corpseIds = [northCorpse.instanceId, southCorpse.instanceId].sort();
+  const raiseCasts = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === raiseDead.instanceId);
+  assert.equal(raiseCasts.length, 1);
+  const raiseCast = raiseCasts[0]!;
+  assert.deepEqual(raiseCast.descriptor, {
+    cardId: raiseDeadId,
+    cardInstanceId: raiseDead.instanceId,
+    casterInstanceId: session.state.players.north.avatar.card.instanceId,
+    kind: 'cast-magic',
+  });
+
+  const committed = stepGame(session, raiseCast);
+  assert.equal(committed.accepted, true);
+  if (!committed.accepted) return;
+  const repeated = stepGame(session, raiseCast);
+  assert.equal(repeated.accepted, true);
+  if (!repeated.accepted) return;
+  assert.deepEqual(repeated.receipt, committed.receipt);
+  const choices = legalGameActions(committed.session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'resolve-random-outcome');
+  assert.equal(committed.session.state.phase, 'random-choice');
+  assert.deepEqual(choices.flatMap(({ descriptor }) => descriptor.kind === 'resolve-random-outcome'
+    ? [descriptor.outcomeInstanceId]
+    : []).sort(), corpseIds);
+  assert.equal(choices.every(({ label }) => label.startsWith('Lucky Charm chooses raise-dead-')), true);
+  assert.deepEqual(committed.receipt.events, []);
+  assert.equal(committed.receipt.randomDraws.length, 2);
+  assert.equal(committed.receipt.randomDraws.every(({ purpose }) =>
+    purpose === 'magic_random_dead_minion'), true);
+
+  const northChoice = choices.find(({ descriptor }) => descriptor.kind === 'resolve-random-outcome'
+    && descriptor.outcomeInstanceId === northCorpse.instanceId);
+  assert.ok(northChoice);
+  const northSelected = stepGame(committed.session, northChoice);
+  assert.equal(northSelected.accepted, true);
+  if (!northSelected.accepted) return;
+  const genesisLabels = legalGameActions(northSelected.session.state, 'north')
+    .filter(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C4')
+    .map(({ label }) => label);
+  assert.equal(genesisLabels.some((label) => label.endsWith('; decline Genesis')), true);
+  assert.equal(genesisLabels.some((label) => label.includes('; Genesis targets avatar ')), true);
+  assert.equal(verifyGameReplay(northSelected.session), true);
+
+  const forcedChoice = choices.find(({ descriptor }) => descriptor.kind === 'resolve-random-outcome'
+    && descriptor.outcomeInstanceId === southCorpse.instanceId);
+  assert.ok(forcedChoice);
+  const selected = stepGame(committed.session, forcedChoice);
+  assert.equal(selected.accepted, true);
+  if (!selected.accepted) return;
+  assert.equal(selected.session.state.phase, 'cemetery-summon');
+  assert.deepEqual(selected.receipt.randomDraws, []);
+  assert.deepEqual(selected.receipt.events.map(({ type }) => type), [
+    'magic-cast',
+    'dead-minion-selected',
+  ]);
+  assert.equal(selected.session.state.players.south.cemetery.some(({ instanceId }) =>
+    instanceId === southCorpse.instanceId), true);
+  assert.equal(selected.session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === northCorpse.instanceId), true);
+
+  const placements = legalGameActions(selected.session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'summon-minion');
+  assert.deepEqual([...new Set(placements.flatMap(({ descriptor }) =>
+    descriptor.kind === 'summon-minion' ? [descriptor.cell] : []))].sort(), ['C1', 'C4']);
+  assert.equal(placements.every(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === southCorpse.instanceId
+    && descriptor.manaCost === 0), true);
+  const placement = placements.find(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cell === 'C1' && !descriptor.region);
+  assert.ok(placement);
+  assert.equal(placement.descriptor.kind, 'summon-minion');
+  if (placement.descriptor.kind !== 'summon-minion') return;
+  const beforePlacementMana = selected.session.state.players.north.mana;
+  const beforeForgeHash = hashGameState(selected.session.state);
+  const beforeForgeTranscript = selected.session.transcript;
+  const forgedDescriptor = { ...placement.descriptor, cell: 'A1' as const };
+  const forged = stepGame(selected.session, {
+    actionId: opaqueActionId(
+      'sorcery-core-v1',
+      'north',
+      selected.session.state.stateVersion,
+      forgedDescriptor,
+    ),
+    seat: 'north',
+    stateVersion: selected.session.state.stateVersion,
+  });
+  assert.equal(forged.accepted, false);
+  if (!forged.accepted) assert.equal(forged.reason.code, 'unknown_action');
+  assert.equal(forged.session.state, selected.session.state);
+  assert.equal(hashGameState(forged.session.state), beforeForgeHash);
+  assert.equal(forged.session.transcript, beforeForgeTranscript);
+
+  const placed = stepGame(forged.session, placement);
+  assert.equal(placed.accepted, true);
+  if (!placed.accepted) return;
+  const raised = placed.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === southCorpse.instanceId);
+  assert.deepEqual(raised && {
+    controller: raised.controller,
+    location: raised.location,
+    owner: raised.owner,
+    region: raised.region,
+    summoningSickness: raised.summoningSickness,
+  }, {
+    controller: 'north',
+    location: 'C1',
+    owner: 'south',
+    region: 'surface',
+    summoningSickness: true,
+  });
+  assert.equal(placed.session.state.players.north.mana, beforePlacementMana);
+  assert.equal(placed.session.state.players.north.avatar.life,
+    selected.session.state.players.north.avatar.life - 2);
+  assert.equal(placed.session.state.players.south.cemetery.some(({ instanceId }) =>
+    instanceId === southCorpse.instanceId), false);
+  assert.equal(placed.session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === northCorpse.instanceId), true);
+  assert.deepEqual(placed.receipt.randomDraws, []);
+  assert.deepEqual(placed.receipt.events.map(({ type }) => type), [
+    'minion-summoned',
+    'avatar-life-lost',
+    'magic-resolved',
+  ]);
+
+  const reusedHash = hashGameState(placed.session.state);
+  const reusedTranscript = placed.session.transcript;
+  const reused = stepGame(placed.session, placement);
+  assert.equal(reused.accepted, false);
+  if (!reused.accepted) assert.equal(reused.reason.code, 'stale_version');
+  assert.equal(reused.session.state, placed.session.state);
+  assert.equal(hashGameState(reused.session.state), reusedHash);
+  assert.equal(reused.session.transcript, reusedTranscript);
+  assert.equal(verifyGameReplay(placed.session), true);
+});

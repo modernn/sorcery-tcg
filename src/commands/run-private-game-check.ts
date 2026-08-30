@@ -390,6 +390,19 @@ export type PrivateGameCheck = Readonly<{
     supportedSpellbookCopies: number;
     teleportOutcomeVerified: boolean;
   }>;
+  airRaiseDead: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    legalPlacementVerified: boolean;
+    ownershipAndControlVerified: boolean;
+    randomSelectionRecorded: boolean;
+    raiseDead: string;
+    replayVerified: boolean;
+    seed: number;
+    sourceAndCemeteriesVerified: boolean;
+    structuralFactsVerified: boolean;
+  }>;
   airDevilsEgg: Readonly<{
     acceptedActionCount: number;
     causalEventsVerified: boolean;
@@ -1692,6 +1705,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   spireLich: NormalizedCard;
   nimbusJinn: NormalizedCard;
   headlessHaunt: NormalizedCard;
+  raiseDead: NormalizedCard;
   devilsEgg: NormalizedCard;
   kiteArcher: NormalizedCard;
   skirmishersOfMu: NormalizedCard;
@@ -3710,6 +3724,28 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || headlessHaunt.subtypes[0] !== 'Spirit') {
     throw new Error('private start-turn random-teleport minion no longer matches its supported facts');
   }
+  const raiseDead = snapshot.cards.find(({ name }) => name === 'Raise Dead');
+  if (!raiseDead
+    || raiseDead.stableId
+      !== 'card:14bfb0e85a7826de045228ecc8c013fa1b247930302a69511f3e391defa1d8d2'
+    || raiseDead.officialSourceId !== '001-raise_dead-b-f'
+    || raiseDead.cardType !== 'magic'
+    || ruleTextDigest(raiseDead.rulesText)
+      !== 'sha256:6c45aa8a6036af19d23efe6c0e731fe22827339db3927eb93d4f6e4df9b3497a'
+    || raiseDead.manaCost !== 4
+    || raiseDead.attack !== null
+    || raiseDead.defense !== null
+    || raiseDead.life !== null
+    || raiseDead.elements.length !== 1
+    || raiseDead.elements[0] !== 'air'
+    || raiseDead.thresholds.air !== 2
+    || raiseDead.thresholds.earth !== 0
+    || raiseDead.thresholds.fire !== 0
+    || raiseDead.thresholds.water !== 0
+    || raiseDead.rarity !== 'exceptional'
+    || raiseDead.subtypes.length !== 0) {
+    throw new Error('private random cemetery-summon Magic no longer matches its supported facts');
+  }
   const devilsEgg = snapshot.cards.find(({ name }) => name === "Devil's Egg");
   if (!devilsEgg
     || devilsEgg.stableId
@@ -4181,6 +4217,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     spireLich,
     nimbusJinn,
     headlessHaunt,
+    raiseDead,
     devilsEgg,
     kiteArcher,
     skirmishersOfMu,
@@ -4411,6 +4448,7 @@ function gameDefinition(
   bearerControllerChoosesExtraRandomOutcome = false,
   atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep: 0 | 3 = 0,
   atStartOfControllerTurnTeleportToRandomSiteOrVoid = false,
+  summonRandomMinionFromAnyCemetery = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4529,6 +4567,7 @@ function gameDefinition(
     + Number(teleportAllyToTargetSite)
     + Number(teleportNearbyAllyThenDrawCard)
     + Number(returnMinionFromOwnCemetery)
+    + Number(summonRandomMinionFromAnyCemetery)
     + Number(disableTargetNearbyMinionUntilNextTurn)
     + Number(submergeTargetMinion)
     + Number(healController !== 0)
@@ -4558,6 +4597,9 @@ function gameDefinition(
       ...(submergeTargetMinion ? { submergeTargetMinion: true } : {}),
       ...(summonTokenToEachControlledSiteBorderingEnemySite
         ? { summonTokenToEachControlledSiteBorderingEnemySite }
+        : {}),
+      ...(summonRandomMinionFromAnyCemetery
+        ? { summonRandomMinionFromAnyCemetery: true as const }
         : {}),
       ...(teleportNearbyAllyThenDrawCard ? { teleportNearbyAllyThenDrawCard: true } : {}),
       ...(damageTargetUnit !== 0
@@ -4685,7 +4727,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-chain-lightning' | 'air-devils-egg' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-kite-archer' | 'air-leyline' | 'air-lightning-bolt' | 'air-lucky-charm' | 'air-nimbus-jinn' | 'air-rain-of-arrows' | 'air-skirmishers-of-mu' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-thunderstorm' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-chain-lightning' | 'air-devils-egg' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-kite-archer' | 'air-leyline' | 'air-lightning-bolt' | 'air-lucky-charm' | 'air-nimbus-jinn' | 'air-rain-of-arrows' | 'air-raise-dead' | 'air-skirmishers-of-mu' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-thunderstorm' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -4988,6 +5030,7 @@ function buildManifest(
       input.spireLich.stableId,
       input.nimbusJinn.stableId,
       ...Array(2).fill(input.headlessHaunt.stableId),
+      input.raiseDead.stableId,
       input.kiteArcher.stableId,
       input.skirmishersOfMu.stableId,
       ...Array(2).fill(input.chainLightning.stableId),
@@ -5176,6 +5219,12 @@ function buildManifest(
   const airKiteArcherDeck = elementalDeck(
     'air',
     [input.kiteArcher, input.stealthTargetMinion],
+  );
+  const airRaiseDeadDeck = elementalDeck(
+    'air',
+    [input.kiteArcher, input.stealthTargetMinion],
+    [],
+    [input.raiseDead],
   );
   const airSkirmishersOfMuDeck = elementalDeck(
     'air',
@@ -5387,6 +5436,8 @@ function buildManifest(
       ? airDevilsEggDeck
       : scenario === 'air-kite-archer'
       ? airKiteArcherDeck
+      : scenario === 'air-raise-dead'
+      ? airRaiseDeadDeck
       : scenario === 'air-skirmishers-of-mu'
       ? airSkirmishersOfMuDeck
       : scenario === 'air-voidwalk'
@@ -5566,6 +5617,8 @@ function buildManifest(
       ? airDevilsEggDeck
       : scenario === 'air-kite-archer'
       ? airKiteArcherDeck
+      : scenario === 'air-raise-dead'
+      ? airRaiseDeadDeck
       : scenario === 'air-skirmishers-of-mu'
       ? airSkirmishersOfMuDeck
       : scenario === 'air-voidwalk'
@@ -5858,6 +5911,7 @@ function buildManifest(
       card.stableId === input.luckyCharm.stableId,
       card.stableId === input.thunderstorm.stableId ? 3 : 0,
       card.stableId === input.headlessHaunt.stableId,
+      card.stableId === input.raiseDead.stableId,
     ),
   ]));
   return {
@@ -9732,28 +9786,29 @@ function findAirHeadlessHauntOpening(
   session: GameSession;
   southSiteInstanceId: string;
 }> {
-  const seed = 7;
-  const built = buildManifest(input, seed, 'air-vs-earth-lesson');
-  const session = createGameSession(built.manifest);
-  const north = session.state.players.north;
-  const south = session.state.players.south;
-  const headlessHaunt = [...north.hand.spellbook, ...north.spellbook.slice(0, 2)]
-    .find(({ cardId }) => cardId === input.headlessHaunt.stableId);
-  if (north.hand.atlas.length !== 3 || south.hand.atlas.length === 0 || !headlessHaunt) {
-    throw new Error('private Headless Haunt seed 7 no longer produces its supported opening');
+  // ponytail: bounded scan keeps the retail deck authoritative without another seed field.
+  for (let seed = 1; seed <= 256; seed += 1) {
+    const built = buildManifest(input, seed, 'air-vs-earth-lesson');
+    const session = createGameSession(built.manifest);
+    const north = session.state.players.north;
+    const south = session.state.players.south;
+    const headlessHaunt = [...north.hand.spellbook, ...north.spellbook.slice(0, 2)]
+      .find(({ cardId }) => cardId === input.headlessHaunt.stableId);
+    if (north.hand.atlas.length !== 3 || south.hand.atlas.length === 0 || !headlessHaunt) continue;
+    return {
+      ...built,
+      headlessHauntInstanceId: headlessHaunt.instanceId,
+      northSiteInstanceIds: north.hand.atlas.map(({ instanceId }) => instanceId) as [
+        string,
+        string,
+        string,
+      ],
+      seed,
+      session,
+      southSiteInstanceId: south.hand.atlas[0]!.instanceId,
+    };
   }
-  return {
-    ...built,
-    headlessHauntInstanceId: headlessHaunt.instanceId,
-    northSiteInstanceIds: north.hand.atlas.map(({ instanceId }) => instanceId) as [
-      string,
-      string,
-      string,
-    ],
-    seed,
-    session,
-    southSiteInstanceId: south.hand.atlas[0]!.instanceId,
-  };
+  throw new Error('private Headless Haunt scenario no longer produces its supported opening');
 }
 
 function findAirKiteArcherOpening(
@@ -9798,6 +9853,84 @@ function findAirKiteArcherOpening(
     southSiteInstanceIds: southSites.slice(0, 2)
       .map(({ instanceId }) => instanceId) as [string, string],
   };
+}
+
+function findAirRaiseDeadOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  kiteArcherInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string, string];
+  raiseDeadInstanceId: string;
+  seed: number;
+  session: GameSession;
+  snowLeopardInstanceId: string;
+  southSiteInstanceIds: readonly [string, string];
+}> {
+  // ponytail: bounded opening scan avoids another private seed/config field.
+  for (let offset = 1; offset <= 256; offset += 1) {
+    const built = buildManifest(input, input.config.airSeed + offset, 'air-raise-dead');
+    const session = createGameSession(built.manifest);
+    const airFirst = (left: { cardId: string }, right: { cardId: string }): number => {
+      const isAir = ({ cardId }: { cardId: string }): boolean => {
+        const definition = session.state.cards[cardId];
+        return definition?.cardType === 'site' && definition.elements.includes('air');
+      };
+      return Number(isAir(right)) - Number(isAir(left));
+    };
+    const northSites = [...session.state.players.north.hand.atlas].sort(airFirst);
+    const southSites = [...session.state.players.south.hand.atlas].sort(airFirst);
+    const northDrawnSite = session.state.players.north.atlas[0];
+    const kiteArcherInstanceId = availableMinionInstance(
+      session,
+      'north',
+      input.kiteArcher.stableId,
+      2,
+    );
+    const raiseDeadInstanceId = availableMinionInstance(
+      session,
+      'north',
+      input.raiseDead.stableId,
+      2,
+    );
+    const snowLeopardInstanceId = availableMinionInstance(
+      session,
+      'south',
+      input.stealthTargetMinion.stableId,
+      1,
+    );
+    const isAirSite = ({ cardId }: { cardId: string }): boolean => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('air');
+    };
+    if (northSites.length >= 3
+      && southSites.length >= 2
+      && isAirSite(northSites[0]!)
+      && isAirSite(northSites[1]!)
+      && isAirSite(southSites[0]!)
+      && northDrawnSite
+      && kiteArcherInstanceId
+      && raiseDeadInstanceId
+      && snowLeopardInstanceId) {
+      return {
+        ...built,
+        kiteArcherInstanceId,
+        northSiteInstanceIds: [
+          northSites[0]!.instanceId,
+          northSites[1]!.instanceId,
+          northSites[2]!.instanceId,
+          northDrawnSite.instanceId,
+        ],
+        raiseDeadInstanceId,
+        seed: built.manifest.seed,
+        session,
+        snowLeopardInstanceId,
+        southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
+      };
+    }
+  }
+  throw new Error('private Raise Dead scenario no longer produces its supported opening');
 }
 
 function findAirSkirmishersOfMuOpening(
@@ -18837,6 +18970,148 @@ function runAirKiteArcher(
   });
 }
 
+function runAirRaiseDead(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airRaiseDead'] {
+  const opening = findAirRaiseDeadOpening(input);
+  let session = keep(keep(opening.session));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  const drawSpell = (): void => take(({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const playSite = (instanceId: string, cell: RealmCell): void => take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === instanceId
+      && descriptor.cell === cell);
+  const endTurn = (): void => take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  playSite(opening.northSiteInstanceIds[0], 'C4');
+  endTurn();
+  drawSpell();
+  playSite(opening.southSiteInstanceIds[0], 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.snowLeopardInstanceId
+    && descriptor.cell === 'C1');
+  endTurn();
+
+  drawSpell();
+  playSite(opening.northSiteInstanceIds[1], 'C3');
+  endTurn();
+  drawSpell();
+  playSite(opening.southSiteInstanceIds[1], 'C2');
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === opening.snowLeopardInstanceId
+    && descriptor.to.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  endTurn();
+
+  drawSpell();
+  playSite(opening.northSiteInstanceIds[2], 'B3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.kiteArcherInstanceId
+    && descriptor.cell === 'C3');
+  endTurn();
+  drawSpell();
+  endTurn();
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  playSite(opening.northSiteInstanceIds[3], 'B4');
+
+  const shot = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'shoot-projectile'
+      && descriptor.shooterInstanceId === opening.kiteArcherInstanceId
+      && descriptor.hit?.instanceId === opening.snowLeopardInstanceId));
+  if (!shot.accepted) throw new Error('private Raise Dead setup shot was rejected');
+  session = shot.session;
+  take(({ descriptor }) => descriptor.kind === 'resolve-ranged-step'
+    && descriptor.choice === 'decline');
+
+  const castAction = action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.raiseDeadInstanceId);
+  const manaBeforeCast = session.state.players.north.mana;
+  const versionBeforeCast = session.state.stateVersion;
+  const cast = stepGame(session, castAction);
+  if (!cast.accepted) throw new Error('private Raise Dead cast was rejected');
+  const random = cast.receipt.randomDraws[0];
+  const randomDomain = random && isJsonRecord(random.domain) ? random.domain : undefined;
+  const selectedStillDead = cast.session.state.players.south.cemetery
+    .some(({ instanceId }) => instanceId === opening.snowLeopardInstanceId);
+  const sourceInCemetery = cast.session.state.players.north.cemetery
+    .some(({ instanceId }) => instanceId === opening.raiseDeadInstanceId);
+  const opponentSite = cast.session.state.realm.sites.C1;
+  const placementAction = legalGameActions(cast.session.state, 'north').find(({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.snowLeopardInstanceId
+      && descriptor.cell === 'C1'
+      && descriptor.manaCost === 0);
+  if (!placementAction) throw new Error('private Raise Dead lacks opponent-site placement');
+  const manaBeforePlacement = cast.session.state.players.north.mana;
+  const summoned = stepGame(cast.session, placementAction);
+  if (!summoned.accepted) throw new Error('private Raise Dead placement was rejected');
+  session = summoned.session;
+
+  const raised = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.snowLeopardInstanceId);
+  const definition = session.state.cards[input.raiseDead.stableId];
+  const castDescriptor = canonicalJson(castAction.descriptor as unknown as JsonValue);
+  const receipts = [shot.receipt, cast.receipt, summoned.receipt];
+  const causalEventsVerified = receipts.every((receipt) => {
+    const firstSequence = receipt.events[0]?.eventSequence;
+    return firstSequence !== undefined && receipt.events.every((event, index) =>
+      event.cause.actionId === receipt.actionId
+        && event.cause.receiptSequence === receipt.receiptSequence
+        && event.eventSequence === firstSequence + index);
+  });
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    legalPlacementVerified: !castDescriptor.includes('target')
+      && !castDescriptor.includes('cemeteryMinionInstanceId')
+      && cast.session.state.phase === 'cemetery-summon'
+      && selectedStillDead
+      && opponentSite !== undefined
+      && 'controller' in opponentSite
+      && opponentSite.controller === 'south'
+      && cast.session.state.stateVersion === versionBeforeCast + 1
+      && manaBeforeCast - cast.session.state.players.north.mana === 4
+      && session.state.stateVersion === cast.session.state.stateVersion + 1
+      && session.state.players.north.mana === manaBeforePlacement,
+    ownershipAndControlVerified: raised?.owner === 'south'
+      && raised.controller === 'north'
+      && raised.location === 'C1'
+      && raised.region === 'surface'
+      && raised.damage === 0
+      && raised.summoningSickness
+      && !raised.tapped,
+    randomSelectionRecorded: cast.receipt.randomDraws.length === 1
+      && random?.purpose === 'magic_random_dead_minion'
+      && randomDomain?.accepted === true
+      && randomDomain.exclusiveMaximum === 1
+      && randomDomain.kind === 'dead_minion_instance_candidate'
+      && cast.receipt.events.map(({ type }) => type).join(',')
+        === 'magic-cast,dead-minion-selected',
+    raiseDead: input.raiseDead.name,
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    sourceAndCemeteriesVerified: sourceInCemetery
+      && session.state.players.north.cemetery
+        .some(({ instanceId }) => instanceId === opening.raiseDeadInstanceId)
+      && session.state.players.south.cemetery
+        .every(({ instanceId }) => instanceId !== opening.snowLeopardInstanceId)
+      && session.state.phase === 'main'
+      && session.state.pendingCemeterySummon === undefined
+      && summoned.receipt.events.map(({ type }) => type).join(',')
+        === 'minion-summoned,magic-resolved',
+    structuralFactsVerified: definition?.cardType === 'magic'
+      && definition.manaCost === 4
+      && definition.summonRandomMinionFromAnyCemetery === true
+      && canonicalJson(definition.thresholds)
+        === canonicalJson({ air: 2, earth: 0, fire: 0, water: 0 }),
+  });
+}
+
 function runAirSkirmishersOfMu(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['airSkirmishersOfMu'] {
@@ -23548,6 +23823,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airSpireLich = runAirSpireLich(input);
   const airNimbusJinn = runAirNimbusJinn(input);
   const airHeadlessHaunt = runAirHeadlessHaunt(input);
+  const airRaiseDead = runAirRaiseDead(input);
   const airDevilsEgg = runAirDevilsEgg(input);
   const airKiteArcher = runAirKiteArcher(input);
   const airSkirmishersOfMu = runAirSkirmishersOfMu(input);
@@ -23766,6 +24042,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     airSpireLich,
     airNimbusJinn,
     airHeadlessHaunt,
+    airRaiseDead,
     airDevilsEgg,
     airKiteArcher,
     airSkirmishersOfMu,
