@@ -93,6 +93,7 @@ type AvatarFacts = Readonly<{
 type SiteFacts = Readonly<{
   airborneMinionsAtopMoveFreelyAway?: true;
   blocksGroundMinionEntryWhileMinionAtop?: true;
+  cannotBeMovedDestroyedOrModified?: true;
   connectsBurrowedAllies?: boolean;
   elements?: readonly ('air' | 'earth' | 'fire' | 'water')[];
   genesisDiscardTopSpells?: 2;
@@ -142,6 +143,9 @@ function cardsFor(
           : {}),
         ...(site.blocksGroundMinionEntryWhileMinionAtop === true
           ? { blocksGroundMinionEntryWhileMinionAtop: true as const }
+          : {}),
+        ...(site.cannotBeMovedDestroyedOrModified === true
+          ? { cannotBeMovedDestroyedOrModified: true as const }
           : {}),
         cardType: 'site',
         connectsBurrowedAllies: site.connectsBurrowedAllies ?? false,
@@ -1493,12 +1497,14 @@ test('RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relati
   const southSites = preview.state.players.south.hand.atlas;
   const southMinions = preview.state.players.south.hand.spellbook;
   const sourceCardId = northSites[1]?.cardId;
+  const protectedCardId = northSites[0]?.cardId;
   const targetCardId = southSites[1]?.cardId;
   const replacementCardId = southSites[2]?.cardId;
   const drownedCardId = southMinions[0]?.cardId;
   const survivorCardId = southMinions[1]?.cardId;
   const artifactCardId = southMinions[2]?.cardId;
   assert.ok(sourceCardId);
+  assert.ok(protectedCardId);
   assert.ok(targetCardId);
   assert.ok(replacementCardId);
   assert.ok(drownedCardId);
@@ -1508,6 +1514,10 @@ test('RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relati
   cards[sourceCardId] = {
     ...cards[sourceCardId]!,
     sacrificeToDestroyNearbySite: true,
+  } as GameCardDefinition;
+  cards[protectedCardId] = {
+    ...cards[protectedCardId]!,
+    cannotBeMovedDestroyedOrModified: true,
   } as GameCardDefinition;
   cards[targetCardId] = { cardType: 'site', elements: ['water'] };
   cards[replacementCardId] = { cardType: 'site', elements: ['water'] };
@@ -1544,6 +1554,16 @@ test('RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relati
       } as unknown as GameCardDefinition,
     },
   }), /sacrificeToDestroyNearbySite/);
+  assert.throws(() => createGameManifest({
+    ...base,
+    cards: {
+      ...cards,
+      [protectedCardId]: {
+        ...cards[protectedCardId]!,
+        cannotBeMovedDestroyedOrModified: false,
+      } as unknown as GameCardDefinition,
+    },
+  }), /cannotBeMovedDestroyedOrModified must be true when defined/);
   const gameManifest = createGameManifest({
     authority: base.authority,
     cards,
@@ -1553,6 +1573,8 @@ test('RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relati
   });
   let session = keep(keep(createGameSession(gameManifest)));
   const sourceCard = session.state.players.north.hand.atlas.find(({ cardId }) => cardId === sourceCardId);
+  const protectedCard = session.state.players.north.hand.atlas.find(({ cardId }) =>
+    cardId === protectedCardId);
   const targetCard = session.state.players.south.hand.atlas.find(({ cardId }) => cardId === targetCardId);
   const replacementCard = session.state.players.south.hand.atlas.find(({ cardId }) =>
     cardId === replacementCardId);
@@ -1561,6 +1583,7 @@ test('RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relati
   const artifactCard = session.state.players.south.hand.spellbook.find(({ cardId }) =>
     cardId === artifactCardId);
   assert.ok(sourceCard);
+  assert.ok(protectedCard);
   assert.ok(targetCard);
   assert.ok(replacementCard);
   assert.ok(drownedCard);
@@ -1569,7 +1592,7 @@ test('RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relati
 
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
-      && descriptor.cardInstanceId !== sourceCard.instanceId
+      && descriptor.cardInstanceId === protectedCard.instanceId
       && descriptor.cell === 'C4'));
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
   session = accept(session, action(session, ({ descriptor }) =>
@@ -1621,6 +1644,23 @@ test('RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relati
   assert.deepEqual(actions.flatMap(({ descriptor }) => descriptor.kind === 'activate-site-destruction'
     ? [descriptor.targetCell]
     : []), ['C2', 'C3', 'C4']);
+  const protectedActivation = actions.find(({ descriptor }) =>
+    descriptor.kind === 'activate-site-destruction' && descriptor.targetCell === 'C4');
+  assert.ok(protectedActivation);
+  const protectedResult = stepGame(checkpoint, protectedActivation);
+  assert.equal(protectedResult.accepted, true);
+  if (!protectedResult.accepted) return;
+  assert.deepEqual(protectedResult.receipt.events.map(({ type }) => type), [
+    'site-sacrificed',
+    'site-destruction-prevented',
+    'rubble-created',
+  ]);
+  assert.deepEqual(protectedResult.session.state.realm.sites.C4, checkpoint.state.realm.sites.C4);
+  assert.equal(protectedResult.session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === sourceCard.instanceId), true);
+  assert.equal(protectedResult.session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === protectedCard.instanceId), false);
+  assert.equal(verifyGameReplay(protectedResult.session), true);
   const activation = actions.find(({ descriptor }) =>
     descriptor.kind === 'activate-site-destruction' && descriptor.targetCell === 'C2');
   assert.ok(activation);
@@ -9427,6 +9467,23 @@ test('RULE-03 Granary Rats suppresses its site threshold while enabled', () => {
   assert.deepEqual(observeGame(suppressed.state, 'north').players.north.affinity,
     { air: 0, earth: 0, fire: 0, water: 0 });
   assert.equal(canSummonGated(suppressed), false);
+
+  const immutableSuppressed: GameSession = {
+    ...suppressed,
+    state: {
+      ...suppressed.state,
+      cards: {
+        ...suppressed.state.cards,
+        'dual-site': {
+          ...suppressed.state.cards['dual-site']!,
+          cannotBeMovedDestroyedOrModified: true,
+        } as GameCardDefinition,
+      },
+    },
+  };
+  assert.deepEqual(observeGame(immutableSuppressed.state, 'north').players.north.affinity,
+    { air: 0, earth: 1, fire: 1, water: 0 });
+  assert.equal(canSummonGated(immutableSuppressed), true);
 
   const oneDisabled = withUnits(suppressed.state.realm.units.map((candidate) =>
     candidate.instanceId === unit.instanceId

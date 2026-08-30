@@ -918,7 +918,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       assert.equal(preset.usesOnlyOrdinaryOrExceptionalCards, false);
       assert.equal(
         preset.manifest.decks.north.atlas.length,
-        preset.id === 'air-vs-earth-lesson' ? 13 : 15,
+        preset.id === 'air-vs-earth-lesson' ? 13 : 16,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
@@ -926,7 +926,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
-        preset.id === 'air-vs-earth-lesson' ? 15 : 13,
+        preset.id === 'air-vs-earth-lesson' ? 16 : 13,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
@@ -977,6 +977,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     Teleport: 1,
   });
   assert.deepEqual(summarize(airLesson, 'south', 'atlas'), {
+    Bedrock: 1,
     'Holy Ground': 1,
     'Humble Village': 3,
     Quagmire: 2,
@@ -1114,6 +1115,14 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     cardType: 'site',
     elements: ['earth'],
     genesisHealNearbyAvatars: 3,
+  });
+  const bedrockId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Bedrock')?.[0];
+  assert.ok(bedrockId);
+  assert.deepEqual(airLesson.manifest.cards[bedrockId], {
+    cannotBeMovedDestroyedOrModified: true,
+    cardType: 'site',
+    elements: ['earth'],
   });
   const mountainPassId = Object.entries(airLesson.cardNames)
     .find(([, name]) => name === 'Mountain Pass')?.[0];
@@ -1587,6 +1596,30 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthHolyGround.deck.spellbook
     .find(({ name }) => name === 'Lesser Blood Demon')?.copies, 4);
   assert.equal(result.earthHolyGround.replayVerified, true);
+  assert.equal(result.earthBedrock.bedrock, 'Bedrock');
+  assert.equal(result.earthBedrock.sinkhole, 'Sinkhole');
+  assert.equal(result.earthBedrock.granaryRats, 'Granary Rats');
+  assert.equal(result.earthBedrock.seed, 7398);
+  assert.equal(result.earthBedrock.acceptedActionCount, 16);
+  assert.equal(result.earthBedrock.exactActivationAvailable, true);
+  assert.equal(result.earthBedrock.sourceCostResolved, true);
+  assert.equal(result.earthBedrock.bedrockStayedInRealm, true);
+  assert.equal(result.earthBedrock.noFalseDestruction, true);
+  assert.equal(result.earthBedrock.thresholdUnsuppressed, true);
+  assert.equal(result.earthBedrock.causalEventsVerified, true);
+  assert.equal(result.earthBedrock.legalConstructedDeck, true);
+  assert.equal(result.earthBedrock.noRandomDraws, true);
+  assert.equal(result.earthBedrock.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthBedrock.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthBedrock.deck.atlas
+    .find(({ name }) => name === 'Bedrock')?.copies, 1);
+  assert.equal(result.earthBedrock.deck.atlas
+    .find(({ name }) => name === 'Sinkhole')?.copies, 2);
+  assert.equal(result.earthBedrock.deck.spellbook
+    .find(({ name }) => name === 'Granary Rats')?.copies, 4);
+  assert.equal(result.earthBedrock.replayVerified, true);
   assert.equal(result.earthBorderMilitia.borderMilitia, 'Border Militia');
   assert.equal(result.earthBorderMilitia.footSoldier, 'Foot Soldier');
   assert.equal(result.earthBorderMilitia.seed, 7688);

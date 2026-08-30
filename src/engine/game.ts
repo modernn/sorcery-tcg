@@ -65,6 +65,7 @@ export type GameCardDefinition =
   | Readonly<{
     airborneMinionsAtopMoveFreelyAway?: true;
     blocksGroundMinionEntryWhileMinionAtop?: true;
+    cannotBeMovedDestroyedOrModified?: true;
     cardType: 'site';
     connectsBurrowedAllies?: boolean;
     elements: readonly GameElement[];
@@ -661,6 +662,12 @@ function isWaterSite(state: GameState, cell: RealmCell): boolean {
   return definition.elements.includes('water');
 }
 
+function siteCannotBeMovedDestroyedOrModified(state: GameState, site: SiteInstance): boolean {
+  const definition = cardDefinition(state, site.cardId);
+  if (definition.cardType !== 'site') throw new Error('realm site lacks site definition');
+  return definition.cannotBeMovedDestroyedOrModified === true;
+}
+
 function meetsThresholds(state: GameState, seat: GameSeat, required: GameThresholds): boolean {
   const available = affinity(state, seat);
   return (['air', 'earth', 'fire', 'water'] as const)
@@ -1166,6 +1173,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.blocksGroundMinionEntryWhileMinionAtop !== true) {
       throw new RangeError(
         `${path}.blocksGroundMinionEntryWhileMinionAtop must be true when defined`,
+      );
+    }
+    if (card.cannotBeMovedDestroyedOrModified !== undefined
+      && card.cannotBeMovedDestroyedOrModified !== true) {
+      throw new RangeError(
+        `${path}.cannotBeMovedDestroyedOrModified must be true when defined`,
       );
     }
     if (!Array.isArray(card.elements)
@@ -1769,6 +1782,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.connectsBurrowedAllies === true ? { connectsBurrowedAllies: true } : {}),
             elements: [...card.elements],
             ...(card.genesisDiscardTopSpells === 2 ? { genesisDiscardTopSpells: 2 as const } : {}),
+            ...(card.cannotBeMovedDestroyedOrModified === true
+              ? { cannotBeMovedDestroyedOrModified: true as const }
+              : {}),
             ...(card.genesisDrawSpellPerAdjacentSameCard === true
               ? { genesisDrawSpellPerAdjacentSameCard: true }
               : {}),
@@ -2158,9 +2174,10 @@ function affinity(state: GameState, seat: GameSeat): GameThresholds {
     .filter(([, site]) => site.controller === seat)
     .forEach(([cell, site]) => {
       if (isRubble(site)) return;
-      if (sitesProvidingNoThreshold.has(cell as RealmCell)) return;
       const definition = cardDefinition(state, site.cardId);
       if (definition.cardType !== 'site') throw new Error('realm site lacks site definition');
+      if (sitesProvidingNoThreshold.has(cell as RealmCell)
+        && !siteCannotBeMovedDestroyedOrModified(state, site)) return;
       definition.elements.forEach((element) => {
         total[element] += 1;
       });
@@ -4570,11 +4587,15 @@ function applyDescriptor(
       throw new Error('unreachable illegal site destruction');
     }
     const source = sourceEntry.site;
+    const targetProtected = !isRubble(target)
+      && siteCannotBeMovedDestroyedOrModified(state, target);
     const resolved = resolveSiteDeaths(
       state,
       [
         { cell: sourceEntry.cell, site: source },
-        ...(isRubble(target) ? [] : [{ cell: descriptor.targetCell, site: target }]),
+        ...(isRubble(target) || targetProtected
+          ? []
+          : [{ cell: descriptor.targetCell, site: target }]),
       ],
       source.instanceId,
     );
@@ -4602,7 +4623,7 @@ function applyDescriptor(
             ...(!isRubble(target) ? { owner: target.owner } : {}),
             sourceInstanceId: source.instanceId,
           },
-          type: 'site-destroyed',
+          type: targetProtected ? 'site-destruction-prevented' : 'site-destroyed',
         },
         ...resolved.outcomes,
       ],

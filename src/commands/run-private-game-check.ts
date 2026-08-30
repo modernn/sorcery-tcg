@@ -528,6 +528,23 @@ export type PrivateGameCheck = Readonly<{
     unitImmobileThroughOpponentTurn: boolean;
     wildBoars: string;
   }>;
+  earthBedrock: Readonly<{
+    acceptedActionCount: number;
+    bedrock: string;
+    bedrockStayedInRealm: boolean;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    exactActivationAvailable: boolean;
+    granaryRats: string;
+    legalConstructedDeck: boolean;
+    noFalseDestruction: boolean;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    seed: number;
+    sinkhole: string;
+    sourceCostResolved: boolean;
+    thresholdUnsuppressed: boolean;
+  }>;
   earthHolyGround: Readonly<{
     acceptedActionCount: number;
     causalEventsVerified: boolean;
@@ -1292,6 +1309,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   autumnUnicorn: NormalizedCard;
   authorityHash: Hash;
   bladderblimp: NormalizedCard;
+  bedrock: NormalizedCard;
   blink: NormalizedCard;
   bury: NormalizedCard;
   borderMilitia: NormalizedCard;
@@ -1884,6 +1902,30 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || holyGround.thresholds.water !== 0
     || holyGround.rarity !== 'exceptional') {
     throw new Error('private nearby Avatar-healing site no longer matches its supported facts');
+  }
+  const bedrock = snapshot.cards.find(({ name }) => name === 'Bedrock');
+  const bedrockTokens: readonly string[] =
+    bedrock?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
+  if (!bedrock
+    || bedrock.stableId
+      !== 'card:4346ee472a609bee00a9239c675ae55bc76b37d3a4e3eb40e9b32e5fde1d909d'
+    || bedrock.officialSourceId !== '001-bedrock-b-f'
+    || bedrock.cardType !== 'site'
+    || bedrockTokens.length !== 7
+    || !['be', 'can', 'destroyed', 'modified', 'moved', 'or', 't']
+      .every((token) => bedrockTokens.includes(token))
+    || bedrock.manaCost !== null
+    || bedrock.attack !== null
+    || bedrock.defense !== null
+    || bedrock.life !== null
+    || bedrock.elements.length !== 1
+    || bedrock.elements[0] !== 'earth'
+    || bedrock.thresholds.air !== 0
+    || bedrock.thresholds.earth !== 1
+    || bedrock.thresholds.fire !== 0
+    || bedrock.thresholds.water !== 0
+    || bedrock.rarity !== 'exceptional') {
+    throw new Error('private immutable Earth site no longer matches its supported facts');
   }
   const mountainPass = snapshot.cards.find(({ name }) => name === 'Mountain Pass');
   const mountainPassTokens = mountainPass?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
@@ -3284,6 +3326,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     autumnUnicorn,
     authorityHash: artifact.contentHash,
     bladderblimp,
+    bedrock,
     blink,
     borderMilitia,
     bury,
@@ -3511,6 +3554,7 @@ function gameDefinition(
   airborneMinionsAtopMoveFreelyAway = false,
   genesisImmobilizeNearbyUntilNextTurn = false,
   genesisHealNearbyAvatars: 0 | 3 = 0,
+  cannotBeMovedDestroyedOrModified = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -3552,6 +3596,9 @@ function gameDefinition(
         : {}),
       ...(blocksGroundMinionEntryWhileMinionAtop
         ? { blocksGroundMinionEntryWhileMinionAtop: true as const }
+        : {}),
+      ...(cannotBeMovedDestroyedOrModified
+        ? { cannotBeMovedDestroyedOrModified: true as const }
         : {}),
       cardType: 'site',
       ...(connectsBurrowedAllies ? { connectsBurrowedAllies: true } : {}),
@@ -3713,7 +3760,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -3852,6 +3899,14 @@ function buildManifest(
       ...earthHolyGroundBase.atlas.slice(0, input.format.atlasMinimum - 1),
     ],
   };
+  const earthBedrockBase = elementalDeck('fire', [input.granaryRats], [input.sinkhole]);
+  const earthBedrockDeck: GameDeckSpec = {
+    ...earthBedrockBase,
+    atlas: [
+      input.bedrock.stableId,
+      ...earthBedrockBase.atlas.slice(0, input.format.atlasMinimum - 1),
+    ],
+  };
   const earthBorderMilitiaDeck = elementalDeck('earth', [], [], [input.borderMilitia]);
   const earthHumbleVillageDeck = elementalDeck('earth', [], [input.humbleVillage]);
   const earthDuelDeck = elementalDeck(
@@ -3929,6 +3984,7 @@ function buildManifest(
       ...Array(2).fill(input.vantageHills.stableId),
       ...Array(2).fill(input.quagmire.stableId),
       input.holyGround.stableId,
+      input.bedrock.stableId,
     ],
     avatar: input.geomancer.stableId,
     spellbook: [
@@ -4222,6 +4278,8 @@ function buildManifest(
         ? earthQuagmireDeck
       : scenario === 'earth-holy-ground'
         ? earthHolyGroundDeck
+      : scenario === 'earth-bedrock'
+        ? earthBedrockDeck
       : scenario === 'earth-duel'
         ? earthDuelDeck
       : scenario === 'earth-sword-and-shield'
@@ -4391,6 +4449,8 @@ function buildManifest(
         ? earthQuagmireDeck
       : scenario === 'earth-holy-ground'
         ? earthHolyGroundDeck
+      : scenario === 'earth-bedrock'
+        ? earthBedrockDeck
       : scenario === 'earth-duel'
         ? earthDuelDeck
       : scenario === 'earth-sword-and-shield'
@@ -4572,6 +4632,7 @@ function buildManifest(
       card.stableId === input.updraftRidge.stableId,
       card.stableId === input.quagmire.stableId,
       card.stableId === input.holyGround.stableId ? 3 : 0,
+      card.stableId === input.bedrock.stableId,
     ),
   ]));
   return {
@@ -5746,6 +5807,53 @@ function findEarthHolyGroundOpening(
     };
   }
   throw new Error('private Holy Ground scenario no longer produces its supported opening');
+}
+
+function findEarthBedrockOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  bedrockInstanceId: string;
+  granaryRatsInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  seed: number;
+  session: GameSession;
+  sinkholeInstanceId: string;
+  southSiteInstanceId: string;
+  wastelandInstanceId: string;
+}> {
+  // ponytail: pinned seed keeps the actual-card proof fast and deterministic.
+  const seed = 7398;
+  const built = buildManifest(input, seed, 'earth-bedrock');
+  const session = createGameSession(built.manifest);
+  const bedrockInstanceId = session.state.players.north.hand.atlas
+    .find(({ cardId }) => cardId === input.bedrock.stableId)?.instanceId;
+  const sinkholeInstanceId = session.state.players.north.hand.atlas
+    .find(({ cardId }) => cardId === input.sinkhole.stableId)?.instanceId;
+  const wastelandInstanceId = session.state.players.north.hand.atlas
+    .find(({ cardId }) => cardId === input.wasteland.stableId)?.instanceId;
+  const granaryRatsInstanceId = [
+    ...session.state.players.north.hand.spellbook,
+    ...session.state.players.north.spellbook.slice(0, 1),
+  ].find(({ cardId }) => cardId === input.granaryRats.stableId)?.instanceId;
+  const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+  if (bedrockInstanceId
+    && sinkholeInstanceId
+    && wastelandInstanceId
+    && granaryRatsInstanceId
+    && southSiteInstanceId) {
+    return {
+      ...built,
+      bedrockInstanceId,
+      granaryRatsInstanceId,
+      seed,
+      session,
+      sinkholeInstanceId,
+      southSiteInstanceId,
+      wastelandInstanceId,
+    };
+  }
+  throw new Error('private immutable-site scenario no longer produces its supported opening');
 }
 
 function findEarthRescueOpening(
@@ -9457,6 +9565,121 @@ function runEarthHolyGround(
     replayVerified: verifyGameReplay(session),
     seed: opening.seed,
     siteEstablished: session.state.realm.sites.B3?.instanceId === opening.holyGroundInstanceId,
+  });
+}
+
+function runEarthBedrock(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthBedrock'] {
+  const opening = findEarthBedrockOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.wastelandInstanceId
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.bedrockInstanceId
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.granaryRatsInstanceId
+    && descriptor.cell === 'C3'
+    && descriptor.region === undefined);
+  const affinityWithRats = observeGame(session.state, 'north').players.north.affinity;
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.sinkholeInstanceId
+    && descriptor.cell === 'B3');
+
+  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'activate-site-destruction'
+      && descriptor.sourceSiteInstanceId === opening.sinkholeInstanceId
+      && descriptor.targetCell === 'C3'
+      && descriptor.targetSiteInstanceId === opening.bedrockInstanceId);
+  const selected = choices[0];
+  if (!selected) throw new Error('private Bedrock destruction attempt is unavailable');
+  const exactActivationAvailable = choices.length === 1;
+  const result = stepGame(session, selected);
+  if (!result.accepted) throw new Error(`private Bedrock destruction attempt rejected: ${result.reason.code}`);
+  session = result.session;
+
+  const events = result.receipt.events;
+  const sacrificedPayload = events[0] && isJsonRecord(events[0].payload)
+    ? events[0].payload
+    : undefined;
+  const preventedPayload = events[1] && isJsonRecord(events[1].payload)
+    ? events[1].payload
+    : undefined;
+  const rubblePayload = events[2] && isJsonRecord(events[2].payload)
+    ? events[2].payload
+    : undefined;
+  const bedrock = session.state.realm.sites.C3;
+  const sourceRubble = session.state.realm.sites.B3;
+  const rats = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.granaryRatsInstanceId);
+  const affinityAfterAttempt = observeGame(session.state, 'north').players.north.affinity;
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    bedrock: opening.names.get(input.bedrock.stableId) ?? input.bedrock.stableId,
+    bedrockStayedInRealm: bedrock !== undefined
+      && !('rubble' in bedrock)
+      && bedrock.instanceId === opening.bedrockInstanceId
+      && bedrock.cardId === input.bedrock.stableId
+      && bedrock.controller === 'north'
+      && bedrock.owner === 'north'
+      && rats?.location === 'C3'
+      && rats.region === 'surface',
+    causalEventsVerified: events.map(({ type }) => type).join(',')
+      === 'site-sacrificed,site-destruction-prevented,rubble-created'
+      && sacrificedPayload?.cell === 'B3'
+      && sacrificedPayload.instanceId === opening.sinkholeInstanceId
+      && sacrificedPayload.owner === 'north'
+      && sacrificedPayload.sourceInstanceId === opening.sinkholeInstanceId
+      && preventedPayload?.cell === 'C3'
+      && preventedPayload.instanceId === opening.bedrockInstanceId
+      && preventedPayload.owner === 'north'
+      && preventedPayload.sourceInstanceId === opening.sinkholeInstanceId
+      && rubblePayload?.cell === 'B3'
+      && rubblePayload.instanceId === sourceRubble?.instanceId
+      && rubblePayload.sourceInstanceId === opening.sinkholeInstanceId,
+    deck,
+    exactActivationAvailable,
+    granaryRats: opening.names.get(input.granaryRats.stableId) ?? input.granaryRats.stableId,
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && deck.atlas.find(({ name }) => name === input.bedrock.name)?.copies === 1
+      && deck.atlas.find(({ name }) => name === input.sinkhole.name)?.copies === 2
+      && deck.spellbook.find(({ name }) => name === input.granaryRats.name)?.copies === 4,
+    noFalseDestruction: events.every(({ type }) => type !== 'site-destroyed')
+      && !session.state.players.north.cemetery
+        .some(({ instanceId }) => instanceId === opening.bedrockInstanceId),
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    sinkhole: opening.names.get(input.sinkhole.stableId) ?? input.sinkhole.stableId,
+    sourceCostResolved: session.state.players.north.cemetery
+      .some(({ instanceId }) => instanceId === opening.sinkholeInstanceId)
+      && sourceRubble !== undefined
+      && 'rubble' in sourceRubble
+      && sourceRubble.rubble === true
+      && sourceRubble.controller === null,
+    thresholdUnsuppressed: affinityWithRats.earth === 1
+      && affinityAfterAttempt.earth === 1,
   });
 }
 
@@ -17020,6 +17243,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthBury = runEarthBury(input);
   const earthQuagmire = runEarthQuagmire(input);
   const earthHolyGround = runEarthHolyGround(input);
+  const earthBedrock = runEarthBedrock(input);
   const earthBorderMilitia = runEarthBorderMilitia(input);
   const earthHumbleVillage = runEarthHumbleVillage(input);
   const earthDuel = runEarthDuel(input);
@@ -17230,6 +17454,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthBury,
     earthQuagmire,
     earthHolyGround,
+    earthBedrock,
     earthBorderMilitia,
     earthHumbleVillage,
     earthDuel,
