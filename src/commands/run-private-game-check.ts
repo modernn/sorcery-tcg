@@ -1035,6 +1035,22 @@ export type PrivateGameCheck = Readonly<{
     replayVerified: boolean;
     summonedStateVerified: boolean;
   }>;
+  fireSacredScarabs: Readonly<{
+    acceptedActionCount: number;
+    deathriteDamagedAvatar: boolean;
+    deathriteFinishedRaal: boolean;
+    deck: DeckList;
+    exactCausalReceipts: boolean;
+    legalConstructedDeck: boolean;
+    noRandomDraws: boolean;
+    normalFightKilledScarab: boolean;
+    normalStrikeWoundedRaal: boolean;
+    raalDromedary: string;
+    replayVerified: boolean;
+    sacredScarabs: string;
+    seed: number;
+    unsupportedMechanicsAbsent: boolean;
+  }>;
   fireLash: Readonly<{
     acceptedActionCount: number;
     causalEventsVerified: boolean;
@@ -1548,6 +1564,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   rescue: NormalizedCard;
   rusticVillage: NormalizedCard;
   roamingMinion: NormalizedCard;
+  sacredScarabs: NormalizedCard;
   secretTunnel: NormalizedCard;
   scentHounds: NormalizedCard;
   sedgeCrabs: NormalizedCard;
@@ -2656,6 +2673,27 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || vileImp.rarity !== 'ordinary') {
     throw new Error('private optional targeted Genesis damage minion no longer matches its supported facts');
   }
+  const sacredScarabs = snapshot.cards.find(({ name }) => name === 'Sacred Scarabs');
+  if (!sacredScarabs
+    || sacredScarabs.stableId
+      !== 'card:476934554ff05d42db595c4b8d13336aec083307a9398cfbd0e0ce7573cf6931'
+    || sacredScarabs.officialSourceId !== '001-sacred_scarabs-b-f'
+    || sacredScarabs.cardType !== 'minion'
+    || ruleTextDigest(sacredScarabs.rulesText)
+      !== 'sha256:0dc0181bcebf94c406b8803093df80d717151055b47b4d9150bc7ada1f3c4754'
+    || sacredScarabs.manaCost !== 2
+    || sacredScarabs.attack !== 1
+    || sacredScarabs.defense !== 1
+    || sacredScarabs.life !== null
+    || sacredScarabs.elements.length !== 1
+    || sacredScarabs.elements[0] !== 'fire'
+    || sacredScarabs.thresholds.air !== 0
+    || sacredScarabs.thresholds.earth !== 0
+    || sacredScarabs.thresholds.fire !== 1
+    || sacredScarabs.thresholds.water !== 0
+    || sacredScarabs.rarity !== 'ordinary') {
+    throw new Error('private location-wide Deathrite damage minion no longer matches its supported facts');
+  }
   const minorExplosion = snapshot.cards.find(({ name }) => name === 'Minor Explosion');
   if (!minorExplosion
     || minorExplosion.cardType !== 'magic'
@@ -3762,6 +3800,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     rescue,
     rusticVillage,
     roamingMinion,
+    sacredScarabs,
     secretTunnel,
     scentHounds,
     sedgeCrabs,
@@ -3919,6 +3958,7 @@ function gameDefinition(
   otherControlledMortalsPowerBonus = false,
   immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns = false,
   occupiesSquareArea: 0 | 2 = 0,
+  deathriteDamageEachUnitHere: 0 | 3 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4095,6 +4135,7 @@ function gameDefinition(
       connectsTopBottom,
       deathriteDrawSite,
       ...(deathriteHeal ? { deathriteHeal } : {}),
+      ...(deathriteDamageEachUnitHere ? { deathriteDamageEachUnitHere } : {}),
       ...(deathriteLoseLifePerNearbySiteControlled
         ? { deathriteLoseLifePerNearbySiteControlled: 1 as const }
         : {}),
@@ -4164,7 +4205,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -4664,6 +4705,10 @@ function buildManifest(
   const fireGenesisLifeLossDeck = elementalDeck('fire', [input.lesserBloodDemon]);
   const fireVileImpDeck = elementalDeck('fire', [input.vileImp], [input.wasteland]);
   const fireIgnitedDeck = elementalDeck('fire', [input.ignited]);
+  const fireSacredScarabsDeck = elementalDeck(
+    'fire',
+    [input.sacredScarabs, input.raalDromedary],
+  );
   const fireLashDeck = elementalDeck(
     'fire',
     [input.raalDromedary],
@@ -4862,6 +4907,8 @@ function buildManifest(
           ? fireVileImpDeck
         : scenario === 'fire-ignited'
           ? fireIgnitedDeck
+        : scenario === 'fire-sacred-scarabs'
+          ? fireSacredScarabsDeck
         : scenario === 'fire-lash'
           ? fireLashDeck
         : scenario === 'fire-leap-attack'
@@ -4967,6 +5014,8 @@ function buildManifest(
         ? fireVikingsDeck
       : scenario === 'fire-vile-imp'
         ? fireVileImpDeck
+      : scenario === 'fire-sacred-scarabs'
+        ? fireSacredScarabsDeck
       : scenario === 'earth-border-militia'
         ? earthBorderMilitiaDeck
       : scenario === 'earth-humble-village'
@@ -5188,6 +5237,7 @@ function buildManifest(
       card.stableId === input.kingOfRealm.stableId,
       card.stableId === input.entangleTerrain.stableId,
       card.stableId === input.mountainGiant.stableId ? 2 : 0,
+      card.stableId === input.sacredScarabs.stableId ? 3 : 0,
     ),
   ]));
   return {
@@ -7994,6 +8044,63 @@ function findFireVileImpOpening(
     };
   }
   throw new Error('private Vile Imp optional Genesis damage scenario lacks its supported opening');
+}
+
+function findFireSacredScarabsOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string];
+  raalInstanceId: string;
+  sacredScarabsInstanceId: string;
+  seed: number;
+  session: GameSession;
+  southSiteInstanceId: string;
+}> {
+  // ponytail: pinned seed keeps the actual-card proof fast and deterministic.
+  const seed = 135;
+  const built = buildManifest(input, seed, 'fire-sacred-scarabs');
+  const session = createGameSession(built.manifest);
+  const northFireSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
+    const definition = session.state.cards[cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('fire');
+  });
+  const southSiteInstanceId = session.state.players.south.hand.atlas.find(({ cardId }) => {
+    const definition = session.state.cards[cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('fire');
+  })?.instanceId;
+  const sacredScarabsInstanceId = availableMinionInstance(
+    session,
+    'north',
+    input.sacredScarabs.stableId,
+    2,
+  );
+  const raalInstanceId = availableMinionInstance(
+    session,
+    'south',
+    input.raalDromedary.stableId,
+    1,
+  );
+  if (northFireSites.length >= 3
+    && southSiteInstanceId
+    && sacredScarabsInstanceId
+    && raalInstanceId) {
+    return {
+      ...built,
+      northSiteInstanceIds: [
+        northFireSites[0]!.instanceId,
+        northFireSites[1]!.instanceId,
+        northFireSites[2]!.instanceId,
+      ],
+      raalInstanceId,
+      sacredScarabsInstanceId,
+      seed,
+      session,
+      southSiteInstanceId,
+    };
+  }
+  throw new Error('private Sacred Scarabs Deathrite scenario lacks its supported opening');
 }
 
 function findFireAramosOpening(
@@ -16900,6 +17007,280 @@ function runFireVileImp(
   });
 }
 
+function runFireSacredScarabs(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['fireSacredScarabs'] {
+  const opening = findFireSacredScarabsOpening(input);
+  let session = keep(keep(opening.session));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.raalInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.sacredScarabsInstanceId
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const moveResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === opening.sacredScarabsInstanceId
+      && descriptor.from.cell === 'C2'
+      && descriptor.to.cell === 'C1'));
+  if (!moveResult.accepted) throw new Error('private Sacred Scarabs move was rejected');
+  session = moveResult.session;
+  const attackResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === opening.raalInstanceId));
+  if (!attackResult.accepted) throw new Error('private Sacred Scarabs attack was rejected');
+  session = attackResult.session;
+  const fightResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  if (!fightResult.accepted) throw new Error('private Sacred Scarabs fight was rejected');
+  session = fightResult.session;
+
+  const movePayload = moveResult.receipt.events[0]
+    && isJsonRecord(moveResult.receipt.events[0].payload)
+    ? moveResult.receipt.events[0].payload
+    : undefined;
+  const attackPayload = attackResult.receipt.events[0]
+    && isJsonRecord(attackResult.receipt.events[0].payload)
+    ? attackResult.receipt.events[0].payload
+    : undefined;
+  const events = fightResult.receipt.events;
+  const southAvatarInstanceId = session.state.players.south.avatar.card.instanceId;
+  const deathriteTargetsInEngineOrder = southAvatarInstanceId.localeCompare(opening.raalInstanceId) < 0
+    ? [
+        { instanceId: southAvatarInstanceId, kind: 'avatar' as const },
+        { instanceId: opening.raalInstanceId, kind: 'minion' as const },
+      ]
+    : [
+        { instanceId: opening.raalInstanceId, kind: 'minion' as const },
+        { instanceId: southAvatarInstanceId, kind: 'avatar' as const },
+      ];
+  const expectedDeathriteAllocations = deathriteTargetsInEngineOrder.map(({ instanceId }) => ({
+    payload: {
+      amount: 3,
+      sourceInstanceId: opening.sacredScarabsInstanceId,
+      targetInstanceId: instanceId,
+    },
+    type: 'deathrite-damage-allocated',
+  }));
+  const expectedDeathriteDamage: { payload: JsonValue; type: string }[] = [];
+  for (const { instanceId, kind } of deathriteTargetsInEngineOrder) {
+    if (kind === 'avatar') {
+      expectedDeathriteDamage.push(
+        {
+          payload: { amount: 3, direct: true, instanceId, seat: 'south' },
+          type: 'damage-dealt',
+        },
+        {
+          payload: { amount: 3, life: 17, seat: 'south' },
+          type: 'avatar-life-lost',
+        },
+      );
+    } else {
+      expectedDeathriteDamage.push({
+        payload: { accumulated: 4, amount: 3, direct: true, instanceId, seat: 'south' },
+        type: 'damage-dealt',
+      });
+    }
+  }
+  const expectedFightEvents = [
+    {
+      payload: { defenderCount: 0, originalTargetParticipates: true },
+      type: 'defend-window-closed',
+    },
+    {
+      payload: {
+        attackerInstanceId: opening.sacredScarabsInstanceId,
+        combatantInstanceIds: [opening.raalInstanceId],
+      },
+      type: 'fight-started',
+    },
+    {
+      payload: {
+        amount: 1,
+        strikerInstanceId: opening.sacredScarabsInstanceId,
+        targetInstanceId: opening.raalInstanceId,
+      },
+      type: 'strike-damage-allocated',
+    },
+    {
+      payload: {
+        accumulated: 2,
+        amount: 2,
+        direct: true,
+        instanceId: opening.sacredScarabsInstanceId,
+        seat: 'north',
+      },
+      type: 'damage-dealt',
+    },
+    {
+      payload: {
+        accumulated: 1,
+        amount: 1,
+        direct: true,
+        instanceId: opening.raalInstanceId,
+        seat: 'south',
+      },
+      type: 'damage-dealt',
+    },
+    ...expectedDeathriteAllocations,
+    ...expectedDeathriteDamage,
+    {
+      payload: {
+        cardId: input.sacredScarabs.stableId,
+        instanceId: opening.sacredScarabsInstanceId,
+        owner: 'north',
+      },
+      type: 'minion-died',
+    },
+    {
+      payload: {
+        cardId: input.raalDromedary.stableId,
+        instanceId: opening.raalInstanceId,
+        owner: 'south',
+      },
+      type: 'minion-died',
+    },
+  ];
+  const orderedFightEventsMatch = canonicalJson(
+    events.map(({ payload, type }) => ({ payload, type })) as unknown as JsonValue,
+  )
+    === canonicalJson(expectedFightEvents as unknown as JsonValue);
+  const firstFightEventSequence = events[0]?.eventSequence;
+  const exactFightCausalEnvelope = firstFightEventSequence !== undefined
+    && events.every((event, index) =>
+      event.cause.actionId === fightResult.receipt.actionId
+        && event.cause.receiptSequence === fightResult.receipt.receiptSequence
+        && event.eventSequence === firstFightEventSequence + index);
+  const eventIndex = (type: string, predicate: (payload: Readonly<Record<string, JsonValue>>) => boolean): number =>
+    events.findIndex(({ payload, type: candidateType }) =>
+      candidateType === type && isJsonRecord(payload) && predicate(payload));
+  const scarabStrikeIndex = eventIndex('strike-damage-allocated', (payload) =>
+    payload.amount === 1
+      && payload.strikerInstanceId === opening.sacredScarabsInstanceId
+      && payload.targetInstanceId === opening.raalInstanceId);
+  const raalWoundIndex = eventIndex('damage-dealt', (payload) =>
+    payload.accumulated === 1
+      && payload.amount === 1
+      && payload.instanceId === opening.raalInstanceId);
+  const scarabDamageIndex = eventIndex('damage-dealt', (payload) =>
+    payload.accumulated === 2
+      && payload.amount === 2
+      && payload.instanceId === opening.sacredScarabsInstanceId);
+  const firstDeathriteIndex = events.findIndex(({ type }) => type === 'deathrite-damage-allocated');
+  const raalDeathriteDamageIndex = eventIndex('damage-dealt', (payload) =>
+    payload.accumulated === 4
+      && payload.amount === 3
+      && payload.instanceId === opening.raalInstanceId);
+  const avatarDeathriteDamageIndex = eventIndex('damage-dealt', (payload) =>
+    payload.amount === 3
+      && payload.direct === true
+      && payload.instanceId === southAvatarInstanceId
+      && payload.seat === 'south');
+  const avatarLifeIndex = eventIndex('avatar-life-lost', (payload) =>
+    payload.amount === 3 && payload.life === 17 && payload.seat === 'south');
+  const scarabDeathIndex = eventIndex('minion-died', (payload) =>
+    payload.cardId === input.sacredScarabs.stableId
+      && payload.instanceId === opening.sacredScarabsInstanceId
+      && payload.owner === 'north');
+  const raalDeathIndex = eventIndex('minion-died', (payload) =>
+    payload.cardId === input.raalDromedary.stableId
+      && payload.instanceId === opening.raalInstanceId
+      && payload.owner === 'south');
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+  const scarabDefinition = session.state.cards[input.sacredScarabs.stableId];
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    deathriteDamagedAvatar: session.state.players.south.avatar.life === 17
+      && avatarDeathriteDamageIndex > firstDeathriteIndex
+      && avatarLifeIndex > avatarDeathriteDamageIndex,
+    deathriteFinishedRaal: raalDeathriteDamageIndex > firstDeathriteIndex
+      && raalDeathIndex > raalDeathriteDamageIndex
+      && session.state.players.south.cemetery.some(({ cardId, instanceId }) =>
+        cardId === input.raalDromedary.stableId && instanceId === opening.raalInstanceId),
+    deck,
+    exactCausalReceipts: moveResult.receipt.events.map(({ type }) => type).join(',')
+        === 'move-and-attack-activated'
+      && canonicalJson(movePayload as JsonValue) === canonicalJson({
+        from: { cell: 'C2', region: 'surface' },
+        path: [
+          { cell: 'C2', region: 'surface' },
+          { cell: 'C1', region: 'surface' },
+        ],
+        seat: 'north',
+        steps: 1,
+        to: { cell: 'C1', region: 'surface' },
+        unitInstanceId: opening.sacredScarabsInstanceId,
+      })
+      && attackResult.receipt.events.map(({ type }) => type).join(',') === 'attack-declared'
+      && canonicalJson(attackPayload as JsonValue) === canonicalJson({
+        attackerInstanceId: opening.sacredScarabsInstanceId,
+        cell: 'C1',
+        seat: 'north',
+        target: {
+          instanceId: opening.raalInstanceId,
+          kind: 'minion',
+          seat: 'south',
+        },
+      })
+      && orderedFightEventsMatch
+      && exactFightCausalEnvelope,
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && deck.spellbook.find(({ name }) => name === input.sacredScarabs.name)?.copies
+        === input.format.copyLimits[input.sacredScarabs.rarity!]
+      && deck.spellbook.find(({ name }) => name === input.raalDromedary.name)?.copies
+        === input.format.copyLimits[input.raalDromedary.rarity!],
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    normalFightKilledScarab: scarabDamageIndex > scarabStrikeIndex
+      && scarabDeathIndex > scarabDamageIndex
+      && session.state.players.north.cemetery.some(({ cardId, instanceId }) =>
+        cardId === input.sacredScarabs.stableId
+          && instanceId === opening.sacredScarabsInstanceId),
+    normalStrikeWoundedRaal: raalWoundIndex > scarabStrikeIndex
+      && firstDeathriteIndex > raalWoundIndex,
+    raalDromedary: input.raalDromedary.name,
+    replayVerified: verifyGameReplay(session),
+    sacredScarabs: input.sacredScarabs.name,
+    seed: opening.seed,
+    unsupportedMechanicsAbsent: scarabDefinition?.cardType === 'minion'
+      && scarabDefinition.deathriteDamageEachUnitHere === 3
+      && session.state.terminal.status === 'active'
+      && session.state.realm.units.every(({ instanceId }) =>
+        instanceId !== opening.sacredScarabsInstanceId
+          && instanceId !== opening.raalInstanceId),
+  });
+}
+
 function runFireAramos(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['fireAramos'] {
@@ -20194,6 +20575,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const fireGenesisLifeLoss = runFireGenesisLifeLoss(input);
   const fireVileImp = runFireVileImp(input);
   const fireIgnited = runFireIgnited(input);
+  const fireSacredScarabs = runFireSacredScarabs(input);
   const fireLash = runFireLash(input);
   const fireLeapAttack = runFireLeapAttack(input);
   const fireMinorExplosion = runFireMinorExplosion(input);
@@ -20407,6 +20789,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     fireGranaryRats,
     fireHamlet,
     fireIgnited,
+    fireSacredScarabs,
     fireLash,
     fireLeapAttack,
     fireMinorExplosion,

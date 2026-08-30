@@ -171,6 +171,7 @@ export type GameCardDefinition =
     cannotDefend?: boolean;
     cannotDefendOrIntercept?: boolean;
     connectsTopBottom?: boolean;
+    deathriteDamageEachUnitHere?: number;
     deathriteHeal?: number;
     deathriteDrawSite?: boolean;
     deathriteLoseLifePerNearbySiteControlled?: 1;
@@ -1801,6 +1802,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.deathriteDrawSite !== undefined && typeof card.deathriteDrawSite !== 'boolean') {
     throw new RangeError(`${path}.deathriteDrawSite must be boolean`);
   }
+  if (card.deathriteDamageEachUnitHere !== undefined
+    && (!Number.isSafeInteger(card.deathriteDamageEachUnitHere)
+      || card.deathriteDamageEachUnitHere < 1
+      || card.deathriteDamageEachUnitHere > MAX_COMBAT_STAT)) {
+    throw new RangeError(
+      `${path}.deathriteDamageEachUnitHere must be a safe integer between 1 and ${MAX_COMBAT_STAT}`,
+    );
+  }
   if (card.deathriteHeal !== undefined
     && (!Number.isSafeInteger(card.deathriteHeal)
       || card.deathriteHeal < 1
@@ -1965,6 +1974,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.summonToAnySite === true
       || card.mustBeCastToOuterColumn === true
       || card.token === true
+      || card.deathriteDamageEachUnitHere !== undefined
       || card.genesisDamageEachOtherUnitHere === 1
       || card.genesisDisableSelfUntilDamaged === true
       || card.genesisMayDamageTargetAdjacentUnit === 2
@@ -2330,6 +2340,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.cannotDefend === true ? { cannotDefend: true } : {}),
             ...(card.cannotDefendOrIntercept === true ? { cannotDefendOrIntercept: true } : {}),
             ...(card.connectsTopBottom === true ? { connectsTopBottom: true } : {}),
+            ...(card.deathriteDamageEachUnitHere
+              ? { deathriteDamageEachUnitHere: card.deathriteDamageEachUnitHere }
+              : {}),
             ...(card.deathriteDrawSite === true ? { deathriteDrawSite: true } : {}),
             ...(card.deathriteHeal ? { deathriteHeal: card.deathriteHeal } : {}),
             ...(card.deathriteLoseLifePerNearbySiteControlled === 1
@@ -4405,30 +4418,207 @@ function resolveMinionDeaths(
   let artifacts = state.realm.artifacts;
   const resolvedDeaths = [...deaths];
   const deadIds = new Set(resolvedDeaths.map(({ instanceId }) => instanceId));
+  const resolvedDefeatedAvatars = new Set(defeatedAvatars);
   let survivingUnits = units.filter(({ instanceId }) => !deadIds.has(instanceId));
-  while (true) {
-    const projectedState = deepFreeze({
-      ...state,
-      players: startingPlayers,
-      realm: { ...state.realm, units: survivingUnits },
-    });
-    const newlyLethal = survivingUnits.filter((unit) => unit.damage > 0
-      && unit.damage >= unitStatus(projectedState, {
-        instanceId: unit.instanceId,
-        kind: 'minion',
-        seat: unit.controller,
-      }).defense);
-    if (newlyLethal.length === 0) break;
-    newlyLethal.forEach((unit) => {
-      deadIds.add(unit.instanceId);
-      resolvedDeaths.push(unit);
-    });
+  const projectedDeathState = (): GameState => deepFreeze({
+    ...state,
+    players: {
+      north: players.north,
+      south: players.south,
+    },
+    realm: {
+      ...state.realm,
+      ...(artifacts ? { artifacts } : {}),
+      units: [...survivingUnits],
+    },
+  });
+  const settlePowerDeaths = (): void => {
+    while (true) {
+      const projectedState = projectedDeathState();
+      const newlyLethal = survivingUnits.filter((unit) => unit.damage > 0
+        && unit.damage >= unitStatus(projectedState, {
+          instanceId: unit.instanceId,
+          kind: 'minion',
+          seat: unit.controller,
+        }).defense);
+      if (newlyLethal.length === 0) break;
+      newlyLethal.forEach((unit) => {
+        deadIds.add(unit.instanceId);
+        resolvedDeaths.push(unit);
+      });
+      survivingUnits = survivingUnits.filter(({ instanceId }) => !deadIds.has(instanceId));
+    }
+  };
+  const appendDeaths = (newDeaths: readonly UnitInstance[]): void => {
+    for (const dead of newDeaths) {
+      if (deadIds.has(dead.instanceId)) continue;
+      deadIds.add(dead.instanceId);
+      resolvedDeaths.push(dead);
+    }
     survivingUnits = survivingUnits.filter(({ instanceId }) => !deadIds.has(instanceId));
-  }
+    settlePowerDeaths();
+  };
+  settlePowerDeaths();
   const deckLosers = new Set<GameSeat>();
-  for (const dead of resolvedDeaths) {
+  for (let deathIndex = 0; deathIndex < resolvedDeaths.length; deathIndex += 1) {
+    const dead = resolvedDeaths[deathIndex]!;
     const definition = cardDefinition(state, dead.cardId);
     if (definition.cardType !== 'minion' || minionDisabled(state, dead)) continue;
+    const deathriteDamage = definition.deathriteDamageEachUnitHere;
+    if (deathriteDamage) {
+      const projectedState = projectedDeathState();
+      const targets = (['north', 'south'] as const)
+        .flatMap((seat) => unitRefs(projectedState, seat))
+        .filter((ref) => {
+          const status = unitStatus(projectedState, ref);
+          return ref.instanceId !== dead.instanceId
+            && status.region === dead.region
+            && status.occupiedCells.includes(dead.location);
+        })
+        .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+      deathOutcomes.push(...targets.map((target) => ({
+        payload: {
+          amount: deathriteDamage,
+          sourceInstanceId: dead.instanceId,
+          targetInstanceId: target.instanceId,
+        },
+        type: 'deathrite-damage-allocated',
+      })));
+      const sourceLethal = !minionDisabled(state, dead)
+        && (definition.lethal === true || bearerHasLethal(state, {
+          instanceId: dead.instanceId,
+          kind: 'minion',
+          seat: dead.controller,
+        }));
+      const triggeredDeaths: UnitInstance[] = [];
+      for (const target of targets) {
+        const amount = deathriteDamage;
+        if (target.kind === 'avatar') {
+          const player = players[target.seat];
+          const avatar = player.avatar;
+          if (avatar.life === 0) {
+            if (avatar.deathDoorTurn !== state.turnNumber) {
+              resolvedDefeatedAvatars.add(target.seat);
+              deathOutcomes.push(
+                {
+                  payload: {
+                    amount,
+                    direct: true,
+                    instanceId: target.instanceId,
+                    seat: target.seat,
+                  },
+                  type: 'damage-dealt',
+                },
+                {
+                  payload: { instanceId: target.instanceId, seat: target.seat },
+                  type: 'death-blow',
+                },
+              );
+            } else {
+              deathOutcomes.push({
+                payload: {
+                  amount: 0,
+                  attemptedAmount: amount,
+                  direct: true,
+                  instanceId: target.instanceId,
+                  prevented: true,
+                  seat: target.seat,
+                },
+                type: 'damage-dealt',
+              });
+            }
+            continue;
+          }
+          const life = Math.max(0, avatar.life - amount);
+          const lost = avatar.life - life;
+          players[target.seat] = deepFreeze({
+            ...player,
+            avatar: {
+              ...avatar,
+              ...(life === 0 ? { deathDoorTurn: state.turnNumber } : {}),
+              life,
+            },
+          });
+          deathOutcomes.push(
+            {
+              payload: {
+                amount,
+                direct: true,
+                instanceId: target.instanceId,
+                seat: target.seat,
+              },
+              type: 'damage-dealt',
+            },
+            {
+              payload: { amount: lost, life, seat: target.seat },
+              type: 'avatar-life-lost',
+            },
+          );
+          if (life === 0) {
+            deathOutcomes.push({
+              payload: { seat: target.seat, turnNumber: state.turnNumber },
+              type: 'avatar-reached-deaths-door',
+            });
+          }
+          continue;
+        }
+
+        const index = survivingUnits.findIndex(({ instanceId }) =>
+          instanceId === target.instanceId);
+        const unit = survivingUnits[index];
+        if (!unit) continue;
+        if (unit.warded) {
+          survivingUnits[index] = deepFreeze({ ...unit, warded: false });
+          deathOutcomes.push(
+            {
+              payload: {
+                amount: 0,
+                attemptedAmount: amount,
+                direct: true,
+                instanceId: target.instanceId,
+                prevented: true,
+                seat: target.seat,
+              },
+              type: 'damage-dealt',
+            },
+            {
+              payload: { instanceId: target.instanceId, seat: target.seat },
+              type: 'ward-broken',
+            },
+          );
+          continue;
+        }
+        const status = unitStatus(projectedState, target);
+        const dealt = Math.max(0, amount - status.takesLessDamage);
+        const accumulated = unit.damage + dealt;
+        const awakened = dealt > 0 && unit.disabledUntilDamaged === true;
+        const updated = { ...unit, damage: accumulated };
+        if (awakened) delete updated.disabledUntilDamaged;
+        survivingUnits[index] = deepFreeze(updated);
+        deathOutcomes.push({
+          payload: {
+            accumulated,
+            amount: dealt,
+            ...(dealt < amount ? { attemptedAmount: amount, prevented: true } : {}),
+            direct: true,
+            instanceId: target.instanceId,
+            seat: target.seat,
+          },
+          type: 'damage-dealt',
+        });
+        if (awakened) {
+          deathOutcomes.push({
+            payload: { instanceId: target.instanceId, seat: target.seat },
+            type: 'minion-awakened',
+          });
+        }
+        if (accumulated > 0
+          && (accumulated >= status.defense || (dealt > 0 && sourceLethal))) {
+          triggeredDeaths.push(survivingUnits[index]!);
+        }
+      }
+      appendDeaths(triggeredDeaths);
+    }
     if (definition.deathriteHeal) {
       const controller = players[dead.controller];
       const avatarDefinition = cardDefinition(state, controller.avatar.card.cardId);
@@ -4531,9 +4721,9 @@ function resolveMinionDeaths(
   }
 
   let terminal: GameTerminal = { status: 'active' };
-  const losers = new Set([...defeatedAvatars, ...deckLosers]);
+  const losers = new Set([...resolvedDefeatedAvatars, ...deckLosers]);
   if (losers.size === 2) {
-    const reason = defeatedAvatars.size === 2 && deckLosers.size === 0
+    const reason = resolvedDefeatedAvatars.size === 2 && deckLosers.size === 0
       ? 'simultaneous_avatar_defeat'
       : 'simultaneous_defeat';
     terminal = { reason, result: 'draw', status: 'finished' };
@@ -4541,7 +4731,7 @@ function resolveMinionDeaths(
   } else if (losers.size === 1) {
     const loser = [...losers][0]!;
     const winner = otherSeat(loser);
-    const reason = defeatedAvatars.has(loser) ? 'avatar_defeated' : 'deck_empty';
+    const reason = resolvedDefeatedAvatars.has(loser) ? 'avatar_defeated' : 'deck_empty';
     terminal = { loser, reason, status: 'finished', winner };
     deathOutcomes.push({ payload: { loser, reason, winner }, type: 'game-ended' });
   }

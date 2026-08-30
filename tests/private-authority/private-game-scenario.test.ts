@@ -2414,6 +2414,27 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.fireIgnited.deck.spellbook
     .find(({ name }) => name === 'Ignited')?.copies, 4);
   assert.equal(result.fireIgnited.replayVerified, true);
+  assert.equal(result.fireSacredScarabs.sacredScarabs, 'Sacred Scarabs');
+  assert.equal(result.fireSacredScarabs.raalDromedary, 'Raal Dromedary');
+  assert.equal(result.fireSacredScarabs.acceptedActionCount, 23);
+  assert.equal(result.fireSacredScarabs.seed, 135);
+  assert.equal(result.fireSacredScarabs.normalFightKilledScarab, true);
+  assert.equal(result.fireSacredScarabs.normalStrikeWoundedRaal, true);
+  assert.equal(result.fireSacredScarabs.deathriteDamagedAvatar, true);
+  assert.equal(result.fireSacredScarabs.deathriteFinishedRaal, true);
+  assert.equal(result.fireSacredScarabs.exactCausalReceipts, true);
+  assert.equal(result.fireSacredScarabs.noRandomDraws, true);
+  assert.equal(result.fireSacredScarabs.unsupportedMechanicsAbsent, true);
+  assert.equal(result.fireSacredScarabs.legalConstructedDeck, true);
+  assert.equal(result.fireSacredScarabs.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.fireSacredScarabs.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.fireSacredScarabs.deck.spellbook
+    .find(({ name }) => name === 'Sacred Scarabs')?.copies, 4);
+  assert.equal(result.fireSacredScarabs.deck.spellbook
+    .find(({ name }) => name === 'Raal Dromedary')?.copies, 4);
+  assert.equal(result.fireSacredScarabs.replayVerified, true);
   assert.equal(result.combat.northMinionDied, true);
   assert.equal(result.combat.southMinionDied, true);
   assert.equal(result.waterDrown.drown, 'Drown');

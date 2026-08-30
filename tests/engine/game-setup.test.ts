@@ -38,6 +38,7 @@ type SpellFacts = Readonly<{
   cannotDefendOrIntercept?: boolean;
   charge?: boolean;
   connectsTopBottom?: boolean;
+  deathriteDamageEachUnitHere?: number;
   deathriteDrawSite?: boolean;
   deathriteHeal?: number;
   deathriteLoseLifePerNearbySiteControlled?: 1;
@@ -188,6 +189,9 @@ function cardsFor(
         cannotDefendOrIntercept: facts.cannotDefendOrIntercept ?? false,
         charge: facts.charge ?? false,
         connectsTopBottom: facts.connectsTopBottom ?? false,
+        ...(facts.deathriteDamageEachUnitHere
+          ? { deathriteDamageEachUnitHere: facts.deathriteDamageEachUnitHere }
+          : {}),
         deathriteDrawSite: facts.deathriteDrawSite ?? false,
         ...(facts.deathriteHeal ? { deathriteHeal: facts.deathriteHeal } : {}),
         ...(facts.deathriteLoseLifePerNearbySiteControlled === 1
@@ -12785,6 +12789,322 @@ test('RULE-05 Bladderblimp Deathrite makes each player lose life for their nearb
   assert.ok(firstDeath > events.findIndex(({ type }) => type === 'avatar-reached-deaths-door'));
   assert.equal(events.some(({ type }) => type === 'game-ended'), false);
   assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-05 Deathrite damages each other remaining unit here in simultaneous chained batches', () => {
+  const decks = {
+    north: deck('deathrite-damage-north', 5, 6),
+    south: deck('deathrite-damage-south', 5, 6),
+  };
+  const baseCards = cardsFor(decks, {
+    attack: 1,
+    defense: 1,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  }, undefined, { elements: ['earth'] });
+  const authority = {
+    contentHash: SYNTHETIC_AUTHORITY_HASH,
+    mode: 'synthetic' as const,
+    revisionId: 'synthetic-deathrite-area-damage-v1',
+  };
+  const seed = 263;
+  const preview = createGameSession(createGameManifest({
+    authority,
+    cards: baseCards,
+    decks,
+    firstSeat: 'north',
+    seed,
+  }));
+  const sourceCardId = preview.state.players.north.hand.spellbook[0]?.cardId;
+  const scarabCardIds = preview.state.players.south.hand.spellbook
+    .slice(0, 2)
+    .map(({ cardId }) => cardId);
+  const chainedCardId = preview.state.players.south.hand.spellbook[2]?.cardId;
+  assert.ok(sourceCardId);
+  assert.equal(scarabCardIds.length, 2);
+  assert.ok(chainedCardId);
+
+  const cards: Record<string, GameCardDefinition> = { ...baseCards };
+  cards[sourceCardId] = {
+    ...baseCards[sourceCardId]!,
+    attack: 1,
+    defense: 4,
+    genesisDamageEachOtherUnitHere: 1,
+    summonToAnySite: true,
+  } as GameCardDefinition;
+  for (const cardId of [...scarabCardIds, chainedCardId]) {
+    cards[cardId] = {
+      ...baseCards[cardId]!,
+      deathriteDamageEachUnitHere: 1,
+      defense: cardId === chainedCardId ? 2 : 1,
+      summonToAnySite: true,
+    } as unknown as GameCardDefinition;
+  }
+  assert.throws(() => createGameManifest({
+    authority,
+    cards: {
+      ...cards,
+      [scarabCardIds[0]!]: {
+        ...cards[scarabCardIds[0]!]!,
+        deathriteDamageEachUnitHere: 0,
+      } as unknown as GameCardDefinition,
+    },
+    decks,
+    firstSeat: 'north',
+    seed,
+  }), /deathriteDamageEachUnitHere must be a safe integer between 1 and/);
+  assert.throws(() => createGameManifest({
+    authority,
+    cards: {
+      ...cards,
+      [scarabCardIds[0]!]: {
+        ...cards[scarabCardIds[0]!]!,
+        occupiesSquareArea: 2,
+      } as unknown as GameCardDefinition,
+    },
+    decks,
+    firstSeat: 'north',
+    seed,
+  }), /occupiesSquareArea has an unsupported ability combination/);
+  const threeDamageManifest = createGameManifest({
+    authority,
+    cards: {
+      ...cards,
+      [scarabCardIds[0]!]: {
+        ...cards[scarabCardIds[0]!]!,
+        deathriteDamageEachUnitHere: 3,
+      } as GameCardDefinition,
+    },
+    decks,
+    firstSeat: 'north',
+    seed,
+  });
+  const threeDamageDefinition = threeDamageManifest.cards[scarabCardIds[0]!];
+  assert.equal(
+    threeDamageDefinition?.cardType === 'minion'
+      && threeDamageDefinition.deathriteDamageEachUnitHere,
+    3,
+  );
+
+  let session = keep(keep(createGameSession(createGameManifest({
+    authority,
+    cards,
+    decks,
+    firstSeat: 'north',
+    seed,
+  }))));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  for (const cardId of [...scarabCardIds, chainedCardId]) {
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === cardId
+      && descriptor.cell === 'C1');
+  }
+  const southUnits = [...session.state.realm.units];
+  const scarabInstanceIds = southUnits
+    .filter(({ cardId }) => scarabCardIds.includes(cardId))
+    .map(({ instanceId }) => instanceId)
+    .sort();
+  const chainedInstanceId = southUnits.find(({ cardId }) => cardId === chainedCardId)?.instanceId;
+  assert.equal(scarabInstanceIds.length, 2);
+  assert.ok(chainedInstanceId);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const sourceInstanceId = session.state.players.north.hand.spellbook
+    .find(({ cardId }) => cardId === sourceCardId)?.instanceId;
+  assert.ok(sourceInstanceId);
+  const result = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === sourceInstanceId
+      && descriptor.cell === 'C1'));
+  assert.equal(result.accepted, true);
+  if (!result.accepted) return;
+  session = result.session;
+
+  assert.equal(session.state.players.north.avatar.life, 20);
+  assert.equal(session.state.players.south.avatar.life, 16);
+  assert.equal(session.state.realm.units.length, 1);
+  assert.deepEqual(session.state.realm.units[0] && {
+    damage: session.state.realm.units[0].damage,
+    instanceId: session.state.realm.units[0].instanceId,
+    location: session.state.realm.units[0].location,
+  }, { damage: 3, instanceId: sourceInstanceId, location: 'C1' });
+  assert.deepEqual(
+    session.state.players.south.cemetery.map(({ instanceId }) => instanceId).sort(),
+    [...scarabInstanceIds, chainedInstanceId].sort(),
+  );
+
+  const events = result.receipt.events;
+  const allocations = events.filter(({ type }) => type === 'deathrite-damage-allocated');
+  assert.equal(allocations.length, 7);
+  const sourceOrder = allocations
+    .map(({ payload }) => payload !== null && typeof payload === 'object'
+      && 'sourceInstanceId' in payload ? payload.sourceInstanceId : undefined)
+    .filter((source, index, sources) => source !== undefined && sources.indexOf(source) === index);
+  assert.deepEqual(sourceOrder, [...scarabInstanceIds, chainedInstanceId]);
+  const southAvatarId = session.state.players.south.avatar.card.instanceId;
+  for (const [source, targets] of [
+    [scarabInstanceIds[0]!, [sourceInstanceId, southAvatarId, chainedInstanceId].sort()],
+    [scarabInstanceIds[1]!, [sourceInstanceId, southAvatarId].sort()],
+    [chainedInstanceId, [sourceInstanceId, southAvatarId].sort()],
+  ] as const) {
+    const expectedTargets = [...targets].sort();
+    assert.deepEqual(allocations.flatMap(({ payload }) =>
+      payload !== null
+        && typeof payload === 'object'
+        && 'sourceInstanceId' in payload
+        && payload.sourceInstanceId === source
+        && 'targetInstanceId' in payload
+        && typeof payload.targetInstanceId === 'string'
+        ? [payload.targetInstanceId]
+        : []), expectedTargets);
+    const allocationIndexes = events.flatMap((event, index) =>
+      event.type === 'deathrite-damage-allocated'
+        && event.payload !== null
+        && typeof event.payload === 'object'
+        && 'sourceInstanceId' in event.payload
+        && event.payload.sourceInstanceId === source
+        ? [index]
+        : []);
+    assert.deepEqual(
+      allocationIndexes,
+      Array.from(
+        { length: expectedTargets.length },
+        (_, index) => allocationIndexes[0]! + index,
+      ),
+    );
+    assert.equal(events[allocationIndexes.at(-1)! + 1]?.type, 'damage-dealt');
+  }
+  const northAvatarId = session.state.players.north.avatar.card.instanceId;
+  assert.equal(allocations.some(({ payload }) =>
+    payload !== null
+      && typeof payload === 'object'
+      && 'targetInstanceId' in payload
+      && payload.targetInstanceId === northAvatarId), false);
+  assert.equal(events.some(({ type }) =>
+    type === 'fight-started' || type === 'strike-damage-allocated'), false);
+  assert.ok(events.findIndex(({ type }) => type === 'minion-died')
+    > events.findLastIndex(({ type }) => type === 'deathrite-damage-allocated'));
+  assert.equal(events.filter(({ type }) => type === 'minion-died').length, 3);
+  assert.equal(result.receipt.randomDraws.length, 0);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-05 Deathrite uses its moved last location with Ward, reduction, and Lethal', () => {
+  const deathrite = {
+    attack: 0,
+    deathriteDamageEachUnitHere: 2,
+    defense: 1,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  } as const;
+  const resolve = (
+    seed: number,
+    source: SpellFacts,
+    target: SpellFacts,
+  ): ReturnType<typeof northAttacksAtC2> => {
+    const setup = northAttacksAtC2(seed, source, undefined, false, target);
+    let session = accept(setup.session, action(setup.session, ({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === setup.targetInstanceId));
+    session = accept(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+    return { ...setup, session };
+  };
+
+  const warded = resolve(266, deathrite, {
+    attack: 2,
+    defense: 10,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    ward: true,
+  });
+  const wardedEvents = warded.session.transcript.at(-1)?.events ?? [];
+  const wardedAllocationIndex = wardedEvents.findIndex(({ type }) =>
+    type === 'deathrite-damage-allocated');
+  assert.deepEqual(wardedEvents[wardedAllocationIndex]?.payload, {
+    amount: 2,
+    sourceInstanceId: warded.attackerInstanceId,
+    targetInstanceId: warded.targetInstanceId,
+  });
+  assert.deepEqual(wardedEvents.slice(wardedAllocationIndex + 1).find(({ payload, type }) =>
+    type === 'damage-dealt'
+      && canonicalJson(payload).includes(warded.targetInstanceId))?.payload, {
+    amount: 0,
+    attemptedAmount: 2,
+    direct: true,
+    instanceId: warded.targetInstanceId,
+    prevented: true,
+    seat: 'south',
+  });
+  assert.ok(wardedEvents.findIndex(({ type }) => type === 'ward-broken') > wardedAllocationIndex);
+  const sourceMoves = warded.session.transcript.flatMap(({ events }) =>
+    events.filter(({ payload, type }) =>
+      type === 'move-and-attack-activated'
+        && canonicalJson(payload).includes(warded.attackerInstanceId)));
+  assert.equal(sourceMoves.length, 2);
+  assert.equal(canonicalJson(sourceMoves.at(-1)!.payload).includes('"to":{"cell":"C2"'), true);
+  const wardedTarget = warded.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === warded.targetInstanceId);
+  const distantWarded = warded.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === warded.defenderInstanceId);
+  assert.deepEqual(wardedTarget && {
+    damage: wardedTarget.damage,
+    location: wardedTarget.location,
+    warded: wardedTarget.warded,
+  }, { damage: 0, location: 'C2', warded: false });
+  assert.deepEqual(distantWarded && {
+    damage: distantWarded.damage,
+    location: distantWarded.location,
+    warded: distantWarded.warded,
+  }, { damage: 0, location: 'C1', warded: true });
+  assert.equal(verifyGameReplay(warded.session), true);
+
+  const lethal = resolve(267, { ...deathrite, lethal: true }, {
+    attack: 2,
+    defense: 10,
+    manaCost: 1,
+    takesLessDamage: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  });
+  const lethalEvents = lethal.session.transcript.at(-1)?.events ?? [];
+  const lethalAllocationIndex = lethalEvents.findIndex(({ type }) =>
+    type === 'deathrite-damage-allocated');
+  assert.deepEqual(lethalEvents[lethalAllocationIndex]?.payload, {
+    amount: 2,
+    sourceInstanceId: lethal.attackerInstanceId,
+    targetInstanceId: lethal.targetInstanceId,
+  });
+  assert.deepEqual(lethalEvents.slice(lethalAllocationIndex + 1).find(({ payload, type }) =>
+    type === 'damage-dealt'
+      && canonicalJson(payload).includes(lethal.targetInstanceId))?.payload, {
+    accumulated: 1,
+    amount: 1,
+    attemptedAmount: 2,
+    direct: true,
+    instanceId: lethal.targetInstanceId,
+    prevented: true,
+    seat: 'south',
+  });
+  assert.ok(lethalEvents.findIndex(({ payload, type }) =>
+    type === 'minion-died' && canonicalJson(payload).includes(lethal.targetInstanceId))
+      > lethalAllocationIndex);
+  assert.equal(lethal.session.state.players.south.cemetery.some(({ instanceId }) =>
+    instanceId === lethal.targetInstanceId), true);
+  const distantReduced = lethal.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === lethal.defenderInstanceId);
+  assert.deepEqual(distantReduced && {
+    damage: distantReduced.damage,
+    location: distantReduced.location,
+  }, { damage: 0, location: 'C1' });
+  assert.equal(verifyGameReplay(lethal.session), true);
 });
 
 test('RULE-05 Deathrite healing caps at maximum, fails at Death\'s Door, and precedes cemetery entry', () => {
