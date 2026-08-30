@@ -177,6 +177,7 @@ export type GameCardDefinition =
     deathriteDrawSite?: boolean;
     deathriteLoseLifePerNearbySiteControlled?: 1;
     defense: number;
+    discardSpellToDamageRandomOtherUnitHere?: number;
     discardRandomCardInsteadOfMana?: true;
     diesAtEndOfControllerTurn?: true;
     genesisDamageEachOtherUnitHere?: 1;
@@ -680,6 +681,11 @@ type GameActionDescriptor =
     kind: 'activate-area-damage';
     sourceInstanceId: StateHash;
     targetLocation: GameLocation;
+  }>
+  | Readonly<{
+    discardCardInstanceId: StateHash;
+    kind: 'activate-discard-random-damage';
+    sourceInstanceId: StateHash;
   }>
   | Readonly<{
     kind: 'activate-sparkmage';
@@ -1841,6 +1847,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && card.deathriteLoseLifePerNearbySiteControlled !== 1) {
     throw new RangeError(`${path}.deathriteLoseLifePerNearbySiteControlled must be 1`);
   }
+  if (card.discardSpellToDamageRandomOtherUnitHere !== undefined
+    && (!Number.isSafeInteger(card.discardSpellToDamageRandomOtherUnitHere)
+      || card.discardSpellToDamageRandomOtherUnitHere < 1
+      || card.discardSpellToDamageRandomOtherUnitHere > MAX_COMBAT_STAT)) {
+    throw new RangeError(
+      `${path}.discardSpellToDamageRandomOtherUnitHere must be a safe integer between 1 and ${MAX_COMBAT_STAT}`,
+    );
+  }
   if (card.discardRandomCardInsteadOfMana !== undefined
     && card.discardRandomCardInsteadOfMana !== true) {
     throw new RangeError(`${path}.discardRandomCardInsteadOfMana must be true when defined`);
@@ -2014,6 +2028,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.mustBeCastToOuterColumn === true
       || card.token === true
       || card.deathriteDamageEachUnitHere !== undefined
+      || card.discardSpellToDamageRandomOtherUnitHere !== undefined
       || card.genesisDamageEachOtherUnitHere === 1
       || card.genesisDisableSelfUntilDamaged === true
       || card.genesisMayDamageTargetAdjacentUnit === 2
@@ -2391,6 +2406,12 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? { deathriteLoseLifePerNearbySiteControlled: 1 as const }
               : {}),
             defense: card.defense,
+            ...(card.discardSpellToDamageRandomOtherUnitHere !== undefined
+              ? {
+                discardSpellToDamageRandomOtherUnitHere:
+                  card.discardSpellToDamageRandomOtherUnitHere,
+              }
+              : {}),
             ...(card.diesAtEndOfControllerTurn === true
               ? { diesAtEndOfControllerTurn: true as const }
               : {}),
@@ -3729,6 +3750,27 @@ function areaDamageAbilityDescriptors(state: GameState, seat: GameSeat): readonl
   });
 }
 
+function discardRandomDamageDescriptors(
+  state: GameState,
+  seat: GameSeat,
+): readonly GameActionDescriptor[] {
+  const discardCardInstanceIds = state.players[seat].hand.spellbook
+    .map(({ instanceId }) => instanceId)
+    .sort((left, right) => left.localeCompare(right));
+  if (discardCardInstanceIds.length === 0) return [];
+  return state.realm.units.flatMap((unit) => {
+    if (unit.controller !== seat || minionDisabled(state, unit)) return [];
+    const definition = cardDefinition(state, unit.cardId);
+    if (definition.cardType !== 'minion'
+      || definition.discardSpellToDamageRandomOtherUnitHere === undefined) return [];
+    return discardCardInstanceIds.map((discardCardInstanceId) => ({
+      discardCardInstanceId,
+      kind: 'activate-discard-random-damage' as const,
+      sourceInstanceId: unit.instanceId,
+    }));
+  });
+}
+
 function sparkmageDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
   const player = state.players[seat];
   const avatarDefinition = cardDefinition(state, player.avatar.card.cardId);
@@ -3968,6 +4010,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     ...dropArtifactDescriptors(state, seat),
     ...siteDestructionDescriptors(state, seat),
     ...areaDamageAbilityDescriptors(state, seat),
+    ...discardRandomDamageDescriptors(state, seat),
     ...sparkmageDescriptors(state, seat),
     ...manaAbilityDescriptors(state, seat),
     ...movementDescriptors(state, seat),
@@ -4153,6 +4196,15 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
   }
   if (descriptor.kind === 'activate-area-damage') {
     return `Tap ${descriptor.sourceInstanceId.slice(0, 15)}… to damage every unit at ${descriptor.targetLocation.cell}`;
+  }
+  if (descriptor.kind === 'activate-discard-random-damage') {
+    const source = state.realm.units.find(({ instanceId }) =>
+      instanceId === descriptor.sourceInstanceId);
+    const discard = source
+      ? state.players[source.controller].hand.spellbook.find(({ instanceId }) =>
+        instanceId === descriptor.discardCardInstanceId)
+      : undefined;
+    return `Discard ${discard?.cardId ?? 'selected Spellbook card'} to activate ${descriptor.sourceInstanceId.slice(0, 15)}…`;
   }
   if (descriptor.kind === 'activate-sparkmage') {
     const amount = state.players[state.decisionSeat].airThresholdsCastThisTurn ?? 0;
@@ -8602,6 +8654,135 @@ function applyDescriptor(
       true,
     );
     return [withStateVersion(damaged, {}), outcomes, randomDraws];
+  }
+
+  if (descriptor.kind === 'activate-discard-random-damage') {
+    const legal = discardRandomDamageDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'activate-discard-random-damage'
+        && candidate.sourceInstanceId === descriptor.sourceInstanceId
+        && candidate.discardCardInstanceId === descriptor.discardCardInstanceId);
+    const source = state.realm.units.find(({ instanceId }) =>
+      instanceId === descriptor.sourceInstanceId);
+    const discardedCard = player.hand.spellbook.find(({ instanceId }) =>
+      instanceId === descriptor.discardCardInstanceId);
+    if (!legal || !source || !discardedCard) {
+      throw new Error('unreachable illegal discard-random-damage activation');
+    }
+    const definition = cardDefinition(state, source.cardId);
+    if (definition.cardType !== 'minion'
+      || definition.discardSpellToDamageRandomOtherUnitHere === undefined) {
+      throw new Error('unreachable discard-random-damage source definition');
+    }
+    const amount = definition.discardSpellToDamageRandomOtherUnitHere;
+    const sourceRef: GameUnitRef = { instanceId: source.instanceId, kind: 'minion', seat };
+    const sourceStatus = unitStatus(state, sourceRef);
+    const paidPlayer = deepFreeze({
+      ...player,
+      cemetery: [...player.cemetery, discardedCard],
+      hand: {
+        ...player.hand,
+        spellbook: player.hand.spellbook.filter(({ instanceId }) =>
+          instanceId !== descriptor.discardCardInstanceId),
+      },
+    });
+    const paidState = deepFreeze({
+      ...state,
+      players: replacePlayer(state, seat, paidPlayer),
+    });
+    const interaction = recordInteraction(paidState, [sourceRef]);
+    const activatedState = deepFreeze({
+      ...paidState,
+      players: interaction.players,
+      realm: { ...paidState.realm, units: interaction.units },
+    });
+    const candidates = (['north', 'south'] as const)
+      .flatMap((targetSeat) => unitRefs(activatedState, targetSeat))
+      .filter((target) => {
+        if (target.instanceId === source.instanceId) return false;
+        const status = unitStatus(activatedState, target);
+        return status.region === sourceStatus.region
+          && status.occupiedCells.includes(sourceStatus.location);
+      })
+      .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+    const discarded: GameOutcome = {
+      payload: {
+        cardId: discardedCard.cardId,
+        instanceId: discardedCard.instanceId,
+        owner: discardedCard.owner,
+        seat,
+        sourceInstanceId: source.instanceId,
+        zone: 'spellbook',
+      },
+      type: 'card-discarded',
+    };
+    if (candidates.length === 0) {
+      return [withStateVersion(activatedState, {}), [discarded, {
+        payload: {
+          amount,
+          discardCardInstanceId: discardedCard.instanceId,
+          seat,
+          sourceInstanceId: source.instanceId,
+          sourceLocation: { cell: sourceStatus.location, region: sourceStatus.region },
+        },
+        type: 'discard-random-damage-activated',
+      }, ...interaction.outcomes], []];
+    }
+    const selected = drawCandidate(
+      activatedState.engine,
+      candidates.length,
+      'discard_spell_random_other_unit_here',
+      'unit_index_candidate',
+    );
+    const targetRef = candidates[selected.index]!;
+    const randomizedState = deepFreeze({ ...activatedState, engine: selected.engine });
+    const activated: GameOutcome = {
+      payload: {
+        amount,
+        discardCardInstanceId: discardedCard.instanceId,
+        seat,
+        sourceInstanceId: source.instanceId,
+        sourceLocation: { cell: sourceStatus.location, region: sourceStatus.region },
+        targetInstanceId: targetRef.instanceId,
+        targetKind: targetRef.kind,
+        targetSeat: targetRef.seat,
+      },
+      type: 'discard-random-damage-activated',
+    };
+    const allocated: GameOutcome = {
+      payload: {
+        amount,
+        sourceInstanceId: source.instanceId,
+        targetInstanceId: targetRef.instanceId,
+      },
+      type: 'discard-random-damage-allocated',
+    };
+    const pending: PendingCombat = deepFreeze({
+      allocations: [{ amount, targetInstanceId: targetRef.instanceId }],
+      attacker: sourceRef,
+      attackingSeat: seat,
+      cell: sourceStatus.location,
+      combatants: [targetRef],
+      defenders: [],
+      originalTarget: targetRef,
+      ...(sourceStatus.region === 'surface' ? {} : { region: sourceStatus.region }),
+      targetRemoved: false,
+    });
+    const [damaged, outcomes, randomDraws] = resolveFightWindow(
+      randomizedState,
+      pending,
+      [discarded, activated, ...interaction.outcomes, allocated],
+      'attacker-unit',
+      true,
+      false,
+      [],
+      false,
+      true,
+    );
+    return [
+      withStateVersion(damaged, {}),
+      outcomes,
+      [...selected.randomDraws, ...randomDraws],
+    ];
   }
 
   if (descriptor.kind === 'activate-sparkmage') {

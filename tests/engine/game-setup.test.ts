@@ -43,6 +43,7 @@ type SpellFacts = Readonly<{
   deathriteHeal?: number;
   deathriteLoseLifePerNearbySiteControlled?: 1;
   defense?: number;
+  discardSpellToDamageRandomOtherUnitHere?: number;
   discardRandomCardInsteadOfMana?: true;
   diesAtEndOfControllerTurn?: true;
   gainsStealthAtEndOfTurn?: boolean;
@@ -199,6 +200,12 @@ function cardsFor(
           ? { deathriteLoseLifePerNearbySiteControlled: 1 as const }
           : {}),
         defense: facts.defense ?? 1,
+        ...(facts.discardSpellToDamageRandomOtherUnitHere !== undefined
+          ? {
+            discardSpellToDamageRandomOtherUnitHere:
+              facts.discardSpellToDamageRandomOtherUnitHere,
+          }
+          : {}),
         ...(facts.discardRandomCardInsteadOfMana === true
           ? { discardRandomCardInsteadOfMana: true as const }
           : {}),
@@ -977,6 +984,45 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     }), /genesisDrawSpells must be a safe integer between 1 and 200/);
   }
+  for (const discardSpellToDamageRandomOtherUnitHere of [0, 1.5, 101]) {
+    assert.throws(() => createGameManifest({
+      ...input,
+      cards: {
+        ...cards,
+        [firstSpell]: {
+          ...cards[firstSpell]!,
+          discardSpellToDamageRandomOtherUnitHere,
+        } as unknown as GameCardDefinition,
+      },
+    }), /discardSpellToDamageRandomOtherUnitHere must be a safe integer between 1 and 100/);
+  }
+  const discardDamageManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        discardSpellToDamageRandomOtherUnitHere: 3,
+      } as unknown as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    discardDamageManifest.cards[firstSpell]?.cardType === 'minion'
+      && (discardDamageManifest.cards[firstSpell] as unknown as Readonly<Record<string, unknown>>)
+        .discardSpellToDamageRandomOtherUnitHere,
+    3,
+  );
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        discardSpellToDamageRandomOtherUnitHere: 3,
+        occupiesSquareArea: 2,
+      } as unknown as GameCardDefinition,
+    },
+  }), /occupiesSquareArea has an unsupported ability combination/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -16783,4 +16829,517 @@ test('RULE-04 an active surface minion derives power, Ranged, and Spellcaster at
   underground = accept(underground, action(underground, ({ descriptor }) =>
     descriptor.kind === 'end-turn'));
   assert.equal(verifyGameReplay(underground), true);
+});
+
+test('RULE-03 a minion discards a chosen Spellbook card to damage a random other unit here', () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const north: GameDeckSpec = {
+    atlas: Array(6).fill('nimbus-site'),
+    avatar: 'nimbus-avatar',
+    spellbook: [
+      'nimbus-source', 'nimbus-discard-a', 'nimbus-discard-b',
+      'nimbus-source', 'nimbus-discard-a', 'nimbus-discard-b',
+      'nimbus-source', 'nimbus-discard-a', 'nimbus-discard-b',
+    ],
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(6).fill('nimbus-south-site'),
+    avatar: 'nimbus-south-avatar',
+    spellbook: Array(6).fill('nimbus-south-dummy'),
+  };
+  const cards = cardsFor(
+    { north, south },
+    {
+      attack: 4,
+      defense: 4,
+      discardSpellToDamageRandomOtherUnitHere: 3,
+      manaCost: 0,
+      thresholds,
+    },
+    { attack: 1, defense: 1, drawSpell: false, life: 20 },
+    { elements: ['air'], genesisGainMana: 6 },
+  );
+  for (const cardId of ['nimbus-discard-a', 'nimbus-discard-b']) {
+    cards[cardId] = {
+      cardType: 'magic',
+      healController: 1,
+      manaCost: 0,
+      thresholds,
+    };
+  }
+  const gameManifest = createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic',
+      revisionId: 'synthetic-nimbus-discard-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north',
+    seed: 3,
+  });
+  assert.equal(gameManifest.cards['nimbus-source']?.cardType === 'minion'
+    && gameManifest.cards['nimbus-source'].discardSpellToDamageRandomOtherUnitHere, 3);
+
+  let session = keep(keep(createGameSession(gameManifest)));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
+  const sourceCard = session.state.players.north.hand.spellbook.find(({ cardId }) =>
+    cardId === 'nimbus-source');
+  assert.ok(sourceCard);
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === sourceCard.instanceId
+      && descriptor.cell === 'C4'));
+  const source = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === sourceCard.instanceId);
+  assert.ok(source);
+  const discardCards = session.state.players.north.hand.spellbook
+    .filter(({ cardId }) => cardId.startsWith('nimbus-discard-'))
+    .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+  assert.equal(discardCards.length, 2);
+  const activations = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'activate-discard-random-damage'
+      && descriptor.sourceInstanceId === source.instanceId);
+  assert.deepEqual(activations.map(({ descriptor }) =>
+    descriptor.kind === 'activate-discard-random-damage'
+      ? descriptor.discardCardInstanceId
+      : ''), discardCards.map(({ instanceId }) => instanceId));
+  assert.equal(new Set(activations.map(({ actionId }) => actionId)).size, 2);
+  assert.equal(activations.every(({ descriptor }) =>
+    !canonicalJson(descriptor as unknown as JsonValue).includes('target')), true);
+  const labelsByCardId = Object.fromEntries(activations.map(({ descriptor, label }) => {
+    if (descriptor.kind !== 'activate-discard-random-damage') return ['', label];
+    const discard = discardCards.find(({ instanceId }) =>
+      instanceId === descriptor.discardCardInstanceId);
+    return [discard?.cardId ?? '', label];
+  }));
+  assert.deepEqual(labelsByCardId, {
+    'nimbus-discard-a': `Discard nimbus-discard-a to activate ${source.instanceId.slice(0, 15)}…`,
+    'nimbus-discard-b': `Discard nimbus-discard-b to activate ${source.instanceId.slice(0, 15)}…`,
+  });
+  assert.equal(activations.every(({ descriptor, label }) =>
+    descriptor.kind === 'activate-discard-random-damage'
+      && !label.includes(descriptor.discardCardInstanceId.slice(0, 15))), true);
+
+  const chosen = activations[0]!;
+  const discardedCard = discardCards[0]!;
+  const avatarInstanceId = session.state.players.north.avatar.card.instanceId;
+  const first = stepGame(session, chosen);
+  assert.equal(first.accepted, true);
+  if (!first.accepted) return;
+  session = first.session;
+  assert.deepEqual(first.receipt.events.map(({ type }) => type), [
+    'card-discarded',
+    'discard-random-damage-activated',
+    'discard-random-damage-allocated',
+    'damage-dealt',
+    'avatar-life-lost',
+  ]);
+  assert.deepEqual(first.receipt.events[0]?.payload, {
+    cardId: discardedCard.cardId,
+    instanceId: discardedCard.instanceId,
+    owner: 'north',
+    seat: 'north',
+    sourceInstanceId: source.instanceId,
+    zone: 'spellbook',
+  });
+  assert.deepEqual(first.receipt.events[1]?.payload, {
+    amount: 3,
+    discardCardInstanceId: discardedCard.instanceId,
+    seat: 'north',
+    sourceInstanceId: source.instanceId,
+    sourceLocation: { cell: 'C4', region: 'surface' },
+    targetInstanceId: avatarInstanceId,
+    targetKind: 'avatar',
+    targetSeat: 'north',
+  });
+  assert.deepEqual(first.receipt.events[2]?.payload, {
+    amount: 3,
+    sourceInstanceId: source.instanceId,
+    targetInstanceId: avatarInstanceId,
+  });
+  assert.equal(first.receipt.randomDraws.length, 1);
+  assert.equal(first.receipt.randomDraws[0]?.purpose,
+    'discard_spell_random_other_unit_here');
+  assert.deepEqual(first.receipt.randomDraws[0]?.domain, {
+    accepted: true,
+    exclusiveMaximum: 1,
+    kind: 'unit_index_candidate',
+  });
+  assert.equal(session.state.players.north.avatar.life, 17);
+  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === discardedCard.instanceId), true);
+  assert.equal(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === source.instanceId)?.tapped, false);
+  const southView = observeGame(session.state, 'south');
+  assert.equal(southView.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === discardedCard.instanceId), true);
+  assert.equal(typeof southView.players.north.hand.spellbook, 'number');
+
+  const stale = stepGame(session, chosen);
+  assert.equal(stale.accepted, false);
+  if (!stale.accepted) assert.equal(stale.reason.code, 'stale_version');
+  const repeat = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'activate-discard-random-damage'
+      && descriptor.sourceInstanceId === source.instanceId));
+  assert.equal(repeat.accepted, true);
+  if (repeat.accepted) {
+    assert.equal(repeat.session.state.players.north.avatar.life, 14);
+    assert.equal(repeat.receipt.randomDraws.length, 1);
+    assert.equal(verifyGameReplay(repeat.session), true);
+  }
+
+  let emptySession = keep(keep(createGameSession(gameManifest)));
+  const takeEmpty = (predicate: Parameters<typeof action>[1]): void => {
+    emptySession = accept(emptySession, action(emptySession, predicate));
+  };
+  takeEmpty(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  takeEmpty(({ descriptor }) => descriptor.kind === 'end-turn');
+  takeEmpty(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  takeEmpty(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  takeEmpty(({ descriptor }) => descriptor.kind === 'end-turn');
+  takeEmpty(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  takeEmpty(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  takeEmpty(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'nimbus-source'
+    && descriptor.cell === 'C3');
+  const emptySource = emptySession.state.realm.units.find(({ cardId }) =>
+    cardId === 'nimbus-source');
+  assert.ok(emptySource);
+  const emptyResult = stepGame(emptySession, action(emptySession, ({ descriptor }) =>
+    descriptor.kind === 'activate-discard-random-damage'
+      && descriptor.sourceInstanceId === emptySource.instanceId));
+  assert.equal(emptyResult.accepted, true);
+  if (emptyResult.accepted) {
+    assert.deepEqual(emptyResult.receipt.events.map(({ type }) => type), [
+      'card-discarded',
+      'discard-random-damage-activated',
+    ]);
+    assert.equal(emptyResult.receipt.randomDraws.length, 0);
+    assert.equal(
+      canonicalJson(emptyResult.receipt.events[1]!.payload).includes('targetInstanceId'),
+      false,
+    );
+    assert.equal(verifyGameReplay(emptyResult.session), true);
+  }
+});
+
+test('RULE-03 random other-unit damage includes allied, enemy, Avatar, and Stealth candidates', () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const north: GameDeckSpec = {
+    atlas: Array(6).fill('nimbus-many-site'),
+    avatar: 'nimbus-many-avatar',
+    spellbook: [
+      'nimbus-many-source', 'nimbus-many-ally', 'nimbus-many-discard',
+      'nimbus-many-source', 'nimbus-many-ally', 'nimbus-many-discard',
+      'nimbus-many-source', 'nimbus-many-ally', 'nimbus-many-discard',
+    ],
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(6).fill('nimbus-many-south-site'),
+    avatar: 'nimbus-many-south-avatar',
+    spellbook: [
+      'nimbus-many-enemy', 'nimbus-many-enemy', 'nimbus-many-enemy',
+      'nimbus-many-dummy', 'nimbus-many-dummy', 'nimbus-many-dummy',
+    ],
+  };
+  const cards = cardsFor({ north, south }, { manaCost: 0, thresholds });
+  cards['nimbus-many-source'] = {
+    attack: 4,
+    cardType: 'minion',
+    defense: 4,
+    discardSpellToDamageRandomOtherUnitHere: 3,
+    manaCost: 0,
+    thresholds,
+  };
+  cards['nimbus-many-ally'] = {
+    attack: 1,
+    cardType: 'minion',
+    defense: 5,
+    manaCost: 0,
+    stealth: true,
+    thresholds,
+  };
+  cards['nimbus-many-discard'] = {
+    cardType: 'magic',
+    healController: 1,
+    manaCost: 0,
+    thresholds,
+  };
+  cards['nimbus-many-enemy'] = {
+    attack: 1,
+    cardType: 'minion',
+    defense: 5,
+    manaCost: 0,
+    summonToAnySite: true,
+    thresholds,
+  };
+  const gameManifest = createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic',
+      revisionId: 'synthetic-nimbus-many-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north',
+    seed: 3,
+  });
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'nimbus-many-ally' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'nimbus-many-enemy' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'nimbus-many-source' && descriptor.cell === 'C4');
+  const source = session.state.realm.units.find(({ cardId }) =>
+    cardId === 'nimbus-many-source');
+  const ally = session.state.realm.units.find(({ cardId }) => cardId === 'nimbus-many-ally');
+  const enemy = session.state.realm.units.find(({ cardId }) => cardId === 'nimbus-many-enemy');
+  assert.ok(source && ally && enemy);
+  const activation = action(session, ({ descriptor }) =>
+    descriptor.kind === 'activate-discard-random-damage'
+      && descriptor.sourceInstanceId === source.instanceId);
+  if (activation.descriptor.kind !== 'activate-discard-random-damage') return;
+  assert.deepEqual(legalGameActions(session.state, 'south'), []);
+
+  const disabledSession: GameSession = {
+    ...session,
+    state: {
+      ...session.state,
+      realm: {
+        ...session.state.realm,
+        units: session.state.realm.units.map((unit) => unit.instanceId === source.instanceId
+          ? { ...unit, disabledUntilDamaged: true }
+          : unit),
+      },
+    },
+  };
+  assert.equal(legalGameActions(disabledSession.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'activate-discard-random-damage'
+      && descriptor.sourceInstanceId === source.instanceId), false);
+  const removedSession: GameSession = {
+    ...session,
+    state: {
+      ...session.state,
+      realm: {
+        ...session.state.realm,
+        units: session.state.realm.units.filter(({ instanceId }) => instanceId !== source.instanceId),
+      },
+    },
+  };
+  assert.equal(legalGameActions(removedSession.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'activate-discard-random-damage'), false);
+  const forgedDescriptor = { ...activation.descriptor, targetInstanceId: enemy.instanceId };
+  const beforeForge = hashGameState(session.state);
+  const forged = stepGame(session, {
+    actionId: opaqueActionId(
+      'sorcery-core-v1',
+      'north',
+      session.state.stateVersion,
+      forgedDescriptor,
+    ),
+    seat: 'north',
+    stateVersion: session.state.stateVersion,
+  });
+  assert.equal(forged.accepted, false);
+  if (!forged.accepted) assert.equal(forged.reason.code, 'unknown_action');
+  assert.equal(hashGameState(forged.session.state), beforeForge);
+
+  const oversizedSession: GameSession = {
+    ...session,
+    state: {
+      ...session.state,
+      realm: {
+        ...session.state.realm,
+        units: session.state.realm.units.map((unit) => unit.instanceId === enemy.instanceId
+          ? { ...unit, occupiedCells: ['B3', 'B4', 'C3', 'C4'] as const }
+          : unit),
+      },
+    },
+  };
+  const oversizedResult = stepGame(oversizedSession, action(oversizedSession, ({ descriptor }) =>
+    descriptor.kind === 'activate-discard-random-damage'
+      && descriptor.sourceInstanceId === source.instanceId));
+  assert.equal(oversizedResult.accepted, true);
+  if (oversizedResult.accepted) {
+    assert.deepEqual(oversizedResult.receipt.randomDraws[0]?.domain, {
+      accepted: true,
+      exclusiveMaximum: 3,
+      kind: 'unit_index_candidate',
+    });
+  }
+
+  const candidates = [
+    session.state.players.north.avatar.card.instanceId,
+    ally.instanceId,
+    enemy.instanceId,
+  ].sort((left, right) => left.localeCompare(right));
+  const result = stepGame(session, activation);
+  assert.equal(result.accepted, true);
+  if (!result.accepted) return;
+  assert.equal(result.receipt.randomDraws.length, 1);
+  assert.deepEqual(result.receipt.randomDraws[0]?.domain, {
+    accepted: true,
+    exclusiveMaximum: 3,
+    kind: 'unit_index_candidate',
+  });
+  const randomResult = result.receipt.randomDraws[0]!.result;
+  assert.equal(typeof randomResult, 'number');
+  if (typeof randomResult !== 'number') return;
+  const selectedIndex = randomResult % candidates.length;
+  const selectedInstanceId = candidates[selectedIndex]!;
+  const activated = result.receipt.events.find(({ type }) =>
+    type === 'discard-random-damage-activated');
+  assert.ok(activated);
+  assert.match(canonicalJson(activated.payload), new RegExp(selectedInstanceId));
+  assert.equal(result.receipt.events.filter(({ type }) =>
+    type === 'discard-random-damage-allocated').length, 1);
+  assert.equal(result.receipt.events.filter(({ type }) => type === 'damage-dealt').length, 1);
+  assert.equal(result.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === source.instanceId)?.damage, 0);
+  assert.equal(result.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === ally.instanceId)?.stealthed, true);
+  assert.equal(verifyGameReplay(result.session), true);
+});
+
+test('RULE-03 discard damage snapshots derived unit power and uses Ward and prevention', () => {
+  const run = (
+    auraBonus: boolean,
+    targetFacts: Readonly<{ prevents?: number; ward?: boolean }>,
+  ): Readonly<{ result: Extract<ReturnType<typeof stepGame>, { accepted: true }>; targetId: string }> => {
+    const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+    const north: GameDeckSpec = {
+      atlas: Array(6).fill('nimbus-prevention-site'),
+      avatar: 'nimbus-prevention-avatar',
+      spellbook: [
+        'nimbus-prevention-source', 'nimbus-prevention-aura',
+        'nimbus-prevention-target', 'nimbus-prevention-discard',
+        'nimbus-prevention-source', 'nimbus-prevention-aura',
+        'nimbus-prevention-target', 'nimbus-prevention-discard',
+        'nimbus-prevention-source', 'nimbus-prevention-aura',
+        'nimbus-prevention-target', 'nimbus-prevention-discard',
+      ],
+    };
+    const south: GameDeckSpec = {
+      atlas: Array(6).fill('nimbus-prevention-south-site'),
+      avatar: 'nimbus-prevention-south-avatar',
+      spellbook: Array(6).fill('nimbus-prevention-dummy'),
+    };
+    const cards = cardsFor({ north, south }, { manaCost: 0, thresholds });
+    cards['nimbus-prevention-source'] = {
+      attack: 3,
+      cardType: 'minion',
+      defense: 4,
+      discardSpellToDamageRandomOtherUnitHere: 3,
+      manaCost: 0,
+      thresholds,
+    };
+    cards['nimbus-prevention-aura'] = {
+      attack: 1,
+      cardType: 'minion',
+      defense: 4,
+      manaCost: 0,
+      ...(auraBonus ? { otherNearbyAlliesPowerBonus: 1 as const } : {}),
+      thresholds,
+    };
+    cards['nimbus-prevention-target'] = {
+      attack: 1,
+      cardType: 'minion',
+      defense: 3,
+      manaCost: 0,
+      ...(targetFacts.prevents !== undefined
+        ? { preventsDamageFromUnitsWithPowerAtLeast: targetFacts.prevents }
+        : {}),
+      thresholds,
+      ...(targetFacts.ward ? { ward: true } : {}),
+    };
+    cards['nimbus-prevention-discard'] = {
+      cardType: 'magic',
+      healController: 1,
+      manaCost: 0,
+      thresholds,
+    };
+    const gameManifest = createGameManifest({
+      authority: {
+        contentHash: SYNTHETIC_AUTHORITY_HASH,
+        mode: 'synthetic',
+        revisionId: `synthetic-nimbus-prevention-${auraBonus}-${targetFacts.ward ?? false}`,
+      },
+      cards,
+      decks: { north, south },
+      firstSeat: 'north',
+      seed: 31,
+    });
+    let session = keep(keep(createGameSession(gameManifest)));
+    const take = (predicate: Parameters<typeof action>[1]): void => {
+      session = accept(session, action(session, predicate));
+    };
+    take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === 'nimbus-prevention-aura' && descriptor.cell === 'C4');
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === 'nimbus-prevention-target' && descriptor.cell === 'C3');
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === 'nimbus-prevention-source' && descriptor.cell === 'C3');
+    const source = session.state.realm.units.find(({ cardId }) =>
+      cardId === 'nimbus-prevention-source');
+    const target = session.state.realm.units.find(({ cardId }) =>
+      cardId === 'nimbus-prevention-target');
+    assert.ok(source && target);
+    assert.equal(observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
+      instanceId === source.instanceId)?.attack, auraBonus ? 4 : 3);
+    const result = stepGame(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'activate-discard-random-damage'
+        && descriptor.sourceInstanceId === source.instanceId));
+    assert.equal(result.accepted, true);
+    if (!result.accepted) throw new Error('expected Nimbus prevention scenario activation');
+    assert.equal(result.receipt.randomDraws.length, 1);
+    assert.equal(verifyGameReplay(result.session), true);
+    return { result, targetId: target.instanceId };
+  };
+
+  const protectedResult = run(true, { prevents: 4 });
+  assert.deepEqual(protectedResult.result.receipt.events.find(({ type }) =>
+    type === 'damage-dealt')?.payload, {
+    accumulated: 0,
+    amount: 0,
+    attemptedAmount: 3,
+    direct: true,
+    instanceId: protectedResult.targetId,
+    prevented: true,
+    seat: 'north',
+  });
+  assert.equal(protectedResult.result.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === protectedResult.targetId), true);
+
+  const belowThreshold = run(false, { prevents: 4 });
+  assert.equal(belowThreshold.result.receipt.events.some(({ payload, type }) =>
+    type === 'minion-died' && canonicalJson(payload).includes(belowThreshold.targetId)), true);
+  assert.equal(belowThreshold.result.session.state.realm.units.some(({ instanceId }) =>
+    instanceId === belowThreshold.targetId), false);
+
+  const warded = run(true, { ward: true });
+  assert.deepEqual(warded.result.receipt.events.slice(-2).map(({ type }) => type), [
+    'damage-dealt',
+    'ward-broken',
+  ]);
+  assert.equal(warded.result.session.state.realm.units.find(({ instanceId }) =>
+    instanceId === warded.targetId)?.warded, false);
 });

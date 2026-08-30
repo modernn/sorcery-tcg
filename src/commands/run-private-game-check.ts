@@ -324,6 +324,23 @@ export type PrivateGameCheck = Readonly<{
     towerBonusVerified: boolean;
     unsupportedMechanicsAbsent: boolean;
   }>;
+  airNimbusJinn: Readonly<{
+    acceptedActionCount: number;
+    candidateSetVerified: boolean;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    discardFaceUpAndRedactionVerified: boolean;
+    discardedSpell: string;
+    exactEventsVerified: boolean;
+    legalConstructedDeck: boolean;
+    nimbusJinn: string;
+    oneRecipientDamaged: boolean;
+    randomReceiptVerified: boolean;
+    replayVerified: boolean;
+    seed: number;
+    structuralFactsVerified: boolean;
+    unsupportedMechanicsAbsent: boolean;
+  }>;
   airLeyline: Readonly<{
     acceptedActionCount: number;
     deck: DeckList;
@@ -1566,6 +1583,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   grandmasterWizard: NormalizedCard;
   slingPixies: NormalizedCard;
   spireLich: NormalizedCard;
+  nimbusJinn: NormalizedCard;
   genesisMinion: NormalizedCard;
   geomancer: NormalizedCard;
   gothicTower: NormalizedCard;
@@ -3489,6 +3507,29 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || spireLich.subtypes[0] !== 'Undead') {
     throw new Error('private Tower-conditional minion no longer matches its supported facts');
   }
+  const nimbusJinn = snapshot.cards.find(({ name }) => name === 'Nimbus Jinn');
+  if (!nimbusJinn
+    || nimbusJinn.stableId
+      !== 'card:b94c9b875d3fdf333dc244b8cd27c0985c9395a16265e18b32e9c80f6b103277'
+    || nimbusJinn.officialSourceId !== '001-nimbus_jinn-b-f'
+    || nimbusJinn.cardType !== 'minion'
+    || ruleTextDigest(nimbusJinn.rulesText)
+      !== 'sha256:3efdebf3a9d4b8ad19833c1be37be975dfc079d2562b79c510e86b7d2db06dff'
+    || nimbusJinn.manaCost !== 6
+    || nimbusJinn.attack !== 4
+    || nimbusJinn.defense !== 4
+    || nimbusJinn.life !== null
+    || nimbusJinn.elements.length !== 1
+    || nimbusJinn.elements[0] !== 'air'
+    || nimbusJinn.thresholds.air !== 2
+    || nimbusJinn.thresholds.earth !== 0
+    || nimbusJinn.thresholds.fire !== 0
+    || nimbusJinn.thresholds.water !== 0
+    || nimbusJinn.rarity !== 'elite'
+    || nimbusJinn.subtypes.length !== 1
+    || nimbusJinn.subtypes[0] !== 'Spirit') {
+    throw new Error('private discard-for-random-damage minion no longer matches its supported facts');
+  }
   const polarBears = snapshot.cards.find(({ name }) => name === 'Polar Bears');
   if (!polarBears
     || polarBears.cardType !== 'minion'
@@ -3867,6 +3908,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     grandmasterWizard,
     slingPixies,
     spireLich,
+    nimbusJinn,
     genesisMinion,
     geomancer,
     gothicTower,
@@ -4084,6 +4126,7 @@ function gameDefinition(
   preventsDamageFromUnitsWithPowerAtLeast: 0 | 4 = 0,
   isTower = false,
   gainsPowerRangedAndSpellcasterAtopTower: 0 | 2 = 0,
+  discardSpellToDamageRandomOtherUnitHere: 0 | 3 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4266,6 +4309,9 @@ function gameDefinition(
         ? { deathriteLoseLifePerNearbySiteControlled: 1 as const }
         : {}),
       defense: card.defense,
+      ...(discardSpellToDamageRandomOtherUnitHere
+        ? { discardSpellToDamageRandomOtherUnitHere }
+        : {}),
       ...(discardRandomCardInsteadOfMana ? { discardRandomCardInsteadOfMana: true } : {}),
       ...(diesAtEndOfControllerTurn ? { diesAtEndOfControllerTurn: true } : {}),
       ...(genesisHealController ? { genesisHealController } : {}),
@@ -4337,7 +4383,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-leyline' | 'air-lightning-bolt' | 'air-nimbus-jinn' | 'air-rain-of-arrows' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -4638,6 +4684,7 @@ function buildManifest(
       input.grandmasterWizard.stableId,
       input.slingPixies.stableId,
       input.spireLich.stableId,
+      input.nimbusJinn.stableId,
       ...Array(2).fill(input.movementTwoMinion.stableId),
       ...Array(2).fill(input.airborneMinion.stableId),
       ...Array(2).fill(input.stealthTargetMinion.stableId),
@@ -4783,6 +4830,13 @@ function buildManifest(
     [input.darkTower],
     [input.zap],
   );
+  const airNimbusJinnDeck = elementalDeck(
+    'air',
+    [input.nimbusJinn, input.stealthMinion],
+    [],
+    [input.zap],
+  );
+  const fireNimbusJinnDeck = elementalDeck('fire', [input.raalDromedary]);
   const fireSlingPixiesDeck = elementalDeck('fire', [input.vikings, input.raalDromedary]);
   const airLeylineDeck = elementalDeck('air', airMinions, [input.leylineHenge]);
   const airVoidwalkDeck = elementalDeck('air', [
@@ -4968,6 +5022,8 @@ function buildManifest(
       ? airSlingPixiesDeck
       : scenario === 'air-spire-lich'
       ? airSpireLichDeck
+      : scenario === 'air-nimbus-jinn'
+      ? airNimbusJinnDeck
       : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
       : scenario === 'air-void-artifact'
@@ -5133,6 +5189,8 @@ function buildManifest(
       ? fireSlingPixiesDeck
       : scenario === 'air-spire-lich'
       ? airSpireLichDeck
+      : scenario === 'air-nimbus-jinn'
+      ? fireNimbusJinnDeck
       : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
       : scenario === 'air-void-artifact'
@@ -5303,7 +5361,8 @@ function buildManifest(
         || card.stableId === input.grainSparrow.stableId
         || card.stableId === input.bladderblimp.stableId
         || card.stableId === input.malakhim.stableId
-        || card.stableId === input.slingPixies.stableId,
+        || card.stableId === input.slingPixies.stableId
+        || card.stableId === input.nimbusJinn.stableId,
       card.stableId === input.stealthMinion.stableId
         || card.stableId === input.midnightRogue.stableId
         || card.stableId === input.deadOfNightDemon.stableId,
@@ -5411,6 +5470,7 @@ function buildManifest(
         || card.stableId === input.gothicTower.stableId
         || card.stableId === input.loneTower.stableId,
       card.stableId === input.spireLich.stableId ? 2 : 0,
+      card.stableId === input.nimbusJinn.stableId ? 3 : 0,
     ),
   ]));
   return {
@@ -9029,6 +9089,77 @@ function findAirSpireLichOpening(
     southTargetInstanceId,
     spireLichInstanceId: spireLich.instanceId,
     zapInstanceIds: [firstZap.instanceId, secondZap.instanceId],
+  };
+}
+
+function findAirNimbusJinnOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  bandInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  nimbusInstanceId: string;
+  northSiteInstanceIds: readonly [string, string, string, string, string, string];
+  raalInstanceId: string;
+  seed: number;
+  session: GameSession;
+  southSiteInstanceIds: readonly [string, string];
+  zapInstanceId: string;
+}> {
+  const seed = 1_088;
+  const built = buildManifest(input, seed, 'air-nimbus-jinn');
+  const session = createGameSession(built.manifest);
+  const north = session.state.players.north;
+  const south = session.state.players.south;
+  const airSites = north.hand.atlas.filter(({ cardId }) => {
+    const definition = session.state.cards[cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('air');
+  });
+  const otherNorthSites = north.hand.atlas.filter(({ instanceId }) =>
+    !airSites.some((site) => site.instanceId === instanceId));
+  const northSites = [
+    ...airSites.slice(0, 2),
+    ...otherNorthSites,
+    ...airSites.slice(2),
+    ...north.atlas.slice(0, 3),
+  ].slice(0, 6);
+  const fireSouthSite = south.hand.atlas.find(({ cardId }) => {
+    const definition = session.state.cards[cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('fire');
+  });
+  const otherSouthSite = south.hand.atlas.find(({ instanceId }) =>
+    instanceId !== fireSouthSite?.instanceId);
+  const availableNorthSpells = [...north.hand.spellbook, ...north.spellbook.slice(0, 2)];
+  const nimbus = availableNorthSpells.find(({ cardId }) =>
+    cardId === input.nimbusJinn.stableId);
+  const band = north.hand.spellbook.find(({ cardId }) =>
+    cardId === input.stealthMinion.stableId);
+  const zap = availableNorthSpells.find(({ cardId }) => cardId === input.zap.stableId);
+  const raal = [...south.hand.spellbook, ...south.spellbook.slice(0, 2)].find(({ cardId }) =>
+    cardId === input.raalDromedary.stableId);
+  if (northSites.length !== 6 || airSites.length < 2
+    || !fireSouthSite || !otherSouthSite
+    || !nimbus || !band || !zap || !raal) {
+    throw new Error('private Nimbus Jinn seed 1088 no longer produces its supported opening');
+  }
+  return {
+    manifest: built.manifest,
+    names: built.names,
+    bandInstanceId: band.instanceId,
+    nimbusInstanceId: nimbus.instanceId,
+    northSiteInstanceIds: northSites.map(({ instanceId }) => instanceId) as [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ],
+    raalInstanceId: raal.instanceId,
+    seed,
+    session,
+    southSiteInstanceIds: [fireSouthSite.instanceId, otherSouthSite.instanceId],
+    zapInstanceId: zap.instanceId,
   };
 }
 
@@ -17311,6 +17442,228 @@ function runAirSpireLich(
   });
 }
 
+function runAirNimbusJinn(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airNimbusJinn'] {
+  const opening = findAirNimbusJinnOpening(input);
+  let session = keep(keep(opening.session));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  const drawAtlas = (): void => take(({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  const drawSpell = (): void => take(({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const endTurn = (): void => take(({ descriptor }) => descriptor.kind === 'end-turn');
+  const playSite = (instanceId: string, cell: RealmCell): void => take(({ descriptor }) =>
+    descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === instanceId
+      && descriptor.cell === cell);
+
+  playSite(opening.northSiteInstanceIds[0], 'C4');
+  endTurn();
+  drawSpell();
+  playSite(opening.southSiteInstanceIds[0], 'C1');
+  endTurn();
+
+  drawAtlas();
+  playSite(opening.northSiteInstanceIds[1], 'C3');
+  endTurn();
+  drawSpell();
+  playSite(opening.southSiteInstanceIds[1], 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.raalInstanceId
+    && descriptor.cell === 'C2');
+  endTurn();
+
+  drawAtlas();
+  playSite(opening.northSiteInstanceIds[2], 'B4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.bandInstanceId
+    && descriptor.cell === 'C3');
+  endTurn();
+  drawAtlas();
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === opening.raalInstanceId
+    && descriptor.from.cell === 'C2'
+    && descriptor.to.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'close-intercept');
+  endTurn();
+
+  drawAtlas();
+  playSite(opening.northSiteInstanceIds[3], 'A4');
+  endTurn();
+  drawAtlas();
+  endTurn();
+  drawSpell();
+  playSite(opening.northSiteInstanceIds[4], 'B3');
+  endTurn();
+  drawAtlas();
+  endTurn();
+  drawSpell();
+  playSite(opening.northSiteInstanceIds[5], 'A3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.nimbusInstanceId
+    && descriptor.cell === 'C3');
+
+  const before = session.state;
+  const bandBefore = observeGame(before, 'north').realm.units.find(({ instanceId }) =>
+    instanceId === opening.bandInstanceId);
+  const raalBefore = observeGame(before, 'north').realm.units.find(({ instanceId }) =>
+    instanceId === opening.raalInstanceId);
+  const nimbusBefore = observeGame(before, 'north').realm.units.find(({ instanceId }) =>
+    instanceId === opening.nimbusInstanceId);
+  const candidates = [opening.bandInstanceId, opening.raalInstanceId]
+    .sort((left, right) => left.localeCompare(right));
+  const activationActions = legalGameActions(before, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'activate-discard-random-damage'
+      && descriptor.sourceInstanceId === opening.nimbusInstanceId
+      && descriptor.discardCardInstanceId === opening.zapInstanceId);
+  if (activationActions.length !== 1
+    || activationActions[0]?.descriptor.kind !== 'activate-discard-random-damage') {
+    throw new Error('private Nimbus Jinn lacks one exact discard activation');
+  }
+  const activationAction = activationActions[0];
+  const activated = stepGame(session, activationAction);
+  if (!activated.accepted) throw new Error('private Nimbus Jinn activation was rejected');
+  session = activated.session;
+  const draw = activated.receipt.randomDraws[0];
+  const selectedIndex = typeof draw?.result === 'number'
+    ? draw.result % candidates.length
+    : -1;
+  const selectedInstanceId = candidates[selectedIndex];
+  if (!selectedInstanceId) throw new Error('private Nimbus Jinn lacks a selected recipient');
+  const selectedIsBand = selectedInstanceId === opening.bandInstanceId;
+  const selectedSeat = selectedIsBand ? 'north' as const : 'south' as const;
+  const selectedCardId = selectedIsBand
+    ? input.stealthMinion.stableId
+    : input.raalDromedary.stableId;
+  const expectedEvents = [
+    {
+      payload: {
+        cardId: input.zap.stableId,
+        instanceId: opening.zapInstanceId,
+        owner: 'north',
+        seat: 'north',
+        sourceInstanceId: opening.nimbusInstanceId,
+        zone: 'spellbook',
+      },
+      type: 'card-discarded',
+    },
+    {
+      payload: {
+        amount: 3,
+        discardCardInstanceId: opening.zapInstanceId,
+        seat: 'north',
+        sourceInstanceId: opening.nimbusInstanceId,
+        sourceLocation: { cell: 'C3', region: 'surface' },
+        targetInstanceId: selectedInstanceId,
+        targetKind: 'minion',
+        targetSeat: selectedSeat,
+      },
+      type: 'discard-random-damage-activated',
+    },
+    {
+      payload: {
+        amount: 3,
+        sourceInstanceId: opening.nimbusInstanceId,
+        targetInstanceId: selectedInstanceId,
+      },
+      type: 'discard-random-damage-allocated',
+    },
+    {
+      payload: {
+        accumulated: 3,
+        amount: 3,
+        direct: true,
+        instanceId: selectedInstanceId,
+        seat: selectedSeat,
+      },
+      type: 'damage-dealt',
+    },
+    {
+      payload: {
+        cardId: selectedCardId,
+        instanceId: selectedInstanceId,
+        owner: selectedSeat,
+      },
+      type: 'minion-died',
+    },
+  ];
+  const actualEvents = activated.receipt.events
+    .map(({ payload, type }) => ({ payload, type }));
+  const firstEventSequence = activated.receipt.events[0]?.eventSequence;
+  const northCemetery = session.state.players.north.cemetery;
+  const southView = observeGame(session.state, 'south');
+  const remainingNorthHandIds = session.state.players.north.hand.spellbook
+    .map(({ instanceId }) => instanceId);
+  const eventBytes = canonicalJson(activated.receipt.events as unknown as JsonValue);
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+  const southDeck = deckList(opening.manifest.decks.south, opening.names);
+  const definition = session.state.cards[input.nimbusJinn.stableId];
+  const selectedCemetery = session.state.players[selectedSeat].cemetery;
+  const unselectedInstanceId = candidates.find((instanceId) => instanceId !== selectedInstanceId)!;
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    candidateSetVerified: bandBefore?.location === 'C3'
+      && bandBefore.region === 'surface'
+      && bandBefore.stealthed === true
+      && raalBefore?.location === 'C3'
+      && raalBefore.region === 'surface'
+      && nimbusBefore?.location === 'C3'
+      && nimbusBefore.region === 'surface'
+      && draw?.domain !== undefined
+      && canonicalJson(draw.domain) === canonicalJson({
+        accepted: true,
+        exclusiveMaximum: 2,
+        kind: 'unit_index_candidate',
+      })
+      && selectedInstanceId === candidates[selectedIndex],
+    causalEventsVerified: firstEventSequence !== undefined
+      && activated.receipt.events.every((event, index) =>
+        event.cause.actionId === activated.receipt.actionId
+          && event.cause.receiptSequence === activated.receipt.receiptSequence
+          && event.eventSequence === firstEventSequence + index),
+    deck,
+    discardFaceUpAndRedactionVerified: northCemetery.some(({ instanceId }) =>
+      instanceId === opening.zapInstanceId)
+      && southView.players.north.cemetery.some(({ instanceId }) =>
+        instanceId === opening.zapInstanceId)
+      && typeof southView.players.north.hand.spellbook === 'number'
+      && remainingNorthHandIds.every((instanceId) => !eventBytes.includes(instanceId)),
+    discardedSpell: input.zap.name,
+    exactEventsVerified: canonicalJson(actualEvents as unknown as JsonValue)
+      === canonicalJson(expectedEvents as unknown as JsonValue),
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && southDeck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && southDeck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && (deck.spellbook.find(({ name }) => name === input.nimbusJinn.name)?.copies ?? 0)
+        <= input.format.copyLimits[input.nimbusJinn.rarity!],
+    nimbusJinn: input.nimbusJinn.name,
+    oneRecipientDamaged: selectedCemetery.some(({ instanceId }) =>
+      instanceId === selectedInstanceId)
+      && session.state.realm.units.some(({ instanceId, damage }) =>
+        instanceId === unselectedInstanceId && damage === 0),
+    randomReceiptVerified: activated.receipt.randomDraws.length === 1
+      && draw?.purpose === 'discard_spell_random_other_unit_here'
+      && session.transcript.slice(0, -1).every(({ randomDraws }) => randomDraws.length === 0),
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    structuralFactsVerified: definition?.cardType === 'minion'
+      && definition.airborne === true
+      && definition.attack === 4
+      && definition.defense === 4
+      && definition.manaCost === 6
+      && definition.discardSpellToDamageRandomOtherUnitHere === 3,
+    unsupportedMechanicsAbsent: session.state.terminal.status === 'active'
+      && activated.receipt.events.length === expectedEvents.length
+      && !canonicalJson(activationAction.descriptor as unknown as JsonValue).includes('target'),
+  });
+}
+
 function runAirSpellcasterFreeze(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['airSpellcasterFreeze'] {
@@ -21403,6 +21756,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airGrandmasterWizard = runAirGrandmasterWizard(input);
   const airSlingPixies = runAirSlingPixies(input);
   const airSpireLich = runAirSpireLich(input);
+  const airNimbusJinn = runAirNimbusJinn(input);
   const airSpellcasterFreeze = runAirSpellcasterFreeze(input);
   const airArcLightning = runAirArcLightning(input);
   const airLightningBolt = runAirLightningBolt(input);
@@ -21613,6 +21967,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     airGrandmasterWizard,
     airSlingPixies,
     airSpireLich,
+    airNimbusJinn,
     airSpellcasterFreeze,
     airArcLightning,
     airLightningBolt,

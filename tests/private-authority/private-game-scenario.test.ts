@@ -923,7 +923,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 26 : 35,
+        preset.id === 'air-vs-earth-lesson' ? 27 : 35,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -931,7 +931,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 35 : 26,
+        preset.id === 'air-vs-earth-lesson' ? 35 : 27,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -972,6 +972,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Highland Clansmen': 1,
     'Lightning Bolt': 3,
     'Midnight Rogue': 2,
+    'Nimbus Jinn': 1,
     'Plumed Pegasus': 2,
     'Roaming Monster': 1,
     'Sling Pixies': 1,
@@ -1021,6 +1022,19 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     assert.equal(spireLich.spellcaster, undefined);
     assert.equal(spireLich.gainsPowerRangedAndSpellcasterAtopTower, 2);
     assert.deepEqual(spireLich.thresholds, { air: 1, earth: 0, fire: 0, water: 0 });
+  }
+  const nimbusJinnId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Nimbus Jinn')?.[0];
+  assert.ok(nimbusJinnId);
+  const nimbusJinn = airLesson.manifest.cards[nimbusJinnId];
+  assert.equal(nimbusJinn?.cardType, 'minion');
+  if (nimbusJinn?.cardType === 'minion') {
+    assert.equal(nimbusJinn.attack, 4);
+    assert.equal(nimbusJinn.defense, 4);
+    assert.equal(nimbusJinn.manaCost, 6);
+    assert.equal(nimbusJinn.airborne, true);
+    assert.equal(nimbusJinn.discardSpellToDamageRandomOtherUnitHere, 3);
+    assert.deepEqual(nimbusJinn.thresholds, { air: 2, earth: 0, fire: 0, water: 0 });
   }
   for (const towerName of ['Dark Tower', 'Gothic Tower', 'Lone Tower']) {
     const towerId = Object.entries(airLesson.cardNames)
@@ -1527,6 +1541,26 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airSpireLich.deck.spellbook
     .find(({ name }) => name === 'Spire Lich')?.copies, 3);
   assert.equal(result.airSpireLich.replayVerified, true);
+  assert.equal(result.airNimbusJinn.nimbusJinn, 'Nimbus Jinn');
+  assert.equal(result.airNimbusJinn.seed, 1088);
+  assert.equal(result.airNimbusJinn.acceptedActionCount, 37);
+  assert.equal(result.airNimbusJinn.candidateSetVerified, true);
+  assert.equal(result.airNimbusJinn.causalEventsVerified, true);
+  assert.equal(result.airNimbusJinn.discardFaceUpAndRedactionVerified, true);
+  assert.equal(result.airNimbusJinn.discardedSpell, 'Zap!');
+  assert.equal(result.airNimbusJinn.exactEventsVerified, true);
+  assert.equal(result.airNimbusJinn.oneRecipientDamaged, true);
+  assert.equal(result.airNimbusJinn.randomReceiptVerified, true);
+  assert.equal(result.airNimbusJinn.structuralFactsVerified, true);
+  assert.equal(result.airNimbusJinn.unsupportedMechanicsAbsent, true);
+  assert.equal(result.airNimbusJinn.legalConstructedDeck, true);
+  assert.equal(result.airNimbusJinn.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airNimbusJinn.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airNimbusJinn.deck.spellbook
+    .find(({ name }) => name === 'Nimbus Jinn')?.copies, 2);
+  assert.equal(result.airNimbusJinn.replayVerified, true);
   assert.equal(result.airSpellcasterFreeze.apprenticeWizard, 'Apprentice Wizard');
   assert.equal(result.airSpellcasterFreeze.freeze, 'Freeze');
   assert.equal(result.airSpellcasterFreeze.seravaTownsfolk, 'Serava Townsfolk');
