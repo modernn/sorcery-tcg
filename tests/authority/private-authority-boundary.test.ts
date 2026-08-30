@@ -350,6 +350,22 @@ test('safe relative metadata and hashes pass the Git index and package boundary'
   }
 });
 
+test('local Codex recovery refs do not expand publishable history', async () => {
+  const fixture = await createFixture();
+  try {
+    await git(fixture, 'switch', '--quiet', '--orphan', 'codex-capture');
+    const privateBytes = fixture.sourceBytes.get('cards/cards.raw.json')!;
+    await addCandidate(fixture, 'capture/private.txt', privateBytes);
+    await git(fixture, 'update-ref', 'refs/codex/turn-diffs/test', 'HEAD');
+    await git(fixture, 'switch', '--quiet', 'master');
+    await git(fixture, 'branch', '-D', 'codex-capture');
+    const result = await runGate(fixture);
+    assert.equal(result.code, 0, result.stderr);
+  } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
 test('generic local-file evidence label is not treated as a private locator', async () => {
   const label = ['user-provided', 'manual-local-file'].join('-');
   const fixture = await createFixture(label);

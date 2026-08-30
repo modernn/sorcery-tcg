@@ -141,7 +141,11 @@ function commandBytes(
 
 function reachableHistoryCandidates(repositoryRoot: string): readonly Candidate[] {
   const candidates: Candidate[] = [];
-  const objects = commandBytes('git', ['rev-list', '--objects', '--all'], repositoryRoot).toString('utf8');
+  const objects = commandBytes(
+    'git',
+    ['rev-list', '--objects', '--branches', '--remotes', '--tags'],
+    repositoryRoot,
+  ).toString('utf8');
   const records = objects.split(/\r?\n/).flatMap((record) => {
     if (record === '') return [];
     const separator = record.indexOf(' ');
