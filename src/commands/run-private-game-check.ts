@@ -560,6 +560,22 @@ export type PrivateGameCheck = Readonly<{
     seed: number;
     siteEstablished: boolean;
   }>;
+  earthWraetannisTitan: Readonly<{
+    acceptedActionCount: number;
+    allyAndSourceExcluded: boolean;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    derivedPower: number;
+    enemiesStruckSimultaneously: boolean;
+    enemyDeathsVerified: boolean;
+    houseArnBannerman: string;
+    legalConstructedDeck: boolean;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    seed: number;
+    wildBoars: string;
+    wraetannisTitan: string;
+  }>;
   earthRescue: Readonly<{
     acceptedActionCount: number;
     boskTroll: string;
@@ -1410,6 +1426,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   wardMinion: NormalizedCard;
   wasteland: NormalizedCard;
   wildBoars: NormalizedCard;
+  wraetannisTitan: NormalizedCard;
   polarBears: NormalizedCard;
   pirateShip: NormalizedCard;
   pudgeButcher: NormalizedCard;
@@ -1809,6 +1826,28 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || houseArnBannerman.thresholds.water !== 0
     || houseArnBannerman.rarity !== 'exceptional') {
     throw new Error('private nearby-allies power minion no longer matches its supported facts');
+  }
+  const wraetannisTitan = snapshot.cards.find(({ name }) => name === 'Wraetannis Titan');
+  const wraetannisTokens = wraetannisTitan?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
+  if (!wraetannisTitan
+    || wraetannisTitan.stableId
+      !== 'card:c3554884b00abe3ace6d5ba9d51c4ab87611bebee660530a7fcb81719312edc8'
+    || wraetannisTitan.officialSourceId !== '001-wraetannis_titan-b-f'
+    || wraetannisTitan.cardType !== 'minion'
+    || identityHash(wraetannisTokens as unknown as JsonValue)
+      !== 'sha256:db1b06ac4f1f9cc286d04d5095e64cb4c6ddb257805c4e88a2a7826de48dc1eb'
+    || wraetannisTitan.manaCost !== 7
+    || wraetannisTitan.attack !== 6
+    || wraetannisTitan.defense !== 6
+    || wraetannisTitan.life !== null
+    || wraetannisTitan.elements.length !== 1
+    || wraetannisTitan.elements[0] !== 'earth'
+    || wraetannisTitan.thresholds.air !== 0
+    || wraetannisTitan.thresholds.earth !== 2
+    || wraetannisTitan.thresholds.fire !== 0
+    || wraetannisTitan.thresholds.water !== 0
+    || wraetannisTitan.rarity !== 'elite') {
+    throw new Error('private Genesis enemy-strike minion no longer matches its supported facts');
   }
   const scentHounds = snapshot.cards.find(({ name }) => name === 'Scent Hounds');
   const scentHoundsTokens = scentHounds?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
@@ -3434,6 +3473,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     wardMinion,
     wasteland,
     wildBoars,
+    wraetannisTitan,
     zap,
   };
 }
@@ -3555,6 +3595,7 @@ function gameDefinition(
   genesisImmobilizeNearbyUntilNextTurn = false,
   genesisHealNearbyAvatars: 0 | 3 = 0,
   cannotBeMovedDestroyedOrModified = false,
+  genesisStrikeEachEnemyHere = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -3708,6 +3749,7 @@ function gameDefinition(
       ...(diesAtEndOfControllerTurn ? { diesAtEndOfControllerTurn: true } : {}),
       ...(genesisHealController ? { genesisHealController } : {}),
       ...(genesisDamageEachOtherUnitHere ? { genesisDamageEachOtherUnitHere } : {}),
+      ...(genesisStrikeEachEnemyHere ? { genesisStrikeEachEnemyHere: true as const } : {}),
       ...(genesisMayDamageTargetAdjacentUnit ? { genesisMayDamageTargetAdjacentUnit } : {}),
       genesisDrawSpell,
       genesisDrawSite,
@@ -3760,7 +3802,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-divine-healing' | 'earth-duel' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-malakhim' | 'earth-overpower' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-shallow-grave' | 'earth-sinkhole' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -3907,6 +3949,17 @@ function buildManifest(
       ...earthBedrockBase.atlas.slice(0, input.format.atlasMinimum - 1),
     ],
   };
+  const earthWraetannisTitanBase = elementalDeck(
+    'earth',
+    [input.houseArnBannerman, input.wildBoars],
+  );
+  const earthWraetannisTitanDeck: GameDeckSpec = {
+    ...earthWraetannisTitanBase,
+    spellbook: [
+      input.wraetannisTitan.stableId,
+      ...earthWraetannisTitanBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
+    ],
+  };
   const earthBorderMilitiaDeck = elementalDeck('earth', [], [], [input.borderMilitia]);
   const earthHumbleVillageDeck = elementalDeck('earth', [], [input.humbleVillage]);
   const earthDuelDeck = elementalDeck(
@@ -4002,6 +4055,7 @@ function buildManifest(
       input.divineHealing.stableId,
       ...Array(2).fill(input.overpower.stableId),
       ...Array(2).fill(input.bury.stableId),
+      input.wraetannisTitan.stableId,
     ],
   };
   const fireStarterDeck = elementalDeck(
@@ -4280,6 +4334,8 @@ function buildManifest(
         ? earthHolyGroundDeck
       : scenario === 'earth-bedrock'
         ? earthBedrockDeck
+      : scenario === 'earth-wraetannis-titan'
+        ? earthWraetannisTitanDeck
       : scenario === 'earth-duel'
         ? earthDuelDeck
       : scenario === 'earth-sword-and-shield'
@@ -4451,6 +4507,8 @@ function buildManifest(
         ? earthHolyGroundDeck
       : scenario === 'earth-bedrock'
         ? earthBedrockDeck
+      : scenario === 'earth-wraetannis-titan'
+        ? earthWraetannisTitanDeck
       : scenario === 'earth-duel'
         ? earthDuelDeck
       : scenario === 'earth-sword-and-shield'
@@ -4633,6 +4691,7 @@ function buildManifest(
       card.stableId === input.quagmire.stableId,
       card.stableId === input.holyGround.stableId ? 3 : 0,
       card.stableId === input.bedrock.stableId,
+      card.stableId === input.wraetannisTitan.stableId,
     ),
   ]));
   return {
@@ -5854,6 +5913,87 @@ function findEarthBedrockOpening(
     };
   }
   throw new Error('private immutable-site scenario no longer produces its supported opening');
+}
+
+function findEarthWraetannisTitanOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  houseArnBannermanInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string, string, string, string, string];
+  seed: number;
+  session: GameSession;
+  southEnemyInstanceIds: readonly [string, string];
+  southSiteInstanceIds: readonly [string, string, string];
+  wraetannisTitanInstanceId: string;
+}> {
+  const earthThresholdSiteIds = new Set(input.cards.filter((card) =>
+    card.cardType === 'site'
+      && card.elements.length === 1
+      && card.elements[0] === 'earth'
+      && card.rulesText.trim() === '').map(({ stableId }) => stableId));
+  // ponytail: pinned seed keeps the actual-card proof fast and deterministic.
+  const seed = 9036;
+  const built = buildManifest(input, seed, 'earth-wraetannis-titan');
+  const session = createGameSession(built.manifest);
+  const northSites = [
+    ...session.state.players.north.hand.atlas,
+    ...session.state.players.north.atlas.slice(0, 4),
+  ];
+  const southSites = session.state.players.south.hand.atlas;
+  const houseArnBannermanInstanceId = availableMinionInstance(
+    session,
+    'north',
+    input.houseArnBannerman.stableId,
+    8,
+  );
+  const wraetannisTitanInstanceId = availableMinionInstance(
+    session,
+    'north',
+    input.wraetannisTitan.stableId,
+    8,
+  );
+  const southWildBoarsInstanceIds = [
+    ...session.state.players.south.hand.spellbook,
+    ...session.state.players.south.spellbook.slice(0, 8),
+  ].filter(({ cardId }) => cardId === input.wildBoars.stableId)
+    .map(({ instanceId }) => instanceId);
+  const thresholdsReady = northSites.length >= 7
+    && northSites.slice(0, 3).filter(({ cardId }) => earthThresholdSiteIds.has(cardId)).length >= 2
+    && southSites.length >= 3
+    && southSites.filter(({ cardId }) => earthThresholdSiteIds.has(cardId)).length >= 2;
+  if (thresholdsReady
+    && houseArnBannermanInstanceId
+    && wraetannisTitanInstanceId
+    && southWildBoarsInstanceIds.length >= 2) {
+    return {
+      ...built,
+      houseArnBannermanInstanceId,
+      northSiteInstanceIds: [
+        northSites[0]!.instanceId,
+        northSites[1]!.instanceId,
+        northSites[2]!.instanceId,
+        northSites[3]!.instanceId,
+        northSites[4]!.instanceId,
+        northSites[5]!.instanceId,
+        northSites[6]!.instanceId,
+      ],
+      seed,
+      session,
+      southEnemyInstanceIds: [
+        southWildBoarsInstanceIds[0]!,
+        southWildBoarsInstanceIds[1]!,
+      ],
+      southSiteInstanceIds: [
+        southSites[0]!.instanceId,
+        southSites[1]!.instanceId,
+        southSites[2]!.instanceId,
+      ],
+      wraetannisTitanInstanceId,
+    };
+  }
+  throw new Error('private Wraetannis Titan seed no longer produces its supported opening');
 }
 
 function findEarthRescueOpening(
@@ -9680,6 +9820,180 @@ function runEarthBedrock(
       && sourceRubble.controller === null,
     thresholdUnsuppressed: affinityWithRats.earth === 1
       && affinityAfterAttempt.earth === 1,
+  });
+}
+
+function runEarthWraetannisTitan(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthWraetannisTitan'] {
+  const opening = findEarthWraetannisTitanOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  const playSite = (instanceId: string, cell: string): void => {
+    take(({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === instanceId
+      && descriptor.cell === cell);
+  };
+
+  playSite(opening.northSiteInstanceIds[0], 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playSite(opening.southSiteInstanceIds[0], 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playSite(opening.northSiteInstanceIds[1], 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playSite(opening.southSiteInstanceIds[1], 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playSite(opening.northSiteInstanceIds[2], 'B4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playSite(opening.southSiteInstanceIds[2], 'B1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  for (let turn = 4; turn <= 7; turn += 1) {
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+  }
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  for (const enemyInstanceId of opening.southEnemyInstanceIds) {
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === enemyInstanceId
+      && descriptor.cell === 'C2'
+      && descriptor.region === undefined);
+  }
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  for (const enemyInstanceId of opening.southEnemyInstanceIds) {
+    take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === enemyInstanceId
+      && descriptor.to.cell === 'C3');
+    take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  }
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  playSite(opening.northSiteInstanceIds[3], 'A4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.houseArnBannermanInstanceId
+    && descriptor.cell === 'C3'
+    && descriptor.region === undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  playSite(opening.northSiteInstanceIds[4], 'A3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  playSite(opening.northSiteInstanceIds[5], 'A2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  playSite(opening.northSiteInstanceIds[6], 'A1');
+  const summonResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.wraetannisTitanInstanceId
+      && descriptor.cell === 'C3'
+      && descriptor.region === undefined));
+  if (!summonResult.accepted) {
+    throw new Error(`private Wraetannis Titan summon rejected: ${summonResult.reason.code}`);
+  }
+  session = summonResult.session;
+
+  const events = summonResult.receipt.events;
+  const allocations = events.flatMap(({ payload, type }) =>
+    type === 'strike-damage-allocated' && isJsonRecord(payload) ? [payload] : []);
+  const allocationTargetIds = allocations
+    .map(({ targetInstanceId }) => targetInstanceId)
+    .filter((instanceId): instanceId is string => typeof instanceId === 'string')
+    .sort();
+  const expectedTargetIds = [...opening.southEnemyInstanceIds].sort();
+  const allocationIndices = events.flatMap(({ type }, index) =>
+    type === 'strike-damage-allocated' ? [index] : []);
+  const damageIndices = events.flatMap(({ type }, index) => type === 'damage-dealt' ? [index] : []);
+  const deathIndices = events.flatMap(({ type }, index) => type === 'minion-died' ? [index] : []);
+  const firstDamageIndex = damageIndices[0] ?? -1;
+  const firstDeathIndex = deathIndices[0] ?? -1;
+  const summonedPayload = events[0] && isJsonRecord(events[0].payload)
+    ? events[0].payload
+    : undefined;
+  const titan = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.wraetannisTitanInstanceId);
+  const bannerman = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.houseArnBannermanInstanceId);
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+  const exactAllocationPayloads = allocations.length === 2
+    && allocations.every(({ amount, strikerInstanceId }) =>
+      amount === 7 && strikerInstanceId === opening.wraetannisTitanInstanceId)
+    && canonicalJson(allocationTargetIds) === canonicalJson(expectedTargetIds);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    allyAndSourceExcluded: exactAllocationPayloads
+      && !allocationTargetIds.includes(opening.houseArnBannermanInstanceId)
+      && !allocationTargetIds.includes(opening.wraetannisTitanInstanceId)
+      && bannerman?.damage === 0
+      && titan?.damage === 0,
+    causalEventsVerified: events.map(({ type }) => type).join(',')
+      === 'minion-summoned,strike-damage-allocated,strike-damage-allocated,damage-dealt,damage-dealt,minion-died,minion-died'
+      && summonedPayload?.cardId === input.wraetannisTitan.stableId
+      && summonedPayload.instanceId === opening.wraetannisTitanInstanceId
+      && summonedPayload.cell === 'C3'
+      && summonedPayload.manaPaid === 7
+      && summonedPayload.seat === 'north'
+      && exactAllocationPayloads,
+    deck,
+    derivedPower: typeof allocations[0]?.amount === 'number' ? allocations[0].amount : 0,
+    enemiesStruckSimultaneously: allocationIndices.length === 2
+      && damageIndices.length === 2
+      && deathIndices.length === 2
+      && allocationIndices.every((index) => index < firstDamageIndex)
+      && damageIndices.every((index) => index < firstDeathIndex),
+    enemyDeathsVerified: opening.southEnemyInstanceIds.every((instanceId) =>
+      session.state.players.south.cemetery.some((card) => card.instanceId === instanceId)
+        && !session.state.realm.units.some((unit) => unit.instanceId === instanceId)),
+    houseArnBannerman:
+      opening.names.get(input.houseArnBannerman.stableId) ?? input.houseArnBannerman.stableId,
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && deck.spellbook.find(({ name }) => name === input.wraetannisTitan.name)?.copies === 1
+      && deck.spellbook.find(({ name }) => name === input.houseArnBannerman.name)?.copies
+        === input.format.copyLimits[input.houseArnBannerman.rarity!],
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    wildBoars: opening.names.get(input.wildBoars.stableId) ?? input.wildBoars.stableId,
+    wraetannisTitan:
+      opening.names.get(input.wraetannisTitan.stableId) ?? input.wraetannisTitan.stableId,
   });
 }
 
@@ -17244,6 +17558,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthQuagmire = runEarthQuagmire(input);
   const earthHolyGround = runEarthHolyGround(input);
   const earthBedrock = runEarthBedrock(input);
+  const earthWraetannisTitan = runEarthWraetannisTitan(input);
   const earthBorderMilitia = runEarthBorderMilitia(input);
   const earthHumbleVillage = runEarthHumbleVillage(input);
   const earthDuel = runEarthDuel(input);
@@ -17455,6 +17770,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthQuagmire,
     earthHolyGround,
     earthBedrock,
+    earthWraetannisTitan,
     earthBorderMilitia,
     earthHumbleVillage,
     earthDuel,

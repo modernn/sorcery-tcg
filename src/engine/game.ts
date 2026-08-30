@@ -125,6 +125,7 @@ export type GameCardDefinition =
     discardRandomCardInsteadOfMana?: true;
     diesAtEndOfControllerTurn?: true;
     genesisDamageEachOtherUnitHere?: 1;
+    genesisStrikeEachEnemyHere?: true;
     genesisMayDamageTargetAdjacentUnit?: 2;
     genesisDrawSpell?: boolean;
     genesisDrawSite?: boolean;
@@ -1485,6 +1486,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && card.genesisDamageEachOtherUnitHere !== 1) {
     throw new RangeError(`${path}.genesisDamageEachOtherUnitHere must be 1`);
   }
+  if (card.genesisStrikeEachEnemyHere !== undefined
+    && card.genesisStrikeEachEnemyHere !== true) {
+    throw new RangeError(`${path}.genesisStrikeEachEnemyHere must be true when defined`);
+  }
   if (card.genesisMayDamageTargetAdjacentUnit !== undefined
     && card.genesisMayDamageTargetAdjacentUnit !== 2) {
     throw new RangeError(`${path}.genesisMayDamageTargetAdjacentUnit must be 2`);
@@ -1514,15 +1519,23 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.genesisDamageEachOtherUnitHere === 1
     && (card.genesisDrawSite || card.genesisDrawSpell
       || card.genesisMayDamageTargetAdjacentUnit !== undefined
+      || card.genesisStrikeEachEnemyHere === true
       || card.genesisHealController !== undefined
       || card.genesisLoseControllerLife !== undefined)) {
     throw new RangeError(`${path} simultaneous Genesis damage and another effect are unsupported`);
   }
   if (card.genesisMayDamageTargetAdjacentUnit === 2
     && (card.genesisDrawSite || card.genesisDrawSpell
+      || card.genesisStrikeEachEnemyHere === true
       || card.genesisHealController !== undefined
       || card.genesisLoseControllerLife !== undefined)) {
     throw new RangeError(`${path} simultaneous Genesis damage and another effect are unsupported`);
+  }
+  if (card.genesisStrikeEachEnemyHere === true
+    && (card.genesisDrawSite || card.genesisDrawSpell
+      || card.genesisHealController !== undefined
+      || card.genesisLoseControllerLife !== undefined)) {
+    throw new RangeError(`${path} simultaneous Genesis strikes and another effect are unsupported`);
   }
   if (card.genesisMayDamageTargetAdjacentUnit === 2
     && (card.discardRandomCardInsteadOfMana === true
@@ -1611,6 +1624,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && (card.genesisDrawSite || card.genesisDrawSpell
       || card.genesisDamageEachOtherUnitHere === 1
       || card.genesisMayDamageTargetAdjacentUnit === 2
+      || card.genesisStrikeEachEnemyHere === true
       || card.genesisHealController !== undefined
       || card.genesisLoseControllerLife !== undefined)) {
     throw new RangeError(`${path} token Genesis effects are unsupported`);
@@ -1635,6 +1649,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && (card.genesisDrawSite || card.genesisDrawSpell
       || card.genesisDamageEachOtherUnitHere === 1
       || card.genesisMayDamageTargetAdjacentUnit === 2
+      || card.genesisStrikeEachEnemyHere === true
       || card.genesisHealController !== undefined
       || card.genesisLoseControllerLife !== undefined)) {
     throw new RangeError(`${path} Waterbound with Genesis is unsupported`);
@@ -1894,6 +1909,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               : {}),
             ...(card.genesisMayDamageTargetAdjacentUnit === 2
               ? { genesisMayDamageTargetAdjacentUnit: 2 as const }
+              : {}),
+            ...(card.genesisStrikeEachEnemyHere === true
+              ? { genesisStrikeEachEnemyHere: true as const }
               : {}),
             ...(card.genesisDrawSpell === true ? { genesisDrawSpell: true } : {}),
             ...(card.genesisDrawSite === true ? { genesisDrawSite: true } : {}),
@@ -6610,7 +6628,8 @@ function applyDescriptor(
     const genesisDrawZone = definition.genesisDrawSite
       ? 'atlas'
       : definition.genesisDrawSpell ? 'spellbook' : undefined;
-    if (definition.genesisDamageEachOtherUnitHere === 1) {
+    if (definition.genesisDamageEachOtherUnitHere === 1
+      || definition.genesisStrikeEachEnemyHere === true) {
       const source: GameUnitRef = {
         instanceId: unit.instanceId,
         kind: 'minion',
@@ -6625,7 +6644,8 @@ function applyDescriptor(
           paymentRandomDraws,
         ];
       }
-      const targets = (['north', 'south'] as const)
+      const isStrike = definition.genesisStrikeEachEnemyHere === true;
+      const targets = (isStrike ? [otherSeat(seat)] : ['north', 'south'] as const)
         .flatMap((targetSeat) => unitRefs(settlement.state, targetSeat))
         .filter((target) => {
           if (target.instanceId === source.instanceId) return false;
@@ -6640,9 +6660,12 @@ function applyDescriptor(
           paymentRandomDraws,
         ];
       }
+      const amount = isStrike
+        ? strikeDamage(settlement.state, source)
+        : definition.genesisDamageEachOtherUnitHere!;
       const pending: PendingCombat = deepFreeze({
         allocations: targets.map(({ instanceId }) => ({
-          amount: definition.genesisDamageEachOtherUnitHere!,
+          amount,
           targetInstanceId: instanceId,
         })),
         attacker: source,
@@ -6656,11 +6679,13 @@ function applyDescriptor(
       });
       const allocationOutcomes: readonly GameOutcome[] = targets.map(({ instanceId }) => ({
         payload: {
-          amount: definition.genesisDamageEachOtherUnitHere!,
-          sourceInstanceId: source.instanceId,
+          amount,
+          ...(isStrike
+            ? { strikerInstanceId: source.instanceId }
+            : { sourceInstanceId: source.instanceId }),
           targetInstanceId: instanceId,
         },
-        type: 'genesis-damage-allocated',
+        type: isStrike ? 'strike-damage-allocated' : 'genesis-damage-allocated',
       }));
       const [damaged, outcomes, randomDraws] = resolveFightWindow(
         settlement.state,
@@ -6669,7 +6694,7 @@ function applyDescriptor(
         true,
         false,
         [source],
-        false,
+        isStrike,
         true,
       );
       return [

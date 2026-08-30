@@ -922,7 +922,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 23 : 26,
+        preset.id === 'air-vs-earth-lesson' ? 23 : 27,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -930,7 +930,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 26 : 23,
+        preset.id === 'air-vs-earth-lesson' ? 27 : 23,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -1001,6 +1001,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Pudge Butcher': 1,
     'Scent Hounds': 2,
     'Wild Boars': 2,
+    'Wraetannis Titan': 1,
   });
   const midnightRogueId = Object.entries(airLesson.cardNames)
     .find(([, name]) => name === 'Midnight Rogue')?.[0];
@@ -1057,6 +1058,26 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       defense: 2,
       manaCost: 4,
       otherNearbyAlliesPowerBonus: 1,
+      thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+    });
+  }
+  const wraetannisTitanId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Wraetannis Titan')?.[0];
+  assert.ok(wraetannisTitanId);
+  const wraetannisTitan = airLesson.manifest.cards[wraetannisTitanId];
+  assert.equal(wraetannisTitan?.cardType, 'minion');
+  if (wraetannisTitan?.cardType === 'minion') {
+    assert.deepEqual({
+      attack: wraetannisTitan.attack,
+      defense: wraetannisTitan.defense,
+      genesisStrikeEachEnemyHere: wraetannisTitan.genesisStrikeEachEnemyHere,
+      manaCost: wraetannisTitan.manaCost,
+      thresholds: wraetannisTitan.thresholds,
+    }, {
+      attack: 6,
+      defense: 6,
+      genesisStrikeEachEnemyHere: true,
+      manaCost: 7,
       thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
     });
   }
@@ -1620,6 +1641,27 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthBedrock.deck.spellbook
     .find(({ name }) => name === 'Granary Rats')?.copies, 4);
   assert.equal(result.earthBedrock.replayVerified, true);
+  assert.equal(result.earthWraetannisTitan.wraetannisTitan, 'Wraetannis Titan');
+  assert.equal(result.earthWraetannisTitan.houseArnBannerman, 'House Arn Bannerman');
+  assert.equal(result.earthWraetannisTitan.wildBoars, 'Wild Boars');
+  assert.equal(result.earthWraetannisTitan.seed, 9036);
+  assert.equal(result.earthWraetannisTitan.acceptedActionCount, 68);
+  assert.equal(result.earthWraetannisTitan.derivedPower, 7);
+  assert.equal(result.earthWraetannisTitan.enemiesStruckSimultaneously, true);
+  assert.equal(result.earthWraetannisTitan.allyAndSourceExcluded, true);
+  assert.equal(result.earthWraetannisTitan.enemyDeathsVerified, true);
+  assert.equal(result.earthWraetannisTitan.causalEventsVerified, true);
+  assert.equal(result.earthWraetannisTitan.legalConstructedDeck, true);
+  assert.equal(result.earthWraetannisTitan.noRandomDraws, true);
+  assert.equal(result.earthWraetannisTitan.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthWraetannisTitan.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthWraetannisTitan.deck.spellbook
+    .find(({ name }) => name === 'Wraetannis Titan')?.copies, 1);
+  assert.equal(result.earthWraetannisTitan.deck.spellbook
+    .find(({ name }) => name === 'House Arn Bannerman')?.copies, 3);
+  assert.equal(result.earthWraetannisTitan.replayVerified, true);
   assert.equal(result.earthBorderMilitia.borderMilitia, 'Border Militia');
   assert.equal(result.earthBorderMilitia.footSoldier, 'Foot Soldier');
   assert.equal(result.earthBorderMilitia.seed, 7688);

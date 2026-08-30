@@ -50,6 +50,7 @@ type SpellFacts = Readonly<{
   genesisHealController?: 2;
   genesisLoseControllerLife?: 2;
   genesisMayDamageTargetAdjacentUnit?: 2;
+  genesisStrikeEachEnemyHere?: true;
   immobile?: boolean;
   lanceCount?: 1 | 2 | 3;
   lethal?: boolean;
@@ -204,6 +205,9 @@ function cardsFor(
         ...(facts.genesisLoseControllerLife === 2 ? { genesisLoseControllerLife: 2 as const } : {}),
         ...(facts.genesisMayDamageTargetAdjacentUnit === 2
           ? { genesisMayDamageTargetAdjacentUnit: 2 as const }
+          : {}),
+        ...(facts.genesisStrikeEachEnemyHere === true
+          ? { genesisStrikeEachEnemyHere: true as const }
           : {}),
         immobile: facts.immobile ?? false,
         ...(facts.lanceCount ? { lanceCount: facts.lanceCount } : {}),
@@ -6925,7 +6929,7 @@ test('RULE-03 Genesis draws a hidden spell and an empty Spellbook loses after su
   assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-03/04 Static Servant Genesis simultaneously damages every other unit here', () => {
+test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', () => {
   const decks = {
     north: deck('static-north', 5, 6),
     south: deck('static-south', 5, 6),
@@ -6937,6 +6941,7 @@ test('RULE-03/04 Static Servant Genesis simultaneously damages every other unit 
   }, undefined, { elements: ['air'] });
   const staticId = decks.north.spellbook[0]!;
   const alliedMinionId = decks.north.spellbook[1]!;
+  const titanId = decks.north.spellbook[2]!;
   const teleportId = decks.south.spellbook[0]!;
   const enemyMinionId = decks.south.spellbook[1]!;
   const wardedMinionId = decks.south.spellbook[2]!;
@@ -6951,6 +6956,12 @@ test('RULE-03/04 Static Servant Genesis simultaneously damages every other unit 
     ...cards[alliedMinionId]!,
     deathriteDrawSite: true,
     defense: 1,
+  } as GameCardDefinition;
+  cards[titanId] = {
+    ...cards[titanId]!,
+    attack: 3,
+    defense: 3,
+    genesisStrikeEachEnemyHere: true,
   } as GameCardDefinition;
   cards[teleportId] = {
     cardType: 'magic',
@@ -6999,6 +7010,17 @@ test('RULE-03/04 Static Servant Genesis simultaneously damages every other unit 
     ...input,
     cards: {
       ...cards,
+      [titanId]: {
+        ...cards[titanId]!,
+        genesisStrikeEachEnemyHere: false,
+      } as unknown as GameCardDefinition,
+    },
+    seed: 1,
+  }), /genesisStrikeEachEnemyHere must be true when defined/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
       [staticId]: {
         ...cards[staticId]!,
         genesisDrawSpell: true,
@@ -7010,7 +7032,7 @@ test('RULE-03/04 Static Servant Genesis simultaneously damages every other unit 
   for (let seed = 1; seed <= 4_096; seed += 1) {
     const candidate = createGameManifest({ ...input, seed });
     const opening = createGameSession(candidate).state.players;
-    const northReady = [staticId, alliedMinionId].every((cardId) =>
+    const northReady = [staticId, alliedMinionId, titanId].every((cardId) =>
       opening.north.hand.spellbook.some((card) => card.cardId === cardId));
     const southAvailable = [
       ...opening.south.hand.spellbook,
@@ -7025,6 +7047,8 @@ test('RULE-03/04 Static Servant Genesis simultaneously damages every other unit 
   assert.ok(gameManifest);
   assert.equal((gameManifest.cards[staticId] as unknown as
     Readonly<Record<string, unknown>>).genesisDamageEachOtherUnitHere, 1);
+  assert.equal((gameManifest.cards[titanId] as unknown as
+    Readonly<Record<string, unknown>>).genesisStrikeEachEnemyHere, true);
   let session = keep(keep(createGameSession(gameManifest)));
   const take = (predicate: Parameters<typeof action>[1]): void => {
     session = accept(session, action(session, predicate));
@@ -7139,6 +7163,65 @@ test('RULE-03/04 Static Servant Genesis simultaneously damages every other unit 
   assert.equal(result.session.state.pendingCombat, null);
   assert.equal(result.session.state.terminal.status, 'active');
   assert.equal(verifyGameReplay(result.session), true);
+
+  const titanResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardId === titanId
+      && descriptor.cell === 'C4'));
+  assert.equal(titanResult.accepted, true);
+  const titan = titanResult.session.state.realm.units.find(({ cardId }) => cardId === titanId);
+  assert.ok(titan);
+  const strikeAllocations = titanResult.receipt.events.filter(({ type }) =>
+    type === 'strike-damage-allocated');
+  assert.deepEqual(strikeAllocations.map(({ payload }) => payload), [
+    titanResult.session.state.players.south.avatar.card,
+    enemyMinion,
+    wardedMinion,
+  ].map(({ instanceId }) => ({
+    amount: 3,
+    strikerInstanceId: titan.instanceId,
+    targetInstanceId: instanceId,
+  })).sort((left, right) => left.targetInstanceId.localeCompare(right.targetInstanceId)));
+  assert.deepEqual({
+    alliedPresent: titanResult.session.state.realm.units.some(({ instanceId }) =>
+      instanceId === alliedMinion.instanceId),
+    enemyPresent: titanResult.session.state.realm.units.some(({ instanceId }) =>
+      instanceId === enemyMinion.instanceId),
+    southLife: titanResult.session.state.players.south.avatar.life,
+    titanDamage: titan.damage,
+    undergroundDamage: titanResult.session.state.realm.units.find(({ instanceId }) =>
+      instanceId === undergroundMinion.instanceId)?.damage,
+    warded: titanResult.session.state.realm.units.find(({ instanceId }) =>
+      instanceId === wardedMinion.instanceId)?.warded,
+  }, {
+    alliedPresent: true,
+    enemyPresent: false,
+    southLife: 17,
+    titanDamage: 0,
+    undergroundDamage: 0,
+    warded: false,
+  });
+  const titanTargetIds = [
+    titanResult.session.state.players.south.avatar.card.instanceId,
+    enemyMinion.instanceId,
+    wardedMinion.instanceId,
+  ].sort();
+  const titanResolutionTypes = titanTargetIds.flatMap((instanceId) =>
+    instanceId === titanResult.session.state.players.south.avatar.card.instanceId
+      ? ['damage-dealt', 'avatar-life-lost']
+      : instanceId === wardedMinion.instanceId
+        ? ['damage-dealt', 'ward-broken']
+        : ['damage-dealt']);
+  assert.deepEqual(titanResult.receipt.events.map(({ type }) => type), [
+    'minion-summoned',
+    ...Array.from({ length: 3 }, () => 'strike-damage-allocated'),
+    ...titanResolutionTypes,
+    'minion-died',
+  ]);
+  assert.equal(titanResult.receipt.randomDraws.length, 0);
+  assert.equal(titanResult.session.state.pendingCombat, null);
+  assert.equal(titanResult.session.state.terminal.status, 'active');
+  assert.equal(verifyGameReplay(titanResult.session), true);
 });
 
 test('RULE-03/04 Vile Imp may deal 2 damage to one adjacent unit or decline', () => {
