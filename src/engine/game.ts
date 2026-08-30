@@ -182,7 +182,7 @@ export type GameCardDefinition =
     genesisDisableSelfUntilDamaged?: true;
     genesisStrikeEachEnemyHere?: true;
     genesisMayDamageTargetAdjacentUnit?: 2;
-    genesisDrawSpell?: boolean;
+    genesisDrawSpells?: number;
     genesisDrawSite?: boolean;
     genesisHealController?: 2;
     genesisLoseControllerLife?: 2;
@@ -1445,6 +1445,9 @@ function requireCardId(value: string, path: string): void {
 
 function validateCardDefinition(card: GameCardDefinition, path: string): void {
   const elements: readonly GameElement[] = ['earth', 'fire', 'water', 'air'];
+  if (Object.prototype.hasOwnProperty.call(card, 'genesisDrawSpell')) {
+    throw new RangeError(`${path}.genesisDrawSpell is obsolete; use genesisDrawSpells`);
+  }
   if (card.cardType === 'avatar') {
     if (typeof card.drawSpell !== 'boolean') throw new RangeError(`${path}.drawSpell must be boolean`);
     if (card.earthSitePlayCreatesAdjacentRubble !== undefined
@@ -1846,8 +1849,13 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.genesisDrawSite !== undefined && typeof card.genesisDrawSite !== 'boolean') {
     throw new RangeError(`${path}.genesisDrawSite must be boolean`);
   }
-  if (card.genesisDrawSpell !== undefined && typeof card.genesisDrawSpell !== 'boolean') {
-    throw new RangeError(`${path}.genesisDrawSpell must be boolean`);
+  if (card.genesisDrawSpells !== undefined
+    && (!Number.isSafeInteger(card.genesisDrawSpells)
+      || card.genesisDrawSpells < 1
+      || card.genesisDrawSpells > MAX_DECK_CARDS)) {
+    throw new RangeError(
+      `${path}.genesisDrawSpells must be a safe integer between 1 and ${MAX_DECK_CARDS}`,
+    );
   }
   if (card.genesisDamageEachOtherUnitHere !== undefined
     && card.genesisDamageEachOtherUnitHere !== 1) {
@@ -1875,20 +1883,20 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && card.diesAtEndOfControllerTurn !== true) {
     throw new RangeError(`${path}.diesAtEndOfControllerTurn must be true when defined`);
   }
-  if (card.genesisDrawSite && card.genesisDrawSpell) {
+  if (card.genesisDrawSite && card.genesisDrawSpells !== undefined) {
     throw new RangeError(`${path} simultaneous Genesis site and spell draws are unsupported`);
   }
   if (card.genesisLoseControllerLife !== undefined
-    && (card.genesisDrawSite || card.genesisDrawSpell)) {
+    && (card.genesisDrawSite || card.genesisDrawSpells !== undefined)) {
     throw new RangeError(`${path} simultaneous Genesis life loss and draw are unsupported`);
   }
   if (card.genesisHealController !== undefined
-    && (card.genesisDrawSite || card.genesisDrawSpell
+    && (card.genesisDrawSite || card.genesisDrawSpells !== undefined
       || card.genesisLoseControllerLife !== undefined)) {
     throw new RangeError(`${path} simultaneous Genesis healing and another effect are unsupported`);
   }
   if (card.genesisDamageEachOtherUnitHere === 1
-    && (card.genesisDrawSite || card.genesisDrawSpell
+    && (card.genesisDrawSite || card.genesisDrawSpells !== undefined
       || card.genesisMayDamageTargetAdjacentUnit !== undefined
       || card.genesisStrikeEachEnemyHere === true
       || card.genesisHealController !== undefined
@@ -1896,20 +1904,20 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     throw new RangeError(`${path} simultaneous Genesis damage and another effect are unsupported`);
   }
   if (card.genesisMayDamageTargetAdjacentUnit === 2
-    && (card.genesisDrawSite || card.genesisDrawSpell
+    && (card.genesisDrawSite || card.genesisDrawSpells !== undefined
       || card.genesisStrikeEachEnemyHere === true
       || card.genesisHealController !== undefined
       || card.genesisLoseControllerLife !== undefined)) {
     throw new RangeError(`${path} simultaneous Genesis damage and another effect are unsupported`);
   }
   if (card.genesisStrikeEachEnemyHere === true
-    && (card.genesisDrawSite || card.genesisDrawSpell
+    && (card.genesisDrawSite || card.genesisDrawSpells !== undefined
       || card.genesisHealController !== undefined
       || card.genesisLoseControllerLife !== undefined)) {
     throw new RangeError(`${path} simultaneous Genesis strikes and another effect are unsupported`);
   }
   if (card.genesisDisableSelfUntilDamaged === true
-    && (card.genesisDrawSite || card.genesisDrawSpell
+    && (card.genesisDrawSite || card.genesisDrawSpells !== undefined
       || card.genesisDamageEachOtherUnitHere === 1
       || card.genesisMayDamageTargetAdjacentUnit === 2
       || card.genesisStrikeEachEnemyHere === true
@@ -1979,7 +1987,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.genesisDisableSelfUntilDamaged === true
       || card.genesisMayDamageTargetAdjacentUnit === 2
       || card.genesisStrikeEachEnemyHere === true
-      || card.genesisDrawSpell === true
+      || card.genesisDrawSpells !== undefined
       || card.genesisDrawSite === true
       || card.genesisHealController === 2
       || card.genesisLoseControllerLife === 2)) {
@@ -2042,7 +2050,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     throw new RangeError(`${path}.token must be true when defined`);
   }
   if (card.token === true
-    && (card.genesisDrawSite || card.genesisDrawSpell
+    && (card.genesisDrawSite || card.genesisDrawSpells !== undefined
       || card.genesisDamageEachOtherUnitHere === 1
       || card.genesisDisableSelfUntilDamaged === true
       || card.genesisMayDamageTargetAdjacentUnit === 2
@@ -2068,7 +2076,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     throw new RangeError(`${path} Waterbound with Ward or Stealth is unsupported`);
   }
   if (card.waterbound
-    && (card.genesisDrawSite || card.genesisDrawSpell
+    && (card.genesisDrawSite || card.genesisDrawSpells !== undefined
       || card.genesisDamageEachOtherUnitHere === 1
       || card.genesisDisableSelfUntilDamaged === true
       || card.genesisMayDamageTargetAdjacentUnit === 2
@@ -2367,7 +2375,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.genesisStrikeEachEnemyHere === true
               ? { genesisStrikeEachEnemyHere: true as const }
               : {}),
-            ...(card.genesisDrawSpell === true ? { genesisDrawSpell: true } : {}),
+            ...(card.genesisDrawSpells !== undefined
+              ? { genesisDrawSpells: card.genesisDrawSpells }
+              : {}),
             ...(card.genesisDrawSite === true ? { genesisDrawSite: true } : {}),
             ...(card.genesisHealController === 2 ? { genesisHealController: 2 as const } : {}),
             ...(card.genesisLoseControllerLife === 2 ? { genesisLoseControllerLife: 2 as const } : {}),
@@ -7738,9 +7748,12 @@ function applyDescriptor(
       ];
     }
     const settledPlayer = settlement.state.players[seat];
+    const genesisDrawCount = definition.genesisDrawSite
+      ? 1
+      : definition.genesisDrawSpells ?? 0;
     const genesisDrawZone = definition.genesisDrawSite
       ? 'atlas'
-      : definition.genesisDrawSpell ? 'spellbook' : undefined;
+      : definition.genesisDrawSpells !== undefined ? 'spellbook' : undefined;
     if (definition.genesisDisableSelfUntilDamaged === true) {
       const disabled = withStateVersion(settlement.state, {
         realm: {
@@ -7976,42 +7989,44 @@ function applyDescriptor(
       ];
     }
     if (genesisDrawZone) {
-      const [drawn, ...remaining] = settledPlayer[genesisDrawZone];
-      if (!drawn) {
-        const winner = otherSeat(seat);
-        return [
-          withStateVersion(settlement.state, {
-            phase: 'terminal',
-            pendingCombat: null,
-            terminal: { loser: seat, reason: 'deck_empty', status: 'finished', winner },
-          }),
-          [
-            ...summonOutcomes,
-            ...settlement.outcomes,
-            { payload: { loser: seat, reason: 'deck_empty', winner }, type: 'game-ended' },
-          ],
-          paymentRandomDraws,
-        ];
-      }
+      const drawn = settledPlayer[genesisDrawZone].slice(0, genesisDrawCount);
+      const remaining = settledPlayer[genesisDrawZone].slice(drawn.length);
+      const drawFailed = drawn.length < genesisDrawCount;
       const drawingPlayer = deepFreeze({
         ...settledPlayer,
         [genesisDrawZone]: remaining,
         hand: {
           ...settledPlayer.hand,
-          [genesisDrawZone]: [...settledPlayer.hand[genesisDrawZone], drawn],
+          [genesisDrawZone]: [...settledPlayer.hand[genesisDrawZone], ...drawn],
         },
       });
+      const winner = otherSeat(seat);
       return [
         withStateVersion(settlement.state, {
+          ...(drawFailed
+            ? {
+              pendingCombat: null,
+              phase: 'terminal' as const,
+              terminal: {
+                loser: seat,
+                reason: 'deck_empty' as const,
+                status: 'finished' as const,
+                winner,
+              },
+            }
+            : {}),
           players: replacePlayer(settlement.state, seat, drawingPlayer),
         }),
         [
           ...summonOutcomes,
           ...settlement.outcomes,
-          {
+          ...drawn.map(() => ({
             payload: { seat, sourceInstanceId: card.instanceId },
             type: genesisDrawZone === 'atlas' ? 'site-drawn' : 'spell-drawn',
-          },
+          })),
+          ...(drawFailed
+            ? [{ payload: { loser: seat, reason: 'deck_empty', winner }, type: 'game-ended' }]
+            : []),
         ],
         paymentRandomDraws,
       ];

@@ -922,7 +922,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 23 : 35,
+        preset.id === 'air-vs-earth-lesson' ? 24 : 35,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -930,7 +930,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 35 : 23,
+        preset.id === 'air-vs-earth-lesson' ? 35 : 24,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -967,6 +967,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Cloud Spirit': 2,
     'Dead of Night Demon': 2,
     'Gyre Hippogriffs': 1,
+    'Grandmaster Wizard': 1,
     'Highland Clansmen': 1,
     'Lightning Bolt': 3,
     'Midnight Rogue': 2,
@@ -976,6 +977,20 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     'Spectral Stalker': 2,
     Teleport: 1,
   });
+  const grandmasterWizardId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Grandmaster Wizard')?.[0];
+  assert.ok(grandmasterWizardId);
+  const grandmasterWizard = airLesson.manifest.cards[grandmasterWizardId];
+  assert.equal(grandmasterWizard?.cardType, 'minion');
+  if (grandmasterWizard?.cardType === 'minion') {
+    assert.equal(grandmasterWizard.attack, 0);
+    assert.equal(grandmasterWizard.defense, 0);
+    assert.equal(grandmasterWizard.manaCost, 6);
+    assert.equal(grandmasterWizard.mortal, true);
+    assert.equal(grandmasterWizard.spellcaster, true);
+    assert.equal(grandmasterWizard.genesisDrawSpells, 3);
+    assert.deepEqual(grandmasterWizard.thresholds, { air: 2, earth: 0, fire: 0, water: 0 });
+  }
   assert.deepEqual(summarize(airLesson, 'south', 'atlas'), {
     Bedrock: 1,
     'Holy Ground': 1,
@@ -1418,6 +1433,23 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airGenesisSpell.deck.spellbook
     .find(({ name }) => name === 'Apprentice Wizard')?.copies, 4);
   assert.equal(result.airGenesisSpell.replayVerified, true);
+  assert.equal(result.airGrandmasterWizard.grandmasterWizard, 'Grandmaster Wizard');
+  assert.equal(result.airGrandmasterWizard.acceptedActionCount, 30);
+  assert.equal(result.airGrandmasterWizard.manaPaid, 6);
+  assert.equal(result.airGrandmasterWizard.spellcasterAndZeroPowerVerified, true);
+  assert.equal(result.airGrandmasterWizard.exactlyThreeOrderedDraws, true);
+  assert.equal(result.airGrandmasterWizard.hiddenFromOpponent, true);
+  assert.equal(result.airGrandmasterWizard.causalEventsVerified, true);
+  assert.equal(result.airGrandmasterWizard.legalConstructedDeck, true);
+  assert.equal(result.airGrandmasterWizard.noRandomDraws, true);
+  assert.equal(result.airGrandmasterWizard.unsupportedMechanicsAbsent, true);
+  assert.equal(result.airGrandmasterWizard.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.airGrandmasterWizard.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.airGrandmasterWizard.deck.spellbook
+    .find(({ name }) => name === 'Grandmaster Wizard')?.copies, 1);
+  assert.equal(result.airGrandmasterWizard.replayVerified, true);
   assert.equal(result.airSpellcasterFreeze.apprenticeWizard, 'Apprentice Wizard');
   assert.equal(result.airSpellcasterFreeze.freeze, 'Freeze');
   assert.equal(result.airSpellcasterFreeze.seravaTownsfolk, 'Serava Townsfolk');

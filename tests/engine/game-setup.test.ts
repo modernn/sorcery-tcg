@@ -46,7 +46,7 @@ type SpellFacts = Readonly<{
   discardRandomCardInsteadOfMana?: true;
   diesAtEndOfControllerTurn?: true;
   gainsStealthAtEndOfTurn?: boolean;
-  genesisDrawSpell?: boolean;
+  genesisDrawSpells?: number;
   genesisDrawSite?: boolean;
   genesisHealController?: 2;
   genesisLoseControllerLife?: 2;
@@ -205,7 +205,9 @@ function cardsFor(
           ? { diesAtEndOfControllerTurn: true as const }
           : {}),
         gainsStealthAtEndOfTurn: facts.gainsStealthAtEndOfTurn ?? false,
-        genesisDrawSpell: facts.genesisDrawSpell ?? false,
+        ...(facts.genesisDrawSpells !== undefined
+          ? { genesisDrawSpells: facts.genesisDrawSpells }
+          : {}),
         genesisDrawSite: facts.genesisDrawSite ?? false,
         ...(facts.genesisHealController === 2 ? { genesisHealController: 2 as const } : {}),
         ...(facts.genesisLoseControllerLife === 2 ? { genesisLoseControllerLife: 2 as const } : {}),
@@ -905,9 +907,31 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
     ...input,
     cards: {
       ...cards,
-      [firstSpell]: { ...cards[firstSpell]!, genesisDrawSpell: 'yes' } as unknown as GameCardDefinition,
+      [firstSpell]: { ...cards[firstSpell]!, genesisDrawSpells: 'yes' } as unknown as GameCardDefinition,
     },
-  }), /genesisDrawSpell/);
+  }), /genesisDrawSpells/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        genesisDrawSpell: true,
+      } as unknown as GameCardDefinition,
+    },
+  }), /genesisDrawSpell is obsolete; use genesisDrawSpells/);
+  for (const genesisDrawSpells of [0, 1.5, 201]) {
+    assert.throws(() => createGameManifest({
+      ...input,
+      cards: {
+        ...cards,
+        [firstSpell]: {
+          ...cards[firstSpell]!,
+          genesisDrawSpells,
+        } as unknown as GameCardDefinition,
+      },
+    }), /genesisDrawSpells must be a safe integer between 1 and 200/);
+  }
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -915,7 +939,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       [firstSpell]: {
         ...cards[firstSpell]!,
         genesisDrawSite: true,
-        genesisDrawSpell: true,
+        genesisDrawSpells: 1,
       } as GameCardDefinition,
     },
   }), /simultaneous Genesis/);
@@ -1040,7 +1064,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       ...cards,
       [firstSpell]: {
         ...cards[firstSpell]!,
-        genesisDrawSpell: true,
+        genesisDrawSpells: 1,
         waterbound: true,
       } as GameCardDefinition,
     },
@@ -7323,7 +7347,7 @@ test('RULE-03 Genesis draws a hidden site and an empty Atlas loses after summoni
 
 test('RULE-03 Genesis draws a hidden spell and an empty Spellbook loses after summoning', () => {
   const spell: SpellFacts = {
-    genesisDrawSpell: true,
+    genesisDrawSpells: 1,
     manaCost: 1,
     thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
   };
@@ -7361,6 +7385,100 @@ test('RULE-03 Genesis draws a hidden spell and an empty Spellbook loses after su
     ['minion-summoned', 'game-ended'],
   );
   assert.equal(verifyGameReplay(session), true);
+});
+
+function numericGenesisSession(remainingCount: number, seed: number): GameSession {
+  const decks = {
+    north: deck(`genesis-spells-north-${remainingCount}`, 5, 3 + remainingCount),
+    south: deck(`genesis-spells-south-${remainingCount}`, 5, 3 + remainingCount),
+  };
+  const cards = cardsFor(decks, {
+    attack: 0,
+    defense: 0,
+    genesisDrawSpells: 3,
+    manaCost: 1,
+    thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+  }, undefined, { elements: ['air'] });
+  let session = keep(createGameSession(createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic',
+      revisionId: `synthetic-genesis-spells-${remainingCount}-v1`,
+    },
+    cards,
+    decks,
+    firstSeat: 'north',
+    seed,
+  })));
+  session = keep(session);
+  return accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+}
+
+test('RULE-03 numeric Genesis spell draw counts draw ordered hidden cards', () => {
+  const session = numericGenesisSession(3, 128);
+  const before = session.state.players.north;
+  const expectedDraws = before.spellbook.slice(0, 3);
+  assert.equal(expectedDraws.length, 3);
+
+  const result = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'));
+  assert.equal(result.accepted, true);
+  if (!result.accepted) return;
+  const after = result.session.state.players.north;
+  assert.equal(after.spellbook.length, before.spellbook.length - 3);
+  assert.equal(after.hand.spellbook.length, before.hand.spellbook.length + 2);
+  assert.deepEqual(result.receipt.events.map(({ type }) => type), [
+    'minion-summoned',
+    'spell-drawn',
+    'spell-drawn',
+    'spell-drawn',
+  ]);
+  for (const drawn of expectedDraws) {
+    assert.equal(after.hand.spellbook.some(({ instanceId }) => instanceId === drawn.instanceId), true);
+    assert.doesNotMatch(canonicalJson(result.receipt.events), new RegExp(drawn.cardId));
+    assert.doesNotMatch(canonicalJson(observeGame(result.session.state, 'south')), new RegExp(drawn.cardId));
+  }
+  assert.equal(observeGame(result.session.state, 'north').realm.units.some(({ attack, damage, defense }) =>
+    attack === 0 && damage === 0 && defense === 0), true);
+  assert.deepEqual(result.receipt.randomDraws, []);
+  assert.equal(verifyGameReplay(result.session), true);
+});
+
+test('RULE-03 numeric Genesis spell draws exhaust 2, 1, or 0 remaining cards before deck loss', () => {
+  for (const remainingCount of [2, 1, 0]) {
+    const session = numericGenesisSession(remainingCount, 129 + remainingCount);
+    const before = session.state.players.north;
+    assert.equal(before.spellbook.length, remainingCount);
+    const expectedDraws = before.spellbook.slice();
+
+    const result = stepGame(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'summon-minion'));
+    assert.equal(result.accepted, true);
+    if (!result.accepted) continue;
+    assert.deepEqual(result.session.state.terminal, {
+      loser: 'north',
+      reason: 'deck_empty',
+      status: 'finished',
+      winner: 'south',
+    });
+    assert.equal(result.session.state.players.north.spellbook.length, 0);
+    assert.deepEqual(result.receipt.events.map(({ type }) => type), [
+      'minion-summoned',
+      ...Array.from({ length: remainingCount }, () => 'spell-drawn' as const),
+      'game-ended',
+    ]);
+    for (const drawn of expectedDraws) {
+      assert.equal(result.session.state.players.north.hand.spellbook
+        .some(({ instanceId }) => instanceId === drawn.instanceId), true);
+      assert.doesNotMatch(canonicalJson(result.receipt.events), new RegExp(drawn.cardId));
+      assert.doesNotMatch(
+        canonicalJson(observeGame(result.session.state, 'south')),
+        new RegExp(drawn.cardId),
+      );
+    }
+    assert.deepEqual(result.receipt.randomDraws, []);
+    assert.equal(verifyGameReplay(result.session), true);
+  }
 });
 
 test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', () => {
@@ -7482,7 +7600,7 @@ test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', (
       ...cards,
       [staticId]: {
         ...cards[staticId]!,
-        genesisDrawSpell: true,
+        genesisDrawSpells: 1,
       } as unknown as GameCardDefinition,
     },
     seed: 1,
@@ -9990,6 +10108,56 @@ function northAttacksAtC2(
       && descriptor.to.cell === 'C2'));
   return { attackerInstanceId, defenderInstanceId, session, targetInstanceId };
 }
+
+test('RULE-03/04 an undamaged 0/0 Genesis minion survives until it takes positive damage', () => {
+  const setup = northAttacksAtC2(131, {
+    attack: 1,
+    defense: 2,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  }, undefined, false, {
+    attack: 0,
+    defense: 0,
+    genesisDrawSpells: 3,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  });
+  const target = observeGame(setup.session.state, 'north').realm.units
+    .find(({ instanceId }) => instanceId === setup.targetInstanceId);
+  assert.ok(target);
+  assert.deepEqual({
+    attack: target.attack,
+    damage: target.damage,
+    defense: target.defense,
+  }, {
+    attack: 0,
+    damage: 0,
+    defense: 0,
+  });
+
+  let session = accept(setup.session, action(setup.session, ({ descriptor }) =>
+    descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === setup.targetInstanceId));
+  const fought = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+  assert.equal(fought.accepted, true);
+  if (!fought.accepted) return;
+  session = fought.session;
+  assert.equal(session.state.players.south.cemetery
+    .some(({ instanceId }) => instanceId === setup.targetInstanceId), true);
+  assert.deepEqual(fought.receipt.events.find(({ payload, type }) =>
+    type === 'damage-dealt'
+      && canonicalJson(payload).includes(setup.targetInstanceId))?.payload, {
+    accumulated: 1,
+    amount: 1,
+    direct: true,
+    instanceId: setup.targetInstanceId,
+    seat: 'south',
+  });
+  assert.equal(session.transcript.every(({ randomDraws }) => randomDraws.length === 0), true);
+  assert.equal(verifyGameReplay(session), true);
+});
 
 test('RULE-04 a restricted attacker can target units but not sites', () => {
   const setup = northAttacksAtC2(114, {

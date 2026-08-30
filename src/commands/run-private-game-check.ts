@@ -25,6 +25,7 @@ import {
   type GameElement,
   type GameLegalAction,
   type GameManifest,
+  type RealmCell,
   type GameSeat,
   type GameSession,
 } from '../engine/game.ts';
@@ -276,6 +277,21 @@ export type PrivateGameCheck = Readonly<{
     hiddenFromOpponent: boolean;
     replayVerified: boolean;
     seed: number;
+  }>;
+  airGrandmasterWizard: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    deck: DeckList;
+    exactlyThreeOrderedDraws: boolean;
+    grandmasterWizard: string;
+    hiddenFromOpponent: boolean;
+    legalConstructedDeck: boolean;
+    manaPaid: number;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    seed: number;
+    spellcasterAndZeroPowerVerified: boolean;
+    unsupportedMechanicsAbsent: boolean;
   }>;
   airLeyline: Readonly<{
     acceptedActionCount: number;
@@ -1516,6 +1532,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   freeze: NormalizedCard;
   fatality: NormalizedCard;
   genesisSpellMinion: NormalizedCard;
+  grandmasterWizard: NormalizedCard;
   genesisMinion: NormalizedCard;
   geomancer: NormalizedCard;
   gothicTower: NormalizedCard;
@@ -3370,6 +3387,29 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || genesisSpellMinion.rarity !== 'ordinary') {
     throw new Error('private Genesis spell-draw minion no longer matches its supported facts');
   }
+  const grandmasterWizard = snapshot.cards.find(({ name }) => name === 'Grandmaster Wizard');
+  if (!grandmasterWizard
+    || grandmasterWizard.stableId
+      !== 'card:d98b9dc7c31c7236b99f8ef0a370159826c19b1cfbca9a2560e6b170e1c64428'
+    || grandmasterWizard.officialSourceId !== '001-grandmaster_wizard-b-f'
+    || grandmasterWizard.cardType !== 'minion'
+    || ruleTextDigest(grandmasterWizard.rulesText)
+      !== 'sha256:bc82d6adc459014e8dadc488003d13a86f1af9912630ef99eccc03d21a3c4378'
+    || grandmasterWizard.manaCost !== 6
+    || grandmasterWizard.attack !== 0
+    || grandmasterWizard.defense !== 0
+    || grandmasterWizard.life !== null
+    || grandmasterWizard.elements.length !== 1
+    || grandmasterWizard.elements[0] !== 'air'
+    || grandmasterWizard.thresholds.air !== 2
+    || grandmasterWizard.thresholds.earth !== 0
+    || grandmasterWizard.thresholds.fire !== 0
+    || grandmasterWizard.thresholds.water !== 0
+    || grandmasterWizard.rarity !== 'elite'
+    || grandmasterWizard.subtypes.length !== 1
+    || grandmasterWizard.subtypes[0] !== 'Mortal') {
+    throw new Error('private multi-spell Genesis Spellcaster no longer matches its supported facts');
+  }
   const polarBears = snapshot.cards.find(({ name }) => name === 'Polar Bears');
   if (!polarBears
     || polarBears.cardType !== 'minion'
@@ -3745,6 +3785,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     freeze,
     fatality,
     genesisSpellMinion,
+    grandmasterWizard,
     genesisMinion,
     geomancer,
     gothicTower,
@@ -3882,7 +3923,7 @@ function gameDefinition(
   submerge = false,
   burrowing = false,
   voidwalk = false,
-  genesisDrawSpell = false,
+  genesisDrawSpells: 0 | 1 | 3 = 0,
   connectsTopBottom = false,
   mustBeCastToOuterColumn = false,
   siteGenesisDrawSpellPerAdjacentSameCard = false,
@@ -4149,7 +4190,7 @@ function gameDefinition(
         ? { genesisDisableSelfUntilDamaged: true as const }
         : {}),
       ...(genesisMayDamageTargetAdjacentUnit ? { genesisMayDamageTargetAdjacentUnit } : {}),
-      genesisDrawSpell,
+      ...(genesisDrawSpells ? { genesisDrawSpells } : {}),
       genesisDrawSite,
       ...(genesisLoseControllerLife ? { genesisLoseControllerLife } : {}),
       gainsStealthAtEndOfTurn,
@@ -4205,7 +4246,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-leyline' | 'air-lightning-bolt' | 'air-rain-of-arrows' | 'air-spellcaster-freeze' | 'air-static-servant' | 'air-teleport' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -4503,6 +4544,7 @@ function buildManifest(
     avatar: input.sparkmage.stableId,
     spellbook: [
       ...Array(2).fill(input.genesisSpellMinion.stableId),
+      input.grandmasterWizard.stableId,
       ...Array(2).fill(input.movementTwoMinion.stableId),
       ...Array(2).fill(input.airborneMinion.stableId),
       ...Array(2).fill(input.stealthTargetMinion.stableId),
@@ -4633,6 +4675,14 @@ function buildManifest(
     [input.zap, input.fatality],
   );
   const airGenesisSpellDeck = elementalDeck('air', [...airMinions, input.genesisSpellMinion]);
+  const airGrandmasterWizardBase = elementalDeck('air', airMinions);
+  const airGrandmasterWizardDeck: GameDeckSpec = {
+    ...airGrandmasterWizardBase,
+    spellbook: [
+      input.grandmasterWizard.stableId,
+      ...airGrandmasterWizardBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
+    ],
+  };
   const airLeylineDeck = elementalDeck('air', airMinions, [input.leylineHenge]);
   const airVoidwalkDeck = elementalDeck('air', [
     ...airMinions,
@@ -4811,6 +4861,8 @@ function buildManifest(
       ? airTeleportDeck
       : scenario === 'air-genesis-spell'
       ? airGenesisSpellDeck
+      : scenario === 'air-grandmaster-wizard'
+      ? airGrandmasterWizardDeck
       : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
       : scenario === 'air-void-artifact'
@@ -4970,6 +5022,8 @@ function buildManifest(
       ? airTeleportDeck
       : scenario === 'air-genesis-spell'
       ? airGenesisSpellDeck
+      : scenario === 'air-grandmaster-wizard'
+      ? airGrandmasterWizardDeck
       : scenario === 'air-voidwalk'
       ? airVoidwalkDeck
       : scenario === 'air-void-artifact'
@@ -5152,7 +5206,9 @@ function buildManifest(
         || card.stableId === input.entombed.stableId,
       card.stableId === input.voidwalkMinion.stableId
         || card.stableId === input.forsaken.stableId,
-      card.stableId === input.genesisSpellMinion.stableId,
+      card.stableId === input.genesisSpellMinion.stableId
+        ? 1
+        : card.stableId === input.grandmasterWizard.stableId ? 3 : 0,
       card.stableId === input.polarBears.stableId,
       card.stableId === input.forsaken.stableId,
       card.stableId === input.leylineHenge.stableId,
@@ -5187,6 +5243,7 @@ function buildManifest(
       card.stableId === input.rainOfArrows.stableId ? 1 : 0,
       card.stableId === input.overpower.stableId ? 2 : 0,
       card.stableId === input.genesisSpellMinion.stableId
+        || card.stableId === input.grandmasterWizard.stableId
         || card.stableId === input.seaWitch.stableId,
       card.stableId === input.grainSparrow.stableId ? 2 : 0,
       card.stableId === input.lash.stableId,
@@ -8749,6 +8806,50 @@ function findAirGenesisSpellOpening(
   throw new Error('private Air Genesis spell-draw scenario no longer produces its supported opening');
 }
 
+function findAirGrandmasterWizardOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  featuredInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string, string, string, string];
+  seed: number;
+  session: GameSession;
+  southSiteInstanceId: string;
+}> {
+  // Seed 785 is pinned from the original bounded opening scan.
+  const seed = 785;
+  const built = buildManifest(input, seed, 'air-grandmaster-wizard');
+  const session = createGameSession(built.manifest);
+  const northPlayer = session.state.players.north;
+  const northSites = [...northPlayer.hand.atlas, ...northPlayer.atlas.slice(0, 3)];
+  const featuredInstanceId = northPlayer.hand.spellbook
+    .find(({ cardId }) => cardId === input.grandmasterWizard.stableId)?.instanceId;
+  const allAirSites = northSites.every(({ cardId }) => {
+    const definition = session.state.cards[cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('air');
+  });
+  const southSite = session.state.players.south.hand.atlas[0];
+  if (northSites.length !== 6 || !allAirSites || !featuredInstanceId || !southSite) {
+    throw new Error('private Grandmaster Wizard seed 785 no longer produces its supported opening');
+  }
+  return {
+    ...built,
+    featuredInstanceId,
+    northSiteInstanceIds: northSites.map(({ instanceId }) => instanceId) as [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ],
+    seed,
+    session,
+    southSiteInstanceId: southSite.instanceId,
+  };
+}
+
 function findAirSpellcasterFreezeOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): Readonly<{
@@ -11751,7 +11852,7 @@ function runEarthMountainGiant(
         'defense',
         'gainsStealthAtEndOfTurn',
         'genesisDrawSite',
-        'genesisDrawSpell',
+        'genesisDrawSpells',
         'immobile',
         'lethal',
         'manaCost',
@@ -16416,6 +16517,134 @@ function runAirGenesisSpell(
   });
 }
 
+function runAirGrandmasterWizard(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['airGrandmasterWizard'] {
+  const opening = findAirGrandmasterWizardOpening(input);
+  let session = keep(opening.session);
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  const playNorthSite = (index: number, cell: RealmCell): void => {
+    take(({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.northSiteInstanceIds[index]
+      && descriptor.cell === cell);
+  };
+  const endNorthTurn = (): void => {
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  };
+
+  playNorthSite(0, 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId
+    && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+
+  playNorthSite(1, 'C3');
+  endNorthTurn();
+  playNorthSite(2, 'B3');
+  endNorthTurn();
+  playNorthSite(3, 'B4');
+  endNorthTurn();
+  playNorthSite(4, 'A4');
+  endNorthTurn();
+  playNorthSite(5, 'A3');
+
+  const before = session.state.players.north;
+  const drawn = before.spellbook.slice(0, 3);
+  if (drawn.length !== 3) {
+    throw new Error('private Grandmaster Wizard scenario lacks three spells to draw');
+  }
+  const summonAction = action(session, ({ descriptor }) =>
+    descriptor.kind === 'summon-minion'
+      && descriptor.cardInstanceId === opening.featuredInstanceId
+      && descriptor.cell === 'A3');
+  if (summonAction.descriptor.kind !== 'summon-minion') {
+    throw new Error('private Grandmaster Wizard scenario selected a non-summon action');
+  }
+  const summoned = stepGame(session, summonAction);
+  if (!summoned.accepted) throw new Error('private Grandmaster Wizard summon was rejected');
+  session = summoned.session;
+
+  const after = session.state.players.north;
+  const events = summoned.receipt.events;
+  const expectedEvents = [
+    {
+      payload: {
+        cardId: input.grandmasterWizard.stableId,
+        casterInstanceId: summonAction.descriptor.casterInstanceId,
+        cell: 'A3',
+        instanceId: opening.featuredInstanceId,
+        manaPaid: 6,
+        seat: 'north',
+      },
+      type: 'minion-summoned',
+    },
+    ...Array.from({ length: 3 }, () => ({
+      payload: {
+        seat: 'north',
+        sourceInstanceId: opening.featuredInstanceId,
+      },
+      type: 'spell-drawn',
+    })),
+  ];
+  const firstEventSequence = events[0]?.eventSequence;
+  const causalEventsVerified = canonicalJson(
+    events.map(({ payload, type }) => ({ payload, type })) as unknown as JsonValue,
+  ) === canonicalJson(expectedEvents as unknown as JsonValue)
+    && firstEventSequence !== undefined
+    && events.every((event, index) =>
+      event.cause.actionId === summoned.receipt.actionId
+        && event.cause.receiptSequence === summoned.receipt.receiptSequence
+        && event.eventSequence === firstEventSequence + index);
+  const drawnInstanceIds = drawn.map(({ instanceId }) => instanceId);
+  const exactlyThreeOrderedDraws = after.spellbook.length === before.spellbook.length - 3
+    && canonicalJson(
+      after.hand.spellbook.slice(-3).map(({ instanceId }) => instanceId) as unknown as JsonValue,
+    ) === canonicalJson(drawnInstanceIds as unknown as JsonValue)
+    && after.hand.spellbook.length === before.hand.spellbook.length + 2;
+  const opponentHand = observeGame(session.state, 'south').players.north.hand.spellbook;
+  const hiddenFromOpponent = typeof opponentHand === 'number'
+    && opponentHand === after.hand.spellbook.length
+    && drawnInstanceIds.every((instanceId) =>
+      !canonicalJson(events as unknown as JsonValue).includes(instanceId));
+  const definition = session.state.cards[input.grandmasterWizard.stableId];
+  const grandmaster = observeGame(session.state, 'north').realm.units
+    .find(({ instanceId }) => instanceId === opening.featuredInstanceId);
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified,
+    deck,
+    exactlyThreeOrderedDraws,
+    grandmasterWizard: input.grandmasterWizard.name,
+    hiddenFromOpponent,
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && deck.spellbook.find(({ name }) => name === input.grandmasterWizard.name)?.copies === 1,
+    manaPaid: before.mana - after.mana,
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    spellcasterAndZeroPowerVerified: definition?.cardType === 'minion'
+      && definition.spellcaster === true
+      && definition.genesisDrawSpells === 3
+      && grandmaster?.attack === 0
+      && grandmaster.defense === 0
+      && grandmaster.damage === 0,
+    unsupportedMechanicsAbsent: session.state.terminal.status === 'active'
+      && events.length === expectedEvents.length,
+  });
+}
+
 function runAirSpellcasterFreeze(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['airSpellcasterFreeze'] {
@@ -20505,6 +20734,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airFireFatality = runAirFireFatality(input);
   const airBladderblimp = runAirBladderblimp(input);
   const airGenesisSpell = runAirGenesisSpell(input);
+  const airGrandmasterWizard = runAirGrandmasterWizard(input);
   const airSpellcasterFreeze = runAirSpellcasterFreeze(input);
   const airArcLightning = runAirArcLightning(input);
   const airLightningBolt = runAirLightningBolt(input);
@@ -20712,6 +20942,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     airStarter,
     airBladderblimp,
     airGenesisSpell,
+    airGrandmasterWizard,
     airSpellcasterFreeze,
     airArcLightning,
     airLightningBolt,
