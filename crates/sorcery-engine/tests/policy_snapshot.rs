@@ -227,3 +227,35 @@ fn absent_parent_should_be_canonical_but_null_should_not() {
     });
     assert!(parse_policy_snapshot(&with_null).is_err());
 }
+
+#[test]
+fn neighborhood_should_be_complete_immutable_and_repeatable() {
+    let root = parse_policy_snapshot(&mutate_body(|body| {
+        body.remove("parentPolicyId");
+        body["generation"] = json!(0);
+    }))
+    .expect("root policy");
+
+    let first = root.neighbors().expect("policy neighbors");
+    let second = root.neighbors().expect("repeat policy neighbors");
+
+    assert_eq!(first, second);
+    assert_eq!(first.len(), 10);
+    assert!(
+        first
+            .windows(2)
+            .all(|pair| pair[0].policy_id() < pair[1].policy_id())
+    );
+    for child in &first {
+        assert_eq!(child.generation(), 1);
+        assert_eq!(child.parent_policy_id(), Some(root.policy_id()));
+        assert_ne!(child.policy_id(), root.policy_id());
+        assert_eq!(
+            parse_policy_snapshot(&serialize_policy_snapshot(child).expect("serialize child"))
+                .expect("parse child"),
+            *child
+        );
+    }
+    assert_eq!(root.selector().atlas_reserve(), 3);
+    assert_eq!(root.selector().feature_priority(), &PolicyFeature::ALL);
+}

@@ -285,6 +285,58 @@ impl PolicySnapshot {
             "policy feature contract omitted canonical fallback",
         ))
     }
+
+    /// Builds the complete deterministic one-step policy neighborhood.
+    ///
+    /// Children swap one adjacent feature pair or adjust the Atlas reserve by one.
+    /// Every child is immutable, self-hashed, and points to this snapshot as its parent.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PolicyError`] when this snapshot cannot produce another generation.
+    pub fn neighbors(&self) -> Result<Vec<Self>, PolicyError> {
+        if self.generation == MAX_POLICY_GENERATION {
+            return Err(PolicyError::Invalid(
+                "policy generation exceeds the supported bound",
+            ));
+        }
+        let mut children = Vec::with_capacity(10);
+        for index in 0..self.selector.feature_priority.len() - 1 {
+            let mut selector = self.selector.clone();
+            selector.feature_priority.swap(index, index + 1);
+            children.push(self.child(selector)?);
+        }
+        if self.selector.atlas_reserve > 0 {
+            let mut selector = self.selector.clone();
+            selector.atlas_reserve -= 1;
+            children.push(self.child(selector)?);
+        }
+        if self.selector.atlas_reserve < MAX_ATLAS_RESERVE {
+            let mut selector = self.selector.clone();
+            selector.atlas_reserve += 1;
+            children.push(self.child(selector)?);
+        }
+        children.sort_unstable_by(|left, right| left.policy_id.cmp(&right.policy_id));
+        Ok(children)
+    }
+
+    fn child(&self, selector: PolicySelector) -> Result<Self, PolicyError> {
+        let mut child = Self {
+            authority_hash: self.authority_hash.clone(),
+            deck_id: self.deck_id.clone(),
+            engine_version: self.engine_version.clone(),
+            generation: self.generation + 1,
+            observation_version: self.observation_version,
+            parent_policy_id: Some(self.policy_id.clone()),
+            policy_id: self.policy_id.clone(),
+            schema_version: self.schema_version,
+            selector,
+            tie_break: self.tie_break,
+        };
+        child.policy_id = identity_hash(&body_value(&child)?)?;
+        validate(&child)?;
+        Ok(child)
+    }
 }
 
 fn select_feature(
