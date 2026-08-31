@@ -209,7 +209,8 @@
 - Pudge's forced drag now serializes its translated path cursor across ordered movement Deathrites, resumes each remaining edge without replaying the projectile cost, and defers its optional arrival fight until every ordered corpse resolves. Direct intermediate- and final-edge checkpoint forks prove both fight choices, exact state-version increments, event order, and byte-exact replay.
 - Terrain replacement now serializes site Genesis across ordered Deathrites. Site placement and its base mana resolve once before occupancy settlement, Genesis resumes only after every ordered corpse resolves, and a terminal Deathrite suppresses the remaining Genesis effects. Direct ordered checkpoint forks plus synchronous nonterminal and terminal paths prove exact state-version increments, event order, convergence, and byte-exact replay.
 - Conditional end-turn Stealth checks the settled realm for enemy Avatars or minions in the same region using shared nearby-footprint geometry, regardless of enemy status; no nearby enemy grants the mark before `turn-ended`, while a nearby enemy suppresses it. The official Survivors of Serava is bound to this generic fact and passes an 11-action legal 30/60 private scenario with exact replay.
-- `pnpm verify`: 368 passing public tests at this checkpoint.
+- The private-local mechanic workload report deterministically classifies all 1,100 pinned cards into ten effect families and four supplemental facets without retaining rules prose. It separates 31 blank cards, 1,046 family-classified cards, and a finite 23-card review queue, while tracking 95 cards and 940 copies demanded by the six current presets. Preset demand explicitly proves neither implementation nor scenario coverage, and the ignored report path rejects junction or symlink escape.
+- `pnpm verify`: 369 passing public tests at this checkpoint.
 
 ## Still required for Phase 3
 
