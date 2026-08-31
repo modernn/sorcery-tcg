@@ -42,6 +42,7 @@ pub struct Position {
     prng: PrngState,
     sites: [Option<SitePosition>; 20],
     state_version: u64,
+    terminal: Option<TerminalResult>,
     turn_number: u64,
     units: Vec<UnitPosition>,
 }
@@ -329,6 +330,7 @@ enum Phase {
     Draw,
     Main,
     Mulligan,
+    Terminal,
 }
 
 impl Phase {
@@ -339,8 +341,21 @@ impl Phase {
             Self::Draw => "draw",
             Self::Main => "main",
             Self::Mulligan => "mulligan",
+            Self::Terminal => "terminal",
         }
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TerminalResult {
+    loser: Seat,
+    winner: Seat,
+}
+
+struct DamageResult {
+    outcomes: Vec<(String, Value)>,
+    minion_died: bool,
+    avatar_defeated: bool,
 }
 
 fn invalid(message: impl Into<String>) -> GameError {
@@ -482,6 +497,7 @@ impl Game {
                 prng,
                 sites: std::array::from_fn(|_| None),
                 state_version: 0,
+                terminal: None,
                 turn_number: 0,
                 units: Vec::new(),
             },
@@ -530,6 +546,7 @@ impl Game {
             Phase::Draw => self.append_draw_actions(&mut actions)?,
             Phase::Mulligan => self.append_mulligan_actions(&mut actions)?,
             Phase::Main => self.append_main_actions(&mut actions)?,
+            Phase::Terminal => {}
         }
         actions.sort_unstable_by(|(left_key, left), (right_key, right)| {
             left_key
@@ -1027,9 +1044,7 @@ impl Game {
                 outcomes.extend(self.resolve_simple_minion_fight()?);
             }
             CombatTarget::Avatar { .. } | CombatTarget::Minion { .. } => {
-                return Err(GameError::UnsupportedManifestFact(
-                    "avatar combat resolution".to_owned(),
-                ));
+                outcomes.extend(self.resolve_simple_avatar_fight()?);
             }
         }
         self.position.state_version += 1;
@@ -1065,7 +1080,7 @@ impl Game {
             return Err(GameError::IllegalAction);
         }
         let attack = self.attacker_power(attacker_kind, attacking_seat, &attacker_id)?;
-        self.record_attacker_interaction(attacker_kind, attacking_seat, &attacker_id)?;
+        self.record_unit_interaction(attacker_kind, attacking_seat, &attacker_id)?;
 
         let avatar = &mut self.position.players[seat_index(target_seat)].avatar;
         let old_life = avatar.life;
@@ -1135,7 +1150,7 @@ impl Game {
         }
     }
 
-    fn record_attacker_interaction(
+    fn record_unit_interaction(
         &mut self,
         kind: UnitKind,
         seat: Seat,
@@ -1158,7 +1173,7 @@ impl Game {
                     .ok_or(GameError::IllegalAction)?;
                 if unit.stealthed {
                     return Err(GameError::UnsupportedManifestFact(
-                        "stealthed site attacker interaction".to_owned(),
+                        "stealthed combat interaction".to_owned(),
                     ));
                 }
                 unit.last_interacted_turn = Some(self.position.turn_number);
@@ -1249,6 +1264,200 @@ impl Game {
         self.position.phase = Phase::Main;
         self.position.decision_seat = attacking_seat;
         Ok(outcomes)
+    }
+
+    fn resolve_simple_avatar_fight(&mut self) -> Result<Vec<(String, Value)>, GameError> {
+        let pending = self
+            .position
+            .pending_combat
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        let target = pending
+            .original_target
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        let target_kind = match target {
+            CombatTarget::Avatar { .. } => UnitKind::Avatar,
+            CombatTarget::Minion { .. } => UnitKind::Minion,
+            CombatTarget::Site { .. } => return Err(GameError::IllegalAction),
+        };
+        let attacker_id = pending.attacker_instance_id.clone();
+        let attacker_kind = pending.attacker_kind;
+        let attacking_seat = pending.attacking_seat;
+        let target_id = target.instance_id().clone();
+        let target_seat = target.seat();
+        let attacker_attack = self.attacker_power(attacker_kind, attacking_seat, &attacker_id)?;
+        let target_attack = self.attacker_power(target_kind, target_seat, &target_id)?;
+
+        self.record_unit_interaction(attacker_kind, attacking_seat, &attacker_id)?;
+        self.record_unit_interaction(target_kind, target_seat, &target_id)?;
+        let mut attacker_damage =
+            self.apply_simple_damage(attacker_kind, attacking_seat, &attacker_id, target_attack)?;
+        let target_damage =
+            self.apply_simple_damage(target_kind, target_seat, &target_id, attacker_attack)?;
+        attacker_damage.outcomes.extend(target_damage.outcomes);
+
+        let mut outcomes = vec![
+            (
+                "fight-started".to_owned(),
+                json!({
+                    "attackerInstanceId": attacker_id,
+                    "combatantInstanceIds": [target_id],
+                }),
+            ),
+            (
+                "strike-damage-allocated".to_owned(),
+                json!({
+                    "amount": attacker_attack,
+                    "strikerInstanceId": attacker_id,
+                    "targetInstanceId": target_id,
+                }),
+            ),
+        ];
+        outcomes.extend(attacker_damage.outcomes);
+        if attacker_damage.minion_died {
+            outcomes.push(self.remove_dead_minion(&attacker_id)?);
+        }
+        if target_damage.minion_died {
+            outcomes.push(self.remove_dead_minion(&target_id)?);
+        }
+        if attacker_damage.avatar_defeated && target_damage.avatar_defeated {
+            return Err(GameError::UnsupportedManifestFact(
+                "simultaneous avatar defeat".to_owned(),
+            ));
+        }
+        let defeated = if attacker_damage.avatar_defeated {
+            Some(attacking_seat)
+        } else if target_damage.avatar_defeated {
+            Some(target_seat)
+        } else {
+            None
+        };
+        self.position.pending_combat = None;
+        self.position.decision_seat = self.position.active_seat;
+        if let Some(loser) = defeated {
+            let winner = other_seat(loser);
+            self.position.phase = Phase::Terminal;
+            self.position.terminal = Some(TerminalResult { loser, winner });
+            outcomes.push((
+                "game-ended".to_owned(),
+                json!({
+                    "loser": loser,
+                    "reason": "avatar_defeated",
+                    "winner": winner,
+                }),
+            ));
+        } else {
+            self.position.phase = Phase::Main;
+        }
+        Ok(outcomes)
+    }
+
+    fn apply_simple_damage(
+        &mut self,
+        kind: UnitKind,
+        seat: Seat,
+        instance_id: &IdentityHash,
+        amount: u8,
+    ) -> Result<DamageResult, GameError> {
+        match kind {
+            UnitKind::Minion => {
+                let (index, _, defense) = self.simple_minion_combatant(instance_id)?;
+                let unit = &mut self.position.units[index];
+                unit.damage = unit.damage.saturating_add(amount);
+                Ok(DamageResult {
+                    outcomes: vec![(
+                        "damage-dealt".to_owned(),
+                        json!({
+                            "accumulated": unit.damage,
+                            "amount": amount,
+                            "direct": true,
+                            "instanceId": instance_id,
+                            "seat": seat,
+                        }),
+                    )],
+                    minion_died: unit.damage >= defense,
+                    avatar_defeated: false,
+                })
+            }
+            UnitKind::Avatar => {
+                let avatar = &mut self.position.players[seat_index(seat)].avatar;
+                if avatar.card.instance_id != *instance_id {
+                    return Err(GameError::IllegalAction);
+                }
+                if avatar.life == 0 {
+                    if amount > 0 && avatar.death_door_turn != Some(self.position.turn_number) {
+                        return Ok(DamageResult {
+                            outcomes: vec![
+                                (
+                                    "damage-dealt".to_owned(),
+                                    json!({
+                                        "amount": amount,
+                                        "direct": true,
+                                        "instanceId": instance_id,
+                                        "seat": seat,
+                                    }),
+                                ),
+                                (
+                                    "death-blow".to_owned(),
+                                    json!({ "instanceId": instance_id, "seat": seat }),
+                                ),
+                            ],
+                            minion_died: false,
+                            avatar_defeated: true,
+                        });
+                    }
+                    return Ok(DamageResult {
+                        outcomes: vec![(
+                            "damage-dealt".to_owned(),
+                            json!({
+                                "amount": 0,
+                                "attemptedAmount": amount,
+                                "direct": true,
+                                "instanceId": instance_id,
+                                "prevented": amount > 0,
+                                "seat": seat,
+                            }),
+                        )],
+                        minion_died: false,
+                        avatar_defeated: false,
+                    });
+                }
+                let old_life = avatar.life;
+                avatar.life = avatar.life.saturating_sub(u16::from(amount));
+                let lost = old_life - avatar.life;
+                let reached_deaths_door = avatar.life == 0;
+                if reached_deaths_door {
+                    avatar.death_door_turn = Some(self.position.turn_number);
+                }
+                let mut outcomes = vec![
+                    (
+                        "damage-dealt".to_owned(),
+                        json!({
+                            "amount": amount,
+                            "direct": true,
+                            "instanceId": instance_id,
+                            "seat": seat,
+                        }),
+                    ),
+                    (
+                        "avatar-life-lost".to_owned(),
+                        json!({ "amount": lost, "life": avatar.life, "seat": seat }),
+                    ),
+                ];
+                if reached_deaths_door {
+                    outcomes.push((
+                        "avatar-reached-deaths-door".to_owned(),
+                        json!({ "seat": seat, "turnNumber": self.position.turn_number }),
+                    ));
+                }
+                Ok(DamageResult {
+                    outcomes,
+                    minion_died: false,
+                    avatar_defeated: false,
+                })
+            }
+        }
     }
 
     fn simple_minion_combatant(
@@ -1681,7 +1890,7 @@ impl Game {
             "realm": { "sites": sites, "units": units },
             "schemaVersion": 1,
             "stateVersion": self.position.state_version,
-            "terminal": { "status": "active" },
+            "terminal": self.terminal_value(),
             "turnNumber": self.position.turn_number,
         })
     }
@@ -1788,6 +1997,20 @@ impl Game {
             "originalTarget": pending.original_target,
             "targetRemoved": false,
         })
+    }
+
+    fn terminal_value(&self) -> Value {
+        self.position.terminal.map_or_else(
+            || json!({ "status": "active" }),
+            |terminal| {
+                json!({
+                    "loser": terminal.loser,
+                    "reason": "avatar_defeated",
+                    "status": "finished",
+                    "winner": terminal.winner,
+                })
+            },
+        )
     }
 }
 

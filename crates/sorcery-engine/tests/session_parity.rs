@@ -122,7 +122,7 @@ fn rejected_requests_should_not_mutate_authoritative_state() {
 }
 
 #[test]
-fn session_receipts_and_replay_should_match_through_site_strikes() {
+fn session_receipts_and_replay_should_match_complete_seed_31_game() {
     let fixture = seed_31_fixture();
     let manifest = fixture
         .manifest_json
@@ -134,7 +134,7 @@ fn session_receipts_and_replay_should_match_through_site_strikes() {
         .expect("initial setup draws hash");
 
     let mut accepted_action_ids = Vec::new();
-    for step_index in 0..194 {
+    for step_index in 0..fixture.steps.len() {
         let expected = &fixture.steps[step_index];
         let legal_actions = session.legal_actions().expect("legal actions");
         assert_eq!(
