@@ -47,6 +47,41 @@ pub struct Position {
     units: Vec<UnitPosition>,
 }
 
+/// Public information required by a deterministic policy for one acting seat.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SeatObservation {
+    atlas_remaining: usize,
+    enemy_avatar: Location,
+    seat: Seat,
+    spellbook_remaining: usize,
+}
+
+impl SeatObservation {
+    /// Returns the observing seat.
+    #[must_use]
+    pub const fn seat(self) -> Seat {
+        self.seat
+    }
+
+    /// Returns the observing player's remaining Atlas count.
+    #[must_use]
+    pub const fn atlas_remaining(self) -> usize {
+        self.atlas_remaining
+    }
+
+    /// Returns the observing player's remaining Spellbook count.
+    #[must_use]
+    pub const fn spellbook_remaining(self) -> usize {
+        self.spellbook_remaining
+    }
+
+    /// Returns the opposing Avatar's public surface location.
+    #[must_use]
+    pub const fn enemy_avatar(self) -> Location {
+        self.enemy_avatar
+    }
+}
+
 /// A game with immutable rules and independently cloneable dynamic state.
 #[derive(Clone, Debug)]
 pub struct Game {
@@ -514,6 +549,34 @@ impl Game {
     #[must_use]
     pub const fn position(&self) -> &Position {
         &self.position
+    }
+
+    /// Builds the compact public policy view for `seat` without exposing hidden identities.
+    #[must_use]
+    pub fn observe(&self, seat: Seat) -> SeatObservation {
+        let player = &self.position.players[seat_index(seat)];
+        let enemy = &self.position.players[seat_index(other_seat(seat))];
+        SeatObservation {
+            atlas_remaining: player.atlas.len(),
+            enemy_avatar: Location {
+                cell: enemy.avatar.location,
+                region: Region::Surface,
+            },
+            seat,
+            spellbook_remaining: player.spellbook.len(),
+        }
+    }
+
+    /// Returns whether the authoritative game has reached a terminal result.
+    #[must_use]
+    pub const fn is_terminal(&self) -> bool {
+        self.position.terminal.is_some()
+    }
+
+    /// Returns the current turn number.
+    #[must_use]
+    pub const fn turn_number(&self) -> u64 {
+        self.position.turn_number
     }
 
     /// Returns immutable setup draw records in authoritative sequence order.
@@ -2062,6 +2125,18 @@ impl IssuedAction {
 }
 
 impl RulesContext {
+    /// Returns the authority revision hash bound into this game.
+    #[must_use]
+    pub const fn authority_hash(&self) -> &IdentityHash {
+        &self.authority_hash
+    }
+
+    /// Returns the engine contract version.
+    #[must_use]
+    pub const fn engine_version(&self) -> &'static str {
+        ENGINE_VERSION
+    }
+
     /// Returns the canonical manifest identity.
     #[must_use]
     pub const fn manifest_id(&self) -> &IdentityHash {

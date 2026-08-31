@@ -6,9 +6,12 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::action::{ActionDescriptor, DeckZone};
+use crate::board::Region;
 use crate::canonical::{
     CanonicalError, IdentityHash, canonical_json, identity_hash, parse_json_without_duplicate_keys,
 };
+use crate::game::{IssuedAction, SeatObservation};
 
 /// Policy snapshot schema understood by this module.
 pub const POLICY_SCHEMA_VERSION: u8 = 1;
@@ -217,6 +220,141 @@ impl PolicySnapshot {
     pub const fn tie_break(&self) -> TieBreak {
         self.tie_break
     }
+
+    /// Verifies the immutable authority, deck, and engine binding for a match.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PolicyError`] when the policy was evaluated for a different match contract.
+    pub fn validate_binding(
+        &self,
+        authority_hash: &IdentityHash,
+        deck_id: &IdentityHash,
+        engine_version: &str,
+    ) -> Result<(), PolicyError> {
+        if self.authority_hash != *authority_hash {
+            return Err(PolicyError::Invalid(
+                "policy authority binding does not match",
+            ));
+        }
+        if self.deck_id != *deck_id {
+            return Err(PolicyError::Invalid("policy deck binding does not match"));
+        }
+        if self.engine_version != engine_version {
+            return Err(PolicyError::Invalid("policy engine binding does not match"));
+        }
+        Ok(())
+    }
+
+    /// Selects one engine-issued action from a seat-scoped observation.
+    ///
+    /// Ties preserve the engine's canonical legal-action ordering.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PolicyError`] for an empty or wrong-seat action set.
+    pub fn select_action<'a>(
+        &self,
+        observation: SeatObservation,
+        legal_actions: &'a [IssuedAction],
+    ) -> Result<&'a IssuedAction, PolicyError> {
+        if legal_actions.is_empty() {
+            return Err(PolicyError::Invalid(
+                "policy selector requires at least one legal action",
+            ));
+        }
+        if legal_actions
+            .iter()
+            .any(|action| action.seat() != observation.seat())
+        {
+            return Err(PolicyError::Invalid(
+                "policy observation seat does not match legal actions",
+            ));
+        }
+        for feature in self.selector.feature_priority {
+            if let Some(action) = select_feature(
+                feature,
+                self.selector.atlas_reserve,
+                observation,
+                legal_actions,
+            ) {
+                return Ok(action);
+            }
+        }
+        Err(PolicyError::Invalid(
+            "policy feature contract omitted canonical fallback",
+        ))
+    }
+}
+
+fn select_feature(
+    feature: PolicyFeature,
+    atlas_reserve: u8,
+    observation: SeatObservation,
+    actions: &[IssuedAction],
+) -> Option<&IssuedAction> {
+    match feature {
+        PolicyFeature::KeepMulligan => actions.iter().find(|action| {
+            matches!(
+                action.descriptor(),
+                ActionDescriptor::Mulligan {
+                    atlas_order,
+                    spellbook_order,
+                } if atlas_order.is_empty() && spellbook_order.is_empty()
+            )
+        }),
+        PolicyFeature::PlaySite => actions
+            .iter()
+            .find(|action| matches!(action.descriptor(), ActionDescriptor::PlaySite { .. })),
+        PolicyFeature::SummonMinion => actions
+            .iter()
+            .find(|action| matches!(action.descriptor(), ActionDescriptor::SummonMinion { .. })),
+        PolicyFeature::PreferredDraw => {
+            let zone = if observation.atlas_remaining() > usize::from(atlas_reserve)
+                || observation.spellbook_remaining() <= observation.atlas_remaining()
+            {
+                DeckZone::Atlas
+            } else {
+                DeckZone::Spellbook
+            };
+            actions.iter().find(|action| {
+                matches!(action.descriptor(), ActionDescriptor::Draw { zone: candidate } if *candidate == zone)
+            })
+        }
+        PolicyFeature::PoweredMovement | PolicyFeature::BeneficialTactic => None,
+        PolicyFeature::MoveTowardEnemy => select_movement(observation, actions),
+        PolicyFeature::EndTurn => actions
+            .iter()
+            .find(|action| matches!(action.descriptor(), ActionDescriptor::EndTurn)),
+        PolicyFeature::CanonicalFallback => actions.first(),
+    }
+}
+
+fn select_movement(
+    observation: SeatObservation,
+    actions: &[IssuedAction],
+) -> Option<&IssuedAction> {
+    let enemy = observation.enemy_avatar();
+    actions
+        .iter()
+        .filter_map(|action| {
+            let ActionDescriptor::MoveAndAttack { path, to, .. } = action.descriptor() else {
+                return None;
+            };
+            if to.region != Region::Surface {
+                return None;
+            }
+            let priority = if path.len() == 1 && *to == enemy {
+                0
+            } else if path.len() > 1 {
+                u16::from(to.cell.manhattan_distance(enemy.cell)) + 1
+            } else {
+                return None;
+            };
+            Some((priority, action))
+        })
+        .min_by_key(|(priority, _)| *priority)
+        .map(|(_, action)| action)
 }
 
 #[derive(Deserialize)]
