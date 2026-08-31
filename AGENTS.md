@@ -2,7 +2,8 @@
 
 ## Product constraints
 
-- Build the engine, simulator, agents, and later browser client in TypeScript.
+- Build the authoritative engine, simulator, deterministic agents, checkpoints, search, and replay in Rust. Keep TypeScript only as a thin boundary for authority ingestion, the server, and browser UI where useful.
+- Do not maintain two permanent legality engines. Delete the superseded TypeScript implementation after parity and cutover.
 - Official rules and card rulings are authoritative. Never tune game balance by changing a real rule.
 - The engine owns state and enumerates legal actions; clients and models may not submit arbitrary mutations.
 - A run manifest plus seed must reproduce byte-identical deterministic-agent events.
@@ -24,4 +25,5 @@
 - Prefer MCP servers for authoritative external data and connected services.
 - Use Podman, not Docker, when containers are necessary.
 - Run `pnpm verify` after changes. Run `pnpm authority:verify-private` only for authority-release work that has the required ignored local inputs.
+- For Rust changes, use locked dependencies and run `cargo fmt --all -- --check`, `cargo check --workspace --all-targets --all-features --locked`, `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, and `cargo test --workspace --all-features --locked`.
 - Make one coherent verified commit per change. Delegate only independent work that benefits from parallel execution.
