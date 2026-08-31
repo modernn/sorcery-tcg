@@ -21,7 +21,7 @@
     "authority:import": "node src/commands/import-authority.ts",
     "decks:import-topdeck": "node src/commands/import-topdeck-candidates.ts",
     "authority:validate": "node src/commands/validate-authority.ts",
-    "authority:verify-private": "node --test tests/private-authority/*.test.ts",
+    "authority:verify-private": "node --test --test-concurrency=1 tests/private-authority/*.test.ts",
     "lint": "eslint .",
     "test": "node --test tests/authority/*.test.ts tests/engine/*.test.ts tests/ingestion/*.test.ts",
     "verify": "pnpm typecheck && pnpm lint && pnpm test"
