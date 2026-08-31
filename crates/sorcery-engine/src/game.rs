@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::action::{
-    ActionDescriptor, CombatTarget, DeckZone, GenesisSpellChoice, GenesisTokenChoice,
-    compare_canonical,
+    ActionDescriptor, CombatTarget, DeckZone, GenesisDamageChoice, GenesisSpellChoice,
+    GenesisTokenChoice, UnitTarget, compare_canonical,
 };
 use crate::board::{Cell, Location, Region};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
@@ -1082,20 +1082,48 @@ impl Game {
                 .summon_destinations(seat, facts)
                 .filter(|destination| destination.mana_cost <= u64::from(player.mana))
             {
-                self.push_action(
-                    actions,
-                    ActionDescriptor::SummonMinion {
-                        card_id: definition.id.clone(),
-                        card_instance_id: card.instance_id.clone(),
-                        caster_instance_id: player.avatar.card.instance_id.clone(),
-                        cell: destination.cell,
-                        mana_cost: destination.mana_cost,
-                    },
-                    format!(
-                        "Summon {} at {} ({} mana)",
-                        definition.id, destination.cell, destination.mana_cost
-                    ),
-                );
+                let genesis_choices = if facts.genesis
+                    == Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo)
+                {
+                    std::iter::once((Some(GenesisDamageChoice::Decline), None))
+                        .chain(
+                            self.genesis_damage_targets(seat, &card.instance_id, destination.cell)
+                                .into_iter()
+                                .map(|target| (Some(GenesisDamageChoice::Target), Some(target))),
+                        )
+                        .collect::<Vec<_>>()
+                } else {
+                    vec![(None, None)]
+                };
+                for (genesis_damage_choice, genesis_damage_target) in genesis_choices {
+                    let genesis_suffix = match (&genesis_damage_choice, &genesis_damage_target) {
+                        (Some(GenesisDamageChoice::Decline), None) => {
+                            "; decline Genesis".to_owned()
+                        }
+                        (Some(GenesisDamageChoice::Target), Some(target)) => format!(
+                            "; Genesis targets {} {}…",
+                            target.kind(),
+                            &target.instance_id().as_str()[..15]
+                        ),
+                        _ => String::new(),
+                    };
+                    self.push_action(
+                        actions,
+                        ActionDescriptor::SummonMinion {
+                            card_id: definition.id.clone(),
+                            card_instance_id: card.instance_id.clone(),
+                            caster_instance_id: player.avatar.card.instance_id.clone(),
+                            cell: destination.cell,
+                            genesis_damage_choice,
+                            genesis_damage_target,
+                            mana_cost: destination.mana_cost,
+                        },
+                        format!(
+                            "Summon {} at {} ({} mana){genesis_suffix}",
+                            definition.id, destination.cell, destination.mana_cost
+                        ),
+                    );
+                }
             }
         }
         for unit in &self.position.units {
@@ -1333,6 +1361,74 @@ impl Game {
                 mana_cost: minion.mana_cost.saturating_sub(discount),
             })
         })
+    }
+
+    fn genesis_damage_targets(
+        &self,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+        cell: Cell,
+    ) -> Vec<UnitTarget> {
+        let nearby = |target: Cell| {
+            target == cell || cell.bordering(false).any(|candidate| candidate == target)
+        };
+        let mut targets = vec![UnitTarget::Minion {
+            instance_id: source_instance_id.clone(),
+            seat,
+        }];
+        for target_seat in [Seat::North, Seat::South] {
+            let player = &self.position.players[seat_index(target_seat)];
+            if nearby(player.avatar.location) {
+                targets.push(UnitTarget::Avatar {
+                    instance_id: player.avatar.card.instance_id.clone(),
+                    seat: target_seat,
+                });
+            }
+            targets.extend(
+                self.position
+                    .units
+                    .iter()
+                    .filter(|unit| {
+                        unit.controller == target_seat
+                            && nearby(unit.location)
+                            && (target_seat == seat || !unit.stealthed)
+                    })
+                    .map(|unit| UnitTarget::Minion {
+                        instance_id: unit.card.instance_id.clone(),
+                        seat: target_seat,
+                    }),
+            );
+        }
+        targets.sort_unstable_by(|left, right| left.instance_id().cmp(right.instance_id()));
+        targets
+    }
+
+    fn valid_genesis_damage_choice(
+        &self,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+        cell: Cell,
+        genesis: Option<MinionGenesis>,
+        choice: Option<GenesisDamageChoice>,
+        target: Option<&UnitTarget>,
+    ) -> bool {
+        match (genesis, choice, target) {
+            (
+                Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo),
+                Some(GenesisDamageChoice::Decline),
+                None,
+            ) => true,
+            (
+                Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo),
+                Some(GenesisDamageChoice::Target),
+                Some(target),
+            ) => self
+                .genesis_damage_targets(seat, source_instance_id, cell)
+                .contains(target),
+            (Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo), _, _) => false,
+            (_, None, None) => true,
+            _ => false,
+        }
     }
 
     fn push_action(
@@ -1879,13 +1975,18 @@ impl Game {
                 let (index, _, defense, damage_prevention) =
                     self.simple_minion_combatant(instance_id)?;
                 let unit = &mut self.position.units[index];
-                let dealt = if !unit.disabled_until_damaged
-                    && matches!(
-                        damage_prevention,
-                        Some(DamagePrevention::PreventsDamageFromUnitsWithPowerAtLeast(
-                            threshold
-                        )) if source.current_power >= threshold
-                    ) {
+                let ward_broken = amount > 0 && unit.warded;
+                if ward_broken {
+                    unit.warded = false;
+                }
+                let dealt = if ward_broken
+                    || !unit.disabled_until_damaged
+                        && matches!(
+                            damage_prevention,
+                            Some(DamagePrevention::PreventsDamageFromUnitsWithPowerAtLeast(
+                                threshold
+                            )) if source.current_power >= threshold
+                        ) {
                     0
                 } else {
                     amount
@@ -1911,6 +2012,12 @@ impl Game {
                     }
                     payload
                 });
+                if ward_broken {
+                    outcomes.push(
+                        "ward-broken",
+                        || json!({ "instanceId": instance_id, "seat": seat }),
+                    );
+                }
                 if awakened {
                     outcomes.push(
                         "minion-awakened",
@@ -2127,6 +2234,23 @@ impl Game {
             "game-ended",
             || json!({ "loser": loser, "reason": "deck_empty", "winner": winner }),
         );
+    }
+
+    fn finish_avatar_defeat(&mut self, loser: Seat, outcomes: &mut OutcomeLog<'_>) {
+        let winner = other_seat(loser);
+        self.position.phase = Phase::Terminal;
+        self.position.terminal = Some(TerminalResult::Win {
+            loser,
+            reason: WinReason::AvatarDefeated,
+            winner,
+        });
+        outcomes.push("game-ended", || {
+            json!({
+                "loser": loser,
+                "reason": "avatar_defeated",
+                "winner": winner,
+            })
+        });
     }
 
     fn apply_move_and_attack_action(
@@ -2932,6 +3056,8 @@ impl Game {
             card_instance_id,
             caster_instance_id,
             cell,
+            genesis_damage_choice,
+            genesis_damage_target,
             mana_cost,
         } = &action.descriptor
         else {
@@ -2961,13 +3087,10 @@ impl Game {
         };
         let genesis = facts.genesis;
         let starts_stealthed = facts.stealth;
+        let starts_warded = facts.damage_prevention == Some(DamagePrevention::Ward);
         if matches!(
             genesis,
-            Some(
-                MinionGenesis::DamageEachOtherUnitHereOne
-                    | MinionGenesis::MayDamageTargetAdjacentUnitTwo
-                    | MinionGenesis::StrikeEachEnemyHere
-            )
+            Some(MinionGenesis::DamageEachOtherUnitHereOne | MinionGenesis::StrikeEachEnemyHere)
         ) {
             return Err(GameError::UnsupportedManifestFact(
                 "minion Genesis effect".to_owned(),
@@ -2978,6 +3101,14 @@ impl Game {
             .any(|destination| destination.cell == *cell && destination.mana_cost == *mana_cost)
             || *mana_cost > u64::from(player.mana)
             || !self.thresholds_met(seat, facts.thresholds)
+            || !self.valid_genesis_damage_choice(
+                seat,
+                card_instance_id,
+                *cell,
+                genesis,
+                *genesis_damage_choice,
+                genesis_damage_target.as_ref(),
+            )
         {
             return Err(GameError::IllegalAction);
         }
@@ -2998,7 +3129,7 @@ impl Game {
             stealthed: starts_stealthed,
             summoning_sickness: true,
             tapped: false,
-            warded: false,
+            warded: starts_warded,
         });
         self.position.state_version += 1;
         outcomes.push("minion-summoned", || {
@@ -3011,7 +3142,14 @@ impl Game {
                 "seat": seat,
             })
         });
-        self.apply_minion_genesis(seat, card_instance_id, genesis, outcomes)?;
+        self.apply_minion_genesis(
+            seat,
+            card_instance_id,
+            genesis,
+            *genesis_damage_choice,
+            genesis_damage_target.as_ref(),
+            outcomes,
+        )?;
         Ok(())
     }
 
@@ -3020,6 +3158,8 @@ impl Game {
         seat: Seat,
         source_instance_id: &IdentityHash,
         genesis: Option<MinionGenesis>,
+        genesis_damage_choice: Option<GenesisDamageChoice>,
+        genesis_damage_target: Option<&UnitTarget>,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
         match genesis {
@@ -3085,15 +3225,61 @@ impl Game {
                     })
                 });
             }
+            Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo) => {
+                match (genesis_damage_choice, genesis_damage_target) {
+                    (Some(GenesisDamageChoice::Decline), None) => {}
+                    (Some(GenesisDamageChoice::Target), Some(target)) => {
+                        self.apply_targeted_genesis_damage(source_instance_id, target, outcomes)?;
+                    }
+                    _ => return Err(GameError::IllegalAction),
+                }
+            }
             Some(
-                MinionGenesis::DamageEachOtherUnitHereOne
-                | MinionGenesis::MayDamageTargetAdjacentUnitTwo
-                | MinionGenesis::StrikeEachEnemyHere,
+                MinionGenesis::DamageEachOtherUnitHereOne | MinionGenesis::StrikeEachEnemyHere,
             ) => {
                 return Err(GameError::UnsupportedManifestFact(
                     "minion Genesis effect".to_owned(),
                 ));
             }
+        }
+        Ok(())
+    }
+
+    fn apply_targeted_genesis_damage(
+        &mut self,
+        source_instance_id: &IdentityHash,
+        target: &UnitTarget,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let (_, attack, _, _) = self.simple_minion_combatant(source_instance_id)?;
+        let target_instance_id = target.instance_id().clone();
+        outcomes.push("genesis-damage-allocated", || {
+            json!({
+                "amount": 2,
+                "sourceInstanceId": source_instance_id,
+                "targetInstanceId": target_instance_id,
+            })
+        });
+        let target_kind = match target {
+            UnitTarget::Avatar { .. } => UnitKind::Avatar,
+            UnitTarget::Minion { .. } => UnitKind::Minion,
+        };
+        let damage = self.apply_simple_damage(
+            target_kind,
+            target.seat(),
+            &target_instance_id,
+            2,
+            UnitDamageSource {
+                current_power: attack,
+                lethal: false,
+            },
+            outcomes,
+        )?;
+        if damage.minion_died {
+            self.remove_dead_minion(&target_instance_id, outcomes)?;
+        }
+        if damage.avatar_defeated {
+            self.finish_avatar_defeat(target.seat(), outcomes);
         }
         Ok(())
     }

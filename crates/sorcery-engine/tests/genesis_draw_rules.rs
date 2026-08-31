@@ -568,6 +568,154 @@ fn undamaged_zero_defense_genesis_minion_should_survive_until_positive_damage() 
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one direct proof covers issued branches, Ward, checkpoint, and replay parity"
+)]
+fn optional_targeted_genesis_damage_should_issue_decline_and_nearby_unit_branches() {
+    let mut vile_imp = minion(2, 2);
+    vile_imp["genesisMayDamageTargetAdjacentUnit"] = json!(2);
+    let mut warded_enemy = minion(1, 2);
+    warded_enemy["summonToAnySite"] = json!(true);
+    warded_enemy["ward"] = json!(true);
+    let manifest = scenario_manifest(391, &avatar(false, 20), &vile_imp, &warded_enemy, 5, 5, 5);
+    let mut checkpoint = first_main(&manifest);
+    accept_where(&mut checkpoint, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(&mut checkpoint, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut checkpoint, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (enemy_summon, _) = accept_where(&mut checkpoint, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut checkpoint, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(&mut checkpoint, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+
+    let before = state(&checkpoint);
+    let source_id = before["players"]["north"]["hand"]["spellbook"][0]["instanceId"]
+        .as_str()
+        .expect("Vile Imp identity")
+        .to_owned();
+    let avatar_id = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("Avatar identity")
+        .to_owned();
+    let enemy_id = enemy_summon["cardInstanceId"]
+        .as_str()
+        .expect("enemy identity")
+        .to_owned();
+    let choices: Vec<_> = checkpoint
+        .legal_actions()
+        .expect("legal actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "summon-minion"
+                && action.descriptor["cardInstanceId"] == source_id
+                && action.descriptor["cell"] == "C4"
+        })
+        .collect();
+    assert_eq!(choices.len(), 4);
+    assert_eq!(choices[0].descriptor["genesisDamageChoice"], "decline");
+    assert!(choices[0].descriptor.get("genesisDamageTarget").is_none());
+    assert_eq!(
+        choices[0].label,
+        "Summon north-minion at C4 (0 mana); decline Genesis"
+    );
+    let mut expected_target_ids = [source_id.clone(), avatar_id.clone(), enemy_id.clone()];
+    expected_target_ids.sort();
+    assert_eq!(
+        choices[1..]
+            .iter()
+            .map(|action| {
+                assert_eq!(action.descriptor["genesisDamageChoice"], "target");
+                action.descriptor["genesisDamageTarget"]["instanceId"]
+                    .as_str()
+                    .expect("target identity")
+            })
+            .collect::<Vec<_>>(),
+        expected_target_ids
+    );
+    assert_checkpoint_round_trip(&checkpoint);
+
+    let mut declined = checkpoint.clone();
+    let (_, declined_receipt) = accept_where(&mut declined, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardInstanceId"] == source_id
+            && descriptor["cell"] == "C4"
+            && descriptor["genesisDamageChoice"] == "decline"
+    });
+    assert_eq!(event_types(&declined_receipt), ["minion-summoned"]);
+    assert_exact_replay(&declined);
+
+    let mut avatar_targeted = checkpoint.clone();
+    let (_, avatar_receipt) = accept_where(&mut avatar_targeted, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardInstanceId"] == source_id
+            && descriptor["cell"] == "C4"
+            && descriptor["genesisDamageTarget"]["instanceId"] == avatar_id
+    });
+    assert_eq!(
+        event_types(&avatar_receipt),
+        [
+            "minion-summoned",
+            "genesis-damage-allocated",
+            "damage-dealt",
+            "avatar-life-lost"
+        ]
+    );
+    assert_eq!(
+        avatar_receipt.events[1].payload,
+        json!({
+            "amount": 2,
+            "sourceInstanceId": source_id,
+            "targetInstanceId": avatar_id,
+        })
+    );
+    assert_eq!(
+        state(&avatar_targeted)["players"]["north"]["avatar"]["life"],
+        18
+    );
+    assert_exact_replay(&avatar_targeted);
+
+    let mut warded = checkpoint;
+    let (_, warded_receipt) = accept_where(&mut warded, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardInstanceId"] == source_id
+            && descriptor["cell"] == "C4"
+            && descriptor["genesisDamageTarget"]["instanceId"] == enemy_id
+    });
+    assert_eq!(
+        event_types(&warded_receipt),
+        [
+            "minion-summoned",
+            "genesis-damage-allocated",
+            "damage-dealt",
+            "ward-broken"
+        ]
+    );
+    let warded_state = state(&warded);
+    let survivor = warded_state["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == enemy_id)
+        .expect("warded enemy survives");
+    assert_eq!(survivor["damage"], 0);
+    assert_eq!(survivor["warded"], false);
+    assert_exact_replay(&warded);
+}
+
+#[test]
 fn site_genesis_mana_should_pay_summon_and_expire_to_site_count() {
     let mut value = manifest_value(
         61,

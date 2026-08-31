@@ -39,6 +39,16 @@ pub enum GenesisSpellChoice {
     KeepNext,
 }
 
+/// An engine-issued branch for optional targeted Genesis damage.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GenesisDamageChoice {
+    /// Resolve the summon without dealing Genesis damage.
+    Decline,
+    /// Deal Genesis damage to the accompanying engine-issued target.
+    Target,
+}
+
 impl DeckZone {
     const fn as_str(self) -> &'static str {
         match self {
@@ -78,6 +88,52 @@ pub enum CombatTarget {
         /// Site owner.
         seat: Seat,
     },
+}
+
+/// An Avatar or minion selected by a unit-targeting effect.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(
+    deny_unknown_fields,
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
+pub enum UnitTarget {
+    /// A player's Avatar.
+    Avatar {
+        /// Authoritative Avatar instance identity.
+        instance_id: IdentityHash,
+        /// Avatar owner.
+        seat: Seat,
+    },
+    /// A minion in the realm.
+    Minion {
+        /// Authoritative minion instance identity.
+        instance_id: IdentityHash,
+        /// Minion owner.
+        seat: Seat,
+    },
+}
+
+impl UnitTarget {
+    pub(crate) const fn kind(&self) -> &'static str {
+        match self {
+            Self::Avatar { .. } => "avatar",
+            Self::Minion { .. } => "minion",
+        }
+    }
+
+    pub(crate) fn instance_id(&self) -> &IdentityHash {
+        match self {
+            Self::Avatar { instance_id, .. } | Self::Minion { instance_id, .. } => instance_id,
+        }
+    }
+
+    pub(crate) const fn seat(&self) -> Seat {
+        match self {
+            Self::Avatar { seat, .. } | Self::Minion { seat, .. } => *seat,
+        }
+    }
 }
 
 impl CombatTarget {
@@ -185,6 +241,12 @@ pub enum ActionDescriptor {
         caster_instance_id: IdentityHash,
         /// Realm cell receiving the minion.
         cell: Cell,
+        /// Decline or select the accompanying optional Genesis damage.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        genesis_damage_choice: Option<GenesisDamageChoice>,
+        /// Exact Avatar or minion selected for optional Genesis damage.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        genesis_damage_target: Option<UnitTarget>,
         /// Mana paid for the summon.
         mana_cost: u64,
     },
@@ -357,6 +419,8 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     card_instance_id: left_instance,
                     caster_instance_id: left_caster,
                     cell: left_cell,
+                    genesis_damage_choice: left_choice,
+                    genesis_damage_target: left_target,
                     mana_cost: left_mana,
                 },
                 ActionDescriptor::SummonMinion {
@@ -364,12 +428,18 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     card_instance_id: right_instance,
                     caster_instance_id: right_caster,
                     cell: right_cell,
+                    genesis_damage_choice: right_choice,
+                    genesis_damage_target: right_target,
                     mana_cost: right_mana,
                 },
             ) => compare_json_strings(left_card, right_card)
                 .then_with(|| left_instance.cmp(right_instance))
                 .then_with(|| left_caster.cmp(right_caster))
                 .then_with(|| left_cell.cmp(right_cell))
+                .then_with(|| compare_optional_genesis_damage_choices(*left_choice, *right_choice))
+                .then_with(|| {
+                    compare_optional_unit_targets(left_target.as_ref(), right_target.as_ref())
+                })
                 .then_with(|| compare_json_integers(*left_mana, *right_mana)),
             (ActionDescriptor::SummonMinion { .. }, ActionDescriptor::PlaySite { .. }) => {
                 compare_card_prefix(left, right).then(Ordering::Less)
@@ -464,6 +534,30 @@ fn compare_optional_genesis_choices(
     }
 }
 
+fn compare_optional_genesis_damage_choices(
+    left: Option<GenesisDamageChoice>,
+    right: Option<GenesisDamageChoice>,
+) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => left.cmp(&right),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+fn compare_optional_unit_targets(
+    left: Option<&UnitTarget>,
+    right: Option<&UnitTarget>,
+) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => compare_unit_targets(left, right),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
 fn compare_optional_cells(left: Option<Cell>, right: Option<Cell>) -> Ordering {
     match (left, right) {
         (Some(left), Some(right)) => left.cmp(&right),
@@ -531,6 +625,20 @@ fn compare_targets(left: &CombatTarget, right: &CombatTarget) -> Ordering {
         .cmp(right.instance_id())
         .then_with(|| target_kind(left).cmp(&target_kind(right)))
         .then_with(|| seat_order(left.seat()).cmp(&seat_order(right.seat())))
+}
+
+fn compare_unit_targets(left: &UnitTarget, right: &UnitTarget) -> Ordering {
+    left.instance_id()
+        .cmp(right.instance_id())
+        .then_with(|| unit_target_kind(left).cmp(&unit_target_kind(right)))
+        .then_with(|| seat_order(left.seat()).cmp(&seat_order(right.seat())))
+}
+
+const fn unit_target_kind(target: &UnitTarget) -> u8 {
+    match target {
+        UnitTarget::Avatar { .. } => 0,
+        UnitTarget::Minion { .. } => 1,
+    }
 }
 
 const fn target_kind(target: &CombatTarget) -> u8 {

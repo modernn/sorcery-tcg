@@ -1146,7 +1146,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Vile Imp may deal 2 damage to one adjacent unit or decline.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "decline"
@@ -1155,8 +1155,8 @@
         "damage"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03/04 Vile Imp may deal 2 damage to one adjacent unit or decline"
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "optional_targeted_genesis_damage_should_issue_decline_and_nearby_unit_branches"
       }
     },
     {
