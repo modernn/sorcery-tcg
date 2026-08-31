@@ -39,6 +39,7 @@ const DEFAULT_SCENARIO = resolve(
 );
 const LESSON_IDS = ['air-vs-earth-lesson', 'earth-vs-air-lesson'] as const;
 const CHECKPOINT_ID_PATTERN = /^sha256:([0-9a-f]{64})$/u;
+const FRONTIER_BRANCH_LIMIT = 32;
 const REVISION_PATTERN = /^[a-z0-9][a-z0-9._-]*$/u;
 
 type LessonId = typeof LESSON_IDS[number];
@@ -51,10 +52,25 @@ export type PrivateNoveltyGauntletReport = Readonly<{
     actionKind: NoveltyFrontierCandidate['actionKind'];
     branchId: string;
     checkpointId: string;
+    depth: number;
     entryActionCount: 1;
     entryEventTypes: readonly string[];
+    novelSignalsAtDispatch: readonly NoveltyFrontierCandidate['signal'][];
+    parentBranchId: string | null;
     parentJobId: string;
     result: NoveltyRolloutResult;
+    signals: readonly NoveltyFrontierCandidate['signal'][];
+  }>[];
+  frontierPending: readonly Readonly<{
+    actionId: string;
+    actionKind: NoveltyFrontierCandidate['actionKind'];
+    branchId: string;
+    checkpointId: string;
+    depth: number;
+    parentBranchId: string | null;
+    parentJobId: string;
+    predictedEventTypes: readonly string[];
+    predictedStateHash: string;
     signals: readonly NoveltyFrontierCandidate['signal'][];
   }>[];
   jobs: readonly Readonly<{
@@ -63,15 +79,21 @@ export type PrivateNoveltyGauntletReport = Readonly<{
     orientation: Orientation;
     result: NoveltyRolloutResult;
   }>[];
-  policyVersion: 'private-lesson-novelty-gauntlet-v1';
-  schemaVersion: 1;
+  policyVersion: 'signal-guided-bounded-frontier-v2';
+  schemaVersion: 2;
   totals: Readonly<{
+    branchLimit: 32;
     completed: number;
     failed: number;
     frontierBranches: number;
     frontierCompleted: number;
     frontierFailed: number;
     frontierHorizon: number;
+    frontierLimitReached: boolean;
+    frontierMaxDepth: number;
+    frontierPending: number;
+    frontierPendingSignals: number;
+    frontierPrunedCovered: number;
     horizon: number;
     jobs: 4;
     savedCheckpoints: number;
@@ -81,8 +103,10 @@ export type PrivateNoveltyGauntletReport = Readonly<{
 type FrontierSeed = Readonly<{
   actionId: string;
   actionKind: NoveltyFrontierCandidate['actionKind'];
+  branchId: string;
   checkpointId: string;
-  parentIndex: number;
+  depth: number;
+  parentBranchId: string | null;
   parentJobId: string;
   predictedEventTypes: readonly string[];
   predictedStateHash: string;
@@ -91,6 +115,10 @@ type FrontierSeed = Readonly<{
 
 function compareStrings(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function signalKey(signal: NoveltyFrontierCandidate['signal']): string {
+  return `${signal.kind}:\0${signal.value}`;
 }
 
 function swappedManifest(manifest: GameManifest): GameManifest {
@@ -205,11 +233,19 @@ export async function runPrivateNoveltyGauntlet(
     }
   }
 
-  const seeds = new Map<string, FrontierSeed>();
-  for (const [parentIndex, job] of jobs.entries()) {
-    for (const candidate of job.result.frontier) {
-      const key = `${parentIndex}\0${candidate.checkpointId}\0${candidate.actionId}`;
-      const existing = seeds.get(key);
+  const queue: FrontierSeed[] = [];
+  const seenBranches = new Set<string>();
+  let nextBranchOrdinal = 1;
+  const enqueueFrontier = (
+    frontier: NoveltyRolloutResult['frontier'],
+    parentJobId: string,
+    parentBranchId: string | null,
+    depth: number,
+  ): void => {
+    const grouped = new Map<string, Omit<FrontierSeed, 'branchId'>>();
+    for (const candidate of frontier) {
+      const key = `${candidate.checkpointId}\0${candidate.actionId}`;
+      const existing = grouped.get(key);
       if (existing) {
         if (existing.actionKind !== candidate.actionKind
           || existing.predictedStateHash !== candidate.predictedStateHash
@@ -219,26 +255,53 @@ export async function runPrivateNoveltyGauntlet(
         }
         existing.signals.push(candidate.signal);
       } else {
-        seeds.set(key, {
+        grouped.set(key, {
           actionId: candidate.actionId,
           actionKind: candidate.actionKind,
           checkpointId: candidate.checkpointId,
-          parentIndex,
-          parentJobId: job.jobId,
+          depth,
+          parentBranchId,
+          parentJobId,
           predictedEventTypes: candidate.predictedEventTypes,
           predictedStateHash: candidate.predictedStateHash,
           signals: [candidate.signal],
         });
       }
     }
+    for (const seed of [...grouped.values()].sort((left, right) =>
+      compareStrings(left.checkpointId, right.checkpointId)
+        || compareStrings(left.actionId, right.actionId))) {
+      const key = `${seed.checkpointId}\0${seed.actionId}`;
+      if (seenBranches.has(key)) continue;
+      seenBranches.add(key);
+      seed.signals.sort((left, right) => compareStrings(signalKey(left), signalKey(right)));
+      queue.push({
+        ...seed,
+        branchId: `${parentJobId}:branch-${nextBranchOrdinal}`,
+      });
+      nextBranchOrdinal += 1;
+    }
+  };
+
+  const exercisedSignals = new Set<string>();
+  for (const job of jobs) {
+    enqueueFrontier(job.result.frontier, job.jobId, null, 1);
   }
 
   const frontierBranches: PrivateNoveltyGauntletReport['frontierBranches'][number][] = [];
-  const orderedSeeds = [...seeds.values()].sort((left, right) =>
-    left.parentIndex - right.parentIndex
-      || compareStrings(left.checkpointId, right.checkpointId)
-      || compareStrings(left.actionId, right.actionId));
-  for (const [index, seed] of orderedSeeds.entries()) {
+  let cursor = 0;
+  let frontierPrunedCovered = 0;
+  let stopAfterFailure = false;
+  while (cursor < queue.length
+    && frontierBranches.length < FRONTIER_BRANCH_LIMIT
+    && !stopAfterFailure) {
+    const seed = queue[cursor++]!;
+    const novelSignalsAtDispatch = seed.signals
+      .filter((signal) => !exercisedSignals.has(signalKey(signal)));
+    if (novelSignalsAtDispatch.length === 0) {
+      frontierPrunedCovered += 1;
+      continue;
+    }
     const checkpoint = checkpoints.get(seed.checkpointId);
     if (!checkpoint) throw new Error('private novelty frontier checkpoint was not captured');
     const resumed = resumeGameCheckpoint(checkpoint);
@@ -261,6 +324,10 @@ export async function runPrivateNoveltyGauntlet(
         : !entryEventTypes.includes(signal.value))) {
       throw new Error('private novelty frontier prediction did not replay exactly');
     }
+    exercisedSignals.add(signalKey({ kind: 'action-kind', value: seed.actionKind }));
+    for (const value of entryEventTypes) {
+      exercisedSignals.add(signalKey({ kind: 'event-type', value }));
+    }
     const result = runNoveltyRollout(entry.session, {
       maxActions,
       onCheckpoint: captureCheckpoint,
@@ -271,15 +338,46 @@ export async function runPrivateNoveltyGauntlet(
     frontierBranches.push({
       actionId: seed.actionId,
       actionKind: seed.actionKind,
-      branchId: `${seed.parentJobId}:frontier-${index + 1}`,
+      branchId: seed.branchId,
       checkpointId: seed.checkpointId,
+      depth: seed.depth,
       entryActionCount: 1,
       entryEventTypes,
+      novelSignalsAtDispatch,
+      parentBranchId: seed.parentBranchId,
       parentJobId: seed.parentJobId,
       result,
       signals: seed.signals,
     });
+    if (result.status === 'failed') {
+      stopAfterFailure = true;
+    } else {
+      enqueueFrontier(result.frontier, seed.parentJobId, seed.branchId, seed.depth + 1);
+    }
   }
+
+  const frontierPending: PrivateNoveltyGauntletReport['frontierPending'][number][] = [];
+  for (const seed of queue.slice(cursor)) {
+    const signals = seed.signals.filter((signal) => !exercisedSignals.has(signalKey(signal)));
+    if (signals.length === 0) {
+      frontierPrunedCovered += 1;
+      continue;
+    }
+    frontierPending.push({
+      actionId: seed.actionId,
+      actionKind: seed.actionKind,
+      branchId: seed.branchId,
+      checkpointId: seed.checkpointId,
+      depth: seed.depth,
+      parentBranchId: seed.parentBranchId,
+      parentJobId: seed.parentJobId,
+      predictedEventTypes: seed.predictedEventTypes,
+      predictedStateHash: seed.predictedStateHash,
+      signals,
+    });
+  }
+  const pendingSignals = new Set(frontierPending.flatMap(({ signals }) =>
+    signals.map(signalKey)));
 
   for (const result of [
     ...jobs.map((job) => job.result),
@@ -296,21 +394,33 @@ export async function runPrivateNoveltyGauntlet(
       throw new Error('private novelty gauntlet did not capture a reported checkpoint');
     }
   }
+  if (frontierPending.some(({ checkpointId }) => !checkpoints.has(checkpointId))) {
+    throw new Error('private novelty gauntlet did not capture a pending checkpoint');
+  }
 
   const savedCheckpoints = await saveCheckpoints(revisionId, outputId, checkpoints);
   const report: PrivateNoveltyGauntletReport = deepFreeze({
     classification: 'authority-private' as const,
     frontierBranches,
+    frontierPending,
     jobs,
-    policyVersion: 'private-lesson-novelty-gauntlet-v1' as const,
-    schemaVersion: 1 as const,
+    policyVersion: 'signal-guided-bounded-frontier-v2' as const,
+    schemaVersion: 2 as const,
     totals: {
+      branchLimit: FRONTIER_BRANCH_LIMIT,
       completed: jobs.filter(({ result }) => result.status === 'completed').length,
       failed: jobs.filter(({ result }) => result.status === 'failed').length,
       frontierBranches: frontierBranches.length,
       frontierCompleted: frontierBranches.filter(({ result }) => result.status === 'completed').length,
       frontierFailed: frontierBranches.filter(({ result }) => result.status === 'failed').length,
       frontierHorizon: frontierBranches.filter(({ result }) => result.status === 'horizon').length,
+      frontierLimitReached: frontierBranches.length === FRONTIER_BRANCH_LIMIT
+        && frontierPending.length > 0,
+      frontierMaxDepth: frontierBranches.reduce((maximum, { depth }) =>
+        Math.max(maximum, depth), 0),
+      frontierPending: frontierPending.length,
+      frontierPendingSignals: pendingSignals.size,
+      frontierPrunedCovered,
       horizon: jobs.filter(({ result }) => result.status === 'horizon').length,
       jobs: 4 as const,
       savedCheckpoints,

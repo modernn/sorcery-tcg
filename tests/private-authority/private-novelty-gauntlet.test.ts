@@ -33,8 +33,8 @@ test('private novelty gauntlet runs both actual lessons and seat swaps without l
   try {
     const lessons = (await loadPrivateStarterCatalog())
       .filter(({ id }) => id.endsWith('-lesson'));
-    const first = await runPrivateNoveltyGauntlet(undefined, 5, TEST_OUTPUT_ID);
-    const second = await runPrivateNoveltyGauntlet(undefined, 5, TEST_OUTPUT_ID);
+    const first = await runPrivateNoveltyGauntlet(undefined, 10, TEST_OUTPUT_ID);
+    const second = await runPrivateNoveltyGauntlet(undefined, 10, TEST_OUTPUT_ID);
 
     assert.equal(networkCalls, 0);
     assert.equal(
@@ -73,32 +73,42 @@ test('private novelty gauntlet runs both actual lessons and seat swaps without l
       },
     ]);
     assert.deepEqual(first.report.totals, {
+      branchLimit: 32,
       completed: 0,
       failed: 0,
-      frontierBranches: 1,
+      frontierBranches: 8,
       frontierCompleted: 0,
       frontierFailed: 0,
-      frontierHorizon: 1,
+      frontierHorizon: 8,
+      frontierLimitReached: false,
+      frontierMaxDepth: 2,
+      frontierPending: 0,
+      frontierPendingSignals: 0,
+      frontierPrunedCovered: 28,
       horizon: 4,
       jobs: 4,
       savedCheckpoints: first.report.totals.savedCheckpoints,
     });
     assert.equal(first.report.jobs.every(({ result }) =>
-      result.acceptedActionCount === 5 && result.replayVerified), true);
+      result.acceptedActionCount === 10 && result.replayVerified), true);
     assert.equal(
       first.report.jobs.reduce((total, { result }) => total + result.frontier.length, 0),
-      2,
+      20,
     );
-    assert.equal(first.report.frontierBranches.length, 1);
+    assert.equal(first.report.frontierBranches.length, 8);
     assert.equal(first.report.frontierBranches.every(({ result }) =>
-      result.acceptedActionCount === 5 && result.replayVerified), true);
-    assert.equal(first.report.frontierBranches[0]?.entryActionCount, 1);
-    assert.deepEqual(first.report.frontierBranches[0]?.signals, [
-      { kind: 'action-kind', value: 'cast-artifact' },
-      { kind: 'event-type', value: 'artifact-conjured' },
-    ]);
-    assert.deepEqual(first.report.frontierBranches[0]?.entryEventTypes, ['artifact-conjured']);
-    assert.equal(first.report.frontierBranches[0]?.result.frontier.length, 0);
+      result.acceptedActionCount === 10 && result.replayVerified), true);
+    assert.equal(first.report.frontierBranches.every((branch) =>
+      branch.depth >= 1
+        && branch.depth <= 2
+        && branch.entryActionCount === 1
+        && branch.novelSignalsAtDispatch.length > 0), true);
+    assert.equal(first.report.frontierBranches.some((branch) => branch.depth === 2), true);
+    assert.equal(first.report.frontierBranches.every((branch) =>
+      branch.novelSignalsAtDispatch.length <= branch.signals.length), true);
+    assert.deepEqual(first.report.frontierPending, []);
+    assert.equal(first.report.policyVersion, 'signal-guided-bounded-frontier-v2');
+    assert.equal(first.report.schemaVersion, 2);
 
     const serialized = await readFile(first.outputPath, 'utf8');
     assert.equal(serialized, `${canonicalJson(first.report as unknown as JsonValue)}\n`);
@@ -144,7 +154,7 @@ test('private novelty gauntlet runs both actual lessons and seat swaps without l
           ? [result.failure.checkpointId]
           : []),
       ...result.frontier.map(({ checkpointId }) => checkpointId),
-    ]));
+    ]).concat(first.report.frontierPending.map(({ checkpointId }) => checkpointId)));
     assert.equal(first.report.totals.savedCheckpoints >= reportedCheckpointIds.size, true);
     for (const checkpointId of reportedCheckpointIds) {
       const checkpointPath = resolve(
@@ -181,13 +191,28 @@ test('private novelty gauntlet runs both actual lessons and seat swaps without l
     }
 
     for (const branch of first.report.frontierBranches) {
-      const parent = first.report.jobs.find(({ jobId }) => jobId === branch.parentJobId);
-      assert.ok(parent);
-      const candidates = parent.result.frontier.filter(({ actionId, checkpointId }) =>
+      const parentResult = branch.parentBranchId === null
+        ? first.report.jobs.find(({ jobId }) => jobId === branch.parentJobId)?.result
+        : first.report.frontierBranches
+          .find(({ branchId }) => branchId === branch.parentBranchId)?.result;
+      assert.ok(parentResult);
+      if (branch.parentBranchId === null) {
+        assert.equal(branch.depth, 1);
+      } else {
+        const parentBranch = first.report.frontierBranches
+          .find(({ branchId }) => branchId === branch.parentBranchId);
+        assert.ok(parentBranch);
+        assert.equal(branch.depth, parentBranch.depth + 1);
+        assert.equal(branch.parentJobId, parentBranch.parentJobId);
+      }
+      const candidates = parentResult.frontier.filter(({ actionId, checkpointId }) =>
         actionId === branch.actionId && checkpointId === branch.checkpointId);
-      assert.equal(candidates.length, 2);
+      assert.equal(candidates.length > 0, true);
       assert.deepEqual(candidates.map(({ signal }) => signal), branch.signals);
       assert.equal(candidates.every(({ actionKind }) => actionKind === branch.actionKind), true);
+      assert.equal(branch.novelSignalsAtDispatch.every((signal) =>
+        branch.signals.some((claimed) => canonicalJson(claimed as unknown as JsonValue)
+          === canonicalJson(signal as unknown as JsonValue))), true);
       const candidate = candidates[0]!;
       const checkpointPath = resolve(
         checkpointDirectory,
