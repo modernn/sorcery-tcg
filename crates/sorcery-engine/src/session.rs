@@ -10,7 +10,7 @@ use crate::contract::{
     ActionRequest, Attempt, LegalAction, Receipt, ReceiptInput, Rejection, RejectionCode, Seat,
     accepted_attempt, create_events, create_receipt, create_rejection, rejected_attempt,
 };
-use crate::game::{Game, GameError, IssuedAction};
+use crate::game::{Game, GameError, GameOutcome, IssuedAction};
 
 /// An accepted receipt or stable rejection.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -265,6 +265,12 @@ impl Session {
     #[must_use]
     pub const fn decision_seat(&self) -> Seat {
         self.game.position().decision_seat()
+    }
+
+    /// Returns the public result after the game finishes.
+    #[must_use]
+    pub const fn outcome(&self) -> Option<GameOutcome> {
+        self.game.outcome()
     }
 
     /// Returns the canonical manifest identity bound to this session.

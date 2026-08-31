@@ -10,5 +10,6 @@ pub mod facts;
 pub mod game;
 pub mod policy;
 pub mod prng;
+pub mod selfplay;
 pub mod session;
 pub mod simulator;

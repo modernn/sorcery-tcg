@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::canonical::IdentityHash;
 use crate::contract::{ActionRequest, Seat};
-use crate::game::{Game, GameError};
+use crate::game::{Game, GameError, GameOutcome};
 use crate::policy::{PolicyError, PolicySnapshot};
 use crate::session::{Session, SessionError};
 
@@ -14,6 +14,7 @@ use crate::session::{Session, SessionError};
 pub struct Rollout {
     action_indices: Vec<usize>,
     manifest_id: IdentityHash,
+    outcome: Option<GameOutcome>,
     terminal: bool,
 }
 
@@ -28,6 +29,12 @@ impl Rollout {
     #[must_use]
     pub const fn is_terminal(&self) -> bool {
         self.terminal
+    }
+
+    /// Returns the public terminal result, when the rollout finished.
+    #[must_use]
+    pub const fn outcome(&self) -> Option<GameOutcome> {
+        self.outcome
     }
 }
 
@@ -176,6 +183,9 @@ pub fn replay_selected(manifest_json: &str, rollout: &Rollout) -> Result<Session
     if !session.verify_replay()? {
         return Err(SimulatorError::ReplayDiverged);
     }
+    if session.outcome() != rollout.outcome {
+        return Err(SimulatorError::ReplayDiverged);
+    }
     Ok(session)
 }
 
@@ -204,6 +214,7 @@ fn continue_game(
     Ok(Rollout {
         action_indices,
         manifest_id: game.rules().manifest_id().clone(),
+        outcome: game.outcome(),
         terminal: game.is_terminal(),
     })
 }
