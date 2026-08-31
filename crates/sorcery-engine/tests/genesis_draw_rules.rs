@@ -1,5 +1,9 @@
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
+use sorcery_engine::checkpoint::{
+    create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+    serialize_game_checkpoint,
+};
 use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
 use sorcery_engine::game::Game;
 use sorcery_engine::session::{Session, StepResult};
@@ -127,13 +131,43 @@ fn keep(session: &mut Session) {
 }
 
 fn first_main(manifest: &str) -> Session {
-    let mut session = Session::new(manifest).expect("valid Genesis scenario");
-    keep(&mut session);
-    keep(&mut session);
+    let mut session = opening_checkpoint(manifest);
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
     });
     session
+}
+
+fn opening_checkpoint(manifest: &str) -> Session {
+    let mut session = Session::new(manifest).expect("valid Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    session
+}
+
+fn private_site_genesis_manifest(seed: u32, facts: &Value, spellbook_count: usize) -> String {
+    let mut value = manifest_value(
+        seed,
+        &avatar(false, 20),
+        &minion(1, 1),
+        &minion(1, 1),
+        4,
+        spellbook_count,
+        4,
+    );
+    value["cards"]["north-site"]
+        .as_object_mut()
+        .expect("north site facts")
+        .extend(facts.as_object().expect("Genesis facts").clone());
+    finish_manifest(value)
+}
+
+fn play_private_genesis_site(manifest: &str) -> (Session, Value, Receipt) {
+    let mut session = opening_checkpoint(manifest);
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    (session, descriptor, receipt)
 }
 
 fn north_second_main(mut session: Session) -> Session {
@@ -165,6 +199,18 @@ fn event_types(receipt: &Receipt) -> Vec<&str> {
 
 fn assert_exact_replay(session: &Session) {
     assert!(session.verify_replay().expect("verified exact replay"));
+}
+
+fn assert_checkpoint_round_trip(session: &Session) {
+    let checkpoint = create_game_checkpoint(session).expect("captured checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized checkpoint");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed checkpoint");
+    let restored = resume_game_checkpoint(&parsed).expect("restored checkpoint");
+    assert_eq!(state(&restored), state(session));
+    assert_eq!(
+        restored.legal_actions().expect("restored actions"),
+        session.legal_actions().expect("source actions")
+    );
 }
 
 fn replay_game(session: &Session) -> Game {
@@ -1032,16 +1078,286 @@ fn optional_site_genesis_should_issue_decline_and_paid_token_branches() {
     assert_exact_replay(&paid);
 }
 
-fn geomancer_manifest(seed: u32, north_atlas: &[&str]) -> String {
+#[test]
+fn seasonal_river_genesis_should_privately_keep_or_bottom_next_spell() {
+    let manifest =
+        private_site_genesis_manifest(160, &json!({ "genesisMayBottomNextSpell": true }), 6);
+    let before = state(&opening_checkpoint(&manifest));
+    let before_spellbook = before["players"]["north"]["spellbook"].clone();
+    let top = before_spellbook[0].clone();
+    let (played, play, play_receipt) = play_private_genesis_site(&manifest);
+    let played_state = state(&played);
+    let before_version = before["stateVersion"].as_u64().expect("state version");
+
+    assert_eq!(event_types(&play_receipt), ["site-played"]);
+    assert!(play_receipt.random_draws.is_empty());
+    assert_eq!(played_state["phase"], "genesis");
+    assert_eq!(played_state["stateVersion"], before_version + 1);
+    assert_eq!(
+        played_state["players"]["north"]["spellbook"],
+        before_spellbook
+    );
+    assert_eq!(
+        played_state["pendingGenesisSpell"],
+        json!({
+            "seat": "north",
+            "sourceInstanceId": play["cardInstanceId"],
+        })
+    );
+
+    let choices = played.legal_actions().expect("private Genesis choices");
+    assert_checkpoint_round_trip(&played);
+    assert_eq!(choices.len(), 2);
+    assert_eq!(choices[0].descriptor["kind"], "resolve-genesis-spell");
+    assert_eq!(choices[0].descriptor["choice"], "bottom-next");
+    assert_eq!(choices[1].descriptor["choice"], "keep-next");
+    assert_ne!(choices[0].action_id, choices[1].action_id);
+    for choice in &choices {
+        let descriptor = serde_json::to_string(&choice.descriptor).expect("choice descriptor");
+        assert!(
+            choice
+                .label
+                .contains(top["cardId"].as_str().expect("top card ID"))
+        );
+        assert!(!descriptor.contains(top["cardId"].as_str().expect("top card ID")));
+        assert!(!descriptor.contains(top["instanceId"].as_str().expect("top instance ID")));
+    }
+
+    let mut kept = played.clone();
+    let (_, kept_receipt) = accept_where(&mut kept, |descriptor| {
+        descriptor["kind"] == "resolve-genesis-spell" && descriptor["choice"] == "keep-next"
+    });
+    let mut bottomed = played;
+    let (_, bottomed_receipt) = accept_where(&mut bottomed, |descriptor| {
+        descriptor["kind"] == "resolve-genesis-spell" && descriptor["choice"] == "bottom-next"
+    });
+    let kept_state = state(&kept);
+    let bottomed_state = state(&bottomed);
+    let source_instance_id = play["cardInstanceId"].clone();
+
+    assert_eq!(kept_state["phase"], "main");
+    assert_eq!(bottomed_state["phase"], "main");
+    assert_eq!(kept_state["stateVersion"], before_version + 2);
+    assert_eq!(bottomed_state["stateVersion"], before_version + 2);
+    assert_eq!(kept_state["pendingGenesisSpell"], Value::Null);
+    assert_eq!(bottomed_state["pendingGenesisSpell"], Value::Null);
+    assert_eq!(
+        kept_state["players"]["north"]["spellbook"],
+        before_spellbook
+    );
+    let mut rotated = before_spellbook
+        .as_array()
+        .expect("Spellbook cards")
+        .clone();
+    let first = rotated.remove(0);
+    rotated.push(first);
+    assert_eq!(
+        bottomed_state["players"]["north"]["spellbook"],
+        Value::Array(rotated)
+    );
+    assert_eq!(event_types(&kept_receipt), ["spell-kept"]);
+    assert_eq!(event_types(&bottomed_receipt), ["spell-bottomed"]);
+    assert_eq!(
+        kept_receipt.events[0].payload,
+        json!({ "seat": "north", "sourceInstanceId": source_instance_id })
+    );
+    assert_eq!(
+        bottomed_receipt.events[0].payload,
+        json!({ "seat": "north", "sourceInstanceId": source_instance_id })
+    );
+    assert!(kept_receipt.random_draws.is_empty());
+    assert!(bottomed_receipt.random_draws.is_empty());
+    let hidden_top_id = top["instanceId"].as_str().expect("top instance ID");
+    assert!(
+        !serde_json::to_string(&kept_receipt.events)
+            .expect("kept events")
+            .contains(hidden_top_id)
+    );
+    assert!(
+        !serde_json::to_string(&bottomed_receipt.events)
+            .expect("bottomed events")
+            .contains(hidden_top_id)
+    );
+    assert_eq!(
+        replay_game(&kept).observe(Seat::South),
+        replay_game(&bottomed).observe(Seat::South)
+    );
+    assert_exact_replay(&kept);
+    assert_exact_replay(&bottomed);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one direct proof covers prefix permutations, privacy, and short Spellbooks"
+)]
+fn observatory_genesis_should_privately_reorder_next_three_spells_without_drawing() {
+    let manifest = private_site_genesis_manifest(161, &json!({ "genesisReorderNextSpells": 3 }), 6);
+    let before = state(&opening_checkpoint(&manifest));
+    let before_spellbook = before["players"]["north"]["spellbook"].clone();
+    let (played, play, play_receipt) = play_private_genesis_site(&manifest);
+    let played_state = state(&played);
+    let before_version = before["stateVersion"].as_u64().expect("state version");
+
+    assert_eq!(event_types(&play_receipt), ["site-played"]);
+    assert!(play_receipt.random_draws.is_empty());
+    assert_eq!(played_state["phase"], "genesis");
+    assert_eq!(played_state["stateVersion"], before_version + 1);
+    assert_eq!(
+        played_state["players"]["north"]["spellbook"],
+        before_spellbook
+    );
+    assert_eq!(
+        played_state["pendingGenesisSpellOrder"],
+        json!({
+            "count": 3,
+            "seat": "north",
+            "sourceInstanceId": play["cardInstanceId"],
+        })
+    );
+
+    let choices = played.legal_actions().expect("private order choices");
+    assert_checkpoint_round_trip(&played);
+    let orders: Vec<_> = choices
+        .iter()
+        .map(|choice| choice.descriptor["order"].clone())
+        .collect();
+    assert_eq!(
+        orders,
+        [
+            json!([0, 1, 2]),
+            json!([0, 2, 1]),
+            json!([1, 0, 2]),
+            json!([1, 2, 0]),
+            json!([2, 0, 1]),
+            json!([2, 1, 0]),
+        ]
+    );
+    let top_instance_id = before_spellbook[0]["instanceId"]
+        .as_str()
+        .expect("top instance ID");
+    assert!(choices.iter().all(|choice| {
+        choice.descriptor["kind"] == "resolve-genesis-spell-order"
+            && choice
+                .label
+                .contains(before_spellbook[0]["cardId"].as_str().expect("top card ID"))
+            && !serde_json::to_string(&choice.descriptor)
+                .expect("order descriptor")
+                .contains(top_instance_id)
+    }));
+
+    let mut identity = played.clone();
+    let (_, identity_receipt) = accept_where(&mut identity, |descriptor| {
+        descriptor["kind"] == "resolve-genesis-spell-order"
+            && descriptor["order"] == json!([0, 1, 2])
+    });
+    let mut reversed = played;
+    let (_, reversed_receipt) = accept_where(&mut reversed, |descriptor| {
+        descriptor["kind"] == "resolve-genesis-spell-order"
+            && descriptor["order"] == json!([2, 1, 0])
+    });
+    let identity_state = state(&identity);
+    let reversed_state = state(&reversed);
+    let before_cards = before_spellbook.as_array().expect("Spellbook cards");
+
+    assert_eq!(
+        identity_state["players"]["north"]["spellbook"],
+        before_spellbook
+    );
+    assert_eq!(
+        reversed_state["players"]["north"]["spellbook"][0],
+        before_cards[2]
+    );
+    assert_eq!(
+        reversed_state["players"]["north"]["spellbook"][1],
+        before_cards[1]
+    );
+    assert_eq!(
+        reversed_state["players"]["north"]["spellbook"][2],
+        before_cards[0]
+    );
+    assert_eq!(identity_state["pendingGenesisSpellOrder"], Value::Null);
+    assert_eq!(reversed_state["pendingGenesisSpellOrder"], Value::Null);
+    assert_eq!(identity_state["stateVersion"], before_version + 2);
+    assert_eq!(reversed_state["stateVersion"], before_version + 2);
+    assert_eq!(event_types(&identity_receipt), ["spells-reordered"]);
+    assert_eq!(event_types(&reversed_receipt), ["spells-reordered"]);
+    assert_eq!(
+        reversed_receipt.events[0].payload,
+        json!({
+            "count": 3,
+            "seat": "north",
+            "sourceInstanceId": play["cardInstanceId"],
+        })
+    );
+    assert!(identity_receipt.random_draws.is_empty());
+    assert!(reversed_receipt.random_draws.is_empty());
+    assert!(
+        !serde_json::to_string(&reversed_receipt.events)
+            .expect("reordered events")
+            .contains(top_instance_id)
+    );
+    assert_eq!(
+        replay_game(&identity).observe(Seat::South),
+        replay_game(&reversed).observe(Seat::South)
+    );
+    assert_exact_replay(&identity);
+    assert_exact_replay(&reversed);
+
+    for (spellbook_count, seed, expected_orders) in [(4, 165, 1), (5, 166, 2)] {
+        let short = private_site_genesis_manifest(
+            seed,
+            &json!({ "genesisReorderNextSpells": 3 }),
+            spellbook_count,
+        );
+        let (short, _, _) = play_private_genesis_site(&short);
+        assert_eq!(
+            short.legal_actions().expect("short order choices").len(),
+            expected_orders
+        );
+    }
+}
+
+#[test]
+fn private_spell_genesis_should_skip_an_empty_spellbook() {
+    for (facts, pending_field) in [
+        (
+            json!({ "genesisMayBottomNextSpell": true }),
+            "pendingGenesisSpell",
+        ),
+        (
+            json!({ "genesisReorderNextSpells": 3 }),
+            "pendingGenesisSpellOrder",
+        ),
+    ] {
+        let manifest = private_site_genesis_manifest(169, &facts, 3);
+        let (session, _, receipt) = play_private_genesis_site(&manifest);
+        let after = state(&session);
+        assert_eq!(event_types(&receipt), ["site-played"]);
+        assert_eq!(after["phase"], "main");
+        assert!(
+            !after
+                .as_object()
+                .expect("authoritative state")
+                .contains_key(pending_field)
+        );
+        assert_exact_replay(&session);
+    }
+}
+
+fn geomancer_manifest(seed: u32, north_atlas: &[&str], site_facts: &Value) -> String {
     let mut geomancer = avatar(false, 20);
     geomancer["earthSitePlayCreatesAdjacentRubble"] = json!(true);
     geomancer["replaceAdjacentRubbleWithTopAtlasSite"] = json!(true);
-    let mut value = manifest_value(seed, &geomancer, &minion(1, 1), &minion(1, 1), 4, 4, 4);
+    let mut value = manifest_value(seed, &geomancer, &minion(1, 1), &minion(1, 1), 4, 6, 4);
     let cards = value["cards"].as_object_mut().expect("card definitions");
     cards.remove("north-site");
     cards.remove("south-site");
     let mut earth_site = site();
-    earth_site["genesisPayOneManaToSummonToken"] = json!("foot-soldier");
+    earth_site
+        .as_object_mut()
+        .expect("earth site facts")
+        .extend(site_facts.as_object().expect("Genesis facts").clone());
     for card_id in north_atlas {
         cards.insert((*card_id).to_owned(), earth_site.clone());
     }
@@ -1056,17 +1372,19 @@ fn geomancer_manifest(seed: u32, north_atlas: &[&str]) -> String {
             json!({ "cardType": "site", "elements": [] }),
         );
     }
-    cards.insert(
-        "foot-soldier".to_owned(),
-        json!({
-            "attack": 1,
-            "cardType": "minion",
-            "defense": 1,
-            "manaCost": 0,
-            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-            "token": true,
-        }),
-    );
+    if earth_site.get("genesisPayOneManaToSummonToken").is_some() {
+        cards.insert(
+            "foot-soldier".to_owned(),
+            json!({
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 1,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                "token": true,
+            }),
+        );
+    }
     value["decks"]["north"]["atlas"] = json!(north_atlas);
     value["decks"]["south"]["atlas"] = json!([
         "south-site-1",
@@ -1075,6 +1393,71 @@ fn geomancer_manifest(seed: u32, north_atlas: &[&str]) -> String {
         "south-site-4",
     ]);
     finish_manifest(value)
+}
+
+#[test]
+fn hidden_spell_genesis_should_resume_after_private_rubble_replacement() {
+    for (seed, facts, action_kind, pending_field) in [
+        (
+            170,
+            json!({ "genesisMayBottomNextSpell": true }),
+            "resolve-genesis-spell",
+            "pendingGenesisSpell",
+        ),
+        (
+            171,
+            json!({ "genesisReorderNextSpells": 3 }),
+            "resolve-genesis-spell-order",
+            "pendingGenesisSpellOrder",
+        ),
+    ] {
+        let atlas = [
+            "private-site-1",
+            "private-site-2",
+            "private-site-3",
+            "private-site-4",
+        ];
+        let manifest = geomancer_manifest(seed, &atlas, &facts);
+        let mut session = opening_checkpoint(&manifest);
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site"
+                && descriptor["cell"] == "C4"
+                && descriptor["createRubbleAt"] == "C3"
+        });
+        accept_where(&mut session, |descriptor| descriptor["kind"] == action_kind);
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+        });
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+
+        let (_, replacement) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "replace-rubble-with-top-atlas-site"
+                && descriptor["targetCell"] == "C3"
+        });
+        assert_eq!(
+            event_types(&replacement),
+            ["rubble-replaced", "site-played"]
+        );
+        assert_eq!(state(&session)["phase"], "genesis");
+        assert!(state(&session)[pending_field].is_object());
+        assert!(
+            session
+                .legal_actions()
+                .expect("replacement Genesis actions")
+                .iter()
+                .all(|action| action.descriptor["kind"] == action_kind)
+        );
+        accept_where(&mut session, |descriptor| descriptor["kind"] == action_kind);
+        assert_eq!(state(&session)[pending_field], Value::Null);
+        assert_exact_replay(&session);
+    }
 }
 
 #[test]
@@ -1134,7 +1517,8 @@ fn geomancer_should_create_rubble_and_privately_replace_it_with_top_atlas_site()
         "rustic-village-3",
         "rustic-village-4",
     ];
-    let manifest = geomancer_manifest(104, &north_atlas);
+    let token_facts = json!({ "genesisPayOneManaToSummonToken": "foot-soldier" });
+    let manifest = geomancer_manifest(104, &north_atlas, &token_facts);
     let mut session = ready(&manifest);
     let before = state(&session);
     let top = before["players"]["north"]["atlas"][0].clone();
@@ -1196,7 +1580,7 @@ fn geomancer_should_create_rubble_and_privately_replace_it_with_top_atlas_site()
         "rustic-village-4",
         "rustic-village-1",
     ];
-    let hidden_alternative = ready(&geomancer_manifest(104, &rotated));
+    let hidden_alternative = ready(&geomancer_manifest(104, &rotated, &token_facts));
     let alternative_top = state(&hidden_alternative)["players"]["north"]["atlas"][0].clone();
     assert_ne!(alternative_top["cardId"], top["cardId"]);
     let alternative_replacement = hidden_alternative

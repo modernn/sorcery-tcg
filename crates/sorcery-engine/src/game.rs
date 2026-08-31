@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::action::{
-    ActionDescriptor, CombatTarget, DeckZone, GenesisTokenChoice, compare_canonical,
+    ActionDescriptor, CombatTarget, DeckZone, GenesisSpellChoice, GenesisTokenChoice,
+    compare_canonical,
 };
 use crate::board::{Cell, Location, Region};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
@@ -39,7 +40,9 @@ pub struct Position {
     active_seat: Seat,
     decision_seat: Seat,
     pending_combat: Option<PendingCombat>,
-    pending_genesis_token: GenesisTokenState,
+    pending_genesis_spell: PendingField<PendingGenesisSpell>,
+    pending_genesis_spell_order: PendingField<PendingGenesisSpellOrder>,
+    pending_genesis_token: PendingField<PendingGenesisToken>,
     phase: Phase,
     players: [PlayerPosition; 2],
     prng: PrngState,
@@ -370,9 +373,22 @@ struct PendingGenesisToken {
 }
 
 #[derive(Clone, Debug)]
-enum GenesisTokenState {
+struct PendingGenesisSpell {
+    seat: Seat,
+    source_instance_id: IdentityHash,
+}
+
+#[derive(Clone, Debug)]
+struct PendingGenesisSpellOrder {
+    count: u8,
+    seat: Seat,
+    source_instance_id: IdentityHash,
+}
+
+#[derive(Clone, Debug)]
+enum PendingField<T> {
     Absent,
-    Pending(PendingGenesisToken),
+    Pending(T),
     Resolved,
 }
 
@@ -495,7 +511,7 @@ fn token_reference(facts: &CardFacts) -> Option<&str> {
     }
 }
 
-fn has_immediate_site_genesis_other_than_paid_token(facts: &SiteFacts) -> bool {
+fn has_unsupported_site_genesis_after_rubble_replacement(facts: &SiteFacts) -> bool {
     facts.genesis_discard_top_spells
         || facts.genesis_draw_spell_per_adjacent_same_card
         || facts.genesis_enemies_lose_stealth
@@ -503,8 +519,6 @@ fn has_immediate_site_genesis_other_than_paid_token(facts: &SiteFacts) -> bool {
         || facts.genesis_gain_mana_if_only_controlled_copy
         || facts.genesis_heal_nearby_avatars
         || facts.genesis_immobilize_nearby_until_next_turn
-        || facts.genesis_may_bottom_next_spell
-        || facts.genesis_reorder_next_spells
 }
 
 fn validate_deck(deck: &Deck, cards: &BTreeMap<String, CardFacts>) -> Result<(), GameError> {
@@ -613,7 +627,9 @@ impl Game {
                 active_seat: Seat::North,
                 decision_seat: Seat::North,
                 pending_combat: None,
-                pending_genesis_token: GenesisTokenState::Absent,
+                pending_genesis_spell: PendingField::Absent,
+                pending_genesis_spell_order: PendingField::Absent,
+                pending_genesis_token: PendingField::Absent,
                 phase: Phase::Mulligan,
                 players: [north, south],
                 prng,
@@ -820,37 +836,88 @@ impl Game {
     }
 
     fn append_genesis_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
-        let GenesisTokenState::Pending(pending) = &self.position.pending_genesis_token else {
-            return Err(invalid("Genesis phase lacks its pending token choice"));
-        };
-        if pending.seat != self.position.decision_seat {
-            return Err(invalid("Genesis token choice belongs to another seat"));
+        let seat = self.position.decision_seat;
+        if let PendingField::Pending(pending) = &self.position.pending_genesis_spell_order {
+            if pending.seat != seat {
+                return Err(invalid("Genesis spell order belongs to another seat"));
+            }
+            let player = &self.position.players[seat_index(seat)];
+            let count = usize::from(pending.count);
+            if player.spellbook.len() < count {
+                return Err(invalid("pending Genesis spell order exceeds its Spellbook"));
+            }
+            let indices: Vec<_> = (0..pending.count).collect();
+            for order in permutations(&indices) {
+                let label = order
+                    .iter()
+                    .map(|index| {
+                        let card = &player.spellbook[usize::from(*index)];
+                        self.rules.cards[usize::from(card.card_id.0)].id.as_str()
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                self.push_action(
+                    actions,
+                    ActionDescriptor::ResolveGenesisSpellOrder { order },
+                    format!("Order next spells {label}"),
+                );
+            }
+            return Ok(());
         }
-        self.push_action(
-            actions,
-            ActionDescriptor::ResolveGenesisToken {
-                choice: GenesisTokenChoice::Decline,
-            },
-            "Decline the optional Genesis token".to_owned(),
-        );
-        if self.position.players[seat_index(pending.seat)].mana > 0 {
-            let site = self.position.sites[pending.cell.index()]
-                .as_ref()
-                .ok_or_else(|| invalid("pending Genesis token source is missing"))?;
-            let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
-            else {
-                return Err(invalid("pending Genesis token source is not a site"));
-            };
-            let token_card_id = facts
-                .genesis_pay_one_mana_to_summon_token
-                .as_deref()
-                .ok_or_else(|| invalid("pending Genesis site lacks its token fact"))?;
+        if let PendingField::Pending(pending) = &self.position.pending_genesis_token {
+            if pending.seat != seat {
+                return Err(invalid("Genesis token choice belongs to another seat"));
+            }
             self.push_action(
                 actions,
                 ActionDescriptor::ResolveGenesisToken {
-                    choice: GenesisTokenChoice::PayOneMana,
+                    choice: GenesisTokenChoice::Decline,
                 },
-                format!("Pay 1 to summon {token_card_id}"),
+                "Decline the optional Genesis token".to_owned(),
+            );
+            if self.position.players[seat_index(pending.seat)].mana > 0 {
+                let site = self.position.sites[pending.cell.index()]
+                    .as_ref()
+                    .ok_or_else(|| invalid("pending Genesis token source is missing"))?;
+                let CardFacts::Site(facts) =
+                    &self.rules.cards[usize::from(site.card.card_id.0)].facts
+                else {
+                    return Err(invalid("pending Genesis token source is not a site"));
+                };
+                let token_card_id = facts
+                    .genesis_pay_one_mana_to_summon_token
+                    .as_deref()
+                    .ok_or_else(|| invalid("pending Genesis site lacks its token fact"))?;
+                self.push_action(
+                    actions,
+                    ActionDescriptor::ResolveGenesisToken {
+                        choice: GenesisTokenChoice::PayOneMana,
+                    },
+                    format!("Pay 1 to summon {token_card_id}"),
+                );
+            }
+            return Ok(());
+        }
+        let PendingField::Pending(pending) = &self.position.pending_genesis_spell else {
+            return Err(invalid("Genesis phase lacks its pending choice"));
+        };
+        if pending.seat != seat {
+            return Err(invalid("Genesis spell choice belongs to another seat"));
+        }
+        let top = self.position.players[seat_index(seat)]
+            .spellbook
+            .first()
+            .ok_or_else(|| invalid("pending Genesis spell lacks a top card"))?;
+        let card_id = &self.rules.cards[usize::from(top.card_id.0)].id;
+        for choice in [GenesisSpellChoice::KeepNext, GenesisSpellChoice::BottomNext] {
+            let label = match choice {
+                GenesisSpellChoice::BottomNext => format!("Put {card_id} on bottom"),
+                GenesisSpellChoice::KeepNext => format!("Keep {card_id} on top"),
+            };
+            self.push_action(
+                actions,
+                ActionDescriptor::ResolveGenesisSpell { choice },
+                label,
             );
         }
         Ok(())
@@ -1362,6 +1429,12 @@ impl Game {
                 target_rubble_instance_id,
                 outcomes,
             ),
+            ActionDescriptor::ResolveGenesisSpell { choice } => {
+                self.apply_resolve_genesis_spell(action.seat, *choice, outcomes)
+            }
+            ActionDescriptor::ResolveGenesisSpellOrder { order } => {
+                self.apply_resolve_genesis_spell_order(action.seat, order, outcomes)
+            }
             ActionDescriptor::ResolveGenesisToken { choice } => {
                 self.apply_resolve_genesis_token(action.seat, *choice, outcomes)
             }
@@ -2310,6 +2383,8 @@ impl Game {
         });
         let genesis_enemies_lose_stealth = facts.genesis_enemies_lose_stealth;
         let genesis_discard_top_spells = facts.genesis_discard_top_spells;
+        let genesis_may_bottom_next_spell = facts.genesis_may_bottom_next_spell;
+        let genesis_reorder_next_spells = facts.genesis_reorder_next_spells;
         let genesis_spell_draw_count = if facts.genesis_draw_spell_per_adjacent_same_card {
             cell.bordering(false)
                 .filter(|neighbor| {
@@ -2450,6 +2525,12 @@ impl Game {
                 });
             }
         }
+        self.begin_hidden_spell_genesis(
+            seat,
+            card_instance_id,
+            genesis_may_bottom_next_spell,
+            genesis_reorder_next_spells,
+        );
         if self.position.terminal.is_none()
             && let (Some(rubble_cell), Some(rubble_instance_id)) = (create_rubble_at, rubble)
         {
@@ -2552,11 +2633,13 @@ impl Game {
         let CardFacts::Site(facts) = &definition.facts else {
             return Err(GameError::IllegalAction);
         };
-        if has_immediate_site_genesis_other_than_paid_token(facts) {
+        if has_unsupported_site_genesis_after_rubble_replacement(facts) {
             return Err(GameError::UnsupportedManifestFact(
                 "site Genesis after Rubble replacement".to_owned(),
             ));
         }
+        let genesis_may_bottom_next_spell = facts.genesis_may_bottom_next_spell;
+        let genesis_reorder_next_spells = facts.genesis_reorder_next_spells;
         let pending_token = facts
             .genesis_pay_one_mana_to_summon_token
             .as_ref()
@@ -2575,13 +2658,19 @@ impl Game {
             controller: seat,
         });
         if let Some(source_instance_id) = pending_token {
-            self.position.pending_genesis_token = GenesisTokenState::Pending(PendingGenesisToken {
+            self.position.pending_genesis_token = PendingField::Pending(PendingGenesisToken {
                 cell: target_cell,
                 seat,
                 source_instance_id,
             });
             self.position.phase = Phase::Genesis;
         }
+        self.begin_hidden_spell_genesis(
+            seat,
+            &card_instance_id,
+            genesis_may_bottom_next_spell,
+            genesis_reorder_next_spells,
+        );
         self.position.state_version += 1;
         outcomes.push("rubble-replaced", || {
             json!({
@@ -2601,13 +2690,131 @@ impl Game {
         Ok(())
     }
 
+    fn begin_hidden_spell_genesis(
+        &mut self,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+        may_bottom_next_spell: bool,
+        reorder_next_spells: bool,
+    ) {
+        if self.position.terminal.is_some() {
+            return;
+        }
+        let spell_count = self.position.players[seat_index(seat)].spellbook.len();
+        if may_bottom_next_spell && spell_count > 0 {
+            self.position.pending_genesis_spell = PendingField::Pending(PendingGenesisSpell {
+                seat,
+                source_instance_id: source_instance_id.clone(),
+            });
+            self.position.phase = Phase::Genesis;
+        } else if reorder_next_spells && spell_count > 0 {
+            self.position.pending_genesis_spell_order =
+                PendingField::Pending(PendingGenesisSpellOrder {
+                    count: match spell_count {
+                        1 => 1,
+                        2 => 2,
+                        _ => 3,
+                    },
+                    seat,
+                    source_instance_id: source_instance_id.clone(),
+                });
+            self.position.phase = Phase::Genesis;
+        }
+    }
+
+    fn apply_resolve_genesis_spell(
+        &mut self,
+        seat: Seat,
+        choice: GenesisSpellChoice,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let PendingField::Pending(pending) = &self.position.pending_genesis_spell else {
+            return Err(GameError::IllegalAction);
+        };
+        if self.position.phase != Phase::Genesis || pending.seat != seat {
+            return Err(GameError::IllegalAction);
+        }
+        let source_instance_id = pending.source_instance_id.clone();
+        let player = &mut self.position.players[seat_index(seat)];
+        if player.spellbook.is_empty() {
+            return Err(GameError::IllegalAction);
+        }
+        if choice == GenesisSpellChoice::BottomNext {
+            let card = player.spellbook.remove(0);
+            player.spellbook.push(card);
+        }
+        self.position.pending_genesis_spell = PendingField::Resolved;
+        self.position.phase = Phase::Main;
+        self.position.state_version += 1;
+        outcomes.push(
+            if choice == GenesisSpellChoice::BottomNext {
+                "spell-bottomed"
+            } else {
+                "spell-kept"
+            },
+            || {
+                json!({
+                    "seat": seat,
+                    "sourceInstanceId": source_instance_id,
+                })
+            },
+        );
+        Ok(())
+    }
+
+    fn apply_resolve_genesis_spell_order(
+        &mut self,
+        seat: Seat,
+        order: &[u8],
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let PendingField::Pending(pending) = &self.position.pending_genesis_spell_order else {
+            return Err(GameError::IllegalAction);
+        };
+        let count = usize::from(pending.count);
+        if self.position.phase != Phase::Genesis
+            || pending.seat != seat
+            || order.len() != count
+            || self.position.players[seat_index(seat)].spellbook.len() < count
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let mut seen = [false; 3];
+        for index in order.iter().copied().map(usize::from) {
+            let Some(was_seen) = seen.get_mut(index) else {
+                return Err(GameError::IllegalAction);
+            };
+            if *was_seen {
+                return Err(GameError::IllegalAction);
+            }
+            *was_seen = true;
+        }
+        let source_instance_id = pending.source_instance_id.clone();
+        let player = &mut self.position.players[seat_index(seat)];
+        let top = player.spellbook[..count].to_vec();
+        for (target, source) in order.iter().copied().map(usize::from).enumerate() {
+            player.spellbook[target] = top[source].clone();
+        }
+        self.position.pending_genesis_spell_order = PendingField::Resolved;
+        self.position.phase = Phase::Main;
+        self.position.state_version += 1;
+        outcomes.push("spells-reordered", || {
+            json!({
+                "count": count,
+                "seat": seat,
+                "sourceInstanceId": source_instance_id,
+            })
+        });
+        Ok(())
+    }
+
     fn apply_resolve_genesis_token(
         &mut self,
         seat: Seat,
         choice: GenesisTokenChoice,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
-        let GenesisTokenState::Pending(pending) = &self.position.pending_genesis_token else {
+        let PendingField::Pending(pending) = &self.position.pending_genesis_token else {
             return Err(GameError::IllegalAction);
         };
         if self.position.phase != Phase::Genesis || pending.seat != seat {
@@ -2644,7 +2851,7 @@ impl Game {
             .transpose()?;
         let cell = pending.cell;
         let source_instance_id = pending.source_instance_id.clone();
-        self.position.pending_genesis_token = GenesisTokenState::Resolved;
+        self.position.pending_genesis_token = PendingField::Resolved;
         self.position.phase = Phase::Main;
         if let Some(token) = token {
             self.position.players[seat_index(seat)].mana -= 1;
@@ -3072,24 +3279,59 @@ impl Game {
             "turnNumber": self.position.turn_number,
         });
         if let Value::Object(object) = &mut value {
-            match &self.position.pending_genesis_token {
-                GenesisTokenState::Absent => {}
-                GenesisTokenState::Pending(pending) => {
-                    object.insert(
-                        "pendingGenesisToken".to_owned(),
-                        json!({
-                            "cell": pending.cell,
-                            "seat": pending.seat,
-                            "sourceInstanceId": pending.source_instance_id,
-                        }),
-                    );
-                }
-                GenesisTokenState::Resolved => {
-                    object.insert("pendingGenesisToken".to_owned(), Value::Null);
-                }
-            }
+            self.insert_pending_genesis_state(object);
         }
         value
+    }
+
+    fn insert_pending_genesis_state(&self, object: &mut Map<String, Value>) {
+        match &self.position.pending_genesis_spell {
+            PendingField::Absent => {}
+            PendingField::Pending(pending) => {
+                object.insert(
+                    "pendingGenesisSpell".to_owned(),
+                    json!({
+                        "seat": pending.seat,
+                        "sourceInstanceId": pending.source_instance_id,
+                    }),
+                );
+            }
+            PendingField::Resolved => {
+                object.insert("pendingGenesisSpell".to_owned(), Value::Null);
+            }
+        }
+        match &self.position.pending_genesis_spell_order {
+            PendingField::Absent => {}
+            PendingField::Pending(pending) => {
+                object.insert(
+                    "pendingGenesisSpellOrder".to_owned(),
+                    json!({
+                        "count": pending.count,
+                        "seat": pending.seat,
+                        "sourceInstanceId": pending.source_instance_id,
+                    }),
+                );
+            }
+            PendingField::Resolved => {
+                object.insert("pendingGenesisSpellOrder".to_owned(), Value::Null);
+            }
+        }
+        match &self.position.pending_genesis_token {
+            PendingField::Absent => {}
+            PendingField::Pending(pending) => {
+                object.insert(
+                    "pendingGenesisToken".to_owned(),
+                    json!({
+                        "cell": pending.cell,
+                        "seat": pending.seat,
+                        "sourceInstanceId": pending.source_instance_id,
+                    }),
+                );
+            }
+            PendingField::Resolved => {
+                object.insert("pendingGenesisToken".to_owned(), Value::Null);
+            }
+        }
     }
 
     /// Hashes the materialized authoritative state.

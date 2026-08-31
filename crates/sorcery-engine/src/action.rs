@@ -29,6 +29,16 @@ pub enum GenesisTokenChoice {
     PayOneMana,
 }
 
+/// An engine-issued choice for the hidden top Spellbook card.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GenesisSpellChoice {
+    /// Move the next spell to the bottom of its Spellbook.
+    BottomNext,
+    /// Leave the next spell on top of its Spellbook.
+    KeepNext,
+}
+
 impl DeckZone {
     const fn as_str(self) -> &'static str {
         match self {
@@ -155,6 +165,16 @@ pub enum ActionDescriptor {
         /// Decline or pay for the revealed site's token.
         choice: GenesisTokenChoice,
     },
+    /// Keep or bottom a still-hidden top Spellbook card.
+    ResolveGenesisSpell {
+        /// Engine-issued hidden-card operation.
+        choice: GenesisSpellChoice,
+    },
+    /// Reorder the still-hidden top Spellbook cards by prefix index.
+    ResolveGenesisSpellOrder {
+        /// Permutation of `0..pending_count`.
+        order: Vec<u8>,
+    },
     /// Summon a minion from the player's hand.
     SummonMinion {
         /// Stable rules card identity.
@@ -273,6 +293,8 @@ impl ActionDescriptor {
                 "Replace Rubble at {target_cell} with the top site of your Atlas"
             )),
             Self::PlaySite { .. }
+            | Self::ResolveGenesisSpell { .. }
+            | Self::ResolveGenesisSpellOrder { .. }
             | Self::ResolveGenesisToken { .. }
             | Self::SummonMinion { .. } => None,
         }
@@ -405,6 +427,14 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                         .cmp(right_cell)
                         .then_with(|| left_id.cmp(right_id)),
                     (
+                        ActionDescriptor::ResolveGenesisSpell { choice: left },
+                        ActionDescriptor::ResolveGenesisSpell { choice: right },
+                    ) => left.cmp(right),
+                    (
+                        ActionDescriptor::ResolveGenesisSpellOrder { order: left },
+                        ActionDescriptor::ResolveGenesisSpellOrder { order: right },
+                    ) => compare_json_array(left, right, u8::cmp),
+                    (
                         ActionDescriptor::ResolveGenesisToken { choice: left },
                         ActionDescriptor::ResolveGenesisToken { choice: right },
                     ) => left.cmp(right),
@@ -486,11 +516,13 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::DrawSpell => 6,
         ActionDescriptor::EndTurn => 7,
         ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 8,
-        ActionDescriptor::ResolveGenesisToken { .. } => 9,
-        ActionDescriptor::Mulligan { .. } => 10,
-        ActionDescriptor::PlaySite { .. } => 11,
-        ActionDescriptor::SummonMinion { .. } => 12,
-        ActionDescriptor::MoveAndAttack { .. } => 13,
+        ActionDescriptor::ResolveGenesisSpell { .. } => 9,
+        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 10,
+        ActionDescriptor::ResolveGenesisToken { .. } => 11,
+        ActionDescriptor::Mulligan { .. } => 12,
+        ActionDescriptor::PlaySite { .. } => 13,
+        ActionDescriptor::SummonMinion { .. } => 14,
+        ActionDescriptor::MoveAndAttack { .. } => 15,
     }
 }
 

@@ -1422,15 +1422,20 @@
         "RULE-03"
       ],
       "plainLanguage": "Seasonal River Genesis privately keeps or bottoms the next spell.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "genesis"
       ],
-      "actionHints": [],
-      "eventHints": [],
+      "actionHints": [
+        "resolve-genesis-spell"
+      ],
+      "eventHints": [
+        "spell-bottomed",
+        "spell-kept"
+      ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 seasonal River Genesis privately keeps or bottoms the next spell"
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "seasonal_river_genesis_should_privately_keep_or_bottom_next_spell"
       }
     },
     {
@@ -1439,18 +1444,20 @@
         "RULE-03"
       ],
       "plainLanguage": "Observatory privately reorders the next three spells without drawing.",
-      "implementationStatus": "typescript-supported",
-      "genericFactHints": [],
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis",
+        "private-reorder"
+      ],
       "actionHints": [
-        "draw",
-        "reorder"
+        "resolve-genesis-spell-order"
       ],
       "eventHints": [
-        "card-draw"
+        "spells-reordered"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Observatory privately reorders the next three spells without drawing"
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "observatory_genesis_should_privately_reorder_next_three_spells_without_drawing"
       }
     },
     {

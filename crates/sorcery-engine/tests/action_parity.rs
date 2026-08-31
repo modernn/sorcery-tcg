@@ -20,6 +20,8 @@ fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
         ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => {
             "replace-rubble-with-top-atlas-site"
         }
+        ActionDescriptor::ResolveGenesisSpell { .. } => "resolve-genesis-spell",
+        ActionDescriptor::ResolveGenesisSpellOrder { .. } => "resolve-genesis-spell-order",
         ActionDescriptor::ResolveGenesisToken { .. } => "resolve-genesis-token",
         ActionDescriptor::SummonMinion { .. } => "summon-minion",
         ActionDescriptor::MoveAndAttack { .. } => "move-and-attack",
