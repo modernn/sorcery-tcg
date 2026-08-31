@@ -2225,7 +2225,7 @@
         "RULE-04"
       ],
       "plainLanguage": "A unit can move across connected top and bottom realm edges.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "move"
@@ -2234,8 +2234,8 @@
         "movement"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-02/04 a unit can move across connected top and bottom realm edges"
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "connected_top_bottom_should_wrap_only_the_minion"
       }
     },
     {

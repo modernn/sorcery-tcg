@@ -556,3 +556,82 @@ fn unconditional_end_turn_stealth_should_gain_before_turn_events_without_duplica
     assert_eq!(state(&session)["realm"]["units"][0]["stealthed"], true);
     assert_exact_replay(&session);
 }
+
+#[test]
+fn connected_top_bottom_should_wrap_only_the_minion() {
+    let mut connector = minion(1, 2);
+    connector["connectsTopBottom"] = json!(true);
+    let manifest = scenario_manifest(
+        112,
+        &json!({
+            "north-connector": connector,
+            "south-minion": minion(1, 2),
+        }),
+        &["north-connector"; 4],
+        &["south-minion"; 4],
+    );
+    let mut session = Session::new(&manifest).expect("valid connected-edge scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let (summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "north-connector"
+    });
+    let minion_id = summon["cardInstanceId"]
+        .as_str()
+        .expect("connector identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+
+    let actions = session.legal_actions().expect("connected-edge actions");
+    let snapshot = state(&session);
+    let avatar_id = snapshot["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("Avatar identity");
+    assert!(actions.iter().any(|action| {
+        action.descriptor["kind"] == "move-and-attack"
+            && action.descriptor["unitInstanceId"] == minion_id
+            && action.descriptor["path"]
+                == json!([
+                    { "cell": "C4", "region": "surface" },
+                    { "cell": "C1", "region": "surface" },
+                ])
+    }));
+    assert!(!actions.iter().any(|action| {
+        action.descriptor["kind"] == "move-and-attack"
+            && action.descriptor["unitInstanceId"] == avatar_id
+            && action.descriptor["to"]["cell"] == "C1"
+    }));
+
+    let (movement, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == minion_id
+            && descriptor["from"]["cell"] == "C4"
+            && descriptor["to"]["cell"] == "C1"
+    });
+    assert_eq!(
+        receipt.events[0].payload,
+        json!({
+            "from": movement["from"].clone(),
+            "path": movement["path"].clone(),
+            "seat": "north",
+            "steps": 1,
+            "to": movement["to"].clone(),
+            "unitInstanceId": minion_id,
+        })
+    );
+    assert_eq!(state(&session)["phase"], "attack");
+    assert_eq!(state(&session)["realm"]["units"][0]["location"], "C1");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
+    assert_exact_replay(&session);
+}

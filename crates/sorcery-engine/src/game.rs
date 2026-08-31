@@ -820,6 +820,10 @@ impl Game {
         Ok(())
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "main-phase legality keeps each engine-issued action filter together"
+    )]
     fn append_main_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
         let seat = self.position.decision_seat;
         let player = &self.position.players[seat_index(seat)];
@@ -889,6 +893,7 @@ impl Game {
                 actions,
                 &player.avatar.card.instance_id,
                 player.avatar.location,
+                false,
             )?;
         }
         for unit in self
@@ -897,7 +902,17 @@ impl Game {
             .iter()
             .filter(|unit| self.minion_can_move_and_attack(unit, seat))
         {
-            self.append_unit_move_actions(actions, &unit.card.instance_id, unit.location)?;
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return Err(invalid("realm minion lacks Minion facts"));
+            };
+            self.append_unit_move_actions(
+                actions,
+                &unit.card.instance_id,
+                unit.location,
+                facts.connects_top_bottom,
+            )?;
         }
         if !player.avatar.tapped {
             let descriptor = ActionDescriptor::DrawSite;
@@ -947,6 +962,7 @@ impl Game {
         actions: &mut Vec<IssuedAction>,
         instance_id: &IdentityHash,
         start: Cell,
+        connects_top_bottom: bool,
     ) -> Result<(), GameError> {
         let from = Location {
             cell: start,
@@ -954,7 +970,7 @@ impl Game {
         };
         for destination in std::iter::once(start).chain(
             start
-                .bordering(false)
+                .bordering(connects_top_bottom)
                 .filter(|cell| self.position.sites[cell.index()].is_some()),
         ) {
             let to = Location {
@@ -1820,18 +1836,17 @@ impl Game {
             || path.last() != Some(&to)
             || self.position.sites[to.cell.index()].is_none()
             || (path.len() == 1 && from != to)
-            || (path.len() == 2
-                && (from == to || !from.cell.bordering(false).any(|cell| cell == to.cell)))
         {
             return Err(GameError::IllegalAction);
         }
-        let (attacker_kind, current_location, ready) = {
+        let (attacker_kind, current_location, ready, connects_top_bottom) = {
             let player = &self.position.players[seat_index(seat)];
             if player.avatar.card.instance_id == *unit_instance_id {
                 (
                     UnitKind::Avatar,
                     player.avatar.location,
                     !player.avatar.tapped,
+                    false,
                 )
             } else {
                 let unit = self
@@ -1840,14 +1855,28 @@ impl Game {
                     .iter()
                     .find(|unit| unit.card.instance_id == *unit_instance_id)
                     .ok_or(GameError::IllegalAction)?;
+                let CardFacts::Minion(facts) =
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                else {
+                    return Err(GameError::IllegalAction);
+                };
                 (
                     UnitKind::Minion,
                     unit.location,
                     self.minion_can_move_and_attack(unit, seat),
+                    facts.connects_top_bottom,
                 )
             }
         };
-        if !ready || current_location != from.cell {
+        if !ready
+            || current_location != from.cell
+            || path.len() == 2
+                && (from == to
+                    || !from
+                        .cell
+                        .bordering(connects_top_bottom)
+                        .any(|cell| cell == to.cell))
+        {
             return Err(GameError::IllegalAction);
         }
         match attacker_kind {
