@@ -724,3 +724,186 @@ fn first_controlled_copy_site_genesis_mana_should_key_by_card_id() {
     assert_eq!(state(&session)["players"]["north"]["mana"], 3);
     assert_exact_replay(&session);
 }
+
+#[test]
+fn site_genesis_should_remove_only_enemy_stealth() {
+    let mut stealth = minion(1, 2);
+    stealth["stealth"] = json!(true);
+    let mut value = manifest_value(71, &avatar(false, 20), &stealth, &stealth, 5, 5, 5);
+    value["cards"]["north-site"]["genesisEnemiesLoseStealth"] = json!(true);
+    let manifest = finish_manifest(value);
+    let mut session = Session::new(&manifest).expect("valid Stealth-removal site Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
+    let (north_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+    });
+    let north_id = north_summon["cardInstanceId"].clone();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
+    let (south_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+    });
+    let south_id = south_summon["cardInstanceId"].clone();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    assert_eq!(event_types(&receipt), ["site-played", "stealth-lost"]);
+    assert_eq!(
+        receipt.events[1].payload,
+        json!({
+            "instanceId": south_id,
+            "seat": "south",
+            "sourceInstanceId": receipt.events[0].payload["instanceId"].clone(),
+        })
+    );
+    let after = state(&session);
+    let units = after["realm"]["units"].as_array().expect("realm units");
+    assert!(
+        units
+            .iter()
+            .any(|unit| { unit["instanceId"] == north_id && unit["stealthed"] == true })
+    );
+    assert!(
+        units
+            .iter()
+            .any(|unit| { unit["instanceId"] == south_id && unit["stealthed"] == false })
+    );
+    assert_exact_replay(&session);
+}
+
+fn adjacent_draw_manifest(seed: u32) -> String {
+    let mut value = manifest_value(
+        seed,
+        &avatar(false, 20),
+        &minion(1, 2),
+        &minion(1, 2),
+        6,
+        5,
+        5,
+    );
+    let mut matching_site = site();
+    matching_site["genesisDrawSpellPerAdjacentSameCard"] = json!(true);
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .insert("matching-site".to_owned(), matching_site);
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("north-site");
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("south-site");
+    value["decks"]["north"]["atlas"] = json!(vec!["matching-site"; 6]);
+    value["decks"]["south"]["atlas"] = json!(vec!["matching-site"; 6]);
+    finish_manifest(value)
+}
+
+#[test]
+fn adjacent_matching_site_genesis_should_draw_each_then_partially_deck_out() {
+    let manifest = adjacent_draw_manifest(74);
+    let mut session = Session::new(&manifest).expect("valid adjacent-draw site Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let (_, one_match) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    assert_eq!(event_types(&one_match), ["site-played", "spell-drawn"]);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+
+    let before = state(&session);
+    let last_spell = before["players"]["north"]["spellbook"][0].clone();
+    let (_, two_matches) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    assert_eq!(
+        event_types(&two_matches),
+        ["site-played", "spell-drawn", "game-ended"]
+    );
+    let after = state(&session);
+    assert_eq!(after["terminal"]["reason"], "deck_empty");
+    assert_eq!(after["realm"]["sites"]["C2"]["cardId"], "matching-site");
+    assert!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("Spellbook hand")
+            .contains(&last_spell)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn site_genesis_should_publicly_discard_up_to_two_spells_without_deck_out() {
+    for (seed, spellbook_count, discarded_count) in [(75, 5, 2), (76, 4, 1)] {
+        let mut value = manifest_value(
+            seed,
+            &avatar(false, 20),
+            &minion(1, 2),
+            &minion(1, 2),
+            5,
+            spellbook_count,
+            5,
+        );
+        value["cards"]["north-site"]["genesisDiscardTopSpells"] = json!(2);
+        let manifest = finish_manifest(value);
+        let mut session =
+            Session::new(&manifest).expect("valid public-discard site Genesis scenario");
+        keep(&mut session);
+        keep(&mut session);
+        let before = state(&session);
+        let expected = before["players"]["north"]["spellbook"]
+            .as_array()
+            .expect("Spellbook")
+            .clone();
+        let (_, receipt) =
+            accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
+        assert_eq!(receipt.events.len(), 1 + discarded_count);
+        assert_eq!(receipt.events[0].event_type, "site-played");
+        for (event, card) in receipt.events[1..].iter().zip(&expected) {
+            assert_eq!(event.event_type, "spell-discarded");
+            assert_eq!(event.payload["cardId"], card["cardId"]);
+            assert_eq!(event.payload["instanceId"], card["instanceId"]);
+            assert_eq!(event.payload["owner"], "north");
+            assert_eq!(event.payload["seat"], "north");
+            assert_eq!(
+                event.payload["sourceInstanceId"],
+                receipt.events[0].payload["instanceId"]
+            );
+        }
+        let after = state(&session);
+        assert_eq!(after["terminal"]["status"], "active");
+        assert_eq!(
+            after["players"]["north"]["spellbook"]
+                .as_array()
+                .map(Vec::len),
+            Some(0)
+        );
+        assert_exact_replay(&session);
+    }
+}

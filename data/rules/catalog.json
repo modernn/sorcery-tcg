@@ -1402,7 +1402,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Hunter's Lodge Genesis removes only enemy Stealth.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "genesis",
         "stealth"
@@ -1412,8 +1412,8 @@
         "stealth-change"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Hunter's Lodge Genesis removes only enemy Stealth"
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "site_genesis_should_remove_only_enemy_stealth"
       }
     },
     {
@@ -1459,7 +1459,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Adjacent matching sites trigger one spell draw apiece and a short deck loses.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "draw"
@@ -1469,8 +1469,8 @@
         "card-draw"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 adjacent matching sites trigger one spell draw apiece and a short deck loses"
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "adjacent_matching_site_genesis_should_draw_each_then_partially_deck_out"
       }
     },
     {
@@ -1479,7 +1479,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Site Genesis discards up to two top spells publicly without deck-out.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "genesis"
       ],
@@ -1490,8 +1490,8 @@
         "card-discard"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 site Genesis discards up to two top spells publicly without deck-out"
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "site_genesis_should_publicly_discard_up_to_two_spells_without_deck_out"
       }
     },
     {

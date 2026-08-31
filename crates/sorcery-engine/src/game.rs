@@ -1963,6 +1963,10 @@ impl Game {
         Ok(())
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "site placement keeps ordered Genesis effects in one authoritative transition"
+    )]
     fn apply_play_site_action(
         &mut self,
         seat: Seat,
@@ -2002,6 +2006,19 @@ impl Game {
                     .any(|site| site.controller == seat && site.card.card_id == played_card_id))
             .then_some(1)
         });
+        let genesis_enemies_lose_stealth = facts.genesis_enemies_lose_stealth;
+        let genesis_discard_top_spells = facts.genesis_discard_top_spells;
+        let genesis_spell_draw_count = if facts.genesis_draw_spell_per_adjacent_same_card {
+            cell.bordering(false)
+                .filter(|neighbor| {
+                    self.position.sites[neighbor.index()]
+                        .as_ref()
+                        .is_some_and(|site| site.card.card_id == played_card_id)
+                })
+                .count()
+        } else {
+            0
+        };
         let genesis_heal_nearby_avatars = facts.genesis_heal_nearby_avatars;
         let ordinary_mana = player.mana.checked_add(1).ok_or(GameError::IllegalAction)?;
         let final_mana = ordinary_mana
@@ -2050,6 +2067,52 @@ impl Game {
                 if nearby {
                     self.heal_avatar(healed_seat, 3, card_instance_id, outcomes)?;
                 }
+            }
+        }
+        if genesis_enemies_lose_stealth {
+            let enemy = other_seat(seat);
+            for unit in self
+                .position
+                .units
+                .iter_mut()
+                .filter(|unit| unit.controller == enemy && unit.stealthed)
+            {
+                unit.stealthed = false;
+                let instance_id = unit.card.instance_id.clone();
+                outcomes.push("stealth-lost", || {
+                    json!({
+                        "instanceId": instance_id,
+                        "seat": enemy,
+                        "sourceInstanceId": card_instance_id,
+                    })
+                });
+            }
+        }
+        if genesis_spell_draw_count > 0 {
+            let count =
+                u8::try_from(genesis_spell_draw_count).map_err(|_| GameError::IllegalAction)?;
+            self.apply_genesis_draws(seat, card_instance_id, DeckZone::Spellbook, count, outcomes);
+        }
+        if genesis_discard_top_spells {
+            for _ in 0..2 {
+                let Some(card) = (!self.position.players[player_index].spellbook.is_empty())
+                    .then(|| self.position.players[player_index].spellbook.remove(0))
+                else {
+                    break;
+                };
+                let discarded_card_id = self.rules.cards[usize::from(card.card_id.0)].id.clone();
+                let instance_id = card.instance_id.clone();
+                let owner = card.owner;
+                self.position.players[player_index].cemetery.push(card);
+                outcomes.push("spell-discarded", || {
+                    json!({
+                        "cardId": discarded_card_id,
+                        "instanceId": instance_id,
+                        "owner": owner,
+                        "seat": seat,
+                        "sourceInstanceId": card_instance_id,
+                    })
+                });
             }
         }
         Ok(())
