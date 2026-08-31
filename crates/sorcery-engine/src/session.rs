@@ -261,6 +261,12 @@ impl Session {
         self.game.position().state_version()
     }
 
+    /// Returns the current authoritative turn number.
+    #[must_use]
+    pub const fn turn_number(&self) -> u64 {
+        self.game.turn_number()
+    }
+
     /// Returns the current deciding seat.
     #[must_use]
     pub const fn decision_seat(&self) -> Seat {
