@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
-use sorcery_engine::game::Game;
+use sorcery_engine::game::{Game, IssuedAction};
 
 #[derive(Deserialize)]
 struct Fixture {
@@ -48,6 +48,14 @@ fn seed_31_fixture() -> FixtureGame {
         .expect("seed-31 game fixture")
 }
 
+fn action_identity(action: &IssuedAction) -> String {
+    action
+        .to_legal_action()
+        .expect("materialized legal action")
+        .action_id
+        .to_string()
+}
+
 #[test]
 fn setup_and_mulligans_should_match_typescript_seed_31() {
     let fixture = seed_31_fixture();
@@ -78,13 +86,13 @@ fn setup_and_mulligans_should_match_typescript_seed_31() {
     assert_eq!(
         north_actions
             .iter()
-            .map(|action| action.action_id().as_str())
+            .map(action_identity)
             .collect::<Vec<_>>(),
         fixture.initial.legal_action_ids
     );
     let north_action = north_actions
         .iter()
-        .find(|action| action.action_id().as_str() == fixture.steps[0].selected_action_id)
+        .find(|action| action_identity(action) == fixture.steps[0].selected_action_id)
         .expect("fixture north action");
     game.apply_action(north_action)
         .expect("apply north mulligan");
@@ -97,13 +105,13 @@ fn setup_and_mulligans_should_match_typescript_seed_31() {
     assert_eq!(
         south_actions
             .iter()
-            .map(|action| action.action_id().as_str())
+            .map(action_identity)
             .collect::<Vec<_>>(),
         fixture.steps[1].legal_action_ids
     );
     let south_action = south_actions
         .iter()
-        .find(|action| action.action_id().as_str() == fixture.steps[1].selected_action_id)
+        .find(|action| action_identity(action) == fixture.steps[1].selected_action_id)
         .expect("fixture south action");
     game.apply_action(south_action)
         .expect("apply south mulligan");
@@ -114,15 +122,12 @@ fn setup_and_mulligans_should_match_typescript_seed_31() {
     );
     let main_actions = game.legal_actions().expect("first main actions");
     assert_eq!(
-        main_actions
-            .iter()
-            .map(|action| action.action_id().as_str())
-            .collect::<Vec<_>>(),
+        main_actions.iter().map(action_identity).collect::<Vec<_>>(),
         fixture.steps[2].legal_action_ids
     );
     let site_action = main_actions
         .iter()
-        .find(|action| action.action_id().as_str() == fixture.steps[2].selected_action_id)
+        .find(|action| action_identity(action) == fixture.steps[2].selected_action_id)
         .expect("fixture site action");
     game.apply_action(site_action).expect("apply first site");
     assert_eq!(
@@ -133,13 +138,13 @@ fn setup_and_mulligans_should_match_typescript_seed_31() {
     assert_eq!(
         summon_actions
             .iter()
-            .map(|action| action.action_id().as_str())
+            .map(action_identity)
             .collect::<Vec<_>>(),
         fixture.steps[3].legal_action_ids
     );
     let summon_action = summon_actions
         .iter()
-        .find(|action| action.action_id().as_str() == fixture.steps[3].selected_action_id)
+        .find(|action| action_identity(action) == fixture.steps[3].selected_action_id)
         .expect("fixture summon action");
     game.apply_action(summon_action)
         .expect("apply first summon");

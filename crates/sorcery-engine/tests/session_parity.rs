@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
-use sorcery_engine::contract::{ActionRequest, RejectionCode, Seat};
+use sorcery_engine::contract::{ActionRequest, RejectionCode, Seat, order_legal_actions};
 use sorcery_engine::session::{Session, StepResult};
 
 #[derive(Deserialize)]
@@ -224,6 +224,11 @@ fn accept_fixture_step(
     step_index: usize,
 ) -> IdentityHash {
     let legal_actions = session.legal_actions().expect("legal actions");
+    assert_eq!(
+        legal_actions,
+        order_legal_actions(legal_actions.clone()).expect("canonical JSON action order"),
+        "native and JSON action order at step {step_index}"
+    );
     assert_eq!(
         legal_actions
             .iter()

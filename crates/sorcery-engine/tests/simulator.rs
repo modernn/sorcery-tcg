@@ -4,6 +4,7 @@ use sorcery_engine::contract::{ActionRequest, Seat};
 use sorcery_engine::game::Game;
 use sorcery_engine::policy::{PolicySnapshot, parse_policy_snapshot};
 use sorcery_engine::session::Session;
+use sorcery_engine::simulator::SimulatorError;
 use sorcery_engine::simulator::{replay_selected, run_game, search_root_actions};
 
 const HASH_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -82,13 +83,7 @@ fn game_rollout_should_repeat_exactly() {
 fn root_search_should_cover_canonical_actions_in_order() {
     let fixture = fixture();
     let game = Game::from_manifest_json(manifest(&fixture)).expect("valid game");
-    let expected: Vec<_> = game
-        .legal_actions()
-        .expect("root actions")
-        .into_iter()
-        .take(4)
-        .map(|action| action.action_id().clone())
-        .collect();
+    let expected = 0..game.legal_actions().expect("root actions").len().min(4);
     let policy = baseline_policy();
     let rollouts = search_root_actions(&game, &policy, &policy, MAX_ACTIONS, expected.len())
         .expect("root rollouts");
@@ -96,9 +91,9 @@ fn root_search_should_cover_canonical_actions_in_order() {
     assert_eq!(
         rollouts
             .iter()
-            .map(|rollout| rollout.action_ids()[0].clone())
+            .map(|rollout| rollout.action_indices()[0])
             .collect::<Vec<_>>(),
-        expected
+        expected.collect::<Vec<_>>()
     );
 }
 
@@ -115,10 +110,7 @@ fn selected_rollout_should_replay_authoritatively() {
     let session = replay_selected(manifest, &rollout).expect("verified replay");
 
     assert!(session.verify_replay().expect("replay verification"));
-    assert_eq!(
-        session.state_hash().expect("authoritative state hash"),
-        *rollout.final_state_hash()
-    );
+    assert!(rollout.is_terminal());
 }
 
 #[test]
@@ -132,7 +124,11 @@ fn speculative_and_recorded_transitions_should_produce_identical_state() {
     game.apply_action(&action).expect("speculative transition");
     session
         .step(ActionRequest {
-            action_id: action.action_id().to_string(),
+            action_id: action
+                .to_legal_action()
+                .expect("materialized action")
+                .action_id
+                .to_string(),
             seat: Seat::North,
             state_version: 0,
         })
@@ -142,4 +138,29 @@ fn speculative_and_recorded_transitions_should_produce_identical_state() {
         game.state_hash().expect("speculative state hash"),
         session.state_hash().expect("recorded state hash")
     );
+}
+
+#[test]
+fn selected_rollout_should_reject_a_different_manifest() {
+    let fixture = fixture();
+    let source_manifest = manifest(&fixture);
+    let policy = baseline_policy();
+    let rollout = run_game(
+        Game::from_manifest_json(source_manifest).expect("source game"),
+        &policy,
+        &policy,
+        1,
+    )
+    .expect("source rollout");
+    let mut other: Value = serde_json::from_str(source_manifest).expect("manifest value");
+    let body = other.as_object_mut().expect("manifest object");
+    body.remove("manifestId").expect("manifest identity");
+    body.insert("seed".to_owned(), json!(32));
+    other["manifestId"] = json!(identity_hash(&other).expect("other manifest identity"));
+    let other = canonical_json(&other).expect("canonical other manifest");
+
+    assert!(matches!(
+        replay_selected(&other, &rollout),
+        Err(SimulatorError::ReplayDiverged)
+    ));
 }

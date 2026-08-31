@@ -1,5 +1,8 @@
 //! Typed descriptors for the currently supported synthetic game workload.
 
+use std::cmp::Ordering;
+use std::str::Bytes;
+
 use serde::{Deserialize, Serialize};
 
 use crate::board::{Cell, Location, Region};
@@ -226,6 +229,279 @@ impl ActionDescriptor {
     }
 }
 
+pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescriptor) -> Ordering {
+    descriptor_group(left)
+        .cmp(&descriptor_group(right))
+        .then_with(|| match (left, right) {
+            (
+                ActionDescriptor::Mulligan {
+                    atlas_order: left_atlas,
+                    spellbook_order: left_spellbook,
+                },
+                ActionDescriptor::Mulligan {
+                    atlas_order: right_atlas,
+                    spellbook_order: right_spellbook,
+                },
+            ) => compare_json_array(left_atlas, right_atlas, IdentityHash::cmp).then_with(|| {
+                compare_json_array(left_spellbook, right_spellbook, IdentityHash::cmp)
+            }),
+            (
+                ActionDescriptor::PlaySite {
+                    card_id: left_card,
+                    card_instance_id: left_instance,
+                    cell: left_cell,
+                },
+                ActionDescriptor::PlaySite {
+                    card_id: right_card,
+                    card_instance_id: right_instance,
+                    cell: right_cell,
+                },
+            ) => compare_json_strings(left_card, right_card)
+                .then_with(|| left_instance.cmp(right_instance))
+                .then_with(|| left_cell.cmp(right_cell)),
+            (
+                ActionDescriptor::SummonMinion {
+                    card_id: left_card,
+                    card_instance_id: left_instance,
+                    caster_instance_id: left_caster,
+                    cell: left_cell,
+                    mana_cost: left_mana,
+                },
+                ActionDescriptor::SummonMinion {
+                    card_id: right_card,
+                    card_instance_id: right_instance,
+                    caster_instance_id: right_caster,
+                    cell: right_cell,
+                    mana_cost: right_mana,
+                },
+            ) => compare_json_strings(left_card, right_card)
+                .then_with(|| left_instance.cmp(right_instance))
+                .then_with(|| left_caster.cmp(right_caster))
+                .then_with(|| left_cell.cmp(right_cell))
+                .then_with(|| compare_json_integers(*left_mana, *right_mana)),
+            (ActionDescriptor::SummonMinion { .. }, ActionDescriptor::PlaySite { .. }) => {
+                compare_card_prefix(left, right).then(Ordering::Less)
+            }
+            (ActionDescriptor::PlaySite { .. }, ActionDescriptor::SummonMinion { .. }) => {
+                compare_card_prefix(left, right).then(Ordering::Greater)
+            }
+            (
+                ActionDescriptor::MoveAndAttack {
+                    from: left_from,
+                    path: left_path,
+                    to: left_to,
+                    unit_instance_id: left_unit,
+                },
+                ActionDescriptor::MoveAndAttack {
+                    from: right_from,
+                    path: right_path,
+                    to: right_to,
+                    unit_instance_id: right_unit,
+                },
+            ) => left_from
+                .cmp(right_from)
+                .then_with(|| compare_json_array(left_path, right_path, Location::cmp))
+                .then_with(|| left_to.cmp(right_to))
+                .then_with(|| left_unit.cmp(right_unit)),
+            _ => action_kind(left)
+                .cmp(&action_kind(right))
+                .then_with(|| match (left, right) {
+                    (
+                        ActionDescriptor::CloseDefend {
+                            original_target_participates: left,
+                        },
+                        ActionDescriptor::CloseDefend {
+                            original_target_participates: right,
+                        },
+                    ) => left.cmp(right),
+                    (
+                        ActionDescriptor::DeclareAttack { target: left },
+                        ActionDescriptor::DeclareAttack { target: right },
+                    ) => compare_targets(left, right),
+                    (
+                        ActionDescriptor::Draw { zone: left },
+                        ActionDescriptor::Draw { zone: right },
+                    ) => deck_zone_order(*left).cmp(&deck_zone_order(*right)),
+                    _ => Ordering::Equal,
+                }),
+        })
+}
+
+const fn descriptor_group(action: &ActionDescriptor) -> u8 {
+    match action {
+        ActionDescriptor::Mulligan { .. } => 0,
+        ActionDescriptor::PlaySite { .. } | ActionDescriptor::SummonMinion { .. } => 1,
+        ActionDescriptor::MoveAndAttack { .. } => 2,
+        _ => 3,
+    }
+}
+
+fn compare_card_prefix(left: &ActionDescriptor, right: &ActionDescriptor) -> Ordering {
+    let (left_card, left_instance) = card_prefix(left);
+    let (right_card, right_instance) = card_prefix(right);
+    compare_json_strings(left_card, right_card).then_with(|| left_instance.cmp(right_instance))
+}
+
+fn card_prefix(action: &ActionDescriptor) -> (&str, &IdentityHash) {
+    match action {
+        ActionDescriptor::PlaySite {
+            card_id,
+            card_instance_id,
+            ..
+        }
+        | ActionDescriptor::SummonMinion {
+            card_id,
+            card_instance_id,
+            ..
+        } => (card_id, card_instance_id),
+        _ => unreachable!("card prefix is used only for card actions"),
+    }
+}
+
+const fn action_kind(action: &ActionDescriptor) -> u8 {
+    match action {
+        ActionDescriptor::CloseDefend { .. } => 0,
+        ActionDescriptor::DeclareAttack { .. } => 1,
+        ActionDescriptor::DeclineAttack => 2,
+        ActionDescriptor::Draw { .. } => 3,
+        ActionDescriptor::DrawSite => 4,
+        ActionDescriptor::EndTurn => 5,
+        ActionDescriptor::Mulligan { .. } => 6,
+        ActionDescriptor::PlaySite { .. } => 7,
+        ActionDescriptor::SummonMinion { .. } => 8,
+        ActionDescriptor::MoveAndAttack { .. } => 9,
+    }
+}
+
+fn compare_targets(left: &CombatTarget, right: &CombatTarget) -> Ordering {
+    left.instance_id()
+        .cmp(right.instance_id())
+        .then_with(|| target_kind(left).cmp(&target_kind(right)))
+        .then_with(|| seat_order(left.seat()).cmp(&seat_order(right.seat())))
+}
+
+const fn target_kind(target: &CombatTarget) -> u8 {
+    match target {
+        CombatTarget::Avatar { .. } => 0,
+        CombatTarget::Minion { .. } => 1,
+        CombatTarget::Site { .. } => 2,
+    }
+}
+
+const fn seat_order(seat: Seat) -> u8 {
+    match seat {
+        Seat::North => 0,
+        Seat::South => 1,
+    }
+}
+
+const fn deck_zone_order(zone: DeckZone) -> u8 {
+    match zone {
+        DeckZone::Atlas => 0,
+        DeckZone::Spellbook => 1,
+    }
+}
+
+fn compare_json_array<T>(left: &[T], right: &[T], compare: fn(&T, &T) -> Ordering) -> Ordering {
+    left.iter()
+        .zip(right)
+        .map(|(left, right)| compare(left, right))
+        .find(|ordering| *ordering != Ordering::Equal)
+        .unwrap_or_else(|| right.len().cmp(&left.len()))
+}
+
+fn compare_json_integers(left: u64, right: u64) -> Ordering {
+    let (left_digits, left_start) = decimal_digits(left);
+    let (right_digits, right_start) = decimal_digits(right);
+    let left = &left_digits[left_start..];
+    let right = &right_digits[right_start..];
+    left.iter()
+        .zip(right)
+        .map(|(left, right)| left.cmp(right))
+        .find(|ordering| *ordering != Ordering::Equal)
+        .unwrap_or_else(|| right.len().cmp(&left.len()))
+}
+
+fn decimal_digits(mut value: u64) -> ([u8; 20], usize) {
+    let mut digits = [0; 20];
+    let mut start = digits.len();
+    loop {
+        start -= 1;
+        digits[start] = b'0' + (value % 10) as u8;
+        value /= 10;
+        if value == 0 {
+            return (digits, start);
+        }
+    }
+}
+
+fn compare_json_strings(left: &str, right: &str) -> Ordering {
+    JsonStringBytes::new(left).cmp(JsonStringBytes::new(right))
+}
+
+struct JsonStringBytes<'a> {
+    bytes: Bytes<'a>,
+    escaped: [u8; 6],
+    escaped_index: usize,
+    escaped_len: usize,
+    finished: bool,
+}
+
+impl<'a> JsonStringBytes<'a> {
+    fn new(value: &'a str) -> Self {
+        Self {
+            bytes: value.bytes(),
+            escaped: [0; 6],
+            escaped_index: 0,
+            escaped_len: 0,
+            finished: false,
+        }
+    }
+}
+
+impl Iterator for JsonStringBytes<'_> {
+    type Item = u8;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.escaped_index < self.escaped_len {
+            let byte = self.escaped[self.escaped_index];
+            self.escaped_index += 1;
+            return Some(byte);
+        }
+        let Some(byte) = self.bytes.next() else {
+            return (!std::mem::replace(&mut self.finished, true)).then_some(b'"');
+        };
+        let escaped: &[u8] = match byte {
+            b'"' => br#"\""#,
+            b'\\' => br"\\",
+            0x08 => br"\b",
+            b'\t' => br"\t",
+            b'\n' => br"\n",
+            0x0c => br"\f",
+            b'\r' => br"\r",
+            0x00..=0x1f => {
+                const HEX: &[u8; 16] = b"0123456789abcdef";
+                self.escaped = [
+                    b'\\',
+                    b'u',
+                    b'0',
+                    b'0',
+                    HEX[(byte >> 4) as usize],
+                    HEX[(byte & 0xf) as usize],
+                ];
+                self.escaped_index = 1;
+                self.escaped_len = self.escaped.len();
+                return Some(self.escaped[0]);
+            }
+            _ => return Some(byte),
+        };
+        self.escaped[..escaped.len()].copy_from_slice(escaped);
+        self.escaped_index = 1;
+        self.escaped_len = escaped.len();
+        Some(self.escaped[0])
+    }
+}
+
 fn short_identity(identity: &IdentityHash) -> &str {
     &identity.as_str()[..15]
 }
@@ -244,5 +520,46 @@ fn location_label(location: Location) -> String {
         location.cell.to_string()
     } else {
         format!("{} {}", location.cell, region_name(location.region))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{compare_json_integers, compare_json_strings};
+
+    #[test]
+    fn native_string_order_should_match_canonical_json_escaping() {
+        let values = ["", " ", "a", "a ", "a\n", "a\"", "a\\", "é"];
+        for left in values {
+            for right in values {
+                let left_json =
+                    serde_json::to_string(&json!({ "cardId": left })).expect("left canonical JSON");
+                let right_json = serde_json::to_string(&json!({ "cardId": right }))
+                    .expect("right canonical JSON");
+                assert_eq!(
+                    compare_json_strings(left, right),
+                    left_json.cmp(&right_json),
+                    "{left:?} compared with {right:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn native_integer_order_should_match_canonical_json_delimiters() {
+        let values = [0, 1, 2, 9, 10, 11, 20, u64::MAX];
+        for left in values {
+            for right in values {
+                let expected =
+                    format!("{{\"manaCost\":{left}}}").cmp(&format!("{{\"manaCost\":{right}}}"));
+                assert_eq!(
+                    compare_json_integers(left, right),
+                    expected,
+                    "{left} compared with {right}"
+                );
+            }
+        }
     }
 }

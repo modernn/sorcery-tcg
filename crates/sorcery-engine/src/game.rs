@@ -8,7 +8,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-use crate::action::{ActionDescriptor, CombatTarget, DeckZone};
+use crate::action::{ActionDescriptor, CombatTarget, DeckZone, compare_canonical};
 use crate::board::{Cell, Location, Region};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
@@ -113,14 +113,11 @@ struct RandomDomain {
 /// A typed action issued for one exact game position.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IssuedAction {
-    action_id: IdentityHash,
     descriptor: ActionDescriptor,
     label: String,
     seat: Seat,
     state_version: u64,
 }
-
-type OrderedAction = (String, IssuedAction);
 
 /// The setup or opening-hand request was invalid.
 #[derive(Debug)]
@@ -612,7 +609,7 @@ impl Game {
     ///
     /// # Errors
     ///
-    /// Returns [`GameError`] if action identity generation fails.
+    /// Returns [`GameError`] if the current position cannot issue its required actions.
     pub fn legal_actions(&self) -> Result<Vec<IssuedAction>, GameError> {
         let mut actions = Vec::new();
         match self.position.phase {
@@ -623,30 +620,28 @@ impl Game {
             Phase::Main => self.append_main_actions(&mut actions)?,
             Phase::Terminal => {}
         }
-        actions.sort_unstable_by(|(left_key, left), (right_key, right)| {
-            left_key
-                .cmp(right_key)
-                .then_with(|| left.action_id.cmp(&right.action_id))
-        });
-        Ok(actions.into_iter().map(|(_, action)| action).collect())
+        actions
+            .sort_unstable_by(|left, right| compare_canonical(&left.descriptor, &right.descriptor));
+        Ok(actions)
     }
 
-    fn append_attack_actions(&self, actions: &mut Vec<OrderedAction>) -> Result<(), GameError> {
+    fn append_attack_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
         for target in self.attack_targets()? {
             let descriptor = ActionDescriptor::DeclareAttack { target };
             let label = descriptor
                 .state_independent_label()
                 .ok_or_else(|| invalid("declare-attack action requires a label"))?;
-            self.push_action(actions, descriptor, label)?;
+            self.push_action(actions, descriptor, label);
         }
         let descriptor = ActionDescriptor::DeclineAttack;
         let label = descriptor
             .state_independent_label()
             .ok_or_else(|| invalid("decline-attack action requires a label"))?;
-        self.push_action(actions, descriptor, label)
+        self.push_action(actions, descriptor, label);
+        Ok(())
     }
 
-    fn append_defend_actions(&self, actions: &mut Vec<OrderedAction>) -> Result<(), GameError> {
+    fn append_defend_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
         let target = self
             .position
             .pending_combat
@@ -659,7 +654,8 @@ impl Game {
         let label = descriptor
             .state_independent_label()
             .ok_or_else(|| invalid("close-defend action requires a label"))?;
-        self.push_action(actions, descriptor, label)
+        self.push_action(actions, descriptor, label);
+        Ok(())
     }
 
     fn attack_targets(&self) -> Result<Vec<CombatTarget>, GameError> {
@@ -702,18 +698,18 @@ impl Game {
         Ok(targets)
     }
 
-    fn append_draw_actions(&self, actions: &mut Vec<OrderedAction>) -> Result<(), GameError> {
+    fn append_draw_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
         for zone in [DeckZone::Atlas, DeckZone::Spellbook] {
             let descriptor = ActionDescriptor::Draw { zone };
             let label = descriptor
                 .state_independent_label()
                 .ok_or_else(|| invalid("draw action requires a label"))?;
-            self.push_action(actions, descriptor, label)?;
+            self.push_action(actions, descriptor, label);
         }
         Ok(())
     }
 
-    fn append_mulligan_actions(&self, actions: &mut Vec<OrderedAction>) -> Result<(), GameError> {
+    fn append_mulligan_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
         let seat = self.position.decision_seat;
         let player = &self.position.players[seat_index(seat)];
         let hand: Vec<_> = player
@@ -751,14 +747,14 @@ impl Game {
                     let label = descriptor
                         .state_independent_label()
                         .ok_or_else(|| invalid("mulligan action requires a label"))?;
-                    self.push_action(actions, descriptor, label)?;
+                    self.push_action(actions, descriptor, label);
                 }
             }
         }
         Ok(())
     }
 
-    fn append_main_actions(&self, actions: &mut Vec<OrderedAction>) -> Result<(), GameError> {
+    fn append_main_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
         let seat = self.position.decision_seat;
         let player = &self.position.players[seat_index(seat)];
         if !player.avatar.tapped {
@@ -774,7 +770,7 @@ impl Game {
                             cell: *cell,
                         },
                         format!("Play {card_id} at {cell}"),
-                    )?;
+                    );
                 }
             }
         }
@@ -803,7 +799,7 @@ impl Game {
                             "Summon {} at {} ({} mana)",
                             definition.id, caster_cell, facts.mana_cost
                         ),
-                    )?;
+                    );
                 }
             }
         }
@@ -827,15 +823,15 @@ impl Game {
             let label = descriptor
                 .state_independent_label()
                 .ok_or_else(|| invalid("draw-site action requires a label"))?;
-            self.push_action(actions, descriptor, label)?;
+            self.push_action(actions, descriptor, label);
         }
-        self.push_action(actions, ActionDescriptor::EndTurn, "End turn".to_owned())?;
+        self.push_action(actions, ActionDescriptor::EndTurn, "End turn".to_owned());
         Ok(())
     }
 
     fn append_unit_move_actions(
         &self,
-        actions: &mut Vec<OrderedAction>,
+        actions: &mut Vec<IssuedAction>,
         instance_id: &IdentityHash,
         start: Cell,
     ) -> Result<(), GameError> {
@@ -865,7 +861,7 @@ impl Game {
             let label = descriptor
                 .state_independent_label()
                 .ok_or_else(|| invalid("move-and-attack action requires a label"))?;
-            self.push_action(actions, descriptor, label)?;
+            self.push_action(actions, descriptor, label);
         }
         Ok(())
     }
@@ -912,28 +908,17 @@ impl Game {
 
     fn push_action(
         &self,
-        actions: &mut Vec<OrderedAction>,
+        actions: &mut Vec<IssuedAction>,
         descriptor: ActionDescriptor,
         label: String,
-    ) -> Result<(), GameError> {
-        let descriptor_value = serde_json::to_value(&descriptor)?;
+    ) {
         let seat = self.position.decision_seat;
-        actions.push((
-            crate::canonical::canonical_json(&descriptor_value)?,
-            IssuedAction {
-                action_id: opaque_action_id(
-                    ENGINE_VERSION,
-                    seat,
-                    self.position.state_version,
-                    &descriptor_value,
-                )?,
-                descriptor,
-                label,
-                seat,
-                state_version: self.position.state_version,
-            },
-        ));
-        Ok(())
+        actions.push(IssuedAction {
+            descriptor,
+            label,
+            seat,
+            state_version: self.position.state_version,
+        });
     }
 
     fn legal_site_cells(&self, seat: Seat) -> Vec<Cell> {
@@ -2119,12 +2104,6 @@ impl Game {
 }
 
 impl IssuedAction {
-    /// Returns the opaque action identity.
-    #[must_use]
-    pub const fn action_id(&self) -> &IdentityHash {
-        &self.action_id
-    }
-
     /// Returns the typed action descriptor.
     #[must_use]
     pub const fn descriptor(&self) -> &ActionDescriptor {
@@ -2153,11 +2132,17 @@ impl IssuedAction {
     ///
     /// # Errors
     ///
-    /// Returns [`serde_json::Error`] if the typed descriptor cannot be represented.
-    pub fn to_legal_action(&self) -> Result<LegalAction, serde_json::Error> {
+    /// Returns [`GameError`] if the typed descriptor cannot be represented or hashed.
+    pub fn to_legal_action(&self) -> Result<LegalAction, GameError> {
+        let descriptor = serde_json::to_value(&self.descriptor)?;
         Ok(LegalAction {
-            action_id: self.action_id.clone(),
-            descriptor: serde_json::to_value(&self.descriptor)?,
+            action_id: opaque_action_id(
+                ENGINE_VERSION,
+                self.seat,
+                self.state_version,
+                &descriptor,
+            )?,
+            descriptor,
             label: self.label.clone(),
             seat: self.seat,
             state_version: self.state_version,

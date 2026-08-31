@@ -4,7 +4,7 @@ use std::error::Error;
 use std::fmt;
 
 use crate::canonical::IdentityHash;
-use crate::contract::Seat;
+use crate::contract::{ActionRequest, Seat};
 use crate::game::{Game, GameError};
 use crate::policy::{PolicyError, PolicySnapshot};
 use crate::session::{Session, SessionError};
@@ -12,22 +12,16 @@ use crate::session::{Session, SessionError};
 /// One compact rollout result, without receipts or replay journals.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Rollout {
-    action_ids: Vec<IdentityHash>,
-    final_state_hash: IdentityHash,
+    action_indices: Vec<usize>,
+    manifest_id: IdentityHash,
     terminal: bool,
 }
 
 impl Rollout {
-    /// Returns engine-issued action identities in application order.
+    /// Returns canonical legal-action indices in application order.
     #[must_use]
-    pub fn action_ids(&self) -> &[IdentityHash] {
-        &self.action_ids
-    }
-
-    /// Returns the final state identity, materialized once after the rollout.
-    #[must_use]
-    pub const fn final_state_hash(&self) -> &IdentityHash {
-        &self.final_state_hash
+    pub fn action_indices(&self) -> &[usize] {
+        &self.action_indices
     }
 
     /// Returns whether the rollout reached an authoritative terminal state.
@@ -137,15 +131,14 @@ pub fn search_root_actions(
     }
     let root_actions = game.legal_actions()?;
     let mut rollouts = Vec::with_capacity(root_actions.len().min(max_root_actions));
-    for action in root_actions.into_iter().take(max_root_actions) {
+    for (action_index, action) in root_actions.into_iter().take(max_root_actions).enumerate() {
         let mut branch = game.clone();
-        let action_id = action.action_id().clone();
         branch.apply_action(&action)?;
         rollouts.push(continue_game(
             branch,
             north_policy,
             south_policy,
-            vec![action_id],
+            vec![action_index],
             max_actions - 1,
         )?);
     }
@@ -159,10 +152,28 @@ pub fn search_root_actions(
 /// Returns [`SimulatorError`] when replay rejects an action or does not reproduce
 /// the speculative rollout's final state exactly.
 pub fn replay_selected(manifest_json: &str, rollout: &Rollout) -> Result<Session, SimulatorError> {
-    let session = Session::replay(manifest_json, rollout.action_ids())?;
-    if session.state_hash().map_err(SessionError::Canonical)? != *rollout.final_state_hash()
-        || !session.verify_replay()?
-    {
+    let mut session = Session::new(manifest_json)?;
+    if session.manifest_id() != &rollout.manifest_id {
+        return Err(SimulatorError::ReplayDiverged);
+    }
+    for &action_index in rollout.action_indices() {
+        let action = session
+            .legal_actions()?
+            .into_iter()
+            .nth(action_index)
+            .ok_or(SimulatorError::ReplayDiverged)?;
+        if matches!(
+            session.step(ActionRequest {
+                action_id: action.action_id.to_string(),
+                seat: session.decision_seat(),
+                state_version: session.state_version(),
+            })?,
+            crate::session::StepResult::Rejected(_)
+        ) {
+            return Err(SimulatorError::ReplayDiverged);
+        }
+    }
+    if !session.verify_replay()? {
         return Err(SimulatorError::ReplayDiverged);
     }
     Ok(session)
@@ -172,7 +183,7 @@ fn continue_game(
     mut game: Game,
     north_policy: &PolicySnapshot,
     south_policy: &PolicySnapshot,
-    mut action_ids: Vec<IdentityHash>,
+    mut action_indices: Vec<usize>,
     remaining_actions: usize,
 ) -> Result<Rollout, SimulatorError> {
     for _ in 0..remaining_actions {
@@ -183,12 +194,16 @@ fn continue_game(
         let actions = game.legal_actions()?;
         let selected = policy_for(seat, north_policy, south_policy)
             .select_action(game.observe(seat), &actions)?;
-        action_ids.push(selected.action_id().clone());
+        let selected_index = actions
+            .iter()
+            .position(|action| std::ptr::eq(action, selected))
+            .ok_or(SimulatorError::ReplayDiverged)?;
+        action_indices.push(selected_index);
         game.apply_action(selected)?;
     }
     Ok(Rollout {
-        action_ids,
-        final_state_hash: game.state_hash().map_err(GameError::Canonical)?,
+        action_indices,
+        manifest_id: game.rules().manifest_id().clone(),
         terminal: game.is_terminal(),
     })
 }

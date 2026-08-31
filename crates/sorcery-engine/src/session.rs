@@ -112,7 +112,7 @@ impl Session {
             .iter()
             .map(IssuedAction::to_legal_action)
             .collect::<Result<Vec<_>, _>>()
-            .map_err(SessionError::Json)
+            .map_err(SessionError::Game)
     }
 
     /// Checks and applies one engine-issued action request.
@@ -137,12 +137,15 @@ impl Session {
         if request.seat != self.game.position().decision_seat() {
             return self.reject(request, state_version, state_hash, RejectionCode::WrongSeat);
         }
-        let action = self
-            .game
-            .legal_actions()?
-            .into_iter()
-            .find(|action| action.action_id().as_str() == request.action_id);
-        let Some(action) = action else {
+        let mut selected = None;
+        for action in self.game.legal_actions()? {
+            let action_id = action.to_legal_action()?.action_id;
+            if action_id.as_str() == request.action_id {
+                selected = Some((action, action_id));
+                break;
+            }
+        }
+        let Some((action, action_id)) = selected else {
             return self.reject(
                 request,
                 state_version,
@@ -165,13 +168,13 @@ impl Session {
         let outcomes = self.game.apply_action_recorded(&action)?;
         let post_state_hash = self.game.state_hash()?;
         let events = create_events(
-            action.action_id(),
+            &action_id,
             receipt_sequence,
             first_event_sequence,
             &outcomes,
         )?;
         let receipt = create_receipt(ReceiptInput {
-            action_id: action.action_id().clone(),
+            action_id,
             events,
             next_state_version: self.game.position().state_version(),
             post_state_hash,
@@ -253,6 +256,12 @@ impl Session {
     #[must_use]
     pub const fn decision_seat(&self) -> Seat {
         self.game.position().decision_seat()
+    }
+
+    /// Returns the canonical manifest identity bound to this session.
+    #[must_use]
+    pub fn manifest_id(&self) -> &IdentityHash {
+        self.game.rules().manifest_id()
     }
 
     /// Hashes the current authoritative state.

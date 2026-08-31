@@ -71,7 +71,11 @@ fn baseline_policy_should_reproduce_the_complete_seed_31_action_sequence() {
             .select_action(observation, &actions)
             .expect("selected action");
         assert_eq!(
-            selected.action_id().as_str(),
+            selected
+                .to_legal_action()
+                .expect("materialized selected action")
+                .action_id
+                .as_str(),
             expected_id.as_str().expect("action identity"),
             "policy action at step {step}"
         );
@@ -110,13 +114,23 @@ fn policy_observation_should_not_change_with_opponent_hidden_order() {
             .legal_actions()
             .expect("original actions")
             .iter()
-            .map(|action| action.action_id().clone())
+            .map(|action| {
+                action
+                    .to_legal_action()
+                    .expect("materialized original action")
+                    .action_id
+            })
             .collect::<Vec<IdentityHash>>(),
         changed
             .legal_actions()
             .expect("changed actions")
             .iter()
-            .map(|action| action.action_id().clone())
+            .map(|action| {
+                action
+                    .to_legal_action()
+                    .expect("materialized changed action")
+                    .action_id
+            })
             .collect::<Vec<IdentityHash>>()
     );
 }

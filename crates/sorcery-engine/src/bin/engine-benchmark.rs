@@ -32,6 +32,7 @@ struct FixtureGame {
 
 struct Workload {
     action_ids: Vec<IdentityHash>,
+    action_indices: Vec<usize>,
     manifest_json: String,
     seed: u32,
 }
@@ -111,13 +112,38 @@ fn workloads() -> BenchmarkResult<Vec<Workload>> {
         .games
         .into_iter()
         .map(|game| {
+            let manifest_json = manifest_for_seed(&template, game.seed)?;
+            let action_indices = resolve_action_indices(&manifest_json, &game.action_ids)?;
             Ok(Workload {
                 action_ids: game.action_ids,
-                manifest_json: manifest_for_seed(&template, game.seed)?,
+                action_indices,
+                manifest_json,
                 seed: game.seed,
             })
         })
         .collect()
+}
+
+fn resolve_action_indices(
+    manifest_json: &str,
+    action_ids: &[IdentityHash],
+) -> BenchmarkResult<Vec<usize>> {
+    let mut game = Game::from_manifest_json(manifest_json)?;
+    let mut indices = Vec::with_capacity(action_ids.len());
+    for expected_action_id in action_ids {
+        let actions = game.legal_actions()?;
+        let mut selected = None;
+        for (index, action) in actions.iter().enumerate() {
+            if action.to_legal_action()?.action_id == *expected_action_id {
+                selected = Some(index);
+                break;
+            }
+        }
+        let index = selected.ok_or_else(|| io::Error::other("fixture action is not legal"))?;
+        game.apply_action(&actions[index])?;
+        indices.push(index);
+    }
+    Ok(indices)
 }
 
 fn manifest_for_seed(template: &str, seed: u32) -> BenchmarkResult<String> {
@@ -136,14 +162,13 @@ fn transition_sample(workload: &Workload, game_count: u32) -> BenchmarkResult<Sa
     let mut latencies = Vec::new();
     for _ in 0..game_count {
         let mut game = Game::from_manifest_json(&workload.manifest_json)?;
-        for expected_action_id in &workload.action_ids {
+        for &action_index in &workload.action_indices {
             let started = Instant::now();
             let actions = game.legal_actions()?;
             let action = actions
-                .into_iter()
-                .find(|action| action.action_id() == expected_action_id)
-                .ok_or_else(|| io::Error::other("fixture action is not legal"))?;
-            black_box(game.apply_action(&action)?);
+                .get(action_index)
+                .ok_or_else(|| io::Error::other("fixture action index is not legal"))?;
+            black_box(game.apply_action(action)?);
             latencies.push(started.elapsed());
         }
     }
