@@ -333,6 +333,7 @@ struct UnitPosition {
     card: CardInstance,
     controller: Seat,
     damage: u8,
+    disable_effects: Vec<DisableEffect>,
     disabled_until_damaged: bool,
     last_interacted_turn: Option<u64>,
     location: Cell,
@@ -341,6 +342,14 @@ struct UnitPosition {
     tapped: bool,
     warded: bool,
 }
+
+#[derive(Clone, Debug)]
+struct DisableEffect {
+    expires_at_seat: Seat,
+    source_instance_id: IdentityHash,
+}
+
+type MagicChoice = (Option<IdentityHash>, Option<UnitTarget>);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum UnitKind {
@@ -1079,6 +1088,7 @@ impl Game {
         if !player.domain_established {
             return Ok(());
         }
+        let spellcasters = self.spellcasters(seat);
         for card in &player.hand_spellbook {
             let definition = &self.rules.cards[usize::from(card.card_id.0)];
             let CardFacts::Magic(facts) = &definition.facts else {
@@ -1089,17 +1099,23 @@ impl Game {
             {
                 continue;
             }
-            for cemetery_minion_instance_id in self.magic_cemetery_choices(seat, &facts.effect)? {
-                let descriptor = ActionDescriptor::CastMagic {
-                    card_id: definition.id.clone(),
-                    card_instance_id: card.instance_id.clone(),
-                    caster_instance_id: player.avatar.card.instance_id.clone(),
-                    cemetery_minion_instance_id,
-                };
-                let label = descriptor
-                    .state_independent_label()
-                    .ok_or_else(|| invalid("cast-magic action requires a label"))?;
-                self.push_action(actions, descriptor, label);
+            for (_, caster_instance_id) in &spellcasters {
+                for (cemetery_minion_instance_id, target) in
+                    self.magic_choices(seat, caster_instance_id, &facts.effect)?
+                {
+                    let descriptor = ActionDescriptor::CastMagic {
+                        card_id: definition.id.clone(),
+                        card_instance_id: card.instance_id.clone(),
+                        caster_instance_id: caster_instance_id.clone(),
+                        cemetery_minion_instance_id,
+                        target,
+                    };
+                    let label = descriptor
+                        .state_independent_label()
+                        .ok_or_else(|| invalid("cast-magic action requires a label"))?
+                        + &self.minion_caster_suffix(seat, caster_instance_id);
+                    self.push_action(actions, descriptor, label);
+                }
             }
         }
         for card in &player.hand_spellbook {
@@ -1127,34 +1143,41 @@ impl Game {
                 } else {
                     vec![(None, None)]
                 };
-                for (genesis_damage_choice, genesis_damage_target) in genesis_choices {
-                    let genesis_suffix = match (&genesis_damage_choice, &genesis_damage_target) {
-                        (Some(GenesisDamageChoice::Decline), None) => {
-                            "; decline Genesis".to_owned()
-                        }
-                        (Some(GenesisDamageChoice::Target), Some(target)) => format!(
-                            "; Genesis targets {} {}…",
-                            target.kind(),
-                            &target.instance_id().as_str()[..15]
-                        ),
-                        _ => String::new(),
-                    };
-                    self.push_action(
-                        actions,
-                        ActionDescriptor::SummonMinion {
-                            card_id: definition.id.clone(),
-                            card_instance_id: card.instance_id.clone(),
-                            caster_instance_id: player.avatar.card.instance_id.clone(),
-                            cell: destination.cell,
-                            genesis_damage_choice,
-                            genesis_damage_target,
-                            mana_cost: destination.mana_cost,
-                        },
-                        format!(
-                            "Summon {} at {} ({} mana){genesis_suffix}",
-                            definition.id, destination.cell, destination.mana_cost
-                        ),
-                    );
+                for (caster_kind, caster_instance_id) in &spellcasters {
+                    for (genesis_damage_choice, genesis_damage_target) in &genesis_choices {
+                        let genesis_suffix = match (genesis_damage_choice, genesis_damage_target) {
+                            (Some(GenesisDamageChoice::Decline), None) => {
+                                "; decline Genesis".to_owned()
+                            }
+                            (Some(GenesisDamageChoice::Target), Some(target)) => format!(
+                                "; Genesis targets {} {}…",
+                                target.kind(),
+                                &target.instance_id().as_str()[..15]
+                            ),
+                            _ => String::new(),
+                        };
+                        let caster_suffix = if *caster_kind == UnitKind::Minion {
+                            self.minion_caster_suffix(seat, caster_instance_id)
+                        } else {
+                            String::new()
+                        };
+                        self.push_action(
+                            actions,
+                            ActionDescriptor::SummonMinion {
+                                card_id: definition.id.clone(),
+                                card_instance_id: card.instance_id.clone(),
+                                caster_instance_id: caster_instance_id.clone(),
+                                cell: destination.cell,
+                                genesis_damage_choice: *genesis_damage_choice,
+                                genesis_damage_target: genesis_damage_target.clone(),
+                                mana_cost: destination.mana_cost,
+                            },
+                            format!(
+                                "Summon {} at {} ({} mana){genesis_suffix}{caster_suffix}",
+                                definition.id, destination.cell, destination.mana_cost
+                            ),
+                        );
+                    }
                 }
             }
         }
@@ -1235,10 +1258,12 @@ impl Game {
         let unit = self.position.units.iter().find(|unit| {
             unit.card.instance_id == *instance_id
                 && unit.controller == seat
-                && !unit.disabled_until_damaged
                 && !unit.tapped
                 && !unit.summoning_sickness
         })?;
+        if self.minion_is_disabled(unit) {
+            return None;
+        }
         let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
         else {
             return None;
@@ -1246,14 +1271,83 @@ impl Game {
         facts.tap_for_mana
     }
 
-    fn magic_cemetery_choices(
+    fn spellcasters(&self, seat: Seat) -> Vec<(UnitKind, IdentityHash)> {
+        let player = &self.position.players[seat_index(seat)];
+        std::iter::once((UnitKind::Avatar, player.avatar.card.instance_id.clone()))
+            .chain(self.position.units.iter().filter_map(|unit| {
+                if unit.controller != seat || self.minion_is_disabled(unit) {
+                    return None;
+                }
+                let CardFacts::Minion(facts) =
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                else {
+                    return None;
+                };
+                facts
+                    .spellcaster
+                    .then(|| (UnitKind::Minion, unit.card.instance_id.clone()))
+            }))
+            .collect()
+    }
+
+    fn spellcaster_kind(&self, seat: Seat, instance_id: &IdentityHash) -> Option<UnitKind> {
+        let player = &self.position.players[seat_index(seat)];
+        if player.avatar.card.instance_id == *instance_id {
+            return Some(UnitKind::Avatar);
+        }
+        let unit = self.position.units.iter().find(|unit| {
+            unit.controller == seat
+                && unit.card.instance_id == *instance_id
+                && !self.minion_is_disabled(unit)
+        })?;
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return None;
+        };
+        facts.spellcaster.then_some(UnitKind::Minion)
+    }
+
+    fn minion_is_disabled(&self, unit: &UnitPosition) -> bool {
+        if unit.disabled_until_damaged || !unit.disable_effects.is_empty() {
+            return true;
+        }
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return true;
+        };
+        facts.waterbound
+            && !self.position.sites[unit.location.index()]
+                .as_ref()
+                .and_then(|site| {
+                    let CardFacts::Site(facts) =
+                        &self.rules.cards[usize::from(site.card.card_id.0)].facts
+                    else {
+                        return None;
+                    };
+                    Some(facts.elements.contains(Element::Water))
+                })
+                .unwrap_or(false)
+    }
+
+    fn minion_caster_suffix(&self, seat: Seat, instance_id: &IdentityHash) -> String {
+        if self.spellcaster_kind(seat, instance_id) == Some(UnitKind::Minion) {
+            format!(" with minion {}…", &instance_id.as_str()[..15])
+        } else {
+            String::new()
+        }
+    }
+
+    fn magic_choices(
         &self,
         seat: Seat,
+        caster_instance_id: &IdentityHash,
         effect: &MagicEffect,
-    ) -> Result<Vec<Option<IdentityHash>>, GameError> {
+    ) -> Result<Vec<MagicChoice>, GameError> {
         Ok(match effect {
             MagicEffect::HealController(_)
-            | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => vec![None],
+            | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => {
+                vec![(None, None)]
+            }
             MagicEffect::ReturnMinionFromOwnCemetery => {
                 let choices: Vec<_> = self.position.players[seat_index(seat)]
                     .cemetery
@@ -1264,13 +1358,58 @@ impl Game {
                             CardFacts::Minion(_)
                         )
                     })
-                    .map(|card| Some(card.instance_id.clone()))
+                    .map(|card| (Some(card.instance_id.clone()), None))
                     .collect();
                 if choices.is_empty() {
-                    vec![None]
+                    vec![(None, None)]
                 } else {
                     choices
                 }
+            }
+            MagicEffect::DisableTargetNearbyMinionUntilNextTurn => {
+                let player = &self.position.players[seat_index(seat)];
+                let caster_location = if player.avatar.card.instance_id == *caster_instance_id {
+                    player.avatar.location
+                } else {
+                    self.position
+                        .units
+                        .iter()
+                        .find(|unit| {
+                            unit.controller == seat && unit.card.instance_id == *caster_instance_id
+                        })
+                        .ok_or(GameError::IllegalAction)?
+                        .location
+                };
+                let mut targets: Vec<_> = self
+                    .position
+                    .units
+                    .iter()
+                    .filter(|unit| {
+                        (unit.controller == seat || !unit.stealthed)
+                            && (unit.location == caster_location
+                                || caster_location
+                                    .bordering(false)
+                                    .chain(caster_location.diagonals(false))
+                                    .any(|cell| cell == unit.location))
+                    })
+                    .map(|unit| {
+                        (
+                            None,
+                            Some(UnitTarget::Minion {
+                                instance_id: unit.card.instance_id.clone(),
+                                seat: unit.controller,
+                            }),
+                        )
+                    })
+                    .collect();
+                targets.sort_unstable_by(|left, right| {
+                    left.1
+                        .as_ref()
+                        .expect("Freeze target")
+                        .instance_id()
+                        .cmp(right.1.as_ref().expect("Freeze target").instance_id())
+                });
+                targets
             }
             _ => {
                 return Err(GameError::UnsupportedManifestFact(
@@ -1386,7 +1525,7 @@ impl Game {
             return false;
         };
         unit.controller == seat
-            && !unit.disabled_until_damaged
+            && !self.minion_is_disabled(unit)
             && !unit.tapped
             && (!unit.summoning_sickness || facts.charge)
     }
@@ -1431,7 +1570,7 @@ impl Game {
             .position
             .units
             .iter()
-            .filter(|unit| unit.controller == seat && !unit.disabled_until_damaged)
+            .filter(|unit| unit.controller == seat && !self.minion_is_disabled(unit))
             .filter_map(|unit| {
                 let CardFacts::Minion(facts) =
                     &self.rules.cards[usize::from(unit.card.card_id.0)].facts
@@ -1979,15 +2118,15 @@ impl Game {
         let target_can_strike = match target_kind {
             UnitKind::Avatar => true,
             UnitKind::Minion => {
-                !self
+                let unit = self
                     .position
                     .units
                     .iter()
                     .find(|unit| {
                         unit.card.instance_id == target_id && unit.controller == target_seat
                     })
-                    .ok_or(GameError::IllegalAction)?
-                    .disabled_until_damaged
+                    .ok_or(GameError::IllegalAction)?;
+                !self.minion_is_disabled(unit)
             }
         };
 
@@ -2097,13 +2236,14 @@ impl Game {
             UnitKind::Minion => {
                 let (index, _, defense, damage_prevention) =
                     self.simple_minion_combatant(instance_id)?;
+                let disabled = self.minion_is_disabled(&self.position.units[index]);
                 let unit = &mut self.position.units[index];
                 let ward_broken = amount > 0 && unit.warded;
                 if ward_broken {
                     unit.warded = false;
                 }
                 let dealt = if ward_broken
-                    || !unit.disabled_until_damaged
+                    || !disabled
                         && matches!(
                             damage_prevention,
                             Some(DamagePrevention::PreventsDamageFromUnitsWithPowerAtLeast(
@@ -2869,6 +3009,7 @@ impl Game {
             },
             controller: owner,
             damage: 0,
+            disable_effects: Vec::new(),
             disabled_until_damaged: false,
             last_interacted_turn: None,
             location: cell,
@@ -3205,6 +3346,7 @@ impl Game {
             card_instance_id,
             caster_instance_id,
             cemetery_minion_instance_id,
+            target,
         } = &action.descriptor
         else {
             return Err(GameError::IllegalAction);
@@ -3212,9 +3354,8 @@ impl Game {
         let seat = action.seat;
         let player_index = seat_index(seat);
         let player = &self.position.players[player_index];
-        if self.position.phase != Phase::Main
-            || !player.domain_established
-            || player.avatar.card.instance_id != *caster_instance_id
+        let caster_kind = self.spellcaster_kind(seat, caster_instance_id);
+        if self.position.phase != Phase::Main || !player.domain_established || caster_kind.is_none()
         {
             return Err(GameError::IllegalAction);
         }
@@ -3234,8 +3375,8 @@ impl Game {
         if facts.mana_cost > u64::from(player.mana)
             || !self.thresholds_met(seat, facts.thresholds)
             || !self
-                .magic_cemetery_choices(seat, &facts.effect)?
-                .contains(cemetery_minion_instance_id)
+                .magic_choices(seat, caster_instance_id, &facts.effect)?
+                .contains(&(cemetery_minion_instance_id.clone(), target.clone()))
         {
             return Err(GameError::IllegalAction);
         }
@@ -3295,9 +3436,18 @@ impl Game {
             if let Some(selected_id) = cemetery_minion_instance_id {
                 payload["cemeteryMinionInstanceId"] = json!(selected_id);
             }
+            if let Some(target) = target {
+                payload["targetInstanceId"] = json!(target.instance_id());
+                payload["targetSeat"] = json!(target.seat());
+            }
             payload
         });
-        self.record_unit_interaction(UnitKind::Avatar, seat, caster_instance_id, outcomes)?;
+        self.record_unit_interaction(
+            caster_kind.ok_or(GameError::IllegalAction)?,
+            seat,
+            caster_instance_id,
+            outcomes,
+        )?;
         match effect {
             MagicEffect::HealController(amount) => {
                 self.heal_avatar(seat, u16::from(amount), card_instance_id, outcomes)?;
@@ -3348,6 +3498,49 @@ impl Game {
                     });
                 }
             }
+            MagicEffect::DisableTargetNearbyMinionUntilNextTurn => {
+                let Some(UnitTarget::Minion {
+                    instance_id,
+                    seat: target_seat,
+                }) = target
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                let unit = self
+                    .position
+                    .units
+                    .iter_mut()
+                    .find(|unit| {
+                        unit.card.instance_id == *instance_id && unit.controller == *target_seat
+                    })
+                    .ok_or(GameError::IllegalAction)?;
+                if unit.warded && *target_seat != seat {
+                    unit.warded = false;
+                    outcomes.push(
+                        "ward-broken",
+                        || json!({ "instanceId": instance_id, "seat": target_seat }),
+                    );
+                } else {
+                    let stealth_removed = unit.stealthed;
+                    let ward_removed = unit.warded;
+                    unit.disable_effects.push(DisableEffect {
+                        expires_at_seat: seat,
+                        source_instance_id: card_instance_id.clone(),
+                    });
+                    unit.stealthed = false;
+                    unit.warded = false;
+                    outcomes.push("minion-disabled", || {
+                        json!({
+                            "expiresAtSeat": seat,
+                            "instanceId": instance_id,
+                            "seat": target_seat,
+                            "sourceInstanceId": card_instance_id,
+                            "stealthRemoved": stealth_removed,
+                            "wardRemoved": ward_removed,
+                        })
+                    });
+                }
+            }
             _ => return Err(GameError::IllegalAction),
         }
         outcomes.push("magic-resolved", || {
@@ -3361,6 +3554,10 @@ impl Game {
         Ok(())
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the closed summon transaction keeps caster validation, payment, and Genesis atomic"
+    )]
     fn apply_summon_minion_action(
         &mut self,
         action: &IssuedAction,
@@ -3381,9 +3578,8 @@ impl Game {
         let seat = action.seat;
         let player_index = seat_index(seat);
         let player = &self.position.players[player_index];
-        if self.position.phase != Phase::Main
-            || !player.domain_established
-            || player.avatar.card.instance_id != *caster_instance_id
+        let caster_kind = self.spellcaster_kind(seat, caster_instance_id);
+        if self.position.phase != Phase::Main || !player.domain_established || caster_kind.is_none()
         {
             return Err(GameError::IllegalAction);
         }
@@ -3433,11 +3629,17 @@ impl Game {
             .remove(hand_index);
         let player = &mut self.position.players[player_index];
         player.mana -= paid_mana;
-        player.avatar.last_interacted_turn = Some(self.position.turn_number);
+        self.record_unit_interaction(
+            caster_kind.ok_or(GameError::IllegalAction)?,
+            seat,
+            caster_instance_id,
+            outcomes,
+        )?;
         self.position.units.push(UnitPosition {
             card,
             controller: seat,
             damage: 0,
+            disable_effects: Vec::new(),
             disabled_until_damaged: false,
             last_interacted_turn: None,
             location: *cell,
@@ -3682,13 +3884,36 @@ impl Game {
         let next_player = &mut self.position.players[seat_index(next_seat)];
         next_player.avatar.tapped = false;
         next_player.mana = next_mana;
-        for unit in &mut self.position.units {
+        let disabled_units: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .map(|unit| self.minion_is_disabled(unit))
+            .collect();
+        let expired_disable_effects: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .flat_map(|unit| {
+                unit.disable_effects
+                    .iter()
+                    .filter(|effect| effect.expires_at_seat == next_seat)
+                    .map(|effect| {
+                        (
+                            unit.card.instance_id.clone(),
+                            unit.controller,
+                            effect.source_instance_id.clone(),
+                        )
+                    })
+            })
+            .collect();
+        for (unit, disabled) in self.position.units.iter_mut().zip(disabled_units) {
             unit.damage = 0;
             if unit.controller == seat {
                 let gains_stealth = matches!(
                     &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
                     CardFacts::Minion(facts)
-                        if !unit.disabled_until_damaged
+                        if !disabled
                             && facts.end_turn_stealth == Some(EndTurnStealth::Always)
                 );
                 if gains_stealth && !unit.stealthed {
@@ -3703,6 +3928,8 @@ impl Game {
             } else if unit.controller == next_seat {
                 unit.tapped = false;
             }
+            unit.disable_effects
+                .retain(|effect| effect.expires_at_seat != next_seat);
         }
         let ended_turn = self.position.turn_number;
         self.position.turn_number += 1;
@@ -3714,6 +3941,15 @@ impl Game {
             "turn-ended",
             || json!({ "seat": seat, "turnNumber": ended_turn }),
         );
+        for (instance_id, controller, source_instance_id) in expired_disable_effects {
+            outcomes.push("minion-disable-expired", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": controller,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
         let turn_number = self.position.turn_number;
         outcomes.push("turn-started", || {
             json!({
@@ -3927,6 +4163,20 @@ impl Game {
         ]);
         if let Some(turn) = unit.last_interacted_turn {
             object.insert("lastInteractedTurn".to_owned(), json!(turn));
+        }
+        if !unit.disable_effects.is_empty() {
+            object.insert(
+                "disableEffects".to_owned(),
+                json!(
+                    unit.disable_effects
+                        .iter()
+                        .map(|effect| json!({
+                            "expiresAtSeat": effect.expires_at_seat,
+                            "sourceInstanceId": effect.source_instance_id,
+                        }))
+                        .collect::<Vec<_>>()
+                ),
+            );
         }
         if unit.disabled_until_damaged {
             object.insert("disabledUntilDamaged".to_owned(), json!(true));

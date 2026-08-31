@@ -28,9 +28,24 @@
         "cemeteryMinionInstanceId": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
         "kind": "cast-magic"
       }
+    },
+    {
+      "actionId": "sha256:0e1642dbf7f8160658aa1680f1571549c798029b08516d39ed8a786a70f14e02",
+      "descriptor": {
+        "cardId": "freeze",
+        "cardInstanceId": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+        "casterInstanceId": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "kind": "cast-magic",
+        "target": {
+          "instanceId": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+          "kind": "minion",
+          "seat": "south"
+        }
+      }
     }
   ],
   "canonicalActionIds": [
+    "sha256:0e1642dbf7f8160658aa1680f1571549c798029b08516d39ed8a786a70f14e02",
     "sha256:bbd5a65ccf6e18cdcf56c0f9e08b3bcbe7369b3d9700687240468e501baccf38",
     "sha256:3839dd572a94131544f692829e96f45a3dcc5da19ea10966a8bd974de970d89e",
     "sha256:2f1b0559b1ec7a135a564fce2aa45262c2f93b3b9c8139c32dfdec9881351f19"

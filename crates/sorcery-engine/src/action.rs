@@ -261,6 +261,9 @@ pub enum ActionDescriptor {
         /// Exact own cemetery minion selected by Rescue.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cemetery_minion_instance_id: Option<IdentityHash>,
+        /// Exact engine-issued unit target.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<UnitTarget>,
     },
     /// Tap a unit and follow an issued movement path before choosing an attack.
     MoveAndAttack {
@@ -325,16 +328,22 @@ impl ActionDescriptor {
             Self::CastMagic {
                 card_id,
                 cemetery_minion_instance_id,
+                target,
                 ..
-            } => Some(cemetery_minion_instance_id.as_ref().map_or_else(
-                || format!("Cast {card_id}"),
-                |instance_id| {
-                    format!(
-                        "Cast {card_id} to return minion {}…",
-                        short_identity(instance_id)
-                    )
-                },
-            )),
+            } => Some(if let Some(instance_id) = cemetery_minion_instance_id {
+                format!(
+                    "Cast {card_id} to return minion {}…",
+                    short_identity(instance_id)
+                )
+            } else if let Some(target) = target {
+                format!(
+                    "Cast {card_id} on {} {}…",
+                    target.kind(),
+                    short_identity(target.instance_id())
+                )
+            } else {
+                format!("Cast {card_id}")
+            }),
             Self::MoveAndAttack {
                 path,
                 to,
@@ -444,18 +453,23 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     card_instance_id: left_instance,
                     caster_instance_id: left_caster,
                     cemetery_minion_instance_id: left_cemetery,
+                    target: left_target,
                 },
                 ActionDescriptor::CastMagic {
                     card_id: right_card,
                     card_instance_id: right_instance,
                     caster_instance_id: right_caster,
                     cemetery_minion_instance_id: right_cemetery,
+                    target: right_target,
                 },
             ) => compare_json_strings(left_card, right_card)
                 .then_with(|| left_instance.cmp(right_instance))
                 .then_with(|| left_caster.cmp(right_caster))
                 .then_with(|| {
                     compare_optional_identities(left_cemetery.as_ref(), right_cemetery.as_ref())
+                })
+                .then_with(|| {
+                    compare_optional_unit_targets(left_target.as_ref(), right_target.as_ref())
                 }),
             (
                 ActionDescriptor::SummonMinion {

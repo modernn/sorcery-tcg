@@ -588,3 +588,276 @@ fn healing_magic_should_cap_and_not_leave_deaths_door() {
     assert_exact_replay(&capped);
     assert_exact_replay(&death_door);
 }
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the direct proof retains sick, tapped, disabled, Magic, summon, and replay branches"
+)]
+fn printed_spellcaster_should_cast_and_summon_while_sick_or_tapped() {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-caster": minion(json!({
+            "spellcaster": true,
+            "stealth": true,
+            "tapForMana": 1,
+        })),
+        "north-freeze": magic(("disableTargetNearbyMinionUntilNextTurn", json!(true)), 0),
+        "north-site": site(false),
+        "north-disabled-caster": minion(json!({
+            "spellcaster": true,
+            "waterbound": true,
+        })),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({ "tapForMana": 1 })),
+        "south-site": site(false),
+    });
+    let north_spellbook = [
+        "north-caster",
+        "north-caster",
+        "north-freeze",
+        "north-freeze",
+        "north-disabled-caster",
+        "north-disabled-caster",
+    ];
+    let manifest = (1..=512)
+        .map(|seed| manifest(seed, &cards, &north_spellbook, &["south-minion"; 8]))
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("candidate session");
+            let state = state(&preview);
+            let hand = state["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("north opening Spellbook hand");
+            ["north-caster", "north-disabled-caster", "north-freeze"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+        .expect("seed with caster, Magic, and minion in the opening hand");
+    let mut session = opening_main(&manifest);
+    let (caster_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-caster"
+            && descriptor["cell"] == "C4"
+    });
+    let caster_instance_id = caster_summon["cardInstanceId"]
+        .as_str()
+        .expect("caster instance identity")
+        .to_owned();
+    let checkpoint = session.clone();
+
+    let sick_magic = checkpoint
+        .legal_actions()
+        .expect("sick caster actions")
+        .into_iter()
+        .find(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-freeze"
+                && action.descriptor["casterInstanceId"] == caster_instance_id
+                && action.descriptor["target"]["instanceId"] == caster_instance_id
+        })
+        .expect("summoning-sick printed Spellcaster Magic action");
+    assert_eq!(
+        sick_magic.label,
+        format!(
+            "Cast north-freeze on minion {}… with minion {}…",
+            &caster_instance_id[..15],
+            &caster_instance_id[..15]
+        )
+    );
+    let mut sick_cast = checkpoint.clone();
+    let StepResult::Accepted(sick_receipt) = sick_cast
+        .step(ActionRequest {
+            action_id: sick_magic.action_id.to_string(),
+            seat: sick_magic.seat,
+            state_version: sick_magic.state_version,
+        })
+        .expect("sick caster Magic step")
+    else {
+        panic!("engine-issued sick caster action must be accepted");
+    };
+    assert_eq!(
+        event_types(&sick_receipt),
+        [
+            "magic-cast",
+            "stealth-lost",
+            "minion-disabled",
+            "magic-resolved"
+        ]
+    );
+    assert_exact_replay(&sick_cast);
+
+    let mut sick_summon = checkpoint.clone();
+    let (summon_descriptor, summon_receipt) = accept_where(&mut sick_summon, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-disabled-caster"
+            && descriptor["casterInstanceId"] == caster_instance_id
+            && descriptor["cell"] == "C4"
+    });
+    assert_eq!(summon_descriptor["casterInstanceId"], caster_instance_id);
+    assert_eq!(
+        event_types(&summon_receipt),
+        ["stealth-lost", "minion-summoned"]
+    );
+    let disabled_caster_id = summon_descriptor["cardInstanceId"]
+        .as_str()
+        .expect("disabled caster instance identity");
+    assert!(
+        !sick_summon
+            .legal_actions()
+            .expect("actions after disabled caster summon")
+            .iter()
+            .any(|action| {
+                action.descriptor["casterInstanceId"] == disabled_caster_id
+                    && matches!(
+                        action.descriptor["kind"].as_str(),
+                        Some("cast-magic" | "summon-minion")
+                    )
+            })
+    );
+    assert_exact_replay(&sick_summon);
+
+    let mut tapped_cast = checkpoint;
+    accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == caster_instance_id
+            && descriptor["from"]["cell"] == "C4"
+            && descriptor["to"]["cell"] == "C3"
+    });
+    accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
+    accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "B2"
+    });
+    let (target_summon, _) = accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "B2"
+    });
+    let target_instance_id = target_summon["cardInstanceId"]
+        .as_str()
+        .expect("nearby target identity")
+        .to_owned();
+    accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "activate-mana" && descriptor["unitInstanceId"] == caster_instance_id
+    });
+    assert_eq!(
+        state(&tapped_cast)["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .find(|unit| unit["instanceId"] == caster_instance_id)
+            .expect("tapped caster")["tapped"],
+        true
+    );
+    let actions = tapped_cast.legal_actions().expect("tapped caster actions");
+    let avatar_instance_id =
+        state(&tapped_cast)["players"]["north"]["avatar"]["card"]["instanceId"]
+            .as_str()
+            .expect("Avatar identity")
+            .to_owned();
+    assert!(actions.iter().any(|action| {
+        action.descriptor["kind"] == "cast-magic"
+            && action.descriptor["casterInstanceId"] == caster_instance_id
+            && action.descriptor["target"]["instanceId"] == target_instance_id
+    }));
+    assert!(!actions.iter().any(|action| {
+        action.descriptor["kind"] == "cast-magic"
+            && action.descriptor["casterInstanceId"] == avatar_instance_id
+            && action.descriptor["target"]["instanceId"] == target_instance_id
+    }));
+    let (_, tapped_receipt) = accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-freeze"
+            && descriptor["casterInstanceId"] == caster_instance_id
+            && descriptor["target"]["instanceId"] == target_instance_id
+    });
+    assert_eq!(
+        event_types(&tapped_receipt),
+        ["magic-cast", "minion-disabled", "magic-resolved"]
+    );
+    assert_eq!(
+        state(&tapped_cast)["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .find(|unit| unit["instanceId"] == target_instance_id)
+            .expect("disabled target")["disableEffects"][0]["sourceInstanceId"],
+        tapped_receipt.events[0].payload["instanceId"]
+    );
+    accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    assert!(
+        !tapped_cast
+            .legal_actions()
+            .expect("disabled target actions")
+            .iter()
+            .any(|action| action.descriptor["unitInstanceId"] == target_instance_id)
+    );
+    let (_, expiration) = accept_where(&mut tapped_cast, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    assert_eq!(
+        event_types(&expiration),
+        ["turn-ended", "minion-disable-expired", "turn-started"]
+    );
+    assert!(
+        state(&tapped_cast)["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .find(|unit| unit["instanceId"] == target_instance_id)
+            .expect("expired target")["disableEffects"]
+            .is_null()
+    );
+    assert_exact_replay(&tapped_cast);
+}
