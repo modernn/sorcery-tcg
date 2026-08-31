@@ -458,6 +458,25 @@ type LeapAttackContinuation = Readonly<{
   strikeLocation: GameLocation;
 }>;
 
+type PlaySiteDescriptor = Readonly<{
+  cardId: string;
+  cardInstanceId: StateHash;
+  cell: RealmCell;
+  createRubbleAt?: RealmCell;
+  fromTopAtlas?: true;
+  genesisTokenChoice?: 'decline' | 'defer' | 'pay-one-mana';
+  kind: 'play-site';
+}>;
+
+type SiteGenesisContinuation = Readonly<{
+  descriptor: PlaySiteDescriptor;
+  genesisGainMana: number;
+  genesisSpellDrawCount: number;
+  kind: 'site-genesis';
+  originStateVersion: number;
+  seat: GameSeat;
+}>;
+
 type DragProjectileContinuation = Readonly<{
   fightOnArrival: boolean;
   kind: 'drag-projectile';
@@ -489,6 +508,7 @@ type DeathriteContinuation =
   }>
   | DragProjectileContinuation
   | LeapAttackContinuation
+  | SiteGenesisContinuation
   | Readonly<{
     caster: GameUnitRef;
     descriptor: SummonMinionDescriptor;
@@ -749,15 +769,7 @@ type GameActionDescriptor =
   | MulliganDescriptor
   | Readonly<{ kind: 'draw-site' }>
   | Readonly<{ kind: 'draw-spell' }>
-  | Readonly<{
-    cardId: string;
-    cardInstanceId: string;
-    cell: RealmCell;
-    createRubbleAt?: RealmCell;
-    fromTopAtlas?: true;
-    genesisTokenChoice?: 'decline' | 'defer' | 'pay-one-mana';
-    kind: 'play-site';
-  }>
+  | PlaySiteDescriptor
   | Readonly<{
     kind: 'replace-rubble-with-top-atlas-site';
     targetCell: RealmCell;
@@ -3303,6 +3315,7 @@ function tokenUnit(
   sourceInstanceId: StateHash,
   cell: RealmCell,
   ordinal: number,
+  originStateVersion = state.stateVersion,
 ): UnitInstance {
   const definition = cardDefinition(state, cardId);
   if (definition.cardType !== 'minion' || definition.token !== true) {
@@ -3320,7 +3333,7 @@ function tokenUnit(
       owner,
       source: 'token',
       sourceInstanceId,
-      stateVersion: state.stateVersion,
+      stateVersion: originStateVersion,
     }),
     location: cell,
     owner,
@@ -5362,7 +5375,6 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
   const siteDescriptors = (cells: readonly RealmCell[]): readonly GameActionDescriptor[] =>
     player.hand.atlas.flatMap((card) => cells.flatMap((cell) => {
       const { cardId, instanceId } = card;
-      if (sitePlayNeedsDeathriteContinuation(state, seat, card, cell)) return [];
       const base = { cardId, cardInstanceId: instanceId, cell, kind: 'play-site' as const };
       const definition = cardDefinition(state, cardId);
       const choices = definition.cardType === 'site'
@@ -5394,7 +5406,6 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
       const site = state.realm.sites[cell];
       const top = player.atlas[0];
       return site && isRubble(site) && top
-        && !sitePlayNeedsDeathriteContinuation(state, seat, top, cell)
         ? [{
           kind: 'replace-rubble-with-top-atlas-site' as const,
           targetCell: cell,
@@ -6177,59 +6188,6 @@ function hasDeathrite(definition: GameCardDefinition): boolean {
       || definition.deathriteLoseLifePerNearbySiteControlled !== undefined);
 }
 
-function deathsMayRequireDeathriteContinuation(
-  state: GameState,
-  deaths: readonly UnitInstance[],
-): boolean {
-  const sources = deaths.filter((unit) => {
-    const definition = cardDefinition(state, unit.cardId);
-    return definition.cardType === 'minion'
-      && hasDeathrite(definition)
-      && !minionDisabled(state, unit);
-  });
-  const counts = sources.reduce<Record<GameSeat, number>>(
-    (current, { controller }) => ({ ...current, [controller]: current[controller] + 1 }),
-    { north: 0, south: 0 },
-  );
-  return counts.north > 1
-    || counts.south > 1
-    || sources.some((unit) => {
-      const definition = cardDefinition(state, unit.cardId);
-      return definition.cardType === 'minion'
-        && definition.deathriteDamageEachUnitHere !== undefined;
-    });
-}
-
-function sitePlayNeedsDeathriteContinuation(
-  state: GameState,
-  seat: GameSeat,
-  card: CardInstance,
-  cell: RealmCell,
-): boolean {
-  const previous = state.realm.sites[cell];
-  const definition = cardDefinition(state, card.cardId);
-  if (!previous || !isRubble(previous) || definition.cardType !== 'site') return false;
-  const units = state.realm.units.map((unit) => {
-    if (unit.location !== cell) return unit;
-    if (unit.region === 'void') return deepFreeze({ ...unit, region: 'surface' as const });
-    return unit.region === 'underground' && definition.elements.includes('water')
-      ? deepFreeze({ ...unit, region: 'underwater' as const })
-      : unit;
-  });
-  const prospective = deepFreeze({
-    ...state,
-    realm: {
-      ...state.realm,
-      sites: { ...state.realm.sites, [cell]: deepFreeze({ ...card, controller: seat }) },
-      units,
-    },
-  });
-  return deathsMayRequireDeathriteContinuation(
-    prospective,
-    units.filter((unit) => minionRegionDisposition(prospective, unit) === 'dies'),
-  );
-}
-
 function makeDeathriteBatch(
   state: GameState,
   sources: readonly PendingDeathriteSource[],
@@ -6986,6 +6944,10 @@ function applyDeathriteOrder(
     && continuation?.kind === 'drag-projectile') {
     continued = continueDragProjectile(resumedState, continuation, []);
     continuedStateVersioned = true;
+  } else if (!resolution.pendingDeathrites
+    && resolution.terminal.status === 'active'
+    && continuation?.kind === 'site-genesis') {
+    continued = finishSiteGenesis(resumedState, continuation);
   } else if (!resolution.pendingDeathrites
     && resolution.terminal.status === 'active'
     && continuation?.kind === 'leap-attack') {
@@ -8377,6 +8339,245 @@ function strikeUndefendedSite(
   ];
 }
 
+function finishSiteGenesis(
+  state: GameState,
+  continuation: SiteGenesisContinuation,
+): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
+  const { descriptor, seat } = continuation;
+  const definition = cardDefinition(state, descriptor.cardId);
+  if (definition.cardType !== 'site') throw new Error('site Genesis lacks its site definition');
+  const player = state.players[seat];
+  const genesisSpellDraws = player.spellbook.slice(0, continuation.genesisSpellDrawCount);
+  const genesisSpellDiscards = definition.genesisDiscardTopSpells
+    ? player.spellbook.slice(0, definition.genesisDiscardTopSpells)
+    : [];
+  const genesisDrawFailed = genesisSpellDraws.length < continuation.genesisSpellDrawCount;
+  const genesisPlayer = deepFreeze({
+    ...player,
+    cemetery: [...player.cemetery, ...genesisSpellDiscards],
+    hand: {
+      ...player.hand,
+      spellbook: [...player.hand.spellbook, ...genesisSpellDraws],
+    },
+    mana: player.mana + continuation.genesisGainMana
+      - Number(descriptor.genesisTokenChoice === 'pay-one-mana'),
+    spellbook: player.spellbook.slice(genesisSpellDraws.length + genesisSpellDiscards.length),
+  });
+  const nearbyCells = new Set([
+    descriptor.cell,
+    ...borderingCells(descriptor.cell),
+    ...diagonalCells(descriptor.cell),
+  ]);
+  let genesisPlayers = replacePlayer(state, seat, genesisPlayer);
+  const genesisHealOutcomes: GameOutcome[] = [];
+  if (definition.genesisHealNearbyAvatars === 3) {
+    for (const healedSeat of ['north', 'south'] as const) {
+      const healedPlayer = genesisPlayers[healedSeat];
+      if (!nearbyCells.has(healedPlayer.avatar.location)) continue;
+      const avatar = cardDefinition(state, healedPlayer.avatar.card.cardId);
+      if (avatar.cardType !== 'avatar') throw new Error('player Avatar lacks Avatar definition');
+      const [healed, amount] = healAvatar(
+        healedPlayer,
+        avatar.life,
+        definition.genesisHealNearbyAvatars,
+      );
+      genesisPlayers = deepFreeze({ ...genesisPlayers, [healedSeat]: healed });
+      if (amount > 0) {
+        genesisHealOutcomes.push({
+          payload: {
+            amount,
+            attemptedAmount: definition.genesisHealNearbyAvatars,
+            life: healed.avatar.life,
+            seat: healedSeat,
+            sourceInstanceId: descriptor.cardInstanceId,
+          },
+          type: 'avatar-healed',
+        });
+      }
+    }
+  }
+  const immobileArea = definition.genesisImmobilizeNearbyUntilNextTurn
+    ? deepFreeze({
+      cells: REALM_CELLS.filter((cell) => {
+        const nearbySite = state.realm.sites[cell];
+        return nearbyCells.has(cell) && nearbySite !== undefined && !isRubble(nearbySite);
+      }),
+      expiresAtSeat: seat,
+      sourceInstanceId: descriptor.cardInstanceId,
+    })
+    : undefined;
+  const enemyStealthRefs: readonly GameUnitRef[] = definition.genesisEnemiesLoseStealth
+    ? state.realm.units
+      .filter(({ controller, stealthed }) => controller !== seat && stealthed)
+      .map(({ controller, instanceId }) => ({ instanceId, kind: 'minion' as const, seat: controller }))
+    : [];
+  const [genesisUnits, enemyStealthOutcomes] = loseStealth(
+    state.realm.units,
+    enemyStealthRefs,
+    descriptor.cardInstanceId,
+  );
+  const genesisToken = descriptor.genesisTokenChoice === 'pay-one-mana'
+    && definition.genesisPayOneManaToSummonToken
+    ? tokenUnit(
+      state,
+      seat,
+      definition.genesisPayOneManaToSummonToken,
+      descriptor.cardInstanceId,
+      descriptor.cell,
+      0,
+      continuation.originStateVersion,
+    )
+    : undefined;
+  const winner = otherSeat(seat);
+  const terminal = genesisDrawFailed
+    ? { loser: seat, reason: 'deck_empty' as const, status: 'finished' as const, winner }
+    : state.terminal;
+  const pendingGenesisSpell = terminal.status === 'active'
+    && definition.genesisMayBottomNextSpell === true
+    && genesisPlayer.spellbook.length > 0
+    ? deepFreeze({ seat, sourceInstanceId: descriptor.cardInstanceId })
+    : undefined;
+  const pendingGenesisSpellOrderCount = definition.genesisReorderNextSpells === 3
+    ? Math.min(definition.genesisReorderNextSpells, genesisPlayer.spellbook.length)
+    : 0;
+  const pendingGenesisSpellOrder = terminal.status === 'active'
+    && pendingGenesisSpellOrderCount > 0
+    ? deepFreeze({
+      count: pendingGenesisSpellOrderCount,
+      seat,
+      sourceInstanceId: descriptor.cardInstanceId,
+    })
+    : undefined;
+  const pendingGenesisToken = terminal.status === 'active'
+    && descriptor.genesisTokenChoice === 'defer'
+    && definition.genesisPayOneManaToSummonToken !== undefined
+    ? deepFreeze({ cell: descriptor.cell, seat, sourceInstanceId: descriptor.cardInstanceId })
+    : undefined;
+  const resolvedState = deepFreeze({
+    ...state,
+    ...(terminal.status === 'finished'
+      ? { phase: 'terminal' as const }
+      : pendingGenesisToken || pendingGenesisSpell || pendingGenesisSpellOrder
+        ? {
+          ...(pendingGenesisSpell ? { pendingGenesisSpell } : {}),
+          ...(pendingGenesisSpellOrder ? { pendingGenesisSpellOrder } : {}),
+          ...(pendingGenesisToken ? { pendingGenesisToken } : {}),
+          phase: 'genesis' as const,
+        }
+        : { phase: 'main' as const }),
+    players: genesisPlayers,
+    realm: {
+      ...state.realm,
+      ...(immobileArea
+        ? {
+          immobileAreas: [
+            ...(state.realm.immobileAreas ?? []),
+            immobileArea,
+          ],
+        }
+        : {}),
+      units: [...genesisUnits, ...(genesisToken ? [genesisToken] : [])],
+    },
+    terminal,
+  });
+  const createRubbleAt = terminal.status === 'active' ? descriptor.createRubbleAt : undefined;
+  const rubble = createRubbleAt
+    ? deepFreeze({
+      controller: null,
+      instanceId: identityHash(asJson({
+        cell: createRubbleAt,
+        kind: 'rubble',
+        sourceInstanceId: state.players[seat].avatar.card.instanceId,
+        stateVersion: continuation.originStateVersion,
+      })),
+      rubble: true as const,
+    })
+    : undefined;
+  const finalState = rubble && createRubbleAt
+    ? deepFreeze({
+      ...resolvedState,
+      realm: {
+        ...resolvedState.realm,
+        ...(resolvedState.realm.artifacts
+          ? {
+            artifacts: resolvedState.realm.artifacts.map((artifact) =>
+              !('bearer' in artifact)
+                && artifact.location === createRubbleAt
+                && artifact.region === 'void'
+                ? deepFreeze({ ...artifact, region: 'surface' as const })
+                : artifact),
+          }
+          : {}),
+        sites: { ...resolvedState.realm.sites, [createRubbleAt]: rubble },
+        units: resolvedState.realm.units.map((unit) =>
+          unit.location === createRubbleAt && unit.region === 'void'
+            ? deepFreeze({ ...unit, region: 'surface' as const })
+            : unit),
+      },
+    })
+    : resolvedState;
+  return [
+    finalState,
+    [
+      ...genesisHealOutcomes,
+      ...(continuation.genesisGainMana
+        ? [{
+          payload: {
+            amount: continuation.genesisGainMana,
+            seat,
+            sourceInstanceId: descriptor.cardInstanceId,
+          },
+          type: 'mana-gained' as const,
+        }]
+        : []),
+      ...(genesisToken
+        ? [{
+          payload: {
+            cardId: genesisToken.cardId,
+            cell: genesisToken.location,
+            instanceId: genesisToken.instanceId,
+            manaPaid: 1,
+            owner: genesisToken.owner,
+            seat: genesisToken.controller,
+            sourceInstanceId: descriptor.cardInstanceId,
+            token: true,
+          },
+          type: 'minion-summoned' as const,
+        }]
+        : []),
+      ...genesisSpellDraws.map(() => ({
+        payload: { seat, sourceInstanceId: descriptor.cardInstanceId },
+        type: 'spell-drawn' as const,
+      })),
+      ...genesisSpellDiscards.map((discarded) => ({
+        payload: {
+          cardId: discarded.cardId,
+          instanceId: discarded.instanceId,
+          owner: discarded.owner,
+          seat,
+          sourceInstanceId: descriptor.cardInstanceId,
+        },
+        type: 'spell-discarded' as const,
+      })),
+      ...enemyStealthOutcomes,
+      ...(genesisDrawFailed
+        ? [{ payload: { loser: seat, reason: 'deck_empty', winner }, type: 'game-ended' as const }]
+        : []),
+      ...(rubble && createRubbleAt
+        ? [{
+          payload: {
+            cell: createRubbleAt,
+            instanceId: rubble.instanceId,
+            sourceInstanceId: state.players[seat].avatar.card.instanceId,
+          },
+          type: 'rubble-created' as const,
+        }]
+        : []),
+    ],
+    [],
+  ];
+}
+
 function applyDescriptor(
   state: GameState,
   descriptor: GameActionDescriptor,
@@ -8992,35 +9193,25 @@ function applyDescriptor(
           return adjacent !== undefined && !isRubble(adjacent) && adjacent.cardId === card.cardId;
         }).length
       : 0;
-    const genesisSpellDraws = player.spellbook.slice(0, genesisSpellDrawCount);
-    const genesisSpellDiscards = definition.genesisDiscardTopSpells
-      ? player.spellbook.slice(0, definition.genesisDiscardTopSpells)
-      : [];
     const genesisGainMana = definition.genesisGainMana
       ?? (definition.genesisGainManaIfOnlyControlledCopy === 1
         && Object.values(state.realm.sites).every((existing) =>
           isRubble(existing) || existing.controller !== seat || existing.cardId !== card.cardId)
         ? 1
         : 0);
-    const genesisDrawFailed = genesisSpellDraws.length < genesisSpellDrawCount;
     const updatedPlayer = deepFreeze({
       ...player,
       avatar: { ...player.avatar, tapped: true },
-      cemetery: [...player.cemetery, ...genesisSpellDiscards],
       domainEstablished: true,
       hand: {
         ...player.hand,
         atlas: descriptor.fromTopAtlas
           ? player.hand.atlas
           : player.hand.atlas.filter(({ instanceId }) => instanceId !== card.instanceId),
-        spellbook: [...player.hand.spellbook, ...genesisSpellDraws],
       },
-      mana: player.mana + 1 + genesisGainMana
-        - Number(descriptor.genesisTokenChoice === 'pay-one-mana'),
+      mana: player.mana + 1,
       atlas: descriptor.fromTopAtlas ? player.atlas.slice(1) : player.atlas,
-      spellbook: player.spellbook.slice(genesisSpellDraws.length + genesisSpellDiscards.length),
     });
-    const winner = otherSeat(seat);
     const placedUnits = state.realm.units.map((unit) => {
       if (unit.location !== descriptor.cell) return unit;
       if (unit.region === 'void') return deepFreeze({ ...unit, region: 'surface' as const });
@@ -9052,232 +9243,57 @@ function applyDescriptor(
       },
     });
     const settlement = settleRegionOccupancy(placedState);
-    // ponytail: site Genesis needs a serializable post-Deathrite continuation only
-    // when a real-card test first combines terrain replacement, two Deathrites,
-    // and a remaining Genesis effect. Fail closed instead of reordering it.
-    if (settlement.state.pendingDeathrites) {
-      throw new Error('unsupported Deathrite ordering during site Genesis continuation');
-    }
-    const nearbyCells = new Set([
-      descriptor.cell,
-      ...borderingCells(descriptor.cell),
-      ...diagonalCells(descriptor.cell),
-    ]);
-    let genesisPlayers = settlement.state.players;
-    const genesisHealOutcomes: GameOutcome[] = [];
-    if (definition.genesisHealNearbyAvatars === 3) {
-      for (const healedSeat of ['north', 'south'] as const) {
-        const healedPlayer = genesisPlayers[healedSeat];
-        if (!nearbyCells.has(healedPlayer.avatar.location)) continue;
-        const avatar = cardDefinition(settlement.state, healedPlayer.avatar.card.cardId);
-        if (avatar.cardType !== 'avatar') throw new Error('player Avatar lacks Avatar definition');
-        const [healed, amount] = healAvatar(
-          healedPlayer,
-          avatar.life,
-          definition.genesisHealNearbyAvatars,
-        );
-        genesisPlayers = deepFreeze({ ...genesisPlayers, [healedSeat]: healed });
-        if (amount > 0) {
-          genesisHealOutcomes.push({
-            payload: {
-              amount,
-              attemptedAmount: definition.genesisHealNearbyAvatars,
-              life: healed.avatar.life,
-              seat: healedSeat,
-              sourceInstanceId: card.instanceId,
-            },
-            type: 'avatar-healed',
-          });
-        }
-      }
-    }
-    const immobileArea = definition.genesisImmobilizeNearbyUntilNextTurn
-      ? deepFreeze({
-        cells: REALM_CELLS.filter((cell) => {
-          const nearbySite = settlement.state.realm.sites[cell];
-          return nearbyCells.has(cell) && nearbySite !== undefined && !isRubble(nearbySite);
-        }),
-        expiresAtSeat: seat,
-        sourceInstanceId: card.instanceId,
-      })
-      : undefined;
-    const enemyStealthRefs: readonly GameUnitRef[] = definition.genesisEnemiesLoseStealth
-      ? settlement.state.realm.units
-        .filter(({ controller, stealthed }) => controller !== seat && stealthed)
-        .map(({ controller, instanceId }) => ({ instanceId, kind: 'minion' as const, seat: controller }))
-      : [];
-    const [genesisUnits, enemyStealthOutcomes] = loseStealth(
-      settlement.state.realm.units,
-      enemyStealthRefs,
-      card.instanceId,
-    );
-    const genesisToken = descriptor.genesisTokenChoice === 'pay-one-mana'
-      && definition.genesisPayOneManaToSummonToken
-      ? tokenUnit(
-        settlement.state,
-        seat,
-        definition.genesisPayOneManaToSummonToken,
-        card.instanceId,
-        descriptor.cell,
-        0,
-      )
-      : undefined;
-    const terminal = genesisDrawFailed
-      ? { loser: seat, reason: 'deck_empty' as const, status: 'finished' as const, winner }
-      : settlement.state.terminal;
-    const settlementOutcomes = genesisDrawFailed
-      ? settlement.outcomes.filter(({ type }) => type !== 'game-ended')
-      : settlement.outcomes;
-    const pendingGenesisSpell = terminal.status === 'active'
-      && definition.genesisMayBottomNextSpell === true
-      && settlement.state.players[seat].spellbook.length > 0
-      ? deepFreeze({ seat, sourceInstanceId: card.instanceId })
-      : undefined;
-    const pendingGenesisSpellOrderCount = definition.genesisReorderNextSpells === 3
-      ? Math.min(definition.genesisReorderNextSpells, settlement.state.players[seat].spellbook.length)
-      : 0;
-    const pendingGenesisSpellOrder = terminal.status === 'active'
-      && pendingGenesisSpellOrderCount > 0
-      ? deepFreeze({
-        count: pendingGenesisSpellOrderCount,
-        seat,
-        sourceInstanceId: card.instanceId,
-      })
-      : undefined;
-    const pendingGenesisToken = terminal.status === 'active'
-      && descriptor.genesisTokenChoice === 'defer'
-      && definition.genesisPayOneManaToSummonToken !== undefined
-      ? deepFreeze({ cell: descriptor.cell, seat, sourceInstanceId: card.instanceId })
-      : undefined;
-    const resolvedState = deepFreeze({
-        ...(terminal.status === 'finished'
-          ? { phase: 'terminal' as const }
-          : pendingGenesisToken || pendingGenesisSpell || pendingGenesisSpellOrder
-            ? {
-              ...(pendingGenesisSpell ? { pendingGenesisSpell } : {}),
-              ...(pendingGenesisSpellOrder ? { pendingGenesisSpellOrder } : {}),
-              ...(pendingGenesisToken ? { pendingGenesisToken } : {}),
-              phase: 'genesis' as const,
-            }
-            : {}),
-        players: genesisPlayers,
-        realm: {
-          ...settlement.state.realm,
-          ...(immobileArea
-            ? {
-              immobileAreas: [
-                ...(settlement.state.realm.immobileAreas ?? []),
-                immobileArea,
-              ],
-            }
-            : {}),
-          units: [...genesisUnits, ...(genesisToken ? [genesisToken] : [])],
-        },
-        terminal,
-      });
-    const createRubbleAt = terminal.status === 'active' ? descriptor.createRubbleAt : undefined;
-    const rubble = createRubbleAt
-      ? deepFreeze({
-        controller: null,
-        instanceId: identityHash(asJson({
-          cell: createRubbleAt,
-          kind: 'rubble',
-          sourceInstanceId: player.avatar.card.instanceId,
-          stateVersion: state.stateVersion,
-        })),
-        rubble: true as const,
-      })
-      : undefined;
-    const finalState = rubble && createRubbleAt
-      ? deepFreeze({
-        ...resolvedState,
-        realm: {
-          ...resolvedState.realm,
-          ...(resolvedState.realm.artifacts
-            ? {
-              artifacts: resolvedState.realm.artifacts.map((artifact) =>
-                !('bearer' in artifact)
-                  && artifact.location === createRubbleAt
-                  && artifact.region === 'void'
-                  ? deepFreeze({ ...artifact, region: 'surface' as const })
-                  : artifact),
-            }
-            : {}),
-          sites: { ...resolvedState.realm.sites, [createRubbleAt]: rubble },
-          units: resolvedState.realm.units.map((unit) =>
-            unit.location === createRubbleAt && unit.region === 'void'
-              ? deepFreeze({ ...unit, region: 'surface' as const })
-              : unit),
-        },
-      })
-      : resolvedState;
-    return [
-      withStateVersion(state, finalState),
-      [
-        ...(replacingRubble
-          ? [{
-            payload: {
-              cell: descriptor.cell,
-              instanceId: previousSite.instanceId,
-              targetSiteInstanceId: card.instanceId,
-            },
-            type: 'rubble-replaced',
-          }]
-          : []),
-        { payload: { cardId: card.cardId, cell: descriptor.cell, instanceId: card.instanceId, seat }, type: 'site-played' },
-        ...genesisHealOutcomes,
-        ...(genesisGainMana
-          ? [{
-            payload: { amount: genesisGainMana, seat, sourceInstanceId: card.instanceId },
-            type: 'mana-gained',
-          }]
-          : []),
-        ...(genesisToken
-          ? [{
-            payload: {
-              cardId: genesisToken.cardId,
-              cell: genesisToken.location,
-              instanceId: genesisToken.instanceId,
-              manaPaid: 1,
-              owner: genesisToken.owner,
-              seat: genesisToken.controller,
-              sourceInstanceId: card.instanceId,
-              token: true,
-            },
-            type: 'minion-summoned' as const,
-          }]
-          : []),
-        ...genesisSpellDraws.map(() => ({
-          payload: { seat, sourceInstanceId: card.instanceId },
-          type: 'spell-drawn',
-        })),
-        ...genesisSpellDiscards.map((discarded) => ({
+    const continuation: SiteGenesisContinuation = deepFreeze({
+      descriptor,
+      genesisGainMana,
+      genesisSpellDrawCount,
+      kind: 'site-genesis',
+      originStateVersion: state.stateVersion,
+      seat,
+    });
+    const placementOutcomes: readonly GameOutcome[] = [
+      ...(replacingRubble
+        ? [{
           payload: {
-            cardId: discarded.cardId,
-            instanceId: discarded.instanceId,
-            owner: discarded.owner,
-            seat,
-            sourceInstanceId: card.instanceId,
+            cell: descriptor.cell,
+            instanceId: previousSite.instanceId,
+            targetSiteInstanceId: card.instanceId,
           },
-          type: 'spell-discarded',
-        })),
-        ...enemyStealthOutcomes,
-        ...settlementOutcomes,
-        ...(genesisDrawFailed
-          ? [{ payload: { loser: seat, reason: 'deck_empty', winner }, type: 'game-ended' }]
-          : []),
-        ...(rubble && createRubbleAt
-          ? [{
-            payload: {
-              cell: createRubbleAt,
-              instanceId: rubble.instanceId,
-              sourceInstanceId: player.avatar.card.instanceId,
-            },
-            type: 'rubble-created',
-          }]
-          : []),
-      ],
-      [],
+          type: 'rubble-replaced' as const,
+        }]
+        : []),
+      {
+        payload: { cardId: card.cardId, cell: descriptor.cell, instanceId: card.instanceId, seat },
+        type: 'site-played',
+      },
+    ];
+    if (settlement.state.pendingDeathrites) {
+      return [
+        withStateVersion(settlement.state, {
+          pendingDeathrites: {
+            ...settlement.state.pendingDeathrites,
+            continuation,
+          },
+        }),
+        [...placementOutcomes, ...settlement.outcomes],
+        [],
+      ];
+    }
+    if (settlement.state.terminal.status === 'finished') {
+      return [
+        withStateVersion(settlement.state, {}),
+        [...placementOutcomes, ...settlement.outcomes],
+        [],
+      ];
+    }
+    const [genesisState, genesisOutcomes, randomDraws] = finishSiteGenesis(
+      settlement.state,
+      continuation,
+    );
+    return [
+      withStateVersion(genesisState, {}),
+      [...placementOutcomes, ...settlement.outcomes, ...genesisOutcomes],
+      randomDraws,
     ];
   }
 
