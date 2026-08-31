@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::action::ActionDescriptor;
+use crate::board::Cell;
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{CardFacts, FactError, MagicEffect, parse_card_definition, validate_identifier};
@@ -35,6 +36,7 @@ pub struct Position {
     phase: Phase,
     players: [PlayerPosition; 2],
     prng: PrngState,
+    sites: [Option<SitePosition>; 20],
     state_version: u64,
     turn_number: u64,
 }
@@ -76,6 +78,8 @@ pub struct IssuedAction {
     seat: Seat,
     state_version: u64,
 }
+
+type OrderedAction = (String, IssuedAction);
 
 /// The setup or opening-hand request was invalid.
 #[derive(Debug)]
@@ -246,7 +250,8 @@ struct CardInstance {
 struct AvatarPosition {
     card: CardInstance,
     life: u16,
-    location: &'static str,
+    location: Cell,
+    tapped: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -254,11 +259,18 @@ struct PlayerPosition {
     air_thresholds_cast_this_turn: Option<u16>,
     atlas: Vec<CardInstance>,
     avatar: AvatarPosition,
+    domain_established: bool,
     hand_atlas: Vec<CardInstance>,
     hand_spellbook: Vec<CardInstance>,
     mana: u16,
     mulligan_complete: bool,
     spellbook: Vec<CardInstance>,
+}
+
+#[derive(Clone, Debug)]
+struct SitePosition {
+    card: CardInstance,
+    controller: Seat,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -405,6 +417,7 @@ impl Game {
                 phase: Phase::Mulligan,
                 players: [north, south],
                 prng,
+                sites: std::array::from_fn(|_| None),
                 state_version: 0,
                 turn_number: 0,
             },
@@ -446,9 +459,20 @@ impl Game {
     ///
     /// Returns [`GameError`] if action identity generation fails.
     pub fn legal_actions(&self) -> Result<Vec<IssuedAction>, GameError> {
-        if self.position.phase != Phase::Mulligan {
-            return Ok(Vec::new());
+        let mut actions = Vec::new();
+        match self.position.phase {
+            Phase::Mulligan => self.append_mulligan_actions(&mut actions)?,
+            Phase::Main => self.append_main_actions(&mut actions)?,
         }
+        actions.sort_unstable_by(|(left_key, left), (right_key, right)| {
+            left_key
+                .cmp(right_key)
+                .then_with(|| left.action_id.cmp(&right.action_id))
+        });
+        Ok(actions.into_iter().map(|(_, action)| action).collect())
+    }
+
+    fn append_mulligan_actions(&self, actions: &mut Vec<OrderedAction>) -> Result<(), GameError> {
         let seat = self.position.decision_seat;
         let player = &self.position.players[seat_index(seat)];
         let hand: Vec<_> = player
@@ -456,7 +480,7 @@ impl Game {
             .iter()
             .chain(&player.hand_spellbook)
             .collect();
-        let mut actions = Vec::with_capacity(76);
+        actions.reserve(76);
         for mask in 0_u8..(1_u8 << hand.len()) {
             if mask.count_ones() > 3 {
                 continue;
@@ -483,34 +507,87 @@ impl Game {
                         atlas_order: atlas_order.clone(),
                         spellbook_order,
                     };
-                    let descriptor_value = serde_json::to_value(&descriptor)?;
                     let label = descriptor
                         .state_independent_label()
                         .ok_or_else(|| invalid("mulligan action requires a label"))?;
-                    actions.push((
-                        crate::canonical::canonical_json(&descriptor_value)?,
-                        IssuedAction {
-                            action_id: opaque_action_id(
-                                ENGINE_VERSION,
-                                seat,
-                                self.position.state_version,
-                                &descriptor_value,
-                            )?,
-                            descriptor,
-                            label,
-                            seat,
-                            state_version: self.position.state_version,
-                        },
-                    ));
+                    self.push_action(actions, descriptor, label)?;
                 }
             }
         }
-        actions.sort_unstable_by(|(left_key, left), (right_key, right)| {
-            left_key
-                .cmp(right_key)
-                .then_with(|| left.action_id.cmp(&right.action_id))
-        });
-        Ok(actions.into_iter().map(|(_, action)| action).collect())
+        Ok(())
+    }
+
+    fn append_main_actions(&self, actions: &mut Vec<OrderedAction>) -> Result<(), GameError> {
+        let player = &self.position.players[seat_index(self.position.decision_seat)];
+        if player.avatar.tapped {
+            return Ok(());
+        }
+        let cells = self.legal_site_cells(self.position.decision_seat);
+        for card in &player.hand_atlas {
+            let card_id = &self.rules.cards[usize::from(card.card_id.0)].id;
+            for cell in &cells {
+                self.push_action(
+                    actions,
+                    ActionDescriptor::PlaySite {
+                        card_id: card_id.clone(),
+                        card_instance_id: card.instance_id.clone(),
+                        cell: *cell,
+                    },
+                    format!("Play {card_id} at {cell}"),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn push_action(
+        &self,
+        actions: &mut Vec<OrderedAction>,
+        descriptor: ActionDescriptor,
+        label: String,
+    ) -> Result<(), GameError> {
+        let descriptor_value = serde_json::to_value(&descriptor)?;
+        let seat = self.position.decision_seat;
+        actions.push((
+            crate::canonical::canonical_json(&descriptor_value)?,
+            IssuedAction {
+                action_id: opaque_action_id(
+                    ENGINE_VERSION,
+                    seat,
+                    self.position.state_version,
+                    &descriptor_value,
+                )?,
+                descriptor,
+                label,
+                seat,
+                state_version: self.position.state_version,
+            },
+        ));
+        Ok(())
+    }
+
+    fn legal_site_cells(&self, seat: Seat) -> Vec<Cell> {
+        let player = &self.position.players[seat_index(seat)];
+        if !player.domain_established {
+            return (self.position.sites[player.avatar.location.index()].is_none())
+                .then_some(player.avatar.location)
+                .into_iter()
+                .collect();
+        }
+        self.position
+            .sites
+            .iter()
+            .enumerate()
+            .filter_map(|(index, site)| {
+                site.as_ref()
+                    .is_some_and(|site| site.controller == seat)
+                    .then_some(Cell::ALL[index])
+            })
+            .flat_map(|cell| cell.bordering(false))
+            .filter(|cell| self.position.sites[cell.index()].is_none())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
     }
 
     /// Applies an engine-issued action without authoritative serialization or hashing.
@@ -523,20 +600,35 @@ impl Game {
         &mut self,
         action: &IssuedAction,
     ) -> Result<Vec<(String, Value)>, GameError> {
-        if self.position.phase != Phase::Mulligan
-            || action.seat != self.position.decision_seat
+        if action.seat != self.position.decision_seat
             || action.state_version != self.position.state_version
         {
             return Err(GameError::IllegalAction);
         }
-        let ActionDescriptor::Mulligan {
-            atlas_order,
-            spellbook_order,
-        } = &action.descriptor
-        else {
+        match &action.descriptor {
+            ActionDescriptor::Mulligan {
+                atlas_order,
+                spellbook_order,
+            } => self.apply_mulligan_action(action.seat, atlas_order, spellbook_order),
+            ActionDescriptor::PlaySite {
+                card_id,
+                card_instance_id,
+                cell,
+            } => self.apply_play_site_action(action.seat, card_id, card_instance_id, *cell),
+            _ => Err(GameError::IllegalAction),
+        }
+    }
+
+    fn apply_mulligan_action(
+        &mut self,
+        seat: Seat,
+        atlas_order: &[IdentityHash],
+        spellbook_order: &[IdentityHash],
+    ) -> Result<Vec<(String, Value)>, GameError> {
+        if self.position.phase != Phase::Mulligan {
             return Err(GameError::IllegalAction);
-        };
-        let player = &mut self.position.players[seat_index(action.seat)];
+        }
+        let player = &mut self.position.players[seat_index(seat)];
         resolve_mulligan_zone(&mut player.hand_atlas, &mut player.atlas, atlas_order)?;
         resolve_mulligan_zone(
             &mut player.hand_spellbook,
@@ -549,11 +641,11 @@ impl Game {
             "mulligan-completed".to_owned(),
             json!({
                 "atlasCount": atlas_order.len(),
-                "seat": action.seat,
+                "seat": seat,
                 "spellbookCount": spellbook_order.len(),
             }),
         )];
-        if action.seat == Seat::North {
+        if seat == Seat::North {
             self.position.active_seat = Seat::South;
             self.position.decision_seat = Seat::South;
         } else {
@@ -573,6 +665,52 @@ impl Game {
         Ok(outcomes)
     }
 
+    fn apply_play_site_action(
+        &mut self,
+        seat: Seat,
+        card_id: &str,
+        card_instance_id: &IdentityHash,
+        cell: Cell,
+    ) -> Result<Vec<(String, Value)>, GameError> {
+        let player_index = seat_index(seat);
+        let player = &self.position.players[player_index];
+        if self.position.phase != Phase::Main
+            || player.avatar.tapped
+            || !self.legal_site_cells(seat).contains(&cell)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let hand_index = player
+            .hand_atlas
+            .iter()
+            .position(|card| {
+                card.instance_id == *card_instance_id
+                    && self.rules.cards[usize::from(card.card_id.0)].id == card_id
+            })
+            .ok_or(GameError::IllegalAction)?;
+        let card = self.position.players[player_index]
+            .hand_atlas
+            .remove(hand_index);
+        let player = &mut self.position.players[player_index];
+        player.avatar.tapped = true;
+        player.domain_established = true;
+        player.mana += 1;
+        self.position.sites[cell.index()] = Some(SitePosition {
+            card,
+            controller: seat,
+        });
+        self.position.state_version += 1;
+        Ok(vec![(
+            "site-played".to_owned(),
+            json!({
+                "cardId": card_id,
+                "cell": cell,
+                "instanceId": card_instance_id,
+                "seat": seat,
+            }),
+        )])
+    }
+
     /// Materializes the authoritative JSON state used for receipts and replay.
     #[must_use]
     pub fn authoritative_state(&self) -> Value {
@@ -581,6 +719,14 @@ impl Game {
             .cards
             .iter()
             .map(|card| (card.id.clone(), card.value.clone()))
+            .collect();
+        let sites: Map<_, _> = Cell::ALL
+            .into_iter()
+            .filter_map(|cell| {
+                self.position.sites[cell.index()]
+                    .as_ref()
+                    .map(|site| (cell.to_string(), self.site_value(site)))
+            })
             .collect();
         json!({
             "activeSeat": self.position.active_seat,
@@ -597,7 +743,7 @@ impl Game {
                 "north": self.player_value(&self.position.players[0]),
                 "south": self.player_value(&self.position.players[1]),
             },
-            "realm": { "sites": {}, "units": [] },
+            "realm": { "sites": sites, "units": [] },
             "schemaVersion": 1,
             "stateVersion": self.position.state_version,
             "terminal": { "status": "active" },
@@ -623,10 +769,10 @@ impl Game {
                 "life": player.avatar.life,
                 "location": player.avatar.location,
                 "region": "surface",
-                "tapped": false,
+                "tapped": player.avatar.tapped,
             },
             "cemetery": [],
-            "domainEstablished": false,
+            "domainEstablished": player.domain_established,
             "hand": {
                 "atlas": self.cards_value(&player.hand_atlas),
                 "spellbook": self.cards_value(&player.hand_spellbook),
@@ -654,6 +800,12 @@ impl Game {
             "owner": card.owner,
             "source": card.source.as_str(),
         })
+    }
+
+    fn site_value(&self, site: &SitePosition) -> Value {
+        let mut value = self.card_value(&site.card);
+        value["controller"] = json!(site.controller);
+        value
     }
 }
 
@@ -833,7 +985,9 @@ fn create_player(
     let avatar = AvatarPosition {
         card: card_instance(rules, avatar_card_id, seat, CardSource::Avatar, 0)?,
         life: u16::from(avatar_facts.life),
-        location: if seat == Seat::North { "C4" } else { "C1" },
+        location: Cell::parse(if seat == Seat::North { "C4" } else { "C1" })
+            .map_err(|_| invalid("avatar start cell must be valid"))?,
+        tapped: false,
     };
     let remaining_atlas = atlas.split_off(3);
     let remaining_spellbook = spellbook.split_off(3);
@@ -843,6 +997,7 @@ fn create_player(
             .then_some(0),
         atlas: remaining_atlas,
         avatar,
+        domain_established: false,
         hand_atlas: atlas,
         hand_spellbook: spellbook,
         mana: 0,

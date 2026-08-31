@@ -112,10 +112,22 @@ fn setup_and_mulligans_should_match_typescript_seed_31() {
         game.state_hash().expect("south post-state hash").as_str(),
         fixture.steps[1].post_state_hash
     );
-    assert!(
-        game.legal_actions()
-            .expect("main phase has no mulligans")
-            .is_empty()
+    let main_actions = game.legal_actions().expect("first main actions");
+    assert_eq!(
+        main_actions
+            .iter()
+            .map(|action| action.action_id().as_str())
+            .collect::<Vec<_>>(),
+        fixture.steps[2].legal_action_ids
+    );
+    let site_action = main_actions
+        .iter()
+        .find(|action| action.action_id().as_str() == fixture.steps[2].selected_action_id)
+        .expect("fixture site action");
+    game.apply_action(site_action).expect("apply first site");
+    assert_eq!(
+        game.state_hash().expect("site post-state hash").as_str(),
+        fixture.steps[2].post_state_hash
     );
 }
 

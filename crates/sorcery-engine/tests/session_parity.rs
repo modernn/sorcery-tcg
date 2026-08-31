@@ -121,7 +121,7 @@ fn rejected_requests_should_not_mutate_authoritative_state() {
 }
 
 #[test]
-fn session_receipts_and_replay_should_match_typescript_mulligans() {
+fn session_receipts_and_replay_should_match_typescript_through_first_site() {
     let fixture = seed_31_fixture();
     let manifest = fixture
         .manifest_json
@@ -133,7 +133,7 @@ fn session_receipts_and_replay_should_match_typescript_mulligans() {
         .expect("initial setup draws hash");
 
     let mut accepted_action_ids = Vec::new();
-    for step_index in 0..2 {
+    for step_index in 0..3 {
         let expected = &fixture.steps[step_index];
         let action = session
             .legal_actions()
