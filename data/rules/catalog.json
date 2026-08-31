@@ -1582,7 +1582,7 @@
         "RULE-04"
       ],
       "plainLanguage": "An active minion prevents damage from a unit at its current-power threshold.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "elemental-threshold",
         "derived-power"
@@ -1592,8 +1592,8 @@
         "damage"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 an active minion prevents damage from a unit at its current-power threshold"
+        "file": "crates/sorcery-engine/tests/damage_prevention_rules.rs",
+        "testName": "active_minion_should_prevent_damage_from_unit_at_current_power_threshold"
       }
     },
     {

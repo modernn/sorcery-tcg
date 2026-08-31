@@ -13,8 +13,8 @@ use crate::board::{Cell, Location, Region};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{
-    CardFacts, Element, EndTurnStealth, FactError, MagicEffect, MinionFacts, MinionGenesis,
-    Thresholds, parse_card_definition, validate_identifier,
+    CardFacts, DamagePrevention, Element, EndTurnStealth, FactError, MagicEffect, MinionFacts,
+    MinionGenesis, Thresholds, parse_card_definition, validate_identifier,
 };
 use crate::prng::PrngState;
 
@@ -323,6 +323,7 @@ struct UnitPosition {
     card: CardInstance,
     controller: Seat,
     damage: u8,
+    disabled_until_damaged: bool,
     last_interacted_turn: Option<u64>,
     location: Cell,
     stealthed: bool,
@@ -417,6 +418,12 @@ enum WinReason {
 struct DamageResult {
     minion_died: bool,
     avatar_defeated: bool,
+}
+
+#[derive(Clone, Copy)]
+struct UnitDamageSource {
+    current_power: u8,
+    lethal: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -947,6 +954,7 @@ impl Game {
         let unit = self.position.units.iter().find(|unit| {
             unit.card.instance_id == *instance_id
                 && unit.controller == seat
+                && !unit.disabled_until_damaged
                 && !unit.tapped
                 && !unit.summoning_sickness
         })?;
@@ -1012,7 +1020,10 @@ impl Game {
         else {
             return false;
         };
-        unit.controller == seat && !unit.tapped && (!unit.summoning_sickness || facts.charge)
+        unit.controller == seat
+            && !unit.disabled_until_damaged
+            && !unit.tapped
+            && (!unit.summoning_sickness || facts.charge)
     }
 
     fn attacker_can_target_sites(&self, pending: &PendingCombat) -> Result<bool, GameError> {
@@ -1055,7 +1066,7 @@ impl Game {
             .position
             .units
             .iter()
-            .filter(|unit| unit.controller == seat)
+            .filter(|unit| unit.controller == seat && !unit.disabled_until_damaged)
             .filter_map(|unit| {
                 let CardFacts::Minion(facts) =
                     &self.rules.cards[usize::from(unit.card.card_id.0)].facts
@@ -1478,6 +1489,10 @@ impl Game {
         Ok(())
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the compact fight path keeps simultaneous damage and terminal event order explicit"
+    )]
     fn resolve_simple_avatar_fight(
         &mut self,
         outcomes: &mut OutcomeLog<'_>,
@@ -1505,6 +1520,20 @@ impl Game {
             self.combatant_attack_and_lethal(attacker_kind, attacking_seat, &attacker_id)?;
         let (target_attack, target_lethal) =
             self.combatant_attack_and_lethal(target_kind, target_seat, &target_id)?;
+        let target_can_strike = match target_kind {
+            UnitKind::Avatar => true,
+            UnitKind::Minion => {
+                !self
+                    .position
+                    .units
+                    .iter()
+                    .find(|unit| {
+                        unit.card.instance_id == target_id && unit.controller == target_seat
+                    })
+                    .ok_or(GameError::IllegalAction)?
+                    .disabled_until_damaged
+            }
+        };
 
         self.record_unit_interaction(attacker_kind, attacking_seat, &attacker_id, outcomes)?;
         self.record_unit_interaction(target_kind, target_seat, &target_id, outcomes)?;
@@ -1521,20 +1550,33 @@ impl Game {
                 "targetInstanceId": target_id,
             })
         });
-        let attacker_damage = self.apply_simple_damage(
-            attacker_kind,
-            attacking_seat,
-            &attacker_id,
-            target_attack,
-            target_lethal,
-            outcomes,
-        )?;
+        let attacker_damage = if target_can_strike {
+            self.apply_simple_damage(
+                attacker_kind,
+                attacking_seat,
+                &attacker_id,
+                target_attack,
+                UnitDamageSource {
+                    current_power: target_attack,
+                    lethal: target_lethal,
+                },
+                outcomes,
+            )?
+        } else {
+            DamageResult {
+                minion_died: false,
+                avatar_defeated: false,
+            }
+        };
         let target_damage = self.apply_simple_damage(
             target_kind,
             target_seat,
             &target_id,
             attacker_attack,
-            attacker_lethal,
+            UnitDamageSource {
+                current_power: attacker_attack,
+                lethal: attacker_lethal,
+            },
             outcomes,
         )?;
         if attacker_damage.minion_died {
@@ -1582,33 +1624,65 @@ impl Game {
         Ok(())
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one damage helper preserves exact minion and Avatar event ordering"
+    )]
     fn apply_simple_damage(
         &mut self,
         kind: UnitKind,
         seat: Seat,
         instance_id: &IdentityHash,
         amount: u8,
-        lethal: bool,
+        source: UnitDamageSource,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<DamageResult, GameError> {
         match kind {
             UnitKind::Minion => {
-                let (index, _, defense) = self.simple_minion_combatant(instance_id)?;
+                let (index, _, defense, damage_prevention) =
+                    self.simple_minion_combatant(instance_id)?;
                 let unit = &mut self.position.units[index];
-                unit.damage = unit.damage.saturating_add(amount);
+                let dealt = if !unit.disabled_until_damaged
+                    && matches!(
+                        damage_prevention,
+                        Some(DamagePrevention::PreventsDamageFromUnitsWithPowerAtLeast(
+                            threshold
+                        )) if source.current_power >= threshold
+                    ) {
+                    0
+                } else {
+                    amount
+                };
+                let prevented = dealt < amount;
+                unit.damage = unit.damage.saturating_add(dealt);
                 let accumulated = unit.damage;
+                let awakened = dealt > 0 && unit.disabled_until_damaged;
+                if awakened {
+                    unit.disabled_until_damaged = false;
+                }
                 outcomes.push("damage-dealt", || {
-                    json!({
+                    let mut payload = json!({
                         "accumulated": accumulated,
-                        "amount": amount,
+                        "amount": dealt,
                         "direct": true,
                         "instanceId": instance_id,
                         "seat": seat,
-                    })
+                    });
+                    if prevented {
+                        payload["attemptedAmount"] = json!(amount);
+                        payload["prevented"] = json!(true);
+                    }
+                    payload
                 });
+                if awakened {
+                    outcomes.push(
+                        "minion-awakened",
+                        || json!({ "instanceId": instance_id, "seat": seat }),
+                    );
+                }
                 Ok(DamageResult {
                     minion_died: accumulated > 0
-                        && (accumulated >= defense || lethal && amount > 0),
+                        && (accumulated >= defense || source.lethal && dealt > 0),
                     avatar_defeated: false,
                 })
             }
@@ -1695,7 +1769,7 @@ impl Game {
     fn simple_minion_combatant(
         &self,
         instance_id: &IdentityHash,
-    ) -> Result<(usize, u8, u8), GameError> {
+    ) -> Result<(usize, u8, u8, Option<DamagePrevention>), GameError> {
         let (index, unit) = self
             .position
             .units
@@ -1707,7 +1781,7 @@ impl Game {
         else {
             return Err(GameError::IllegalAction);
         };
-        Ok((index, facts.attack, facts.defense))
+        Ok((index, facts.attack, facts.defense, facts.damage_prevention))
     }
 
     fn remove_dead_minion(
@@ -2196,7 +2270,6 @@ impl Game {
             genesis,
             Some(
                 MinionGenesis::DamageEachOtherUnitHereOne
-                    | MinionGenesis::DisableSelfUntilDamaged
                     | MinionGenesis::MayDamageTargetAdjacentUnitTwo
                     | MinionGenesis::StrikeEachEnemyHere
             )
@@ -2224,6 +2297,7 @@ impl Game {
             card,
             controller: seat,
             damage: 0,
+            disabled_until_damaged: false,
             last_interacted_turn: None,
             location: *cell,
             stealthed: starts_stealthed,
@@ -2298,9 +2372,26 @@ impl Game {
                     }
                 }
             }
+            Some(MinionGenesis::DisableSelfUntilDamaged) => {
+                let unit = self
+                    .position
+                    .units
+                    .iter_mut()
+                    .find(|unit| {
+                        unit.card.instance_id == *source_instance_id && unit.controller == seat
+                    })
+                    .ok_or(GameError::IllegalAction)?;
+                unit.disabled_until_damaged = true;
+                outcomes.push("minion-disabled", || {
+                    json!({
+                        "instanceId": source_instance_id,
+                        "seat": seat,
+                        "sourceInstanceId": source_instance_id,
+                    })
+                });
+            }
             Some(
                 MinionGenesis::DamageEachOtherUnitHereOne
-                | MinionGenesis::DisableSelfUntilDamaged
                 | MinionGenesis::MayDamageTargetAdjacentUnitTwo
                 | MinionGenesis::StrikeEachEnemyHere,
             ) => {
@@ -2401,7 +2492,8 @@ impl Game {
                 let gains_stealth = matches!(
                     &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
                     CardFacts::Minion(facts)
-                        if facts.end_turn_stealth == Some(EndTurnStealth::Always)
+                        if !unit.disabled_until_damaged
+                            && facts.end_turn_stealth == Some(EndTurnStealth::Always)
                 );
                 if gains_stealth && !unit.stealthed {
                     unit.stealthed = true;
@@ -2571,6 +2663,9 @@ impl Game {
         ]);
         if let Some(turn) = unit.last_interacted_turn {
             object.insert("lastInteractedTurn".to_owned(), json!(turn));
+        }
+        if unit.disabled_until_damaged {
+            object.insert("disabledUntilDamaged".to_owned(), json!(true));
         }
         value
     }
