@@ -16,7 +16,7 @@ test('TypeScript parity fixture regenerates byte-identically', () => {
     fixtureVersion: number;
     games: Array<{
       actionIds: string[];
-      manifestJson?: string;
+      manifestRecipe?: string;
       replay: { verified: boolean };
       seed: number;
       steps: Array<{
@@ -40,7 +40,7 @@ test('TypeScript parity fixture regenerates byte-identically', () => {
     && step.selectedAction.descriptor.kind.length > 0
     && step.events.map(({ eventId }) => eventId).join(',') === step.eventIds.join(',')
     && step.events.map(({ type }) => type).join(',') === step.eventTypes.join(','))), true);
-  const manifestJson = fixture.games.find(({ seed }) => seed === 31)?.manifestJson;
-  assert.ok(manifestJson);
-  assert.equal(canonicalJson(parseJsonWithDuplicateKeyCheck(manifestJson)), manifestJson);
+  const manifestRecipe = fixture.games.find(({ seed }) => seed === 31)?.manifestRecipe;
+  assert.equal(manifestRecipe, 'synthetic-demo-v1');
+  assert.equal(canonicalJson(parseJsonWithDuplicateKeyCheck(regenerated)), regenerated.trimEnd());
 });

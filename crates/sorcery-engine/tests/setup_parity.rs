@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::game::{Game, IssuedAction};
+use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
 #[derive(Deserialize)]
 struct Fixture {
@@ -15,7 +16,6 @@ struct Fixture {
 struct FixtureGame {
     initial: FixtureInitial,
     manifest_id: String,
-    manifest_json: Option<String>,
     seed: u32,
     steps: Vec<FixtureStep>,
 }
@@ -59,13 +59,8 @@ fn action_identity(action: &IssuedAction) -> String {
 #[test]
 fn setup_and_mulligans_should_match_typescript_seed_31() {
     let fixture = seed_31_fixture();
-    let mut game = Game::from_manifest_json(
-        fixture
-            .manifest_json
-            .as_deref()
-            .expect("seed-31 canonical manifest JSON"),
-    )
-    .expect("valid canonical synthetic manifest");
+    let manifest = synthetic_demo_manifest_json(fixture.seed).expect("synthetic manifest");
+    let mut game = Game::from_manifest_json(&manifest).expect("valid canonical synthetic manifest");
     let branch = game.clone();
 
     assert!(Arc::ptr_eq(game.rules(), branch.rules()));
@@ -157,9 +152,7 @@ fn setup_and_mulligans_should_match_typescript_seed_31() {
 #[test]
 fn manifest_json_should_reject_duplicate_top_level_keys() {
     let fixture = seed_31_fixture();
-    let manifest = fixture
-        .manifest_json
-        .expect("seed-31 canonical manifest JSON");
+    let manifest = synthetic_demo_manifest_json(fixture.seed).expect("synthetic manifest");
     let duplicate = manifest.replacen('{', r#"{"seed":31,"#, 1);
 
     assert!(Game::from_manifest_json(&duplicate).is_err());
@@ -168,13 +161,8 @@ fn manifest_json_should_reject_duplicate_top_level_keys() {
 #[test]
 fn rules_context_should_resolve_typed_token_references() {
     let fixture = seed_31_fixture();
-    let mut manifest: Value = serde_json::from_str(
-        fixture
-            .manifest_json
-            .as_deref()
-            .expect("seed-31 canonical manifest JSON"),
-    )
-    .expect("manifest value");
+    let manifest_json = synthetic_demo_manifest_json(fixture.seed).expect("synthetic manifest");
+    let mut manifest: Value = serde_json::from_str(&manifest_json).expect("manifest value");
     let spell_id = manifest["decks"]["north"]["spellbook"][0]
         .as_str()
         .expect("north spell id")

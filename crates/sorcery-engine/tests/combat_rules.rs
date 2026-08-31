@@ -3,6 +3,7 @@ use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
 use sorcery_engine::game::{Game, GameOutcome};
 use sorcery_engine::session::{Session, StepResult};
+use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
 struct AttackSetup {
     attacker_instance_id: String,
@@ -25,19 +26,10 @@ fn scenario_manifest(
     avatar_attack: u64,
     avatar_life: u64,
 ) -> String {
-    let fixture: Value = serde_json::from_str(include_str!(
-        "../../../tests/engine/fixtures/typescript-parity-v1.json"
-    ))
-    .expect("valid checked-in TypeScript parity fixture");
-    let manifest_json = fixture["games"]
-        .as_array()
-        .and_then(|games| games.iter().find(|game| game["seed"] == 31))
-        .and_then(|game| game["manifestJson"].as_str())
-        .expect("seed-31 canonical manifest JSON");
-    let mut manifest: Value = serde_json::from_str(manifest_json).expect("manifest value");
+    let manifest_json = synthetic_demo_manifest_json(seed).expect("synthetic manifest");
+    let mut manifest: Value = serde_json::from_str(&manifest_json).expect("manifest value");
     let body = manifest.as_object_mut().expect("manifest object");
     body.remove("manifestId").expect("manifest identity");
-    body.insert("seed".to_owned(), json!(seed));
     for card in body["cards"]
         .as_object_mut()
         .expect("manifest cards")
@@ -737,12 +729,10 @@ fn terminal_outcome_exposes_winner_and_loser() {
         .as_array()
         .and_then(|games| games.iter().find(|game| game["seed"] == 31))
         .expect("seed-31 fixture game");
-    let manifest_json = game["manifestJson"]
-        .as_str()
-        .expect("seed-31 manifest JSON");
+    let manifest_json = synthetic_demo_manifest_json(31).expect("synthetic manifest");
     let action_ids: Vec<IdentityHash> =
         serde_json::from_value(game["actionIds"].clone()).expect("fixture action identities");
-    let session = Session::replay(manifest_json, &action_ids).expect("fixture replay");
+    let session = Session::replay(&manifest_json, &action_ids).expect("fixture replay");
     assert_eq!(
         replay_game(&session).outcome(),
         Some(GameOutcome::Win {

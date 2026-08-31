@@ -88,7 +88,7 @@ function captureGame(seed: number): JsonValue {
     actionIds,
     finalStateHash: hashGameState(session.state),
     initial,
-    ...(seed === 31 ? { manifestJson: canonicalJson(manifest as unknown as JsonValue) } : {}),
+    ...(seed === 31 ? { manifestRecipe: 'synthetic-demo-v1' } : {}),
     manifestId: manifest.manifestId,
     receiptIdsHash: hash(session.transcript.map(({ receiptId }) => receiptId)),
     replay: {

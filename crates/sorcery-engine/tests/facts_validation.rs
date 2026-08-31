@@ -1,4 +1,5 @@
 use serde_json::{Value, json};
+use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
 #[expect(
     dead_code,
@@ -289,17 +290,8 @@ fn rule_06_should_reject_unknown_or_noncanonical_facts() {
 
 #[test]
 fn rule_06_typescript_parity_fixture_card_facts_should_parse() {
-    let fixture: Value = serde_json::from_str(include_str!(
-        "../../../tests/engine/fixtures/typescript-parity-v1.json"
-    ))
-    .expect("valid checked-in parity fixture");
-    let manifest_json = fixture["games"]
-        .as_array()
-        .expect("fixture games")
-        .iter()
-        .find_map(|game| game["manifestJson"].as_str())
-        .expect("fixture manifest JSON");
-    let manifest: Value = serde_json::from_str(manifest_json).expect("valid manifest JSON");
+    let manifest_json = synthetic_demo_manifest_json(31).expect("synthetic manifest");
+    let manifest: Value = serde_json::from_str(&manifest_json).expect("valid manifest JSON");
     let cards = manifest["cards"].as_object().expect("manifest cards");
 
     for (card_id, definition) in cards {

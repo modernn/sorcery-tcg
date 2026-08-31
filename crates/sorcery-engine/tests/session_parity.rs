@@ -1,7 +1,8 @@
 use serde::Deserialize;
-use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
+use sorcery_engine::canonical::{IdentityHash, identity_hash};
 use sorcery_engine::contract::{ActionRequest, RejectionCode, Seat, order_legal_actions};
 use sorcery_engine::session::{Session, StepResult};
+use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
 #[derive(Deserialize)]
 struct Fixture {
@@ -14,7 +15,6 @@ struct FixtureGame {
     action_ids: Vec<String>,
     final_state_hash: String,
     initial: FixtureInitial,
-    manifest_json: Option<String>,
     replay: serde_json::Value,
     seed: u32,
     steps: Vec<FixtureStep>,
@@ -57,25 +57,11 @@ fn seed_31_fixture() -> FixtureGame {
         .expect("seed-31 fixture")
 }
 
-fn manifest_for_seed(template: &str, seed: u32) -> String {
-    let mut manifest: serde_json::Value =
-        serde_json::from_str(template).expect("canonical fixture manifest");
-    let body = manifest.as_object_mut().expect("manifest object");
-    body.remove("manifestId").expect("manifest identity");
-    body.insert("seed".to_owned(), serde_json::json!(seed));
-    let manifest_id = identity_hash(&manifest).expect("manifest identity for selected seed");
-    manifest["manifestId"] = serde_json::json!(manifest_id);
-    canonical_json(&manifest).expect("canonical manifest with selected seed")
-}
-
 #[test]
 fn rejected_requests_should_not_mutate_authoritative_state() {
     let fixture = seed_31_fixture();
-    let manifest = fixture
-        .manifest_json
-        .as_deref()
-        .expect("seed-31 canonical manifest JSON");
-    let mut session = Session::new(manifest).expect("valid session");
+    let manifest = synthetic_demo_manifest_json(fixture.seed).expect("synthetic manifest");
+    let mut session = Session::new(&manifest).expect("valid session");
     let initial_state_hash = session.state_hash().expect("initial state hash");
     let initial_draws_hash = session
         .initial_random_draws_hash()
@@ -142,21 +128,13 @@ fn rejected_requests_should_not_mutate_authoritative_state() {
 #[test]
 fn sessions_should_match_all_complete_typescript_fixture_games() {
     let fixture = fixture();
-    let template = fixture
-        .games
-        .iter()
-        .find(|game| game.seed == 31)
-        .and_then(|game| game.manifest_json.as_deref())
-        .expect("seed-31 canonical manifest JSON")
-        .to_owned();
     for game in fixture.games {
-        verify_fixture_game(&game, &manifest_for_seed(&template, game.seed));
+        let manifest = synthetic_demo_manifest_json(game.seed).expect("synthetic manifest");
+        verify_fixture_game(&game, &manifest);
     }
 }
 
 fn verify_fixture_game(fixture: &FixtureGame, manifest: &str) {
-    let fixture_manifest = fixture.manifest_json.as_deref().unwrap_or(manifest);
-    assert_eq!(fixture_manifest, manifest);
     let mut session = Session::new(manifest).expect("valid session");
     let initial_draws_hash = session
         .initial_random_draws_hash()

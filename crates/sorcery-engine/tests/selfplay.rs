@@ -4,32 +4,9 @@ use sorcery_engine::contract::Seat;
 use sorcery_engine::deck::{CanonicalDeck, DeckValidation};
 use sorcery_engine::policy::{PolicySnapshot, parse_policy_snapshot};
 use sorcery_engine::selfplay::{SelfPlayCase, train_and_promote};
+use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
 const HASH_B: &str = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-
-fn fixture() -> Value {
-    serde_json::from_str(include_str!(
-        "../../../tests/engine/fixtures/typescript-parity-v1.json"
-    ))
-    .expect("valid parity fixture")
-}
-
-fn manifest(fixture: &Value) -> &str {
-    fixture["games"]
-        .as_array()
-        .and_then(|games| games.iter().find(|game| game["seed"] == 31))
-        .and_then(|game| game["manifestJson"].as_str())
-        .expect("seed-31 manifest")
-}
-
-fn manifest_for_seed(template: &str, seed: u32) -> String {
-    let mut manifest: Value = serde_json::from_str(template).expect("manifest JSON");
-    let body = manifest.as_object_mut().expect("manifest object");
-    body.remove("manifestId").expect("manifest identity");
-    body.insert("seed".to_owned(), json!(seed));
-    manifest["manifestId"] = json!(identity_hash(&manifest).expect("manifest identity"));
-    canonical_json(&manifest).expect("canonical manifest")
-}
 
 fn authority_hash(manifest: &str) -> String {
     serde_json::from_str::<Value>(manifest).expect("manifest JSON")["authority"]["contentHash"]
@@ -100,11 +77,10 @@ fn pair<'a>(
 
 #[test]
 fn heldout_tie_should_keep_the_replay_verified_champion_deterministically() {
-    let fixture = fixture();
-    let champion = policy(&authority_hash(manifest(&fixture)));
+    let training_manifest = synthetic_demo_manifest_json(30).expect("training manifest");
+    let heldout_manifest = synthetic_demo_manifest_json(31).expect("held-out manifest");
+    let champion = policy(&authority_hash(&heldout_manifest));
     let deck = deck(&champion);
-    let training_manifest = manifest_for_seed(manifest(&fixture), 30);
-    let heldout_manifest = manifest_for_seed(manifest(&fixture), 31);
     let training = pair(&training_manifest, 30, &champion);
     let heldout = pair(&heldout_manifest, 31, &champion);
 
@@ -126,10 +102,9 @@ fn heldout_tie_should_keep_the_replay_verified_champion_deterministically() {
 
 #[test]
 fn suites_should_require_seat_pairs_and_disjoint_seeds() {
-    let fixture = fixture();
-    let champion = policy(&authority_hash(manifest(&fixture)));
+    let manifest = synthetic_demo_manifest_json(30).expect("training manifest");
+    let champion = policy(&authority_hash(&manifest));
     let deck = deck(&champion);
-    let manifest = manifest_for_seed(manifest(&fixture), 30);
     let pair = pair(&manifest, 30, &champion);
 
     assert!(train_and_promote(&champion, &deck, &pair[..1], &pair, 400).is_err());

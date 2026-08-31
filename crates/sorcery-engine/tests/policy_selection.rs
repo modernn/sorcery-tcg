@@ -4,6 +4,7 @@ use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::contract::Seat;
 use sorcery_engine::game::Game;
 use sorcery_engine::policy::{PolicySnapshot, parse_policy_snapshot};
+use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
 const HASH_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const HASH_B: &str = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -15,12 +16,8 @@ fn fixture() -> Value {
     .expect("valid parity fixture")
 }
 
-fn seed_31_manifest(fixture: &Value) -> &str {
-    fixture["games"]
-        .as_array()
-        .and_then(|games| games.iter().find(|game| game["seed"] == 31))
-        .and_then(|game| game["manifestJson"].as_str())
-        .expect("seed-31 manifest")
+fn seed_31_manifest(_fixture: &Value) -> String {
+    synthetic_demo_manifest_json(31).expect("synthetic manifest")
 }
 
 fn baseline_policy() -> PolicySnapshot {
@@ -61,7 +58,8 @@ fn baseline_policy_should_reproduce_the_complete_seed_31_action_sequence() {
         .and_then(|games| games.iter().find(|game| game["seed"] == 31))
         .expect("seed-31 game");
     let expected = game_fixture["actionIds"].as_array().expect("action IDs");
-    let mut game = Game::from_manifest_json(seed_31_manifest(&fixture)).expect("valid game");
+    let manifest = seed_31_manifest(&fixture);
+    let mut game = Game::from_manifest_json(&manifest).expect("valid game");
     let policy = baseline_policy();
 
     for (step, expected_id) in expected.iter().enumerate() {
@@ -95,8 +93,8 @@ fn baseline_policy_should_reproduce_the_complete_seed_31_action_sequence() {
 fn policy_observation_should_not_change_with_opponent_hidden_order() {
     let fixture = fixture();
     let manifest = seed_31_manifest(&fixture);
-    let original = Game::from_manifest_json(manifest).expect("original game");
-    let mut changed: Value = serde_json::from_str(manifest).expect("manifest value");
+    let original = Game::from_manifest_json(&manifest).expect("original game");
+    let mut changed: Value = serde_json::from_str(&manifest).expect("manifest value");
     let body = changed.as_object_mut().expect("manifest object");
     body.remove("manifestId").expect("manifest identity");
     let spellbook = body["decks"]["south"]["spellbook"]
@@ -156,7 +154,8 @@ fn policy_binding_and_empty_action_sets_should_fail_closed() {
     );
 
     let fixture = fixture();
-    let game = Game::from_manifest_json(seed_31_manifest(&fixture)).expect("valid game");
+    let manifest = seed_31_manifest(&fixture);
+    let game = Game::from_manifest_json(&manifest).expect("valid game");
     let error = policy
         .select_action(game.observe(Seat::North), &[])
         .expect_err("empty legal actions must fail");

@@ -4,8 +4,11 @@ use std::error::Error;
 use std::fmt;
 use std::thread;
 
+use serde::Serialize;
+
 use crate::canonical::IdentityHash;
-use crate::game::{Game, GameOutcome};
+use crate::contract::Seat;
+use crate::game::{Game, GameEndReason, GameOutcome};
 use crate::policy::PolicySnapshot;
 use crate::session::SessionError;
 use crate::simulator::{SimulatorError, replay_selected, run_game};
@@ -20,7 +23,8 @@ pub const MAX_BATCH_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_GAME_ACTIONS: usize = 500;
 
 /// Public result classification while supported mechanics remain incomplete.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BatchClassification {
     /// The game was exact for exercised mechanics but is not ranked-eligible.
     UnrankedPartialRules,
@@ -31,10 +35,113 @@ pub enum BatchClassification {
 pub struct BatchJob<'a> {
     /// Canonical authoritative manifest bytes.
     pub manifest_json: &'a str,
+    /// Deck identity North's policy must be bound to.
+    pub north_deck_id: &'a IdentityHash,
     /// North's immutable deck-bound policy.
     pub north_policy: &'a PolicySnapshot,
+    /// Deck identity South's policy must be bound to.
+    pub south_deck_id: &'a IdentityHash,
     /// South's immutable deck-bound policy.
     pub south_policy: &'a PolicySnapshot,
+}
+
+/// The status of a finished public terminal.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FinishedStatus {
+    /// The game finished.
+    Finished,
+}
+
+/// The public result marker for a draw.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DrawResult {
+    /// Neither seat won.
+    Draw,
+}
+
+/// Why a finished game was drawn.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DrawReason {
+    /// Both Avatars were defeated by one simultaneous damage batch.
+    SimultaneousAvatarDefeat,
+    /// Both seats otherwise lost simultaneously.
+    SimultaneousDefeat,
+}
+
+/// Why one seat won a finished game.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WinReason {
+    /// The losing Avatar was defeated.
+    AvatarDefeated,
+    /// The losing seat attempted to draw from an empty deck.
+    DeckEmpty,
+}
+
+/// Exact public terminal object for a finished game.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum FinishedTerminal {
+    /// Neither seat won.
+    Draw {
+        /// Why the draw occurred.
+        reason: DrawReason,
+        /// Public draw marker.
+        result: DrawResult,
+        /// Finished status marker.
+        status: FinishedStatus,
+    },
+    /// Exactly one seat won.
+    Win {
+        /// Losing seat.
+        loser: Seat,
+        /// Why the seat lost.
+        reason: WinReason,
+        /// Finished status marker.
+        status: FinishedStatus,
+        /// Winning seat.
+        winner: Seat,
+    },
+}
+
+impl FinishedTerminal {
+    fn from_game(outcome: GameOutcome, reason: GameEndReason) -> Option<Self> {
+        match (outcome, reason) {
+            (GameOutcome::Draw, GameEndReason::SimultaneousAvatarDefeat) => Some(Self::Draw {
+                reason: DrawReason::SimultaneousAvatarDefeat,
+                result: DrawResult::Draw,
+                status: FinishedStatus::Finished,
+            }),
+            (GameOutcome::Win { loser, winner }, GameEndReason::AvatarDefeated) => {
+                Some(Self::Win {
+                    loser,
+                    reason: WinReason::AvatarDefeated,
+                    status: FinishedStatus::Finished,
+                    winner,
+                })
+            }
+            (GameOutcome::Win { loser, winner }, GameEndReason::DeckEmpty) => Some(Self::Win {
+                loser,
+                reason: WinReason::DeckEmpty,
+                status: FinishedStatus::Finished,
+                winner,
+            }),
+            (GameOutcome::Draw, GameEndReason::AvatarDefeated | GameEndReason::DeckEmpty)
+            | (GameOutcome::Win { .. }, GameEndReason::SimultaneousAvatarDefeat) => None,
+        }
+    }
+
+    /// Returns the winner when the terminal is a win.
+    #[must_use]
+    pub const fn winner(self) -> Option<Seat> {
+        match self {
+            Self::Draw { .. } => None,
+            Self::Win { winner, .. } => Some(winner),
+        }
+    }
 }
 
 /// Compact authoritative result for one ordered batch job.
@@ -52,14 +159,67 @@ pub struct BatchResult {
     pub final_state_hash: IdentityHash,
     /// Number of fights started.
     pub fight_count: usize,
-    /// Terminal public result.
-    pub outcome: GameOutcome,
+    /// Exact finished public terminal.
+    pub terminal: FinishedTerminal,
     /// Whether final authoritative replay reproduced the rollout.
     pub replay_verified: bool,
     /// Final authoritative transcript identity.
     pub transcript_hash: IdentityHash,
     /// Final turn number.
     pub turn_count: u64,
+}
+
+/// Exact externally serialized deterministic-game report.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeterministicGameReport {
+    /// Number of accepted actions.
+    pub accepted_action_count: usize,
+    /// Ranked/public result classification.
+    pub classification: BatchClassification,
+    /// Final authoritative state identity.
+    pub final_state_hash: IdentityHash,
+    /// Number of fights started.
+    pub fight_count: usize,
+    /// Whether final authoritative replay reproduced the rollout.
+    pub replay_verified: bool,
+    /// Exact finished public terminal.
+    pub terminal: FinishedTerminal,
+    /// Final authoritative transcript identity.
+    pub transcript_hash: IdentityHash,
+    /// Final turn number.
+    pub turn_count: u64,
+}
+
+/// Exact externally serialized result for one ordered batch job.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameBatchResult {
+    /// Original zero-based job index.
+    pub job_index: usize,
+    /// Canonical manifest identity.
+    pub manifest_id: IdentityHash,
+    /// Deterministic authoritative game report.
+    pub report: DeterministicGameReport,
+}
+
+impl From<BatchResult> for GameBatchResult {
+    fn from(result: BatchResult) -> Self {
+        Self {
+            job_index: result.job_index,
+            manifest_id: result.manifest_id,
+            report: DeterministicGameReport {
+                accepted_action_count: result.accepted_action_count,
+                classification: result.classification,
+                final_state_hash: result.final_state_hash,
+                fight_count: result.fight_count,
+                replay_verified: result.replay_verified,
+                terminal: result.terminal,
+                transcript_hash: result.transcript_hash,
+                turn_count: result.turn_count,
+            },
+        }
+    }
 }
 
 /// A bounded batch was invalid or one job failed.
@@ -154,16 +314,40 @@ pub fn run_batch(
     results.into_iter().collect()
 }
 
+/// Runs an ordered native batch and returns the exact external report contract.
+///
+/// # Errors
+///
+/// Returns [`BatchError`] under the same conditions as [`run_batch`].
+pub fn run_game_batch(
+    jobs: &[BatchJob<'_>],
+    requested_workers: usize,
+) -> Result<Vec<GameBatchResult>, BatchError> {
+    Ok(run_batch(jobs, requested_workers)?
+        .into_iter()
+        .map(GameBatchResult::from)
+        .collect())
+}
+
+/// Returns the default bounded native worker count for this host.
+#[must_use]
+pub fn default_batch_workers() -> usize {
+    thread::available_parallelism().map_or(1, |workers| workers.get().min(MAX_BATCH_WORKERS))
+}
+
 fn run_job(job_index: usize, job: &BatchJob<'_>) -> Result<BatchResult, BatchError> {
     let failed = |source| BatchError::Job { job_index, source };
     let game = Game::from_manifest_json(job.manifest_json)
         .map_err(SimulatorError::from)
         .map_err(failed)?;
-    for policy in [job.north_policy, job.south_policy] {
+    for (policy, deck_id) in [
+        (job.north_policy, job.north_deck_id),
+        (job.south_policy, job.south_deck_id),
+    ] {
         policy
             .validate_binding(
                 game.rules().authority_hash(),
-                policy.deck_id(),
+                deck_id,
                 game.rules().engine_version(),
             )
             .map_err(SimulatorError::from)
@@ -171,10 +355,18 @@ fn run_job(job_index: usize, job: &BatchJob<'_>) -> Result<BatchResult, BatchErr
     }
     let rollout =
         run_game(game, job.north_policy, job.south_policy, MAX_GAME_ACTIONS).map_err(failed)?;
-    let Some(outcome) = rollout.outcome() else {
+    if rollout.outcome().is_none() {
+        return Err(BatchError::NonTerminal(job_index));
+    }
+    let session = replay_selected(job.manifest_json, &rollout).map_err(failed)?;
+    let (Some(outcome), Some(reason)) = (session.outcome(), session.terminal_reason()) else {
         return Err(BatchError::NonTerminal(job_index));
     };
-    let session = replay_selected(job.manifest_json, &rollout).map_err(failed)?;
+    let Some(terminal) = FinishedTerminal::from_game(outcome, reason) else {
+        return Err(BatchError::Invalid(
+            "game terminal outcome and reason disagree",
+        ));
+    };
     let fight_count = session
         .transcript()
         .iter()
@@ -192,7 +384,7 @@ fn run_job(job_index: usize, job: &BatchJob<'_>) -> Result<BatchResult, BatchErr
             .map_err(SimulatorError::from)
             .map_err(failed)?,
         fight_count,
-        outcome,
+        terminal,
         replay_verified: true,
         transcript_hash: session
             .transcript_hash()

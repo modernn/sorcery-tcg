@@ -4,11 +4,13 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 
+use serde::Serialize;
+
 use crate::batch::{
-    BatchClassification, BatchError, BatchJob, BatchResult, MAX_BATCH_JOBS, run_batch,
+    BatchClassification, BatchError, BatchJob, FinishedTerminal, GameBatchResult, MAX_BATCH_JOBS,
+    run_batch,
 };
 use crate::contract::Seat;
-use crate::game::GameOutcome;
 
 /// One deck orientation for a gauntlet seed.
 #[derive(Clone, Copy, Debug)]
@@ -31,7 +33,7 @@ pub struct GauntletPair<'a> {
 }
 
 /// Win/draw/loss counts from one perspective.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct OutcomeCounts {
     /// Draws.
     pub draws: u64,
@@ -44,21 +46,30 @@ pub struct OutcomeCounts {
 }
 
 /// Aggregate results for one deck overall and by seat.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeckOutcomeCounts {
-    /// Overall counts.
-    pub total: OutcomeCounts,
     /// Counts while occupying North.
     pub as_north: OutcomeCounts,
     /// Counts while occupying South.
     pub as_south: OutcomeCounts,
+    /// Overall draws.
+    pub draws: u64,
+    /// Overall counted games.
+    pub games: u64,
+    /// Overall losses.
+    pub losses: u64,
+    /// Overall wins.
+    pub wins: u64,
 }
 
 /// One authoritative gauntlet game with deck and seed metadata.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GauntletGameResult {
     /// Native authoritative result.
-    pub result: BatchResult,
+    #[serde(flatten)]
+    pub result: GameBatchResult,
     /// Stable North deck identity.
     pub north_deck_id: String,
     /// Declared seed.
@@ -67,17 +78,29 @@ pub struct GauntletGameResult {
     pub south_deck_id: String,
 }
 
+/// Seat-keyed outcome counts matching the public TypeScript contract.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+pub struct SeatOutcomeCounts {
+    /// North-seat outcomes.
+    pub north: OutcomeCounts,
+    /// South-seat outcomes.
+    pub south: OutcomeCounts,
+}
+
 /// Complete deterministic gauntlet report.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GauntletReport {
     /// Arithmetic mean of final turn numbers.
     pub average_turns: f64,
     /// Canonically ordered per-deck counts.
     pub by_deck: BTreeMap<String, DeckOutcomeCounts>,
-    /// North then South counts.
-    pub by_seat: [OutcomeCounts; 2],
+    /// Physical-seat outcome counts.
+    pub by_seat: SeatOutcomeCounts,
     /// Ranked/public result classification.
     pub classification: BatchClassification,
+    /// Number of games in the report.
+    pub game_count: usize,
     /// Ordered authoritative game results.
     pub games: Vec<GauntletGameResult>,
     /// Input seeds in pair order.
@@ -148,7 +171,7 @@ pub fn run_gauntlet(
         .collect::<Vec<_>>();
     let results = run_batch(&jobs, requested_workers)?;
     let mut by_deck = BTreeMap::<String, DeckOutcomeCounts>::new();
-    let mut by_seat = [OutcomeCounts::default(); 2];
+    let mut by_seat = SeatOutcomeCounts::default();
     let mut games = Vec::with_capacity(results.len());
     for result in results {
         let pair = &pairs[result.job_index / 2];
@@ -157,10 +180,16 @@ pub fn run_gauntlet(
             (Seat::North, orientation.north_deck_id),
             (Seat::South, orientation.south_deck_id),
         ] {
-            let outcome = perspective(result.outcome, seat);
-            record(&mut by_seat[seat_index(seat)], outcome);
+            let outcome = perspective(result.terminal, seat);
+            record(
+                match seat {
+                    Seat::North => &mut by_seat.north,
+                    Seat::South => &mut by_seat.south,
+                },
+                outcome,
+            );
             let deck = by_deck.entry(deck_id.to_owned()).or_default();
-            record(&mut deck.total, outcome);
+            record_deck_total(deck, outcome);
             record(
                 match seat {
                     Seat::North => &mut deck.as_north,
@@ -170,7 +199,7 @@ pub fn run_gauntlet(
             );
         }
         games.push(GauntletGameResult {
-            result,
+            result: result.into(),
             north_deck_id: orientation.north_deck_id.to_owned(),
             seed: pair.seed,
             south_deck_id: orientation.south_deck_id.to_owned(),
@@ -179,7 +208,7 @@ pub fn run_gauntlet(
     let total_turns = games
         .iter()
         .try_fold(0_u64, |total, game| {
-            total.checked_add(game.result.turn_count)
+            total.checked_add(game.result.report.turn_count)
         })
         .ok_or(GauntletError::Invalid("gauntlet turn total overflowed"))?;
     let average_turns = f64::from(
@@ -194,6 +223,7 @@ pub fn run_gauntlet(
         by_deck,
         by_seat,
         classification: BatchClassification::UnrankedPartialRules,
+        game_count: games.len(),
         games,
         seeds: pairs.iter().map(|pair| pair.seed).collect(),
     })
@@ -206,18 +236,11 @@ enum Perspective {
     Win,
 }
 
-fn perspective(outcome: GameOutcome, seat: Seat) -> Perspective {
-    match outcome {
-        GameOutcome::Draw => Perspective::Draw,
-        GameOutcome::Win { winner, .. } if winner == seat => Perspective::Win,
-        GameOutcome::Win { .. } => Perspective::Loss,
-    }
-}
-
-const fn seat_index(seat: Seat) -> usize {
-    match seat {
-        Seat::North => 0,
-        Seat::South => 1,
+fn perspective(terminal: FinishedTerminal, seat: Seat) -> Perspective {
+    match terminal.winner() {
+        None => Perspective::Draw,
+        Some(winner) if winner == seat => Perspective::Win,
+        Some(_) => Perspective::Loss,
     }
 }
 
@@ -230,29 +253,108 @@ fn record(counts: &mut OutcomeCounts, outcome: Perspective) {
     }
 }
 
+fn record_deck_total(counts: &mut DeckOutcomeCounts, outcome: Perspective) {
+    counts.games += 1;
+    match outcome {
+        Perspective::Draw => counts.draws += 1,
+        Perspective::Loss => counts.losses += 1,
+        Perspective::Win => counts.wins += 1,
+    }
+}
+
 fn validate_pairs(pairs: &[GauntletPair<'_>]) -> Result<(), GauntletError> {
+    let [reference_first, reference_second] = pairs[0].orientations;
+    if reference_first.north_deck_id.trim().is_empty()
+        || reference_first.south_deck_id.trim().is_empty()
+        || reference_first.north_deck_id == reference_first.south_deck_id
+        || reference_second.north_deck_id != reference_first.south_deck_id
+        || reference_second.south_deck_id != reference_first.north_deck_id
+        || reference_second.job.north_deck_id != reference_first.job.south_deck_id
+        || reference_second.job.south_deck_id != reference_first.job.north_deck_id
+    {
+        return Err(GauntletError::Invalid(
+            "gauntlet requires two distinct decks swapped across seats",
+        ));
+    }
+    let reference_manifest = manifest_facts(reference_first.job.manifest_json)?;
+    let deck_a = reference_manifest.north_deck;
+    let deck_b = reference_manifest.south_deck;
+
     for pair in pairs {
         let [first, second] = pair.orientations;
-        if first.north_deck_id.trim().is_empty()
-            || first.south_deck_id.trim().is_empty()
-            || first.north_deck_id == first.south_deck_id
+        if first.north_deck_id != reference_first.north_deck_id
+            || first.south_deck_id != reference_first.south_deck_id
             || second.north_deck_id != first.south_deck_id
             || second.south_deck_id != first.north_deck_id
+            || first.job.north_deck_id != reference_first.job.north_deck_id
+            || first.job.south_deck_id != reference_first.job.south_deck_id
+            || second.job.north_deck_id != reference_second.job.north_deck_id
+            || second.job.south_deck_id != reference_second.job.south_deck_id
         {
             return Err(GauntletError::Invalid(
                 "gauntlet requires two distinct decks swapped across seats",
             ));
         }
-        for orientation in pair.orientations {
-            let manifest: serde_json::Value = serde_json::from_str(orientation.job.manifest_json)?;
-            if manifest.get("seed").and_then(serde_json::Value::as_u64)
-                != Some(u64::from(pair.seed))
-            {
-                return Err(GauntletError::Invalid(
-                    "gauntlet seed does not match its manifest",
-                ));
-            }
+        let first_manifest = manifest_facts(first.job.manifest_json)?;
+        let second_manifest = manifest_facts(second.job.manifest_json)?;
+        if first_manifest.seed != u64::from(pair.seed)
+            || second_manifest.seed != u64::from(pair.seed)
+        {
+            return Err(GauntletError::Invalid(
+                "gauntlet seed does not match its manifest",
+            ));
+        }
+        if first_manifest.north_deck != deck_a
+            || first_manifest.south_deck != deck_b
+            || second_manifest.north_deck != deck_b
+            || second_manifest.south_deck != deck_a
+        {
+            return Err(GauntletError::Invalid(
+                "gauntlet manifests must contain the declared seat swap",
+            ));
         }
     }
     Ok(())
+}
+
+struct ManifestFacts {
+    north_deck: serde_json::Value,
+    seed: u64,
+    south_deck: serde_json::Value,
+}
+
+fn manifest_facts(manifest_json: &str) -> Result<ManifestFacts, GauntletError> {
+    let manifest: serde_json::Value = serde_json::from_str(manifest_json)?;
+    if manifest
+        .get("firstSeat")
+        .and_then(serde_json::Value::as_str)
+        != Some("north")
+    {
+        return Err(GauntletError::Invalid(
+            "gauntlet manifests must start with north",
+        ));
+    }
+    let seed = manifest
+        .get("seed")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or(GauntletError::Invalid(
+            "gauntlet manifest must declare an unsigned seed",
+        ))?;
+    let decks = manifest
+        .get("decks")
+        .and_then(serde_json::Value::as_object)
+        .ok_or(GauntletError::Invalid(
+            "gauntlet manifest must declare both decks",
+        ))?;
+    let north_deck = decks.get("north").cloned().ok_or(GauntletError::Invalid(
+        "gauntlet manifest must declare both decks",
+    ))?;
+    let south_deck = decks.get("south").cloned().ok_or(GauntletError::Invalid(
+        "gauntlet manifest must declare both decks",
+    ))?;
+    Ok(ManifestFacts {
+        north_deck,
+        seed,
+        south_deck,
+    })
 }

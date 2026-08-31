@@ -15,3 +15,4 @@ pub mod prng;
 pub mod selfplay;
 pub mod session;
 pub mod simulator;
+pub mod synthetic;

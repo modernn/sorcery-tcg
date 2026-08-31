@@ -7,6 +7,7 @@ use sorcery_engine::checkpoint::{
 };
 use sorcery_engine::contract::{ActionRequest, Seat};
 use sorcery_engine::session::{Session, StepResult};
+use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
 #[derive(Deserialize)]
 struct Fixture {
@@ -16,7 +17,6 @@ struct Fixture {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FixtureGame {
-    manifest_json: Option<String>,
     seed: u32,
 }
 
@@ -25,12 +25,13 @@ fn manifest() -> String {
         "../../../tests/engine/fixtures/typescript-parity-v1.json"
     ))
     .expect("valid checked-in TypeScript parity fixture");
-    fixture
+    let seed = fixture
         .games
         .into_iter()
         .find(|game| game.seed == 31)
-        .and_then(|game| game.manifest_json)
-        .expect("seed-31 canonical manifest JSON")
+        .map(|game| game.seed)
+        .expect("seed-31 fixture");
+    synthetic_demo_manifest_json(seed).expect("synthetic manifest")
 }
 
 #[test]

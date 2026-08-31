@@ -5,9 +5,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 use serde_json::{Value, json};
-use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
+use sorcery_engine::canonical::IdentityHash;
 use sorcery_engine::game::Game;
 use sorcery_engine::session::Session;
+use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
 const FIXTURE_JSON: &str =
     include_str!("../../../../tests/engine/fixtures/typescript-parity-v1.json");
@@ -26,7 +27,6 @@ struct Fixture {
 #[serde(rename_all = "camelCase")]
 struct FixtureGame {
     action_ids: Vec<IdentityHash>,
-    manifest_json: Option<String>,
     seed: u32,
 }
 
@@ -102,17 +102,11 @@ fn positive_integer(name: &str, fallback: u32, maximum: u32) -> BenchmarkResult<
 
 fn workloads() -> BenchmarkResult<Vec<Workload>> {
     let fixture: Fixture = serde_json::from_str(FIXTURE_JSON)?;
-    let template = fixture
-        .games
-        .iter()
-        .find_map(|game| game.manifest_json.as_deref())
-        .ok_or_else(|| io::Error::other("parity fixture has no canonical manifest"))?
-        .to_owned();
     fixture
         .games
         .into_iter()
         .map(|game| {
-            let manifest_json = manifest_for_seed(&template, game.seed)?;
+            let manifest_json = synthetic_demo_manifest_json(game.seed)?;
             let action_indices = resolve_action_indices(&manifest_json, &game.action_ids)?;
             Ok(Workload {
                 action_ids: game.action_ids,
@@ -144,18 +138,6 @@ fn resolve_action_indices(
         indices.push(index);
     }
     Ok(indices)
-}
-
-fn manifest_for_seed(template: &str, seed: u32) -> BenchmarkResult<String> {
-    let mut manifest: Value = serde_json::from_str(template)?;
-    let body = manifest
-        .as_object_mut()
-        .ok_or_else(|| io::Error::other("fixture manifest must be an object"))?;
-    body.remove("manifestId")
-        .ok_or_else(|| io::Error::other("fixture manifest has no identity"))?;
-    body.insert("seed".to_owned(), json!(seed));
-    manifest["manifestId"] = json!(identity_hash(&manifest)?);
-    Ok(canonical_json(&manifest)?)
 }
 
 fn transition_sample(workload: &Workload, game_count: u32) -> BenchmarkResult<Sample> {
