@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,7 +23,6 @@ const FIXTURE_PATH = fileURLToPath(
 );
 const SEEDS = [0, 31, 0xffff_ffff] as const;
 const PRNG_DRAWS = 5;
-const CAPTURED_STEPS = 8;
 const MAX_ACTIONS = 500;
 
 function hash(value: unknown): ReturnType<typeof identityHash> {
@@ -65,19 +64,17 @@ function captureGame(seed: number): JsonValue {
     const result = stepGame(session, action);
     if (!result.accepted) throw new Error(`issued action was rejected: ${result.reason.code}`);
     actionIds.push(action.actionId);
-    if (steps.length < CAPTURED_STEPS) {
-      steps.push({
-        eventIds: result.receipt.events.map(({ eventId }) => eventId),
-        eventTypes: result.receipt.events.map(({ type }) => type),
-        legalActionIds: legalActions.map(({ actionId }) => actionId),
-        postStateHash: result.receipt.postStateHash,
-        preStateHash,
-        randomDrawsHash: hash(result.receipt.randomDraws),
-        receiptId: result.receipt.receiptId,
-        selectedActionId: action.actionId,
-        stateVersion: session.state.stateVersion,
-      });
-    }
+    steps.push({
+      eventIds: result.receipt.events.map(({ eventId }) => eventId),
+      eventTypes: result.receipt.events.map(({ type }) => type),
+      legalActionIds: legalActions.map(({ actionId }) => actionId),
+      postStateHash: result.receipt.postStateHash,
+      preStateHash,
+      randomDrawsHash: hash(result.receipt.randomDraws),
+      receiptId: result.receipt.receiptId,
+      selectedActionId: action.actionId,
+      stateVersion: session.state.stateVersion,
+    });
     session = result.session;
   }
 
@@ -123,6 +120,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     if (readFileSync(FIXTURE_PATH, 'utf8') !== serialized) {
       throw new Error(`parity fixture is stale: ${FIXTURE_PATH}`);
     }
+  } else if (process.argv[2] === '--write') {
+    writeFileSync(FIXTURE_PATH, serialized);
   } else {
     process.stdout.write(serialized);
   }

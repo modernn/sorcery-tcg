@@ -28,7 +28,7 @@ test('TypeScript parity fixture regenerates byte-identically', () => {
   assert.equal(fixture.prng.length, 3);
   assert.equal(fixture.games.every(({ actionIds }) => actionIds.length > 0), true);
   assert.equal(fixture.games.every(({ replay }) => replay.verified), true);
-  assert.equal(fixture.games.every(({ steps }) => steps.length === 8), true);
+  assert.equal(fixture.games.every(({ actionIds, steps }) => steps.length === actionIds.length), true);
   const manifestJson = fixture.games.find(({ seed }) => seed === 31)?.manifestJson;
   assert.ok(manifestJson);
   assert.equal(canonicalJson(parseJsonWithDuplicateKeyCheck(manifestJson)), manifestJson);
