@@ -1006,7 +1006,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Charge allows a summoned minion to Move and Attack immediately.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "charge"
       ],
@@ -1020,8 +1020,8 @@
         "movement"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Charge allows a summoned minion to Move and Attack immediately"
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "charge_should_allow_immediate_move_and_attack_without_clearing_sickness"
       }
     },
     {
@@ -1642,15 +1642,15 @@
         "RULE-04"
       ],
       "plainLanguage": "A restricted attacker can target units but not sites.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "choose-target"
       ],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 a restricted attacker can target units but not sites"
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "restricted_attacker_should_preserve_unit_targets_and_filter_site_target"
       }
     },
     {
@@ -1886,7 +1886,7 @@
         "RULE-03"
       ],
       "plainLanguage": "A provider adds affinity until that minion dies.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "elemental-affinity"
       ],
@@ -1895,8 +1895,8 @@
         "death"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 a provider adds affinity until that minion dies"
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "provider_affinity_should_stop_immediately_when_provider_dies"
       }
     },
     {

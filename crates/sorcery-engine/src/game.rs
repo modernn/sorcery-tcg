@@ -752,7 +752,8 @@ impl Game {
                     seat: opposing_seat,
                 }),
         );
-        if let Some(site) = &self.position.sites[pending.cell.index()]
+        if self.attacker_can_target_sites(pending)?
+            && let Some(site) = &self.position.sites[pending.cell.index()]
             && site.controller == opposing_seat
         {
             targets.push(CombatTarget::Site {
@@ -881,7 +882,7 @@ impl Game {
             .position
             .units
             .iter()
-            .filter(|unit| unit.controller == seat && !unit.tapped && !unit.summoning_sickness)
+            .filter(|unit| self.minion_can_move_and_attack(unit, seat))
         {
             self.append_unit_move_actions(actions, &unit.card.instance_id, unit.location)?;
         }
@@ -945,29 +946,77 @@ impl Game {
             })
     }
 
-    fn thresholds_met(&self, seat: Seat, thresholds: Thresholds) -> bool {
-        let mut affinities = [0_u64; 4];
-        for site in self
+    fn minion_can_move_and_attack(&self, unit: &UnitPosition, seat: Seat) -> bool {
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return false;
+        };
+        unit.controller == seat && !unit.tapped && (!unit.summoning_sickness || facts.charge)
+    }
+
+    fn attacker_can_target_sites(&self, pending: &PendingCombat) -> Result<bool, GameError> {
+        if pending.attacker_kind == UnitKind::Avatar {
+            return Ok(true);
+        }
+        let unit = self
+            .position
+            .units
+            .iter()
+            .find(|unit| {
+                unit.card.instance_id == pending.attacker_instance_id
+                    && unit.controller == pending.attacking_seat
+            })
+            .ok_or(GameError::IllegalAction)?;
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        Ok(!facts.cannot_attack_sites)
+    }
+
+    fn elemental_affinities(&self, seat: Seat) -> [u64; 4] {
+        let site_elements = self
             .position
             .sites
             .iter()
             .flatten()
             .filter(|site| site.controller == seat)
-        {
-            let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
-            else {
-                continue;
-            };
-            for element in facts.elements.iter() {
-                affinities[match element {
-                    Element::Earth => 0,
-                    Element::Fire => 1,
-                    Element::Water => 2,
-                    Element::Air => 3,
-                }] += 1;
-            }
+            .filter_map(|site| {
+                let CardFacts::Site(facts) =
+                    &self.rules.cards[usize::from(site.card.card_id.0)].facts
+                else {
+                    return None;
+                };
+                Some(facts.elements)
+            })
+            .flat_map(crate::facts::ElementSet::iter);
+        let provider_elements = self
+            .position
+            .units
+            .iter()
+            .filter(|unit| unit.controller == seat)
+            .filter_map(|unit| {
+                let CardFacts::Minion(facts) =
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                else {
+                    return None;
+                };
+                facts.provides
+            });
+        let mut affinities = [0_u64; 4];
+        for element in site_elements.chain(provider_elements) {
+            affinities[match element {
+                Element::Earth => 0,
+                Element::Fire => 1,
+                Element::Water => 2,
+                Element::Air => 3,
+            }] += 1;
         }
         affinities
+    }
+
+    fn thresholds_met(&self, seat: Seat, thresholds: Thresholds) -> bool {
+        self.elemental_affinities(seat)
             .into_iter()
             .zip(thresholds.canonical())
             .all(|(available, required)| available >= required)
@@ -1722,7 +1771,7 @@ impl Game {
                 (
                     UnitKind::Minion,
                     unit.location,
-                    unit.controller == seat && !unit.tapped && !unit.summoning_sickness,
+                    self.minion_can_move_and_attack(unit, seat),
                 )
             }
         };
