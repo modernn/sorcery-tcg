@@ -13165,6 +13165,15 @@ function applyDescriptor(
     });
   });
   const stealthGainedIds = new Set(stealthGained.map(({ instanceId }) => instanceId));
+  const preExpiryStealthSettlement = settleNearbyEnemyStealth(deepFreeze({
+    ...endState,
+    realm: {
+      ...endState.realm,
+      units: endState.realm.units.map((unit) => stealthGainedIds.has(unit.instanceId)
+        ? deepFreeze({ ...unit, stealthed: true })
+        : unit),
+    },
+  }));
   const endPhaseUntapped = endState.realm.units.filter((unit) => {
     if (unit.controller !== seat || !unit.tapped || minionDisabled(endState, unit)) return false;
     const definition = cardDefinition(endState, unit.cardId);
@@ -13180,7 +13189,7 @@ function applyDescriptor(
     .filter(({ expiresAtSeat, sourceInstanceId }) =>
       expiresAtSeat !== nextSeat && !expiredAuraIds.has(sourceInstanceId));
   const chargeExpired: GameOutcome[] = [];
-  const units = endState.realm.units.map((unit) => {
+  const units = preExpiryStealthSettlement.state.realm.units.map((unit) => {
     const {
       disableEffects: previousDisableEffects,
       temporaryChargeSources,
@@ -13210,7 +13219,6 @@ function applyDescriptor(
       ...baseUnit,
       ...(disableEffects.length > 0 ? { disableEffects } : {}),
       damage: 0,
-      ...(stealthGainedIds.has(unit.instanceId) ? { stealthed: true } : {}),
       ...(unit.controller === seat ? { summoningSickness: false } : {}),
       ...(unit.controller === nextSeat || endPhaseUntappedIds.has(unit.instanceId)
         ? { tapped: false }
@@ -13233,11 +13241,12 @@ function applyDescriptor(
     },
     turnNumber,
   });
-  const startTurnTriggerIds = startTurnTriggerInstanceIds(nextTurnState, nextSeat);
+  const postExpiryStealthSettlement = settleNearbyEnemyStealth(nextTurnState);
+  const startTurnTriggerIds = startTurnTriggerInstanceIds(postExpiryStealthSettlement.state, nextSeat);
   const startedState: GameState = startTurnTriggerIds.length === 0
-    ? nextTurnState
+    ? postExpiryStealthSettlement.state
     : deepFreeze({
-      ...nextTurnState,
+      ...postExpiryStealthSettlement.state,
       pendingStartTurn: {
         remainingTriggerInstanceIds: startTurnTriggerIds,
         seat: nextSeat,
@@ -13258,6 +13267,7 @@ function applyDescriptor(
         payload: { instanceId, seat: controller },
         type: 'stealth-gained',
       })),
+      ...preExpiryStealthSettlement.outcomes,
       ...chargeExpired,
       ...powerExpired,
       ...countedAuras.map(({ controller, instanceId, turnCounters }) => ({
@@ -13282,6 +13292,7 @@ function applyDescriptor(
         },
         type: 'minion-disable-expired',
       })),
+      ...postExpiryStealthSettlement.outcomes,
       { payload: { drawSkipped: false, seat: nextSeat, turnNumber }, type: 'turn-started' },
     ],
     [],

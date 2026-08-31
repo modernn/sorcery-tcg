@@ -14168,6 +14168,28 @@ test('RULE-04 Scent Hounds permanently removes nearby enemy Stealth', () => {
   assert.equal(disabledMove.receipt.events.some(({ type }) => type === 'stealth-lost'), false);
   assert.equal(disabledMove.session.state.realm.units
     .find(({ instanceId }) => instanceId === targetInstanceId)?.stealthed, true);
+  let expiry = accept(disabledMove.session, action(disabledMove.session, ({ descriptor }) =>
+    descriptor.kind === 'decline-attack'));
+  expiry = accept(expiry, action(expiry, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  expiry = accept(expiry, action(expiry, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  const reenabled = stepGame(expiry, action(expiry, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  assert.equal(reenabled.accepted, true);
+  if (!reenabled.accepted) return;
+  assert.deepEqual(reenabled.receipt.events.map(({ type }) => type), [
+    'turn-ended',
+    'minion-disable-expired',
+    'stealth-lost',
+    'turn-started',
+  ]);
+  assert.deepEqual(reenabled.receipt.events[2]?.payload, {
+    instanceId: targetInstanceId,
+    seat: 'south',
+    sourceInstanceId: houndInstanceId,
+  });
+  assert.equal(reenabled.session.state.stateVersion, expiry.state.stateVersion + 1);
+  assert.equal(reenabled.session.state.realm.units
+    .find(({ instanceId }) => instanceId === targetInstanceId)?.stealthed, false);
 });
 
 test('RULE-04 Malakhim untaps at its controller End Phase unless Disabled', () => {
