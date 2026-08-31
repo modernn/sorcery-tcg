@@ -907,3 +907,127 @@ fn site_genesis_should_publicly_discard_up_to_two_spells_without_deck_out() {
         assert_exact_replay(&session);
     }
 }
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one direct scenario compares both engine-issued optional Genesis branches"
+)]
+fn optional_site_genesis_should_issue_decline_and_paid_token_branches() {
+    let mut value = manifest_value(
+        103,
+        &avatar(false, 20),
+        &minion(1, 1),
+        &minion(1, 1),
+        5,
+        5,
+        5,
+    );
+    value["cards"]["north-site"]["genesisPayOneManaToSummonToken"] = json!("foot-soldier");
+    value["cards"]["foot-soldier"] = json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        "token": true,
+    });
+    let manifest = finish_manifest(value);
+    let mut checkpoint =
+        Session::new(&manifest).expect("valid optional paid-token Genesis scenario");
+    keep(&mut checkpoint);
+    keep(&mut checkpoint);
+    let origin = state(&checkpoint);
+    let source_instance_id = origin["players"]["north"]["hand"]["atlas"][0]["instanceId"].clone();
+
+    let choices: Vec<_> = checkpoint
+        .legal_actions()
+        .expect("legal actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "play-site"
+                && action.descriptor["cell"] == "C4"
+                && action.descriptor["cardId"] == "north-site"
+                && action.descriptor["cardInstanceId"] == source_instance_id
+        })
+        .collect();
+    assert_eq!(choices.len(), 2);
+    assert_eq!(choices[0].descriptor["genesisTokenChoice"], "decline");
+    assert_eq!(choices[0].label, "Play north-site at C4 (decline Genesis)");
+    assert_eq!(choices[1].descriptor["genesisTokenChoice"], "pay-one-mana");
+    assert_eq!(
+        choices[1].label,
+        "Play north-site at C4 (pay 1 for Genesis)"
+    );
+    assert_ne!(choices[0].action_id, choices[1].action_id);
+
+    let mut declined = checkpoint.clone();
+    let (_, declined_receipt) = accept_where(&mut declined, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C4"
+            && descriptor["cardInstanceId"] == source_instance_id
+            && descriptor["genesisTokenChoice"] == "decline"
+    });
+    assert_eq!(event_types(&declined_receipt), ["site-played"]);
+    assert_eq!(state(&declined)["players"]["north"]["mana"], 1);
+    assert_eq!(state(&declined)["realm"]["units"], json!([]));
+    assert!(declined_receipt.random_draws.is_empty());
+    assert_exact_replay(&declined);
+
+    let origin_state_version = origin["stateVersion"].clone();
+    let expected_token_id = identity_hash(&json!({
+        "cardId": "foot-soldier",
+        "cell": "C4",
+        "ordinal": 0,
+        "owner": "north",
+        "source": "token",
+        "sourceInstanceId": source_instance_id,
+        "stateVersion": origin_state_version,
+    }))
+    .expect("deterministic token identity");
+    let mut paid = checkpoint;
+    let (_, paid_receipt) = accept_where(&mut paid, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C4"
+            && descriptor["cardInstanceId"] == source_instance_id
+            && descriptor["genesisTokenChoice"] == "pay-one-mana"
+    });
+    assert_eq!(
+        event_types(&paid_receipt),
+        ["site-played", "minion-summoned"]
+    );
+    assert!(paid_receipt.random_draws.is_empty());
+    let paid_state = state(&paid);
+    assert_eq!(paid_state["players"]["north"]["mana"], 0);
+    assert_eq!(
+        paid_receipt.events[1].payload,
+        json!({
+            "cardId": "foot-soldier",
+            "cell": "C4",
+            "instanceId": expected_token_id,
+            "manaPaid": 1,
+            "owner": "north",
+            "seat": "north",
+            "sourceInstanceId": source_instance_id,
+            "token": true,
+        })
+    );
+    assert_eq!(
+        paid_state["realm"]["units"][0],
+        json!({
+            "cardId": "foot-soldier",
+            "controller": "north",
+            "damage": 0,
+            "instanceId": expected_token_id,
+            "location": "C4",
+            "owner": "north",
+            "region": "surface",
+            "source": "token",
+            "stealthed": false,
+            "summoningSickness": true,
+            "tapped": false,
+            "warded": false,
+        })
+    );
+    assert_exact_replay(&paid);
+}

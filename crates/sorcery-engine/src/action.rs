@@ -19,6 +19,16 @@ pub enum DeckZone {
     Spellbook,
 }
 
+/// An engine-issued choice for an optional paid site Genesis token.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GenesisTokenChoice {
+    /// Resolve the site without paying for its token.
+    Decline,
+    /// Spend the mana gained by playing the site and summon its token.
+    PayOneMana,
+}
+
 impl DeckZone {
     const fn as_str(self) -> &'static str {
         match self {
@@ -126,6 +136,9 @@ pub enum ActionDescriptor {
         card_instance_id: IdentityHash,
         /// Empty realm cell receiving the site.
         cell: Cell,
+        /// Issued branch for a site with optional paid-token Genesis.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        genesis_token_choice: Option<GenesisTokenChoice>,
     },
     /// Summon a minion from the player's hand.
     SummonMinion {
@@ -281,15 +294,18 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     card_id: left_card,
                     card_instance_id: left_instance,
                     cell: left_cell,
+                    genesis_token_choice: left_choice,
                 },
                 ActionDescriptor::PlaySite {
                     card_id: right_card,
                     card_instance_id: right_instance,
                     cell: right_cell,
+                    genesis_token_choice: right_choice,
                 },
             ) => compare_json_strings(left_card, right_card)
                 .then_with(|| left_instance.cmp(right_instance))
-                .then_with(|| left_cell.cmp(right_cell)),
+                .then_with(|| left_cell.cmp(right_cell))
+                .then_with(|| compare_optional_genesis_choices(*left_choice, *right_choice)),
             (
                 ActionDescriptor::SummonMinion {
                     card_id: left_card,
@@ -365,6 +381,18 @@ fn compare_mana_activations(
     right_unit: &IdentityHash,
 ) -> Ordering {
     compare_json_integers(left_amount, right_amount).then_with(|| left_unit.cmp(right_unit))
+}
+
+fn compare_optional_genesis_choices(
+    left: Option<GenesisTokenChoice>,
+    right: Option<GenesisTokenChoice>,
+) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => left.cmp(&right),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
 }
 
 const fn descriptor_group(action: &ActionDescriptor) -> u8 {

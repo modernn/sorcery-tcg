@@ -1343,7 +1343,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Humble Village Genesis may spend its mana to summon one Foot Soldier.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "genesis"
       ],
@@ -1355,8 +1355,8 @@
         "summon"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Humble Village Genesis may spend its mana to summon one Foot Soldier"
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "optional_site_genesis_should_issue_decline_and_paid_token_branches"
       }
     },
     {

@@ -8,7 +8,9 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-use crate::action::{ActionDescriptor, CombatTarget, DeckZone, compare_canonical};
+use crate::action::{
+    ActionDescriptor, CombatTarget, DeckZone, GenesisTokenChoice, compare_canonical,
+};
 use crate::board::{Cell, Location, Region};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
@@ -264,6 +266,7 @@ enum CardSource {
     Atlas,
     Avatar,
     Spellbook,
+    Token,
 }
 
 impl CardSource {
@@ -272,6 +275,7 @@ impl CardSource {
             Self::Atlas => "atlas",
             Self::Avatar => "avatar",
             Self::Spellbook => "spellbook",
+            Self::Token => "token",
         }
     }
 }
@@ -837,17 +841,43 @@ impl Game {
         if !player.avatar.tapped {
             let cells = self.legal_site_cells(seat);
             for card in &player.hand_atlas {
-                let card_id = &self.rules.cards[usize::from(card.card_id.0)].id;
+                let definition = &self.rules.cards[usize::from(card.card_id.0)];
+                let card_id = &definition.id;
+                let paid_token = matches!(
+                    &definition.facts,
+                    CardFacts::Site(facts)
+                        if facts.genesis_pay_one_mana_to_summon_token.is_some()
+                );
+                let token_choices = if paid_token {
+                    [
+                        Some(GenesisTokenChoice::Decline),
+                        Some(GenesisTokenChoice::PayOneMana),
+                    ]
+                } else {
+                    [None, None]
+                };
                 for cell in &cells {
-                    self.push_action(
-                        actions,
-                        ActionDescriptor::PlaySite {
-                            card_id: card_id.clone(),
-                            card_instance_id: card.instance_id.clone(),
-                            cell: *cell,
-                        },
-                        format!("Play {card_id} at {cell}"),
-                    );
+                    for genesis_token_choice in
+                        token_choices
+                            .into_iter()
+                            .take(if paid_token { 2 } else { 1 })
+                    {
+                        let suffix = match genesis_token_choice {
+                            Some(GenesisTokenChoice::Decline) => " (decline Genesis)",
+                            Some(GenesisTokenChoice::PayOneMana) => " (pay 1 for Genesis)",
+                            None => "",
+                        };
+                        self.push_action(
+                            actions,
+                            ActionDescriptor::PlaySite {
+                                card_id: card_id.clone(),
+                                card_instance_id: card.instance_id.clone(),
+                                cell: *cell,
+                                genesis_token_choice,
+                            },
+                            format!("Play {card_id} at {cell}{suffix}"),
+                        );
+                    }
                 }
             }
         }
@@ -1207,9 +1237,15 @@ impl Game {
                 card_id,
                 card_instance_id,
                 cell,
-            } => {
-                self.apply_play_site_action(action.seat, card_id, card_instance_id, *cell, outcomes)
-            }
+                genesis_token_choice,
+            } => self.apply_play_site_action(
+                action.seat,
+                card_id,
+                card_instance_id,
+                *cell,
+                *genesis_token_choice,
+                outcomes,
+            ),
             ActionDescriptor::SummonMinion { .. } => {
                 self.apply_summon_minion_action(action, outcomes)
             }
@@ -2047,8 +2083,10 @@ impl Game {
         card_id: &str,
         card_instance_id: &IdentityHash,
         cell: Cell,
+        genesis_token_choice: Option<GenesisTokenChoice>,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        let origin_state_version = self.position.state_version;
         let player_index = seat_index(seat);
         let player = &self.position.players[player_index];
         if self.position.phase != Phase::Main
@@ -2069,6 +2107,28 @@ impl Game {
         let definition = &self.rules.cards[usize::from(played_card_id.0)];
         let CardFacts::Site(facts) = &definition.facts else {
             return Err(GameError::IllegalAction);
+        };
+        let genesis_token_card_id = facts.genesis_pay_one_mana_to_summon_token.clone();
+        match (&genesis_token_card_id, genesis_token_choice) {
+            (Some(_), Some(GenesisTokenChoice::Decline | GenesisTokenChoice::PayOneMana))
+            | (None, None) => {}
+            _ => return Err(GameError::IllegalAction),
+        }
+        let paid_token = matches!(genesis_token_choice, Some(GenesisTokenChoice::PayOneMana));
+        let token = if paid_token {
+            Some(
+                self.create_token_unit(
+                    seat,
+                    genesis_token_card_id
+                        .as_deref()
+                        .ok_or(GameError::IllegalAction)?,
+                    card_instance_id,
+                    cell,
+                    origin_state_version,
+                )?,
+            )
+        } else {
+            None
         };
         let genesis_gain_mana = facts.genesis_gain_mana.or_else(|| {
             (facts.genesis_gain_mana_if_only_controlled_copy
@@ -2095,7 +2155,10 @@ impl Game {
         };
         let genesis_heal_nearby_avatars = facts.genesis_heal_nearby_avatars;
         let ordinary_mana = player.mana.checked_add(1).ok_or(GameError::IllegalAction)?;
-        let final_mana = ordinary_mana
+        let mana_after_token = ordinary_mana
+            .checked_sub(u16::from(paid_token))
+            .ok_or(GameError::IllegalAction)?;
+        let final_mana = mana_after_token
             .checked_add(u16::from(genesis_gain_mana.unwrap_or(0)))
             .ok_or(GameError::IllegalAction)?;
         let card = self.position.players[player_index]
@@ -2104,7 +2167,7 @@ impl Game {
         let player = &mut self.position.players[player_index];
         player.avatar.tapped = true;
         player.domain_established = true;
-        player.mana = ordinary_mana;
+        player.mana = mana_after_token;
         self.position.sites[cell.index()] = Some(SitePosition {
             card,
             controller: seat,
@@ -2118,6 +2181,26 @@ impl Game {
                 "seat": seat,
             })
         });
+        if let Some(token) = token {
+            let token_card_id = self.rules.cards[usize::from(token.card.card_id.0)]
+                .id
+                .clone();
+            let token_instance_id = token.card.instance_id.clone();
+            let token_owner = token.card.owner;
+            self.position.units.push(token);
+            outcomes.push("minion-summoned", || {
+                json!({
+                    "cardId": token_card_id,
+                    "cell": cell,
+                    "instanceId": token_instance_id,
+                    "manaPaid": 1,
+                    "owner": token_owner,
+                    "seat": seat,
+                    "sourceInstanceId": card_instance_id,
+                    "token": true,
+                })
+            });
+        }
         if let Some(amount) = genesis_gain_mana {
             self.position.players[player_index].mana = final_mana;
             outcomes.push("mana-gained", || {
@@ -2190,6 +2273,62 @@ impl Game {
             }
         }
         Ok(())
+    }
+
+    fn create_token_unit(
+        &self,
+        owner: Seat,
+        token_card_id: &str,
+        source_instance_id: &IdentityHash,
+        cell: Cell,
+        origin_state_version: u64,
+    ) -> Result<UnitPosition, GameError> {
+        let (index, definition) = self
+            .rules
+            .cards
+            .iter()
+            .enumerate()
+            .find(|(_, definition)| definition.id == token_card_id)
+            .ok_or_else(|| invalid("token effect lacks its referenced token minion definition"))?;
+        let CardFacts::Minion(facts) = &definition.facts else {
+            return Err(invalid(
+                "token effect lacks its referenced token minion definition",
+            ));
+        };
+        if !facts.token {
+            return Err(invalid(
+                "token effect lacks its referenced token minion definition",
+            ));
+        }
+        let card_id = CardId(
+            u16::try_from(index)
+                .map_err(|_| invalid("manifest contains too many card definitions"))?,
+        );
+        Ok(UnitPosition {
+            card: CardInstance {
+                card_id,
+                instance_id: identity_hash(&json!({
+                    "cardId": token_card_id,
+                    "cell": cell,
+                    "ordinal": 0,
+                    "owner": owner,
+                    "source": "token",
+                    "sourceInstanceId": source_instance_id,
+                    "stateVersion": origin_state_version,
+                }))?,
+                owner,
+                source: CardSource::Token,
+            },
+            controller: owner,
+            damage: 0,
+            disabled_until_damaged: false,
+            last_interacted_turn: None,
+            location: cell,
+            stealthed: facts.stealth,
+            summoning_sickness: true,
+            tapped: false,
+            warded: matches!(facts.damage_prevention, Some(DamagePrevention::Ward)),
+        })
     }
 
     fn apply_mana_activation(
