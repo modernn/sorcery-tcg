@@ -16,8 +16,9 @@ use crate::board::{Cell, Location, Region};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{
-    CardFacts, DamagePrevention, Element, EndTurnStealth, FactError, MagicEffect, MinionFacts,
-    MinionGenesis, SiteFacts, Thresholds, parse_card_definition, validate_identifier,
+    BasicMovementRestriction, CardFacts, DamagePrevention, Element, EndTurnStealth, FactError,
+    MagicEffect, MinionFacts, MinionGenesis, SiteFacts, Thresholds, parse_card_definition,
+    validate_identifier,
 };
 use crate::prng::PrngState;
 
@@ -468,6 +469,14 @@ struct UnitDamageSource {
 struct SummonDestination {
     cell: Cell,
     mana_cost: u64,
+}
+
+#[derive(Clone, Copy)]
+struct MovementProfile {
+    connects_top_bottom: bool,
+    maximum_steps: usize,
+    restriction: Option<BasicMovementRestriction>,
+    seat: Seat,
 }
 
 enum OutcomeLog<'a> {
@@ -1144,7 +1153,12 @@ impl Game {
                 actions,
                 &player.avatar.card.instance_id,
                 player.avatar.location,
-                false,
+                MovementProfile {
+                    connects_top_bottom: false,
+                    maximum_steps: 1,
+                    restriction: None,
+                    seat,
+                },
             )?;
         }
         for unit in self
@@ -1162,7 +1176,12 @@ impl Game {
                 actions,
                 &unit.card.instance_id,
                 unit.location,
-                facts.connects_top_bottom,
+                MovementProfile {
+                    connects_top_bottom: facts.connects_top_bottom,
+                    maximum_steps: 1 + usize::from(facts.movement_bonus.unwrap_or(0)),
+                    restriction: facts.movement_restriction,
+                    seat,
+                },
             )?;
         }
         if !player.avatar.tapped {
@@ -1209,25 +1228,13 @@ impl Game {
         actions: &mut Vec<IssuedAction>,
         instance_id: &IdentityHash,
         start: Cell,
-        connects_top_bottom: bool,
+        profile: MovementProfile,
     ) -> Result<(), GameError> {
-        let from = Location {
-            cell: start,
-            region: Region::Surface,
-        };
-        for destination in std::iter::once(start).chain(
-            start
-                .bordering(connects_top_bottom)
-                .filter(|cell| self.surface_location_exists(*cell)),
-        ) {
-            let to = Location {
-                cell: destination,
-                region: Region::Surface,
-            };
-            let mut path = vec![from];
-            if destination != start {
-                path.push(to);
-            }
+        for path in self.surface_movement_paths(start, profile) {
+            let from = path[0];
+            let to = *path
+                .last()
+                .ok_or_else(|| invalid("movement path is empty"))?;
             let descriptor = ActionDescriptor::MoveAndAttack {
                 from,
                 path,
@@ -1240,6 +1247,64 @@ impl Game {
             self.push_action(actions, descriptor, label);
         }
         Ok(())
+    }
+
+    fn surface_movement_paths(&self, start: Cell, profile: MovementProfile) -> Vec<Vec<Location>> {
+        if !self.surface_location_exists(start) {
+            return Vec::new();
+        }
+        let start = Location {
+            cell: start,
+            region: Region::Surface,
+        };
+        let mut paths = vec![vec![start]];
+        let mut frontier = paths.clone();
+        for _ in 0..profile.maximum_steps {
+            let mut next_frontier = Vec::new();
+            for path in frontier {
+                let current = *path.last().expect("movement path starts nonempty");
+                for cell in current.cell.bordering(profile.connects_top_bottom) {
+                    let candidate = Location {
+                        cell,
+                        region: Region::Surface,
+                    };
+                    if !self.surface_location_exists(cell)
+                        || !Self::movement_restriction_allows(profile, current.cell, cell)
+                        || path
+                            .windows(2)
+                            .any(|edge| edge[0] == current && edge[1] == candidate)
+                    {
+                        continue;
+                    }
+                    let mut next = path.clone();
+                    next.push(candidate);
+                    next_frontier.push(next);
+                }
+            }
+            frontier = next_frontier;
+            paths.extend(frontier.iter().cloned());
+        }
+        paths
+    }
+
+    fn movement_restriction_allows(profile: MovementProfile, from: Cell, to: Cell) -> bool {
+        match profile.restriction {
+            None => true,
+            Some(BasicMovementRestriction::SidewaysOnly) => from.rank_index() == to.rank_index(),
+            Some(BasicMovementRestriction::ForwardOnly) => {
+                let forward_rank = match profile.seat {
+                    Seat::North => from.rank_index() - 1,
+                    Seat::South => from.rank_index() + 1,
+                };
+                from.file_index() == to.file_index()
+                    && (to.rank_index() == forward_rank
+                        || profile.connects_top_bottom
+                            && match profile.seat {
+                                Seat::North => from.rank_index() == 0 && to.rank_index() == 3,
+                                Seat::South => from.rank_index() == 3 && to.rank_index() == 0,
+                            })
+            }
+        }
     }
 
     fn controlled_site_cells(&self, seat: Seat) -> impl Iterator<Item = Cell> + '_ {
@@ -2264,24 +2329,28 @@ impl Game {
     ) -> Result<(), GameError> {
         if self.position.phase != Phase::Main
             || seat != self.position.active_seat
-            || from.region != Region::Surface
-            || to.region != Region::Surface
-            || !(1..=2).contains(&path.len())
+            || path.is_empty()
+            || path
+                .iter()
+                .any(|location| location.region != Region::Surface)
             || path.first() != Some(&from)
             || path.last() != Some(&to)
-            || !self.surface_location_exists(to.cell)
-            || (path.len() == 1 && from != to)
         {
             return Err(GameError::IllegalAction);
         }
-        let (attacker_kind, current_location, ready, connects_top_bottom) = {
+        let (attacker_kind, current_location, ready, profile) = {
             let player = &self.position.players[seat_index(seat)];
             if player.avatar.card.instance_id == *unit_instance_id {
                 (
                     UnitKind::Avatar,
                     player.avatar.location,
                     !player.avatar.tapped,
-                    false,
+                    MovementProfile {
+                        connects_top_bottom: false,
+                        maximum_steps: 1,
+                        restriction: None,
+                        seat,
+                    },
                 )
             } else {
                 let unit = self
@@ -2299,18 +2368,21 @@ impl Game {
                     UnitKind::Minion,
                     unit.location,
                     self.minion_can_move_and_attack(unit, seat),
-                    facts.connects_top_bottom,
+                    MovementProfile {
+                        connects_top_bottom: facts.connects_top_bottom,
+                        maximum_steps: 1 + usize::from(facts.movement_bonus.unwrap_or(0)),
+                        restriction: facts.movement_restriction,
+                        seat,
+                    },
                 )
             }
         };
         if !ready
             || current_location != from.cell
-            || path.len() == 2
-                && (from == to
-                    || !from
-                        .cell
-                        .bordering(connects_top_bottom)
-                        .any(|cell| cell == to.cell))
+            || !self
+                .surface_movement_paths(current_location, profile)
+                .iter()
+                .any(|candidate| candidate == path)
         {
             return Err(GameError::IllegalAction);
         }

@@ -57,6 +57,14 @@ impl Cell {
         self.0 as usize
     }
 
+    pub(crate) const fn file_index(self) -> i8 {
+        self.file()
+    }
+
+    pub(crate) const fn rank_index(self) -> i8 {
+        self.rank()
+    }
+
     /// Returns bordering cells in west, south, east, north order.
     ///
     /// A top-bottom connection appends the opposite rank after ordinary borders.

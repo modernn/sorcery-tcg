@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
-use sorcery_engine::contract::{ActionRequest, Receipt};
+use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
 use sorcery_engine::session::{Session, StepResult};
 
 fn minion(attack: u8, defense: u8) -> Value {
@@ -114,6 +114,287 @@ fn assert_exact_replay(session: &Session) {
     );
     assert_eq!(replayed.transcript(), session.transcript());
     assert!(session.verify_replay().expect("verified replay"));
+}
+
+fn ready_movement_session(
+    seed: u32,
+    mut mover: Value,
+    seat: Seat,
+    summon_cell: &str,
+    destination_defender: bool,
+) -> (Session, String) {
+    mover["summonToAnySite"] = json!(true);
+    let manifest = scenario_manifest(
+        seed,
+        &json!({
+            "north-mover": mover.clone(),
+            "south-mover": mover,
+        }),
+        &["north-mover"; 8],
+        &["south-mover"; 8],
+    );
+    let mut session = Session::new(&manifest).expect("valid movement scenario");
+    keep(&mut session);
+    keep(&mut session);
+    for (site_cell, draw_zone) in [
+        ("C4", None),
+        ("C1", Some("spellbook")),
+        ("C3", Some("spellbook")),
+        ("C2", Some("spellbook")),
+    ] {
+        if let Some(zone) = draw_zone {
+            accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "draw" && descriptor["zone"] == zone
+            });
+        }
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == site_cell
+        });
+        if seat == Seat::South && site_cell == "C2" {
+            let (summon, _) = accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "summon-minion"
+                    && descriptor["cardId"] == "south-mover"
+                    && descriptor["cell"] == summon_cell
+            });
+            let instance_id = summon["cardInstanceId"]
+                .as_str()
+                .expect("mover identity")
+                .to_owned();
+            accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+            accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+            });
+            accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "play-site" && descriptor["cell"] == "B3"
+            });
+            accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+            accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+            });
+            return (session, instance_id);
+        }
+        if destination_defender && seat == Seat::North && site_cell == "C2" {
+            accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "summon-minion"
+                    && descriptor["cardId"] == "south-mover"
+                    && descriptor["cell"] == "C1"
+            });
+        }
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    }
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "B3"
+    });
+    let (summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-mover"
+            && descriptor["cell"] == summon_cell
+    });
+    let instance_id = summon["cardInstanceId"]
+        .as_str()
+        .expect("mover identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    (session, instance_id)
+}
+
+fn movement_paths(session: &Session, instance_id: &str) -> Vec<String> {
+    session
+        .legal_actions()
+        .expect("movement actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "move-and-attack"
+                && action.descriptor["unitInstanceId"] == instance_id
+        })
+        .map(|action| {
+            action.descriptor["path"]
+                .as_array()
+                .expect("movement path")
+                .iter()
+                .map(|location| location["cell"].as_str().expect("path cell"))
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .collect()
+}
+
+#[test]
+fn movement_bonus_one_should_issue_exact_returning_surface_paths() {
+    let mut mover = minion(2, 3);
+    mover["movementBonus"] = json!(1);
+    let (mut session, instance_id) = ready_movement_session(53, mover, Seat::North, "C2", false);
+    assert_eq!(
+        movement_paths(&session, &instance_id),
+        [
+            "C2,C1,C2", "C2,C1", "C2,C3,B3", "C2,C3,C2", "C2,C3,C4", "C2,C3", "C2",
+        ]
+    );
+    let action = session
+        .legal_actions()
+        .expect("movement actions")
+        .into_iter()
+        .find(|action| {
+            action.descriptor["kind"] == "move-and-attack"
+                && action.descriptor["unitInstanceId"] == instance_id
+                && action.descriptor["path"].as_array().is_some_and(|path| {
+                    path.iter()
+                        .map(|location| location["cell"].as_str().expect("path cell"))
+                        .eq(["C2", "C3", "C4"])
+                })
+        })
+        .expect("exact two-step action");
+    assert!(action.label.ends_with(" C2 → C3 → C4"));
+    let (_, receipt) = accept_where(&mut session, |descriptor| descriptor == &action.descriptor);
+    assert_eq!(receipt.events[0].event_type, "move-and-attack-activated");
+    assert_eq!(receipt.events[0].payload["steps"], 2);
+    assert_eq!(state(&session)["realm"]["units"][0]["location"], "C4");
+    assert_eq!(state(&session)["pendingCombat"]["cell"], "C4");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn movement_bonus_two_should_reject_reused_directed_edges_and_attack_after_three_steps() {
+    let mut mover = minion(2, 3);
+    mover["movementBonus"] = json!(2);
+    let (mut session, instance_id) = ready_movement_session(125, mover, Seat::North, "C2", true);
+    let paths = movement_paths(&session, &instance_id);
+    assert!(paths.contains(&"C2,C3,C2".to_owned()));
+    assert!(paths.contains(&"C2,C3,C4,C3".to_owned()));
+    assert!(!paths.contains(&"C2,C3,C2,C3".to_owned()));
+    assert!(paths.iter().all(|path| path.split(',').count() <= 4));
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == instance_id
+            && descriptor["path"].as_array().is_some_and(|path| {
+                path.iter()
+                    .map(|location| location["cell"].as_str().expect("path cell"))
+                    .eq(["C2", "C3", "C2", "C1"])
+            })
+    });
+    assert_eq!(receipt.events[0].payload["steps"], 3);
+    let defender_id = state(&session)["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["controller"] == "south" && unit["location"] == "C1")
+        .and_then(|unit| unit["instanceId"].as_str())
+        .expect("destination defender")
+        .to_owned();
+    assert!(
+        session
+            .legal_actions()
+            .expect("final-cell attacks")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "declare-attack"
+                    && action.descriptor["target"]["kind"] == "minion"
+                    && action.descriptor["target"]["instanceId"] == defender_id
+            })
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn sideways_restriction_should_filter_every_non_sideways_step() {
+    let mut mover = minion(3, 3);
+    mover["movementBonus"] = json!(1);
+    mover["movesOnlySideways"] = json!(true);
+    let (mut session, instance_id) = ready_movement_session(127, mover, Seat::North, "C3", false);
+    assert_eq!(
+        movement_paths(&session, &instance_id),
+        ["C3,B3,C3", "C3,B3", "C3"]
+    );
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == instance_id
+            && descriptor["path"].as_array().is_some_and(|path| {
+                path.iter()
+                    .map(|location| location["cell"].as_str().expect("path cell"))
+                    .eq(["C3", "B3"])
+            })
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
+    assert_eq!(state(&session)["realm"]["units"][0]["location"], "B3");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn forward_restriction_should_use_seat_direction_and_top_bottom_wrap() {
+    let mut mover = minion(5, 5);
+    mover["connectsTopBottom"] = json!(true);
+    mover["movementBonus"] = json!(1);
+    mover["movesOnlyForward"] = json!(true);
+    let (mut north, north_id) =
+        ready_movement_session(142, mover.clone(), Seat::North, "C3", false);
+    assert_eq!(
+        movement_paths(&north, &north_id),
+        ["C3,C2,C1", "C3,C2", "C3"]
+    );
+    accept_where(&mut north, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == north_id
+            && descriptor["path"].as_array().is_some_and(|path| {
+                path.iter()
+                    .map(|location| location["cell"].as_str().expect("path cell"))
+                    .eq(["C3", "C2", "C1"])
+            })
+    });
+    accept_where(&mut north, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
+    accept_where(&mut north, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut north, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut north, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut north, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let north_edge_paths = movement_paths(&north, &north_id);
+    assert!(north_edge_paths.contains(&"C1,C4".to_owned()));
+    assert!(
+        !north_edge_paths
+            .iter()
+            .any(|path| path.starts_with("C1,C2"))
+    );
+
+    let (mut south, south_id) = ready_movement_session(143, mover, Seat::South, "C4", false);
+    let south_edge_paths = movement_paths(&south, &south_id);
+    assert!(south_edge_paths.contains(&"C4,C1".to_owned()));
+    assert!(
+        !south_edge_paths
+            .iter()
+            .any(|path| path.starts_with("C4,C3"))
+    );
+    accept_where(&mut south, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == south_id
+            && descriptor["path"].as_array().is_some_and(|path| {
+                path.iter()
+                    .map(|location| location["cell"].as_str().expect("path cell"))
+                    .eq(["C4", "C1"])
+            })
+    });
+    accept_where(&mut south, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
+    assert_eq!(state(&south)["realm"]["units"][0]["location"], "C1");
+    assert_exact_replay(&north);
+    assert_exact_replay(&south);
 }
 
 #[test]

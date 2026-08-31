@@ -2434,7 +2434,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Movement +1 issues exact two-step and returning Move and Attack paths.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "movement-bonus"
       ],
@@ -2446,8 +2446,8 @@
         "movement"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Movement +1 issues exact two-step and returning Move and Attack paths"
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "movement_bonus_one_should_issue_exact_returning_surface_paths"
       }
     },
     {
@@ -2475,7 +2475,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Movement +2 issues exact three-step paths and attacks after moving.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "movement-bonus"
       ],
@@ -2487,8 +2487,8 @@
         "movement"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Movement +2 issues exact three-step paths and attacks after moving"
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "movement_bonus_two_should_reject_reused_directed_edges_and_attack_after_three_steps"
       }
     },
     {
