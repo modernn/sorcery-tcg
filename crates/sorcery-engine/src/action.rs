@@ -299,6 +299,13 @@ pub enum ActionDescriptor {
         /// Whether the original attack target remains a combatant.
         original_target_participates: bool,
     },
+    /// Move one ready unit at the fight location into combat.
+    Intercept {
+        /// Authoritative intercepting unit identity.
+        unit_instance_id: IdentityHash,
+    },
+    /// Close the intercept window without adding another combatant.
+    CloseIntercept {},
     /// Assign one striker's damage to a combatant.
     AllocateStrike {
         /// Damage assigned by this action.
@@ -419,6 +426,11 @@ impl ActionDescriptor {
                 }
                 .to_owned(),
             ),
+            Self::Intercept { unit_instance_id } => Some(format!(
+                "Intercept with {}…",
+                short_identity(unit_instance_id)
+            )),
+            Self::CloseIntercept {} => Some("Close intercept window".to_owned()),
             Self::AllocateStrike {
                 amount,
                 target_instance_id,
@@ -646,6 +658,14 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                         },
                     ) => left.cmp(right),
                     (
+                        ActionDescriptor::Intercept {
+                            unit_instance_id: left,
+                        },
+                        ActionDescriptor::Intercept {
+                            unit_instance_id: right,
+                        },
+                    ) => left.cmp(right),
+                    (
                         ActionDescriptor::DeclareAttack { target: left },
                         ActionDescriptor::DeclareAttack { target: right },
                     ) => compare_targets(left, right),
@@ -793,21 +813,23 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::AllocateStrike { .. } => 1,
         ActionDescriptor::CastMagic { .. } => 2,
         ActionDescriptor::CloseDefend { .. } => 3,
-        ActionDescriptor::DeclareAttack { .. } => 4,
-        ActionDescriptor::DeclineAttack => 5,
-        ActionDescriptor::Defend { .. } => 6,
-        ActionDescriptor::Draw { .. } => 7,
-        ActionDescriptor::DrawSite => 8,
-        ActionDescriptor::DrawSpell => 9,
-        ActionDescriptor::EndTurn => 10,
-        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 11,
-        ActionDescriptor::ResolveGenesisSpell { .. } => 12,
-        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 13,
-        ActionDescriptor::ResolveGenesisToken { .. } => 14,
-        ActionDescriptor::Mulligan { .. } => 15,
-        ActionDescriptor::PlaySite { .. } => 16,
-        ActionDescriptor::SummonMinion { .. } => 17,
-        ActionDescriptor::MoveAndAttack { .. } => 18,
+        ActionDescriptor::CloseIntercept {} => 4,
+        ActionDescriptor::DeclareAttack { .. } => 5,
+        ActionDescriptor::DeclineAttack => 6,
+        ActionDescriptor::Defend { .. } => 7,
+        ActionDescriptor::Draw { .. } => 8,
+        ActionDescriptor::DrawSite => 9,
+        ActionDescriptor::DrawSpell => 10,
+        ActionDescriptor::EndTurn => 11,
+        ActionDescriptor::Intercept { .. } => 12,
+        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 13,
+        ActionDescriptor::ResolveGenesisSpell { .. } => 14,
+        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 15,
+        ActionDescriptor::ResolveGenesisToken { .. } => 16,
+        ActionDescriptor::Mulligan { .. } => 17,
+        ActionDescriptor::PlaySite { .. } => 18,
+        ActionDescriptor::SummonMinion { .. } => 19,
+        ActionDescriptor::MoveAndAttack { .. } => 20,
     }
 }
 

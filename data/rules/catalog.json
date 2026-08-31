@@ -1931,7 +1931,7 @@
         "RULE-04"
       ],
       "plainLanguage": "A prohibited minion cannot move to Defend but can still Intercept.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "move",
@@ -1942,8 +1942,8 @@
         "movement"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 a prohibited minion cannot move to Defend but can still Intercept"
+        "file": "crates/sorcery-engine/tests/intercept_rules.rs",
+        "testName": "cannot_defend_should_block_movement_but_allow_stationary_defend_and_intercept"
       }
     },
     {
@@ -1952,7 +1952,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Immobile units attack and Defend in place but cannot move themselves.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "immobile"
       ],
@@ -1965,8 +1965,8 @@
         "movement"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Immobile units attack and Defend in place but cannot move themselves"
+        "file": "crates/sorcery-engine/tests/intercept_rules.rs",
+        "testName": "immobile_should_defend_and_attack_in_place_without_moving"
       }
     },
     {
@@ -1975,7 +1975,7 @@
         "RULE-04"
       ],
       "plainLanguage": "A fully prohibited minion cannot use Defend or Intercept.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "defend",
@@ -1983,8 +1983,8 @@
       ],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 a fully prohibited minion cannot use Defend or Intercept"
+        "file": "crates/sorcery-engine/tests/intercept_rules.rs",
+        "testName": "cannot_defend_or_intercept_should_exclude_both_response_actions"
       }
     },
     {
@@ -2212,7 +2212,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Dalcean Phalanx can move itself only forward for its seat.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "move"
@@ -2221,8 +2221,8 @@
         "movement"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Dalcean Phalanx can move itself only forward for its seat"
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "forward_restriction_should_use_seat_direction_and_top_bottom_wrap"
       }
     },
     {
@@ -2701,7 +2701,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Declining an attack gives only co-located ready enemies an Intercept window.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "attack",
@@ -2710,8 +2710,8 @@
       ],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 declining an attack gives only co-located ready enemies an Intercept window"
+        "file": "crates/sorcery-engine/tests/intercept_rules.rs",
+        "testName": "decline_should_offer_only_colocated_ready_interceptor_and_close_into_fight"
       }
     },
     {

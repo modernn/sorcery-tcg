@@ -82,6 +82,19 @@
         "kind": "allocate-strike",
         "targetInstanceId": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
       }
+    },
+    {
+      "actionId": "sha256:c05572083030d22e92234761fb1f80d1309ca567623010470a5dc6089eb67e4a",
+      "descriptor": {
+        "kind": "intercept",
+        "unitInstanceId": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+      }
+    },
+    {
+      "actionId": "sha256:b789148aa3e940cd996ea8dd985328284de035bd4a71864262b9fba51f1894fa",
+      "descriptor": {
+        "kind": "close-intercept"
+      }
     }
   ],
   "canonicalActionIds": [
@@ -92,7 +105,9 @@
     "sha256:5e5e8be8135200d4b0adc25661c5e3458b29f3df98e120f7be143d3bb138891b",
     "sha256:8731334b37ded08815d8307df962196e18f9aa155e9d82579050d0090e1ea6a5",
     "sha256:bc4f20db38feea3760ae76fd3a8b254e8fa989538e30cf0e21fdf00039e7cc65",
-    "sha256:c11162bb0429ee8fecf80ccf21117ceb88c027257276faf9b5a1922e63f9c613"
+    "sha256:c11162bb0429ee8fecf80ccf21117ceb88c027257276faf9b5a1922e63f9c613",
+    "sha256:b789148aa3e940cd996ea8dd985328284de035bd4a71864262b9fba51f1894fa",
+    "sha256:c05572083030d22e92234761fb1f80d1309ca567623010470a5dc6089eb67e4a"
   ],
   "contract": "sorcery-core-v1",
   "schemaVersion": 1,

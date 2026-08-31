@@ -356,6 +356,9 @@ fn forward_restriction_should_use_seat_direction_and_top_bottom_wrap() {
     accept_where(&mut north, |descriptor| {
         descriptor["kind"] == "decline-attack"
     });
+    accept_where(&mut north, |descriptor| {
+        descriptor["kind"] == "close-intercept"
+    });
     accept_where(&mut north, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(&mut north, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"

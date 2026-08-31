@@ -419,6 +419,7 @@ enum Phase {
     Defend,
     Draw,
     Genesis,
+    Intercept,
     Main,
     Mulligan,
     Terminal,
@@ -432,6 +433,7 @@ impl Phase {
             Self::Defend => "defend",
             Self::Draw => "draw",
             Self::Genesis => "genesis",
+            Self::Intercept => "intercept",
             Self::Main => "main",
             Self::Mulligan => "mulligan",
             Self::Terminal => "terminal",
@@ -772,6 +774,7 @@ impl Game {
             Phase::Defend => self.append_defend_actions(&mut actions)?,
             Phase::Draw => self.append_draw_actions(&mut actions)?,
             Phase::Genesis => self.append_genesis_actions(&mut actions)?,
+            Phase::Intercept => self.append_intercept_actions(&mut actions)?,
             Phase::Mulligan => self.append_mulligan_actions(&mut actions)?,
             Phase::Main => self.append_main_actions(&mut actions)?,
             Phase::Terminal => {}
@@ -891,6 +894,128 @@ impl Game {
             self.push_action(actions, descriptor, label);
         }
         Ok(())
+    }
+
+    fn append_intercept_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
+        for target in self.interceptor_candidates()? {
+            let descriptor = ActionDescriptor::Intercept {
+                unit_instance_id: target.instance_id().clone(),
+            };
+            let label = descriptor
+                .state_independent_label()
+                .ok_or_else(|| invalid("intercept action requires a label"))?;
+            self.push_action(actions, descriptor, label);
+        }
+        let descriptor = ActionDescriptor::CloseIntercept {};
+        let label = descriptor
+            .state_independent_label()
+            .ok_or_else(|| invalid("close-intercept action requires a label"))?;
+        self.push_action(actions, descriptor, label);
+        Ok(())
+    }
+
+    fn interceptor_candidates(&self) -> Result<Vec<UnitTarget>, GameError> {
+        let pending = self
+            .position
+            .pending_combat
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        let seat = other_seat(pending.attacking_seat);
+        if self.combatant_stealthed(
+            pending.attacker_kind,
+            pending.attacking_seat,
+            &pending.attacker_instance_id,
+        )? {
+            return Ok(Vec::new());
+        }
+        let attacker_airborne = self.combatant_airborne(
+            pending.attacker_kind,
+            pending.attacking_seat,
+            &pending.attacker_instance_id,
+        )?;
+        let unavailable: BTreeSet<_> = pending
+            .defenders
+            .iter()
+            .map(|target| target.instance_id().clone())
+            .collect();
+        let mut candidates = Vec::new();
+        let player = &self.position.players[seat_index(seat)];
+        if player.avatar.location == pending.cell
+            && !player.avatar.tapped
+            && !unavailable.contains(&player.avatar.card.instance_id)
+            && !attacker_airborne
+        {
+            candidates.push(UnitTarget::Avatar {
+                instance_id: player.avatar.card.instance_id.clone(),
+                seat,
+            });
+        }
+        for unit in &self.position.units {
+            if unit.controller != seat
+                || unit.location != pending.cell
+                || unit.tapped
+                || self.minion_is_disabled(unit)
+                || unavailable.contains(&unit.card.instance_id)
+            {
+                continue;
+            }
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return Err(invalid("realm minion lacks Minion facts"));
+            };
+            if facts.cannot_defend_or_intercept
+                || unit.summoning_sickness && !facts.charge
+                || attacker_airborne && !facts.airborne && !facts.ranged
+            {
+                continue;
+            }
+            candidates.push(UnitTarget::Minion {
+                instance_id: unit.card.instance_id.clone(),
+                seat,
+            });
+        }
+        Ok(candidates)
+    }
+
+    fn combatant_stealthed(
+        &self,
+        kind: UnitKind,
+        seat: Seat,
+        instance_id: &IdentityHash,
+    ) -> Result<bool, GameError> {
+        match kind {
+            UnitKind::Avatar => Ok(false),
+            UnitKind::Minion => self
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.controller == seat && unit.card.instance_id == *instance_id)
+                .map(|unit| unit.stealthed)
+                .ok_or(GameError::IllegalAction),
+        }
+    }
+
+    fn combatant_airborne(
+        &self,
+        kind: UnitKind,
+        seat: Seat,
+        instance_id: &IdentityHash,
+    ) -> Result<bool, GameError> {
+        if kind == UnitKind::Avatar {
+            return Ok(false);
+        }
+        let unit = self
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.controller == seat && unit.card.instance_id == *instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        Ok(facts.airborne)
     }
 
     fn defender_candidates(
@@ -1390,7 +1515,11 @@ impl Game {
                 unit.location,
                 MovementProfile {
                     connects_top_bottom: facts.connects_top_bottom,
-                    maximum_steps: 1 + usize::from(facts.movement_bonus.unwrap_or(0)),
+                    maximum_steps: if facts.immobile {
+                        0
+                    } else {
+                        1 + usize::from(facts.movement_bonus.unwrap_or(0))
+                    },
                     restriction: facts.movement_restriction,
                     seat,
                 },
@@ -1948,6 +2077,9 @@ impl Game {
             } => {
                 self.apply_close_defend_action(action.seat, *original_target_participates, outcomes)
             }
+            ActionDescriptor::CloseIntercept {} => {
+                self.apply_close_intercept_action(action.seat, outcomes)
+            }
             ActionDescriptor::DeclareAttack { target } => {
                 self.apply_declare_attack_action(action.seat, target, outcomes)
             }
@@ -2005,6 +2137,9 @@ impl Game {
                 outcomes,
             ),
             ActionDescriptor::EndTurn => self.apply_end_turn_action(action.seat, outcomes),
+            ActionDescriptor::Intercept { unit_instance_id } => {
+                self.apply_intercept_action(action.seat, unit_instance_id, outcomes)
+            }
             ActionDescriptor::DrawSite => {
                 self.apply_draw_action(action.seat, DeckZone::Atlas, true, outcomes)
             }
@@ -2027,24 +2162,20 @@ impl Game {
         if self.position.phase != Phase::Attack || pending.attacking_seat != seat {
             return Err(GameError::IllegalAction);
         }
-        if self.position.units.iter().any(|unit| {
-            unit.controller != seat
-                && unit.location == pending.cell
-                && !unit.tapped
-                && !unit.summoning_sickness
-        }) {
-            return Err(GameError::UnsupportedManifestFact(
-                "intercept window after declined attack".to_owned(),
-            ));
-        }
+        let intercept_window_opened = !self.interceptor_candidates()?.is_empty();
         let attacker_instance_id = pending.attacker_instance_id.clone();
-        self.position.pending_combat = None;
-        self.position.phase = Phase::Main;
-        self.position.decision_seat = seat;
+        if intercept_window_opened {
+            self.position.phase = Phase::Intercept;
+            self.position.decision_seat = other_seat(seat);
+        } else {
+            self.position.pending_combat = None;
+            self.position.phase = Phase::Main;
+            self.position.decision_seat = seat;
+        }
         self.position.state_version += 1;
         outcomes.push("attack-declined", || {
             json!({
-                "interceptWindowOpened": false,
+                "interceptWindowOpened": intercept_window_opened,
                 "seat": seat,
                 "unitInstanceId": attacker_instance_id,
             })
@@ -2240,6 +2371,89 @@ impl Game {
         if final_allocation {
             self.resolve_pending_fight(outcomes)?;
         }
+        Ok(())
+    }
+
+    fn apply_intercept_action(
+        &mut self,
+        seat: Seat,
+        unit_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        if self.position.phase != Phase::Intercept {
+            return Err(GameError::IllegalAction);
+        }
+        let target = self
+            .interceptor_candidates()?
+            .into_iter()
+            .find(|target| target.instance_id() == unit_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        let cell = self
+            .position
+            .pending_combat
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?
+            .cell;
+        match &target {
+            UnitTarget::Avatar { .. } => {
+                self.position.players[seat_index(seat)].avatar.tapped = true;
+            }
+            UnitTarget::Minion { .. } => {
+                self.position
+                    .units
+                    .iter_mut()
+                    .find(|unit| {
+                        unit.controller == seat && unit.card.instance_id == *unit_instance_id
+                    })
+                    .ok_or(GameError::IllegalAction)?
+                    .tapped = true;
+            }
+        }
+        self.position
+            .pending_combat
+            .as_mut()
+            .ok_or(GameError::IllegalAction)?
+            .defenders
+            .push(target);
+        self.position.state_version += 1;
+        outcomes.push("interceptor-joined", || {
+            json!({
+                "cell": cell,
+                "instanceId": unit_instance_id,
+                "seat": seat,
+            })
+        });
+        Ok(())
+    }
+
+    fn apply_close_intercept_action(
+        &mut self,
+        seat: Seat,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let pending = self
+            .position
+            .pending_combat
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        if self.position.phase != Phase::Intercept || seat != other_seat(pending.attacking_seat) {
+            return Err(GameError::IllegalAction);
+        }
+        let interceptor_count = pending.defenders.len();
+        let defenders = pending.defenders.clone();
+        outcomes.push(
+            "intercept-window-closed",
+            || json!({ "interceptorCount": interceptor_count }),
+        );
+        if defenders.is_empty() {
+            let attacking_seat = pending.attacking_seat;
+            self.position.pending_combat = None;
+            self.position.phase = Phase::Main;
+            self.position.decision_seat = attacking_seat;
+        } else {
+            self.begin_fight(defenders, outcomes)?;
+        }
+        self.position.state_version += 1;
         Ok(())
     }
 
@@ -3168,6 +3382,10 @@ impl Game {
         });
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one closed movement transaction revalidates the complete issued path"
+    )]
     fn apply_move_and_attack_action(
         &mut self,
         seat: Seat,
@@ -3220,7 +3438,11 @@ impl Game {
                     self.minion_can_move_and_attack(unit, seat),
                     MovementProfile {
                         connects_top_bottom: facts.connects_top_bottom,
-                        maximum_steps: 1 + usize::from(facts.movement_bonus.unwrap_or(0)),
+                        maximum_steps: if facts.immobile {
+                            0
+                        } else {
+                            1 + usize::from(facts.movement_bonus.unwrap_or(0))
+                        },
                         restriction: facts.movement_restriction,
                         seat,
                     },

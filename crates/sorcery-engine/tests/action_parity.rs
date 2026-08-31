@@ -35,6 +35,8 @@ fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
         ActionDescriptor::DeclareAttack { .. } => "declare-attack",
         ActionDescriptor::Defend { .. } => "defend",
         ActionDescriptor::CloseDefend { .. } => "close-defend",
+        ActionDescriptor::Intercept { .. } => "intercept",
+        ActionDescriptor::CloseIntercept {} => "close-intercept",
         ActionDescriptor::EndTurn => "end-turn",
     }
 }
@@ -66,7 +68,10 @@ fn combat_response_descriptors_order_ids_and_labels_should_match_typescript() {
         );
         if matches!(
             descriptor,
-            ActionDescriptor::Defend { .. } | ActionDescriptor::AllocateStrike { .. }
+            ActionDescriptor::Defend { .. }
+                | ActionDescriptor::Intercept { .. }
+                | ActionDescriptor::CloseIntercept {}
+                | ActionDescriptor::AllocateStrike { .. }
         ) {
             labels.push(
                 descriptor
@@ -100,6 +105,8 @@ fn combat_response_descriptors_order_ids_and_labels_should_match_typescript() {
             "Defend with sha256:11111111… via C2 → C3",
             "Assign 2 damage to sha256:11111111…",
             "Assign 10 damage to sha256:33333333…",
+            "Intercept with sha256:44444444…",
+            "Close intercept window",
         ]
     );
 }
@@ -261,6 +268,21 @@ fn unsupported_fields_and_null_substitutions_should_be_rejected() {
         "originalTargetParticipates": null
     });
     assert!(serde_json::from_value::<ActionDescriptor>(null_required_field).is_err());
+
+    let intercept_with_unsupported_field = json!({
+        "kind": "intercept",
+        "unitInstanceId": NORTH_AVATAR,
+        "from": { "cell": "C4", "region": "surface" }
+    });
+    assert!(serde_json::from_value::<ActionDescriptor>(intercept_with_unsupported_field).is_err());
+
+    let close_intercept_with_unsupported_field = json!({
+        "kind": "close-intercept",
+        "unitInstanceId": NORTH_AVATAR
+    });
+    assert!(
+        serde_json::from_value::<ActionDescriptor>(close_intercept_with_unsupported_field).is_err()
+    );
 }
 
 #[test]
