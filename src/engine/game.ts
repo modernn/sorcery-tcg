@@ -6835,7 +6835,7 @@ function applyDeathriteOrder(
     : reconcilePendingCombat(resolvedState, resolvedState.pendingCombat);
   const basicMovement = resolvedState.pendingBasicMovement;
   const staleBasicMovement = basicMovement
-    && (!resolvedState.realm.units.some(({ instanceId }) =>
+    && (!unitRefs(resolvedState, basicMovement.seat).some(({ instanceId }) =>
       instanceId === basicMovement.sourceInstanceId)
       || basicMovement.purpose === 'defend' && reconciledCombat === null);
   const movementState = staleBasicMovement
@@ -7001,16 +7001,18 @@ function settleStaticPowerDeaths(
     deaths,
     new Set<GameSeat>(),
   );
+  const resolvedState = deepFreeze({
+    ...state,
+    realm: { ...state.realm, units: resolution.units },
+  });
   const pendingCombat = state.pendingCombat === null
     ? null
-    : reconcilePendingCombat(
-      deepFreeze({ ...state, realm: { ...state.realm, units: resolution.units } }),
-      state.pendingCombat,
-    );
+    : reconcilePendingCombat(resolvedState, state.pendingCombat);
   const pendingInvalid = state.pendingCombat !== null && pendingCombat === null;
   const movement = state.pendingBasicMovement;
   const movementInvalid = movement !== null && movement !== undefined
-    && (!resolution.units.some(({ instanceId }) => instanceId === movement.sourceInstanceId)
+    && (!unitRefs(resolvedState, movement.seat).some(({ instanceId }) =>
+      instanceId === movement.sourceInstanceId)
       || (movement.purpose === 'defend' && pendingCombat === null));
   const terminal = state.terminal.status === 'finished'
     ? state.terminal
@@ -7334,32 +7336,15 @@ function resolveDeclaredPath(
     current = settlement.state;
     outcomes.push(...settlement.outcomes);
     removals.push(...settlement.removals);
-    if (current.pendingDeathrites) {
-      // ponytail: resume the remaining declared path when an actual-card scenario
-      // first combines multi-edge movement with ordered Deathrites.
-      if (index < path.length - 1) {
-        throw new Error('unsupported Deathrite ordering during multi-step movement');
-      }
-      break;
-    }
+    if (current.pendingDeathrites) break;
     const stealthSettlement = settleNearbyEnemyStealth(current);
     current = stealthSettlement.state;
     outcomes.push(...stealthSettlement.outcomes);
-    if (current.pendingDeathrites) {
-      if (index < path.length - 1) {
-        throw new Error('unsupported Deathrite ordering during multi-step movement');
-      }
-      break;
-    }
+    if (current.pendingDeathrites) break;
     const powerSettlement = settleStaticPowerDeaths(current);
     current = powerSettlement.state;
     outcomes.push(...powerSettlement.outcomes);
-    if (current.pendingDeathrites) {
-      if (index < path.length - 1) {
-        throw new Error('unsupported Deathrite ordering during multi-step movement');
-      }
-      break;
-    }
+    if (current.pendingDeathrites) break;
     if (settlement.removals.some(({ instanceId }) => instanceId === ref.instanceId)
       || current.terminal.status === 'finished') break;
   }
@@ -12385,9 +12370,9 @@ function applyDescriptor(
         candidate.kind === 'continue-basic-movement'
         && candidate.unitInstanceId === descriptor.unitInstanceId);
     if (!legal || !pending) throw new Error('unreachable illegal basic movement continuation');
-    const unit = state.realm.units.find(({ controller, instanceId }) =>
-      controller === seat && instanceId === pending.sourceInstanceId);
-    if (!unit) {
+    const ref = unitRefs(state, seat).find(({ instanceId }) =>
+      instanceId === pending.sourceInstanceId);
+    if (!ref) {
       return [
         withStateVersion(state, {
           decisionSeat: pending.purpose === 'defend' && state.pendingCombat !== null
@@ -12400,7 +12385,6 @@ function applyDescriptor(
         [],
       ];
     }
-    const ref: GameUnitRef = { instanceId: unit.instanceId, kind: 'minion', seat };
     const reachedPath = pending.path.slice(0, pending.pathIndex + 1);
     const next = pending.path[pending.pathIndex + 1];
     if (!next) {
@@ -12415,9 +12399,29 @@ function applyDescriptor(
       false,
     );
     const path = [...reachedPath, ...edge.path.slice(1)];
-    const sourceRemains = edge.state.realm.units.some(({ controller, instanceId, location, region }) =>
-      controller === seat && instanceId === ref.instanceId
-      && location === next.cell && region === next.region);
+    const continued: GameOutcome = {
+      payload: {
+        from: edge.path[0]!,
+        purpose: pending.purpose,
+        seat,
+        sourceInstanceId: ref.instanceId,
+        to: edge.path.at(-1)!,
+      },
+      type: 'basic-movement-continued',
+    };
+    if (edge.state.pendingDeathrites) {
+      return [
+        withStateVersion(edge.state, {
+          pendingBasicMovement: { ...pending, pathIndex: pending.pathIndex + 1 },
+        }),
+        [continued, ...edge.outcomes],
+        [],
+      ];
+    }
+    const sourceRemains = unitRefs(edge.state, seat).some((candidate) =>
+      candidate.instanceId === ref.instanceId
+      && candidate.kind === ref.kind
+      && unitOccupiesLocation(edge.state, candidate, next));
     const combatRemains = pending.purpose === 'move-and-attack' || edge.state.pendingCombat !== null;
     if (!sourceRemains || !combatRemains || edge.state.terminal.status === 'finished') {
       return pending.purpose === 'move-and-attack'
@@ -12430,16 +12434,7 @@ function applyDescriptor(
         pendingBasicMovement: { ...pending, pathIndex: pending.pathIndex + 1 },
         phase: 'movement',
       }),
-      [{
-        payload: {
-          from: edge.path[0]!,
-          purpose: pending.purpose,
-          seat,
-          sourceInstanceId: ref.instanceId,
-          to: edge.path.at(-1)!,
-        },
-        type: 'basic-movement-continued',
-      }, ...edge.outcomes],
+      [continued, ...edge.outcomes],
       [],
     ];
   }
@@ -12465,22 +12460,34 @@ function applyDescriptor(
     }
     const path = resolveDeclaredPath(state, ref, descriptor.path, true);
     if (path.state.pendingDeathrites) {
-      const activated: GameOutcome = {
-        payload: {
-          from: path.path[0]!,
-          path: path.path,
-          seat: ref.seat,
-          steps: path.path.length - 1,
-          to: path.path.at(-1)!,
-          unitInstanceId: ref.instanceId,
-        },
-        type: 'move-and-attack-activated',
-      };
+      const pathComplete = path.path.length === descriptor.path.length;
+      const movement: GameOutcome = pathComplete
+        ? {
+          payload: {
+            from: path.path[0]!,
+            path: path.path,
+            seat: ref.seat,
+            steps: path.path.length - 1,
+            to: path.path.at(-1)!,
+            unitInstanceId: ref.instanceId,
+          },
+          type: 'move-and-attack-activated',
+        }
+        : {
+          payload: {
+            from: path.path[0]!,
+            path: descriptor.path,
+            purpose: 'move-and-attack',
+            seat: ref.seat,
+            sourceInstanceId: ref.instanceId,
+            to: descriptor.path.at(-1)!,
+          },
+          type: 'basic-movement-started',
+        };
       return [
         withStateVersion(path.state, {
-          decisionSeat: seat,
           pendingBasicMovement: {
-            activationEmitted: true,
+            ...(pathComplete ? { activationEmitted: true as const } : {}),
             path: descriptor.path,
             pathIndex: path.path.length - 1,
             purpose: 'move-and-attack',
@@ -12488,9 +12495,13 @@ function applyDescriptor(
             seat,
             sourceInstanceId: ref.instanceId,
           },
-          phase: 'movement',
+          pendingDeathrites: {
+            ...path.state.pendingDeathrites,
+            returnDecisionSeat: seat,
+            returnPhase: 'movement',
+          },
         }),
-        [activated, ...path.outcomes],
+        [movement, ...path.outcomes],
         [],
       ];
     }
@@ -12592,33 +12603,45 @@ function applyDescriptor(
     }
     const path = resolveDeclaredPath(state, ref, descriptor.path, true);
     if (path.state.pendingDeathrites) {
-      const destination = state.pendingCombat
+      const pathComplete = path.path.length === descriptor.path.length;
+      const destination = path.state.pendingCombat
         ? {
-          cell: state.pendingCombat.cell,
-          region: state.pendingCombat.region ?? 'surface' as const,
+          cell: path.state.pendingCombat.cell,
+          region: path.state.pendingCombat.region ?? 'surface' as const,
         }
         : path.path.at(-1)!;
-      const defenderArrived = state.pendingCombat !== null
+      const defenderArrived = path.state.pendingCombat !== null
         && unitRefs(path.state, ref.seat).some((candidate) =>
           candidate.instanceId === ref.instanceId
             && candidate.kind === ref.kind
             && unitOccupiesLocation(path.state, candidate, destination));
-      const movement: GameOutcome = {
-        payload: {
-          from: path.path[0]!,
-          instanceId: ref.instanceId,
-          path: path.path,
-          seat: ref.seat,
-          steps: path.path.length - 1,
-          to: path.path.at(-1)!,
-        },
-        type: defenderArrived ? 'defender-joined' : 'defender-moved',
-      };
+      const movement: GameOutcome = pathComplete
+        ? {
+          payload: {
+            from: path.path[0]!,
+            instanceId: ref.instanceId,
+            path: path.path,
+            seat: ref.seat,
+            steps: path.path.length - 1,
+            to: path.path.at(-1)!,
+          },
+          type: defenderArrived ? 'defender-joined' : 'defender-moved',
+        }
+        : {
+          payload: {
+            from: path.path[0]!,
+            path: descriptor.path,
+            purpose: 'defend',
+            seat: ref.seat,
+            sourceInstanceId: ref.instanceId,
+            to: descriptor.path.at(-1)!,
+          },
+          type: 'basic-movement-started',
+        };
       return [
         withStateVersion(path.state, {
-          decisionSeat: seat,
           pendingBasicMovement: {
-            activationEmitted: true,
+            ...(pathComplete ? { activationEmitted: true as const } : {}),
             path: descriptor.path,
             pathIndex: path.path.length - 1,
             purpose: 'defend',
@@ -12626,7 +12649,11 @@ function applyDescriptor(
             seat,
             sourceInstanceId: ref.instanceId,
           },
-          phase: 'movement',
+          pendingDeathrites: {
+            ...path.state.pendingDeathrites,
+            returnDecisionSeat: seat,
+            returnPhase: 'movement',
+          },
         }),
         [movement, ...path.outcomes],
         [],

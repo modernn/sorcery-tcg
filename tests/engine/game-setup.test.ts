@@ -5684,6 +5684,7 @@ test('RULE-04 aura-loss deaths cannot restore stale combat during a defender pat
     'defend-fragile': {
       attack: 1,
       cardType: 'minion',
+      deathriteHeal: 3,
       defense: 1,
       manaCost: 0,
       thresholds,
@@ -5747,6 +5748,7 @@ test('RULE-04 aura-loss deaths cannot restore stale combat during a defender pat
     ].map(({ cardId }) => cardId));
     if (['defend-fragile', 'defend-source', 'defend-target']
       .every((cardId) => northOpening.has(cardId))
+      && opening.north.spellbook[0]?.cardId === 'defend-fragile'
       && southBySecondTurn.has('defend-attacker')
       && new Set([
         ...opening.south.hand.spellbook,
@@ -5779,6 +5781,11 @@ test('RULE-04 aura-loss deaths cannot restore stale combat during a defender pat
   take(({ descriptor }) => descriptor.kind === 'end-turn');
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === 'defend-fragile'
+    && descriptor.cell === 'C4');
+  const fragiles = session.state.realm.units.filter(({ cardId }) => cardId === 'defend-fragile');
+  assert.equal(fragiles.length, 2);
   take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === source.instanceId
     && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,B4');
@@ -5816,17 +5823,49 @@ test('RULE-04 aura-loss deaths cannot restore stale combat during a defender pat
   assert.equal(defended.accepted, true);
   if (!defended.accepted) return;
   session = defended.session;
+  assert.equal(session.state.phase, 'deathrite-order');
+  assert.equal(session.state.decisionSeat, 'north');
+  assert.deepEqual(defended.receipt.events.map(({ type }) => type), ['basic-movement-started']);
+  assert.equal(fragiles.every(({ instanceId }) => !session.state.realm.units
+    .some((unit) => unit.instanceId === instanceId)), true);
+  assert.equal(fragiles.every(({ instanceId }) => !session.state.players.north.cemetery
+    .some((card) => card.instanceId === instanceId)), true);
+  const orderActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'order-deathrites');
+  assert.deepEqual(orderActions.flatMap(({ descriptor }) =>
+    descriptor.kind === 'order-deathrites' ? [descriptor.sourceInstanceId] : []).sort(),
+  fragiles.map(({ instanceId }) => instanceId).sort());
+
+  session = resumeGameCheckpoint(parseGameCheckpoint(serializeGameCheckpoint(
+    createGameCheckpoint(session),
+  )));
+  const ordered = stepGame(session, orderActions[0]!);
+  assert.equal(ordered.accepted, true);
+  if (!ordered.accepted) return;
+  session = ordered.session;
+  assert.equal(session.state.phase, 'movement');
+  assert.equal(ordered.receipt.events.filter(({ type }) => type === 'minion-died').length, 2);
+  assert.equal(fragiles.every(({ instanceId }) => session.state.players.north.cemetery
+    .some((card) => card.instanceId === instanceId)), true);
+
+  const events = [...defended.receipt.events, ...ordered.receipt.events];
+  while (session.state.phase === 'movement') {
+    const continued = stepGame(session, action(session, ({ descriptor }) =>
+      descriptor.kind === 'continue-basic-movement'));
+    assert.equal(continued.accepted, true);
+    if (!continued.accepted) return;
+    session = continued.session;
+    events.push(...continued.receipt.events);
+  }
+  assert.equal(session.state.phase, 'defend');
   assert.deepEqual(session.state.pendingCombat?.defenders.map(({ instanceId }) => instanceId), [
     source.instanceId,
   ]);
-  assert.equal(session.state.realm.units.some(({ instanceId }) =>
-    instanceId === fragile.instanceId), false);
-  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
-    instanceId === fragile.instanceId), true);
-  assert.deepEqual(defended.receipt.events.map(({ type }) => type), [
-    'defender-joined',
-    'minion-died',
-  ]);
+  assert.equal(events.filter(({ type }) => type === 'basic-movement-started').length, 1);
+  assert.equal(events.filter(({ type }) => type === 'basic-movement-continued').length, 2);
+  assert.equal(events.filter(({ type }) => type === 'defender-joined').length, 1);
+  assert.ok(events.findIndex(({ type }) => type === 'defender-joined')
+    > events.findLastIndex(({ type }) => type === 'minion-died'));
   assert.equal(verifyGameReplay(session), true);
 });
 
