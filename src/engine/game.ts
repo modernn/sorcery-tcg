@@ -449,6 +449,15 @@ type PendingDeathriteBatch = Readonly<{
 
 type GamePhase = 'allocate' | 'attack' | 'cemetery-summon' | 'chain-magic' | 'deathrite-order' | 'defend' | 'draw' | 'end-turn-aura' | 'genesis' | 'intercept' | 'main' | 'movement' | 'mulligan' | 'random-choice' | 'ranged-step' | 'start-turn' | 'terminal';
 
+type LeapAttackContinuation = Readonly<{
+  ally: GameUnitRef;
+  cardId: string;
+  instanceId: StateHash;
+  kind: 'leap-attack';
+  owner: GameSeat;
+  strikeLocation: GameLocation;
+}>;
+
 type DeathriteContinuation =
   | Readonly<{
     cardId: string;
@@ -469,6 +478,7 @@ type DeathriteContinuation =
     kind: 'first-strike';
     pending: PendingCombat;
   }>
+  | LeapAttackContinuation
   | Readonly<{
     caster: GameUnitRef;
     descriptor: SummonMinionDescriptor;
@@ -6961,6 +6971,10 @@ function applyDeathriteOrder(
       continuation,
     );
     continuedStateVersioned = true;
+  } else if (!resolution.pendingDeathrites
+    && resolution.terminal.status === 'active'
+    && continuation?.kind === 'leap-attack') {
+    continued = finishLeapAttack(resumedState, continuation);
   } else {
     continued = !resolution.pendingDeathrites && continuation?.kind === 'first-strike'
       ? continueFirstStrikeAfterDeathrites(resumedState, continuation)
@@ -6973,7 +6987,8 @@ function applyDeathriteOrder(
     ? []
     : [
       ...(pending.deferredOutcomes ?? []),
-      ...(resolution.terminal.status === 'finished' && continuation?.kind === 'blink'
+      ...(resolution.terminal.status === 'finished'
+        && (continuation?.kind === 'blink' || continuation?.kind === 'leap-attack')
         ? [{
           payload: {
             cardId: continuation.cardId,
@@ -8015,6 +8030,87 @@ function continueFirstStrikeAfterDeathrites(
     !continuation.attackerStrikesFirst,
     survivors.filter(({ instanceId }) => !firstIds.has(instanceId)),
   );
+}
+
+function finishLeapAttack(
+  state: GameState,
+  continuation: LeapAttackContinuation,
+  priorOutcomes: readonly GameOutcome[] = [],
+): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
+  const resolved: GameOutcome = {
+    payload: {
+      cardId: continuation.cardId,
+      instanceId: continuation.instanceId,
+      owner: continuation.owner,
+    },
+    type: 'magic-resolved',
+  };
+  const complete = (
+    completedState: GameState,
+    outcomes: readonly GameOutcome[],
+    randomDraws: readonly EngineRandomDraw[] = [],
+  ): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] => {
+    const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
+    return [
+      completedState,
+      terminalIndex < 0
+        ? [...outcomes, resolved]
+        : [
+          ...outcomes.slice(0, terminalIndex),
+          resolved,
+          ...outcomes.slice(terminalIndex),
+        ],
+      randomDraws,
+    ];
+  };
+  const allyRemains = unitRefs(state, continuation.ally.seat).some((candidate) =>
+    candidate.instanceId === continuation.ally.instanceId
+      && candidate.kind === continuation.ally.kind);
+  if (!allyRemains || state.terminal.status === 'finished') {
+    return complete(state, priorOutcomes);
+  }
+  const striker = unitStatus(state, continuation.ally);
+  const enemies = striker.region === continuation.strikeLocation.region
+    && striker.occupiedCells.includes(continuation.strikeLocation.cell)
+    ? unitRefs(state, otherSeat(continuation.ally.seat))
+      .filter((enemy) => {
+        const status = unitStatus(state, enemy);
+        return status.region === striker.region
+          && status.occupiedCells.includes(continuation.strikeLocation.cell);
+      })
+      .sort((left, right) => left.instanceId.localeCompare(right.instanceId))
+    : [];
+  if (striker.disabled || enemies.length === 0) return complete(state, priorOutcomes);
+  const amount = strikeDamage(state, continuation.ally);
+  const pending: PendingCombat = deepFreeze({
+    allocations: enemies.map(({ instanceId }) => ({ amount, targetInstanceId: instanceId })),
+    attacker: continuation.ally,
+    attackingSeat: continuation.ally.seat,
+    cell: continuation.strikeLocation.cell,
+    combatants: enemies,
+    defenders: [],
+    originalTarget: null,
+    ...(striker.region === 'surface' ? {} : { region: striker.region }),
+    targetRemoved: false,
+  });
+  const allocationOutcomes: readonly GameOutcome[] = enemies.map(({ instanceId }) => ({
+    payload: {
+      amount,
+      strikerInstanceId: continuation.ally.instanceId,
+      targetInstanceId: instanceId,
+    },
+    type: 'strike-damage-allocated',
+  }));
+  const [struck, strikeOutcomes, randomDraws] = resolveFightWindow(
+    state,
+    pending,
+    [...priorOutcomes, ...allocationOutcomes],
+    'attacker-unit',
+    true,
+    false,
+    [continuation.ally],
+  );
+  return complete(struck, strikeOutcomes, randomDraws);
 }
 
 function finishFight(
@@ -9873,88 +9969,36 @@ function applyDescriptor(
         }]
         : [];
       const outcomesBeforeStrike = [...castOutcomes, ...stepOutcomes, ...path.outcomes];
+      const continuation: LeapAttackContinuation = {
+        ally: descriptor.ally,
+        cardId: card.cardId,
+        instanceId: card.instanceId,
+        kind: 'leap-attack',
+        owner: card.owner,
+        strikeLocation: descriptor.allyStrikeLocation ?? steppedTo,
+      };
       if (path.state.pendingDeathrites) {
-        // ponytail: serialize Leap Attack's destination strike when an actual-card
-        // scenario first combines it with ordered movement deaths.
-        throw new Error('unsupported Deathrite ordering during Leap Attack continuation');
-      }
-      const moverRemoved = path.removals.some(({ instanceId }) =>
-        instanceId === descriptor.ally!.instanceId);
-      if (moverRemoved || path.state.terminal.status === 'finished') {
-        const terminalIndex = outcomesBeforeStrike.findIndex(({ type }) => type === 'game-ended');
         return [
-          withStateVersion(path.state, {}),
-          terminalIndex < 0
-            ? [...outcomesBeforeStrike, resolved]
-            : [
-              ...outcomesBeforeStrike.slice(0, terminalIndex),
-              resolved,
-              ...outcomesBeforeStrike.slice(terminalIndex),
-            ],
+          withStateVersion(path.state, {
+            pendingDeathrites: {
+              ...path.state.pendingDeathrites,
+              continuation,
+              returnDecisionSeat: seat,
+              returnPhase: 'main',
+            },
+          }),
+          outcomesBeforeStrike,
           [],
         ];
       }
-      const striker = unitStatus(path.state, descriptor.ally);
-      const strikeLocation = descriptor.allyStrikeLocation ?? steppedTo;
-      const enemies = striker.region === strikeLocation.region
-        && striker.occupiedCells.includes(strikeLocation.cell)
-        ? unitRefs(path.state, otherSeat(seat))
-        .filter((enemy) => {
-          const status = unitStatus(path.state, enemy);
-          return status.region === striker.region
-            && status.occupiedCells.includes(strikeLocation.cell);
-        })
-        .sort((left, right) => left.instanceId.localeCompare(right.instanceId))
-        : [];
-      if (striker.disabled || enemies.length === 0) {
-        return [
-          withStateVersion(path.state, {}),
-          [...outcomesBeforeStrike, resolved],
-          [],
-        ];
-      }
-      const amount = strikeDamage(path.state, descriptor.ally);
-      const pending: PendingCombat = deepFreeze({
-        allocations: enemies.map(({ instanceId }) => ({
-          amount,
-          targetInstanceId: instanceId,
-        })),
-        attacker: descriptor.ally,
-        attackingSeat: seat,
-        cell: strikeLocation.cell,
-        combatants: enemies,
-        defenders: [],
-        originalTarget: null,
-        ...(striker.region === 'surface' ? {} : { region: striker.region }),
-        targetRemoved: false,
-      });
-      const allocationOutcomes: readonly GameOutcome[] = enemies.map(({ instanceId }) => ({
-        payload: {
-          amount,
-          strikerInstanceId: descriptor.ally!.instanceId,
-          targetInstanceId: instanceId,
-        },
-        type: 'strike-damage-allocated',
-      }));
-      const [struck, strikeOutcomes, randomDraws] = resolveFightWindow(
+      const [struck, strikeOutcomes, randomDraws] = finishLeapAttack(
         path.state,
-        pending,
-        [...outcomesBeforeStrike, ...allocationOutcomes],
-        'attacker-unit',
-        true,
-        false,
-        [descriptor.ally],
+        continuation,
+        outcomesBeforeStrike,
       );
-      const terminalIndex = strikeOutcomes.findIndex(({ type }) => type === 'game-ended');
       return [
         withStateVersion(struck, {}),
-        terminalIndex < 0
-          ? [...strikeOutcomes, resolved]
-          : [
-            ...strikeOutcomes.slice(0, terminalIndex),
-            resolved,
-            ...strikeOutcomes.slice(terminalIndex),
-          ],
+        strikeOutcomes,
         randomDraws,
       ];
     }

@@ -3550,6 +3550,213 @@ test('RULE-03/04 Leap Attack optionally steps an ally before it strikes every en
   assert.equal(verifyGameReplay(leaped.session), true);
 });
 
+test('RULE-03/04 Leap Attack resumes its strike after ordered movement Deathrites', () => {
+  const decks = {
+    north: deck('leap-order-north', 6, 8),
+    south: deck('leap-order-south', 6, 8),
+  };
+  const cards = cardsFor(decks, {
+    defense: 3,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  }, undefined, { elements: ['fire'] });
+  const leapId = decks.north.spellbook[0]!;
+  const sourceId = decks.north.spellbook[1]!;
+  const fragileIds = decks.north.spellbook.slice(2, 4);
+  const rainId = decks.north.spellbook[4]!;
+  const enemyId = decks.south.spellbook[0]!;
+  cards[leapId] = {
+    cardType: 'magic',
+    leapAttackAlly: true,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  };
+  cards[sourceId] = {
+    ...cards[sourceId]!,
+    attack: 3,
+    otherNearbyAlliesPowerBonus: 1,
+  } as GameCardDefinition;
+  for (const fragileId of fragileIds) {
+    cards[fragileId] = {
+      ...cards[fragileId]!,
+      deathriteDrawSite: true,
+      defense: 1,
+    } as GameCardDefinition;
+  }
+  cards[rainId] = {
+    cardType: 'magic',
+    damageEachAbovegroundMinion: 1,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  };
+  cards[enemyId] = {
+    ...cards[enemyId]!,
+    attack: 1,
+    defense: 3,
+    summonToAnySite: true,
+  } as GameCardDefinition;
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-leap-attack-ordered-deathrites-v1',
+    },
+    cards,
+    decks,
+    firstSeat: 'north' as const,
+  };
+  let gameManifest: GameManifest | undefined;
+  for (let seed = 1; seed <= 4_096; seed += 1) {
+    const candidate = createGameManifest({ ...input, seed });
+    const opening = createGameSession(candidate).state.players;
+    const northOpening = new Set(opening.north.hand.spellbook.map(({ cardId }) => cardId));
+    const northBySecondTurn = new Set([
+      ...opening.north.hand.spellbook,
+      ...opening.north.spellbook.slice(0, 1),
+    ].map(({ cardId }) => cardId));
+    const northByThirdTurn = new Set([
+      ...opening.north.hand.spellbook,
+      ...opening.north.spellbook.slice(0, 2),
+    ].map(({ cardId }) => cardId));
+    const southBySecondTurn = new Set([
+      ...opening.south.hand.spellbook,
+      ...opening.south.spellbook.slice(0, 2),
+    ].map(({ cardId }) => cardId));
+    if (fragileIds.every((cardId) => northOpening.has(cardId))
+      && northBySecondTurn.has(sourceId)
+      && [leapId, rainId].every((cardId) => northByThirdTurn.has(cardId))
+      && southBySecondTurn.has(enemyId)) {
+      gameManifest = candidate;
+      break;
+    }
+  }
+  assert.ok(gameManifest);
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  for (const fragileId of fragileIds) {
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === fragileId
+      && descriptor.cell === 'C4');
+  }
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === sourceId
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardId === enemyId
+    && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'cast-magic' && descriptor.cardId === rainId);
+  const fragiles = session.state.realm.units.filter(({ cardId }) => fragileIds.includes(cardId));
+  assert.equal(fragiles.length, 2);
+  assert.equal(fragiles.every(({ damage }) => damage === 1), true);
+  const source = session.state.realm.units.find(({ cardId }) => cardId === sourceId);
+  const enemy = session.state.realm.units.find(({ cardId }) => cardId === enemyId);
+  assert.ok(source && enemy);
+  assert.equal(source.location, 'C3');
+  assert.deepEqual(fragiles.map(({ instanceId }) => observeGame(session.state, 'north').realm.units
+    .find((unit) => unit.instanceId === instanceId)?.defense), [2, 2]);
+  const atlasBefore = session.state.players.north.atlas.length;
+  const atlasHandBefore = session.state.players.north.hand.atlas.length;
+  const cast = action(session, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardId === leapId
+      && descriptor.ally?.instanceId === source.instanceId
+      && descriptor.allyDestination?.cell === 'C2');
+  const interrupted = stepGame(session, cast);
+  assert.equal(interrupted.accepted, true);
+  if (!interrupted.accepted) throw new Error('expected Leap Attack to reach Deathrite ordering');
+  session = interrupted.session;
+  assert.deepEqual(interrupted.receipt.events.map(({ type }) => type), [
+    'magic-cast',
+    'unit-stepped',
+  ]);
+  assert.equal(session.state.phase, 'deathrite-order');
+  assert.equal(session.state.decisionSeat, 'north');
+  assert.equal(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === source.instanceId)?.location, 'C2');
+  assert.equal(session.state.realm.units.some(({ instanceId }) =>
+    instanceId === enemy.instanceId), true);
+  assert.equal(fragiles.every(({ instanceId }) => !session.state.realm.units
+    .some((unit) => unit.instanceId === instanceId)), true);
+  assert.equal(fragiles.every(({ instanceId }) => !session.state.players.north.cemetery
+    .some((card) => card.instanceId === instanceId)), true);
+  const orderActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'order-deathrites');
+  assert.deepEqual(orderActions.flatMap(({ descriptor }) =>
+    descriptor.kind === 'order-deathrites' ? [descriptor.sourceInstanceId] : []).sort(),
+  fragiles.map(({ instanceId }) => instanceId).sort());
+
+  const restored = resumeGameCheckpoint(parseGameCheckpoint(serializeGameCheckpoint(
+    createGameCheckpoint(session),
+  )));
+  assert.equal(
+    canonicalJson(restored as unknown as JsonValue),
+    canonicalJson(session as unknown as JsonValue),
+  );
+  assert.deepEqual(
+    legalGameActions(restored.state, 'north').map(({ actionId }) => actionId),
+    orderActions.map(({ actionId }) => actionId),
+  );
+  const branches = orderActions.map((orderAction) => {
+    assert.equal(orderAction.descriptor.kind, 'order-deathrites');
+    if (orderAction.descriptor.kind !== 'order-deathrites') throw new Error('unreachable');
+    const chosenInstanceId = orderAction.descriptor.sourceInstanceId;
+    const otherInstanceId = fragiles.find(({ instanceId }) =>
+      instanceId !== chosenInstanceId)?.instanceId;
+    assert.ok(otherInstanceId);
+    const ordered = stepGame(restored, orderAction);
+    assert.equal(ordered.accepted, true);
+    if (!ordered.accepted) throw new Error('expected Leap Attack to resume after Deathrites');
+    const types = ordered.receipt.events.map(({ type }) => type);
+    assert.deepEqual(types.slice(0, 5), [
+      'deathrite-order-committed',
+      'site-drawn',
+      'site-drawn',
+      'minion-died',
+      'minion-died',
+    ]);
+    assert.equal(types.at(-1), 'magic-resolved');
+    const strikeIndex = types.indexOf('strike-damage-allocated');
+    assert.ok(strikeIndex > 4);
+    assert.ok(strikeIndex < types.lastIndexOf('minion-died'));
+    assert.deepEqual(ordered.receipt.events.filter(({ type }) => type === 'site-drawn')
+      .map(({ payload }) => payload !== null && typeof payload === 'object'
+        && 'sourceInstanceId' in payload ? payload.sourceInstanceId : undefined), [
+      chosenInstanceId,
+      otherInstanceId,
+    ]);
+    const resolved = ordered.session;
+    assert.equal(resolved.state.phase, 'main');
+    assert.equal(resolved.state.pendingDeathrites, undefined);
+    assert.equal(resolved.state.realm.units.find(({ instanceId }) =>
+      instanceId === source.instanceId)?.location, 'C2');
+    assert.equal(resolved.state.realm.units.some(({ instanceId }) =>
+      instanceId === enemy.instanceId), false);
+    assert.equal(resolved.state.players.south.cemetery.some(({ instanceId }) =>
+      instanceId === enemy.instanceId), true);
+    assert.equal(fragiles.every(({ instanceId }) => resolved.state.players.north.cemetery
+      .some((card) => card.instanceId === instanceId)), true);
+    assert.equal(resolved.state.players.north.atlas.length, atlasBefore - 2);
+    assert.equal(resolved.state.players.north.hand.atlas.length, atlasHandBefore + 2);
+    assert.equal(verifyGameReplay(resolved), true);
+    return resolved;
+  });
+  assert.equal(new Set(branches.map(({ state }) => hashGameState(state))).size, 1);
+});
+
 test('RULE-03 Magic targets stay in the caster region and exclude enemy Stealth', () => {
   const targetIsLegal = (
     spell: SpellFacts,
