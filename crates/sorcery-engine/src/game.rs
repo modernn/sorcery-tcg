@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
-use crate::contract::{Seat, opaque_action_id};
+use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::prng::PrngState;
 
 const ENGINE_VERSION: &str = "sorcery-core-v1";
@@ -824,6 +824,33 @@ impl MulliganAction {
     pub fn label(&self) -> &str {
         &self.label
     }
+
+    /// Returns the acting seat.
+    #[must_use]
+    pub const fn seat(&self) -> Seat {
+        self.seat
+    }
+
+    /// Returns the state version that issued this action.
+    #[must_use]
+    pub const fn state_version(&self) -> u64 {
+        self.state_version
+    }
+
+    /// Materializes the typed action at the external JSON boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`serde_json::Error`] if the typed descriptor cannot be represented.
+    pub fn to_legal_action(&self) -> Result<LegalAction, serde_json::Error> {
+        Ok(LegalAction {
+            action_id: self.action_id.clone(),
+            descriptor: serde_json::to_value(&self.descriptor)?,
+            label: self.label.clone(),
+            seat: self.seat,
+            state_version: self.state_version,
+        })
+    }
 }
 
 impl MulliganDescriptor {
@@ -846,6 +873,12 @@ impl RulesContext {
     pub const fn manifest_id(&self) -> &IdentityHash {
         &self.manifest_id
     }
+
+    /// Returns the manifest-selected first seat.
+    #[must_use]
+    pub const fn first_seat(&self) -> Seat {
+        self.first_seat
+    }
 }
 
 impl Position {
@@ -853,6 +886,12 @@ impl Position {
     #[must_use]
     pub const fn state_version(&self) -> u64 {
         self.state_version
+    }
+
+    /// Returns the seat currently making the decision.
+    #[must_use]
+    pub const fn decision_seat(&self) -> Seat {
+        self.decision_seat
     }
 }
 
