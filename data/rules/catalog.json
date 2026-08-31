@@ -28,13 +28,13 @@
         "RULE-01"
       ],
       "plainLanguage": "Setup shuffles two decks, deals split hidden hands, and places Avatars.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-01 setup shuffles two decks, deals split hidden hands, and places Avatars"
+        "file": "crates/sorcery-engine/tests/setup_parity.rs",
+        "testName": "setup_and_mulligans_should_match_typescript_seed_31"
       }
     },
     {
@@ -58,7 +58,7 @@
         "RULE-01"
       ],
       "plainLanguage": "One mulligan returns at most three chosen cards to their deck bottoms and redraws.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "mulligan",
@@ -68,8 +68,8 @@
         "card-draw"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-01 one mulligan returns at most three chosen cards to their deck bottoms and redraws"
+        "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
+        "testName": "mulligan_returns_chosen_card_to_deck_bottom"
       }
     },
     {
@@ -78,7 +78,7 @@
         "RULE-01"
       ],
       "plainLanguage": "First player skips its draw, establishes a domain, then second player chooses a deck.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "draw"
@@ -87,8 +87,8 @@
         "card-draw"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-01 first player skips its draw, establishes a domain, then second player chooses a deck"
+        "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
+        "testName": "first_player_skips_draw_then_second_player_chooses_deck"
       }
     },
     {
@@ -97,13 +97,13 @@
         "RULE-02"
       ],
       "plainLanguage": "Sites expand through unoccupied orthogonal cells controlled by their player.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-02 sites expand through unoccupied orthogonal cells controlled by their player"
+        "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
+        "testName": "sites_expand_through_unoccupied_orthogonal_cells"
       }
     },
     {
@@ -127,7 +127,7 @@
         "RULE-02"
       ],
       "plainLanguage": "The Avatar may draw a private site instead of playing one.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "draw"
@@ -136,8 +136,8 @@
         "card-draw"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-02 the Avatar may draw a private site instead of playing one"
+        "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
+        "testName": "avatar_draws_private_site_and_pays_tap_cost"
       }
     },
     {
@@ -167,7 +167,7 @@
         "RULE-02"
       ],
       "plainLanguage": "Drawing a site from an empty Atlas pays the tap cost and loses.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "draw",
@@ -179,8 +179,8 @@
         "card-draw"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-02 drawing a site from an empty Atlas pays the tap cost and loses"
+        "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
+        "testName": "empty_atlas_avatar_draw_pays_tap_cost_and_loses"
       }
     },
     {
@@ -2775,7 +2775,7 @@
         "RULE-01"
       ],
       "plainLanguage": "Attempting to draw from an empty deck immediately loses.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "draw"
@@ -2785,8 +2785,8 @@
         "card-draw"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-01 attempting to draw from an empty deck immediately loses"
+        "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
+        "testName": "empty_normal_draw_immediately_loses"
       }
     },
     {

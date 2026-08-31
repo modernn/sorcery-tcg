@@ -42,7 +42,7 @@ pub struct Position {
     prng: PrngState,
     sites: [Option<SitePosition>; 20],
     state_version: u64,
-    terminal: Option<GameOutcome>,
+    terminal: Option<TerminalResult>,
     turn_number: u64,
     units: Vec<UnitPosition>,
 }
@@ -387,6 +387,33 @@ pub enum GameOutcome {
     Win { loser: Seat, winner: Seat },
 }
 
+/// Why an authoritative game finished.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GameEndReason {
+    /// Exactly one Avatar was defeated.
+    AvatarDefeated,
+    /// A player attempted to draw from an empty deck.
+    DeckEmpty,
+    /// Both Avatars were defeated by one simultaneous damage batch.
+    SimultaneousAvatarDefeat,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum TerminalResult {
+    Draw,
+    Win {
+        loser: Seat,
+        reason: WinReason,
+        winner: Seat,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+enum WinReason {
+    AvatarDefeated,
+    DeckEmpty,
+}
+
 struct DamageResult {
     minion_died: bool,
     avatar_defeated: bool,
@@ -588,7 +615,30 @@ impl Game {
     /// Returns the public result after the game finishes.
     #[must_use]
     pub const fn outcome(&self) -> Option<GameOutcome> {
-        self.position.terminal
+        match self.position.terminal {
+            Some(TerminalResult::Draw) => Some(GameOutcome::Draw),
+            Some(TerminalResult::Win { loser, winner, .. }) => {
+                Some(GameOutcome::Win { loser, winner })
+            }
+            None => None,
+        }
+    }
+
+    /// Returns why the game finished.
+    #[must_use]
+    pub const fn terminal_reason(&self) -> Option<GameEndReason> {
+        match self.position.terminal {
+            Some(TerminalResult::Draw) => Some(GameEndReason::SimultaneousAvatarDefeat),
+            Some(TerminalResult::Win {
+                reason: WinReason::AvatarDefeated,
+                ..
+            }) => Some(GameEndReason::AvatarDefeated),
+            Some(TerminalResult::Win {
+                reason: WinReason::DeckEmpty,
+                ..
+            }) => Some(GameEndReason::DeckEmpty),
+            None => None,
+        }
     }
 
     /// Returns the current turn number.
@@ -827,7 +877,7 @@ impl Game {
         {
             self.append_unit_move_actions(actions, &unit.card.instance_id, unit.location)?;
         }
-        if !player.avatar.tapped && !player.atlas.is_empty() {
+        if !player.avatar.tapped {
             let descriptor = ActionDescriptor::DrawSite;
             let label = descriptor
                 .state_independent_label()
@@ -987,7 +1037,9 @@ impl Game {
             ActionDescriptor::DeclineAttack => {
                 self.apply_decline_attack_action(action.seat, outcomes)
             }
-            ActionDescriptor::Draw { zone } => self.apply_draw_action(action.seat, *zone, outcomes),
+            ActionDescriptor::Draw { zone } => {
+                self.apply_draw_action(action.seat, *zone, false, outcomes)
+            }
             ActionDescriptor::Mulligan {
                 atlas_order,
                 spellbook_order,
@@ -1016,7 +1068,9 @@ impl Game {
                 outcomes,
             ),
             ActionDescriptor::EndTurn => self.apply_end_turn_action(action.seat, outcomes),
-            ActionDescriptor::DrawSite => Err(GameError::IllegalAction),
+            ActionDescriptor::DrawSite => {
+                self.apply_draw_action(action.seat, DeckZone::Atlas, true, outcomes)
+            }
         }
     }
 
@@ -1346,7 +1400,7 @@ impl Game {
         self.position.decision_seat = self.position.active_seat;
         if attacker_damage.avatar_defeated && target_damage.avatar_defeated {
             self.position.phase = Phase::Terminal;
-            self.position.terminal = Some(GameOutcome::Draw);
+            self.position.terminal = Some(TerminalResult::Draw);
             outcomes.push("game-ended", || {
                 json!({
                     "reason": "simultaneous_avatar_defeat",
@@ -1356,7 +1410,11 @@ impl Game {
         } else if let Some(loser) = defeated {
             let winner = other_seat(loser);
             self.position.phase = Phase::Terminal;
-            self.position.terminal = Some(GameOutcome::Win { loser, winner });
+            self.position.terminal = Some(TerminalResult::Win {
+                loser,
+                reason: WinReason::AvatarDefeated,
+                winner,
+            });
             outcomes.push("game-ended", || {
                 json!({
                     "loser": loser,
@@ -1531,29 +1589,34 @@ impl Game {
         &mut self,
         seat: Seat,
         zone: DeckZone,
+        avatar_draw: bool,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
-        if self.position.phase != Phase::Draw || seat != self.position.active_seat {
+        let player_index = seat_index(seat);
+        let player = &self.position.players[player_index];
+        if seat != self.position.active_seat
+            || avatar_draw
+                && (zone != DeckZone::Atlas
+                    || self.position.phase != Phase::Main
+                    || player.avatar.tapped
+                    || !player.domain_established)
+            || !avatar_draw && self.position.phase != Phase::Draw
+        {
             return Err(GameError::IllegalAction);
         }
-        let player = &mut self.position.players[seat_index(seat)];
+        let player = &mut self.position.players[player_index];
+        if avatar_draw {
+            player.avatar.tapped = true;
+        }
         let card = match zone {
-            DeckZone::Atlas => {
-                if player.atlas.is_empty() {
-                    return Err(GameError::UnsupportedManifestFact(
-                        "empty-atlas terminal transition".to_owned(),
-                    ));
-                }
-                player.atlas.remove(0)
-            }
+            DeckZone::Atlas => (!player.atlas.is_empty()).then(|| player.atlas.remove(0)),
             DeckZone::Spellbook => {
-                if player.spellbook.is_empty() {
-                    return Err(GameError::UnsupportedManifestFact(
-                        "empty-spellbook terminal transition".to_owned(),
-                    ));
-                }
-                player.spellbook.remove(0)
+                (!player.spellbook.is_empty()).then(|| player.spellbook.remove(0))
             }
+        };
+        let Some(card) = card else {
+            self.finish_deck_empty(seat, outcomes);
+            return Ok(());
         };
         match zone {
             DeckZone::Atlas => player.hand_atlas.push(card),
@@ -1561,8 +1624,27 @@ impl Game {
         }
         self.position.phase = Phase::Main;
         self.position.state_version += 1;
-        outcomes.push("card-drawn", || json!({ "seat": seat, "zone": zone }));
+        if avatar_draw {
+            outcomes.push("site-drawn", || json!({ "seat": seat }));
+        } else {
+            outcomes.push("card-drawn", || json!({ "seat": seat, "zone": zone }));
+        }
         Ok(())
+    }
+
+    fn finish_deck_empty(&mut self, loser: Seat, outcomes: &mut OutcomeLog<'_>) {
+        let winner = other_seat(loser);
+        self.position.phase = Phase::Terminal;
+        self.position.terminal = Some(TerminalResult::Win {
+            loser,
+            reason: WinReason::DeckEmpty,
+            winner,
+        });
+        self.position.state_version += 1;
+        outcomes.push(
+            "game-ended",
+            || json!({ "loser": loser, "reason": "deck_empty", "winner": winner }),
+        );
     }
 
     fn apply_move_and_attack_action(
@@ -2034,14 +2116,21 @@ impl Game {
         self.position.terminal.map_or_else(
             || json!({ "status": "active" }),
             |terminal| match terminal {
-                GameOutcome::Draw => json!({
+                TerminalResult::Draw => json!({
                     "reason": "simultaneous_avatar_defeat",
                     "result": "draw",
                     "status": "finished",
                 }),
-                GameOutcome::Win { loser, winner } => json!({
+                TerminalResult::Win {
+                    loser,
+                    reason,
+                    winner,
+                } => json!({
                     "loser": loser,
-                    "reason": "avatar_defeated",
+                    "reason": match reason {
+                        WinReason::AvatarDefeated => "avatar_defeated",
+                        WinReason::DeckEmpty => "deck_empty",
+                    },
                     "status": "finished",
                     "winner": winner,
                 }),
