@@ -4,16 +4,67 @@ use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
+use serde::de;
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 const HEX: &[u8; 16] = b"0123456789abcdef";
 
 /// A SHA-256 identity over canonical JSON bytes.
-#[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
 pub struct IdentityHash(String);
+
+impl IdentityHash {
+    /// Parses a lowercase SHA-256 engine identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IdentityHashError`] when `value` is not `sha256:` followed by
+    /// exactly 64 lowercase hexadecimal digits.
+    pub fn parse(value: &str) -> Result<Self, IdentityHashError> {
+        let Some(digest) = value.strip_prefix("sha256:") else {
+            return Err(IdentityHashError);
+        };
+        if digest.len() != 64
+            || !digest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(IdentityHashError);
+        }
+        Ok(Self(value.to_owned()))
+    }
+
+    /// Returns the identity string.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for IdentityHash {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(de::Error::custom)
+    }
+}
+
+/// An engine identity did not use the frozen lowercase SHA-256 syntax.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IdentityHashError;
+
+impl fmt::Display for IdentityHashError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("identity must be sha256: followed by 64 lowercase hexadecimal digits")
+    }
+}
+
+impl Error for IdentityHashError {}
 
 impl fmt::Display for IdentityHash {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -156,5 +207,14 @@ mod tests {
                 .to_string(),
             "sha256:9ec0a8e3f08e46c6c6e2a44542de0a7c20a50a1fe6af9ea5b195dd0379d4e4b2"
         );
+    }
+
+    #[test]
+    fn identity_hash_deserialization_should_reject_noncanonical_syntax() {
+        let result = serde_json::from_str::<super::IdentityHash>(
+            r#""SHA256:9EC0A8E3F08E46C6C6E2A44542DE0A7C20A50A1FE6AF9EA5B195DD0379D4E4B2""#,
+        );
+
+        assert!(result.is_err());
     }
 }

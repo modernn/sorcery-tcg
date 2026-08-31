@@ -1,0 +1,129 @@
+use std::sync::Arc;
+
+use serde::Deserialize;
+use sorcery_engine::game::Game;
+
+#[derive(Deserialize)]
+struct Fixture {
+    games: Vec<FixtureGame>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FixtureGame {
+    initial: FixtureInitial,
+    manifest_id: String,
+    manifest_json: Option<String>,
+    seed: u32,
+    steps: Vec<FixtureStep>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FixtureInitial {
+    legal_action_ids: Vec<String>,
+    random_draws_hash: String,
+    state_hash: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FixtureStep {
+    legal_action_ids: Vec<String>,
+    post_state_hash: String,
+    selected_action_id: String,
+}
+
+fn seed_31_fixture() -> FixtureGame {
+    let fixture: Fixture = serde_json::from_str(include_str!(
+        "../../../tests/engine/fixtures/typescript-parity-v1.json"
+    ))
+    .expect("valid checked-in TypeScript parity fixture");
+    fixture
+        .games
+        .into_iter()
+        .find(|game| game.seed == 31)
+        .expect("seed-31 game fixture")
+}
+
+#[test]
+fn setup_and_mulligans_should_match_typescript_seed_31() {
+    let fixture = seed_31_fixture();
+    let mut game = Game::from_manifest_json(
+        fixture
+            .manifest_json
+            .as_deref()
+            .expect("seed-31 canonical manifest JSON"),
+    )
+    .expect("valid canonical synthetic manifest");
+    let branch = game.clone();
+
+    assert!(Arc::ptr_eq(game.rules(), branch.rules()));
+    assert_eq!(game.rules().manifest_id().as_str(), fixture.manifest_id);
+    assert_eq!(
+        game.state_hash().expect("initial state hash").as_str(),
+        fixture.initial.state_hash
+    );
+    assert_eq!(
+        game.initial_random_draws_hash()
+            .expect("initial random draw hash")
+            .as_str(),
+        fixture.initial.random_draws_hash
+    );
+
+    let north_actions = game.legal_mulligans().expect("north mulligans");
+    assert_eq!(north_actions.len(), 76);
+    assert_eq!(
+        north_actions
+            .iter()
+            .map(|action| action.action_id().as_str())
+            .collect::<Vec<_>>(),
+        fixture.initial.legal_action_ids
+    );
+    let north_action = north_actions
+        .iter()
+        .find(|action| action.action_id().as_str() == fixture.steps[0].selected_action_id)
+        .expect("fixture north action");
+    game.apply_mulligan(north_action)
+        .expect("apply north mulligan");
+    assert_eq!(
+        game.state_hash().expect("north post-state hash").as_str(),
+        fixture.steps[0].post_state_hash
+    );
+
+    let south_actions = game.legal_mulligans().expect("south mulligans");
+    assert_eq!(
+        south_actions
+            .iter()
+            .map(|action| action.action_id().as_str())
+            .collect::<Vec<_>>(),
+        fixture.steps[1].legal_action_ids
+    );
+    let south_action = south_actions
+        .iter()
+        .find(|action| action.action_id().as_str() == fixture.steps[1].selected_action_id)
+        .expect("fixture south action");
+    game.apply_mulligan(south_action)
+        .expect("apply south mulligan");
+    assert_eq!(game.position().state_version(), 2);
+    assert_eq!(
+        game.state_hash().expect("south post-state hash").as_str(),
+        fixture.steps[1].post_state_hash
+    );
+    assert!(
+        game.legal_mulligans()
+            .expect("main phase has no mulligans")
+            .is_empty()
+    );
+}
+
+#[test]
+fn manifest_json_should_reject_duplicate_top_level_keys() {
+    let fixture = seed_31_fixture();
+    let manifest = fixture
+        .manifest_json
+        .expect("seed-31 canonical manifest JSON");
+    let duplicate = manifest.replacen('{', r#"{"seed":31,"#, 1);
+
+    assert!(Game::from_manifest_json(&duplicate).is_err());
+}
