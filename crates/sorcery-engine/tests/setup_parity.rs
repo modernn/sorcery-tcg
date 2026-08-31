@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
 use serde::Deserialize;
+use serde_json::{Value, json};
+use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::game::Game;
 
 #[derive(Deserialize)]
@@ -126,4 +128,52 @@ fn manifest_json_should_reject_duplicate_top_level_keys() {
     let duplicate = manifest.replacen('{', r#"{"seed":31,"#, 1);
 
     assert!(Game::from_manifest_json(&duplicate).is_err());
+}
+
+#[test]
+fn rules_context_should_resolve_typed_token_references() {
+    let fixture = seed_31_fixture();
+    let mut manifest: Value = serde_json::from_str(
+        fixture
+            .manifest_json
+            .as_deref()
+            .expect("seed-31 canonical manifest JSON"),
+    )
+    .expect("manifest value");
+    let spell_id = manifest["decks"]["north"]["spellbook"][0]
+        .as_str()
+        .expect("north spell id")
+        .to_owned();
+    manifest["cards"][&spell_id] = json!({
+        "cardType": "magic",
+        "manaCost": 1,
+        "summonTokenToEachControlledSiteBorderingEnemySite": "test-token",
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    });
+    manifest["cards"]["test-token"] = json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        "token": true,
+    });
+    let mut body = manifest.as_object().expect("manifest object").clone();
+    body.remove("manifestId");
+    manifest["manifestId"] =
+        serde_json::to_value(identity_hash(&Value::Object(body)).expect("manifest identity"))
+            .expect("identity JSON");
+    let canonical = canonical_json(&manifest).expect("canonical token manifest");
+
+    Game::from_manifest_json(&canonical).expect("resolved token definition");
+
+    manifest["cards"]["test-token"]["token"] = Value::Bool(false);
+    let mut invalid_body = manifest.as_object().expect("manifest object").clone();
+    invalid_body.remove("manifestId");
+    manifest["manifestId"] = serde_json::to_value(
+        identity_hash(&Value::Object(invalid_body)).expect("invalid manifest identity"),
+    )
+    .expect("identity JSON");
+    let invalid = canonical_json(&manifest).expect("canonical invalid manifest");
+    assert!(Game::from_manifest_json(&invalid).is_err());
 }

@@ -10,11 +10,11 @@ use serde_json::{Map, Value, json};
 
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
+use crate::facts::{CardFacts, FactError, MagicEffect, parse_card_definition, validate_identifier};
 use crate::prng::PrngState;
 
 const ENGINE_VERSION: &str = "sorcery-core-v1";
 const MAX_DECK_CARDS: usize = 200;
-const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 /// Immutable manifest facts shared by cloned game positions.
 #[derive(Debug)]
@@ -99,6 +99,8 @@ pub enum GameError {
     Canonical(CanonicalError),
     /// JSON could not be decoded.
     Json(serde_json::Error),
+    /// A card rule fact violated the supported contract.
+    Fact(FactError),
     /// The manifest violated the frozen game contract.
     InvalidManifest(String),
     /// A known rule fact has not yet been admitted by this Rust slice.
@@ -112,6 +114,7 @@ impl fmt::Display for GameError {
         match self {
             Self::Canonical(error) => error.fmt(formatter),
             Self::Json(error) => error.fmt(formatter),
+            Self::Fact(error) => error.fmt(formatter),
             Self::InvalidManifest(message) => formatter.write_str(message),
             Self::UnsupportedManifestFact(field) => {
                 write!(
@@ -129,6 +132,7 @@ impl Error for GameError {
         match self {
             Self::Canonical(error) => Some(error),
             Self::Json(error) => Some(error),
+            Self::Fact(error) => Some(error),
             Self::InvalidManifest(_) | Self::UnsupportedManifestFact(_) | Self::IllegalAction => {
                 None
             }
@@ -145,6 +149,12 @@ impl From<CanonicalError> for GameError {
 impl From<serde_json::Error> for GameError {
     fn from(error: serde_json::Error) -> Self {
         Self::Json(error)
+    }
+}
+
+impl From<FactError> for GameError {
+    fn from(error: FactError) -> Self {
+        Self::Fact(error)
     }
 }
 
@@ -207,8 +217,8 @@ struct CardId(u16);
 #[derive(Debug)]
 struct CardDefinition {
     definition_hash: IdentityHash,
+    facts: CardFacts,
     id: String,
-    kind: CardKind,
     value: Value,
 }
 
@@ -285,193 +295,32 @@ fn invalid(message: impl Into<String>) -> GameError {
     GameError::InvalidManifest(message.into())
 }
 
-fn card_kind(value: &Value) -> Result<CardKind, GameError> {
-    match value.get("cardType").and_then(Value::as_str) {
-        Some("artifact") => Ok(CardKind::Artifact),
-        Some("aura") => Ok(CardKind::Aura),
-        Some("avatar") => Ok(CardKind::Avatar),
-        Some("magic") => Ok(CardKind::Magic),
-        Some("minion") => Ok(CardKind::Minion),
-        Some("site") => Ok(CardKind::Site),
-        _ => Err(invalid("cardType is unsupported")),
+const fn card_kind(facts: &CardFacts) -> CardKind {
+    match facts {
+        CardFacts::Artifact(_) => CardKind::Artifact,
+        CardFacts::Aura(_) => CardKind::Aura,
+        CardFacts::Avatar(_) => CardKind::Avatar,
+        CardFacts::Magic(_) => CardKind::Magic,
+        CardFacts::Minion(_) => CardKind::Minion,
+        CardFacts::Site(_) => CardKind::Site,
     }
 }
 
-fn require_card_id(value: &str, path: &str) -> Result<(), GameError> {
-    if value.trim().is_empty() || value.len() > 256 {
-        return Err(invalid(format!("{path} must be 1-256 characters")));
-    }
-    Ok(())
-}
-
-fn validate_integer(
-    definition: &Value,
-    field: &str,
-    minimum: u64,
-    maximum: Option<u64>,
-) -> Result<u64, GameError> {
-    let value = definition
-        .get(field)
-        .and_then(Value::as_u64)
-        .ok_or_else(|| invalid(format!("card.{field} must be a nonnegative integer")))?;
-    if value < minimum || value > maximum.unwrap_or(MAX_SAFE_INTEGER) {
-        return Err(invalid(format!(
-            "card.{field} is outside the supported range"
-        )));
-    }
-    Ok(value)
-}
-
-fn validate_thresholds(definition: &Value) -> Result<(), GameError> {
-    let thresholds = definition
-        .get("thresholds")
-        .and_then(Value::as_object)
-        .ok_or_else(|| invalid("card.thresholds must be an object"))?;
-    if thresholds.len() != 4
-        || ["air", "earth", "fire", "water"].iter().any(|element| {
-            thresholds
-                .get(*element)
-                .and_then(Value::as_u64)
-                .is_none_or(|value| value > MAX_SAFE_INTEGER)
-        })
-    {
-        return Err(invalid(
-            "card.thresholds must contain nonnegative air, earth, fire, and water integers",
-        ));
-    }
-    Ok(())
-}
-
-fn validate_card_definition(definition: &Value) -> Result<CardKind, GameError> {
-    let object = definition
-        .as_object()
-        .ok_or_else(|| invalid("card definition must be an object"))?;
-    let kind = card_kind(definition)?;
-    if object
-        .keys()
-        .any(|field| !supported_card_field(kind, field))
-    {
-        return Err(invalid("card definition contains an unsupported field"));
-    }
-    for field in object.keys() {
-        let admitted = match kind {
-            CardKind::Avatar => matches!(
-                field.as_str(),
-                "attack"
-                    | "cardType"
-                    | "defense"
-                    | "drawSpell"
-                    | "life"
-                    | "tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"
-            ),
-            CardKind::Site => matches!(field.as_str(), "cardType" | "elements"),
-            CardKind::Minion => matches!(
-                field.as_str(),
-                "attack" | "cardType" | "defense" | "manaCost" | "thresholds" | "token"
-            ),
-            CardKind::Artifact | CardKind::Aura | CardKind::Magic => {
-                matches!(field.as_str(), "cardType" | "manaCost" | "thresholds")
+fn token_reference(facts: &CardFacts) -> Option<&str> {
+    match facts {
+        CardFacts::Site(site) => site.genesis_pay_one_mana_to_summon_token.as_deref(),
+        CardFacts::Magic(magic) => match &magic.effect {
+            MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(card_id) => {
+                Some(card_id)
             }
-        };
-        if !admitted {
-            return Err(GameError::UnsupportedManifestFact(field.clone()));
-        }
+            _ => None,
+        },
+        _ => None,
     }
-    if matches!(kind, CardKind::Artifact | CardKind::Aura | CardKind::Magic) {
-        return Err(GameError::UnsupportedManifestFact(format!(
-            "{kind:?} card rules"
-        )));
-    }
-    match kind {
-        CardKind::Avatar => {
-            validate_integer(definition, "attack", 0, Some(100))?;
-            validate_integer(definition, "defense", 0, Some(100))?;
-            validate_integer(definition, "life", 1, Some(100))?;
-            if definition
-                .get("drawSpell")
-                .and_then(Value::as_bool)
-                .is_none()
-            {
-                return Err(invalid("card.drawSpell must be boolean"));
-            }
-            if definition
-                .get("tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn")
-                .is_some_and(|value| value != &Value::Bool(true))
-            {
-                return Err(invalid(
-                    "avatar air-threshold damage fact must be true when defined",
-                ));
-            }
-        }
-        CardKind::Site => {
-            let elements = definition
-                .get("elements")
-                .and_then(Value::as_array)
-                .ok_or_else(|| invalid("card.elements must be an array"))?;
-            let canonical = ["earth", "fire", "water", "air"];
-            let mut previous = None;
-            for element in elements {
-                let index = element
-                    .as_str()
-                    .and_then(|element| {
-                        canonical.iter().position(|candidate| *candidate == element)
-                    })
-                    .ok_or_else(|| invalid("card.elements contains an unsupported element"))?;
-                if previous.is_some_and(|previous| index <= previous) {
-                    return Err(invalid(
-                        "card.elements must be unique and canonically ordered",
-                    ));
-                }
-                previous = Some(index);
-            }
-        }
-        CardKind::Artifact | CardKind::Aura | CardKind::Magic | CardKind::Minion => {
-            validate_integer(definition, "manaCost", 0, None)?;
-            validate_thresholds(definition)?;
-            if kind == CardKind::Minion {
-                validate_integer(definition, "attack", 0, Some(100))?;
-                validate_integer(definition, "defense", 0, Some(100))?;
-                if definition
-                    .get("token")
-                    .is_some_and(|value| value != &Value::Bool(true))
-                {
-                    return Err(invalid("card.token must be true when defined"));
-                }
-            }
-        }
-    }
-    Ok(kind)
 }
 
-fn supported_card_field(kind: CardKind, field: &str) -> bool {
-    let fields = match kind {
-        CardKind::Artifact => {
-            "atEndOfEachTurnSiteControllerLosesLife bearerControllerChoosesExtraRandomOutcome cardType grantsBearerLethal grantsBearerPower manaCost tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath thresholds"
-        }
-        CardKind::Aura => {
-            "atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep cardType immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns manaCost thresholds"
-        }
-        CardKind::Avatar => {
-            "attack cardType defense drawSpell earthSitePlayCreatesAdjacentRubble life replaceAdjacentRubbleWithTopAtlasSite tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"
-        }
-        CardKind::Magic => {
-            "burrowAllMinionsAndArtifactsAtTargetLandSite burrowTargetMinionOrArtifact cardType damageChainNearbyUnits damageEachAbovegroundMinion damageEachUnitAtLocationWithinTwoSteps damageRandomUnitAtLocation damageTargetUnit damageUnitsAboveAndBelowTargetSiteByManhattanDistance disableTargetNearbyMinionUntilNextTurn discardSiteAsAdditionalCost destroyTargetSite fightAllyWithAdjacentEnemy gainControlOfTargetNearbyMinion grantChargeToAllyThisTurn grantPowerToAllyThisTurn healController killTargetWoundedMinion leapAttackAlly lureEnemyMinionOneStepCloser manaCost returnMinionFromOwnCemetery submergeTargetMinion summonRandomMinionFromAnyCemetery summonTokenToEachControlledSiteBorderingEnemySite targetNearby teleportAllyToTargetSite teleportNearbyAllyThenDrawCard thresholds untapTargetMinionAfterDamage"
-        }
-        CardKind::Minion => {
-            "airborne atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cannotAttackSites cannotDefend cannotDefendOrIntercept cardType charge connectsTopBottom deathriteDamageEachUnitHere deathriteDrawSite deathriteHeal deathriteLoseLifePerNearbySiteControlled defense diesAtEndOfControllerTurn discardRandomCardInsteadOfMana discardSpellToDamageRandomOtherUnitHere gainsPowerRangedAndSpellcasterAtopTower gainsStealthAtEndOfTurn gainsStealthAtEndOfTurnIfNoEnemiesNearby genesisDamageEachOtherUnitHere genesisDisableSelfUntilDamaged genesisDrawSite genesisDrawSpells genesisHealController genesisLoseControllerLife genesisMayDamageTargetAdjacentUnit genesisStrikeEachEnemyHere immobile lanceCount lethal manaCost mayRangedStrikeOnceDuringBasicMovement mayStepAfterRangedStrike mortal movementBonus movesOnlyForward movesOnlySideways mustBeCastBurrowed mustBeCastSubmerged mustBeCastToOuterColumn mustBeCastToWaterSite nearbyEnemiesPermanentlyLoseStealth occupiesSquareArea ordinary otherControlledMortalsPowerBonus otherNearbyAlliesPowerBonus preventsDamageFromUnitsWithPowerAtLeast provides ranged sacrificeMinionAtSummoningLocationForManaDiscount shootsDragProjectile siteProvidesNoThreshold spellcaster stealth strikesFirstWhileAttacking submerge summonToAnySite takesLessDamage tapForMana tapToDamageEachUnitAtAdjacentLocation tapToShootProjectileDamage thresholds token untapsAtEndOfControllerTurn voidwalk ward waterbound"
-        }
-        CardKind::Site => {
-            "airborneMinionsAtopMoveFreelyAway blocksGroundMinionEntryWhileMinionAtop cannotBeMovedDestroyedOrModified cardType connectsBurrowedAllies elements flyToNearbyVoidOncePerTurnAtAirThreshold genesisDiscardTopSpells genesisDrawSpellPerAdjacentSameCard genesisEnemiesLoseStealth genesisGainMana genesisGainManaIfOnlyControlledCopy genesisHealNearbyAvatars genesisImmobilizeNearbyUntilNextTurn genesisMayBottomNextSpell genesisPayOneManaToSummonToken genesisReorderNextSpells isTower minionsHereGainVoidwalkUntilLeavingVoid ordinaryMinionManaDiscount preventsUnitsWithPowerAtLeastFromEntering rangedUnitsHereRangeBonus sacrificeToDestroyNearbySite"
-        }
-    };
-    fields
-        .split_ascii_whitespace()
-        .any(|candidate| candidate == field)
-}
-
-fn validate_deck(deck: &Deck, cards: &BTreeMap<String, CardKind>) -> Result<(), GameError> {
-    require_card_id(&deck.avatar, "deck.avatar")?;
-    if cards.get(&deck.avatar) != Some(&CardKind::Avatar) {
+fn validate_deck(deck: &Deck, cards: &BTreeMap<String, CardFacts>) -> Result<(), GameError> {
+    if cards.get(&deck.avatar).map(card_kind) != Some(CardKind::Avatar) {
         return Err(invalid("deck.avatar must reference an avatar"));
     }
     for (zone, expected) in [(&deck.atlas, None), (&deck.spellbook, Some(()))] {
@@ -479,11 +328,11 @@ fn validate_deck(deck: &Deck, cards: &BTreeMap<String, CardKind>) -> Result<(), 
             return Err(invalid("deck zone must contain 3-200 cards"));
         }
         for card_id in zone {
-            require_card_id(card_id, "deck card")?;
-            let kind = cards
+            let facts = cards
                 .get(card_id)
                 .ok_or_else(|| invalid("deck references a missing card"))?;
-            if expected.is_none() && *kind != CardKind::Site {
+            let kind = card_kind(facts);
+            if expected.is_none() && kind != CardKind::Site {
                 return Err(invalid("atlas must contain only sites"));
             }
             if expected.is_some()
@@ -518,18 +367,20 @@ impl Game {
             return Err(invalid("game manifest JSON is not canonical"));
         }
         let manifest: Manifest = serde_json::from_value(raw.clone())?;
-        validate_manifest(&raw, &manifest)?;
+        let mut parsed_facts = validate_manifest(&raw, &manifest)?;
 
         let mut cards = Vec::with_capacity(manifest.cards.len());
         let mut card_ids = BTreeMap::new();
         for (index, (id, value)) in manifest.cards.iter().enumerate() {
             let id_number = u16::try_from(index)
                 .map_err(|_| invalid("manifest contains too many card definitions"))?;
-            let kind = card_kind(value)?;
+            let facts = parsed_facts
+                .remove(id)
+                .ok_or_else(|| invalid("validated manifest lacks parsed card facts"))?;
             cards.push(CardDefinition {
                 definition_hash: identity_hash(value)?,
+                facts,
                 id: id.clone(),
-                kind,
                 value: value.clone(),
             });
             card_ids.insert(id.clone(), CardId(id_number));
@@ -895,11 +746,14 @@ impl Position {
     }
 }
 
-fn validate_manifest(raw: &Value, manifest: &Manifest) -> Result<(), GameError> {
+fn validate_manifest(
+    raw: &Value,
+    manifest: &Manifest,
+) -> Result<BTreeMap<String, CardFacts>, GameError> {
     if manifest.engine_version != ENGINE_VERSION || manifest.schema_version != 1 {
         return Err(invalid("manifest engine or schema version is unsupported"));
     }
-    require_card_id(&manifest.authority.revision_id, "authority.revisionId")?;
+    validate_identifier(&manifest.authority.revision_id, "authority.revisionId")?;
     match manifest.authority.mode {
         AuthorityMode::PrivateLocal | AuthorityMode::Synthetic => {}
     }
@@ -913,17 +767,16 @@ fn validate_manifest(raw: &Value, manifest: &Manifest) -> Result<(), GameError> 
     if manifest.cards.is_empty() || manifest.cards.len() > 5_000 {
         return Err(invalid("cards must contain 1-5000 definitions"));
     }
-    let mut kinds = BTreeMap::new();
+    let mut facts = BTreeMap::new();
     for (card_id, definition) in &manifest.cards {
-        require_card_id(card_id, "cards key")?;
-        kinds.insert(card_id.clone(), validate_card_definition(definition)?);
+        facts.insert(card_id.clone(), parse_card_definition(card_id, definition)?);
     }
-    validate_deck(&manifest.decks.north, &kinds)?;
-    validate_deck(&manifest.decks.south, &kinds)?;
+    validate_deck(&manifest.decks.north, &facts)?;
+    validate_deck(&manifest.decks.south, &facts)?;
 
     for deck in [&manifest.decks.north, &manifest.decks.south] {
         for card_id in &deck.spellbook {
-            if manifest.cards[card_id].get("token") == Some(&Value::Bool(true)) {
+            if matches!(facts.get(card_id), Some(CardFacts::Minion(minion)) if minion.token) {
                 return Err(invalid("spellbook references an unsupported token spell"));
             }
         }
@@ -936,22 +789,8 @@ fn validate_manifest(raw: &Value, manifest: &Manifest) -> Result<(), GameError> 
     }
     let token_sources: Vec<_> = referenced.iter().copied().collect();
     for card_id in token_sources {
-        let definition = &manifest.cards[card_id];
-        let token_id = definition
-            .get("summonTokenToEachControlledSiteBorderingEnemySite")
-            .or_else(|| definition.get("genesisPayOneManaToSummonToken"))
-            .and_then(Value::as_str);
-        if let Some(token_id) = token_id {
-            let token = manifest.cards.get(token_id);
-            if token
-                .and_then(|value| value.get("cardType"))
-                .and_then(Value::as_str)
-                != Some("minion")
-                || token
-                    .and_then(|value| value.get("token"))
-                    .and_then(Value::as_bool)
-                    != Some(true)
-            {
+        if let Some(token_id) = token_reference(&facts[card_id]) {
+            if !matches!(facts.get(token_id), Some(CardFacts::Minion(minion)) if minion.token) {
                 return Err(invalid("token effect must reference a token minion"));
             }
             referenced.insert(token_id);
@@ -967,7 +806,7 @@ fn validate_manifest(raw: &Value, manifest: &Manifest) -> Result<(), GameError> 
             "cards must contain exactly the deck-referenced definitions",
         ));
     }
-    Ok(())
+    Ok(facts)
 }
 
 fn create_player(
@@ -1002,27 +841,19 @@ fn create_player(
         .get(&deck.avatar)
         .ok_or_else(|| invalid("validated deck lacks avatar definition"))?;
     let avatar_definition = &rules.cards[usize::from(avatar_card_id.0)];
-    if avatar_definition.kind != CardKind::Avatar {
+    let CardFacts::Avatar(avatar_facts) = &avatar_definition.facts else {
         return Err(invalid("validated deck lacks avatar definition"));
-    }
-    let life = avatar_definition
-        .value
-        .get("life")
-        .and_then(Value::as_u64)
-        .and_then(|value| u16::try_from(value).ok())
-        .ok_or_else(|| invalid("validated avatar lacks supported life"))?;
+    };
     let avatar = AvatarPosition {
         card: card_instance(rules, avatar_card_id, seat, CardSource::Avatar, 0)?,
-        life,
+        life: u16::from(avatar_facts.life),
         location: if seat == Seat::North { "C4" } else { "C1" },
     };
     let remaining_atlas = atlas.split_off(3);
     let remaining_spellbook = spellbook.split_off(3);
     Ok(PlayerPosition {
-        air_thresholds_cast_this_turn: avatar_definition
-            .value
-            .get("tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn")
-            .is_some_and(|value| value == &Value::Bool(true))
+        air_thresholds_cast_this_turn: avatar_facts
+            .tap_damage_random_other_unit_at_nearby_location_per_air_threshold_cast_this_turn
             .then_some(0),
         atlas: remaining_atlas,
         avatar,

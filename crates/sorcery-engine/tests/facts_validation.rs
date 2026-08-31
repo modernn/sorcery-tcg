@@ -1,0 +1,678 @@
+use serde_json::{Value, json};
+
+#[expect(
+    dead_code,
+    reason = "the focused test imports the complete future public module"
+)]
+#[path = "../src/facts.rs"]
+mod facts;
+
+use facts::{CardFacts, Element, MagicEffect, MinionGenesis, Thresholds, parse_card_definition};
+
+fn thresholds() -> Value {
+    json!({ "earth": 0, "fire": 0, "water": 0, "air": 0 })
+}
+
+fn avatar() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "avatar",
+        "defense": 2,
+        "drawSpell": false,
+        "life": 20
+    })
+}
+
+fn minion() -> Value {
+    json!({
+        "attack": 2,
+        "cardType": "minion",
+        "defense": 3,
+        "manaCost": 1,
+        "thresholds": thresholds()
+    })
+}
+
+fn spell(card_type: &str, effect: (&str, Value)) -> Value {
+    let mut value = json!({
+        "cardType": card_type,
+        "manaCost": 1,
+        "thresholds": thresholds()
+    });
+    value
+        .as_object_mut()
+        .expect("spell fixture object")
+        .insert(effect.0.to_owned(), effect.1);
+    value
+}
+
+fn with(mut value: Value, field: &str, added: Value) -> Value {
+    value
+        .as_object_mut()
+        .expect("card fixture object")
+        .insert(field.to_owned(), added);
+    value
+}
+
+#[test]
+fn parse_should_accept_each_typed_card_kind() {
+    let cases = [
+        ("avatar", avatar(), "avatar"),
+        (
+            "site",
+            json!({
+                "cardType": "site",
+                "connectsBurrowedAllies": false,
+                "elements": ["earth", "water"],
+                "genesisGainMana": 2
+            }),
+            "site",
+        ),
+        (
+            "artifact",
+            spell("artifact", ("grantsBearerPower", json!(2))),
+            "artifact",
+        ),
+        (
+            "aura",
+            spell(
+                "aura",
+                (
+                    "immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns",
+                    json!(true),
+                ),
+            ),
+            "aura",
+        ),
+        (
+            "magic",
+            spell("magic", ("damageTargetUnit", json!(2))),
+            "magic",
+        ),
+        ("minion", minion(), "minion"),
+    ];
+
+    for (card_id, definition, expected) in cases {
+        let actual = match parse_card_definition(card_id, &definition).expect("valid card facts") {
+            CardFacts::Avatar(_) => "avatar",
+            CardFacts::Artifact(_) => "artifact",
+            CardFacts::Aura(_) => "aura",
+            CardFacts::Magic(_) => "magic",
+            CardFacts::Minion(_) => "minion",
+            CardFacts::Site(_) => "site",
+        };
+        assert_eq!(actual, expected, "{card_id}");
+    }
+}
+
+#[test]
+fn parse_should_normalize_optional_false_and_canonical_element_order() {
+    let definition = with(
+        with(
+            with(minion(), "airborne", json!(false)),
+            "charge",
+            json!(false),
+        ),
+        "thresholds",
+        json!({ "air": 4, "water": 3, "fire": 2, "earth": 1 }),
+    );
+
+    let CardFacts::Minion(facts) =
+        parse_card_definition("normalized", &definition).expect("valid normalized facts")
+    else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(facts.thresholds.canonical(), [1, 2, 3, 4]);
+    assert!(!facts.airborne && !facts.charge);
+}
+
+#[test]
+fn parse_should_use_utf16_length_and_ecmascript_whitespace_for_card_ids() {
+    let valid = "😀".repeat(128);
+    let too_long = "😀".repeat(129);
+    let next_line = "\u{0085}";
+    let cases = [
+        (valid.as_str(), true),
+        (too_long.as_str(), false),
+        ("\u{FEFF}", false),
+        (next_line, true),
+    ];
+
+    for (card_id, accepted) in cases {
+        assert_eq!(
+            parse_card_definition(card_id, &avatar()).is_ok(),
+            accepted,
+            "card ID {card_id:?}"
+        );
+    }
+}
+
+#[test]
+fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
+    let artifact_effects = [
+        ("atEndOfEachTurnSiteControllerLosesLife", json!(2)),
+        ("bearerControllerChoosesExtraRandomOutcome", json!(true)),
+        ("grantsBearerLethal", json!(true)),
+        ("grantsBearerPower", json!(2)),
+        (
+            "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps",
+            json!(true),
+        ),
+        (
+            "tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps",
+            json!(3),
+        ),
+        (
+            "tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath",
+            json!(4),
+        ),
+    ];
+    for (field, value) in artifact_effects {
+        assert!(
+            parse_card_definition(field, &spell("artifact", (field, value))).is_ok(),
+            "Artifact effect {field}"
+        );
+    }
+
+    let aura_effects = [
+        (
+            "atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep",
+            json!(3),
+        ),
+        (
+            "immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns",
+            json!(true),
+        ),
+    ];
+    for (field, value) in aura_effects {
+        assert!(
+            parse_card_definition(field, &spell("aura", (field, value))).is_ok(),
+            "Aura effect {field}"
+        );
+    }
+
+    let magic_effects = [
+        ("burrowAllMinionsAndArtifactsAtTargetLandSite", json!(true)),
+        ("burrowTargetMinionOrArtifact", json!(true)),
+        ("damageChainNearbyUnits", json!(true)),
+        ("damageEachAbovegroundMinion", json!(1)),
+        ("damageEachUnitAtLocationWithinTwoSteps", json!(2)),
+        ("damageRandomUnitAtLocation", json!(2)),
+        ("damageTargetUnit", json!(2)),
+        ("disableTargetNearbyMinionUntilNextTurn", json!(true)),
+        ("fightAllyWithAdjacentEnemy", json!(true)),
+        ("gainControlOfTargetNearbyMinion", json!(true)),
+        ("grantChargeToAllyThisTurn", json!(true)),
+        ("grantPowerToAllyThisTurn", json!(2)),
+        ("healController", json!(2)),
+        ("killTargetWoundedMinion", json!(true)),
+        ("leapAttackAlly", json!(true)),
+        ("lureEnemyMinionOneStepCloser", json!(true)),
+        ("returnMinionFromOwnCemetery", json!(true)),
+        ("submergeTargetMinion", json!(true)),
+        ("summonRandomMinionFromAnyCemetery", json!(true)),
+        (
+            "summonTokenToEachControlledSiteBorderingEnemySite",
+            json!("foot-soldier"),
+        ),
+        ("teleportAllyToTargetSite", json!(true)),
+        ("teleportNearbyAllyThenDrawCard", json!(true)),
+    ];
+    for (field, value) in magic_effects {
+        assert!(
+            parse_card_definition(field, &spell("magic", (field, value))).is_ok(),
+            "Magic effect {field}"
+        );
+    }
+
+    let grid = with(
+        with(
+            spell(
+                "magic",
+                (
+                    "damageUnitsAboveAndBelowTargetSiteByManhattanDistance",
+                    json!([1, 2, 3, 4, 5]),
+                ),
+            ),
+            "discardSiteAsAdditionalCost",
+            json!(true),
+        ),
+        "destroyTargetSite",
+        json!(true),
+    );
+    assert!(parse_card_definition("damage-grid", &grid).is_ok());
+}
+
+#[test]
+fn rule_06_should_reject_unknown_or_noncanonical_facts() {
+    let invalid = [
+        (
+            "unknown field",
+            with(avatar(), "futureRule", json!(true)),
+            "futureRule",
+        ),
+        (
+            "obsolete fact",
+            with(minion(), "genesisDrawSpell", json!(true)),
+            "obsolete",
+        ),
+        (
+            "unknown card type",
+            json!({ "cardType": "realm" }),
+            "cardType",
+        ),
+        (
+            "true-only false",
+            with(minion(), "token", json!(false)),
+            "must be true",
+        ),
+        (
+            "fractional integer",
+            with(minion(), "manaCost", json!(1.5)),
+            "safe integer",
+        ),
+        (
+            "unsafe integer",
+            with(minion(), "manaCost", json!(9_007_199_254_740_992_u64)),
+            "safe integer",
+        ),
+    ];
+
+    for (name, definition, expected_error) in invalid {
+        let error = parse_card_definition(name, &definition).expect_err(name);
+        assert!(
+            error.to_string().contains(expected_error),
+            "{name}: {error}"
+        );
+    }
+}
+
+#[test]
+fn rule_06_typescript_parity_fixture_card_facts_should_parse() {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../tests/engine/fixtures/typescript-parity-v1.json"
+    ))
+    .expect("valid checked-in parity fixture");
+    let manifest_json = fixture["games"]
+        .as_array()
+        .expect("fixture games")
+        .iter()
+        .find_map(|game| game["manifestJson"].as_str())
+        .expect("fixture manifest JSON");
+    let manifest: Value = serde_json::from_str(manifest_json).expect("valid manifest JSON");
+    let cards = manifest["cards"].as_object().expect("manifest cards");
+
+    for (card_id, definition) in cards {
+        parse_card_definition(card_id, definition).expect("TypeScript-supported card facts");
+    }
+}
+
+#[test]
+fn rule_06_should_validate_elements_thresholds_and_token_reference_ids() {
+    let invalid = [
+        (
+            "element order",
+            json!({ "cardType": "site", "elements": ["air", "earth"] }),
+            "canonical order",
+        ),
+        (
+            "duplicate element",
+            json!({ "cardType": "site", "elements": ["earth", "earth"] }),
+            "canonical order",
+        ),
+        (
+            "unknown element",
+            json!({ "cardType": "site", "elements": ["aether"] }),
+            "unsupported element",
+        ),
+        (
+            "missing threshold",
+            with(
+                minion(),
+                "thresholds",
+                json!({ "earth": 0, "fire": 0, "water": 0 }),
+            ),
+            "thresholds.air",
+        ),
+        (
+            "unknown threshold",
+            with(
+                minion(),
+                "thresholds",
+                json!({ "earth": 0, "fire": 0, "water": 0, "air": 0, "aether": 0 }),
+            ),
+            "aether",
+        ),
+        (
+            "negative threshold",
+            with(
+                minion(),
+                "thresholds",
+                json!({ "earth": -1, "fire": 0, "water": 0, "air": 0 }),
+            ),
+            "between 0",
+        ),
+        (
+            "blank token reference",
+            spell(
+                "magic",
+                (
+                    "summonTokenToEachControlledSiteBorderingEnemySite",
+                    json!("\u{FEFF}"),
+                ),
+            ),
+            "UTF-16",
+        ),
+    ];
+
+    for (name, definition, expected_error) in invalid {
+        let error = parse_card_definition(name, &definition).expect_err(name);
+        assert!(
+            error.to_string().contains(expected_error),
+            "{name}: {error}"
+        );
+    }
+}
+
+#[test]
+fn exclusive_effects_and_magic_auxiliary_facts_should_fail_closed() {
+    let invalid = [
+        (
+            "artifact no effect",
+            json!({ "cardType": "artifact", "manaCost": 0, "thresholds": thresholds() }),
+            "exactly one",
+        ),
+        (
+            "artifact two effects",
+            with(
+                spell("artifact", ("grantsBearerPower", json!(2))),
+                "grantsBearerLethal",
+                json!(true),
+            ),
+            "exactly one",
+        ),
+        (
+            "aura two effects",
+            with(
+                spell(
+                    "aura",
+                    (
+                        "immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns",
+                        json!(true),
+                    ),
+                ),
+                "atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep",
+                json!(3),
+            ),
+            "exactly one",
+        ),
+        (
+            "magic two effects",
+            with(
+                spell("magic", ("damageTargetUnit", json!(2))),
+                "healController",
+                json!(2),
+            ),
+            "exactly one",
+        ),
+        (
+            "targetNearby false still needs target damage",
+            with(
+                spell("magic", ("healController", json!(2))),
+                "targetNearby",
+                json!(false),
+            ),
+            "requires damageTargetUnit",
+        ),
+        (
+            "untap needs target damage",
+            with(
+                spell("magic", ("healController", json!(2))),
+                "untapTargetMinionAfterDamage",
+                json!(true),
+            ),
+            "requires damageTargetUnit",
+        ),
+        (
+            "incomplete damage grid",
+            spell(
+                "magic",
+                (
+                    "damageUnitsAboveAndBelowTargetSiteByManhattanDistance",
+                    json!([1, 2, 3, 4, 5]),
+                ),
+            ),
+            "defined together",
+        ),
+        (
+            "bad damage grid value",
+            with(
+                with(
+                    spell(
+                        "magic",
+                        (
+                            "damageUnitsAboveAndBelowTargetSiteByManhattanDistance",
+                            json!([1, 2, 0, 4, 5]),
+                        ),
+                    ),
+                    "discardSiteAsAdditionalCost",
+                    json!(true),
+                ),
+                "destroyTargetSite",
+                json!(true),
+            ),
+            "positive damage",
+        ),
+    ];
+
+    for (name, definition, expected_error) in invalid {
+        let error = parse_card_definition(name, &definition).expect_err(name);
+        assert!(
+            error.to_string().contains(expected_error),
+            "{name}: {error}"
+        );
+    }
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one visible table documents the cross-field fail-closed contract"
+)]
+fn site_and_minion_mutual_exclusions_should_fail_closed() {
+    let paid_token = with(
+        json!({ "cardType": "site", "elements": [] }),
+        "genesisPayOneManaToSummonToken",
+        json!("token"),
+    );
+    let invalid = [
+        (
+            "site mana modes",
+            with(
+                with(
+                    json!({ "cardType": "site", "elements": [] }),
+                    "genesisGainMana",
+                    json!(2),
+                ),
+                "genesisGainManaIfOnlyControlledCopy",
+                json!(1),
+            ),
+            "unconditional and conditional",
+        ),
+        (
+            "paid token plus Genesis",
+            with(paid_token, "genesisHealNearbyAvatars", json!(3)),
+            "paid-token",
+        ),
+        (
+            "site discard and draw",
+            with(
+                with(
+                    json!({ "cardType": "site", "elements": [] }),
+                    "genesisDiscardTopSpells",
+                    json!(2),
+                ),
+                "genesisDrawSpellPerAdjacentSameCard",
+                json!(true),
+            ),
+            "discard and draw",
+        ),
+        (
+            "alternative payments",
+            with(
+                with(minion(), "discardRandomCardInsteadOfMana", json!(true)),
+                "sacrificeMinionAtSummoningLocationForManaDiscount",
+                json!(2),
+            ),
+            "alternative summon payments",
+        ),
+        (
+            "Genesis effects",
+            with(
+                with(minion(), "genesisDrawSite", json!(true)),
+                "genesisHealController",
+                json!(2),
+            ),
+            "Genesis effects",
+        ),
+        (
+            "Genesis disable and Stealth",
+            with(
+                with(minion(), "genesisDisableSelfUntilDamaged", json!(true)),
+                "stealth",
+                json!(true),
+            ),
+            "disable with Stealth",
+        ),
+        (
+            "targeted Genesis and payment",
+            with(
+                with(minion(), "genesisMayDamageTargetAdjacentUnit", json!(2)),
+                "discardRandomCardInsteadOfMana",
+                json!(true),
+            ),
+            "targeted Genesis",
+        ),
+        (
+            "end-turn Stealth modes",
+            with(
+                with(minion(), "gainsStealthAtEndOfTurn", json!(true)),
+                "gainsStealthAtEndOfTurnIfNoEnemiesNearby",
+                json!(true),
+            ),
+            "end-turn Stealth",
+        ),
+        (
+            "Ranged movement requires Ranged",
+            with(
+                minion(),
+                "mayRangedStrikeOnceDuringBasicMovement",
+                json!(true),
+            ),
+            "requires ranged",
+        ),
+        (
+            "random teleport requires Voidwalk",
+            with(
+                minion(),
+                "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
+                json!(true),
+            ),
+            "requires voidwalk",
+        ),
+        (
+            "oversized ability",
+            with(
+                with(minion(), "occupiesSquareArea", json!(2)),
+                "ranged",
+                json!(true),
+            ),
+            "unsupported ability combination",
+        ),
+        (
+            "movement restrictions",
+            with(
+                with(minion(), "movesOnlyForward", json!(true)),
+                "movesOnlySideways",
+                json!(true),
+            ),
+            "only forward and only sideways",
+        ),
+        (
+            "cast region ability",
+            with(minion(), "mustBeCastBurrowed", json!(true)),
+            "requires Burrowing",
+        ),
+        (
+            "damage prevention",
+            with(
+                with(minion(), "ward", json!(true)),
+                "takesLessDamage",
+                json!(1),
+            ),
+            "damage prevention",
+        ),
+        (
+            "token Genesis",
+            with(
+                with(minion(), "token", json!(true)),
+                "genesisDrawSite",
+                json!(true),
+            ),
+            "token Genesis",
+        ),
+        (
+            "Waterbound Ward",
+            with(
+                with(minion(), "waterbound", json!(true)),
+                "ward",
+                json!(true),
+            ),
+            "Waterbound with Ward",
+        ),
+    ];
+
+    for (name, definition, expected_error) in invalid {
+        let error = parse_card_definition(name, &definition).expect_err(name);
+        assert!(
+            error.to_string().contains(expected_error),
+            "{name}: {error}"
+        );
+    }
+}
+
+#[test]
+fn typed_effects_should_retain_only_normalized_values() {
+    let definition = with(
+        with(
+            spell("magic", ("damageTargetUnit", json!(3.0))),
+            "targetNearby",
+            json!(true),
+        ),
+        "untapTargetMinionAfterDamage",
+        json!(true),
+    );
+    let CardFacts::Magic(facts) =
+        parse_card_definition("lash", &definition).expect("valid targeted Magic")
+    else {
+        panic!("expected Magic facts");
+    };
+    assert_eq!(
+        facts.effect,
+        MagicEffect::DamageTargetUnit {
+            amount: 3,
+            target_nearby: true,
+            untap_target_minion_after_damage: true,
+        }
+    );
+
+    let CardFacts::Minion(facts) =
+        parse_card_definition("draw-two", &with(minion(), "genesisDrawSpells", json!(2)))
+            .expect("valid Genesis minion")
+    else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(facts.genesis, Some(MinionGenesis::DrawSpells(2)));
+    assert_eq!(facts.thresholds, Thresholds::default());
+    assert_eq!(facts.provides, None::<Element>);
+}
