@@ -163,8 +163,8 @@ fn north_attacks_with_manifest(manifest: &str) -> AttackSetup {
     }
 }
 
-fn north_avatar_attacks_south_at_c2(seed: u32) -> AvatarAttackSetup {
-    let manifest = scenario_manifest(seed, 1, 1, false, 2, 1);
+fn north_avatar_attacks_south_at_c2(seed: u32, avatar_attack: u64) -> AvatarAttackSetup {
+    let manifest = scenario_manifest(seed, 1, 1, false, avatar_attack, 1);
     let mut session = Session::new(&manifest).expect("valid Avatar combat session");
     keep(&mut session);
     keep(&mut session);
@@ -311,6 +311,37 @@ fn replay_game(session: &Session) -> Game {
         game.apply_action(&action).expect("replay action");
     }
     game
+}
+
+#[test]
+fn zero_power_avatars_should_not_emit_zero_damage_or_life_loss() {
+    let AvatarAttackSetup {
+        mut session,
+        south_avatar_instance_id,
+        ..
+    } = north_avatar_attacks_south_at_c2(68, 0);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "declare-attack"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["instanceId"] == south_avatar_instance_id
+    });
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "close-defend" && descriptor["originalTargetParticipates"] == true
+    });
+
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "defend-window-closed",
+            "fight-started",
+            "strike-damage-allocated",
+        ]
+    );
+    assert_exact_replay(&session);
 }
 
 #[test]
@@ -487,7 +518,7 @@ fn deaths_door_prevents_same_turn_damage_and_later_simultaneous_death_blows_draw
         north_minion_instance_id,
         mut session,
         south_avatar_instance_id,
-    } = north_avatar_attacks_south_at_c2(67);
+    } = north_avatar_attacks_south_at_c2(67, 2);
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "declare-attack"
             && descriptor["target"]["kind"] == "avatar"

@@ -1,0 +1,102 @@
+{
+  "actions": [
+    {
+      "actionId": "sha256:c11162bb0429ee8fecf80ccf21117ceb88c027257276faf9b5a1922e63f9c613",
+      "descriptor": {
+        "kind": "close-defend",
+        "originalTargetParticipates": false
+      }
+    },
+    {
+      "actionId": "sha256:8731334b37ded08815d8307df962196e18f9aa155e9d82579050d0090e1ea6a5",
+      "descriptor": {
+        "from": { "cell": "C2", "region": "surface" },
+        "kind": "defend",
+        "path": [
+          { "cell": "C2", "region": "surface" },
+          { "cell": "D2", "region": "surface" }
+        ],
+        "to": { "cell": "D2", "region": "surface" },
+        "unitInstanceId": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+      }
+    },
+    {
+      "actionId": "sha256:5e5e8be8135200d4b0adc25661c5e3458b29f3df98e120f7be143d3bb138891b",
+      "descriptor": {
+        "from": { "cell": "C2", "region": "surface" },
+        "kind": "defend",
+        "path": [
+          { "cell": "C2", "region": "surface" },
+          { "cell": "C3", "region": "surface" }
+        ],
+        "to": { "cell": "C3", "region": "surface" },
+        "unitInstanceId": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    },
+    {
+      "actionId": "sha256:1590be022f32f29933e1d979161532728e6cea65314e8fea6049470f2a63b143",
+      "descriptor": {
+        "from": { "cell": "B2", "region": "surface" },
+        "kind": "move-and-attack",
+        "path": [
+          { "cell": "B2", "region": "surface" },
+          { "cell": "B3", "region": "surface" }
+        ],
+        "to": { "cell": "B3", "region": "surface" },
+        "unitInstanceId": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "actionId": "sha256:bc4f20db38feea3760ae76fd3a8b254e8fa989538e30cf0e21fdf00039e7cc65",
+      "descriptor": {
+        "from": { "cell": "C2", "region": "surface" },
+        "kind": "move-and-attack",
+        "path": [
+          { "cell": "C2", "region": "surface" },
+          { "cell": "C3", "region": "surface" }
+        ],
+        "to": { "cell": "C3", "region": "surface" },
+        "unitInstanceId": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+      }
+    },
+    {
+      "actionId": "sha256:e26abfa92f1a5999ea911aaae537a121a4c161120f37d762cd4ea5eb06dc73c7",
+      "descriptor": {
+        "amount": 2,
+        "kind": "allocate-strike",
+        "targetInstanceId": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    },
+    {
+      "actionId": "sha256:ec84de9e00a29cfa1f6850e43375d426fe8ad75c4233770d83200d9ea60adf5f",
+      "descriptor": {
+        "amount": 2,
+        "kind": "activate-mana",
+        "unitInstanceId": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+      }
+    },
+    {
+      "actionId": "sha256:2bbd197b613a8678ed8ebff9067880cd60393a17342b3bbc8ab390d6d4497fcd",
+      "descriptor": {
+        "amount": 10,
+        "kind": "allocate-strike",
+        "targetInstanceId": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    }
+  ],
+  "canonicalActionIds": [
+    "sha256:2bbd197b613a8678ed8ebff9067880cd60393a17342b3bbc8ab390d6d4497fcd",
+    "sha256:ec84de9e00a29cfa1f6850e43375d426fe8ad75c4233770d83200d9ea60adf5f",
+    "sha256:e26abfa92f1a5999ea911aaae537a121a4c161120f37d762cd4ea5eb06dc73c7",
+    "sha256:1590be022f32f29933e1d979161532728e6cea65314e8fea6049470f2a63b143",
+    "sha256:5e5e8be8135200d4b0adc25661c5e3458b29f3df98e120f7be143d3bb138891b",
+    "sha256:8731334b37ded08815d8307df962196e18f9aa155e9d82579050d0090e1ea6a5",
+    "sha256:bc4f20db38feea3760ae76fd3a8b254e8fa989538e30cf0e21fdf00039e7cc65",
+    "sha256:c11162bb0429ee8fecf80ccf21117ceb88c027257276faf9b5a1922e63f9c613"
+  ],
+  "contract": "sorcery-core-v1",
+  "schemaVersion": 1,
+  "seat": "south",
+  "source": "typescript-legality-engine",
+  "stateVersion": 23
+}

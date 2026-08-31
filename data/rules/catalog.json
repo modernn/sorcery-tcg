@@ -2193,7 +2193,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Sedge Crabs can move themselves only sideways.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "move"
@@ -2202,8 +2202,8 @@
         "movement"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Sedge Crabs can move themselves only sideways"
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "sideways_restriction_should_filter_every_non_sideways_step"
       }
     },
     {
@@ -2456,7 +2456,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Movement +1 can take an exact two-step path to Defend.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "movement-bonus"
       ],
@@ -2465,8 +2465,8 @@
       ],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Movement +1 can take an exact two-step path to Defend"
+        "file": "crates/sorcery-engine/tests/defend_rules.rs",
+        "testName": "movement_bonus_one_should_issue_and_apply_exact_two_step_defend_path"
       }
     },
     {
@@ -2660,7 +2660,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Defend moves a unit into a simultaneous fight and stages exact split damage.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "move",
@@ -2672,8 +2672,8 @@
         "movement"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Defend moves a unit into a simultaneous fight and stages exact split damage"
+        "file": "crates/sorcery-engine/tests/defend_rules.rs",
+        "testName": "defend_should_move_then_resolve_simultaneous_split_damage"
       }
     },
     {
@@ -2682,7 +2682,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Takes-less prevention applies to each simultaneous damage source before Lethal.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "lethal"
       ],
@@ -2691,8 +2691,8 @@
         "damage"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 takes-less prevention applies to each simultaneous damage source before Lethal"
+        "file": "crates/sorcery-engine/tests/defend_rules.rs",
+        "testName": "takes_less_damage_should_prevent_each_simultaneous_lethal_source"
       }
     },
     {

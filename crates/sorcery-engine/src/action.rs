@@ -283,10 +283,28 @@ pub enum ActionDescriptor {
         /// Chosen combat target.
         target: CombatTarget,
     },
+    /// Move one ready unit along an engine-issued path to join a fight.
+    Defend {
+        /// Unit location before movement.
+        from: Location,
+        /// Complete issued path, including the starting location.
+        path: Vec<Location>,
+        /// Fight location after movement.
+        to: Location,
+        /// Authoritative defending unit identity.
+        unit_instance_id: IdentityHash,
+    },
     /// Close the defend window.
     CloseDefend {
         /// Whether the original attack target remains a combatant.
         original_target_participates: bool,
+    },
+    /// Assign one striker's damage to a combatant.
+    AllocateStrike {
+        /// Damage assigned by this action.
+        amount: u64,
+        /// Authoritative target identity.
+        target_instance_id: IdentityHash,
     },
     /// End the acting player's turn.
     EndTurn,
@@ -298,6 +316,10 @@ impl ActionDescriptor {
     /// Site and summon labels return `None` because their established labels
     /// depend on rule facts or the current phase and board state.
     #[must_use]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "closed descriptor labels mirror the TypeScript action contract"
+    )]
     pub fn state_independent_label(&self) -> Option<String> {
         match self {
             Self::ActivateMana {
@@ -374,6 +396,19 @@ impl ActionDescriptor {
                 target.kind(),
                 short_identity(target.instance_id())
             )),
+            Self::Defend {
+                path,
+                unit_instance_id,
+                ..
+            } => Some(format!(
+                "Defend with {}… via {}",
+                short_identity(unit_instance_id),
+                path.iter()
+                    .copied()
+                    .map(location_label)
+                    .collect::<Vec<_>>()
+                    .join(" → ")
+            )),
             Self::CloseDefend {
                 original_target_participates,
             } => Some(
@@ -384,6 +419,13 @@ impl ActionDescriptor {
                 }
                 .to_owned(),
             ),
+            Self::AllocateStrike {
+                amount,
+                target_instance_id,
+            } => Some(format!(
+                "Assign {amount} damage to {}…",
+                short_identity(target_instance_id)
+            )),
             Self::EndTurn => Some("End turn".to_owned()),
             Self::ReplaceRubbleWithTopAtlasSite { target_cell, .. } => Some(format!(
                 "Replace Rubble at {target_cell} with the top site of your Atlas"
@@ -415,6 +457,37 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     unit_instance_id: right_unit,
                 },
             ) => compare_mana_activations(*left_amount, left_unit, *right_amount, right_unit),
+            (
+                ActionDescriptor::AllocateStrike {
+                    amount: left_amount,
+                    target_instance_id: left_target,
+                },
+                ActionDescriptor::AllocateStrike {
+                    amount: right_amount,
+                    target_instance_id: right_target,
+                },
+            ) => compare_json_integers(*left_amount, *right_amount)
+                .then_with(|| left_target.cmp(right_target)),
+            (
+                ActionDescriptor::ActivateMana {
+                    amount: left_amount,
+                    ..
+                },
+                ActionDescriptor::AllocateStrike {
+                    amount: right_amount,
+                    ..
+                },
+            ) => compare_json_integers(*left_amount, *right_amount).then(Ordering::Less),
+            (
+                ActionDescriptor::AllocateStrike {
+                    amount: left_amount,
+                    ..
+                },
+                ActionDescriptor::ActivateMana {
+                    amount: right_amount,
+                    ..
+                },
+            ) => compare_json_integers(*left_amount, *right_amount).then(Ordering::Greater),
             (
                 ActionDescriptor::Mulligan {
                     atlas_order: left_atlas,
@@ -527,6 +600,40 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 .then_with(|| compare_json_array(left_path, right_path, Location::cmp))
                 .then_with(|| left_to.cmp(right_to))
                 .then_with(|| left_unit.cmp(right_unit)),
+            (
+                ActionDescriptor::Defend {
+                    from: left_from,
+                    path: left_path,
+                    to: left_to,
+                    unit_instance_id: left_unit,
+                },
+                ActionDescriptor::Defend {
+                    from: right_from,
+                    path: right_path,
+                    to: right_to,
+                    unit_instance_id: right_unit,
+                },
+            ) => left_from
+                .cmp(right_from)
+                .then_with(|| compare_json_array(left_path, right_path, Location::cmp))
+                .then_with(|| left_to.cmp(right_to))
+                .then_with(|| left_unit.cmp(right_unit)),
+            (
+                ActionDescriptor::Defend {
+                    from: left_from, ..
+                },
+                ActionDescriptor::MoveAndAttack {
+                    from: right_from, ..
+                },
+            ) => left_from.cmp(right_from).then(Ordering::Less),
+            (
+                ActionDescriptor::MoveAndAttack {
+                    from: left_from, ..
+                },
+                ActionDescriptor::Defend {
+                    from: right_from, ..
+                },
+            ) => left_from.cmp(right_from).then(Ordering::Greater),
             _ => action_kind(left)
                 .cmp(&action_kind(right))
                 .then_with(|| match (left, right) {
@@ -643,12 +750,12 @@ fn compare_optional_cells(left: Option<Cell>, right: Option<Cell>) -> Ordering {
 
 const fn descriptor_group(action: &ActionDescriptor) -> u8 {
     match action {
-        ActionDescriptor::ActivateMana { .. } => 0,
+        ActionDescriptor::ActivateMana { .. } | ActionDescriptor::AllocateStrike { .. } => 0,
         ActionDescriptor::Mulligan { .. } => 1,
         ActionDescriptor::CastMagic { .. }
         | ActionDescriptor::PlaySite { .. }
         | ActionDescriptor::SummonMinion { .. } => 2,
-        ActionDescriptor::MoveAndAttack { .. } => 3,
+        ActionDescriptor::Defend { .. } | ActionDescriptor::MoveAndAttack { .. } => 3,
         _ => 4,
     }
 }
@@ -683,22 +790,24 @@ fn card_prefix(action: &ActionDescriptor) -> (&str, &IdentityHash) {
 const fn action_kind(action: &ActionDescriptor) -> u8 {
     match action {
         ActionDescriptor::ActivateMana { .. } => 0,
-        ActionDescriptor::CastMagic { .. } => 1,
-        ActionDescriptor::CloseDefend { .. } => 2,
-        ActionDescriptor::DeclareAttack { .. } => 3,
-        ActionDescriptor::DeclineAttack => 4,
-        ActionDescriptor::Draw { .. } => 5,
-        ActionDescriptor::DrawSite => 6,
-        ActionDescriptor::DrawSpell => 7,
-        ActionDescriptor::EndTurn => 8,
-        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 9,
-        ActionDescriptor::ResolveGenesisSpell { .. } => 10,
-        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 11,
-        ActionDescriptor::ResolveGenesisToken { .. } => 12,
-        ActionDescriptor::Mulligan { .. } => 13,
-        ActionDescriptor::PlaySite { .. } => 14,
-        ActionDescriptor::SummonMinion { .. } => 15,
-        ActionDescriptor::MoveAndAttack { .. } => 16,
+        ActionDescriptor::AllocateStrike { .. } => 1,
+        ActionDescriptor::CastMagic { .. } => 2,
+        ActionDescriptor::CloseDefend { .. } => 3,
+        ActionDescriptor::DeclareAttack { .. } => 4,
+        ActionDescriptor::DeclineAttack => 5,
+        ActionDescriptor::Defend { .. } => 6,
+        ActionDescriptor::Draw { .. } => 7,
+        ActionDescriptor::DrawSite => 8,
+        ActionDescriptor::DrawSpell => 9,
+        ActionDescriptor::EndTurn => 10,
+        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 11,
+        ActionDescriptor::ResolveGenesisSpell { .. } => 12,
+        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 13,
+        ActionDescriptor::ResolveGenesisToken { .. } => 14,
+        ActionDescriptor::Mulligan { .. } => 15,
+        ActionDescriptor::PlaySite { .. } => 16,
+        ActionDescriptor::SummonMinion { .. } => 17,
+        ActionDescriptor::MoveAndAttack { .. } => 18,
     }
 }
 
@@ -868,9 +977,45 @@ fn location_label(location: Location) -> String {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{Value, json};
 
-    use super::{compare_json_integers, compare_json_strings};
+    use super::{ActionDescriptor, compare_canonical, compare_json_integers, compare_json_strings};
+
+    const COMBAT_RESPONSE_FIXTURE: &str =
+        include_str!("../../../tests/engine/fixtures/combat-response-action-v1.json");
+
+    #[test]
+    fn native_combat_response_order_should_match_typescript() {
+        let fixture: Value =
+            serde_json::from_str(COMBAT_RESPONSE_FIXTURE).expect("valid parity fixture");
+        let mut actions = fixture["actions"]
+            .as_array()
+            .expect("fixture actions")
+            .iter()
+            .map(|action| {
+                (
+                    serde_json::from_value::<ActionDescriptor>(action["descriptor"].clone())
+                        .expect("typed descriptor"),
+                    action["actionId"].as_str().expect("action ID").to_owned(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        actions.sort_unstable_by(|(left, _), (right, _)| compare_canonical(left, right));
+
+        assert_eq!(
+            actions
+                .into_iter()
+                .map(|(_, action_id)| action_id)
+                .collect::<Vec<_>>(),
+            fixture["canonicalActionIds"]
+                .as_array()
+                .expect("canonical action IDs")
+                .iter()
+                .map(|action_id| action_id.as_str().expect("action ID").to_owned())
+                .collect::<Vec<_>>()
+        );
+    }
 
     #[test]
     fn native_string_order_should_match_canonical_json_escaping() {

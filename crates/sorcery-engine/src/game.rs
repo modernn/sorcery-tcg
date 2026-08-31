@@ -332,7 +332,7 @@ struct SitePosition {
 struct UnitPosition {
     card: CardInstance,
     controller: Seat,
-    damage: u8,
+    damage: u16,
     disable_effects: Vec<DisableEffect>,
     disabled_until_damaged: bool,
     last_interacted_turn: Option<u64>,
@@ -368,11 +368,21 @@ impl UnitKind {
 
 #[derive(Clone, Debug)]
 struct PendingCombat {
+    allocations: Vec<StrikeAllocation>,
     attacker_instance_id: IdentityHash,
     attacker_kind: UnitKind,
     attacking_seat: Seat,
     cell: Cell,
+    combatants: Vec<UnitTarget>,
+    defenders: Vec<UnitTarget>,
     original_target: Option<CombatTarget>,
+    target_removed: bool,
+}
+
+#[derive(Clone, Debug)]
+struct StrikeAllocation {
+    amount: u8,
+    target_instance_id: IdentityHash,
 }
 
 #[derive(Clone, Debug)]
@@ -404,6 +414,7 @@ enum PendingField<T> {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Phase {
+    Allocate,
     Attack,
     Defend,
     Draw,
@@ -416,6 +427,7 @@ enum Phase {
 impl Phase {
     const fn as_str(self) -> &'static str {
         match self {
+            Self::Allocate => "allocate",
             Self::Attack => "attack",
             Self::Defend => "defend",
             Self::Draw => "draw",
@@ -755,6 +767,7 @@ impl Game {
     pub fn legal_actions(&self) -> Result<Vec<IssuedAction>, GameError> {
         let mut actions = Vec::new();
         match self.position.phase {
+            Phase::Allocate => self.append_allocate_actions(&mut actions)?,
             Phase::Attack => self.append_attack_actions(&mut actions)?,
             Phase::Defend => self.append_defend_actions(&mut actions)?,
             Phase::Draw => self.append_draw_actions(&mut actions)?,
@@ -766,6 +779,51 @@ impl Game {
         actions
             .sort_unstable_by(|left, right| compare_canonical(&left.descriptor, &right.descriptor));
         Ok(actions)
+    }
+
+    fn append_allocate_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
+        let pending = self
+            .position
+            .pending_combat
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        let target = pending
+            .combatants
+            .get(pending.allocations.len())
+            .ok_or(GameError::IllegalAction)?;
+        let attack = self
+            .combatant_attack_and_lethal(
+                pending.attacker_kind,
+                pending.attacking_seat,
+                &pending.attacker_instance_id,
+            )?
+            .0;
+        let assigned = pending
+            .allocations
+            .iter()
+            .try_fold(0_u8, |total, allocation| {
+                total.checked_add(allocation.amount)
+            })
+            .ok_or(GameError::IllegalAction)?;
+        let remaining = attack
+            .checked_sub(assigned)
+            .ok_or(GameError::IllegalAction)?;
+        let amounts = if pending.allocations.len() + 1 == pending.combatants.len() {
+            remaining..=remaining
+        } else {
+            0..=remaining
+        };
+        for amount in amounts {
+            let descriptor = ActionDescriptor::AllocateStrike {
+                amount: u64::from(amount),
+                target_instance_id: target.instance_id().clone(),
+            };
+            let label = descriptor
+                .state_independent_label()
+                .ok_or_else(|| invalid("allocate-strike action requires a label"))?;
+            self.push_action(actions, descriptor, label);
+        }
+        Ok(())
     }
 
     fn append_attack_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
@@ -785,20 +843,128 @@ impl Game {
     }
 
     fn append_defend_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
-        let target = self
+        let pending = self
             .position
             .pending_combat
             .as_ref()
-            .and_then(|pending| pending.original_target.as_ref())
             .ok_or(GameError::IllegalAction)?;
-        let descriptor = ActionDescriptor::CloseDefend {
-            original_target_participates: !matches!(target, CombatTarget::Site { .. }),
+        let target = pending
+            .original_target
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        let destination = Location {
+            cell: pending.cell,
+            region: Region::Surface,
         };
-        let label = descriptor
-            .state_independent_label()
-            .ok_or_else(|| invalid("close-defend action requires a label"))?;
-        self.push_action(actions, descriptor, label);
+        for (_kind, instance_id, start, profile) in self.defender_candidates()? {
+            for path in self
+                .surface_movement_paths(start, profile)
+                .into_iter()
+                .filter(|path| path.last() == Some(&destination))
+            {
+                let descriptor = ActionDescriptor::Defend {
+                    from: path[0],
+                    path,
+                    to: destination,
+                    unit_instance_id: instance_id.clone(),
+                };
+                let label = descriptor
+                    .state_independent_label()
+                    .ok_or_else(|| invalid("defend action requires a label"))?;
+                self.push_action(actions, descriptor, label);
+            }
+        }
+        let choices: &[bool] = if matches!(target, CombatTarget::Site { .. }) {
+            &[false]
+        } else if pending.defenders.is_empty() {
+            &[true]
+        } else {
+            &[true, false]
+        };
+        for original_target_participates in choices {
+            let descriptor = ActionDescriptor::CloseDefend {
+                original_target_participates: *original_target_participates,
+            };
+            let label = descriptor
+                .state_independent_label()
+                .ok_or_else(|| invalid("close-defend action requires a label"))?;
+            self.push_action(actions, descriptor, label);
+        }
         Ok(())
+    }
+
+    fn defender_candidates(
+        &self,
+    ) -> Result<Vec<(UnitKind, IdentityHash, Cell, MovementProfile)>, GameError> {
+        let pending = self
+            .position
+            .pending_combat
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        let seat = other_seat(pending.attacking_seat);
+        let unavailable: BTreeSet<_> = pending
+            .defenders
+            .iter()
+            .map(|target| target.instance_id().clone())
+            .chain(
+                pending
+                    .original_target
+                    .as_ref()
+                    .filter(|target| !matches!(target, CombatTarget::Site { .. }))
+                    .map(|target| target.instance_id().clone()),
+            )
+            .collect();
+        let player = &self.position.players[seat_index(seat)];
+        let mut candidates = Vec::new();
+        if !player.avatar.tapped && !unavailable.contains(&player.avatar.card.instance_id) {
+            candidates.push((
+                UnitKind::Avatar,
+                player.avatar.card.instance_id.clone(),
+                player.avatar.location,
+                MovementProfile {
+                    connects_top_bottom: false,
+                    maximum_steps: 1,
+                    restriction: None,
+                    seat,
+                },
+            ));
+        }
+        for unit in &self.position.units {
+            if unit.controller != seat
+                || unit.tapped
+                || self.minion_is_disabled(unit)
+                || unavailable.contains(&unit.card.instance_id)
+            {
+                continue;
+            }
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return Err(invalid("realm minion lacks Minion facts"));
+            };
+            if facts.cannot_defend_or_intercept {
+                continue;
+            }
+            if unit.summoning_sickness && !facts.charge {
+                continue;
+            }
+            candidates.push((
+                UnitKind::Minion,
+                unit.card.instance_id.clone(),
+                unit.location,
+                MovementProfile {
+                    connects_top_bottom: facts.connects_top_bottom,
+                    maximum_steps: if facts.cannot_defend || facts.immobile {
+                        0
+                    } else {
+                        1 + usize::from(facts.movement_bonus.unwrap_or(0))
+                    },
+                    restriction: facts.movement_restriction,
+                    seat,
+                },
+            ));
+        }
+        Ok(candidates)
     }
 
     fn attack_targets(&self) -> Result<Vec<CombatTarget>, GameError> {
@@ -1763,6 +1929,15 @@ impl Game {
             return Err(GameError::IllegalAction);
         }
         match &action.descriptor {
+            ActionDescriptor::AllocateStrike {
+                amount,
+                target_instance_id,
+            } => self.apply_allocate_strike_action(
+                action.seat,
+                *amount,
+                target_instance_id,
+                outcomes,
+            ),
             ActionDescriptor::ActivateMana {
                 amount,
                 unit_instance_id,
@@ -1778,6 +1953,14 @@ impl Game {
             }
             ActionDescriptor::DeclineAttack => {
                 self.apply_decline_attack_action(action.seat, outcomes)
+            }
+            ActionDescriptor::Defend {
+                from,
+                path,
+                to,
+                unit_instance_id,
+            } => {
+                self.apply_defend_action(action.seat, *from, path, *to, unit_instance_id, outcomes)
             }
             ActionDescriptor::Draw { zone } => {
                 self.apply_draw_action(action.seat, *zone, false, outcomes)
@@ -1869,6 +2052,197 @@ impl Game {
         Ok(())
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one closed Defend transaction keeps validation, movement, and response state atomic"
+    )]
+    fn apply_defend_action(
+        &mut self,
+        seat: Seat,
+        from: Location,
+        path: &[Location],
+        to: Location,
+        unit_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        if self.position.phase != Phase::Defend
+            || path.is_empty()
+            || path.first() != Some(&from)
+            || path.last() != Some(&to)
+            || path
+                .iter()
+                .any(|location| location.region != Region::Surface)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let pending_cell = self
+            .position
+            .pending_combat
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?
+            .cell;
+        if to
+            != (Location {
+                cell: pending_cell,
+                region: Region::Surface,
+            })
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let (kind, _, start, profile) = self
+            .defender_candidates()?
+            .into_iter()
+            .find(|(_, candidate, _, _)| candidate == unit_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        if start != from.cell
+            || !self
+                .surface_movement_paths(start, profile)
+                .iter()
+                .any(|candidate| candidate == path)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        match kind {
+            UnitKind::Avatar => {
+                let avatar = &mut self.position.players[seat_index(seat)].avatar;
+                avatar.location = to.cell;
+                avatar.tapped = true;
+            }
+            UnitKind::Minion => {
+                let unit = self
+                    .position
+                    .units
+                    .iter_mut()
+                    .find(|unit| {
+                        unit.card.instance_id == *unit_instance_id && unit.controller == seat
+                    })
+                    .ok_or(GameError::IllegalAction)?;
+                unit.location = to.cell;
+                unit.tapped = true;
+            }
+        }
+        let defender = match kind {
+            UnitKind::Avatar => UnitTarget::Avatar {
+                instance_id: unit_instance_id.clone(),
+                seat,
+            },
+            UnitKind::Minion => UnitTarget::Minion {
+                instance_id: unit_instance_id.clone(),
+                seat,
+            },
+        };
+        let removes_site = self
+            .position
+            .pending_combat
+            .as_ref()
+            .is_some_and(|pending| {
+                !pending.target_removed
+                    && matches!(pending.original_target, Some(CombatTarget::Site { .. }))
+            });
+        let removed_target = removes_site
+            .then(|| {
+                self.position
+                    .pending_combat
+                    .as_ref()
+                    .and_then(|pending| pending.original_target.as_ref())
+                    .map(|target| target.instance_id().clone())
+            })
+            .flatten();
+        let pending = self
+            .position
+            .pending_combat
+            .as_mut()
+            .ok_or(GameError::IllegalAction)?;
+        pending.defenders.push(defender);
+        pending.target_removed |= removes_site;
+        self.position.state_version += 1;
+        outcomes.push("defender-joined", || {
+            json!({
+                "from": from,
+                "instanceId": unit_instance_id,
+                "path": path,
+                "seat": seat,
+                "steps": path.len() - 1,
+                "to": to,
+            })
+        });
+        if let Some(instance_id) = removed_target {
+            outcomes.push(
+                "original-target-removed",
+                || json!({ "instanceId": instance_id, "kind": "site" }),
+            );
+        }
+        Ok(())
+    }
+
+    fn apply_allocate_strike_action(
+        &mut self,
+        seat: Seat,
+        amount: u64,
+        target_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let amount = u8::try_from(amount).map_err(|_| GameError::IllegalAction)?;
+        let pending = self
+            .position
+            .pending_combat
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        if self.position.phase != Phase::Allocate || seat != pending.attacking_seat {
+            return Err(GameError::IllegalAction);
+        }
+        let target = pending
+            .combatants
+            .get(pending.allocations.len())
+            .ok_or(GameError::IllegalAction)?;
+        let attack = self
+            .combatant_attack_and_lethal(
+                pending.attacker_kind,
+                pending.attacking_seat,
+                &pending.attacker_instance_id,
+            )?
+            .0;
+        let assigned = pending
+            .allocations
+            .iter()
+            .try_fold(0_u8, |total, allocation| {
+                total.checked_add(allocation.amount)
+            })
+            .ok_or(GameError::IllegalAction)?;
+        let remaining = attack
+            .checked_sub(assigned)
+            .ok_or(GameError::IllegalAction)?;
+        let final_allocation = pending.allocations.len() + 1 == pending.combatants.len();
+        if target.instance_id() != target_instance_id
+            || amount > remaining
+            || final_allocation && amount != remaining
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let attacker_instance_id = pending.attacker_instance_id.clone();
+        self.position
+            .pending_combat
+            .as_mut()
+            .ok_or(GameError::IllegalAction)?
+            .allocations
+            .push(StrikeAllocation {
+                amount,
+                target_instance_id: target_instance_id.clone(),
+            });
+        self.position.state_version += 1;
+        outcomes.push("strike-damage-allocated", || {
+            json!({
+                "amount": amount,
+                "strikerInstanceId": attacker_instance_id,
+                "targetInstanceId": target_instance_id,
+            })
+        });
+        if final_allocation {
+            self.resolve_pending_fight(outcomes)?;
+        }
+        Ok(())
+    }
+
     fn apply_declare_attack_action(
         &mut self,
         seat: Seat,
@@ -1923,23 +2297,73 @@ impl Game {
             .original_target
             .as_ref()
             .ok_or(GameError::IllegalAction)?;
-        let expected_participation = !matches!(target, CombatTarget::Site { .. });
-        if self.position.phase != Phase::Defend
-            || seat != target.seat()
-            || original_target_participates != expected_participation
+        let participation_is_legal = if matches!(target, CombatTarget::Site { .. }) {
+            !original_target_participates
+        } else if pending.defenders.is_empty() {
+            original_target_participates
+        } else {
+            true
+        };
+        if self.position.phase != Phase::Defend || seat != target.seat() || !participation_is_legal
         {
             return Err(GameError::IllegalAction);
         }
+        let defender_count = pending.defenders.len();
+        let target = target.clone();
         outcomes.push("defend-window-closed", || {
             json!({
-                "defenderCount": 0,
+                "defenderCount": defender_count,
                 "originalTargetParticipates": original_target_participates,
             })
         });
-        match target {
-            CombatTarget::Site { .. } => self.resolve_undefended_site_strike(outcomes)?,
-            CombatTarget::Avatar { .. } | CombatTarget::Minion { .. } => {
-                self.resolve_simple_avatar_fight(outcomes)?;
+        match &target {
+            CombatTarget::Site { .. } if defender_count == 0 => {
+                self.resolve_undefended_site_strike(outcomes)?;
+            }
+            CombatTarget::Site { .. } => {
+                let combatants = self
+                    .position
+                    .pending_combat
+                    .as_ref()
+                    .ok_or(GameError::IllegalAction)?
+                    .defenders
+                    .clone();
+                self.begin_fight(combatants, outcomes)?;
+            }
+            CombatTarget::Avatar { instance_id, seat }
+            | CombatTarget::Minion { instance_id, seat } => {
+                if !original_target_participates {
+                    outcomes.push(
+                        "original-target-removed",
+                        || json!({ "instanceId": instance_id, "kind": target.kind() }),
+                    );
+                }
+                let mut combatants = self
+                    .position
+                    .pending_combat
+                    .as_ref()
+                    .ok_or(GameError::IllegalAction)?
+                    .defenders
+                    .clone();
+                if original_target_participates {
+                    combatants.push(match target {
+                        CombatTarget::Avatar { .. } => UnitTarget::Avatar {
+                            instance_id: instance_id.clone(),
+                            seat: *seat,
+                        },
+                        CombatTarget::Minion { .. } => UnitTarget::Minion {
+                            instance_id: instance_id.clone(),
+                            seat: *seat,
+                        },
+                        CombatTarget::Site { .. } => unreachable!(),
+                    });
+                }
+                self.position
+                    .pending_combat
+                    .as_mut()
+                    .ok_or(GameError::IllegalAction)?
+                    .target_removed = !original_target_participates;
+                self.begin_fight(combatants, outcomes)?;
             }
         }
         self.position.state_version += 1;
@@ -2056,6 +2480,21 @@ impl Game {
         instance_id: &IdentityHash,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        if self.mark_unit_interaction(kind, seat, instance_id)? {
+            outcomes.push(
+                "stealth-lost",
+                || json!({ "instanceId": instance_id, "seat": seat }),
+            );
+        }
+        Ok(())
+    }
+
+    fn mark_unit_interaction(
+        &mut self,
+        kind: UnitKind,
+        seat: Seat,
+        instance_id: &IdentityHash,
+    ) -> Result<bool, GameError> {
         match kind {
             UnitKind::Avatar => {
                 let avatar = &mut self.position.players[seat_index(seat)].avatar;
@@ -2063,6 +2502,7 @@ impl Game {
                     return Err(GameError::IllegalAction);
                 }
                 avatar.last_interacted_turn = Some(self.position.turn_number);
+                Ok(false)
             }
             UnitKind::Minion => {
                 let unit = self
@@ -2072,124 +2512,220 @@ impl Game {
                     .find(|unit| unit.card.instance_id == *instance_id && unit.controller == seat)
                     .ok_or(GameError::IllegalAction)?;
                 unit.last_interacted_turn = Some(self.position.turn_number);
-                if unit.stealthed {
-                    unit.stealthed = false;
-                    outcomes.push(
-                        "stealth-lost",
-                        || json!({ "instanceId": instance_id, "seat": seat }),
-                    );
-                }
+                let lost_stealth = unit.stealthed;
+                unit.stealthed = false;
+                Ok(lost_stealth)
             }
         }
-        Ok(())
+    }
+
+    fn begin_fight(
+        &mut self,
+        mut combatants: Vec<UnitTarget>,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        combatants.sort_unstable_by(|left, right| left.instance_id().cmp(right.instance_id()));
+        if combatants.is_empty() {
+            return Err(GameError::IllegalAction);
+        }
+        let attacker_instance_id = self
+            .position
+            .pending_combat
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?
+            .attacker_instance_id
+            .clone();
+        let combatant_instance_ids: Vec<_> = combatants
+            .iter()
+            .map(|target| target.instance_id().clone())
+            .collect();
+        let pending = self
+            .position
+            .pending_combat
+            .as_mut()
+            .ok_or(GameError::IllegalAction)?;
+        pending.allocations.clear();
+        pending.combatants = combatants;
+        outcomes.push("fight-started", || {
+            json!({
+                "attackerInstanceId": attacker_instance_id,
+                "combatantInstanceIds": combatant_instance_ids,
+            })
+        });
+        if self
+            .position
+            .pending_combat
+            .as_ref()
+            .is_some_and(|pending| pending.combatants.len() == 1)
+        {
+            let pending = self
+                .position
+                .pending_combat
+                .as_ref()
+                .ok_or(GameError::IllegalAction)?;
+            let amount = self
+                .combatant_attack_and_lethal(
+                    pending.attacker_kind,
+                    pending.attacking_seat,
+                    &pending.attacker_instance_id,
+                )?
+                .0;
+            let target_instance_id = pending.combatants[0].instance_id().clone();
+            self.position
+                .pending_combat
+                .as_mut()
+                .ok_or(GameError::IllegalAction)?
+                .allocations
+                .push(StrikeAllocation {
+                    amount,
+                    target_instance_id: target_instance_id.clone(),
+                });
+            outcomes.push("strike-damage-allocated", || {
+                json!({
+                    "amount": amount,
+                    "strikerInstanceId": attacker_instance_id,
+                    "targetInstanceId": target_instance_id,
+                })
+            });
+            self.resolve_pending_fight(outcomes)
+        } else {
+            self.position.phase = Phase::Allocate;
+            self.position.decision_seat = self
+                .position
+                .pending_combat
+                .as_ref()
+                .ok_or(GameError::IllegalAction)?
+                .attacking_seat;
+            Ok(())
+        }
     }
 
     #[expect(
         clippy::too_many_lines,
         reason = "the compact fight path keeps simultaneous damage and terminal event order explicit"
     )]
-    fn resolve_simple_avatar_fight(
-        &mut self,
-        outcomes: &mut OutcomeLog<'_>,
-    ) -> Result<(), GameError> {
+    fn resolve_pending_fight(&mut self, outcomes: &mut OutcomeLog<'_>) -> Result<(), GameError> {
         let pending = self
             .position
             .pending_combat
             .as_ref()
             .ok_or(GameError::IllegalAction)?;
-        let target = pending
-            .original_target
-            .as_ref()
-            .ok_or(GameError::IllegalAction)?;
-        let target_kind = match target {
-            CombatTarget::Avatar { .. } => UnitKind::Avatar,
-            CombatTarget::Minion { .. } => UnitKind::Minion,
-            CombatTarget::Site { .. } => return Err(GameError::IllegalAction),
-        };
+        if pending.combatants.is_empty()
+            || pending.allocations.len() != pending.combatants.len()
+            || pending
+                .allocations
+                .iter()
+                .zip(&pending.combatants)
+                .any(|(allocation, target)| allocation.target_instance_id != *target.instance_id())
+        {
+            return Err(GameError::IllegalAction);
+        }
         let attacker_id = pending.attacker_instance_id.clone();
         let attacker_kind = pending.attacker_kind;
         let attacking_seat = pending.attacking_seat;
-        let target_id = target.instance_id().clone();
-        let target_seat = target.seat();
+        let combatants = pending.combatants.clone();
+        let allocations = pending.allocations.clone();
         let (attacker_attack, attacker_lethal) =
             self.combatant_attack_and_lethal(attacker_kind, attacking_seat, &attacker_id)?;
-        let (target_attack, target_lethal) =
-            self.combatant_attack_and_lethal(target_kind, target_seat, &target_id)?;
-        let target_can_strike = match target_kind {
-            UnitKind::Avatar => true,
-            UnitKind::Minion => {
-                let unit = self
-                    .position
-                    .units
-                    .iter()
-                    .find(|unit| {
-                        unit.card.instance_id == target_id && unit.controller == target_seat
-                    })
-                    .ok_or(GameError::IllegalAction)?;
-                !self.minion_is_disabled(unit)
-            }
-        };
+        let return_sources = combatants
+            .iter()
+            .map(|target| {
+                let kind = match target {
+                    UnitTarget::Avatar { .. } => UnitKind::Avatar,
+                    UnitTarget::Minion { .. } => UnitKind::Minion,
+                };
+                let (attack, lethal) =
+                    self.combatant_attack_and_lethal(kind, target.seat(), target.instance_id())?;
+                let can_strike = match kind {
+                    UnitKind::Avatar => true,
+                    UnitKind::Minion => self
+                        .position
+                        .units
+                        .iter()
+                        .find(|unit| unit.card.instance_id == *target.instance_id())
+                        .is_some_and(|unit| !self.minion_is_disabled(unit)),
+                };
+                Ok((kind, target.clone(), attack, lethal, can_strike))
+            })
+            .collect::<Result<Vec<_>, GameError>>()?;
 
-        self.record_unit_interaction(attacker_kind, attacking_seat, &attacker_id, outcomes)?;
-        self.record_unit_interaction(target_kind, target_seat, &target_id, outcomes)?;
-        outcomes.push("fight-started", || {
-            json!({
-                "attackerInstanceId": attacker_id,
-                "combatantInstanceIds": [target_id],
+        let mut stealth_losses = Vec::new();
+        if self.mark_unit_interaction(attacker_kind, attacking_seat, &attacker_id)? {
+            stealth_losses.push((attacker_id.clone(), attacking_seat));
+        }
+        for (kind, target, _, _, can_strike) in &return_sources {
+            if *can_strike
+                && self.mark_unit_interaction(*kind, target.seat(), target.instance_id())?
+            {
+                stealth_losses.push((target.instance_id().clone(), target.seat()));
+            }
+        }
+        let return_damage_sources = return_sources
+            .iter()
+            .filter(|(_, _, _, _, can_strike)| *can_strike)
+            .map(|(_, _, attack, lethal, _)| {
+                (
+                    u16::from(*attack),
+                    UnitDamageSource {
+                        current_power: *attack,
+                        lethal: *lethal,
+                    },
+                )
             })
-        });
-        outcomes.push("strike-damage-allocated", || {
-            json!({
-                "amount": attacker_attack,
-                "strikerInstanceId": attacker_id,
-                "targetInstanceId": target_id,
-            })
-        });
-        let attacker_damage = if target_can_strike {
-            self.apply_simple_damage(
-                attacker_kind,
-                attacking_seat,
-                &attacker_id,
-                target_attack,
-                UnitDamageSource {
-                    current_power: target_attack,
-                    lethal: target_lethal,
-                },
-                outcomes,
-            )?
-        } else {
+            .collect::<Vec<_>>();
+        let attacker_damage = if return_damage_sources.is_empty() {
             DamageResult {
                 minion_died: false,
                 avatar_defeated: false,
             }
+        } else {
+            self.apply_simultaneous_unit_damage(
+                attacker_kind,
+                attacking_seat,
+                &attacker_id,
+                &return_damage_sources,
+                outcomes,
+            )?
         };
-        let target_damage = self.apply_simple_damage(
-            target_kind,
-            target_seat,
-            &target_id,
-            attacker_attack,
-            UnitDamageSource {
-                current_power: attacker_attack,
-                lethal: attacker_lethal,
-            },
-            outcomes,
-        )?;
+        let mut combatant_results = Vec::with_capacity(combatants.len());
+        for (target, allocation) in combatants.iter().zip(&allocations) {
+            let kind = match target {
+                UnitTarget::Avatar { .. } => UnitKind::Avatar,
+                UnitTarget::Minion { .. } => UnitKind::Minion,
+            };
+            let result = self.apply_simple_damage(
+                kind,
+                target.seat(),
+                target.instance_id(),
+                u16::from(allocation.amount),
+                UnitDamageSource {
+                    current_power: attacker_attack,
+                    lethal: attacker_lethal,
+                },
+                outcomes,
+            )?;
+            combatant_results.push((target.clone(), result));
+        }
+        for (instance_id, seat) in stealth_losses {
+            outcomes.push(
+                "stealth-lost",
+                || json!({ "instanceId": instance_id, "seat": seat }),
+            );
+        }
         if attacker_damage.minion_died {
             self.remove_dead_minion(&attacker_id, outcomes)?;
         }
-        if target_damage.minion_died {
-            self.remove_dead_minion(&target_id, outcomes)?;
+        for (target, result) in &combatant_results {
+            if result.minion_died {
+                self.remove_dead_minion(target.instance_id(), outcomes)?;
+            }
         }
-        let defeated = if attacker_damage.avatar_defeated {
-            Some(attacking_seat)
-        } else if target_damage.avatar_defeated {
-            Some(target_seat)
-        } else {
-            None
-        };
+        let combatant_avatar_defeated = combatant_results
+            .iter()
+            .find_map(|(target, result)| result.avatar_defeated.then_some(target.seat()));
         self.position.pending_combat = None;
         self.position.decision_seat = self.position.active_seat;
-        if attacker_damage.avatar_defeated && target_damage.avatar_defeated {
+        if attacker_damage.avatar_defeated && combatant_avatar_defeated.is_some() {
             self.position.phase = Phase::Terminal;
             self.position.terminal = Some(TerminalResult::Draw);
             outcomes.push("game-ended", || {
@@ -2198,7 +2734,11 @@ impl Game {
                     "result": "draw",
                 })
             });
-        } else if let Some(loser) = defeated {
+        } else if let Some(loser) = attacker_damage
+            .avatar_defeated
+            .then_some(attacking_seat)
+            .or(combatant_avatar_defeated)
+        {
             let winner = other_seat(loser);
             self.position.phase = Phase::Terminal;
             self.position.terminal = Some(TerminalResult::Win {
@@ -2219,6 +2759,99 @@ impl Game {
         Ok(())
     }
 
+    fn apply_simultaneous_unit_damage(
+        &mut self,
+        kind: UnitKind,
+        seat: Seat,
+        instance_id: &IdentityHash,
+        sources: &[(u16, UnitDamageSource)],
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<DamageResult, GameError> {
+        let attempted = sources
+            .iter()
+            .try_fold(0_u16, |total, (amount, _)| total.checked_add(*amount))
+            .ok_or(GameError::IllegalAction)?;
+        if kind == UnitKind::Avatar {
+            return self.apply_simple_damage(
+                kind,
+                seat,
+                instance_id,
+                attempted,
+                UnitDamageSource {
+                    current_power: 0,
+                    lethal: false,
+                },
+                outcomes,
+            );
+        }
+        let (index, _, defense, prevention) = self.simple_minion_combatant(instance_id)?;
+        let disabled = self.minion_is_disabled(&self.position.units[index]);
+        let mut contributions = sources.iter().map(|(amount, source)| {
+            let dealt =
+                if disabled {
+                    *amount
+                } else {
+                    match prevention {
+                        Some(DamagePrevention::PreventsDamageFromUnitsWithPowerAtLeast(
+                            threshold,
+                        )) if source.current_power >= threshold => 0,
+                        Some(DamagePrevention::TakesOneLessDamage) => amount.saturating_sub(1),
+                        _ => *amount,
+                    }
+                };
+            (dealt, source.lethal && dealt > 0)
+        });
+        let (unwarded, lethal_dealt) = contributions
+            .try_fold((0_u16, false), |(total, any_lethal), (amount, lethal)| {
+                total
+                    .checked_add(amount)
+                    .map(|next| (next, any_lethal || lethal))
+            })
+            .ok_or(GameError::IllegalAction)?;
+        let unit = &mut self.position.units[index];
+        let ward_broken = unwarded > 0 && unit.warded;
+        if ward_broken {
+            unit.warded = false;
+        }
+        let dealt = if ward_broken { 0 } else { unwarded };
+        unit.damage = unit.damage.saturating_add(dealt);
+        let accumulated = unit.damage;
+        let awakened = dealt > 0 && unit.disabled_until_damaged;
+        if awakened {
+            unit.disabled_until_damaged = false;
+        }
+        outcomes.push("damage-dealt", || {
+            let mut payload = json!({
+                "accumulated": accumulated,
+                "amount": dealt,
+                "direct": true,
+                "instanceId": instance_id,
+                "seat": seat,
+            });
+            if dealt < attempted {
+                payload["attemptedAmount"] = json!(attempted);
+                payload["prevented"] = json!(true);
+            }
+            payload
+        });
+        if ward_broken {
+            outcomes.push(
+                "ward-broken",
+                || json!({ "instanceId": instance_id, "seat": seat }),
+            );
+        }
+        if awakened {
+            outcomes.push(
+                "minion-awakened",
+                || json!({ "instanceId": instance_id, "seat": seat }),
+            );
+        }
+        Ok(DamageResult {
+            minion_died: accumulated > 0 && (accumulated >= u16::from(defense) || lethal_dealt),
+            avatar_defeated: false,
+        })
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "one damage helper preserves exact minion and Avatar event ordering"
@@ -2228,7 +2861,7 @@ impl Game {
         kind: UnitKind,
         seat: Seat,
         instance_id: &IdentityHash,
-        amount: u8,
+        amount: u16,
         source: UnitDamageSource,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<DamageResult, GameError> {
@@ -2242,17 +2875,18 @@ impl Game {
                 if ward_broken {
                     unit.warded = false;
                 }
-                let dealt = if ward_broken
-                    || !disabled
-                        && matches!(
-                            damage_prevention,
-                            Some(DamagePrevention::PreventsDamageFromUnitsWithPowerAtLeast(
-                                threshold
-                            )) if source.current_power >= threshold
-                        ) {
+                let dealt = if ward_broken {
                     0
-                } else {
+                } else if disabled {
                     amount
+                } else {
+                    match damage_prevention {
+                        Some(DamagePrevention::PreventsDamageFromUnitsWithPowerAtLeast(
+                            threshold,
+                        )) if source.current_power >= threshold => 0,
+                        Some(DamagePrevention::TakesOneLessDamage) => amount.saturating_sub(1),
+                        _ => amount,
+                    }
                 };
                 let prevented = dealt < amount;
                 unit.damage = unit.damage.saturating_add(dealt);
@@ -2289,7 +2923,7 @@ impl Game {
                 }
                 Ok(DamageResult {
                     minion_died: accumulated > 0
-                        && (accumulated >= defense || source.lethal && dealt > 0),
+                        && (accumulated >= u16::from(defense) || source.lethal && dealt > 0),
                     avatar_defeated: false,
                 })
             }
@@ -2338,8 +2972,14 @@ impl Game {
                         avatar_defeated: false,
                     });
                 }
+                if amount == 0 {
+                    return Ok(DamageResult {
+                        minion_died: false,
+                        avatar_defeated: false,
+                    });
+                }
                 let old_life = avatar.life;
-                avatar.life = avatar.life.saturating_sub(u16::from(amount));
+                avatar.life = avatar.life.saturating_sub(amount);
                 let lost = old_life - avatar.life;
                 let reached_deaths_door = avatar.life == 0;
                 if reached_deaths_door {
@@ -2614,11 +3254,15 @@ impl Game {
             }
         }
         self.position.pending_combat = Some(PendingCombat {
+            allocations: Vec::new(),
             attacker_instance_id: unit_instance_id.clone(),
             attacker_kind,
             attacking_seat: seat,
             cell: to.cell,
+            combatants: Vec::new(),
+            defenders: Vec::new(),
             original_target: None,
+            target_removed: false,
         });
         self.position.phase = Phase::Attack;
         self.position.state_version += 1;
@@ -4186,7 +4830,10 @@ impl Game {
 
     fn pending_combat_value(pending: &PendingCombat) -> Value {
         json!({
-            "allocations": [],
+            "allocations": pending.allocations.iter().map(|allocation| json!({
+                "amount": allocation.amount,
+                "targetInstanceId": allocation.target_instance_id,
+            })).collect::<Vec<_>>(),
             "attacker": {
                 "instanceId": pending.attacker_instance_id,
                 "kind": pending.attacker_kind.as_str(),
@@ -4194,10 +4841,10 @@ impl Game {
             },
             "attackingSeat": pending.attacking_seat,
             "cell": pending.cell,
-            "combatants": [],
-            "defenders": [],
+            "combatants": pending.combatants,
+            "defenders": pending.defenders,
             "originalTarget": pending.original_target,
-            "targetRemoved": false,
+            "targetRemoved": pending.target_removed,
         })
     }
 
