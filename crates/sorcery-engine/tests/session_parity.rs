@@ -121,7 +121,7 @@ fn rejected_requests_should_not_mutate_authoritative_state() {
 }
 
 #[test]
-fn session_receipts_and_replay_should_match_typescript_through_first_draw() {
+fn session_receipts_and_replay_should_match_typescript_through_repeated_setup_turns() {
     let fixture = seed_31_fixture();
     let manifest = fixture
         .manifest_json
@@ -133,14 +133,14 @@ fn session_receipts_and_replay_should_match_typescript_through_first_draw() {
         .expect("initial setup draws hash");
 
     let mut accepted_action_ids = Vec::new();
-    for step_index in 0..6 {
+    for step_index in 0..13 {
         let expected = &fixture.steps[step_index];
         let action = session
             .legal_actions()
             .expect("legal mulligan actions")
             .into_iter()
             .find(|action| action.action_id.as_str() == expected.selected_action_id)
-            .expect("fixture-selected legal action");
+            .unwrap_or_else(|| panic!("fixture-selected legal action at step {step_index}"));
         accepted_action_ids.push(action.action_id.clone());
         let result = session
             .step(ActionRequest {

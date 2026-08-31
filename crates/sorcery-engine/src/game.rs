@@ -583,11 +583,7 @@ impl Game {
         if !player.domain_established {
             return Ok(());
         }
-        let caster_cell = player.avatar.location;
-        if self.position.sites[caster_cell.index()]
-            .as_ref()
-            .is_some_and(|site| site.controller == seat)
-        {
+        for caster_cell in self.controlled_site_cells(seat) {
             for card in &player.hand_spellbook {
                 let definition = &self.rules.cards[usize::from(card.card_id.0)];
                 let CardFacts::Minion(facts) = &definition.facts else {
@@ -615,6 +611,18 @@ impl Game {
         }
         self.push_action(actions, ActionDescriptor::EndTurn, "End turn".to_owned())?;
         Ok(())
+    }
+
+    fn controlled_site_cells(&self, seat: Seat) -> impl Iterator<Item = Cell> + '_ {
+        self.position
+            .sites
+            .iter()
+            .enumerate()
+            .filter_map(move |(index, site)| {
+                site.as_ref()
+                    .is_some_and(|site| site.controller == seat)
+                    .then_some(Cell::ALL[index])
+            })
     }
 
     fn thresholds_met(&self, seat: Seat, thresholds: Thresholds) -> bool {
@@ -679,15 +687,7 @@ impl Game {
                 .into_iter()
                 .collect();
         }
-        self.position
-            .sites
-            .iter()
-            .enumerate()
-            .filter_map(|(index, site)| {
-                site.as_ref()
-                    .is_some_and(|site| site.controller == seat)
-                    .then_some(Cell::ALL[index])
-            })
+        self.controlled_site_cells(seat)
             .flat_map(|cell| cell.bordering(false))
             .filter(|cell| self.position.sites[cell.index()].is_none())
             .collect::<BTreeSet<_>>()
@@ -885,7 +885,6 @@ impl Game {
         if self.position.phase != Phase::Main
             || !player.domain_established
             || player.avatar.card.instance_id != *caster_instance_id
-            || player.avatar.location != cell
             || !self.position.sites[cell.index()]
                 .as_ref()
                 .is_some_and(|site| site.controller == seat)
