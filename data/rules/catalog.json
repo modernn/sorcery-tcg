@@ -8,7 +8,7 @@
         "RULE-01"
       ],
       "plainLanguage": "Deterministic agents move, fight, and complete a match.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "move",
@@ -18,8 +18,8 @@
         "movement"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-demo.test.ts",
-        "testName": "RULE-01 deterministic agents move, fight, and complete a match"
+        "file": "crates/sorcery-engine/tests/rules_catalog_proofs.rs",
+        "testName": "deterministic_policy_completes_movement_fight_terminal_replay"
       }
     },
     {
@@ -43,13 +43,13 @@
         "RULE-06"
       ],
       "plainLanguage": "The manifest accepts only exact deck-scoped supported card facts.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-06 the manifest accepts only exact deck-scoped supported card facts"
+        "file": "crates/sorcery-engine/tests/rules_catalog_proofs.rs",
+        "testName": "manifest_fact_and_deck_scope_invalid_shapes_fail_closed"
       }
     },
     {
@@ -189,13 +189,13 @@
         "RULE-02"
       ],
       "plainLanguage": "Forged spatial actions cannot mutate the game.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-02 forged spatial actions cannot mutate the game"
+        "file": "crates/sorcery-engine/tests/rules_catalog_proofs.rs",
+        "testName": "forged_stale_and_wrong_seat_requests_preserve_authoritative_game"
       }
     },
     {
@@ -2631,7 +2631,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Move and Attack stages movement before an undefended enemy-site strike.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "move",
@@ -2643,8 +2643,8 @@
         "strike"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Move and Attack stages movement before an undefended enemy-site strike"
+        "file": "crates/sorcery-engine/tests/rules_catalog_proofs.rs",
+        "testName": "move_and_attack_stages_movement_before_undefended_site_strike"
       }
     },
     {
