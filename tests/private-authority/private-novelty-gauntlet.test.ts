@@ -9,7 +9,11 @@ import {
   resumeGameCheckpoint,
   serializeGameCheckpoint,
 } from '../../src/engine/checkpoint.ts';
-import { hashGameState } from '../../src/engine/game.ts';
+import {
+  hashGameState,
+  legalGameActions,
+  stepGame,
+} from '../../src/engine/game.ts';
 import {
   runPrivateNoveltyGauntlet,
 } from '../../src/commands/run-private-novelty-gauntlet.ts';
@@ -29,8 +33,8 @@ test('private novelty gauntlet runs both actual lessons and seat swaps without l
   try {
     const lessons = (await loadPrivateStarterCatalog())
       .filter(({ id }) => id.endsWith('-lesson'));
-    const first = await runPrivateNoveltyGauntlet(undefined, 1, TEST_OUTPUT_ID);
-    const second = await runPrivateNoveltyGauntlet(undefined, 1, TEST_OUTPUT_ID);
+    const first = await runPrivateNoveltyGauntlet(undefined, 5, TEST_OUTPUT_ID);
+    const second = await runPrivateNoveltyGauntlet(undefined, 5, TEST_OUTPUT_ID);
 
     assert.equal(networkCalls, 0);
     assert.equal(
@@ -71,12 +75,30 @@ test('private novelty gauntlet runs both actual lessons and seat swaps without l
     assert.deepEqual(first.report.totals, {
       completed: 0,
       failed: 0,
+      frontierBranches: 1,
+      frontierCompleted: 0,
+      frontierFailed: 0,
+      frontierHorizon: 1,
       horizon: 4,
       jobs: 4,
-      savedCheckpoints: 4,
+      savedCheckpoints: first.report.totals.savedCheckpoints,
     });
     assert.equal(first.report.jobs.every(({ result }) =>
-      result.acceptedActionCount === 1 && result.replayVerified), true);
+      result.acceptedActionCount === 5 && result.replayVerified), true);
+    assert.equal(
+      first.report.jobs.reduce((total, { result }) => total + result.frontier.length, 0),
+      2,
+    );
+    assert.equal(first.report.frontierBranches.length, 1);
+    assert.equal(first.report.frontierBranches.every(({ result }) =>
+      result.acceptedActionCount === 5 && result.replayVerified), true);
+    assert.equal(first.report.frontierBranches[0]?.entryActionCount, 1);
+    assert.deepEqual(first.report.frontierBranches[0]?.signals, [
+      { kind: 'action-kind', value: 'cast-artifact' },
+      { kind: 'event-type', value: 'artifact-conjured' },
+    ]);
+    assert.deepEqual(first.report.frontierBranches[0]?.entryEventTypes, ['artifact-conjured']);
+    assert.equal(first.report.frontierBranches[0]?.result.frontier.length, 0);
 
     const serialized = await readFile(first.outputPath, 'utf8');
     assert.equal(serialized, `${canonicalJson(first.report as unknown as JsonValue)}\n`);
@@ -111,23 +133,30 @@ test('private novelty gauntlet runs both actual lessons and seat swaps without l
     );
     const checkpointFiles = await readdir(checkpointDirectory);
     assert.equal(checkpointFiles.length >= first.report.totals.savedCheckpoints, true);
-    for (const { result } of first.report.jobs) {
-      assert.equal(result.status, 'horizon');
-      if (result.status !== 'horizon') continue;
+    const reportedResults = [
+      ...first.report.jobs.map(({ result }) => result),
+      ...first.report.frontierBranches.map(({ result }) => result),
+    ];
+    const reportedCheckpointIds = new Set(reportedResults.flatMap((result) => [
+      ...(result.status === 'horizon'
+        ? [result.checkpointId]
+        : result.status === 'failed' && 'checkpointId' in result.failure
+          ? [result.failure.checkpointId]
+          : []),
+      ...result.frontier.map(({ checkpointId }) => checkpointId),
+    ]));
+    assert.equal(first.report.totals.savedCheckpoints >= reportedCheckpointIds.size, true);
+    for (const checkpointId of reportedCheckpointIds) {
       const checkpointPath = resolve(
         checkpointDirectory,
-        `${result.checkpointId.slice('sha256:'.length)}.json`,
+        `${checkpointId.slice('sha256:'.length)}.json`,
       );
       const checkpointBytes = await readFile(checkpointPath, 'utf8');
       const checkpoint = parseGameCheckpoint(checkpointBytes);
-      assert.equal(checkpoint.checkpointId, result.checkpointId);
+      assert.equal(checkpoint.checkpointId, checkpointId);
       assert.equal(
         checkpointBytes,
         `${serializeGameCheckpoint(checkpoint)}\n`,
-      );
-      assert.equal(
-        hashGameState(resumeGameCheckpoint(checkpoint).state),
-        result.finalStateHash,
       );
       const relativeCheckpoint = relative(REPOSITORY_ROOT, checkpointPath).replaceAll('\\', '/');
       const checkpointIgnored = await runBounded(
@@ -136,6 +165,49 @@ test('private novelty gauntlet runs both actual lessons and seat swaps without l
         REPOSITORY_ROOT,
       );
       assert.equal(checkpointIgnored.code, 0, checkpointIgnored.stderr);
+    }
+    for (const result of reportedResults) {
+      if (result.status !== 'horizon') continue;
+      const checkpointPath = resolve(
+        checkpointDirectory,
+        `${result.checkpointId.slice('sha256:'.length)}.json`,
+      );
+      assert.equal(
+        hashGameState(resumeGameCheckpoint(parseGameCheckpoint(
+          await readFile(checkpointPath, 'utf8'),
+        )).state),
+        result.finalStateHash,
+      );
+    }
+
+    for (const branch of first.report.frontierBranches) {
+      const parent = first.report.jobs.find(({ jobId }) => jobId === branch.parentJobId);
+      assert.ok(parent);
+      const candidates = parent.result.frontier.filter(({ actionId, checkpointId }) =>
+        actionId === branch.actionId && checkpointId === branch.checkpointId);
+      assert.equal(candidates.length, 2);
+      assert.deepEqual(candidates.map(({ signal }) => signal), branch.signals);
+      assert.equal(candidates.every(({ actionKind }) => actionKind === branch.actionKind), true);
+      const candidate = candidates[0]!;
+      const checkpointPath = resolve(
+        checkpointDirectory,
+        `${candidate.checkpointId.slice('sha256:'.length)}.json`,
+      );
+      const resumed = resumeGameCheckpoint(parseGameCheckpoint(
+        await readFile(checkpointPath, 'utf8'),
+      ));
+      const issued = legalGameActions(resumed.state, resumed.state.decisionSeat)
+        .filter(({ actionId }) => actionId === candidate.actionId);
+      assert.equal(issued.length, 1);
+      const applied = stepGame(resumed, issued[0]!);
+      assert.equal(applied.accepted, true);
+      if (!applied.accepted) continue;
+      assert.equal(hashGameState(applied.session.state), candidate.predictedStateHash);
+      assert.equal(branch.result.initialStateHash, candidate.predictedStateHash);
+      assert.deepEqual(
+        [...new Set(applied.receipt.events.map(({ type }) => type))].sort(),
+        branch.entryEventTypes,
+      );
     }
   } finally {
     globalThis.fetch = originalFetch;
