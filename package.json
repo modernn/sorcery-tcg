@@ -13,6 +13,7 @@
     "game:batch": "node src/commands/run-game-batch.ts",
     "game:check-private": "node src/commands/run-private-game-check.ts",
     "game:verify-private": "node --test tests/private-authority/private-game-scenario.test.ts",
+    "game:novelty-private": "node src/commands/run-private-novelty-gauntlet.ts",
     "game:report-private-mechanics": "node src/commands/report-private-mechanic-workload.ts",
     "play": "node src/prototype/game-server.ts",
     "prototype": "node src/prototype/server.ts",
