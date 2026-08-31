@@ -250,6 +250,18 @@ pub enum ActionDescriptor {
         /// Mana paid for the summon.
         mana_cost: u64,
     },
+    /// Cast one supported Magic card from the player's hand.
+    CastMagic {
+        /// Stable rules card identity.
+        card_id: String,
+        /// Authoritative card instance identity.
+        card_instance_id: IdentityHash,
+        /// Authoritative Spellcaster instance identity.
+        caster_instance_id: IdentityHash,
+        /// Exact own cemetery minion selected by Rescue.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cemetery_minion_instance_id: Option<IdentityHash>,
+    },
     /// Tap a unit and follow an issued movement path before choosing an attack.
     MoveAndAttack {
         /// Unit location before movement.
@@ -310,6 +322,19 @@ impl ActionDescriptor {
             Self::Draw { zone } => Some(format!("Draw from {}", zone.as_str())),
             Self::DrawSite => Some("Draw a site with Avatar".to_owned()),
             Self::DrawSpell => Some("Draw a spell with Avatar".to_owned()),
+            Self::CastMagic {
+                card_id,
+                cemetery_minion_instance_id,
+                ..
+            } => Some(cemetery_minion_instance_id.as_ref().map_or_else(
+                || format!("Cast {card_id}"),
+                |instance_id| {
+                    format!(
+                        "Cast {card_id} to return minion {}…",
+                        short_identity(instance_id)
+                    )
+                },
+            )),
             Self::MoveAndAttack {
                 path,
                 to,
@@ -414,6 +439,25 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 .then_with(|| compare_optional_cells(*left_rubble, *right_rubble))
                 .then_with(|| compare_optional_genesis_choices(*left_choice, *right_choice)),
             (
+                ActionDescriptor::CastMagic {
+                    card_id: left_card,
+                    card_instance_id: left_instance,
+                    caster_instance_id: left_caster,
+                    cemetery_minion_instance_id: left_cemetery,
+                },
+                ActionDescriptor::CastMagic {
+                    card_id: right_card,
+                    card_instance_id: right_instance,
+                    caster_instance_id: right_caster,
+                    cemetery_minion_instance_id: right_cemetery,
+                },
+            ) => compare_json_strings(left_card, right_card)
+                .then_with(|| left_instance.cmp(right_instance))
+                .then_with(|| left_caster.cmp(right_caster))
+                .then_with(|| {
+                    compare_optional_identities(left_cemetery.as_ref(), right_cemetery.as_ref())
+                }),
+            (
                 ActionDescriptor::SummonMinion {
                     card_id: left_card,
                     card_instance_id: left_instance,
@@ -441,10 +485,14 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     compare_optional_unit_targets(left_target.as_ref(), right_target.as_ref())
                 })
                 .then_with(|| compare_json_integers(*left_mana, *right_mana)),
-            (ActionDescriptor::SummonMinion { .. }, ActionDescriptor::PlaySite { .. }) => {
+            (ActionDescriptor::CastMagic { .. }, ActionDescriptor::PlaySite { .. })
+            | (ActionDescriptor::SummonMinion { .. }, ActionDescriptor::CastMagic { .. })
+            | (ActionDescriptor::SummonMinion { .. }, ActionDescriptor::PlaySite { .. }) => {
                 compare_card_prefix(left, right).then(Ordering::Less)
             }
-            (ActionDescriptor::PlaySite { .. }, ActionDescriptor::SummonMinion { .. }) => {
+            (ActionDescriptor::PlaySite { .. }, ActionDescriptor::CastMagic { .. })
+            | (ActionDescriptor::CastMagic { .. }, ActionDescriptor::SummonMinion { .. })
+            | (ActionDescriptor::PlaySite { .. }, ActionDescriptor::SummonMinion { .. }) => {
                 compare_card_prefix(left, right).then(Ordering::Greater)
             }
             (
@@ -558,6 +606,18 @@ fn compare_optional_unit_targets(
     }
 }
 
+fn compare_optional_identities(
+    left: Option<&IdentityHash>,
+    right: Option<&IdentityHash>,
+) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => left.cmp(right),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
 fn compare_optional_cells(left: Option<Cell>, right: Option<Cell>) -> Ordering {
     match (left, right) {
         (Some(left), Some(right)) => left.cmp(&right),
@@ -571,7 +631,9 @@ const fn descriptor_group(action: &ActionDescriptor) -> u8 {
     match action {
         ActionDescriptor::ActivateMana { .. } => 0,
         ActionDescriptor::Mulligan { .. } => 1,
-        ActionDescriptor::PlaySite { .. } | ActionDescriptor::SummonMinion { .. } => 2,
+        ActionDescriptor::CastMagic { .. }
+        | ActionDescriptor::PlaySite { .. }
+        | ActionDescriptor::SummonMinion { .. } => 2,
         ActionDescriptor::MoveAndAttack { .. } => 3,
         _ => 4,
     }
@@ -590,6 +652,11 @@ fn card_prefix(action: &ActionDescriptor) -> (&str, &IdentityHash) {
             card_instance_id,
             ..
         }
+        | ActionDescriptor::CastMagic {
+            card_id,
+            card_instance_id,
+            ..
+        }
         | ActionDescriptor::SummonMinion {
             card_id,
             card_instance_id,
@@ -602,21 +669,22 @@ fn card_prefix(action: &ActionDescriptor) -> (&str, &IdentityHash) {
 const fn action_kind(action: &ActionDescriptor) -> u8 {
     match action {
         ActionDescriptor::ActivateMana { .. } => 0,
-        ActionDescriptor::CloseDefend { .. } => 1,
-        ActionDescriptor::DeclareAttack { .. } => 2,
-        ActionDescriptor::DeclineAttack => 3,
-        ActionDescriptor::Draw { .. } => 4,
-        ActionDescriptor::DrawSite => 5,
-        ActionDescriptor::DrawSpell => 6,
-        ActionDescriptor::EndTurn => 7,
-        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 8,
-        ActionDescriptor::ResolveGenesisSpell { .. } => 9,
-        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 10,
-        ActionDescriptor::ResolveGenesisToken { .. } => 11,
-        ActionDescriptor::Mulligan { .. } => 12,
-        ActionDescriptor::PlaySite { .. } => 13,
-        ActionDescriptor::SummonMinion { .. } => 14,
-        ActionDescriptor::MoveAndAttack { .. } => 15,
+        ActionDescriptor::CastMagic { .. } => 1,
+        ActionDescriptor::CloseDefend { .. } => 2,
+        ActionDescriptor::DeclareAttack { .. } => 3,
+        ActionDescriptor::DeclineAttack => 4,
+        ActionDescriptor::Draw { .. } => 5,
+        ActionDescriptor::DrawSite => 6,
+        ActionDescriptor::DrawSpell => 7,
+        ActionDescriptor::EndTurn => 8,
+        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 9,
+        ActionDescriptor::ResolveGenesisSpell { .. } => 10,
+        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 11,
+        ActionDescriptor::ResolveGenesisToken { .. } => 12,
+        ActionDescriptor::Mulligan { .. } => 13,
+        ActionDescriptor::PlaySite { .. } => 14,
+        ActionDescriptor::SummonMinion { .. } => 15,
+        ActionDescriptor::MoveAndAttack { .. } => 16,
     }
 }
 

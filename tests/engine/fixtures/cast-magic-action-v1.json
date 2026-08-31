@@ -1,0 +1,43 @@
+{
+  "actions": [
+    {
+      "actionId": "sha256:bbd5a65ccf6e18cdcf56c0f9e08b3bcbe7369b3d9700687240468e501baccf38",
+      "descriptor": {
+        "cardId": "healing-magic",
+        "cardInstanceId": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "casterInstanceId": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "kind": "cast-magic"
+      }
+    },
+    {
+      "actionId": "sha256:2f1b0559b1ec7a135a564fce2aa45262c2f93b3b9c8139c32dfdec9881351f19",
+      "descriptor": {
+        "cardId": "rescue",
+        "cardInstanceId": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "casterInstanceId": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "cemeteryMinionInstanceId": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "kind": "cast-magic"
+      }
+    },
+    {
+      "actionId": "sha256:3839dd572a94131544f692829e96f45a3dcc5da19ea10966a8bd974de970d89e",
+      "descriptor": {
+        "cardId": "rescue",
+        "cardInstanceId": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "casterInstanceId": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "cemeteryMinionInstanceId": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "kind": "cast-magic"
+      }
+    }
+  ],
+  "canonicalActionIds": [
+    "sha256:bbd5a65ccf6e18cdcf56c0f9e08b3bcbe7369b3d9700687240468e501baccf38",
+    "sha256:3839dd572a94131544f692829e96f45a3dcc5da19ea10966a8bd974de970d89e",
+    "sha256:2f1b0559b1ec7a135a564fce2aa45262c2f93b3b9c8139c32dfdec9881351f19"
+  ],
+  "contract": "sorcery-core-v1",
+  "schemaVersion": 1,
+  "seat": "north",
+  "source": "typescript-legality-engine",
+  "stateVersion": 17
+}

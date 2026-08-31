@@ -248,7 +248,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Token Magic summons deterministically and tokens banish instead of entering a cemetery.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "token"
       ],
@@ -261,8 +261,8 @@
         "summon"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03/04 token Magic summons deterministically and tokens banish instead of entering a cemetery"
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "token_magic_should_summon_in_cell_order_and_banish_a_dead_token"
       }
     },
     {
@@ -777,7 +777,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Rescue returns a chosen own cemetery minion to hidden hand or resolves with none.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [],
       "eventHints": [
@@ -785,8 +785,8 @@
         "resolution"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Rescue returns a chosen own cemetery minion to hidden hand or resolves with none"
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rescue_should_issue_only_own_minion_choices_and_keep_the_return_hidden"
       }
     },
     {
@@ -881,7 +881,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Healing Magic is targetless, capped, and cannot leave Death's Door.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "deaths-door"
       ],
@@ -893,8 +893,8 @@
         "healing"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03/04 healing Magic is targetless, capped, and cannot leave Death's Door"
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "healing_magic_should_cap_and_not_leave_deaths_door"
       }
     },
     {

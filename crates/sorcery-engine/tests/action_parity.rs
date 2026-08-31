@@ -3,15 +3,18 @@ use std::collections::BTreeSet;
 use serde_json::{Value, json};
 use sorcery_engine::action::{ActionDescriptor, CombatTarget, DeckZone};
 use sorcery_engine::canonical::{IdentityHash, canonical_json};
-use sorcery_engine::contract::Seat;
+use sorcery_engine::contract::{Seat, opaque_action_id};
 
 const FIXTURE: &str = include_str!("../../../tests/engine/fixtures/typescript-parity-v1.json");
+const CAST_MAGIC_FIXTURE: &str =
+    include_str!("../../../tests/engine/fixtures/cast-magic-action-v1.json");
 const NORTH_AVATAR: &str =
     "sha256:310a489a62739a8b1a6a13bf949daa8dc42ab0995619e5288691a0ac86a2472e";
 
 fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
     match descriptor {
         ActionDescriptor::ActivateMana { .. } => "activate-mana",
+        ActionDescriptor::CastMagic { .. } => "cast-magic",
         ActionDescriptor::Mulligan { .. } => "mulligan",
         ActionDescriptor::Draw { .. } => "draw",
         ActionDescriptor::DrawSite => "draw-site",
@@ -79,6 +82,48 @@ fn selected_descriptors_should_round_trip_to_identical_canonical_values() {
         ])
     );
     assert_eq!(target_kinds, BTreeSet::from(["avatar", "minion", "site"]));
+}
+
+#[test]
+fn cast_magic_descriptors_order_and_action_ids_should_match_typescript() {
+    let fixture: Value =
+        serde_json::from_str(CAST_MAGIC_FIXTURE).expect("valid Cast Magic parity fixture");
+    let contract = fixture["contract"].as_str().expect("action contract");
+    let state_version = fixture["stateVersion"]
+        .as_u64()
+        .expect("fixture state version");
+    let mut ordered = Vec::new();
+    for action in fixture["actions"].as_array().expect("fixture actions") {
+        let descriptor: ActionDescriptor = serde_json::from_value(action["descriptor"].clone())
+            .expect("typed Cast Magic descriptor");
+        let serialized = serde_json::to_value(&descriptor).expect("serialized descriptor");
+        assert_eq!(serialized, action["descriptor"]);
+        let expected_id =
+            IdentityHash::parse(action["actionId"].as_str().expect("TypeScript action ID"))
+                .expect("valid TypeScript action ID");
+        assert_eq!(
+            opaque_action_id(contract, Seat::North, state_version, &serialized)
+                .expect("Rust action identity"),
+            expected_id
+        );
+        ordered.push((
+            canonical_json(&serialized).expect("canonical descriptor"),
+            expected_id,
+        ));
+    }
+    ordered.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+    assert_eq!(
+        ordered
+            .into_iter()
+            .map(|(_, action_id)| action_id.to_string())
+            .collect::<Vec<_>>(),
+        fixture["canonicalActionIds"]
+            .as_array()
+            .expect("canonical TypeScript order")
+            .iter()
+            .map(|action_id| action_id.as_str().expect("action ID").to_owned())
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]

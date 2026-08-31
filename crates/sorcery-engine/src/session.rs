@@ -10,7 +10,7 @@ use crate::contract::{
     ActionRequest, Attempt, LegalAction, Receipt, ReceiptInput, Rejection, RejectionCode, Seat,
     accepted_attempt, create_events, create_receipt, create_rejection, rejected_attempt,
 };
-use crate::game::{Game, GameEndReason, GameError, GameOutcome, IssuedAction};
+use crate::game::{Game, GameEndReason, GameError, GameOutcome, IssuedAction, SeatObservation};
 
 /// An accepted receipt or stable rejection.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -105,6 +105,12 @@ impl Session {
             state_hash,
             transcript: Vec::new(),
         })
+    }
+
+    /// Returns the compact public policy view without hidden card identities.
+    #[must_use]
+    pub fn observe(&self, seat: Seat) -> SeatObservation {
+        self.game.observe(seat)
     }
 
     /// Returns legal actions materialized at the external boundary.

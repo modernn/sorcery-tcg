@@ -1081,6 +1081,29 @@ impl Game {
         }
         for card in &player.hand_spellbook {
             let definition = &self.rules.cards[usize::from(card.card_id.0)];
+            let CardFacts::Magic(facts) = &definition.facts else {
+                continue;
+            };
+            if u64::from(player.mana) < facts.mana_cost
+                || !self.thresholds_met(seat, facts.thresholds)
+            {
+                continue;
+            }
+            for cemetery_minion_instance_id in self.magic_cemetery_choices(seat, &facts.effect)? {
+                let descriptor = ActionDescriptor::CastMagic {
+                    card_id: definition.id.clone(),
+                    card_instance_id: card.instance_id.clone(),
+                    caster_instance_id: player.avatar.card.instance_id.clone(),
+                    cemetery_minion_instance_id,
+                };
+                let label = descriptor
+                    .state_independent_label()
+                    .ok_or_else(|| invalid("cast-magic action requires a label"))?;
+                self.push_action(actions, descriptor, label);
+            }
+        }
+        for card in &player.hand_spellbook {
+            let definition = &self.rules.cards[usize::from(card.card_id.0)];
             let CardFacts::Minion(facts) = &definition.facts else {
                 continue;
             };
@@ -1221,6 +1244,40 @@ impl Game {
             return None;
         };
         facts.tap_for_mana
+    }
+
+    fn magic_cemetery_choices(
+        &self,
+        seat: Seat,
+        effect: &MagicEffect,
+    ) -> Result<Vec<Option<IdentityHash>>, GameError> {
+        Ok(match effect {
+            MagicEffect::HealController(_)
+            | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => vec![None],
+            MagicEffect::ReturnMinionFromOwnCemetery => {
+                let choices: Vec<_> = self.position.players[seat_index(seat)]
+                    .cemetery
+                    .iter()
+                    .filter(|card| {
+                        matches!(
+                            self.rules.cards[usize::from(card.card_id.0)].facts,
+                            CardFacts::Minion(_)
+                        )
+                    })
+                    .map(|card| Some(card.instance_id.clone()))
+                    .collect();
+                if choices.is_empty() {
+                    vec![None]
+                } else {
+                    choices
+                }
+            }
+            _ => {
+                return Err(GameError::UnsupportedManifestFact(
+                    "Magic effect".to_owned(),
+                ));
+            }
+        })
     }
 
     fn append_unit_move_actions(
@@ -1571,6 +1628,7 @@ impl Game {
                 amount,
                 unit_instance_id,
             } => self.apply_mana_activation(action.seat, *amount, unit_instance_id, outcomes),
+            ActionDescriptor::CastMagic { .. } => self.apply_cast_magic_action(action, outcomes),
             ActionDescriptor::CloseDefend {
                 original_target_participates,
             } => {
@@ -2209,9 +2267,12 @@ impl Game {
             .id
             .clone();
         let owner = unit.card.owner;
-        self.position.players[seat_index(owner)]
-            .cemetery
-            .push(unit.card);
+        let token = unit.card.source == CardSource::Token;
+        if !token {
+            self.position.players[seat_index(owner)]
+                .cemetery
+                .push(unit.card);
+        }
         outcomes.push("minion-died", || {
             json!({
                 "cardId": card_id,
@@ -2219,6 +2280,15 @@ impl Game {
                 "owner": owner,
             })
         });
+        if token {
+            outcomes.push("minion-banished", || {
+                json!({
+                    "cardId": card_id,
+                    "instanceId": instance_id,
+                    "owner": owner,
+                })
+            });
+        }
         Ok(())
     }
 
@@ -2570,6 +2640,7 @@ impl Game {
                         .ok_or(GameError::IllegalAction)?,
                     card_instance_id,
                     cell,
+                    0,
                     origin_state_version,
                 )?,
             )
@@ -2757,6 +2828,7 @@ impl Game {
         token_card_id: &str,
         source_instance_id: &IdentityHash,
         cell: Cell,
+        ordinal: usize,
         origin_state_version: u64,
     ) -> Result<UnitPosition, GameError> {
         let (index, definition) = self
@@ -2786,7 +2858,7 @@ impl Game {
                 instance_id: identity_hash(&json!({
                     "cardId": token_card_id,
                     "cell": cell,
-                    "ordinal": 0,
+                    "ordinal": ordinal,
                     "owner": owner,
                     "source": "token",
                     "sourceInstanceId": source_instance_id,
@@ -3050,6 +3122,7 @@ impl Game {
                     token_card_id,
                     &pending.source_instance_id,
                     pending.cell,
+                    0,
                     self.position.state_version,
                 )
             })
@@ -3116,6 +3189,176 @@ impl Game {
             })
         });
         self.record_unit_interaction(UnitKind::Minion, seat, unit_instance_id, outcomes)
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the closed Magic transaction keeps validation, payment, and effects atomic"
+    )]
+    fn apply_cast_magic_action(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::CastMagic {
+            card_id,
+            card_instance_id,
+            caster_instance_id,
+            cemetery_minion_instance_id,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let seat = action.seat;
+        let player_index = seat_index(seat);
+        let player = &self.position.players[player_index];
+        if self.position.phase != Phase::Main
+            || !player.domain_established
+            || player.avatar.card.instance_id != *caster_instance_id
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let hand_index = player
+            .hand_spellbook
+            .iter()
+            .position(|card| {
+                card.instance_id == *card_instance_id
+                    && self.rules.cards[usize::from(card.card_id.0)].id == card_id.as_str()
+            })
+            .ok_or(GameError::IllegalAction)?;
+        let definition =
+            &self.rules.cards[usize::from(player.hand_spellbook[hand_index].card_id.0)];
+        let CardFacts::Magic(facts) = &definition.facts else {
+            return Err(GameError::IllegalAction);
+        };
+        if facts.mana_cost > u64::from(player.mana)
+            || !self.thresholds_met(seat, facts.thresholds)
+            || !self
+                .magic_cemetery_choices(seat, &facts.effect)?
+                .contains(cemetery_minion_instance_id)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let effect = facts.effect.clone();
+        let thresholds = facts.thresholds;
+        let mana_paid = u16::try_from(facts.mana_cost).map_err(|_| GameError::IllegalAction)?;
+        let next_air_thresholds_cast_this_turn = player
+            .air_thresholds_cast_this_turn
+            .map(|cast_air| {
+                let added = u16::try_from(thresholds.get(Element::Air))
+                    .map_err(|_| GameError::IllegalAction)?;
+                cast_air.checked_add(added).ok_or(GameError::IllegalAction)
+            })
+            .transpose()?;
+        let token_units = match &effect {
+            MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(token_card_id) => {
+                let enemy = other_seat(seat);
+                self.controlled_site_cells(seat)
+                    .filter(|cell| {
+                        cell.bordering(false).any(|bordering| {
+                            self.position.sites[bordering.index()]
+                                .as_ref()
+                                .is_some_and(|site| site.controller == enemy)
+                        })
+                    })
+                    .enumerate()
+                    .map(|(ordinal, cell)| {
+                        self.create_token_unit(
+                            seat,
+                            token_card_id,
+                            card_instance_id,
+                            cell,
+                            ordinal,
+                            self.position.state_version,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+            }
+            _ => Vec::new(),
+        };
+        let card = self.position.players[player_index]
+            .hand_spellbook
+            .remove(hand_index);
+        let owner = card.owner;
+        let player = &mut self.position.players[player_index];
+        player.mana -= mana_paid;
+        player.air_thresholds_cast_this_turn = next_air_thresholds_cast_this_turn;
+        self.position.players[seat_index(owner)].cemetery.push(card);
+        outcomes.push("magic-cast", || {
+            let mut payload = json!({
+                "cardId": card_id,
+                "casterInstanceId": caster_instance_id,
+                "instanceId": card_instance_id,
+                "manaPaid": mana_paid,
+                "seat": seat,
+            });
+            if let Some(selected_id) = cemetery_minion_instance_id {
+                payload["cemeteryMinionInstanceId"] = json!(selected_id);
+            }
+            payload
+        });
+        self.record_unit_interaction(UnitKind::Avatar, seat, caster_instance_id, outcomes)?;
+        match effect {
+            MagicEffect::HealController(amount) => {
+                self.heal_avatar(seat, u16::from(amount), card_instance_id, outcomes)?;
+            }
+            MagicEffect::ReturnMinionFromOwnCemetery => {
+                if let Some(selected_id) = cemetery_minion_instance_id {
+                    let player = &mut self.position.players[player_index];
+                    let selected_index = player
+                        .cemetery
+                        .iter()
+                        .position(|card| card.instance_id == *selected_id)
+                        .ok_or(GameError::IllegalAction)?;
+                    let selected = player.cemetery.remove(selected_index);
+                    let selected_card_id =
+                        self.rules.cards[usize::from(selected.card_id.0)].id.clone();
+                    let selected_owner = selected.owner;
+                    player.hand_spellbook.push(selected);
+                    outcomes.push("minion-returned-to-hand", || {
+                        json!({
+                            "cardId": selected_card_id,
+                            "instanceId": selected_id,
+                            "owner": selected_owner,
+                            "seat": seat,
+                            "sourceInstanceId": card_instance_id,
+                        })
+                    });
+                }
+            }
+            MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => {
+                for token in token_units {
+                    let token_card_id = self.rules.cards[usize::from(token.card.card_id.0)]
+                        .id
+                        .clone();
+                    let cell = token.location;
+                    let instance_id = token.card.instance_id.clone();
+                    let token_owner = token.card.owner;
+                    self.position.units.push(token);
+                    outcomes.push("minion-summoned", || {
+                        json!({
+                            "cardId": token_card_id,
+                            "cell": cell,
+                            "instanceId": instance_id,
+                            "owner": token_owner,
+                            "seat": seat,
+                            "sourceInstanceId": card_instance_id,
+                            "token": true,
+                        })
+                    });
+                }
+            }
+            _ => return Err(GameError::IllegalAction),
+        }
+        outcomes.push("magic-resolved", || {
+            json!({
+                "cardId": card_id,
+                "instanceId": card_instance_id,
+                "owner": owner,
+            })
+        });
+        self.position.state_version += 1;
+        Ok(())
     }
 
     fn apply_summon_minion_action(
