@@ -1199,7 +1199,19 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
         ward: true,
       } as GameCardDefinition,
     },
-  }), /Waterbound with Ward or Stealth/);
+  }), /Waterbound with Ward or end-turn Stealth/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        stealth: true,
+        token: true,
+        waterbound: true,
+      } as GameCardDefinition,
+    },
+  }), /Waterbound Stealth tokens are unsupported/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -7792,6 +7804,14 @@ test('RULE-03/04 Waterbound derives Disabled from terrain and survives only with
       thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
     };
   }
+  for (const cardId of base.decks.south.spellbook) {
+    cards[cardId] = {
+      cardType: 'magic',
+      damageTargetUnit: 1,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    };
+  }
   cards[waterboundId] = {
     attack: 2,
     cardType: 'minion',
@@ -7799,6 +7819,7 @@ test('RULE-03/04 Waterbound derives Disabled from terrain and survives only with
     defense: 2,
     manaCost: 0,
     provides: 'water',
+    stealth: true,
     submerge: true,
     tapForMana: 1,
     thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
@@ -7842,6 +7863,7 @@ test('RULE-03/04 Waterbound derives Disabled from terrain and survives only with
         && (descriptor.region ?? 'surface') === region));
   const underwater = summoned('underwater');
   assert.equal(observeGame(underwater.state, 'north').realm.units[0]?.disabled, false);
+  assert.equal(observeGame(underwater.state, 'north').realm.units[0]?.stealthed, true);
   assert.equal(observeGame(underwater.state, 'north').players.north.affinity.water, 2);
   assert.equal(verifyGameReplay(underwater), true);
 
@@ -7871,6 +7893,7 @@ test('RULE-03/04 Waterbound derives Disabled from terrain and survives only with
   assert.deepEqual(destroyed.receipt.events.map(({ type }) => type), [
     'site-sacrificed',
     'site-destroyed',
+    'stealth-lost',
     'minion-died',
     'rubble-created',
     'rubble-created',
@@ -7882,17 +7905,36 @@ test('RULE-03/04 Waterbound derives Disabled from terrain and survives only with
   assert.equal(destroyed.receipt.events.some(({ type }) => type === 'site-drawn'), false);
   assert.equal(verifyGameReplay(destroyed.session), true);
 
-  session = northSecondMain(summoned('surface'));
+  const surface = summoned('surface');
+  assert.equal(observeGame(surface.state, 'north').realm.units[0]?.stealthed, true);
+  let activeTargetCheckpoint = accept(surface, action(surface, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  activeTargetCheckpoint = accept(activeTargetCheckpoint, action(activeTargetCheckpoint, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  assert.equal(legalGameActions(activeTargetCheckpoint.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.target?.instanceId === waterbound.instanceId), false);
+  session = northSecondMain(surface);
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === waterbound.instanceId
       && descriptor.to.cell === 'C3'));
+  assert.deepEqual(session.transcript.at(-1)?.events.map(({ type }) => type), [
+    'move-and-attack-activated',
+    'stealth-lost',
+  ]);
+  assert.equal(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === waterbound.instanceId)?.stealthed, false);
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
   assert.equal(observeGame(session.state, 'north').realm.units[0]?.disabled, true);
+  assert.equal(observeGame(session.state, 'north').realm.units[0]?.stealthed, false);
   assert.equal(observeGame(session.state, 'north').players.north.affinity.water, 1);
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.target?.instanceId === waterbound.instanceId), true);
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
   session = accept(session, action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
@@ -7932,6 +7974,7 @@ test('RULE-03/04 Waterbound derives Disabled from terrain and survives only with
     tapped: false,
   });
   assert.equal(observeGame(session.state, 'north').realm.units[0]?.disabled, false);
+  assert.equal(observeGame(session.state, 'north').realm.units[0]?.stealthed, false);
   assert.equal(observeGame(session.state, 'north').players.north.affinity.water, 2);
   const enabledActions = legalGameActions(session.state, 'north');
   assert.equal(enabledActions.some(({ descriptor }) =>
@@ -7940,6 +7983,12 @@ test('RULE-03/04 Waterbound derives Disabled from terrain and survives only with
   assert.equal(enabledActions.some(({ descriptor }) =>
     descriptor.kind === 'activate-mana'
       && descriptor.unitInstanceId === waterbound.instanceId), true);
+  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = accept(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.target?.instanceId === waterbound.instanceId), true);
   assert.equal(verifyGameReplay(session), true);
 });
 
@@ -8574,7 +8623,7 @@ test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', (
     },
     seed: 1,
   }), /genesisDisableSelfUntilDamaged must be true when defined/);
-  for (const incompatible of [{ token: true }, { waterbound: true }]) {
+  for (const incompatible of [{ stealth: true }, { token: true }, { waterbound: true }]) {
     assert.throws(() => createGameManifest({
       ...input,
       cards: {

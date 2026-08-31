@@ -2619,6 +2619,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.genesisLoseControllerLife !== undefined)) {
     throw new RangeError(`${path} Genesis disable with another effect is unsupported`);
   }
+  if (card.genesisDisableSelfUntilDamaged === true && card.stealth === true) {
+    throw new RangeError(`${path} Genesis disable with Stealth is unsupported`);
+  }
   if (card.genesisMayDamageTargetAdjacentUnit === 2
     && (card.discardRandomCardInsteadOfMana === true
       || card.sacrificeMinionAtSummoningLocationForManaDiscount === 2)) {
@@ -2812,9 +2815,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.waterbound !== undefined && typeof card.waterbound !== 'boolean') {
     throw new RangeError(`${path}.waterbound must be boolean`);
   }
+  if (card.token === true && card.waterbound === true && card.stealth === true) {
+    throw new RangeError(`${path} Waterbound Stealth tokens are unsupported`);
+  }
   if (card.waterbound
-    && (card.ward || card.stealth || card.gainsStealthAtEndOfTurn)) {
-    throw new RangeError(`${path} Waterbound with Ward or Stealth is unsupported`);
+    && (card.ward || card.gainsStealthAtEndOfTurn)) {
+    throw new RangeError(`${path} Waterbound with Ward or end-turn Stealth is unsupported`);
   }
   if (card.waterbound
     && (card.genesisDrawSite || card.genesisDrawSpells !== undefined
@@ -3762,7 +3768,7 @@ export function observeGame(state: GameState, viewer: GameSeat): GameObservation
       ...(unit.occupiedCells ? { occupiedCells: unit.occupiedCells } : {}),
       owner: unit.owner,
       region: unit.region,
-      stealthed: unit.stealthed,
+      stealthed: status.stealthed,
       summoningSickness: unit.summoningSickness,
       tapped: unit.tapped,
       ...(definition.token === true ? { token: true as const } : {}),
@@ -7225,21 +7231,35 @@ function settleRegionOccupancy(state: GameState): Readonly<{
   }>[];
   state: GameState;
 }> {
-  const removals = state.realm.units.flatMap((unit) => {
-    const disposition = minionRegionDisposition(state, unit);
+  const disabledStealthRefs = state.realm.units.flatMap((unit): readonly GameUnitRef[] =>
+    unit.stealthed && minionDisabled(state, unit)
+      ? [{ instanceId: unit.instanceId, kind: 'minion', seat: unit.controller }]
+      : []).sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+  let abilityUnits = state.realm.units;
+  const abilityOutcomes: GameOutcome[] = [];
+  for (const ref of disabledStealthRefs) {
+    const [units, outcomes] = loseStealth(abilityUnits, [ref]);
+    abilityUnits = units;
+    abilityOutcomes.push(...outcomes);
+  }
+  const abilityState = abilityOutcomes.length === 0
+    ? state
+    : deepFreeze({ ...state, realm: { ...state.realm, units: abilityUnits } });
+  const removals = abilityState.realm.units.flatMap((unit) => {
+    const disposition = minionRegionDisposition(abilityState, unit);
     return disposition === 'survives' ? [] : [{ disposition, instanceId: unit.instanceId }];
   });
-  if (removals.length === 0) return { outcomes: [], removals, state };
+  if (removals.length === 0) return { outcomes: abilityOutcomes, removals, state: abilityState };
   const banishedIds = new Set(removals
     .filter(({ disposition }) => disposition === 'banished')
     .map(({ instanceId }) => instanceId));
   const deathIds = new Set(removals
     .filter(({ disposition }) => disposition === 'dies')
     .map(({ instanceId }) => instanceId));
-  const banished = state.realm.units.filter(({ instanceId }) => banishedIds.has(instanceId));
-  const units = state.realm.units.filter(({ instanceId }) => !banishedIds.has(instanceId));
+  const banished = abilityState.realm.units.filter(({ instanceId }) => banishedIds.has(instanceId));
+  const units = abilityState.realm.units.filter(({ instanceId }) => !banishedIds.has(instanceId));
   const deaths = units.filter(({ instanceId }) => deathIds.has(instanceId));
-  let artifacts = state.realm.artifacts;
+  let artifacts = abilityState.realm.artifacts;
   const banishedOutcomes: GameOutcome[] = [];
   for (const unit of banished) {
     const drop = dropArtifactsCarriedBy(artifacts, unit);
@@ -7250,26 +7270,27 @@ function settleRegionOccupancy(state: GameState): Readonly<{
     });
   }
   const banishedState = deepFreeze({
-    ...state,
-    realm: { ...state.realm, ...(artifacts ? { artifacts } : {}), units },
+    ...abilityState,
+    realm: { ...abilityState.realm, ...(artifacts ? { artifacts } : {}), units },
   });
   const deathResolution = resolveMinionDeaths(
     banishedState,
-    state.players,
+    abilityState.players,
     units,
     deaths,
     new Set<GameSeat>(),
   );
   const terminalIndex = deathResolution.outcomes.findIndex(({ type }) => type === 'game-ended');
   const outcomes = terminalIndex < 0
-    ? [...deathResolution.outcomes, ...banishedOutcomes]
+    ? [...abilityOutcomes, ...deathResolution.outcomes, ...banishedOutcomes]
     : [
+      ...abilityOutcomes,
       ...deathResolution.outcomes.slice(0, terminalIndex),
       ...banishedOutcomes,
       ...deathResolution.outcomes.slice(terminalIndex),
     ];
   const settledState = deepFreeze({
-    ...state,
+    ...abilityState,
     ...(deathResolution.terminal.status === 'finished'
       ? { pendingCombat: null, phase: 'terminal' as const }
       : {}),
@@ -7278,7 +7299,7 @@ function settleRegionOccupancy(state: GameState): Readonly<{
       ? { pendingDeathrites: deathResolution.pendingDeathrites }
       : {}),
     realm: {
-      ...state.realm,
+      ...abilityState.realm,
       ...(deathResolution.artifacts ? { artifacts: deathResolution.artifacts } : {}),
       units: deathResolution.units,
     },
