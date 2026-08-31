@@ -1,0 +1,3206 @@
+{
+  "schemaVersion": 1,
+  "description": "Public, human-reviewable paraphrases of supported rule scenarios. Executable authority remains in engine code and tests.",
+  "rules": [
+    {
+      "ruleId": "RULE-CATALOG-0001",
+      "requirementIds": [
+        "RULE-01"
+      ],
+      "plainLanguage": "Deterministic agents move, fight, and complete a match.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "move",
+        "fight"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-demo.test.ts",
+        "testName": "RULE-01 deterministic agents move, fight, and complete a match"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0002",
+      "requirementIds": [
+        "RULE-01"
+      ],
+      "plainLanguage": "Setup shuffles two decks, deals split hidden hands, and places Avatars.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-01 setup shuffles two decks, deals split hidden hands, and places Avatars"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0003",
+      "requirementIds": [
+        "RULE-06"
+      ],
+      "plainLanguage": "The manifest accepts only exact deck-scoped supported card facts.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-06 the manifest accepts only exact deck-scoped supported card facts"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0004",
+      "requirementIds": [
+        "RULE-01"
+      ],
+      "plainLanguage": "One mulligan returns at most three chosen cards to their deck bottoms and redraws.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "mulligan",
+        "draw"
+      ],
+      "eventHints": [
+        "card-draw"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-01 one mulligan returns at most three chosen cards to their deck bottoms and redraws"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0005",
+      "requirementIds": [
+        "RULE-01"
+      ],
+      "plainLanguage": "First player skips its draw, establishes a domain, then second player chooses a deck.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "draw"
+      ],
+      "eventHints": [
+        "card-draw"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-01 first player skips its draw, establishes a domain, then second player chooses a deck"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0006",
+      "requirementIds": [
+        "RULE-02"
+      ],
+      "plainLanguage": "Sites expand through unoccupied orthogonal cells controlled by their player.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-02 sites expand through unoccupied orthogonal cells controlled by their player"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0007",
+      "requirementIds": [
+        "RULE-02"
+      ],
+      "plainLanguage": "A player with no sites recovers at the closest available cell.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-02 a player with no sites recovers at the closest available cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0008",
+      "requirementIds": [
+        "RULE-02"
+      ],
+      "plainLanguage": "The Avatar may draw a private site instead of playing one.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "draw"
+      ],
+      "eventHints": [
+        "card-draw"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-02 the Avatar may draw a private site instead of playing one"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0009",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A draw-spell Avatar pays its tap cost and keeps the drawn identity private.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "draw",
+        "tap",
+        "pay-cost"
+      ],
+      "eventHints": [
+        "card-draw"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 a draw-spell Avatar pays its tap cost and keeps the drawn identity private"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0010",
+      "requirementIds": [
+        "RULE-02"
+      ],
+      "plainLanguage": "Drawing a site from an empty Atlas pays the tap cost and loses.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "draw",
+        "tap",
+        "pay-cost"
+      ],
+      "eventHints": [
+        "loss",
+        "card-draw"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-02 drawing a site from an empty Atlas pays the tap cost and loses"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0011",
+      "requirementIds": [
+        "RULE-02"
+      ],
+      "plainLanguage": "Forged spatial actions cannot mutate the game.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-02 forged spatial actions cannot mutate the game"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0012",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Sinkhole sacrifices sites into neutral Rubble and preserves relative subsurface.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "rubble"
+      ],
+      "actionHints": [
+        "sacrifice"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relative subsurface"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0013",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A Spellcaster pays mana and summons a minion atop a controlled site.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "spellcaster"
+      ],
+      "actionHints": [
+        "summon",
+        "pay-cost"
+      ],
+      "eventHints": [
+        "mana-change",
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 a Spellcaster pays mana and summons a minion atop a controlled site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0014",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Token Magic summons deterministically and tokens banish instead of entering a cemetery.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "token"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "cemetery-entry",
+        "banishment",
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 token Magic summons deterministically and tokens banish instead of entering a cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0015",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Aramos Mercenaries may discard a deterministic random hand card instead of paying mana.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "discard",
+        "pay-cost"
+      ],
+      "eventHints": [
+        "card-discard",
+        "mana-change"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Aramos Mercenaries may discard a deterministic random hand card instead of paying mana"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0016",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Gnarled Wendigo sacrifices local minions before paying its discounted summon.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "summon",
+        "sacrifice",
+        "pay-cost"
+      ],
+      "eventHints": [
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Gnarled Wendigo sacrifices local minions before paying its discounted summon"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0017",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Hamlet reduces only Ordinary minion mana payments at that site.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [
+        "mana-change"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Hamlet reduces only Ordinary minion mana payments at that site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0018",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Printed Spellcasters cast while tapped or summoning sick from their own location.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "spellcaster",
+        "summoning-sickness"
+      ],
+      "actionHints": [
+        "summon",
+        "cast",
+        "tap"
+      ],
+      "eventHints": [
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 printed Spellcasters cast while tapped or summoning sick from their own location"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0019",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Targeted Magic is a non-unit source and resolves damage, Deathrite, and cemetery entry.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "deathrite"
+      ],
+      "actionHints": [
+        "choose-target"
+      ],
+      "eventHints": [
+        "damage",
+        "cemetery-entry",
+        "resolution"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/05 targeted Magic is a non-unit source and resolves damage, Deathrite, and cemetery entry"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0020",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Duel makes a chosen ally fight a same-square targeted enemy.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "choose-target",
+        "fight"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 Duel makes a chosen ally fight a same-square targeted enemy"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0021",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Leap Attack optionally steps an ally before it strikes every enemy there.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "attack",
+        "strike"
+      ],
+      "eventHints": [
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 Leap Attack optionally steps an ally before it strikes every enemy there"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0022",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Leap Attack resumes its strike after ordered movement Deathrites.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "attack",
+        "strike"
+      ],
+      "eventHints": [
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 Leap Attack resumes its strike after ordered movement Deathrites"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0023",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Magic targets stay in the caster region and exclude enemy Stealth.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "stealth",
+        "region"
+      ],
+      "actionHints": [
+        "choose-target"
+      ],
+      "eventHints": [
+        "stealth-change"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Magic targets stay in the caster region and exclude enemy Stealth"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0024",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Lash damages then untaps only a surviving nearby minion target.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "choose-target",
+        "untap"
+      ],
+      "eventHints": [
+        "damage",
+        "untap"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Lash damages then untaps only a surviving nearby minion target"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0025",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Freeze disables a nearby minion until the caster next Start Phase.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Freeze disables a nearby minion until the caster next Start Phase"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0026",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Disabling a subsurface minion immediately settles its region.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "disabled",
+        "region"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "disable"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 disabling a subsurface minion immediately settles its region"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0027",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Lightning Bolt targets a location and deterministically damages one random unit there.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "choose-target"
+      ],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Lightning Bolt targets a location and deterministically damages one random unit there"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0028",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Lucky Charm commits the random action before exposing two deterministic outcomes.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Lucky Charm commits the random action before exposing two deterministic outcomes"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0029",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Minor Explosion damages every unit at a location up to two cardinal steps away.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 Minor Explosion damages every unit at a location up to two cardinal steps away"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0030",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Chain Magic stages distinct nearby hops and damages all chosen units simultaneously.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 Chain Magic stages distinct nearby hops and damages all chosen units simultaneously"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0031",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Rain of Arrows simultaneously damages every aboveground minion.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 Rain of Arrows simultaneously damages every aboveground minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0032",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Charge Magic grants an untargeted ally Charge only for the current turn.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "charge"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Charge Magic grants an untargeted ally Charge only for the current turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0033",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Overpower changes current power for source-aware prevention until the current End Phase.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "derived-power"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Overpower changes current power for source-aware prevention until the current End Phase"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0034",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Nearby-allies power is derived and settles deaths when its source dies.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "derived-power"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "death"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 nearby-allies power is derived and settles deaths when its source dies"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0035",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Controlled Mortal power follows current control and settles deaths.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "mortal-subtype",
+        "derived-power"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "death"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 controlled Mortal power follows current control and settles deaths"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0036",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Aura-loss Deathrite ends the game after its triggering Magic resolves.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "deathrite",
+        "aura"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "loss",
+        "resolution"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 aura-loss Deathrite ends the game after its triggering Magic resolves"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0037",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Aura-loss deaths cannot restore stale combat during a defender path.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "aura"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "death",
+        "loss"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 aura-loss deaths cannot restore stale combat during a defender path"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0038",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Lure makes a chosen enemy minion take its own closer step.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Lure makes a chosen enemy minion take its own closer step"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0039",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Teleport forcefully moves a chosen ally to a target site surface.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "choose-target",
+        "move",
+        "teleport"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Teleport forcefully moves a chosen ally to a target site surface"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0040",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Blink teleports a nearby ally before deaths and a private chosen-deck draw.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "draw",
+        "teleport"
+      ],
+      "eventHints": [
+        "death",
+        "card-draw"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Blink teleports a nearby ally before deaths and a private chosen-deck draw"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0041",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Rescue returns a chosen own cemetery minion to hidden hand or resolves with none.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [
+        "cemetery-entry",
+        "resolution"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Rescue returns a chosen own cemetery minion to hidden hand or resolves with none"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0042",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Bury forcefully burrows minions if able and immediately resolves survival.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "burrowing"
+      ],
+      "actionHints": [
+        "burrow"
+      ],
+      "eventHints": [
+        "resolution"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 Bury forcefully burrows minions if able and immediately resolves survival"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0043",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Bury detaches and burrows Artifacts if able.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "burrowing",
+        "artifact"
+      ],
+      "actionHints": [
+        "burrow"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 Bury detaches and burrows Artifacts if able"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0044",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Cave-In burrows every surface minion and Artifact at one Land Site together.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "burrowing",
+        "artifact"
+      ],
+      "actionHints": [
+        "burrow"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 Cave-In burrows every surface minion and Artifact at one Land Site together"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0045",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Drown forcefully submerges a target minion if able.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "submerge"
+      ],
+      "actionHints": [
+        "choose-target",
+        "submerge"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 Drown forcefully submerges a target minion if able"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0046",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Healing Magic is targetless, capped, and cannot leave Death's Door.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "deaths-door"
+      ],
+      "actionHints": [
+        "heal"
+      ],
+      "eventHints": [
+        "death",
+        "healing"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 healing Magic is targetless, capped, and cannot leave Death's Door"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0047",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Explicit permission allows a minion to be summoned to any site.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 explicit permission allows a minion to be summoned to any site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0048",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A Water-site cast restriction filters unrestricted summons by terrain.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "terrain"
+      ],
+      "actionHints": [
+        "summon",
+        "cast"
+      ],
+      "eventHints": [
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 a Water-site cast restriction filters unrestricted summons by terrain"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0049",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Waterbound derives Disabled from terrain and survives only with active abilities.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "disabled",
+        "waterbound",
+        "terrain"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "disable"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 Waterbound derives Disabled from terrain and survives only with active abilities"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0050",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "Region settlement kills inhospitable minions and banishes them from the void.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "region"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "banishment"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-02/04 region settlement kills inhospitable minions and banishes them from the void"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0051",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "Playing a site surfaces uncarried Artifacts from the covered void.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "artifact"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-02/04 playing a site surfaces uncarried Artifacts from the covered void"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0052",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Charge allows a summoned minion to Move and Attack immediately.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "charge"
+      ],
+      "actionHints": [
+        "summon",
+        "move",
+        "attack"
+      ],
+      "eventHints": [
+        "summon",
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Charge allows a summoned minion to Move and Attack immediately"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0053",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Genesis draws a hidden site and an empty Atlas loses after summoning.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [
+        "draw",
+        "summon"
+      ],
+      "eventHints": [
+        "loss",
+        "card-draw",
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Genesis draws a hidden site and an empty Atlas loses after summoning"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0054",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Genesis draws a hidden spell and an empty Spellbook loses after summoning.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [
+        "draw",
+        "summon"
+      ],
+      "eventHints": [
+        "loss",
+        "card-draw",
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Genesis draws a hidden spell and an empty Spellbook loses after summoning"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0055",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Numeric Genesis spell draw counts draw ordered hidden cards.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [
+        "draw"
+      ],
+      "eventHints": [
+        "card-draw"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 numeric Genesis spell draw counts draw ordered hidden cards"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0056",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Numeric Genesis spell draws exhaust 2, 1, or 0 remaining cards before deck loss.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [
+        "draw"
+      ],
+      "eventHints": [
+        "loss",
+        "card-draw"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 numeric Genesis spell draws exhaust 2, 1, or 0 remaining cards before deck loss"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0057",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Genesis resolves simultaneous area damage and enemy strikes.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [
+        "strike"
+      ],
+      "eventHints": [
+        "damage",
+        "resolution",
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0058",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Vile Imp may deal 2 damage to one adjacent unit or decline.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "decline"
+      ],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 Vile Imp may deal 2 damage to one adjacent unit or decline"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0059",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Genesis life loss reaches but cannot cross Death's Door.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "genesis",
+        "deaths-door"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "death",
+        "loss"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Genesis life loss reaches but cannot cross Death's Door"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0060",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Grain Sparrow Genesis gains controller life through shared healing semantics.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [
+        "heal"
+      ],
+      "eventHints": [
+        "healing"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Grain Sparrow Genesis gains controller life through shared healing semantics"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0061",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Site Genesis grants temporary mana once, pays a summon, and expires.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [
+        "summon",
+        "pay-cost"
+      ],
+      "eventHints": [
+        "effect-expiry",
+        "mana-change",
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 site Genesis grants temporary mana once, pays a summon, and expires"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0062",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Site Genesis heals every nearby Avatar through shared life caps.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [
+        "heal"
+      ],
+      "eventHints": [
+        "healing"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 site Genesis heals every nearby Avatar through shared life caps"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0063",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Site Genesis makes units at nearby sites Immobile until its controller next turn.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "genesis",
+        "immobile"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 site Genesis makes units at nearby sites Immobile until its controller next turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0064",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Aura occupies any canonical 2x2 area and grounds site minions for three controller turns.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "aura"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Aura occupies any canonical 2x2 area and grounds site minions for three controller turns"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0065",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "An end-turn Aura damages a random affected unit before its optional step.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "aura"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 an end-turn Aura damages a random affected unit before its optional step"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0066",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Oversized minions occupy one canonical 2x2 footprint for movement, combat, Auras, and terrain.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "fixed-footprint",
+        "terrain"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 oversized minions occupy one canonical 2x2 footprint for movement, combat, Auras, and terrain"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0067",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Tower Genesis grants mana only for the first controlled copy.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "mana-change"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Tower Genesis grants mana only for the first controlled copy"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0068",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Humble Village Genesis may spend its mana to summon one Foot Soldier.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "mana-change",
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Humble Village Genesis may spend its mana to summon one Foot Soldier"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0069",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Geomancer creates Rubble and privately replaces it with the top Atlas site.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "rubble"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-02/03 Geomancer creates Rubble and privately replaces it with the top Atlas site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0070",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Site Genesis resumes after ordered terrain-replacement Deathrites.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "genesis",
+        "terrain"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-02/03 site Genesis resumes after ordered terrain-replacement Deathrites"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0071",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Hunter's Lodge Genesis removes only enemy Stealth.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "genesis",
+        "stealth"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "stealth-change"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Hunter's Lodge Genesis removes only enemy Stealth"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0072",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Seasonal River Genesis privately keeps or bottoms the next spell.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 seasonal River Genesis privately keeps or bottoms the next spell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0073",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Observatory privately reorders the next three spells without drawing.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "draw",
+        "reorder"
+      ],
+      "eventHints": [
+        "card-draw"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Observatory privately reorders the next three spells without drawing"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0074",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Adjacent matching sites trigger one spell draw apiece and a short deck loses.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "draw"
+      ],
+      "eventHints": [
+        "loss",
+        "card-draw"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 adjacent matching sites trigger one spell draw apiece and a short deck loses"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0075",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Site Genesis discards up to two top spells publicly without deck-out.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [
+        "discard"
+      ],
+      "eventHints": [
+        "card-discard"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 site Genesis discards up to two top spells publicly without deck-out"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0076",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Vikings area damage uses bearer Lethal without becoming a strike.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "lethal"
+      ],
+      "actionHints": [
+        "strike"
+      ],
+      "eventHints": [
+        "damage",
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 Vikings area damage uses bearer Lethal without becoming a strike"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0077",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A minion mana ability requires readiness, taps, and expires at End Phase.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "tap"
+      ],
+      "eventHints": [
+        "effect-expiry",
+        "mana-change"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 a minion mana ability requires readiness, taps, and expires at End Phase"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0078",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Mana and every elemental threshold gate minion actions without being spent together.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "elemental-threshold"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "mana-change"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 mana and every elemental threshold gate minion actions without being spent together"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0079",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "An undamaged 0/0 Genesis minion survives until it takes positive damage.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 an undamaged 0/0 Genesis minion survives until it takes positive damage"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0080",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "An active minion prevents damage from a unit at its current-power threshold.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "elemental-threshold",
+        "derived-power"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 an active minion prevents damage from a unit at its current-power threshold"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0081",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Ranged damage retains its attacking unit source classification.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "ranged"
+      ],
+      "actionHints": [
+        "attack"
+      ],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Ranged damage retains its attacking unit source classification"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0082",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A ready minion may tap to shoot a fixed-damage projectile to the first visible unit.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "tap"
+      ],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 a ready minion may tap to shoot a fixed-damage projectile to the first visible unit"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0083",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A restricted attacker can target units but not sites.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "choose-target"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 a restricted attacker can target units but not sites"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0084",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Attacking-only first strike resolves deaths before normal strikes and is inactive while defending.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "first-strike"
+      ],
+      "actionHints": [
+        "attack",
+        "strike"
+      ],
+      "eventHints": [
+        "death",
+        "resolution",
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 attacking-only first strike resolves deaths before normal strikes and is inactive while defending"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0085",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Genesis sleep ends on real damage without retroactive strikes.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [
+        "strike"
+      ],
+      "eventHints": [
+        "damage",
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 Genesis sleep ends on real damage without retroactive strikes"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0086",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Lance buffs and breaks on the next unit strike but not a site strike.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "strike"
+      ],
+      "eventHints": [
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Lance buffs and breaks on the next unit strike but not a site strike"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0087",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Ranged strikes without return damage and Ward prevents the first positive damage event.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "ward",
+        "ranged"
+      ],
+      "actionHints": [
+        "strike"
+      ],
+      "eventHints": [
+        "damage",
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Ranged strikes without return damage and Ward prevents the first positive damage event"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0088",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A surviving enabled minion may take one legal step after its Ranged strike.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "ranged"
+      ],
+      "actionHints": [
+        "strike"
+      ],
+      "eventHints": [
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 a surviving enabled minion may take one legal step after its Ranged strike"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0089",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "An empty Ranged projectile does not offer the post-strike step.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "ranged"
+      ],
+      "actionHints": [
+        "strike"
+      ],
+      "eventHints": [
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 an empty Ranged projectile does not offer the post-strike step"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0090",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A Ranged striker that dies during the hit cannot leave a pending step.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "ranged"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "death"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 a Ranged striker that dies during the hit cannot leave a pending step"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0091",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A Ranged unit may strike once during Move and Attack or Defend.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "ranged"
+      ],
+      "actionHints": [
+        "move",
+        "attack",
+        "defend",
+        "strike"
+      ],
+      "eventHints": [
+        "movement",
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 a Ranged unit may strike once during Move and Attack or Defend"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0092",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A drag projectile stops at the first visible unit and may fight after arrival.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "fight"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 a drag projectile stops at the first visible unit and may fight after arrival"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0093",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A drag projectile resumes after ordered movement Deathrites before fighting.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "fight"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 a drag projectile resumes after ordered movement Deathrites before fighting"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0094",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Granary Rats suppresses its site threshold while enabled.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "elemental-threshold"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Granary Rats suppresses its site threshold while enabled"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0095",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A provider adds affinity until that minion dies.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "elemental-affinity"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "death"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 a provider adds affinity until that minion dies"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0096",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Lethal kills a tougher minion with positive damage but not zero damage.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "lethal"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Lethal kills a tougher minion with positive damage but not zero damage"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0097",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A prohibited minion cannot move to Defend but can still Intercept.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "move",
+        "defend",
+        "intercept"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 a prohibited minion cannot move to Defend but can still Intercept"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0098",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Immobile units attack and Defend in place but cannot move themselves.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "immobile"
+      ],
+      "actionHints": [
+        "move",
+        "attack",
+        "defend"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Immobile units attack and Defend in place but cannot move themselves"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0099",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A fully prohibited minion cannot use Defend or Intercept.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "defend",
+        "intercept"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 a fully prohibited minion cannot use Defend or Intercept"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0100",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Airborne moves diagonally and restricts attacks and Intercept.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "airborne"
+      ],
+      "actionHints": [
+        "move",
+        "attack",
+        "intercept"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Airborne moves diagonally and restricts attacks and Intercept"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0101",
+      "requirementIds": [
+        "RULE-02"
+      ],
+      "plainLanguage": "Cloud City flies once per turn at three Air affinity and carries normal occupants.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "elemental-affinity"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-02 Cloud City flies once per turn at three Air affinity and carries normal occupants"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0102",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Updraft Ridge gives only Airborne minions a free departure to move or Defend.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "airborne"
+      ],
+      "actionHints": [
+        "move",
+        "defend"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Updraft Ridge gives only Airborne minions a free departure to move or Defend"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0103",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Mountain Pass blocks only occupied ground-minion entry.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Mountain Pass blocks only occupied ground-minion entry"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0104",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Stealth blocks attacks, Defend, Intercept, and projectiles until interaction.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "stealth"
+      ],
+      "actionHints": [
+        "attack",
+        "defend",
+        "intercept"
+      ],
+      "eventHints": [
+        "stealth-change"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Stealth blocks attacks, Defend, Intercept, and projectiles until interaction"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0105",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Sly Fox gains Stealth once at the end of its controller turn.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "stealth"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "stealth-change"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Sly Fox gains Stealth once at the end of its controller turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0106",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Conditional end-turn Stealth requires no nearby enemy in the same region.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "stealth",
+        "region"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "stealth-change"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 conditional end-turn Stealth requires no nearby enemy in the same region"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0107",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Scent Hounds permanently removes nearby enemy Stealth.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "stealth"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "stealth-change"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Scent Hounds permanently removes nearby enemy Stealth"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0108",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Malakhim untaps at its controller End Phase unless Disabled.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "disabled"
+      ],
+      "actionHints": [
+        "untap"
+      ],
+      "eventHints": [
+        "untap",
+        "disable"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Malakhim untaps at its controller End Phase unless Disabled"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0109",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Ignited dies before turn cleanup unless it is Disabled.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "disabled"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "death",
+        "disable"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Ignited dies before turn cleanup unless it is Disabled"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0110",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Sedge Crabs can move themselves only sideways.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "move"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Sedge Crabs can move themselves only sideways"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0111",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Dalcean Phalanx can move itself only forward for its seat.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "move"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Dalcean Phalanx can move itself only forward for its seat"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0112",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A unit can move across connected top and bottom realm edges.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "move"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-02/04 a unit can move across connected top and bottom realm edges"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0113",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Submerge uses underwater summons, movement, and region-isolated combat.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "submerge",
+        "region"
+      ],
+      "actionHints": [
+        "summon",
+        "submerge"
+      ],
+      "eventHints": [
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Submerge uses underwater summons, movement, and region-isolated combat"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0114",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Burrowing uses underground summons and movement only at land sites.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "burrowing"
+      ],
+      "actionHints": [
+        "summon",
+        "burrow"
+      ],
+      "eventHints": [
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Burrowing uses underground summons and movement only at land sites"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0115",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Secret Tunnel connects burrowed allies only to the controller's other sites.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "burrowing"
+      ],
+      "actionHints": [
+        "burrow"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Secret Tunnel connects burrowed allies only to the controller's other sites"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0116",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A must-be-burrowed cast restriction suppresses only non-underground casts.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "burrowing"
+      ],
+      "actionHints": [
+        "cast",
+        "burrow"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 a must-be-burrowed cast restriction suppresses only non-underground casts"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0117",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A must-be-submerged cast restriction suppresses only non-underwater casts.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "submerge"
+      ],
+      "actionHints": [
+        "cast",
+        "submerge"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 a must-be-submerged cast restriction suppresses only non-underwater casts"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0118",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Combined region abilities permit eligible cross-region adjacency steps.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "region"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 combined region abilities permit eligible cross-region adjacency steps"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0119",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Voidwalk summons to any void and moves between adjacent void and surface locations.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "voidwalk"
+      ],
+      "actionHints": [
+        "summon",
+        "move"
+      ],
+      "eventHints": [
+        "summon",
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Voidwalk summons to any void and moves between adjacent void and surface locations"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0120",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Planar Gate grants minions Voidwalk only until they leave the void.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "voidwalk"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Planar Gate grants minions Voidwalk only until they leave the void"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0121",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "An outer-column cast restriction filters surface and Voidwalk summons, not movement.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "voidwalk"
+      ],
+      "actionHints": [
+        "summon",
+        "cast"
+      ],
+      "eventHints": [
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 an outer-column cast restriction filters surface and Voidwalk summons, not movement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0122",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Movement +1 issues exact two-step and returning Move and Attack paths.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "movement-bonus"
+      ],
+      "actionHints": [
+        "move",
+        "attack"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Movement +1 issues exact two-step and returning Move and Attack paths"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0123",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Movement +1 can take an exact two-step path to Defend.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "movement-bonus"
+      ],
+      "actionHints": [
+        "defend"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Movement +1 can take an exact two-step path to Defend"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0124",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Movement +2 issues exact three-step paths and attacks after moving.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "movement-bonus"
+      ],
+      "actionHints": [
+        "move",
+        "attack"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Movement +2 issues exact three-step paths and attacks after moving"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0125",
+      "requirementIds": [
+        "RULE-05"
+      ],
+      "plainLanguage": "AP commits before NAP, then NAP Deathrites resolve before AP Deathrites.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [
+        "resolution"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-05 AP commits before NAP, then NAP Deathrites resolve before AP Deathrites"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0126",
+      "requirementIds": [
+        "RULE-05"
+      ],
+      "plainLanguage": "NAP then AP Deathrites resolve before simultaneous deaths enter their cemeteries.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [
+        "death",
+        "cemetery-entry",
+        "resolution"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-05 NAP then AP Deathrites resolve before simultaneous deaths enter their cemeteries"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0127",
+      "requirementIds": [
+        "RULE-05"
+      ],
+      "plainLanguage": "Bladderblimp Deathrite makes each player lose life for their nearby sites.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "deathrite"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "loss"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-05 Bladderblimp Deathrite makes each player lose life for their nearby sites"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0128",
+      "requirementIds": [
+        "RULE-05"
+      ],
+      "plainLanguage": "Deathrite damages each other remaining unit here in simultaneous chained batches.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "deathrite"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-05 Deathrite damages each other remaining unit here in simultaneous chained batches"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0129",
+      "requirementIds": [
+        "RULE-05"
+      ],
+      "plainLanguage": "Deathrite uses its moved last location with Ward, reduction, and Lethal.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "deathrite",
+        "ward",
+        "lethal"
+      ],
+      "actionHints": [
+        "move"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-05 Deathrite uses its moved last location with Ward, reduction, and Lethal"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0130",
+      "requirementIds": [
+        "RULE-05"
+      ],
+      "plainLanguage": "Deathrite preserves its unit-source power snapshot before cemetery entry.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "deathrite",
+        "derived-power"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "cemetery-entry"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-05 Deathrite preserves its unit-source power snapshot before cemetery entry"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0131",
+      "requirementIds": [
+        "RULE-05"
+      ],
+      "plainLanguage": "Deathrite healing caps at maximum, fails at Death's Door, and precedes cemetery entry.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "deathrite",
+        "deaths-door"
+      ],
+      "actionHints": [
+        "heal"
+      ],
+      "eventHints": [
+        "death",
+        "cemetery-entry",
+        "healing"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-05 Deathrite healing caps at maximum, fails at Death's Door, and precedes cemetery entry"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0132",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Move and Attack stages movement before an undefended enemy-site strike.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "move",
+        "attack",
+        "strike"
+      ],
+      "eventHints": [
+        "movement",
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Move and Attack stages movement before an undefended enemy-site strike"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0133",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Defend moves a unit into a simultaneous fight and stages exact split damage.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "move",
+        "defend",
+        "fight"
+      ],
+      "eventHints": [
+        "damage",
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Defend moves a unit into a simultaneous fight and stages exact split damage"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0134",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Takes-less prevention applies to each simultaneous damage source before Lethal.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "lethal"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 takes-less prevention applies to each simultaneous damage source before Lethal"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0135",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Declining an attack gives only co-located ready enemies an Intercept window.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "attack",
+        "intercept",
+        "decline"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 declining an attack gives only co-located ready enemies an Intercept window"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0136",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Surviving minion damage persists through the turn and clears in End Phase.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 surviving minion damage persists through the turn and clears in End Phase"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0137",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Death's Door prevents same-turn direct damage and later simultaneous death blows draw.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "deaths-door"
+      ],
+      "actionHints": [
+        "draw"
+      ],
+      "eventHints": [
+        "damage",
+        "death",
+        "card-draw"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Death's Door prevents same-turn direct damage and later simultaneous death blows draw"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0138",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Later undefended site strikes cannot deliver Death's Door death blows.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "deaths-door"
+      ],
+      "actionHints": [
+        "strike"
+      ],
+      "eventHints": [
+        "death",
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 later undefended site strikes cannot deliver Death's Door death blows"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0139",
+      "requirementIds": [
+        "RULE-01"
+      ],
+      "plainLanguage": "Attempting to draw from an empty deck immediately loses.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "draw"
+      ],
+      "eventHints": [
+        "loss",
+        "card-draw"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-01 attempting to draw from an empty deck immediately loses"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0140",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Pick Up and Drop manage local carried Artifacts once per unit turn.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "artifact"
+      ],
+      "actionHints": [
+        "pick-up",
+        "drop"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 Pick Up and Drop manage local carried Artifacts once per unit turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0141",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Dropping a power Artifact immediately kills a lethally wounded bearer.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "artifact",
+        "derived-power"
+      ],
+      "actionHints": [
+        "drop"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 dropping a power Artifact immediately kills a lethally wounded bearer"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0142",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A carried Lethal Artifact kills on positive strike damage and drops with its bearer.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "lethal",
+        "artifact"
+      ],
+      "actionHints": [
+        "strike",
+        "drop"
+      ],
+      "eventHints": [
+        "damage",
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 a carried Lethal Artifact kills on positive strike damage and drops with its bearer"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0143",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Siege Ballista taps its bearer and another ally for measured artifact damage.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "artifact"
+      ],
+      "actionHints": [
+        "tap"
+      ],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Siege Ballista taps its bearer and another ally for measured artifact damage"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0144",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Payload Trebuchet discards a card for measured location damage.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "discard"
+      ],
+      "eventHints": [
+        "damage",
+        "card-discard"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Payload Trebuchet discards a card for measured location damage"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0145",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Rolling Boulder rolls maximally and damages other units along its path.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Rolling Boulder rolls maximally and damages other units along its path"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0146",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Mesmerism transfers a minion and its Deathrite to the new controller.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "deathrite"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/05 Mesmerism transfers a minion and its Deathrite to the new controller"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0147",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Fatality kills only a wounded minion in the caster region.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "region"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Fatality kills only a wounded minion in the caster region"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0148",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Sparkmage may tap for zero damage at a nearby location with no other unit.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "tap"
+      ],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Sparkmage may tap for zero damage at a nearby location with no other unit"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0149",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Sparkmage counts every player-cast spell source, resets, and damages one other unit.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "cast"
+      ],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Sparkmage counts every player-cast spell source, resets, and damages one other unit"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0150",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Sparkmage chooses among multiple other units with deterministic private RNG.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Sparkmage chooses among multiple other units with deterministic private RNG"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0151",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "An active surface minion derives power, Ranged, and Spellcaster atop a Tower.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "ranged",
+        "spellcaster",
+        "derived-power"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 an active surface minion derives power, Ranged, and Spellcaster atop a Tower"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0152",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A minion discards a chosen Spellbook card to damage a random other unit here.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "discard"
+      ],
+      "eventHints": [
+        "damage",
+        "card-discard"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 a minion discards a chosen Spellbook card to damage a random other unit here"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0153",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Random other-unit damage includes allied, enemy, Avatar, and Stealth candidates.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "stealth"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "damage",
+        "stealth-change"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 random other-unit damage includes allied, enemy, Avatar, and Stealth candidates"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0154",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Discard damage snapshots derived unit power and uses Ward and prevention.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "ward",
+        "derived-power"
+      ],
+      "actionHints": [
+        "discard"
+      ],
+      "eventHints": [
+        "damage",
+        "card-discard"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 discard damage snapshots derived unit power and uses Ward and prevention"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0155",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Artifacts make their current site controller lose life at each turn end.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "artifact"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "loss"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Artifacts make their current site controller lose life at each turn end"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0156",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "End-turn Artifact life loss uses its carried cell and survives bearer Disable.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "disabled",
+        "artifact"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "loss",
+        "disable"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 end-turn Artifact life loss uses its carried cell and survives bearer Disable"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0157",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "End-turn Artifact life loss respects regions, Rubble, stacking, and Death's Door.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "artifact",
+        "deaths-door",
+        "rubble",
+        "region"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "death",
+        "loss"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 end-turn Artifact life loss respects regions, Rubble, stacking, and Death's Door"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0158",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Start-turn random teleports resolve in controller-chosen order through Lucky Charm.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "teleport"
+      ],
+      "eventHints": [
+        "resolution"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-04 start-turn random teleports resolve in controller-chosen order through Lucky Charm"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0159",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Raise Dead selects a public random cemetery minion before free placement.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [
+        "cemetery-entry"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Raise Dead selects a public random cemetery minion before free placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0160",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Craterize discards a site, destroys its target, and applies the printed damage grid.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "choose-target",
+        "discard",
+        "destroy"
+      ],
+      "eventHints": [
+        "damage",
+        "card-discard"
+      ],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03 Craterize discards a site, destroys its target, and applies the printed damage grid"
+      }
+    }
+  ]
+}
