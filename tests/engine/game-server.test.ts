@@ -120,6 +120,7 @@ test('playable-core page renders the authoritative 5x4 checkpoint without artwor
   assert.match(page, /<select id="opponent"/);
   assert.match(page, /id="save">Save position/);
   assert.match(page, /id="resume" disabled>Resume position/);
+  assert.match(page, /localStorage\.setItem\(saveKey/);
   assert.match(page, /South computer/);
   assert.equal(page.match(/class="cell"/g)?.length, 20);
   assert.doesNotMatch(page, /<img\b/i);
@@ -442,28 +443,59 @@ test('browser API rejects a stale action without exposing or mutating authority'
   assert.equal('session' in stale, false);
 });
 
-test('browser API restores an opaque same-process checkpoint without exposing hidden state', async () => {
+test('browser API restores a canonical checkpoint across server restart', async () => {
   const start = await post('/api/reset', { opponent: 'manual', seed: 41 });
   const saved = await post('/api/checkpoint');
-  assert.deepEqual(Object.keys(saved).sort(), ['saveId', 'stateHash', 'turnNumber']);
+  assert.deepEqual(Object.keys(saved).sort(), [
+    'checkpoint',
+    'checkpointId',
+    'opponent',
+    'stateHash',
+    'turnNumber',
+  ]);
   assert.equal(saved.stateHash, start.stateHash);
-  assert.doesNotMatch(JSON.stringify(saved), /manifest|requests|south-(?:site|spell)-/);
+  assert.equal(saved.opponent, 'manual');
+  assert.equal(typeof saved.checkpoint, 'string');
 
   const advanced = await submit(keep(start));
   assert.notEqual(advanced.stateHash, saved.stateHash);
-  const restored = await post('/api/resume', { saveId: saved.saveId, seat: 'north' });
-  assert.equal(restored.stateHash, start.stateHash);
-  assert.deepEqual(actions(restored), actions(start));
-  assert.doesNotMatch(JSON.stringify(restored), /south-(?:site|spell)-/);
-  assert.equal((await post('/api/replay')).verified, true);
-
-  const missing = await fetch(`${origin}/api/resume`, {
-    body: JSON.stringify({ saveId: 'missing', seat: 'north' }),
-    headers: { 'content-type': 'application/json' },
-    method: 'POST',
+  const restarted = createGamePrototypeServer(99);
+  await new Promise<void>((resolve, reject) => {
+    restarted.once('error', reject);
+    restarted.listen(0, '127.0.0.1', resolve);
   });
-  assert.equal(missing.status, 404);
-  assert.deepEqual(await missing.json(), { error: 'saved position not found' });
+  const restartedAddress = restarted.address() as AddressInfo;
+  const restartedOrigin = `http://127.0.0.1:${restartedAddress.port}`;
+  try {
+    const restored = await json('/api/resume?seat=north&opponent=manual', {
+      body: saved.checkpoint as string,
+      headers: { 'content-type': 'application/json' },
+      method: 'POST',
+    }, restartedOrigin);
+    assert.equal(restored.stateHash, start.stateHash);
+    assert.deepEqual(actions(restored), actions(start));
+    assert.doesNotMatch(JSON.stringify(restored), /south-(?:site|spell)-/);
+
+    const continued = await submit(keep(restored), restartedOrigin);
+    assert.equal(continued.accepted, true);
+    const replay = await post('/api/replay', undefined, restartedOrigin);
+    assert.equal(replay.verified, true);
+    assert.equal(replay.finalStateHash, continued.stateHash);
+
+    const invalid = await fetch(`${restartedOrigin}/api/resume?seat=north&opponent=manual`, {
+      body: '{}',
+      headers: { 'content-type': 'application/json' },
+      method: 'POST',
+    });
+    assert.equal(invalid.status, 400);
+    assert.match(String((await invalid.json() as JsonObject).error), /checkpoint/);
+    assert.equal((await json('/api/view?seat=north', undefined, restartedOrigin)).stateHash,
+      continued.stateHash);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      restarted.close((error) => error ? reject(error) : resolve());
+    });
+  }
 });
 
 test('browser API lets North play a deterministic South opponent through terminal replay', async () => {

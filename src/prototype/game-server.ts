@@ -1,5 +1,4 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,15 +23,16 @@ import {
 } from '../engine/game.ts';
 import {
   createGameCheckpoint,
+  GAME_CHECKPOINT_MAX_BYTES,
+  parseGameCheckpoint,
   resumeGameCheckpoint,
-  type GameCheckpoint,
+  serializeGameCheckpoint,
 } from '../engine/checkpoint.ts';
 
 const HOST = '127.0.0.1';
 const DEFAULT_PORT = 4174;
 const MAX_BODY_BYTES = 65_536;
 const MAX_OPPONENT_ACTIONS = 500;
-const MAX_SAVED_CHECKPOINTS = 32;
 
 type GameOpponent = 'manual' | 'south';
 
@@ -73,7 +73,7 @@ const PAGE = String.raw`<!doctype html>
     </aside>
   </main>
   <script>
-    var seat='north',snapshot,lastCommand,savedPositionId;var byId=function(id){return document.getElementById(id)};
+    var seat='north',snapshot,lastCommand,savedPosition;var byId=function(id){return document.getElementById(id)},saveKey='sorcery-playable-core-checkpoint-v1';try{savedPosition=JSON.parse(localStorage.getItem(saveKey)||'null')}catch(_error){localStorage.removeItem(saveKey)}if(!savedPosition||typeof savedPosition.checkpoint!=='string'||!['manual','south'].includes(savedPosition.opponent))savedPosition=undefined;
     async function request(path,options){var response=await fetch(path,options);var body=await response.json();if(!response.ok)throw new Error(body.error||('HTTP '+response.status));return body}
     function clearActionResult(){byId('notice').textContent='';byId('opponent-summary').textContent='';byId('receipt').textContent=''}
     function escapeHtml(value){return String(value).replace(/[&<>"']/g,function(character){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]})}
@@ -108,10 +108,10 @@ const PAGE = String.raw`<!doctype html>
     byId('preset').addEventListener('change',function(){var selected=snapshot.presets.find(function(preset){return preset.id===byId('preset').value});if(selected)byId('seed').value=String(selected.seed)});
     byId('reset-form').addEventListener('submit',async function(event){event.preventDefault();try{seat='north';lastCommand=undefined;syncSeatButtons();byId('stale').disabled=true;var data=await request('/api/reset',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({opponent:byId('opponent').value,presetId:byId('preset').value,seed:Number(byId('seed').value)})});clearActionResult();byId('notice').className='ok';byId('notice').textContent='Match reset';byId('receipt').textContent=JSON.stringify({stateHash:data.stateHash},null,2);render(data)}catch(error){showError(error)}});
     byId('stale').addEventListener('click',function(){if(lastCommand)submit(lastCommand.actionId,lastCommand)});
-    byId('save').addEventListener('click',async function(){try{var data=await request('/api/checkpoint',{method:'POST'});savedPositionId=data.saveId;byId('resume').disabled=false;clearActionResult();byId('notice').className='ok';byId('notice').textContent='Position saved at turn '+data.turnNumber;byId('receipt').textContent=JSON.stringify(data,null,2)}catch(error){showError(error)}});
-    byId('resume').addEventListener('click',async function(){if(!savedPositionId)return;try{var data=await request('/api/resume',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({saveId:savedPositionId,seat:seat})});lastCommand=undefined;byId('stale').disabled=true;clearActionResult();byId('notice').className='ok';byId('notice').textContent='Saved position restored';byId('receipt').textContent=JSON.stringify({saveId:savedPositionId,stateHash:data.stateHash},null,2);render(data)}catch(error){showError(error)}});
+    byId('save').addEventListener('click',async function(){try{var data=await request('/api/checkpoint',{method:'POST'});savedPosition=data;localStorage.setItem(saveKey,JSON.stringify(data));byId('resume').disabled=false;clearActionResult();byId('notice').className='ok';byId('notice').textContent='Position saved in this browser at turn '+data.turnNumber;byId('receipt').textContent=JSON.stringify({checkpointId:data.checkpointId,stateHash:data.stateHash,turnNumber:data.turnNumber},null,2)}catch(error){showError(error)}});
+    byId('resume').addEventListener('click',async function(){if(!savedPosition)return;try{var data=await request('/api/resume?seat='+encodeURIComponent(seat)+'&opponent='+encodeURIComponent(savedPosition.opponent),{method:'POST',headers:{'content-type':'application/json'},body:savedPosition.checkpoint});lastCommand=undefined;byId('stale').disabled=true;clearActionResult();byId('notice').className='ok';byId('notice').textContent='Saved position restored';byId('receipt').textContent=JSON.stringify({checkpointId:savedPosition.checkpointId,stateHash:data.stateHash},null,2);render(data)}catch(error){showError(error)}});
     byId('replay').addEventListener('click',async function(){try{var data=await request('/api/replay',{method:'POST'});clearActionResult();byId('notice').className=data.verified?'ok':'error';byId('notice').textContent=data.verified?'Replay byte-identical':'Replay mismatch';byId('receipt').textContent=JSON.stringify(data,null,2)}catch(error){showError(error)}});
-    refresh().catch(showError);
+    byId('resume').disabled=!savedPosition;refresh().catch(showError);
   </script>
 </body>
 </html>`;
@@ -300,16 +300,23 @@ function displayActionLabel(
   return label;
 }
 
-async function readJson(request: IncomingMessage): Promise<JsonRecord> {
+async function readText(
+  request: IncomingMessage,
+  maximumBytes = MAX_BODY_BYTES,
+): Promise<string> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
     size += buffer.length;
-    if (size > MAX_BODY_BYTES) throw new Error('request body exceeds 64 KiB');
+    if (size > maximumBytes) throw new Error(`request body exceeds ${maximumBytes} bytes`);
     chunks.push(buffer);
   }
-  const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+async function readJson(request: IncomingMessage): Promise<JsonRecord> {
+  const parsed: unknown = JSON.parse(await readText(request) || '{}');
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('request body must be a JSON object');
   }
@@ -357,13 +364,6 @@ export function createGamePrototypeServer(
     selectedPreset.manifest,
     initialSeed ?? selectedPreset.manifest.seed,
   ));
-  // ponytail: same-process saves only; persist canonical checkpoints if restart survival is requested.
-  const checkpoints = new Map<string, Readonly<{
-    checkpoint: GameCheckpoint;
-    opponent: GameOpponent;
-    presetId: string;
-  }>>();
-
   function advanceOpponent(start: GameSession): Readonly<{
     count: number;
     session: GameSession;
@@ -502,38 +502,39 @@ export function createGamePrototypeServer(
         });
       }
       if (request.method === 'POST' && url.pathname === '/api/checkpoint') {
-        const saveId = randomUUID();
-        checkpoints.set(saveId, {
-          checkpoint: createGameCheckpoint(session),
-          opponent,
-          presetId: selectedPreset.id,
-        });
-        if (checkpoints.size > MAX_SAVED_CHECKPOINTS) {
-          checkpoints.delete(checkpoints.keys().next().value!);
-        }
+        const checkpoint = createGameCheckpoint(session);
         return sendJson(response, 200, {
-          saveId,
+          checkpoint: serializeGameCheckpoint(checkpoint),
+          checkpointId: checkpoint.checkpointId,
+          opponent,
           stateHash: hashGameState(session.state),
           turnNumber: session.state.turnNumber,
         });
       }
       if (request.method === 'POST' && url.pathname === '/api/resume') {
-        const body = await readJson(request);
-        const seat = typeof body.seat === 'string' ? body.seat : null;
-        const saved = typeof body.saveId === 'string' ? checkpoints.get(body.saveId) : undefined;
-        if (!isSeat(seat) || !saved) {
-          return sendJson(response, 404, { error: 'saved position not found' });
+        const seat = url.searchParams.get('seat');
+        const requestedOpponent = url.searchParams.get('opponent');
+        if (!isSeat(seat)) {
+          return sendJson(response, 400, { error: 'seat must be north or south' });
         }
-        if (saved.opponent === 'south' && seat === 'south') {
+        if (requestedOpponent !== 'manual' && requestedOpponent !== 'south') {
+          return sendJson(response, 400, { error: 'opponent must be manual or south' });
+        }
+        if (requestedOpponent === 'south' && seat === 'south') {
           return sendJson(response, 403, {
             error: 'south is hidden while controlled by the deterministic opponent',
           });
         }
-        const preset = presets.find(({ id }) => id === saved.presetId);
+        const checkpoint = parseGameCheckpoint(
+          await readText(request, GAME_CHECKPOINT_MAX_BYTES),
+        );
+        const preset = presets.find(({ manifest }) =>
+          reseedManifest(manifest, checkpoint.manifest.seed).manifestId
+            === checkpoint.manifest.manifestId);
         if (!preset) throw new Error('saved position preset is unavailable');
-        const restored = resumeGameCheckpoint(saved.checkpoint);
+        const restored = resumeGameCheckpoint(checkpoint);
         selectedPreset = preset;
-        opponent = saved.opponent;
+        opponent = requestedOpponent;
         session = restored;
         return sendJson(response, 200, view(seat));
       }

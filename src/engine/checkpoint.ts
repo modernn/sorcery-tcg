@@ -10,7 +10,7 @@ import {
   type GameSession,
 } from './game.ts';
 
-const MAX_CHECKPOINT_BYTES = 16 * 1024 * 1024;
+export const GAME_CHECKPOINT_MAX_BYTES = 16 * 1024 * 1024;
 const MAX_CHECKPOINT_REQUESTS = 1_000;
 const HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
@@ -137,8 +137,8 @@ export function serializeGameCheckpoint(checkpoint: GameCheckpoint): string {
 }
 
 export function parseGameCheckpoint(text: string): GameCheckpoint {
-  if (new TextEncoder().encode(text).length > MAX_CHECKPOINT_BYTES) {
-    throw new RangeError(`checkpoint exceeds ${MAX_CHECKPOINT_BYTES} bytes`);
+  if (new TextEncoder().encode(text).length > GAME_CHECKPOINT_MAX_BYTES) {
+    throw new RangeError(`checkpoint exceeds ${GAME_CHECKPOINT_MAX_BYTES} bytes`);
   }
   return validateCheckpoint(parseJsonWithDuplicateKeyCheck(text));
 }
