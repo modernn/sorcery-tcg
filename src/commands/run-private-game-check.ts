@@ -845,6 +845,21 @@ export type PrivateGameCheck = Readonly<{
     survivorAndArtifactUndergroundCarried: boolean;
     swordAndShield: string;
   }>;
+  earthCraterize: Readonly<{
+    acceptedActionCount: number;
+    causalEventsVerified: boolean;
+    craterize: string;
+    deck: DeckList;
+    discardCostVerified: boolean;
+    gridDamageVerified: boolean;
+    legalConstructedDeck: boolean;
+    noRandomDraws: boolean;
+    replayVerified: boolean;
+    seed: number;
+    sourceDiscardAndSiteCemeteriesVerified: boolean;
+    structuralFactsVerified: boolean;
+    targetDestroyedAndRubble: boolean;
+  }>;
   earthSiegeBallista: Readonly<{
     acceptedActionCount: number;
     ballistaRemainedCarried: boolean;
@@ -1668,6 +1683,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   blink: NormalizedCard;
   bury: NormalizedCard;
   caveIn: NormalizedCard;
+  craterize: NormalizedCard;
   siegeBallista: NormalizedCard;
   payloadTrebuchet: NormalizedCard;
   rollingBoulder: NormalizedCard;
@@ -2566,6 +2582,28 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || caveIn.thresholds.water !== 0
     || caveIn.rarity !== 'exceptional') {
     throw new Error('private site-wide forced-burrow Magic no longer matches its supported facts');
+  }
+  const craterize = snapshot.cards.find(({ name }) => name === 'Craterize');
+  if (!craterize
+    || craterize.stableId
+      !== 'card:edd303ec2d2fe8819291d47649b61dfd3d2134bd69e88310ddebd235407acfa5'
+    || craterize.officialSourceId !== '001-craterize-b-f'
+    || craterize.cardType !== 'magic'
+    || ruleTextDigest(craterize.rulesText)
+      !== 'sha256:8e5ac03a231d64dcf50601b07f6b137489e25924e1fab29ea39f7b7b7023b1d9'
+    || craterize.manaCost !== 8
+    || craterize.attack !== null
+    || craterize.defense !== null
+    || craterize.life !== null
+    || craterize.elements.length !== 1
+    || craterize.elements[0] !== 'earth'
+    || craterize.thresholds.air !== 0
+    || craterize.thresholds.earth !== 2
+    || craterize.thresholds.fire !== 0
+    || craterize.thresholds.water !== 0
+    || craterize.rarity !== 'elite'
+    || craterize.subtypes.length !== 0) {
+    throw new Error('private site-destruction grid-damage Magic no longer matches its supported facts');
   }
   const siegeBallista = snapshot.cards.find(({ name }) => name === 'Siege Ballista');
   if (!siegeBallista
@@ -4181,6 +4219,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     borderMilitia,
     bury,
     caveIn,
+    craterize,
     siegeBallista,
     payloadTrebuchet,
     rollingBoulder,
@@ -4449,6 +4488,9 @@ function gameDefinition(
   atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep: 0 | 3 = 0,
   atStartOfControllerTurnTeleportToRandomSiteOrVoid = false,
   summonRandomMinionFromAnyCemetery = false,
+  discardSiteAsAdditionalCost = false,
+  destroyTargetSite = false,
+  damageUnitsAboveAndBelowTargetSiteByManhattanDistance?: readonly [number, number, number, number, number],
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4568,6 +4610,9 @@ function gameDefinition(
     + Number(teleportNearbyAllyThenDrawCard)
     + Number(returnMinionFromOwnCemetery)
     + Number(summonRandomMinionFromAnyCemetery)
+    + Number(discardSiteAsAdditionalCost
+      && destroyTargetSite
+      && damageUnitsAboveAndBelowTargetSiteByManhattanDistance !== undefined)
     + Number(disableTargetNearbyMinionUntilNextTurn)
     + Number(submergeTargetMinion)
     + Number(healController !== 0)
@@ -4600,6 +4645,14 @@ function gameDefinition(
         : {}),
       ...(summonRandomMinionFromAnyCemetery
         ? { summonRandomMinionFromAnyCemetery: true as const }
+        : {}),
+      ...(discardSiteAsAdditionalCost
+        ? {
+          damageUnitsAboveAndBelowTargetSiteByManhattanDistance:
+            damageUnitsAboveAndBelowTargetSiteByManhattanDistance!,
+          destroyTargetSite: true as const,
+          discardSiteAsAdditionalCost: true as const,
+        }
         : {}),
       ...(teleportNearbyAllyThenDrawCard ? { teleportNearbyAllyThenDrawCard: true } : {}),
       ...(damageTargetUnit !== 0
@@ -4727,7 +4780,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-chain-lightning' | 'air-devils-egg' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-kite-archer' | 'air-leyline' | 'air-lightning-bolt' | 'air-lucky-charm' | 'air-nimbus-jinn' | 'air-rain-of-arrows' | 'air-raise-dead' | 'air-skirmishers-of-mu' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-thunderstorm' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-chain-lightning' | 'air-devils-egg' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-kite-archer' | 'air-leyline' | 'air-lightning-bolt' | 'air-lucky-charm' | 'air-nimbus-jinn' | 'air-rain-of-arrows' | 'air-raise-dead' | 'air-skirmishers-of-mu' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-thunderstorm' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-craterize' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -4937,6 +4990,14 @@ function buildManifest(
       ...earthCaveInBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
     ],
   };
+  const earthCraterizeBase = elementalDeck('earth', []);
+  const earthCraterizeDeck: GameDeckSpec = {
+    ...earthCraterizeBase,
+    spellbook: [
+      input.craterize.stableId,
+      ...earthCraterizeBase.spellbook.slice(0, input.format.spellbookMinimum - 1),
+    ],
+  };
   const earthSiegeBallistaBase = elementalDeck(
     'earth',
     [input.scentHounds, input.stealthTargetMinion],
@@ -5080,6 +5141,7 @@ function buildManifest(
       input.wraetannisTitan.stableId,
       input.slumberingGiantess.stableId,
       input.caveIn.stableId,
+      input.craterize.stableId,
       input.siegeBallista.stableId,
       input.payloadTrebuchet.stableId,
       input.rollingBoulder.stableId,
@@ -5460,6 +5522,8 @@ function buildManifest(
         ? earthBuryDeck
       : scenario === 'earth-cave-in'
         ? earthCaveInDeck
+      : scenario === 'earth-craterize'
+        ? earthCraterizeDeck
       : scenario === 'earth-siege-ballista'
         ? earthSiegeBallistaDeck
       : scenario === 'earth-payload-trebuchet'
@@ -5675,6 +5739,8 @@ function buildManifest(
         ? earthBuryDeck
       : scenario === 'earth-cave-in'
         ? earthCaveInDeck
+      : scenario === 'earth-craterize'
+        ? earthCraterizeDeck
       : scenario === 'earth-siege-ballista'
         ? earthSiegeBallistaDeck
       : scenario === 'earth-payload-trebuchet'
@@ -5912,6 +5978,9 @@ function buildManifest(
       card.stableId === input.thunderstorm.stableId ? 3 : 0,
       card.stableId === input.headlessHaunt.stableId,
       card.stableId === input.raiseDead.stableId,
+      card.stableId === input.craterize.stableId,
+      card.stableId === input.craterize.stableId,
+      card.stableId === input.craterize.stableId ? [10, 7, 4, 2, 1] as const : undefined,
     ),
   ]));
   return {
@@ -7582,6 +7651,63 @@ function findEarthCaveInOpening(
     };
   }
   throw new Error('private Cave-In scenario no longer produces its supported opening');
+}
+
+function findEarthCraterizeOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  craterizeInstanceId: string;
+  discardSiteInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northSiteInstanceIds: readonly [string, string, string, string, string, string, string, string];
+  seed: number;
+  session: GameSession;
+  southSiteInstanceId: string;
+}> {
+  // ponytail: bounded scan avoids another ignored scenario-config field.
+  for (let seed = 1; seed <= 4_096; seed += 1) {
+    const built = buildManifest(input, seed, 'earth-craterize');
+    const session = createGameSession(built.manifest);
+    const northSites = [
+      ...session.state.players.north.hand.atlas,
+      ...session.state.players.north.atlas.slice(0, 6),
+    ];
+    const spellWindow = [
+      ...session.state.players.north.hand.spellbook,
+      ...session.state.players.north.spellbook.slice(0, 7),
+    ];
+    const craterizeInstanceId = spellWindow
+      .find(({ cardId }) => cardId === input.craterize.stableId)?.instanceId;
+    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+    const earthSiteCount = northSites.slice(0, 8).filter(({ cardId }) => {
+      const definition = session.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('earth');
+    }).length;
+    if (!craterizeInstanceId
+      || !southSiteInstanceId
+      || northSites.length < 9
+      || earthSiteCount < 2) continue;
+    return {
+      ...built,
+      craterizeInstanceId,
+      discardSiteInstanceId: northSites[8]!.instanceId,
+      northSiteInstanceIds: [
+        northSites[0]!.instanceId,
+        northSites[1]!.instanceId,
+        northSites[2]!.instanceId,
+        northSites[3]!.instanceId,
+        northSites[4]!.instanceId,
+        northSites[5]!.instanceId,
+        northSites[6]!.instanceId,
+        northSites[7]!.instanceId,
+      ],
+      seed,
+      session,
+      southSiteInstanceId,
+    };
+  }
+  throw new Error('private Craterize scenario lacks its supported bounded opening');
 }
 
 function findEarthSiegeBallistaOpening(
@@ -13410,6 +13536,165 @@ function runEarthCaveIn(
       && observedSwordAndShield.region === 'underground',
     swordAndShield:
       opening.names.get(input.swordAndShield.stableId) ?? input.swordAndShield.stableId,
+  });
+}
+
+function runEarthCraterize(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['earthCraterize'] {
+  const opening = findEarthCraterizeOpening(input);
+  let session = keep(keep(opening.session));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+  const playSite = (instanceId: string, cell: RealmCell): void => {
+    take(({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === instanceId
+      && descriptor.cell === cell);
+  };
+
+  playSite(opening.northSiteInstanceIds[0], 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  playSite(opening.southSiteInstanceId, 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+  const northCells = ['C3', 'B4', 'B3', 'A4', 'A3', 'D4', 'D3'] as const;
+  let northSiteIndex = 1;
+  let ready = false;
+  for (let cycle = 0; cycle < 20; cycle += 1) {
+    const nextSiteInstanceId = opening.northSiteInstanceIds[northSiteIndex];
+    const needsAtlas = nextSiteInstanceId !== undefined
+      && session.state.players.north.hand.atlas.every(({ instanceId }) =>
+        instanceId !== nextSiteInstanceId)
+      || northSiteIndex === 8
+        && session.state.players.north.hand.atlas.every(({ instanceId }) =>
+          instanceId !== opening.discardSiteInstanceId);
+    const drawZone = needsAtlas ? 'atlas' : 'spellbook';
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === drawZone);
+    if (northSiteIndex < 8) {
+      playSite(
+        opening.northSiteInstanceIds[northSiteIndex]!,
+        northCells[northSiteIndex - 1]!,
+      );
+      northSiteIndex += 1;
+    }
+    ready = northSiteIndex === 8
+      && session.state.players.north.hand.atlas.some(({ instanceId }) =>
+        instanceId === opening.discardSiteInstanceId)
+      && session.state.players.north.hand.spellbook.some(({ instanceId }) =>
+        instanceId === opening.craterizeInstanceId)
+      && session.state.players.north.mana >= 8;
+    if (ready) break;
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+  }
+  if (!ready) throw new Error('private Craterize setup exceeded its bounded turn count');
+
+  const targetSite = session.state.realm.sites.C3;
+  const northLifeBefore = session.state.players.north.avatar.life;
+  const southLifeBefore = session.state.players.south.avatar.life;
+  const manaBefore = session.state.players.north.mana;
+  if (!targetSite || 'rubble' in targetSite) {
+    throw new Error('private Craterize target Site is absent');
+  }
+  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === opening.craterizeInstanceId
+      && descriptor.discardSiteInstanceId === opening.discardSiteInstanceId
+      && descriptor.targetLocation?.cell === 'C3'
+      && descriptor.targetLocation.region === 'surface'
+      && descriptor.targetSiteInstanceId === targetSite.instanceId);
+  if (choices.length !== 1) {
+    throw new Error(`private Craterize exact cast has ${choices.length} choices`);
+  }
+  const selected = choices[0]!;
+  const result = stepGame(session, selected);
+  if (!result.accepted) {
+    throw new Error(`private Craterize cast rejected: ${result.reason.code}`);
+  }
+  session = result.session;
+
+  const events = result.receipt.events;
+  const payload = (type: string, instanceId?: string): Readonly<Record<string, JsonValue>> | undefined => {
+    const event = events.find(({ payload: candidate, type: candidateType }) =>
+      candidateType === type
+        && (!instanceId || isJsonRecord(candidate) && candidate.instanceId === instanceId));
+    return event && isJsonRecord(event.payload) ? event.payload : undefined;
+  };
+  const discardPayload = payload('card-discarded', opening.discardSiteInstanceId);
+  const castPayload = payload('magic-cast', opening.craterizeInstanceId);
+  const siteDestroyedPayload = payload('site-destroyed', targetSite.instanceId);
+  const rubblePayload = payload('rubble-created');
+  const northAvatarDamage = payload(
+    'damage-dealt',
+    session.state.players.north.avatar.card.instanceId,
+  );
+  const southAvatarDamage = payload(
+    'damage-dealt',
+    session.state.players.south.avatar.card.instanceId,
+  );
+  const resolvedPayload = payload('magic-resolved', opening.craterizeInstanceId);
+  const discardIndex = events.findIndex(({ type }) => type === 'card-discarded');
+  const castIndex = events.findIndex(({ type }) => type === 'magic-cast');
+  const destroyedIndex = events.findIndex(({ type }) => type === 'site-destroyed');
+  const rubbleIndex = events.findIndex(({ type }) => type === 'rubble-created');
+  const resolvedIndex = events.findIndex(({ type }) => type === 'magic-resolved');
+  const cemetery = session.state.players.north.cemetery;
+  const afterSite = session.state.realm.sites.C3;
+  const definition = session.state.cards[input.craterize.stableId];
+  const deck = deckList(opening.manifest.decks.north, opening.names);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    causalEventsVerified: discardIndex === 0
+      && castIndex === 1
+      && destroyedIndex > castIndex
+      && rubbleIndex > destroyedIndex
+      && resolvedIndex === events.length - 1
+      && resolvedPayload?.cardId === input.craterize.stableId
+      && events.filter(({ type }) => type === 'site-destroyed').length === 1
+      && events.filter(({ type }) => type === 'rubble-created').length === 1,
+    craterize: opening.names.get(input.craterize.stableId) ?? input.craterize.stableId,
+    deck,
+    discardCostVerified: selected.descriptor.kind === 'cast-magic'
+      && selected.descriptor.discardSiteInstanceId === opening.discardSiteInstanceId
+      && manaBefore - session.state.players.north.mana === 8
+      && discardPayload?.owner === 'north'
+      && discardPayload.seat === 'north'
+      && discardPayload.sourceInstanceId === opening.craterizeInstanceId
+      && discardPayload.zone === 'atlas'
+      && castPayload?.discardSiteInstanceId === opening.discardSiteInstanceId
+      && castPayload.manaPaid === 8,
+    gridDamageVerified: northAvatarDamage?.amount === 7
+      && southAvatarDamage?.amount === 4
+      && session.state.players.north.avatar.life === northLifeBefore - 7
+      && session.state.players.south.avatar.life === southLifeBefore - 4
+      && events.filter(({ type }) => type === 'avatar-life-lost').length === 2,
+    legalConstructedDeck: deck.atlas.reduce((total, card) => total + card.copies, 0) === 30
+      && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
+      && deck.spellbook.find(({ name }) => name === input.craterize.name)?.copies === 1,
+    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    sourceDiscardAndSiteCemeteriesVerified:
+      cemetery.some(({ instanceId }) => instanceId === opening.craterizeInstanceId)
+      && cemetery.some(({ instanceId }) => instanceId === opening.discardSiteInstanceId)
+      && cemetery.some(({ instanceId }) => instanceId === targetSite.instanceId)
+      && session.state.players.north.hand.spellbook.every(({ instanceId }) =>
+        instanceId !== opening.craterizeInstanceId)
+      && session.state.players.north.hand.atlas.every(({ instanceId }) =>
+        instanceId !== opening.discardSiteInstanceId),
+    structuralFactsVerified: definition?.cardType === 'magic'
+      && definition.discardSiteAsAdditionalCost === true
+      && definition.destroyTargetSite === true
+      && canonicalJson(definition.damageUnitsAboveAndBelowTargetSiteByManhattanDistance as JsonValue)
+        === '[10,7,4,2,1]',
+    targetDestroyedAndRubble: afterSite !== undefined
+      && 'rubble' in afterSite
+      && siteDestroyedPayload?.instanceId === targetSite.instanceId
+      && rubblePayload?.cell === 'C3',
   });
 }
 
@@ -23863,6 +24148,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthMountainGiant = runEarthMountainGiant(input);
   const earthSlumberingGiantess = runEarthSlumberingGiantess(input);
   const earthCaveIn = runEarthCaveIn(input);
+  const earthCraterize = runEarthCraterize(input);
   const earthSiegeBallista = runEarthSiegeBallista(input);
   const earthPayloadTrebuchet = runEarthPayloadTrebuchet(input);
   const earthRollingBoulder = runEarthRollingBoulder(input);
@@ -24096,6 +24382,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     earthMountainGiant,
     earthSlumberingGiantess,
     earthCaveIn,
+    earthCraterize,
     earthSiegeBallista,
     earthPayloadTrebuchet,
     earthRollingBoulder,

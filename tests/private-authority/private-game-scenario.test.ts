@@ -945,7 +945,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 36 : 35,
+        36,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
@@ -953,7 +953,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
-        preset.id === 'air-vs-earth-lesson' ? 35 : 36,
+        36,
       );
       assert.notDeepEqual(preset.manifest.decks.north, preset.manifest.decks.south);
     } else {
@@ -1152,6 +1152,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     Bury: 2,
     'Cave-In': 1,
     'Cave Trolls': 3,
+    Craterize: 1,
     'Dalcean Phalanx': 1,
     'Divine Healing': 1,
     'Entangle Terrain': 1,
@@ -1332,6 +1333,27 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       burrowAllMinionsAndArtifactsAtTargetLandSite: true,
       manaCost: 4,
       thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    });
+  }
+  const craterizeId = Object.entries(airLesson.cardNames)
+    .find(([, name]) => name === 'Craterize')?.[0];
+  assert.ok(craterizeId);
+  const craterize = airLesson.manifest.cards[craterizeId];
+  assert.equal(craterize?.cardType, 'magic');
+  if (craterize?.cardType === 'magic') {
+    assert.deepEqual({
+      damageUnitsAboveAndBelowTargetSiteByManhattanDistance:
+        craterize.damageUnitsAboveAndBelowTargetSiteByManhattanDistance,
+      destroyTargetSite: craterize.destroyTargetSite,
+      discardSiteAsAdditionalCost: craterize.discardSiteAsAdditionalCost,
+      manaCost: craterize.manaCost,
+      thresholds: craterize.thresholds,
+    }, {
+      damageUnitsAboveAndBelowTargetSiteByManhattanDistance: [10, 7, 4, 2, 1],
+      destroyTargetSite: true,
+      discardSiteAsAdditionalCost: true,
+      manaCost: 8,
+      thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
     });
   }
   const siegeBallistaId = Object.entries(airLesson.cardNames)
@@ -2302,6 +2324,24 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.earthCaveIn.deck.spellbook
     .find(({ name }) => name === 'Cave-In')?.copies, 1);
   assert.equal(result.earthCaveIn.replayVerified, true);
+  assert.equal(result.earthCraterize.craterize, 'Craterize');
+  assert.equal(result.earthCraterize.seed, 2);
+  assert.equal(result.earthCraterize.acceptedActionCount, 44);
+  assert.equal(result.earthCraterize.causalEventsVerified, true);
+  assert.equal(result.earthCraterize.discardCostVerified, true);
+  assert.equal(result.earthCraterize.gridDamageVerified, true);
+  assert.equal(result.earthCraterize.legalConstructedDeck, true);
+  assert.equal(result.earthCraterize.noRandomDraws, true);
+  assert.equal(result.earthCraterize.sourceDiscardAndSiteCemeteriesVerified, true);
+  assert.equal(result.earthCraterize.structuralFactsVerified, true);
+  assert.equal(result.earthCraterize.targetDestroyedAndRubble, true);
+  assert.equal(result.earthCraterize.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.earthCraterize.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.earthCraterize.deck.spellbook
+    .find(({ name }) => name === 'Craterize')?.copies, 1);
+  assert.equal(result.earthCraterize.replayVerified, true);
   assert.equal(result.earthSiegeBallista.siegeBallista, 'Siege Ballista');
   assert.equal(result.earthSiegeBallista.scentHounds, 'Scent Hounds');
   assert.equal(result.earthSiegeBallista.snowLeopard, 'Snow Leopard');

@@ -184,11 +184,13 @@ export type GameCardDefinition =
     burrowAllMinionsAndArtifactsAtTargetLandSite?: true;
     burrowTargetMinionOrArtifact?: true;
     cardType: 'magic';
+    damageUnitsAboveAndBelowTargetSiteByManhattanDistance?: readonly [number, number, number, number, number];
     damageChainNearbyUnits?: true;
     damageEachAbovegroundMinion?: 1;
     damageEachUnitAtLocationWithinTwoSteps?: number;
     damageRandomUnitAtLocation?: number;
     damageTargetUnit?: number;
+    discardSiteAsAdditionalCost?: true;
     disableTargetNearbyMinionUntilNextTurn?: true;
     fightAllyWithAdjacentEnemy?: true;
     gainControlOfTargetNearbyMinion?: true;
@@ -203,6 +205,7 @@ export type GameCardDefinition =
     submergeTargetMinion?: true;
     summonRandomMinionFromAnyCemetery?: true;
     summonTokenToEachControlledSiteBorderingEnemySite?: string;
+    destroyTargetSite?: true;
     targetNearby?: boolean;
     teleportAllyToTargetSite?: true;
     teleportNearbyAllyThenDrawCard?: true;
@@ -714,6 +717,7 @@ type GameActionDescriptor =
     cardInstanceId: string;
     casterInstanceId: StateHash;
     cemeteryMinionInstanceId?: StateHash;
+    discardSiteInstanceId?: StateHash;
     drawZone?: DeckZone;
     kind: 'cast-magic';
     ally?: GameUnitRef;
@@ -1619,6 +1623,24 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
       return [cast];
     }
     if (definition.summonRandomMinionFromAnyCemetery === true) return [cast];
+    if (definition.discardSiteAsAdditionalCost === true) {
+      if (caster.region === 'void') return [];
+      const discardSiteInstanceIds = player.hand.atlas
+        .map(({ instanceId: discardSiteInstanceId }) => discardSiteInstanceId)
+        .sort();
+      return REALM_CELLS.flatMap((cell) => {
+        const site = state.realm.sites[cell];
+        if (!site
+          || caster.region === 'underwater' && !isWaterSite(state, cell)
+          || caster.region === 'underground' && isWaterSite(state, cell)) return [];
+        return discardSiteInstanceIds.map((discardSiteInstanceId) => ({
+          ...cast,
+          discardSiteInstanceId,
+          targetLocation: { cell, region: caster.region as Exclude<GameRegion, 'void'> },
+          targetSiteInstanceId: site.instanceId,
+        }));
+      });
+    }
     if (definition.teleportNearbyAllyThenDrawCard === true) {
       return unitRefs(state, seat).flatMap((ally) => {
         const status = unitStatus(state, ally);
@@ -1811,6 +1833,8 @@ const SUPPORTED_CARD_FIELDS = {
     burrowAllMinionsAndArtifactsAtTargetLandSite burrowTargetMinionOrArtifact cardType
     damageChainNearbyUnits damageEachAbovegroundMinion damageEachUnitAtLocationWithinTwoSteps
     damageRandomUnitAtLocation damageTargetUnit disableTargetNearbyMinionUntilNextTurn
+    damageUnitsAboveAndBelowTargetSiteByManhattanDistance discardSiteAsAdditionalCost
+    destroyTargetSite
     fightAllyWithAdjacentEnemy gainControlOfTargetNearbyMinion grantChargeToAllyThisTurn
     grantPowerToAllyThisTurn healController killTargetWoundedMinion leapAttackAlly
     lureEnemyMinionOneStepCloser manaCost returnMinionFromOwnCemetery submergeTargetMinion
@@ -2188,6 +2212,32 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     if (card.damageChainNearbyUnits !== undefined && card.damageChainNearbyUnits !== true) {
       throw new RangeError(`${path}.damageChainNearbyUnits must be true when defined`);
     }
+    if (card.discardSiteAsAdditionalCost !== undefined
+      && card.discardSiteAsAdditionalCost !== true) {
+      throw new RangeError(`${path}.discardSiteAsAdditionalCost must be true when defined`);
+    }
+    if (card.destroyTargetSite !== undefined && card.destroyTargetSite !== true) {
+      throw new RangeError(`${path}.destroyTargetSite must be true when defined`);
+    }
+    const targetSiteDamage = card.damageUnitsAboveAndBelowTargetSiteByManhattanDistance;
+    if (targetSiteDamage !== undefined
+      && (!Array.isArray(targetSiteDamage)
+        || targetSiteDamage.length !== 5
+        || targetSiteDamage.some((amount) => !Number.isSafeInteger(amount)
+          || amount < 1
+          || amount > MAX_COMBAT_STAT))) {
+      throw new RangeError(
+        `${path}.damageUnitsAboveAndBelowTargetSiteByManhattanDistance must contain five supported positive damage values`,
+      );
+    }
+    const targetSiteEffectFacts = Number(card.discardSiteAsAdditionalCost === true)
+      + Number(card.destroyTargetSite === true)
+      + Number(targetSiteDamage !== undefined);
+    if (targetSiteEffectFacts !== 0 && targetSiteEffectFacts !== 3) {
+      throw new RangeError(
+        `${path} site-destruction grid damage facts must be defined together`,
+      );
+    }
     const effectCount = Number(card.burrowAllMinionsAndArtifactsAtTargetLandSite === true)
       + Number(card.burrowTargetMinionOrArtifact === true)
       + Number(card.submergeTargetMinion === true)
@@ -2196,6 +2246,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.damageEachUnitAtLocationWithinTwoSteps !== undefined)
       + Number(card.damageRandomUnitAtLocation !== undefined)
       + Number(card.damageTargetUnit !== undefined)
+      + Number(targetSiteEffectFacts === 3)
       + Number(card.disableTargetNearbyMinionUntilNextTurn === true)
       + Number(card.fightAllyWithAdjacentEnemy === true)
       + Number(card.gainControlOfTargetNearbyMinion === true)
@@ -2855,6 +2906,13 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               cardType: 'magic' as const,
               ...(card.burrowAllMinionsAndArtifactsAtTargetLandSite === true
                 ? { burrowAllMinionsAndArtifactsAtTargetLandSite: true as const }
+                : card.discardSiteAsAdditionalCost === true
+                  ? {
+                    damageUnitsAboveAndBelowTargetSiteByManhattanDistance:
+                      [...card.damageUnitsAboveAndBelowTargetSiteByManhattanDistance!] as [number, number, number, number, number],
+                    destroyTargetSite: true as const,
+                    discardSiteAsAdditionalCost: true as const,
+                  }
                 : card.burrowTargetMinionOrArtifact === true
                   ? { burrowTargetMinionOrArtifact: true as const }
                 : card.submergeTargetMinion === true
@@ -5216,6 +5274,11 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
         `Cast ${descriptor.cardId} to return minion ${descriptor.cemeteryMinionInstanceId.slice(0, 15)}…`,
       );
     }
+    if (descriptor.discardSiteInstanceId && descriptor.targetLocation) {
+      return withCaster(
+        `Cast ${descriptor.cardId} at ${descriptor.targetLocation.cell}; discard site ${descriptor.discardSiteInstanceId.slice(0, 15)}…`,
+      );
+    }
     if (descriptor.ally && descriptor.temptedEnemy && descriptor.temptedDestination) {
       return withCaster(
         `Cast ${descriptor.cardId}: ${descriptor.ally.kind} ${descriptor.ally.instanceId.slice(0, 15)}… tempts minion ${descriptor.temptedEnemy.instanceId.slice(0, 15)}… to ${descriptor.temptedDestination.cell}`,
@@ -6717,15 +6780,14 @@ function finishDefendMovement(
   ];
 }
 
-function resolveSiteDeaths(
+function applySiteDestructionTerrain(
   state: GameState,
   destroyed: readonly Readonly<{ cell: RealmCell; site: SiteInstance }>[],
   sourceInstanceId: StateHash,
 ): Readonly<{
   outcomes: readonly GameOutcome[];
-  players: GameState['players'];
-  realm: GameState['realm'];
-  terminal: GameTerminal;
+  state: GameState;
+  unique: readonly Readonly<{ cell: RealmCell; site: SiteInstance }>[];
 }> {
   const unique = [...new Map(destroyed.map((entry) => [entry.site.instanceId, entry])).values()]
     .sort((left, right) => left.cell.localeCompare(right.cell));
@@ -6773,14 +6835,20 @@ function resolveSiteDeaths(
       units,
     },
   });
-  const settlement = settleRegionOccupancy(terrainState);
-  const players: Record<GameSeat, PlayerState> = {
-    north: settlement.state.players.north,
-    south: settlement.state.players.south,
+  return { outcomes: rubbleOutcomes, state: terrainState, unique };
+}
+
+function addDestroyedSitesToCemeteries(
+  players: GameState['players'],
+  destroyed: readonly Readonly<{ site: SiteInstance }>[],
+): GameState['players'] {
+  const updated: Record<GameSeat, PlayerState> = {
+    north: players.north,
+    south: players.south,
   };
-  for (const { site } of unique) {
-    const owner = players[site.owner];
-    players[site.owner] = deepFreeze({
+  for (const { site } of destroyed) {
+    const owner = updated[site.owner];
+    updated[site.owner] = deepFreeze({
       ...owner,
       cemetery: [...owner.cemetery, {
         cardId: site.cardId,
@@ -6790,16 +6858,32 @@ function resolveSiteDeaths(
       }],
     });
   }
+  return deepFreeze(updated);
+}
+
+function resolveSiteDeaths(
+  state: GameState,
+  destroyed: readonly Readonly<{ cell: RealmCell; site: SiteInstance }>[],
+  sourceInstanceId: StateHash,
+): Readonly<{
+  outcomes: readonly GameOutcome[];
+  players: GameState['players'];
+  realm: GameState['realm'];
+  terminal: GameTerminal;
+}> {
+  const terrain = applySiteDestructionTerrain(state, destroyed, sourceInstanceId);
+  const settlement = settleRegionOccupancy(terrain.state);
+  const players = addDestroyedSitesToCemeteries(settlement.state.players, terrain.unique);
   const terminalIndex = settlement.outcomes.findIndex(({ type }) => type === 'game-ended');
   return {
     outcomes: terminalIndex < 0
-      ? [...settlement.outcomes, ...rubbleOutcomes]
+      ? [...settlement.outcomes, ...terrain.outcomes]
       : [
         ...settlement.outcomes.slice(0, terminalIndex),
-        ...rubbleOutcomes,
+        ...terrain.outcomes,
         ...settlement.outcomes.slice(terminalIndex),
       ],
-    players: deepFreeze(players),
+    players,
     realm: settlement.state.realm,
     terminal: settlement.state.terminal,
   };
@@ -6839,6 +6923,10 @@ function resolveFightWindow(
   interactingRefs?: readonly GameUnitRef[],
   allocationsAreStrikes = true,
   allocationsUseAttackerLethal = allocationsAreStrikes,
+  simultaneousSiteDestruction?: Readonly<{
+    destroyed: readonly Readonly<{ cell: RealmCell; site: SiteInstance }>[];
+    sourceInstanceId: StateHash;
+  }>,
 ): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
   const allocations = new Map(pending.allocations.map(({ amount, targetInstanceId }) =>
     [targetInstanceId, amount]));
@@ -7035,7 +7123,42 @@ function resolveFightWindow(
     }
   }
 
-  const deathResolution = resolveMinionDeaths(state, players, units, deaths, defeatedAvatars);
+  let deathState = state;
+  let deathUnits: readonly UnitInstance[] = units;
+  let simultaneousOutcomes: readonly GameOutcome[] = [];
+  let destroyedSites: readonly Readonly<{ cell: RealmCell; site: SiteInstance }>[] = [];
+  let simultaneousDeaths = deaths;
+  if (simultaneousSiteDestruction) {
+    const damagedState = deepFreeze({
+      ...state,
+      players,
+      realm: { ...state.realm, units },
+    });
+    const terrain = applySiteDestructionTerrain(
+      damagedState,
+      simultaneousSiteDestruction.destroyed,
+      simultaneousSiteDestruction.sourceInstanceId,
+    );
+    const damagedIds = new Set(deaths.map(({ instanceId }) => instanceId));
+    deathState = terrain.state;
+    deathUnits = terrain.state.realm.units;
+    simultaneousOutcomes = terrain.outcomes;
+    destroyedSites = terrain.unique;
+    simultaneousDeaths = deathUnits.filter((unit) =>
+      damagedIds.has(unit.instanceId) || minionRegionDisposition(deathState, unit) === 'dies');
+  }
+
+  const deathResolution = resolveMinionDeaths(
+    deathState,
+    players,
+    deathUnits,
+    simultaneousDeaths,
+    defeatedAvatars,
+  );
+  const resolvedPlayers = addDestroyedSitesToCemeteries(
+    deathResolution.players,
+    destroyedSites,
+  );
 
   return [
     deepFreeze({
@@ -7043,15 +7166,21 @@ function resolveFightWindow(
       decisionSeat: state.activeSeat,
       pendingCombat: null,
       phase: deathResolution.terminal.status === 'finished' ? 'terminal' : 'main',
-      players: deathResolution.players,
+      players: resolvedPlayers,
       realm: {
-        ...state.realm,
+        ...deathState.realm,
         ...(deathResolution.artifacts ? { artifacts: deathResolution.artifacts } : {}),
         units: deathResolution.units,
       },
       terminal: deathResolution.terminal,
     }),
-    [...outcomes, ...damageOutcomes, ...lanceOutcomes, ...deathResolution.outcomes],
+    [
+      ...outcomes,
+      ...damageOutcomes,
+      ...lanceOutcomes,
+      ...simultaneousOutcomes,
+      ...deathResolution.outcomes,
+    ],
     [],
   ];
 }
@@ -8333,6 +8462,7 @@ function applyDescriptor(
         && candidate.cardInstanceId === descriptor.cardInstanceId
         && candidate.casterInstanceId === descriptor.casterInstanceId
         && candidate.cemeteryMinionInstanceId === descriptor.cemeteryMinionInstanceId
+        && candidate.discardSiteInstanceId === descriptor.discardSiteInstanceId
         && (candidate.ally === undefined && descriptor.ally === undefined
           || candidate.ally !== undefined
             && descriptor.ally !== undefined
@@ -8382,6 +8512,13 @@ function applyDescriptor(
     if (!card || !definition || definition.cardType !== 'magic' || !legal || !caster) {
       throw new Error('unreachable illegal Magic cast');
     }
+    const discardedSite = definition.discardSiteAsAdditionalCost === true
+      ? player.hand.atlas.find(({ instanceId }) =>
+        instanceId === descriptor.discardSiteInstanceId)
+      : undefined;
+    if (definition.discardSiteAsAdditionalCost === true && !discardedSite) {
+      throw new Error('unreachable missing Magic site-discard cost');
+    }
     const manaPaid = definition.manaCost + (definition.damageChainNearbyUnits === true
       ? CHAIN_MAGIC_EXTRA_TARGET_MANA * (descriptor.targets!.length - 1)
       : 0);
@@ -8395,8 +8532,15 @@ function applyDescriptor(
         : {}),
       hand: {
         ...player.hand,
+        ...(discardedSite
+          ? {
+            atlas: player.hand.atlas.filter(({ instanceId }) =>
+              instanceId !== discardedSite.instanceId),
+          }
+          : {}),
         spellbook: player.hand.spellbook.filter(({ instanceId }) => instanceId !== card.instanceId),
       },
+      ...(discardedSite ? { cemetery: [...player.cemetery, discardedSite] } : {}),
       mana: player.mana - manaPaid,
     });
     const paidState = deepFreeze({
@@ -8452,6 +8596,9 @@ function applyDescriptor(
         ...(descriptor.cemeteryMinionInstanceId
           ? { cemeteryMinionInstanceId: descriptor.cemeteryMinionInstanceId }
           : {}),
+        ...(descriptor.discardSiteInstanceId
+          ? { discardSiteInstanceId: descriptor.discardSiteInstanceId }
+          : {}),
         ...(descriptor.temptedDestination
           ? { temptedDestination: descriptor.temptedDestination }
           : {}),
@@ -8464,7 +8611,23 @@ function applyDescriptor(
       },
       type: 'magic-cast',
     } as const;
-    const castOutcomes: readonly GameOutcome[] = [castOutcome, ...interaction.outcomes];
+    const castOutcomes: readonly GameOutcome[] = [
+      ...(discardedSite
+        ? [{
+          payload: {
+            cardId: discardedSite.cardId,
+            instanceId: discardedSite.instanceId,
+            owner: discardedSite.owner,
+            seat,
+            sourceInstanceId: card.instanceId,
+            zone: 'atlas',
+          },
+          type: 'card-discarded',
+        } as const]
+        : []),
+      castOutcome,
+      ...interaction.outcomes,
+    ];
     const resolved = {
       payload: { cardId: card.cardId, instanceId: card.instanceId, owner: card.owner },
       type: 'magic-resolved',
@@ -9461,6 +9624,91 @@ function applyDescriptor(
           resolved,
         ],
         [],
+      ];
+    }
+    if (definition.damageUnitsAboveAndBelowTargetSiteByManhattanDistance !== undefined) {
+      if (!descriptor.targetLocation || !descriptor.targetSiteInstanceId) {
+        throw new Error('unreachable Craterize target');
+      }
+      const cell = descriptor.targetLocation.cell;
+      const targetSite = castState.realm.sites[cell];
+      if (!targetSite || targetSite.instanceId !== descriptor.targetSiteInstanceId) {
+        throw new Error('unreachable Craterize site');
+      }
+      const damageGrid = definition.damageUnitsAboveAndBelowTargetSiteByManhattanDistance;
+      const targets = (['north', 'south'] as const)
+        .flatMap((targetSeat) => unitRefs(castState, targetSeat))
+        .map((target) => {
+          const status = unitStatus(castState, target);
+          const amount = status.region === 'void'
+            ? 0
+            : status.occupiedCells.reduce((total, occupiedCell) => {
+              const fileDistance = Math.abs(occupiedCell.charCodeAt(0) - cell.charCodeAt(0));
+              const rankDistance = Math.abs(Number(occupiedCell[1]) - Number(cell[1]));
+              return fileDistance <= 2 && rankDistance <= 2
+                ? total + damageGrid[fileDistance + rankDistance]!
+                : total;
+            }, 0);
+          return { amount, target };
+        })
+        .filter(({ amount }) => amount > 0)
+        .sort((left, right) => left.target.instanceId.localeCompare(right.target.instanceId));
+      const targetProtected = !isRubble(targetSite)
+        && siteCannotBeMovedDestroyedOrModified(castState, targetSite);
+      const destroyed = isRubble(targetSite) || targetProtected
+        ? []
+        : [{ cell, site: targetSite }];
+      const pending: PendingCombat = deepFreeze({
+        allocations: targets.map(({ amount, target }) => ({
+          amount,
+          targetInstanceId: target.instanceId,
+        })),
+        attacker: caster,
+        attackingSeat: seat,
+        cell,
+        combatants: targets.map(({ target }) => target),
+        defenders: [],
+        originalTarget: null,
+        targetRemoved: false,
+      });
+      const [damaged, outcomes, randomDraws] = resolveFightWindow(
+        castState,
+        pending,
+        [
+          ...castOutcomes,
+          {
+            payload: {
+              cell,
+              instanceId: targetSite.instanceId,
+              ...(!isRubble(targetSite) ? { owner: targetSite.owner } : {}),
+              sourceInstanceId: card.instanceId,
+            },
+            type: targetProtected ? 'site-destruction-prevented' : 'site-destroyed',
+          },
+          ...targets.map(({ amount, target }) => ({
+            payload: {
+              amount,
+              sourceInstanceId: card.instanceId,
+              targetInstanceId: target.instanceId,
+            },
+            type: 'magic-damage-allocated',
+          })),
+        ],
+        'non-unit',
+        true,
+        false,
+        [caster],
+        false,
+        false,
+        destroyed.length > 0 ? { destroyed, sourceInstanceId: card.instanceId } : undefined,
+      );
+      const terminalIndex = outcomes.findIndex(({ type }) => type === 'game-ended');
+      return [
+        withStateVersion(damaged, {}),
+        terminalIndex < 0
+          ? [...outcomes, resolved]
+          : [...outcomes.slice(0, terminalIndex), resolved, ...outcomes.slice(terminalIndex)],
+        randomDraws,
       ];
     }
     if (definition.damageChainNearbyUnits === true) {

@@ -19080,3 +19080,283 @@ test('RULE-03 Raise Dead selects a public random cemetery minion before free pla
   assert.equal(reused.session.transcript, reusedTranscript);
   assert.equal(verifyGameReplay(placed.session), true);
 });
+
+test('RULE-03 Craterize discards a site, destroys its target, and applies the printed damage grid', () => {
+  const craterizeId = 'craterize';
+  const targetSiteId = 'craterize-water-site';
+  const landSiteId = 'craterize-land-site';
+  const unitIds = [
+    'craterize-center',
+    'craterize-seven',
+    'craterize-four',
+    'craterize-two',
+    'craterize-one',
+    'craterize-oversized',
+    'craterize-void',
+  ] as const;
+  const north: GameDeckSpec = {
+    atlas: Array(8).fill(landSiteId),
+    avatar: 'craterize-north-avatar',
+    spellbook: Array(7).fill(craterizeId),
+  };
+  const south: GameDeckSpec = {
+    atlas: [targetSiteId, targetSiteId, ...Array(8).fill(landSiteId)],
+    avatar: 'craterize-south-avatar',
+    spellbook: unitIds,
+  };
+  const thresholds = { air: 0, earth: 2, fire: 0, water: 0 } as const;
+  const cards: Record<string, GameCardDefinition> = {
+    [craterizeId]: {
+      cardType: 'magic',
+      damageUnitsAboveAndBelowTargetSiteByManhattanDistance: [10, 7, 4, 2, 1],
+      destroyTargetSite: true,
+      discardSiteAsAdditionalCost: true,
+      manaCost: 8,
+      thresholds,
+    },
+    [landSiteId]: { cardType: 'site', elements: ['earth'] },
+    [targetSiteId]: { cardType: 'site', elements: ['water'] },
+    'craterize-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'craterize-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    ...Object.fromEntries(unitIds.map((cardId) => [cardId, {
+      attack: 1,
+      ...(cardId === 'craterize-center' || cardId === 'craterize-seven'
+        ? { burrowing: true }
+        : {}),
+      cardType: 'minion' as const,
+      defense: 40,
+      ...(cardId === 'craterize-oversized' ? { occupiesSquareArea: 2 as const } : {}),
+      ...(cardId === 'craterize-two' ? { stealth: true } : {}),
+      ...(cardId === 'craterize-center' ? { submerge: true } : {}),
+      ...(cardId === 'craterize-void' ? { voidwalk: true } : {}),
+      ...(cardId === 'craterize-one' ? { ward: true } : {}),
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    }])),
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-craterize-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north' as const,
+    seed: 197,
+  };
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [craterizeId]: {
+        ...cards[craterizeId]!,
+        destroyTargetSite: false,
+      } as unknown as GameCardDefinition,
+    },
+  }), /destroyTargetSite must be true/);
+
+  const gameManifest = createGameManifest(input);
+  assert.deepEqual(gameManifest.cards[craterizeId], cards[craterizeId]);
+  const base = keep(keep(createGameSession(gameManifest)));
+  const northSites = [
+    ...base.state.players.north.hand.atlas,
+    ...base.state.players.north.atlas,
+  ];
+  const southSites = [
+    ...base.state.players.south.hand.atlas,
+    ...base.state.players.south.atlas,
+  ];
+  const landSites = [...northSites, ...southSites].filter(({ cardId }) => cardId === landSiteId);
+  const targetSite = southSites.find(({ cardId }) => cardId === targetSiteId);
+  const unitCards = [
+    ...base.state.players.south.hand.spellbook,
+    ...base.state.players.south.spellbook,
+  ];
+  const craterize = base.state.players.north.hand.spellbook.find(({ cardId }) =>
+    cardId === craterizeId);
+  assert.ok(targetSite && craterize && landSites.length >= 8 && unitCards.length === unitIds.length);
+  const unitAt = (
+    cardId: typeof unitIds[number],
+    location: 'A4' | 'B1' | 'C2' | 'C3' | 'D3' | 'E3' | 'E4',
+    region: 'surface' | 'underground' | 'underwater' | 'void',
+    occupiedCells?: readonly ['B1', 'B2', 'C1', 'C2'],
+  ): GameSession['state']['realm']['units'][number] => {
+    const card = unitCards.find((candidate) => candidate.cardId === cardId);
+    assert.ok(card);
+    return {
+      ...card,
+      controller: 'south',
+      damage: 0,
+      location,
+      ...(occupiedCells ? { occupiedCells } : {}),
+      region,
+      stealthed: cardId === 'craterize-two',
+      summoningSickness: false,
+      tapped: false,
+      warded: cardId === 'craterize-one',
+    };
+  };
+  const units: GameSession['state']['realm']['units'] = [
+    unitAt('craterize-center', 'C2', 'underwater'),
+    unitAt('craterize-seven', 'C3', 'underground'),
+    unitAt('craterize-four', 'D3', 'surface'),
+    unitAt('craterize-two', 'E3', 'surface'),
+    unitAt('craterize-one', 'E4', 'surface'),
+    unitAt('craterize-oversized', 'B1', 'surface', ['B1', 'B2', 'C1', 'C2']),
+    unitAt('craterize-void', 'A4', 'void'),
+  ];
+  const checkpoint: GameSession = {
+    ...base,
+    state: {
+      ...base.state,
+      activeSeat: 'north',
+      decisionSeat: 'north',
+      phase: 'main',
+      players: {
+        ...base.state.players,
+        north: { ...base.state.players.north, domainEstablished: true, mana: 8 },
+      },
+      realm: {
+        ...base.state.realm,
+        sites: {
+          B1: { ...landSites[0]!, controller: 'south' },
+          B2: { ...landSites[1]!, controller: 'south' },
+          C1: { ...landSites[2]!, controller: 'south' },
+          C2: { ...targetSite, controller: 'south' },
+          C3: { ...landSites[3]!, controller: 'south' },
+          C4: { ...landSites[4]!, controller: 'north' },
+          D3: { ...landSites[5]!, controller: 'south' },
+          D4: { ...landSites[6]!, controller: 'north' },
+          E3: { ...landSites[7]!, controller: 'south' },
+          E4: { ...landSites[8]!, controller: 'south' },
+        },
+        units,
+      },
+    },
+  };
+  const noDiscardCost: GameSession = {
+    ...checkpoint,
+    state: {
+      ...checkpoint.state,
+      players: {
+        ...checkpoint.state.players,
+        north: {
+          ...checkpoint.state.players.north,
+          hand: { ...checkpoint.state.players.north.hand, atlas: [] },
+        },
+      },
+    },
+  };
+  assert.equal(legalGameActions(noDiscardCost.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === craterize.instanceId), false);
+
+  const targetChoices = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === craterize.instanceId
+      && descriptor.targetSiteInstanceId === targetSite.instanceId);
+  assert.equal(targetChoices.length, checkpoint.state.players.north.hand.atlas.length);
+  const cast = targetChoices[0];
+  assert.ok(cast && cast.descriptor.kind === 'cast-magic' && cast.descriptor.discardSiteInstanceId);
+  if (cast.descriptor.kind !== 'cast-magic' || !cast.descriptor.discardSiteInstanceId) return;
+  const discardedSiteInstanceId = cast.descriptor.discardSiteInstanceId;
+  const beforeForgeHash = hashGameState(checkpoint.state);
+  const forgedDescriptor = { ...cast.descriptor, discardSiteInstanceId: targetSite.instanceId };
+  const forged = stepGame(checkpoint, {
+    actionId: opaqueActionId(
+      'sorcery-core-v1',
+      'north',
+      checkpoint.state.stateVersion,
+      forgedDescriptor,
+    ),
+    seat: 'north',
+    stateVersion: checkpoint.state.stateVersion,
+  });
+  assert.equal(forged.accepted, false);
+  if (!forged.accepted) assert.equal(forged.reason.code, 'unknown_action');
+  assert.equal(hashGameState(forged.session.state), beforeForgeHash);
+
+  const protectedCheckpoint: GameSession = {
+    ...checkpoint,
+    state: {
+      ...checkpoint.state,
+      cards: {
+        ...checkpoint.state.cards,
+        [targetSiteId]: {
+          ...checkpoint.state.cards[targetSiteId]!,
+          cannotBeMovedDestroyedOrModified: true,
+        } as GameCardDefinition,
+      },
+    },
+  };
+  const protectedCast = action(protectedCheckpoint, ({ descriptor }) =>
+    descriptor.kind === 'cast-magic'
+      && descriptor.cardInstanceId === craterize.instanceId
+      && descriptor.targetSiteInstanceId === targetSite.instanceId);
+  const protectedResult = stepGame(protectedCheckpoint, protectedCast);
+  assert.equal(protectedResult.accepted, true);
+  if (!protectedResult.accepted) return;
+  assert.equal(protectedResult.receipt.events.some(({ type }) =>
+    type === 'site-destruction-prevented'), true);
+  assert.equal(protectedResult.receipt.events.some(({ type }) => type === 'rubble-created'), false);
+  assert.deepEqual(protectedResult.session.state.realm.sites.C2, checkpoint.state.realm.sites.C2);
+  assert.equal(protectedResult.session.state.realm.units.find(({ cardId }) =>
+    cardId === 'craterize-center')?.damage, 10);
+
+  const result = stepGame(checkpoint, cast);
+  assert.equal(result.accepted, true);
+  if (!result.accepted) return;
+  const repeated = stepGame(checkpoint, cast);
+  assert.equal(repeated.accepted, true);
+  if (!repeated.accepted) return;
+  assert.deepEqual(repeated.receipt, result.receipt);
+  assert.equal(hashGameState(repeated.session.state), hashGameState(result.session.state));
+  const resolvedUnits = result.session.state.realm.units;
+  const unitState = (cardId: typeof unitIds[number]) =>
+    resolvedUnits.find((unit) => unit.cardId === cardId);
+  assert.deepEqual(unitIds.map((cardId) => [
+    cardId,
+    unitState(cardId)?.damage,
+  ]), [
+    ['craterize-center', 10],
+    ['craterize-seven', 7],
+    ['craterize-four', 4],
+    ['craterize-two', 2],
+    ['craterize-one', 0],
+    ['craterize-oversized', 28],
+    ['craterize-void', 0],
+  ]);
+  assert.equal(unitState('craterize-center')?.region, 'underground');
+  assert.equal(unitState('craterize-two')?.stealthed, true);
+  assert.equal(unitState('craterize-one')?.warded, false);
+  assert.equal(result.session.state.players.north.avatar.life, 16);
+  assert.equal(result.session.state.players.south.avatar.life, 13);
+  assert.equal(result.session.state.players.north.mana, 0);
+  assert.equal(result.session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === craterize.instanceId), true);
+  assert.equal(result.session.state.players.north.cemetery.some(({ instanceId }) =>
+    instanceId === discardedSiteInstanceId), true);
+  assert.equal(result.session.state.players.south.cemetery.some(({ instanceId }) =>
+    instanceId === targetSite.instanceId), true);
+  assert.equal(result.session.state.realm.sites.C2?.controller, null);
+  assert.equal(result.receipt.events.some(({ type }) => type === 'site-destroyed'), true);
+  assert.equal(result.receipt.events.some(({ type }) => type === 'rubble-created'), true);
+  assert.equal(result.receipt.events.at(-1)?.type, 'magic-resolved');
+  assert.deepEqual(result.receipt.randomDraws, []);
+
+  const stale = stepGame(result.session, cast);
+  assert.equal(stale.accepted, false);
+  if (!stale.accepted) assert.equal(stale.reason.code, 'stale_version');
+});
