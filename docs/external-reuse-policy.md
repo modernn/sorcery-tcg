@@ -80,6 +80,14 @@ No audited community source is an approved gameplay corpus:
 
 Other audited candidates are incomplete, copyleft, unlicensed, or publisher-reserved. None is a substitute corpus and none may become normative authority.
 
+### Private TopDeck competitive-deck snapshots
+
+TopDeck competitive results may be imported manually for private deck research with the existing v2 API adapter. Set `TOPDECK_API_KEY`, then run:
+
+    pnpm decks:import-topdeck -- --last-days 30
+
+The command makes one bounded API request and writes one canonical, content-addressed snapshot beneath ignored `.local/authority/topdeck-candidates/`. It does not scrape HTML, retry, evade access controls, schedule updates, or write a database. The snapshot includes TopDeck attribution, endpoint/API version, retrieval time, raw-response hash, tournament ID/date/participant count, placement, and unresolved deck data. It omits player names, player IDs, tournament names, and location metadata. The current adapter does not expose wins or win rate, so placement is the only retained result evidence. API access and attribution do not grant permission to redistribute the snapshot.
+
 ## Clean-room evidence
 
 An external behavioral observation may influence an independent implementation only when its review record contains:

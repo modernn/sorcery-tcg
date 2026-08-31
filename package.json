@@ -19,6 +19,7 @@
     "prototype": "node src/prototype/server.ts",
     "typecheck": "node --stack-size=4096 node_modules/typescript/bin/tsc --noEmit",
     "authority:import": "node src/commands/import-authority.ts",
+    "decks:import-topdeck": "node src/commands/import-topdeck-candidates.ts",
     "authority:validate": "node src/commands/validate-authority.ts",
     "authority:verify-private": "node --test tests/private-authority/*.test.ts",
     "lint": "eslint .",
