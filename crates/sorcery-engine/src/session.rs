@@ -302,6 +302,27 @@ impl Session {
         Ok(identity_hash(&serde_json::to_value(&self.transcript)?)?)
     }
 
+    /// Hashes all authoritative state and journals reconstructed by a checkpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError`] when session data cannot be serialized or hashed.
+    pub fn session_hash(&self) -> Result<IdentityHash, SessionError> {
+        Ok(identity_hash(&json!({
+            "attempts": self.attempts,
+            "initialRandomDraws": self.game.initial_random_draws(),
+            "manifestId": self.game.rules().manifest_id(),
+            "state": self.game.authoritative_state(),
+            "transcript": self.transcript,
+        }))?)
+    }
+
+    /// Returns the canonical manifest bytes retained for replay and checkpoints.
+    #[must_use]
+    pub fn manifest_json(&self) -> &str {
+        &self.manifest_json
+    }
+
     /// Materializes replay-verification data at the authoritative boundary.
     ///
     /// # Errors

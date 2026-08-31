@@ -4,7 +4,9 @@ use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;
 
-use serde::de;
+use std::collections::BTreeSet;
+
+use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -173,11 +175,109 @@ pub fn identity_hash(value: &Value) -> Result<IdentityHash, CanonicalError> {
     Ok(IdentityHash(hash))
 }
 
+/// Parses JSON while rejecting duplicate object keys at every depth.
+///
+/// # Errors
+///
+/// Returns [`serde_json::Error`] for malformed JSON or duplicate object keys.
+pub fn parse_json_without_duplicate_keys(text: &str) -> Result<Value, serde_json::Error> {
+    struct CheckedValue(Value);
+
+    impl<'de> Deserialize<'de> for CheckedValue {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            struct CheckedValueVisitor;
+
+            impl<'de> Visitor<'de> for CheckedValueVisitor {
+                type Value = CheckedValue;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("a JSON value without duplicate object keys")
+                }
+
+                fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
+                    Ok(CheckedValue(Value::Bool(value)))
+                }
+
+                fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
+                    Ok(CheckedValue(Value::Number(value.into())))
+                }
+
+                fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+                    Ok(CheckedValue(Value::Number(value.into())))
+                }
+
+                fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+                where
+                    E: de::Error,
+                {
+                    serde_json::Number::from_f64(value)
+                        .map(Value::Number)
+                        .map(CheckedValue)
+                        .ok_or_else(|| E::custom("non-finite JSON number"))
+                }
+
+                fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+                where
+                    E: de::Error,
+                {
+                    self.visit_string(value.to_owned())
+                }
+
+                fn visit_string<E>(self, value: String) -> Result<Self::Value, E> {
+                    Ok(CheckedValue(Value::String(value)))
+                }
+
+                fn visit_none<E>(self) -> Result<Self::Value, E> {
+                    Ok(CheckedValue(Value::Null))
+                }
+
+                fn visit_unit<E>(self) -> Result<Self::Value, E> {
+                    Ok(CheckedValue(Value::Null))
+                }
+
+                fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+                where
+                    A: SeqAccess<'de>,
+                {
+                    let mut values = Vec::with_capacity(sequence.size_hint().unwrap_or(0));
+                    while let Some(CheckedValue(value)) = sequence.next_element()? {
+                        values.push(value);
+                    }
+                    Ok(CheckedValue(Value::Array(values)))
+                }
+
+                fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+                where
+                    A: MapAccess<'de>,
+                {
+                    let mut keys = BTreeSet::new();
+                    let mut values = serde_json::Map::new();
+                    while let Some(key) = map.next_key::<String>()? {
+                        if !keys.insert(key.clone()) {
+                            return Err(de::Error::custom(format!("duplicate_key:{key}")));
+                        }
+                        let CheckedValue(value) = map.next_value()?;
+                        values.insert(key, value);
+                    }
+                    Ok(CheckedValue(Value::Object(values)))
+                }
+            }
+
+            deserializer.deserialize_any(CheckedValueVisitor)
+        }
+    }
+
+    serde_json::from_str::<CheckedValue>(text).map(|CheckedValue(value)| value)
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
-    use super::{canonical_json, identity_hash};
+    use super::{canonical_json, identity_hash, parse_json_without_duplicate_keys};
 
     #[test]
     fn canonical_json_should_match_existing_engine_state_vector() {
@@ -216,5 +316,13 @@ mod tests {
         );
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn checked_json_should_reject_nested_duplicate_keys() {
+        let error = parse_json_without_duplicate_keys(r#"{"outer":{"same":1,"same":2}}"#)
+            .expect_err("duplicate key must be rejected");
+
+        assert!(error.to_string().contains("duplicate_key:same"));
     }
 }
