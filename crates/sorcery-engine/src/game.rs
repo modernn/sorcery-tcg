@@ -8,7 +8,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-use crate::action::ActionDescriptor;
+use crate::action::{ActionDescriptor, DeckZone};
 use crate::board::Cell;
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
@@ -296,6 +296,7 @@ struct UnitPosition {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Phase {
+    Draw,
     Main,
     Mulligan,
 }
@@ -303,6 +304,7 @@ enum Phase {
 impl Phase {
     const fn as_str(self) -> &'static str {
         match self {
+            Self::Draw => "draw",
             Self::Main => "main",
             Self::Mulligan => "mulligan",
         }
@@ -370,6 +372,13 @@ fn seat_index(seat: Seat) -> usize {
     match seat {
         Seat::North => 0,
         Seat::South => 1,
+    }
+}
+
+const fn other_seat(seat: Seat) -> Seat {
+    match seat {
+        Seat::North => Seat::South,
+        Seat::South => Seat::North,
     }
 }
 
@@ -483,6 +492,7 @@ impl Game {
     pub fn legal_actions(&self) -> Result<Vec<IssuedAction>, GameError> {
         let mut actions = Vec::new();
         match self.position.phase {
+            Phase::Draw => self.append_draw_actions(&mut actions)?,
             Phase::Mulligan => self.append_mulligan_actions(&mut actions)?,
             Phase::Main => self.append_main_actions(&mut actions)?,
         }
@@ -492,6 +502,17 @@ impl Game {
                 .then_with(|| left.action_id.cmp(&right.action_id))
         });
         Ok(actions.into_iter().map(|(_, action)| action).collect())
+    }
+
+    fn append_draw_actions(&self, actions: &mut Vec<OrderedAction>) -> Result<(), GameError> {
+        for zone in [DeckZone::Atlas, DeckZone::Spellbook] {
+            let descriptor = ActionDescriptor::Draw { zone };
+            let label = descriptor
+                .state_independent_label()
+                .ok_or_else(|| invalid("draw action requires a label"))?;
+            self.push_action(actions, descriptor, label)?;
+        }
+        Ok(())
     }
 
     fn append_mulligan_actions(&self, actions: &mut Vec<OrderedAction>) -> Result<(), GameError> {
@@ -690,6 +711,7 @@ impl Game {
             return Err(GameError::IllegalAction);
         }
         match &action.descriptor {
+            ActionDescriptor::Draw { zone } => self.apply_draw_action(action.seat, *zone),
             ActionDescriptor::Mulligan {
                 atlas_order,
                 spellbook_order,
@@ -713,8 +735,48 @@ impl Game {
                 *cell,
                 *mana_cost,
             ),
+            ActionDescriptor::EndTurn => self.apply_end_turn_action(action.seat),
             _ => Err(GameError::IllegalAction),
         }
+    }
+
+    fn apply_draw_action(
+        &mut self,
+        seat: Seat,
+        zone: DeckZone,
+    ) -> Result<Vec<(String, Value)>, GameError> {
+        if self.position.phase != Phase::Draw || seat != self.position.active_seat {
+            return Err(GameError::IllegalAction);
+        }
+        let player = &mut self.position.players[seat_index(seat)];
+        let card = match zone {
+            DeckZone::Atlas => {
+                if player.atlas.is_empty() {
+                    return Err(GameError::UnsupportedManifestFact(
+                        "empty-atlas terminal transition".to_owned(),
+                    ));
+                }
+                player.atlas.remove(0)
+            }
+            DeckZone::Spellbook => {
+                if player.spellbook.is_empty() {
+                    return Err(GameError::UnsupportedManifestFact(
+                        "empty-spellbook terminal transition".to_owned(),
+                    ));
+                }
+                player.spellbook.remove(0)
+            }
+        };
+        match zone {
+            DeckZone::Atlas => player.hand_atlas.push(card),
+            DeckZone::Spellbook => player.hand_spellbook.push(card),
+        }
+        self.position.phase = Phase::Main;
+        self.position.state_version += 1;
+        Ok(vec![(
+            "card-drawn".to_owned(),
+            json!({ "seat": seat, "zone": zone }),
+        )])
     }
 
     fn apply_mulligan_action(
@@ -878,6 +940,56 @@ impl Game {
                 "seat": seat,
             }),
         )])
+    }
+
+    fn apply_end_turn_action(&mut self, seat: Seat) -> Result<Vec<(String, Value)>, GameError> {
+        if self.position.phase != Phase::Main
+            || seat != self.position.active_seat
+            || !self.position.players[seat_index(seat)].domain_established
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let next_seat = other_seat(seat);
+        let next_mana = self
+            .position
+            .sites
+            .iter()
+            .flatten()
+            .filter(|site| site.controller == next_seat)
+            .count();
+        let next_mana = u16::try_from(next_mana).map_err(|_| GameError::IllegalAction)?;
+        self.position.players[seat_index(seat)].mana = 0;
+        let next_player = &mut self.position.players[seat_index(next_seat)];
+        next_player.avatar.tapped = false;
+        next_player.mana = next_mana;
+        for unit in &mut self.position.units {
+            unit.damage = 0;
+            if unit.controller == seat {
+                unit.summoning_sickness = false;
+            } else if unit.controller == next_seat {
+                unit.tapped = false;
+            }
+        }
+        let ended_turn = self.position.turn_number;
+        self.position.turn_number += 1;
+        self.position.active_seat = next_seat;
+        self.position.decision_seat = next_seat;
+        self.position.phase = Phase::Draw;
+        self.position.state_version += 1;
+        Ok(vec![
+            (
+                "turn-ended".to_owned(),
+                json!({ "seat": seat, "turnNumber": ended_turn }),
+            ),
+            (
+                "turn-started".to_owned(),
+                json!({
+                    "drawSkipped": false,
+                    "seat": next_seat,
+                    "turnNumber": self.position.turn_number,
+                }),
+            ),
+        ])
     }
 
     /// Materializes the authoritative JSON state used for receipts and replay.
