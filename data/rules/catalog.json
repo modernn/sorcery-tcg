@@ -2713,15 +2713,15 @@
         "RULE-04"
       ],
       "plainLanguage": "Surviving minion damage persists through the turn and clears in End Phase.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [],
       "eventHints": [
         "damage"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 surviving minion damage persists through the turn and clears in End Phase"
+        "file": "crates/sorcery-engine/tests/combat_rules.rs",
+        "testName": "surviving_minion_damage_should_persist_until_end_phase"
       }
     },
     {
@@ -2753,7 +2753,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Later undefended site strikes cannot deliver Death's Door death blows.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "deaths-door"
       ],
@@ -2765,8 +2765,8 @@
         "strike"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 later undefended site strikes cannot deliver Death's Door death blows"
+        "file": "crates/sorcery-engine/tests/combat_rules.rs",
+        "testName": "later_undefended_site_strikes_should_not_deliver_deaths_door_death_blows"
       }
     },
     {

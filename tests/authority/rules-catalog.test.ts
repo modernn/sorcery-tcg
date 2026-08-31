@@ -23,7 +23,12 @@ test('the public rules catalog stays linked to direct scenario proofs', () => {
   for (const rule of catalog.rules) {
     assert.match(rule.ruleId, /^RULE-CATALOG-\d{4}$/u);
     assert.equal(rule.plainLanguage.trim().length > 0, true);
-    assert.match(rule.scenarioProof.file, /^tests\/engine\/[\w-]+\.test\.ts$/u);
+    assert.match(
+      rule.scenarioProof.file,
+      rule.implementationStatus === 'rust-supported'
+        ? /^crates\/sorcery-engine\/tests\/[\w-]+\.rs$/u
+        : /^tests\/engine\/[\w-]+\.test\.ts$/u,
+    );
     const proofUrl = new URL(`../../${rule.scenarioProof.file}`, import.meta.url);
     const proof = readFileSync(proofUrl, 'utf8').replaceAll("\\'", "'");
     assert.equal(proof.includes(rule.scenarioProof.testName), true);
