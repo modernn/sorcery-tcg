@@ -13,8 +13,8 @@ use crate::board::{Cell, Location, Region};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{
-    CardFacts, Element, FactError, MagicEffect, MinionFacts, MinionGenesis, Thresholds,
-    parse_card_definition, validate_identifier,
+    CardFacts, Element, EndTurnStealth, FactError, MagicEffect, MinionFacts, MinionGenesis,
+    Thresholds, parse_card_definition, validate_identifier,
 };
 use crate::prng::PrngState;
 
@@ -871,6 +871,19 @@ impl Game {
                 );
             }
         }
+        for unit in &self.position.units {
+            let Some(amount) = self.mana_activation_amount(seat, &unit.card.instance_id) else {
+                continue;
+            };
+            let descriptor = ActionDescriptor::ActivateMana {
+                amount: u64::from(amount),
+                unit_instance_id: unit.card.instance_id.clone(),
+            };
+            let label = descriptor
+                .state_independent_label()
+                .ok_or_else(|| invalid("activate-mana action requires a label"))?;
+            self.push_action(actions, descriptor, label);
+        }
         if !player.avatar.tapped {
             self.append_unit_move_actions(
                 actions,
@@ -907,6 +920,26 @@ impl Game {
         }
         self.push_action(actions, ActionDescriptor::EndTurn, "End turn".to_owned());
         Ok(())
+    }
+
+    fn mana_activation_amount(&self, seat: Seat, instance_id: &IdentityHash) -> Option<u8> {
+        if self.position.phase != Phase::Main
+            || self.position.active_seat != seat
+            || self.position.decision_seat != seat
+        {
+            return None;
+        }
+        let unit = self.position.units.iter().find(|unit| {
+            unit.card.instance_id == *instance_id
+                && unit.controller == seat
+                && !unit.tapped
+                && !unit.summoning_sickness
+        })?;
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return None;
+        };
+        facts.tap_for_mana
     }
 
     fn append_unit_move_actions(
@@ -1121,6 +1154,10 @@ impl Game {
             return Err(GameError::IllegalAction);
         }
         match &action.descriptor {
+            ActionDescriptor::ActivateMana {
+                amount,
+                unit_instance_id,
+            } => self.apply_mana_activation(action.seat, *amount, unit_instance_id, outcomes),
             ActionDescriptor::CloseDefend {
                 original_target_participates,
             } => {
@@ -1320,7 +1357,7 @@ impl Game {
         }
         let (attack, _) =
             self.combatant_attack_and_lethal(attacker_kind, attacking_seat, &attacker_id)?;
-        self.record_unit_interaction(attacker_kind, attacking_seat, &attacker_id)?;
+        self.record_unit_interaction(attacker_kind, attacking_seat, &attacker_id, outcomes)?;
 
         let avatar = &mut self.position.players[seat_index(target_seat)].avatar;
         let old_life = avatar.life;
@@ -1395,6 +1432,7 @@ impl Game {
         kind: UnitKind,
         seat: Seat,
         instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
         match kind {
             UnitKind::Avatar => {
@@ -1411,12 +1449,14 @@ impl Game {
                     .iter_mut()
                     .find(|unit| unit.card.instance_id == *instance_id && unit.controller == seat)
                     .ok_or(GameError::IllegalAction)?;
-                if unit.stealthed {
-                    return Err(GameError::UnsupportedManifestFact(
-                        "stealthed combat interaction".to_owned(),
-                    ));
-                }
                 unit.last_interacted_turn = Some(self.position.turn_number);
+                if unit.stealthed {
+                    unit.stealthed = false;
+                    outcomes.push(
+                        "stealth-lost",
+                        || json!({ "instanceId": instance_id, "seat": seat }),
+                    );
+                }
             }
         }
         Ok(())
@@ -1450,8 +1490,8 @@ impl Game {
         let (target_attack, target_lethal) =
             self.combatant_attack_and_lethal(target_kind, target_seat, &target_id)?;
 
-        self.record_unit_interaction(attacker_kind, attacking_seat, &attacker_id)?;
-        self.record_unit_interaction(target_kind, target_seat, &target_id)?;
+        self.record_unit_interaction(attacker_kind, attacking_seat, &attacker_id, outcomes)?;
+        self.record_unit_interaction(target_kind, target_seat, &target_id, outcomes)?;
         outcomes.push("fight-started", || {
             json!({
                 "attackerInstanceId": attacker_id,
@@ -1941,6 +1981,41 @@ impl Game {
         Ok(())
     }
 
+    fn apply_mana_activation(
+        &mut self,
+        seat: Seat,
+        amount: u64,
+        unit_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let printed = self
+            .mana_activation_amount(seat, unit_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        if amount != u64::from(printed) {
+            return Err(GameError::IllegalAction);
+        }
+        let next_mana = self.position.players[seat_index(seat)]
+            .mana
+            .checked_add(u16::from(printed))
+            .ok_or(GameError::IllegalAction)?;
+        self.position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == *unit_instance_id)
+            .ok_or(GameError::IllegalAction)?
+            .tapped = true;
+        self.position.players[seat_index(seat)].mana = next_mana;
+        self.position.state_version += 1;
+        outcomes.push("mana-activated", || {
+            json!({
+                "amount": amount,
+                "seat": seat,
+                "unitInstanceId": unit_instance_id,
+            })
+        });
+        self.record_unit_interaction(UnitKind::Minion, seat, unit_instance_id, outcomes)
+    }
+
     fn apply_summon_minion_action(
         &mut self,
         action: &IssuedAction,
@@ -1979,6 +2054,7 @@ impl Game {
             return Err(GameError::IllegalAction);
         };
         let genesis = facts.genesis;
+        let starts_stealthed = facts.stealth;
         if matches!(
             genesis,
             Some(
@@ -2013,7 +2089,7 @@ impl Game {
             damage: 0,
             last_interacted_turn: None,
             location: *cell,
-            stealthed: false,
+            stealthed: starts_stealthed,
             summoning_sickness: true,
             tapped: false,
             warded: false,
@@ -2173,6 +2249,19 @@ impl Game {
         for unit in &mut self.position.units {
             unit.damage = 0;
             if unit.controller == seat {
+                let gains_stealth = matches!(
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
+                    CardFacts::Minion(facts)
+                        if facts.end_turn_stealth == Some(EndTurnStealth::Always)
+                );
+                if gains_stealth && !unit.stealthed {
+                    unit.stealthed = true;
+                    let instance_id = unit.card.instance_id.clone();
+                    outcomes.push(
+                        "stealth-gained",
+                        || json!({ "instanceId": instance_id, "seat": seat }),
+                    );
+                }
                 unit.summoning_sickness = false;
             } else if unit.controller == next_seat {
                 unit.tapped = false;

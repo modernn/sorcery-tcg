@@ -11,6 +11,7 @@ const NORTH_AVATAR: &str =
 
 fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
     match descriptor {
+        ActionDescriptor::ActivateMana { .. } => "activate-mana",
         ActionDescriptor::Mulligan { .. } => "mulligan",
         ActionDescriptor::Draw { .. } => "draw",
         ActionDescriptor::DrawSite => "draw-site",

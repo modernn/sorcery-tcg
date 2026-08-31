@@ -95,6 +95,13 @@ impl CombatTarget {
     tag = "kind"
 )]
 pub enum ActionDescriptor {
+    /// Tap one ready minion to add its printed mana amount.
+    ActivateMana {
+        /// Printed mana added by the ability.
+        amount: u64,
+        /// Authoritative source minion identity.
+        unit_instance_id: IdentityHash,
+    },
     /// Keep an opening hand or return selected cards in the specified order.
     Mulligan {
         /// Atlas instance IDs returned to the deck bottom, in order.
@@ -168,6 +175,13 @@ impl ActionDescriptor {
     #[must_use]
     pub fn state_independent_label(&self) -> Option<String> {
         match self {
+            Self::ActivateMana {
+                amount,
+                unit_instance_id,
+            } => Some(format!(
+                "Tap {}… for {amount} mana",
+                short_identity(unit_instance_id)
+            )),
             Self::Mulligan {
                 atlas_order,
                 spellbook_order,
@@ -232,10 +246,24 @@ impl ActionDescriptor {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "closed descriptor ordering mirrors canonical JSON field order"
+)]
 pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescriptor) -> Ordering {
     descriptor_group(left)
         .cmp(&descriptor_group(right))
         .then_with(|| match (left, right) {
+            (
+                ActionDescriptor::ActivateMana {
+                    amount: left_amount,
+                    unit_instance_id: left_unit,
+                },
+                ActionDescriptor::ActivateMana {
+                    amount: right_amount,
+                    unit_instance_id: right_unit,
+                },
+            ) => compare_mana_activations(*left_amount, left_unit, *right_amount, right_unit),
             (
                 ActionDescriptor::Mulligan {
                     atlas_order: left_atlas,
@@ -330,12 +358,22 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
         })
 }
 
+fn compare_mana_activations(
+    left_amount: u64,
+    left_unit: &IdentityHash,
+    right_amount: u64,
+    right_unit: &IdentityHash,
+) -> Ordering {
+    compare_json_integers(left_amount, right_amount).then_with(|| left_unit.cmp(right_unit))
+}
+
 const fn descriptor_group(action: &ActionDescriptor) -> u8 {
     match action {
-        ActionDescriptor::Mulligan { .. } => 0,
-        ActionDescriptor::PlaySite { .. } | ActionDescriptor::SummonMinion { .. } => 1,
-        ActionDescriptor::MoveAndAttack { .. } => 2,
-        _ => 3,
+        ActionDescriptor::ActivateMana { .. } => 0,
+        ActionDescriptor::Mulligan { .. } => 1,
+        ActionDescriptor::PlaySite { .. } | ActionDescriptor::SummonMinion { .. } => 2,
+        ActionDescriptor::MoveAndAttack { .. } => 3,
+        _ => 4,
     }
 }
 
@@ -363,17 +401,18 @@ fn card_prefix(action: &ActionDescriptor) -> (&str, &IdentityHash) {
 
 const fn action_kind(action: &ActionDescriptor) -> u8 {
     match action {
-        ActionDescriptor::CloseDefend { .. } => 0,
-        ActionDescriptor::DeclareAttack { .. } => 1,
-        ActionDescriptor::DeclineAttack => 2,
-        ActionDescriptor::Draw { .. } => 3,
-        ActionDescriptor::DrawSite => 4,
-        ActionDescriptor::DrawSpell => 5,
-        ActionDescriptor::EndTurn => 6,
-        ActionDescriptor::Mulligan { .. } => 7,
-        ActionDescriptor::PlaySite { .. } => 8,
-        ActionDescriptor::SummonMinion { .. } => 9,
-        ActionDescriptor::MoveAndAttack { .. } => 10,
+        ActionDescriptor::ActivateMana { .. } => 0,
+        ActionDescriptor::CloseDefend { .. } => 1,
+        ActionDescriptor::DeclareAttack { .. } => 2,
+        ActionDescriptor::DeclineAttack => 3,
+        ActionDescriptor::Draw { .. } => 4,
+        ActionDescriptor::DrawSite => 5,
+        ActionDescriptor::DrawSpell => 6,
+        ActionDescriptor::EndTurn => 7,
+        ActionDescriptor::Mulligan { .. } => 8,
+        ActionDescriptor::PlaySite { .. } => 9,
+        ActionDescriptor::SummonMinion { .. } => 10,
+        ActionDescriptor::MoveAndAttack { .. } => 11,
     }
 }
 

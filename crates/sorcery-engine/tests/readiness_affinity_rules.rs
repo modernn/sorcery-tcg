@@ -348,3 +348,211 @@ fn provider_affinity_should_stop_immediately_when_provider_dies() {
     );
     assert_exact_replay(&session);
 }
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "direct scenario proof keeps the readiness and expiration sequence visible"
+)]
+fn mana_activation_should_require_readiness_tap_add_printed_mana_reveal_and_expire() {
+    let mut mana_source = minion(1, 2);
+    mana_source["charge"] = json!(true);
+    mana_source["stealth"] = json!(true);
+    mana_source["tapForMana"] = json!(2);
+    let manifest = scenario_manifest(
+        39,
+        &json!({
+            "north-mana-source": mana_source,
+            "south-minion": minion(1, 2),
+        }),
+        &["north-mana-source"; 4],
+        &["south-minion"; 4],
+    );
+    let mut session = Session::new(&manifest).expect("valid mana activation scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let (summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "north-mana-source"
+    });
+    let instance_id = summon["cardInstanceId"]
+        .as_str()
+        .expect("mana source identity")
+        .to_owned();
+
+    assert_eq!(state(&session)["realm"]["units"][0]["stealthed"], true);
+    assert!(
+        !session
+            .legal_actions()
+            .expect("summoning-sick actions")
+            .iter()
+            .any(|action| action.descriptor["kind"] == "activate-mana")
+    );
+
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+
+    let before_mana = state(&session)["players"]["north"]["mana"]
+        .as_u64()
+        .expect("north mana");
+    let action = session
+        .legal_actions()
+        .expect("ready mana actions")
+        .into_iter()
+        .find(|action| {
+            action.descriptor["kind"] == "activate-mana"
+                && action.descriptor["amount"] == 2
+                && action.descriptor["unitInstanceId"] == instance_id
+        })
+        .expect("printed mana activation");
+    assert!(action.label.ends_with(" for 2 mana"));
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .expect("authoritative mana activation")
+    else {
+        panic!("engine-issued mana activation must be accepted");
+    };
+    let after = state(&session);
+    let source = after["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+        .expect("mana source");
+
+    assert_eq!(after["players"]["north"]["mana"], before_mana + 2);
+    assert_eq!(source["tapped"], true);
+    assert_eq!(source["stealthed"], false);
+    assert_eq!(source["lastInteractedTurn"], 3);
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect::<Vec<_>>(),
+        ["mana-activated", "stealth-lost"]
+    );
+    assert_eq!(
+        receipt.events[0].payload,
+        json!({ "amount": 2, "seat": "north", "unitInstanceId": instance_id })
+    );
+    assert!(
+        !session
+            .legal_actions()
+            .expect("post-activation actions")
+            .iter()
+            .any(|action| action.descriptor["kind"] == "activate-mana")
+    );
+
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let refreshed = state(&session);
+    assert_eq!(refreshed["players"]["north"]["mana"], 1);
+    assert_eq!(refreshed["realm"]["units"][0]["tapped"], false);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn unconditional_end_turn_stealth_should_gain_before_turn_events_without_duplicates() {
+    let mut fox = minion(1, 2);
+    fox["gainsStealthAtEndOfTurn"] = json!(true);
+    fox["stealth"] = json!(true);
+    fox["tapForMana"] = json!(1);
+    let manifest = scenario_manifest(
+        126,
+        &json!({
+            "north-fox": fox,
+            "south-minion": minion(1, 2),
+        }),
+        &["north-fox"; 4],
+        &["south-minion"; 4],
+    );
+    let mut session = Session::new(&manifest).expect("valid end-turn Stealth scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
+    let (summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "north-fox"
+    });
+    let instance_id = summon["cardInstanceId"]
+        .as_str()
+        .expect("Stealth source identity")
+        .to_owned();
+    assert_eq!(state(&session)["realm"]["units"][0]["stealthed"], true);
+
+    let (_, first_end) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(
+        !first_end
+            .events
+            .iter()
+            .any(|event| event.event_type == "stealth-gained")
+    );
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+
+    let (_, activation) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "activate-mana" && descriptor["unitInstanceId"] == instance_id
+    });
+    assert_eq!(
+        activation
+            .events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect::<Vec<_>>(),
+        ["mana-activated", "stealth-lost"]
+    );
+    let (_, regained) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert_eq!(
+        regained
+            .events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect::<Vec<_>>(),
+        ["stealth-gained", "turn-ended", "turn-started"]
+    );
+    assert_eq!(
+        regained.events[0].payload,
+        json!({ "instanceId": instance_id, "seat": "north" })
+    );
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let (_, no_duplicate) =
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(
+        !no_duplicate
+            .events
+            .iter()
+            .any(|event| event.event_type == "stealth-gained")
+    );
+    assert_eq!(state(&session)["realm"]["units"][0]["stealthed"], true);
+    assert_exact_replay(&session);
+}

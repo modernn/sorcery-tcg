@@ -1523,7 +1523,7 @@
         "RULE-03"
       ],
       "plainLanguage": "A minion mana ability requires readiness, taps, and expires at End Phase.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "tap"
@@ -1533,8 +1533,8 @@
         "mana-change"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 a minion mana ability requires readiness, taps, and expires at End Phase"
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "mana_activation_should_require_readiness_tap_add_printed_mana_reveal_and_expire"
       }
     },
     {
@@ -2086,7 +2086,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Sly Fox gains Stealth once at the end of its controller turn.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "stealth"
       ],
@@ -2095,8 +2095,8 @@
         "stealth-change"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Sly Fox gains Stealth once at the end of its controller turn"
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "unconditional_end_turn_stealth_should_gain_before_turn_events_without_duplicates"
       }
     },
     {
