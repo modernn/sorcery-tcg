@@ -71,8 +71,8 @@ fn worker_counts_should_produce_identical_ordered_authoritative_results() {
         },
     ];
 
-    let one = run_batch(&jobs, 400, 1).expect("one-worker batch");
-    let two = run_batch(&jobs, 400, 2).expect("two-worker batch");
+    let one = run_batch(&jobs, 1).expect("one-worker batch");
+    let two = run_batch(&jobs, 2).expect("two-worker batch");
 
     assert_eq!(one, two);
     assert_eq!(
@@ -85,12 +85,17 @@ fn worker_counts_should_produce_identical_ordered_authoritative_results() {
         one.iter()
             .all(|result| result.accepted_action_count > 0 && result.replay_verified)
     );
+    assert!(matches!(run_batch(&jobs, 9), Err(BatchError::Invalid(_))));
+
+    let invalid_jobs = [
+        jobs[0],
+        BatchJob {
+            manifest_json: "{}",
+            ..jobs[1]
+        },
+    ];
     assert!(matches!(
-        run_batch(&jobs, 400, 9),
-        Err(BatchError::Invalid(_))
-    ));
-    assert!(matches!(
-        run_batch(&jobs, 1, 2),
-        Err(BatchError::NonTerminal(0))
+        run_batch(&invalid_jobs, 2),
+        Err(BatchError::Job { job_index: 1, .. })
     ));
 }

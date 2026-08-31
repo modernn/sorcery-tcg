@@ -114,21 +114,15 @@ impl Error for BatchError {
 /// Returns [`BatchError`] when a bound, policy binding, manifest, rollout, replay, or worker fails.
 pub fn run_batch(
     jobs: &[BatchJob<'_>],
-    max_actions: usize,
     requested_workers: usize,
 ) -> Result<Vec<BatchResult>, BatchError> {
     if jobs.is_empty() || jobs.len() > MAX_BATCH_JOBS {
         return Err(BatchError::Invalid("batch must contain 1-256 jobs"));
     }
-    if max_actions == 0 {
-        return Err(BatchError::Invalid(
-            "batch action bound must be greater than zero",
-        ));
-    }
     if !(1..=MAX_BATCH_WORKERS).contains(&requested_workers) {
         return Err(BatchError::Invalid("batch workers must be 1-8"));
     }
-    let bytes = jobs.iter().try_fold(0_usize, |total, job| {
+    let bytes = jobs.iter().try_fold(jobs.len() + 1, |total, job| {
         total.checked_add(job.manifest_json.len())
     });
     if bytes.is_none_or(|bytes| bytes > MAX_BATCH_BYTES) {
@@ -146,9 +140,7 @@ pub fn run_batch(
                     chunk
                         .iter()
                         .enumerate()
-                        .map(|(offset, job)| {
-                            run_job(chunk_index * chunk_size + offset, job, max_actions)
-                        })
+                        .map(|(offset, job)| run_job(chunk_index * chunk_size + offset, job))
                         .collect::<Vec<_>>()
                 })
             })
@@ -162,11 +154,7 @@ pub fn run_batch(
     results.into_iter().collect()
 }
 
-fn run_job(
-    job_index: usize,
-    job: &BatchJob<'_>,
-    max_actions: usize,
-) -> Result<BatchResult, BatchError> {
+fn run_job(job_index: usize, job: &BatchJob<'_>) -> Result<BatchResult, BatchError> {
     let failed = |source| BatchError::Job { job_index, source };
     let game = Game::from_manifest_json(job.manifest_json)
         .map_err(SimulatorError::from)
@@ -182,7 +170,7 @@ fn run_job(
             .map_err(failed)?;
     }
     let rollout =
-        run_game(game, job.north_policy, job.south_policy, max_actions).map_err(failed)?;
+        run_game(game, job.north_policy, job.south_policy, MAX_GAME_ACTIONS).map_err(failed)?;
     let Some(outcome) = rollout.outcome() else {
         return Err(BatchError::NonTerminal(job_index));
     };

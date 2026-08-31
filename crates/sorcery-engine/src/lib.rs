@@ -9,6 +9,7 @@ pub mod contract;
 pub mod deck;
 pub mod facts;
 pub mod game;
+pub mod gauntlet;
 pub mod policy;
 pub mod prng;
 pub mod selfplay;
