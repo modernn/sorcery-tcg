@@ -449,28 +449,40 @@ type PendingDeathriteBatch = Readonly<{
 
 type GamePhase = 'allocate' | 'attack' | 'cemetery-summon' | 'chain-magic' | 'deathrite-order' | 'defend' | 'draw' | 'end-turn-aura' | 'genesis' | 'intercept' | 'main' | 'movement' | 'mulligan' | 'random-choice' | 'ranged-step' | 'start-turn' | 'terminal';
 
-type PendingDeathrites = Readonly<{
-  batches: readonly PendingDeathriteBatch[];
-  blinkContinuation?: Readonly<{
+type DeathriteContinuation =
+  | Readonly<{
     cardId: string;
     instanceId: StateHash;
+    kind: 'blink';
     owner: GameSeat;
     seat: GameSeat;
     zone: DeckZone;
+  }>
+  | Readonly<{
+    kind: 'end-turn';
+    remainingInstanceIds: readonly StateHash[];
+    seat: GameSeat;
+  }>
+  | Readonly<{
+    attackerStrikesFirst: boolean;
+    firstCombatantInstanceIds: readonly StateHash[];
+    kind: 'first-strike';
+    pending: PendingCombat;
+  }>
+  | Readonly<{
+    caster: GameUnitRef;
+    descriptor: SummonMinionDescriptor;
+    kind: 'paid-summon';
+    unit: UnitInstance;
   }>;
+
+type PendingDeathrites = Readonly<{
+  batches: readonly PendingDeathriteBatch[];
+  continuation?: DeathriteContinuation;
   corpses: readonly UnitInstance[];
   deckLosers: readonly GameSeat[];
   deferredOutcomes?: readonly GameOutcome[];
-  endTurnContinuation?: Readonly<{
-    remainingInstanceIds: readonly StateHash[];
-    seat: GameSeat;
-  }>;
   defeatedAvatars: readonly GameSeat[];
-  firstStrikeContinuation?: Readonly<{
-    attackerStrikesFirst: boolean;
-    firstCombatantInstanceIds: readonly StateHash[];
-    pending: PendingCombat;
-  }>;
   returnDecisionSeat?: GameSeat;
   returnPhase?: GamePhase;
 }>;
@@ -698,6 +710,21 @@ type MulliganDescriptor = Readonly<{
   spellbookOrder: readonly string[];
 }>;
 
+type SummonMinionDescriptor = Readonly<{
+  cardId: string;
+  cardInstanceId: string;
+  casterInstanceId: string;
+  cell: RealmCell;
+  cells?: TwoByTwoArea;
+  kind: 'summon-minion';
+  manaCost: number;
+  genesisDamageChoice?: 'decline' | 'target';
+  genesisDamageTarget?: GameUnitRef;
+  paymentMode?: 'random-card-discard';
+  region?: 'underground' | 'underwater' | 'void';
+  sacrificedMinionInstanceIds?: readonly StateHash[];
+}>;
+
 type GameActionDescriptor =
   | MulliganDescriptor
   | Readonly<{ kind: 'draw-site' }>
@@ -749,20 +776,7 @@ type GameActionDescriptor =
     kind: 'cast-artifact';
     manaCost: number;
   }>
-  | Readonly<{
-    cardId: string;
-    cardInstanceId: string;
-    casterInstanceId: string;
-    cell: RealmCell;
-    cells?: TwoByTwoArea;
-    kind: 'summon-minion';
-    manaCost: number;
-    genesisDamageChoice?: 'decline' | 'target';
-    genesisDamageTarget?: GameUnitRef;
-    paymentMode?: 'random-card-discard';
-    region?: 'underground' | 'underwater' | 'void';
-    sacrificedMinionInstanceIds?: readonly StateHash[];
-  }>
+  | SummonMinionDescriptor
   | Readonly<{
     cardId: string;
     cardInstanceId: string;
@@ -1204,11 +1218,6 @@ function summonDescriptors(state: GameState, seat: GameSeat): readonly GameActio
             manaCost: Math.max(0, baseManaCost - (2 * sacrificedMinionInstanceIds.length)),
             sacrificedMinionInstanceIds,
           }))
-          .filter(({ sacrificedMinionInstanceIds }) => !deathsMayRequireDeathriteContinuation(
-            state,
-            state.realm.units.filter(({ instanceId: candidateId }) =>
-              sacrificedMinionInstanceIds.includes(candidateId)),
-          ))
           .filter(({ manaCost }) => player.mana >= manaCost);
         const genesisChoices = genesisDamageChoices(
           state,
@@ -6867,13 +6876,14 @@ function applyDeathriteOrder(
     : movementState;
   let continued: readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]];
   let continuedStateVersioned = false;
+  const continuation = pending.continuation;
   if (!resolution.pendingDeathrites
     && resolution.terminal.status === 'active'
-    && pending.endTurnContinuation) {
+    && continuation?.kind === 'end-turn') {
     const endTurnDeaths = resolveEndOfTurnDeaths(
       resumedState,
-      pending.endTurnContinuation.seat,
-      pending.endTurnContinuation.remainingInstanceIds,
+      continuation.seat,
+      continuation.remainingInstanceIds,
     );
     if (endTurnDeaths.state.pendingDeathrites) {
       continued = [endTurnDeaths.state, endTurnDeaths.outcomes, []];
@@ -6890,8 +6900,8 @@ function applyDeathriteOrder(
     }
   } else if (!resolution.pendingDeathrites
     && resolution.terminal.status === 'active'
-    && pending.blinkContinuation) {
-    const blink = pending.blinkContinuation;
+    && continuation?.kind === 'blink') {
+    const blink = continuation;
     const drawingPlayer = resumedState.players[blink.seat];
     const [drawn, ...remaining] = drawingPlayer[blink.zone];
     const resolved: GameOutcome = {
@@ -6939,9 +6949,21 @@ function applyDeathriteOrder(
         [],
       ];
     }
+  } else if (!resolution.pendingDeathrites
+    && resolution.terminal.status === 'active'
+    && continuation?.kind === 'paid-summon') {
+    continued = applyDescriptor(
+      resumedState,
+      continuation.descriptor,
+      manifest,
+      undefined,
+      false,
+      continuation,
+    );
+    continuedStateVersioned = true;
   } else {
-    continued = !resolution.pendingDeathrites && pending.firstStrikeContinuation
-      ? continueFirstStrikeAfterDeathrites(resumedState, pending.firstStrikeContinuation)
+    continued = !resolution.pendingDeathrites && continuation?.kind === 'first-strike'
+      ? continueFirstStrikeAfterDeathrites(resumedState, continuation)
       : [resumedState, [] as readonly GameOutcome[], [] as readonly EngineRandomDraw[]];
   }
   const nextState = continued[0].pendingDeathrites
@@ -6951,12 +6973,12 @@ function applyDeathriteOrder(
     ? []
     : [
       ...(pending.deferredOutcomes ?? []),
-      ...(resolution.terminal.status === 'finished' && pending.blinkContinuation
+      ...(resolution.terminal.status === 'finished' && continuation?.kind === 'blink'
         ? [{
           payload: {
-            cardId: pending.blinkContinuation.cardId,
-            instanceId: pending.blinkContinuation.instanceId,
-            owner: pending.blinkContinuation.owner,
+            cardId: continuation.cardId,
+            instanceId: continuation.instanceId,
+            owner: continuation.owner,
           },
           type: 'magic-resolved',
         }]
@@ -7094,7 +7116,8 @@ function resolveEndOfTurnDeaths(
     const pendingDeathrites = resolution.pendingDeathrites
       ? deepFreeze({
         ...resolution.pendingDeathrites,
-        endTurnContinuation: {
+        continuation: {
+          kind: 'end-turn' as const,
           remainingInstanceIds: triggeredIds.slice(index + 1),
           seat,
         },
@@ -7972,7 +7995,7 @@ function resolveChainMagicDamage(
 
 function continueFirstStrikeAfterDeathrites(
   state: GameState,
-  continuation: NonNullable<PendingDeathrites['firstStrikeContinuation']>,
+  continuation: Extract<DeathriteContinuation, Readonly<{ kind: 'first-strike' }>>,
 ): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
   const survivors = continuation.pending.combatants.filter((ref) =>
     ref.kind === 'avatar'
@@ -8026,9 +8049,10 @@ function finishFight(
           ...earlyState,
           pendingDeathrites: {
             ...earlyState.pendingDeathrites,
-            firstStrikeContinuation: {
+            continuation: {
               attackerStrikesFirst,
               firstCombatantInstanceIds: firstCombatants.map(({ instanceId }) => instanceId),
+              kind: 'first-strike' as const,
               pending,
             },
           },
@@ -8167,6 +8191,7 @@ function applyDescriptor(
   manifest: GameManifest,
   forcedRandomOutcomeInstanceId?: StateHash,
   resumeEndTurn: false | 'after-auras' | 'after-deaths' = false,
+  resumePaidSummon?: Extract<DeathriteContinuation, Readonly<{ kind: 'paid-summon' }>>,
 ): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
   const seat = state.decisionSeat;
   const player = state.players[seat];
@@ -10513,9 +10538,10 @@ function applyDescriptor(
           withStateVersion(effectState, {
             pendingDeathrites: deepFreeze({
               ...effectState.pendingDeathrites,
-              blinkContinuation: {
+              continuation: {
                 cardId: card.cardId,
                 instanceId: card.instanceId,
+                kind: 'blink' as const,
                 owner: card.owner,
                 seat,
                 zone: descriptor.drawZone!,
@@ -10901,7 +10927,7 @@ function applyDescriptor(
   }
 
   if (descriptor.kind === 'summon-minion') {
-    const pendingCemeterySummon = state.phase === 'cemetery-summon'
+    const pendingCemeterySummon = !resumePaidSummon && state.phase === 'cemetery-summon'
       ? state.pendingCemeterySummon
       : undefined;
     const sourceMagic = pendingCemeterySummon
@@ -10934,13 +10960,13 @@ function applyDescriptor(
         randomDraws,
       ];
     };
-    const card = pendingCemeterySummon
+    const card = resumePaidSummon?.unit ?? (pendingCemeterySummon
       ? state.players[pendingCemeterySummon.cardOwner].cemetery.find(({ cardId, instanceId }) =>
         instanceId === descriptor.cardInstanceId && cardId === descriptor.cardId)
       : player.hand.spellbook.find(({ cardId, instanceId }) =>
-        instanceId === descriptor.cardInstanceId && cardId === descriptor.cardId);
+        instanceId === descriptor.cardInstanceId && cardId === descriptor.cardId));
     const definition = card && cardDefinition(state, card.cardId);
-    const legal = (pendingCemeterySummon
+    const legal = resumePaidSummon !== undefined || (pendingCemeterySummon
       ? cemeterySummonDescriptors(state, seat)
       : summonDescriptors(state, seat)).some((candidate) => {
       if (candidate.kind !== 'summon-minion') return false;
@@ -10963,7 +10989,7 @@ function applyDescriptor(
         && candidateSacrifices.every((instanceId, index) =>
           instanceId === requestedSacrifices[index]);
     });
-    const caster = spellcasterRefs(state, seat).find(({ instanceId }) =>
+    const caster = resumePaidSummon?.caster ?? spellcasterRefs(state, seat).find(({ instanceId }) =>
       instanceId === descriptor.casterInstanceId);
     if (!card
       || !definition
@@ -10972,7 +10998,7 @@ function applyDescriptor(
       || !pendingCemeterySummon && !caster) {
       throw new Error('unreachable illegal minion summon');
     }
-    const discardCandidates = descriptor.paymentMode === 'random-card-discard'
+    const discardCandidates = !resumePaidSummon && descriptor.paymentMode === 'random-card-discard'
       ? [
         ...player.hand.atlas.map((candidate) => ({ card: candidate, zone: 'atlas' as const })),
         ...player.hand.spellbook
@@ -10980,7 +11006,7 @@ function applyDescriptor(
           .map((candidate) => ({ card: candidate, zone: 'spellbook' as const })),
       ]
       : [];
-    const randomCost = descriptor.paymentMode === 'random-card-discard'
+    const randomCost = !resumePaidSummon && descriptor.paymentMode === 'random-card-discard'
       ? resolveRandomOutcome(
         state,
         discardCandidates.map(({ card: { instanceId } }) => instanceId),
@@ -10993,7 +11019,7 @@ function applyDescriptor(
       ? discardCandidates.find(({ card: { instanceId } }) =>
         instanceId === randomCost.outcomeInstanceId)
       : undefined;
-    if (descriptor.paymentMode === 'random-card-discard' && !discardedCard) {
+    if (!resumePaidSummon && descriptor.paymentMode === 'random-card-discard' && !discardedCard) {
       throw new Error('unreachable random card discard cost without another card');
     }
     const randomizedState = randomCost
@@ -11013,7 +11039,7 @@ function applyDescriptor(
       }]
       : [];
     const paymentRandomDraws = randomCost?.randomDraws ?? [];
-    const unit: UnitInstance = deepFreeze({
+    const unit: UnitInstance = resumePaidSummon?.unit ?? deepFreeze({
       ...card,
       ...(definition.lanceCount ? { carriedLanceCount: definition.lanceCount } : {}),
       controller: seat,
@@ -11027,7 +11053,9 @@ function applyDescriptor(
       warded: definition.ward === true,
     });
     let paidState: GameState;
-    if (pendingCemeterySummon) {
+    if (resumePaidSummon) {
+      paidState = state;
+    } else if (pendingCemeterySummon) {
       const cemeteryOwner = randomizedState.players[pendingCemeterySummon.cardOwner];
       const withoutPending = { ...randomizedState };
       delete withoutPending.pendingCemeterySummon;
@@ -11068,7 +11096,9 @@ function applyDescriptor(
         players: replacePlayer(randomizedState, seat, updatedPlayer),
       });
     }
-    const sacrificedUnits = (descriptor.sacrificedMinionInstanceIds ?? []).map((instanceId) => {
+    const sacrificedUnits = (resumePaidSummon
+      ? []
+      : descriptor.sacrificedMinionInstanceIds ?? []).map((instanceId) => {
       const sacrificed = paidState.realm.units.find((unit) => unit.instanceId === instanceId);
       if (!sacrificed) throw new Error('unreachable missing minion sacrifice cost');
       return sacrificed;
@@ -11092,12 +11122,37 @@ function applyDescriptor(
         new Set(),
       )
       : undefined;
-    // A Deathrite ordering pause during payment must interrupt the summon itself;
-    // never continue the summon with an authoritative choice still pending.
     if (deathResolution?.pendingDeathrites) {
-      throw new Error('unsupported Deathrite ordering during summon payment continuation');
+      const interrupted = exposeDeathriteOrder(deepFreeze({
+        ...paidState,
+        pendingDeathrites: deepFreeze({
+          ...deathResolution.pendingDeathrites,
+          continuation: {
+            caster: caster!,
+            descriptor,
+            kind: 'paid-summon' as const,
+            unit,
+          },
+          returnDecisionSeat: seat,
+          returnPhase: 'main' as const,
+        }),
+        players: deathResolution.players,
+        realm: {
+          ...paidState.realm,
+          ...(deathResolution.artifacts ? { artifacts: deathResolution.artifacts } : {}),
+          units: deathResolution.units,
+        },
+        terminal: deathResolution.terminal,
+      }));
+      return [
+        withStateVersion(interrupted, {}),
+        [...discardOutcomes, ...sacrificedOutcomes, ...deathResolution.outcomes],
+        paymentRandomDraws,
+      ];
     }
-    const resolvedPaymentState = deathResolution
+    const resolvedPaymentState = resumePaidSummon
+      ? state
+      : deathResolution
       ? deepFreeze({
         ...paidState,
         ...(deathResolution.terminal.status === 'finished' ? { phase: 'terminal' as const } : {}),
@@ -11113,11 +11168,13 @@ function applyDescriptor(
         terminal: deathResolution.terminal,
       })
       : paidState;
-    const paymentOutcomes = [
-      ...discardOutcomes,
-      ...sacrificedOutcomes,
-      ...(deathResolution?.outcomes ?? []),
-    ];
+    const paymentOutcomes = resumePaidSummon
+      ? []
+      : [
+        ...discardOutcomes,
+        ...sacrificedOutcomes,
+        ...(deathResolution?.outcomes ?? []),
+      ];
     if (resolvedPaymentState.terminal.status === 'finished') {
       return completeSummon([
         withStateVersion(resolvedPaymentState, {}),
