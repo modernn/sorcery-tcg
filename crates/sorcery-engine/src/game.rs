@@ -8,6 +8,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
+use crate::action::ActionDescriptor;
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{CardFacts, FactError, MagicEffect, parse_card_definition, validate_identifier};
@@ -66,30 +67,14 @@ struct RandomDomain {
     kind: &'static str,
 }
 
-/// A typed, engine-issued opening-hand action.
+/// A typed action issued for one exact game position.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MulliganAction {
+pub struct IssuedAction {
     action_id: IdentityHash,
-    descriptor: MulliganDescriptor,
+    descriptor: ActionDescriptor,
     label: String,
     seat: Seat,
     state_version: u64,
-}
-
-/// A typed opening-hand selection. Order controls which returned cards go to
-/// the bottom first.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MulliganDescriptor {
-    atlas_order: Vec<IdentityHash>,
-    kind: MulliganKind,
-    spellbook_order: Vec<IdentityHash>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
-#[serde(rename_all = "kebab-case")]
-enum MulliganKind {
-    Mulligan,
 }
 
 /// The setup or opening-hand request was invalid.
@@ -122,7 +107,7 @@ impl fmt::Display for GameError {
                     "manifest fact is not yet supported by Rust: {field}"
                 )
             }
-            Self::IllegalAction => formatter.write_str("mulligan action is not legal here"),
+            Self::IllegalAction => formatter.write_str("action is not legal here"),
         }
     }
 }
@@ -455,12 +440,12 @@ impl Game {
         )?)?)
     }
 
-    /// Enumerates typed legal opening-hand actions in canonical order.
+    /// Enumerates typed legal actions in canonical order.
     ///
     /// # Errors
     ///
     /// Returns [`GameError`] if action identity generation fails.
-    pub fn legal_mulligans(&self) -> Result<Vec<MulliganAction>, GameError> {
+    pub fn legal_actions(&self) -> Result<Vec<IssuedAction>, GameError> {
         if self.position.phase != Phase::Mulligan {
             return Ok(Vec::new());
         }
@@ -494,16 +479,17 @@ impl Game {
                 .collect();
             for atlas_order in permutations(&atlas) {
                 for spellbook_order in permutations(&spellbook) {
-                    let descriptor = MulliganDescriptor {
+                    let descriptor = ActionDescriptor::Mulligan {
                         atlas_order: atlas_order.clone(),
-                        kind: MulliganKind::Mulligan,
                         spellbook_order,
                     };
                     let descriptor_value = serde_json::to_value(&descriptor)?;
-                    let count = descriptor.atlas_order.len() + descriptor.spellbook_order.len();
+                    let label = descriptor
+                        .state_independent_label()
+                        .ok_or_else(|| invalid("mulligan action requires a label"))?;
                     actions.push((
                         crate::canonical::canonical_json(&descriptor_value)?,
-                        MulliganAction {
+                        IssuedAction {
                             action_id: opaque_action_id(
                                 ENGINE_VERSION,
                                 seat,
@@ -511,15 +497,7 @@ impl Game {
                                 &descriptor_value,
                             )?,
                             descriptor,
-                            label: if count == 0 {
-                                "Keep opening hand".to_owned()
-                            } else {
-                                format!(
-                                    "Mulligan {count} ({} atlas, {} spellbook)",
-                                    atlas.len(),
-                                    spellbook.len()
-                                )
-                            },
+                            label,
                             seat,
                             state_version: self.position.state_version,
                         },
@@ -535,32 +513,46 @@ impl Game {
         Ok(actions.into_iter().map(|(_, action)| action).collect())
     }
 
-    /// Applies an engine-issued opening-hand action without serialization or hashing.
+    /// Applies an engine-issued action without authoritative serialization or hashing.
     ///
     /// # Errors
     ///
-    /// Returns [`GameError::IllegalAction`] when the action is stale or belongs to
-    /// another decision.
-    pub fn apply_mulligan(&mut self, action: &MulliganAction) -> Result<(), GameError> {
+    /// Returns [`GameError::IllegalAction`] when the action is stale, belongs to
+    /// another decision, or is not valid for the current phase.
+    pub fn apply_action(
+        &mut self,
+        action: &IssuedAction,
+    ) -> Result<Vec<(String, Value)>, GameError> {
         if self.position.phase != Phase::Mulligan
             || action.seat != self.position.decision_seat
             || action.state_version != self.position.state_version
         {
             return Err(GameError::IllegalAction);
         }
+        let ActionDescriptor::Mulligan {
+            atlas_order,
+            spellbook_order,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
         let player = &mut self.position.players[seat_index(action.seat)];
-        resolve_mulligan_zone(
-            &mut player.hand_atlas,
-            &mut player.atlas,
-            &action.descriptor.atlas_order,
-        )?;
+        resolve_mulligan_zone(&mut player.hand_atlas, &mut player.atlas, atlas_order)?;
         resolve_mulligan_zone(
             &mut player.hand_spellbook,
             &mut player.spellbook,
-            &action.descriptor.spellbook_order,
+            spellbook_order,
         )?;
         player.mulligan_complete = true;
         self.position.state_version += 1;
+        let mut outcomes = vec![(
+            "mulligan-completed".to_owned(),
+            json!({
+                "atlasCount": atlas_order.len(),
+                "seat": action.seat,
+                "spellbookCount": spellbook_order.len(),
+            }),
+        )];
         if action.seat == Seat::North {
             self.position.active_seat = Seat::South;
             self.position.decision_seat = Seat::South;
@@ -569,8 +561,16 @@ impl Game {
             self.position.decision_seat = self.rules.first_seat;
             self.position.phase = Phase::Main;
             self.position.turn_number = 1;
+            outcomes.push((
+                "turn-started".to_owned(),
+                json!({
+                    "drawSkipped": true,
+                    "seat": self.rules.first_seat,
+                    "turnNumber": 1,
+                }),
+            ));
         }
-        Ok(())
+        Ok(outcomes)
     }
 
     /// Materializes the authoritative JSON state used for receipts and replay.
@@ -657,7 +657,7 @@ impl Game {
     }
 }
 
-impl MulliganAction {
+impl IssuedAction {
     /// Returns the opaque action identity.
     #[must_use]
     pub const fn action_id(&self) -> &IdentityHash {
@@ -666,7 +666,7 @@ impl MulliganAction {
 
     /// Returns the typed action descriptor.
     #[must_use]
-    pub const fn descriptor(&self) -> &MulliganDescriptor {
+    pub const fn descriptor(&self) -> &ActionDescriptor {
         &self.descriptor
     }
 
@@ -701,20 +701,6 @@ impl MulliganAction {
             seat: self.seat,
             state_version: self.state_version,
         })
-    }
-}
-
-impl MulliganDescriptor {
-    /// Returns selected Atlas instance IDs in bottom-deck order.
-    #[must_use]
-    pub fn atlas_order(&self) -> &[IdentityHash] {
-        &self.atlas_order
-    }
-
-    /// Returns selected Spellbook instance IDs in bottom-deck order.
-    #[must_use]
-    pub fn spellbook_order(&self) -> &[IdentityHash] {
-        &self.spellbook_order
     }
 }
 

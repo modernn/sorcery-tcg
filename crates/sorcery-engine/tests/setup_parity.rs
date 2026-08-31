@@ -73,7 +73,7 @@ fn setup_and_mulligans_should_match_typescript_seed_31() {
         fixture.initial.random_draws_hash
     );
 
-    let north_actions = game.legal_mulligans().expect("north mulligans");
+    let north_actions = game.legal_actions().expect("north mulligans");
     assert_eq!(north_actions.len(), 76);
     assert_eq!(
         north_actions
@@ -86,14 +86,14 @@ fn setup_and_mulligans_should_match_typescript_seed_31() {
         .iter()
         .find(|action| action.action_id().as_str() == fixture.steps[0].selected_action_id)
         .expect("fixture north action");
-    game.apply_mulligan(north_action)
+    game.apply_action(north_action)
         .expect("apply north mulligan");
     assert_eq!(
         game.state_hash().expect("north post-state hash").as_str(),
         fixture.steps[0].post_state_hash
     );
 
-    let south_actions = game.legal_mulligans().expect("south mulligans");
+    let south_actions = game.legal_actions().expect("south mulligans");
     assert_eq!(
         south_actions
             .iter()
@@ -105,7 +105,7 @@ fn setup_and_mulligans_should_match_typescript_seed_31() {
         .iter()
         .find(|action| action.action_id().as_str() == fixture.steps[1].selected_action_id)
         .expect("fixture south action");
-    game.apply_mulligan(south_action)
+    game.apply_action(south_action)
         .expect("apply south mulligan");
     assert_eq!(game.position().state_version(), 2);
     assert_eq!(
@@ -113,7 +113,7 @@ fn setup_and_mulligans_should_match_typescript_seed_31() {
         fixture.steps[1].post_state_hash
     );
     assert!(
-        game.legal_mulligans()
+        game.legal_actions()
             .expect("main phase has no mulligans")
             .is_empty()
     );

@@ -10,7 +10,7 @@ use crate::contract::{
     ActionRequest, Attempt, LegalAction, Receipt, ReceiptInput, Rejection, RejectionCode, Seat,
     accepted_attempt, create_events, create_receipt, create_rejection, rejected_attempt,
 };
-use crate::game::{Game, GameError, MulliganAction};
+use crate::game::{Game, GameError, IssuedAction};
 
 /// An accepted receipt or stable rejection.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -108,9 +108,9 @@ impl Session {
     /// Returns [`SessionError`] when action identity or descriptor serialization fails.
     pub fn legal_actions(&self) -> Result<Vec<LegalAction>, SessionError> {
         self.game
-            .legal_mulligans()?
+            .legal_actions()?
             .iter()
-            .map(MulliganAction::to_legal_action)
+            .map(IssuedAction::to_legal_action)
             .collect::<Result<Vec<_>, _>>()
             .map_err(SessionError::Json)
     }
@@ -139,7 +139,7 @@ impl Session {
         }
         let action = self
             .game
-            .legal_mulligans()?
+            .legal_actions()?
             .into_iter()
             .find(|action| action.action_id().as_str() == request.action_id);
         let Some(action) = action else {
@@ -162,26 +162,8 @@ impl Session {
         let first_event_sequence = event_count
             .checked_add(1)
             .ok_or(SessionError::SequenceExhausted)?;
-        self.game.apply_mulligan(&action)?;
+        let outcomes = self.game.apply_action(&action)?;
         let post_state_hash = self.game.state_hash()?;
-        let mut outcomes = vec![(
-            "mulligan-completed".to_owned(),
-            json!({
-                "atlasCount": action.descriptor().atlas_order().len(),
-                "seat": action.seat(),
-                "spellbookCount": action.descriptor().spellbook_order().len(),
-            }),
-        )];
-        if action.seat() == Seat::South {
-            outcomes.push((
-                "turn-started".to_owned(),
-                json!({
-                    "drawSkipped": true,
-                    "seat": self.game.rules().first_seat(),
-                    "turnNumber": 1,
-                }),
-            ));
-        }
         let events = create_events(
             action.action_id(),
             receipt_sequence,
