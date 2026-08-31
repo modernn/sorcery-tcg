@@ -13,7 +13,7 @@ use crate::board::{Cell, Location, Region};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{
-    CardFacts, Element, FactError, MagicEffect, Thresholds, parse_card_definition,
+    CardFacts, Element, FactError, MagicEffect, MinionFacts, Thresholds, parse_card_definition,
     validate_identifier,
 };
 use crate::prng::PrngState;
@@ -417,6 +417,12 @@ enum WinReason {
 struct DamageResult {
     minion_died: bool,
     avatar_defeated: bool,
+}
+
+#[derive(Clone, Copy)]
+struct SummonDestination {
+    cell: Cell,
+    mana_cost: u64,
 }
 
 enum OutcomeLog<'a> {
@@ -836,30 +842,32 @@ impl Game {
         if !player.domain_established {
             return Ok(());
         }
-        for caster_cell in self.controlled_site_cells(seat) {
-            for card in &player.hand_spellbook {
-                let definition = &self.rules.cards[usize::from(card.card_id.0)];
-                let CardFacts::Minion(facts) = &definition.facts else {
-                    continue;
-                };
-                if facts.mana_cost <= u64::from(player.mana)
-                    && self.thresholds_met(seat, facts.thresholds)
-                {
-                    self.push_action(
-                        actions,
-                        ActionDescriptor::SummonMinion {
-                            card_id: definition.id.clone(),
-                            card_instance_id: card.instance_id.clone(),
-                            caster_instance_id: player.avatar.card.instance_id.clone(),
-                            cell: caster_cell,
-                            mana_cost: facts.mana_cost,
-                        },
-                        format!(
-                            "Summon {} at {} ({} mana)",
-                            definition.id, caster_cell, facts.mana_cost
-                        ),
-                    );
-                }
+        for card in &player.hand_spellbook {
+            let definition = &self.rules.cards[usize::from(card.card_id.0)];
+            let CardFacts::Minion(facts) = &definition.facts else {
+                continue;
+            };
+            if !self.thresholds_met(seat, facts.thresholds) {
+                continue;
+            }
+            for destination in self
+                .summon_destinations(seat, facts)
+                .filter(|destination| destination.mana_cost <= u64::from(player.mana))
+            {
+                self.push_action(
+                    actions,
+                    ActionDescriptor::SummonMinion {
+                        card_id: definition.id.clone(),
+                        card_instance_id: card.instance_id.clone(),
+                        caster_instance_id: player.avatar.card.instance_id.clone(),
+                        cell: destination.cell,
+                        mana_cost: destination.mana_cost,
+                    },
+                    format!(
+                        "Summon {} at {} ({} mana)",
+                        definition.id, destination.cell, destination.mana_cost
+                    ),
+                );
             }
         }
         if !player.avatar.tapped {
@@ -963,6 +971,32 @@ impl Game {
             .into_iter()
             .zip(thresholds.canonical())
             .all(|(available, required)| available >= required)
+    }
+
+    fn summon_destinations<'a>(
+        &'a self,
+        seat: Seat,
+        minion: &'a MinionFacts,
+    ) -> impl Iterator<Item = SummonDestination> + 'a {
+        Cell::ALL.into_iter().filter_map(move |cell| {
+            let site = self.position.sites[cell.index()].as_ref()?;
+            if !minion.summon_to_any_site && site.controller != seat {
+                return None;
+            }
+            let CardFacts::Site(site_facts) =
+                &self.rules.cards[usize::from(site.card.card_id.0)].facts
+            else {
+                return None;
+            };
+            if minion.must_be_cast_to_water_site && !site_facts.elements.contains(Element::Water) {
+                return None;
+            }
+            let discount = u64::from(minion.ordinary && site_facts.ordinary_minion_mana_discount);
+            Some(SummonDestination {
+                cell,
+                mana_cost: minion.mana_cost.saturating_sub(discount),
+            })
+        })
     }
 
     fn push_action(
@@ -1847,9 +1881,6 @@ impl Game {
         if self.position.phase != Phase::Main
             || !player.domain_established
             || player.avatar.card.instance_id != *caster_instance_id
-            || !self.position.sites[cell.index()]
-                .as_ref()
-                .is_some_and(|site| site.controller == seat)
         {
             return Err(GameError::IllegalAction);
         }
@@ -1866,7 +1897,9 @@ impl Game {
         let CardFacts::Minion(facts) = &definition.facts else {
             return Err(GameError::IllegalAction);
         };
-        if facts.mana_cost != *mana_cost
+        if !self
+            .summon_destinations(seat, facts)
+            .any(|destination| destination.cell == *cell && destination.mana_cost == *mana_cost)
             || *mana_cost > u64::from(player.mana)
             || !self.thresholds_met(seat, facts.thresholds)
         {

@@ -224,7 +224,7 @@
         "RULE-04"
       ],
       "plainLanguage": "A Spellcaster pays mana and summons a minion atop a controlled site.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "spellcaster"
       ],
@@ -237,8 +237,8 @@
         "summon"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03/04 a Spellcaster pays mana and summons a minion atop a controlled site"
+        "file": "crates/sorcery-engine/tests/summon_rules.rs",
+        "testName": "spellcaster_should_pay_mana_and_summon_at_controlled_site"
       }
     },
     {
@@ -313,15 +313,15 @@
         "RULE-03"
       ],
       "plainLanguage": "Hamlet reduces only Ordinary minion mana payments at that site.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [],
       "eventHints": [
         "mana-change"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Hamlet reduces only Ordinary minion mana payments at that site"
+        "file": "crates/sorcery-engine/tests/summon_rules.rs",
+        "testName": "hamlet_should_discount_only_ordinary_minions_at_that_site"
       }
     },
     {
@@ -903,7 +903,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Explicit permission allows a minion to be summoned to any site.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "summon"
@@ -912,8 +912,8 @@
         "summon"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 explicit permission allows a minion to be summoned to any site"
+        "file": "crates/sorcery-engine/tests/summon_rules.rs",
+        "testName": "explicit_permission_should_allow_summoning_to_any_site"
       }
     },
     {
@@ -922,7 +922,7 @@
         "RULE-03"
       ],
       "plainLanguage": "A Water-site cast restriction filters unrestricted summons by terrain.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "terrain"
       ],
@@ -934,8 +934,8 @@
         "summon"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 a Water-site cast restriction filters unrestricted summons by terrain"
+        "file": "crates/sorcery-engine/tests/summon_rules.rs",
+        "testName": "water_site_restriction_should_filter_unrestricted_summons_by_terrain"
       }
     },
     {
@@ -1543,7 +1543,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Mana and every elemental threshold gate minion actions without being spent together.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "elemental-threshold"
       ],
@@ -1552,8 +1552,8 @@
         "mana-change"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 mana and every elemental threshold gate minion actions without being spent together"
+        "file": "crates/sorcery-engine/tests/summon_rules.rs",
+        "testName": "mana_and_each_elemental_threshold_should_gate_without_spending_affinity"
       }
     },
     {
