@@ -1987,13 +1987,33 @@ impl Game {
                     && self.rules.cards[usize::from(card.card_id.0)].id == card_id
             })
             .ok_or(GameError::IllegalAction)?;
+        let played_card_id = player.hand_atlas[hand_index].card_id;
+        let definition = &self.rules.cards[usize::from(played_card_id.0)];
+        let CardFacts::Site(facts) = &definition.facts else {
+            return Err(GameError::IllegalAction);
+        };
+        let genesis_gain_mana = facts.genesis_gain_mana.or_else(|| {
+            (facts.genesis_gain_mana_if_only_controlled_copy
+                && !self
+                    .position
+                    .sites
+                    .iter()
+                    .flatten()
+                    .any(|site| site.controller == seat && site.card.card_id == played_card_id))
+            .then_some(1)
+        });
+        let genesis_heal_nearby_avatars = facts.genesis_heal_nearby_avatars;
+        let ordinary_mana = player.mana.checked_add(1).ok_or(GameError::IllegalAction)?;
+        let final_mana = ordinary_mana
+            .checked_add(u16::from(genesis_gain_mana.unwrap_or(0)))
+            .ok_or(GameError::IllegalAction)?;
         let card = self.position.players[player_index]
             .hand_atlas
             .remove(hand_index);
         let player = &mut self.position.players[player_index];
         player.avatar.tapped = true;
         player.domain_established = true;
-        player.mana += 1;
+        player.mana = ordinary_mana;
         self.position.sites[cell.index()] = Some(SitePosition {
             card,
             controller: seat,
@@ -2007,6 +2027,31 @@ impl Game {
                 "seat": seat,
             })
         });
+        if let Some(amount) = genesis_gain_mana {
+            self.position.players[player_index].mana = final_mana;
+            outcomes.push("mana-gained", || {
+                json!({
+                    "amount": amount,
+                    "seat": seat,
+                    "sourceInstanceId": card_instance_id,
+                })
+            });
+        }
+        if genesis_heal_nearby_avatars {
+            for healed_seat in [Seat::North, Seat::South] {
+                let avatar_cell = self.position.players[seat_index(healed_seat)]
+                    .avatar
+                    .location;
+                let nearby = avatar_cell == cell
+                    || cell
+                        .bordering(false)
+                        .chain(cell.diagonals(false))
+                        .any(|nearby| nearby == avatar_cell);
+                if nearby {
+                    self.heal_avatar(healed_seat, 3, card_instance_id, outcomes)?;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -2160,30 +2205,7 @@ impl Game {
                 );
             }
             Some(MinionGenesis::HealControllerTwo) => {
-                let player = &mut self.position.players[seat_index(seat)];
-                let CardFacts::Avatar(avatar_facts) =
-                    self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts
-                else {
-                    return Err(GameError::IllegalAction);
-                };
-                let old_life = player.avatar.life;
-                if old_life > 0 {
-                    player.avatar.life =
-                        old_life.saturating_add(2).min(u16::from(avatar_facts.life));
-                }
-                let amount = player.avatar.life - old_life;
-                if amount > 0 {
-                    let life = player.avatar.life;
-                    outcomes.push("avatar-healed", || {
-                        json!({
-                            "amount": amount,
-                            "attemptedAmount": 2,
-                            "life": life,
-                            "seat": seat,
-                            "sourceInstanceId": source_instance_id,
-                        })
-                    });
-                }
+                self.heal_avatar(seat, 2, source_instance_id, outcomes)?;
             }
             Some(MinionGenesis::LoseControllerLifeTwo) => {
                 let player = &mut self.position.players[seat_index(seat)];
@@ -2223,6 +2245,41 @@ impl Game {
                     "minion Genesis effect".to_owned(),
                 ));
             }
+        }
+        Ok(())
+    }
+
+    fn heal_avatar(
+        &mut self,
+        seat: Seat,
+        attempted_amount: u16,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let player = &mut self.position.players[seat_index(seat)];
+        let CardFacts::Avatar(avatar_facts) =
+            self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let old_life = player.avatar.life;
+        if old_life > 0 {
+            player.avatar.life = old_life
+                .saturating_add(attempted_amount)
+                .min(u16::from(avatar_facts.life));
+        }
+        let amount = player.avatar.life - old_life;
+        if amount > 0 {
+            let life = player.avatar.life;
+            outcomes.push("avatar-healed", || {
+                json!({
+                    "amount": amount,
+                    "attemptedAmount": attempted_amount,
+                    "life": life,
+                    "seat": seat,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
         }
         Ok(())
     }

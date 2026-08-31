@@ -520,3 +520,207 @@ fn undamaged_zero_defense_genesis_minion_should_survive_until_positive_damage() 
     }));
     assert_exact_replay(&session);
 }
+
+#[test]
+fn site_genesis_mana_should_pay_summon_and_expire_to_site_count() {
+    let mut value = manifest_value(
+        61,
+        &avatar(false, 20),
+        &minion(1, 2),
+        &minion(1, 2),
+        5,
+        5,
+        5,
+    );
+    value["cards"]["north-site"]["genesisGainMana"] = json!(1);
+    value["cards"]["north-minion"]["manaCost"] = json!(2);
+    let manifest = finish_manifest(value);
+    let mut session = Session::new(&manifest).expect("valid site-mana Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let (_, played) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    assert_eq!(event_types(&played), ["site-played", "mana-gained"]);
+    assert_eq!(
+        played.events[1].payload,
+        json!({
+            "amount": 1,
+            "seat": "north",
+            "sourceInstanceId": played.events[0].payload["instanceId"].clone(),
+        })
+    );
+    assert_eq!(state(&session)["players"]["north"]["mana"], 2);
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["manaCost"] == 2
+    });
+    assert_eq!(state(&session)["players"]["north"]["mana"], 0);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    assert_eq!(state(&session)["players"]["north"]["mana"], 1);
+    assert_exact_replay(&session);
+}
+
+fn site_heal_manifest(seed: u32) -> String {
+    let mut loss = minion(1, 2);
+    loss["genesisLoseControllerLife"] = json!(2);
+    let mut value = manifest_value(seed, &avatar(false, 20), &loss, &loss, 8, 8, 8);
+    value["cards"]["north-site"]["genesisHealNearbyAvatars"] = json!(3);
+    finish_manifest(value)
+}
+
+#[test]
+fn site_genesis_heal_should_target_both_nearby_avatars_in_seat_order_and_cap() {
+    let manifest = site_heal_manifest(62);
+    let mut session = Session::new(&manifest).expect("valid site-heal Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-site"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-site"
+            && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["from"]["cell"] == "C4"
+            && descriptor["to"]["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 18);
+    assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 18);
+    let (_, healed) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-site"
+            && descriptor["cell"] == "C2"
+    });
+    assert_eq!(
+        event_types(&healed),
+        ["site-played", "avatar-healed", "avatar-healed"]
+    );
+    assert_eq!(
+        healed
+            .events
+            .iter()
+            .skip(1)
+            .map(|event| event.payload["seat"].clone())
+            .collect::<Vec<_>>(),
+        [json!("north"), json!("south")]
+    );
+    for event in &healed.events[1..] {
+        assert_eq!(event.payload["amount"], 2);
+        assert_eq!(event.payload["attemptedAmount"], 3);
+        assert_eq!(event.payload["life"], 20);
+        assert_eq!(
+            event.payload["sourceInstanceId"],
+            healed.events[0].payload["instanceId"]
+        );
+    }
+    assert_exact_replay(&session);
+}
+
+fn first_copy_mana_manifest(seed: u32) -> String {
+    let mut value = manifest_value(
+        seed,
+        &avatar(false, 20),
+        &minion(1, 2),
+        &minion(1, 2),
+        8,
+        8,
+        8,
+    );
+    for card_id in ["north-dark-site", "north-gothic-site"] {
+        let mut facts = site();
+        facts["genesisGainManaIfOnlyControlledCopy"] = json!(1);
+        value["cards"]
+            .as_object_mut()
+            .expect("card definitions")
+            .insert(card_id.to_owned(), facts);
+    }
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("north-site");
+    value["decks"]["north"]["atlas"] = json!([
+        "north-dark-site",
+        "north-gothic-site",
+        "north-dark-site",
+        "north-gothic-site",
+        "north-dark-site",
+        "north-gothic-site",
+        "north-dark-site",
+        "north-gothic-site",
+    ]);
+    finish_manifest(value)
+}
+
+#[test]
+fn first_controlled_copy_site_genesis_mana_should_key_by_card_id() {
+    let manifest = first_copy_mana_manifest(67);
+    let mut session = Session::new(&manifest).expect("valid first-copy site Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let (_, first_dark) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-dark-site"
+            && descriptor["cell"] == "C4"
+    });
+    assert_eq!(event_types(&first_dark), ["site-played", "mana-gained"]);
+    assert_eq!(state(&session)["players"]["north"]["mana"], 2);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+
+    let (_, first_gothic) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-gothic-site"
+            && descriptor["cell"] == "C3"
+    });
+    assert_eq!(event_types(&first_gothic), ["site-played", "mana-gained"]);
+    assert_eq!(state(&session)["players"]["north"]["mana"], 3);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+
+    let (_, second_dark) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-dark-site"
+            && descriptor["cell"] == "B3"
+    });
+    assert_eq!(event_types(&second_dark), ["site-played"]);
+    assert_eq!(state(&session)["players"]["north"]["mana"], 3);
+    assert_exact_replay(&session);
+}

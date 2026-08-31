@@ -1207,7 +1207,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Site Genesis grants temporary mana once, pays a summon, and expires.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "genesis"
       ],
@@ -1221,8 +1221,8 @@
         "summon"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 site Genesis grants temporary mana once, pays a summon, and expires"
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "site_genesis_mana_should_pay_summon_and_expire_to_site_count"
       }
     },
     {
@@ -1231,7 +1231,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Site Genesis heals every nearby Avatar through shared life caps.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "genesis"
       ],
@@ -1242,8 +1242,8 @@
         "healing"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 site Genesis heals every nearby Avatar through shared life caps"
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "site_genesis_heal_should_target_both_nearby_avatars_in_seat_order_and_cap"
       }
     },
     {
@@ -1324,7 +1324,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Tower Genesis grants mana only for the first controlled copy.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "genesis"
       ],
@@ -1333,8 +1333,8 @@
         "mana-change"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Tower Genesis grants mana only for the first controlled copy"
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "first_controlled_copy_site_genesis_mana_should_key_by_card_id"
       }
     },
     {
