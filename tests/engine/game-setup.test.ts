@@ -82,6 +82,7 @@ type SpellFacts = Readonly<{
   ranged?: boolean;
   sacrificeMinionAtSummoningLocationForManaDiscount?: 2;
   shootsDragProjectile?: boolean;
+  tapToShootProjectileDamage?: number;
   stealth?: boolean;
   strikesFirstWhileAttacking?: boolean;
   submerge?: boolean;
@@ -291,6 +292,9 @@ function cardsFor(
         submerge: facts.submerge ?? false,
         summonToAnySite: facts.summonToAnySite ?? false,
         mustBeCastToOuterColumn: facts.mustBeCastToOuterColumn ?? false,
+        ...(facts.tapToShootProjectileDamage !== undefined
+          ? { tapToShootProjectileDamage: facts.tapToShootProjectileDamage }
+          : {}),
         ...(facts.tapForMana ? { tapForMana: facts.tapForMana } : {}),
         ...(facts.takesLessDamage === 1 ? { takesLessDamage: 1 as const } : {}),
         thresholds: { ...facts.thresholds },
@@ -11838,6 +11842,98 @@ test('RULE-04 Ranged damage retains its attacking unit source classification', (
     'damage-dealt',
   ]);
   assert.equal(shot.receipt.randomDraws.length, 0);
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 a ready minion may tap to shoot a fixed-damage projectile to the first visible unit', () => {
+  const gameManifest = manifest(314, {
+    northSpell: {
+      airborne: true,
+      attack: 4,
+      defense: 4,
+      manaCost: 1,
+      tapToShootProjectileDamage: 4,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      ward: true,
+    },
+    southSpell: {
+      attack: 1,
+      defense: 5,
+      manaCost: 1,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    },
+  });
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: Parameters<typeof action>[1]): void => {
+    session = accept(session, action(session, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C4');
+  const shooter = session.state.realm.units.find(({ controller }) => controller === 'north');
+  assert.ok(shooter);
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'shoot-damage-projectile'
+      && descriptor.shooterInstanceId === shooter.instanceId), false);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C1');
+  const target = session.state.realm.units.find(({ controller }) => controller === 'south');
+  assert.ok(target);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const shot = legalGameActions(session.state, 'north').find(({ descriptor }) =>
+    descriptor.kind === 'shoot-damage-projectile'
+      && descriptor.shooterInstanceId === shooter.instanceId
+      && descriptor.direction === 'south'
+      && descriptor.hit?.instanceId === target.instanceId);
+  assert.ok(shot);
+  assert.deepEqual(
+    shot.descriptor.kind === 'shoot-damage-projectile'
+      ? shot.descriptor.path.map(({ cell }) => cell)
+      : [],
+    ['C4', 'C3', 'C2', 'C1'],
+  );
+  const fired = stepGame(session, shot);
+  assert.equal(fired.accepted, true);
+  if (!fired.accepted) return;
+  session = fired.session;
+  assert.deepEqual(fired.receipt.events.map(({ type }) => type), [
+    'projectile-shot',
+    'projectile-damage-allocated',
+    'damage-dealt',
+  ]);
+  assert.equal(canonicalJson(fired.receipt.events[1]!.payload), canonicalJson({
+    amount: 4,
+    sourceInstanceId: shooter.instanceId,
+    targetInstanceId: target.instanceId,
+  }));
+  const firedShooter = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === shooter.instanceId);
+  assert.deepEqual(firedShooter && {
+    damage: firedShooter.damage,
+    location: firedShooter.location,
+    summoningSickness: firedShooter.summoningSickness,
+    tapped: firedShooter.tapped,
+    warded: firedShooter.warded,
+  }, {
+    damage: 0,
+    location: 'C4',
+    summoningSickness: false,
+    tapped: true,
+    warded: true,
+  });
+  assert.equal(session.state.realm.units.find(({ instanceId }) =>
+    instanceId === target.instanceId)?.damage, 4);
+  assert.equal(fired.receipt.events.some(({ type }) => type === 'strike-damage-allocated'), false);
+  assert.equal(fired.receipt.randomDraws.length, 0);
   assert.equal(verifyGameReplay(session), true);
 });
 

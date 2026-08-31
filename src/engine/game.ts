@@ -267,6 +267,7 @@ export type GameCardDefinition =
     provides?: GameElement;
     ranged?: boolean;
     sacrificeMinionAtSummoningLocationForManaDiscount?: 2;
+    tapToShootProjectileDamage?: number;
     shootsDragProjectile?: boolean;
     siteProvidesNoThreshold?: true;
     spellcaster?: boolean;
@@ -865,6 +866,13 @@ type GameActionDescriptor =
     direction: ProjectileDirection;
     hit: GameUnitRef | null;
     kind: 'shoot-projectile';
+    path: readonly GameLocation[];
+    shooterInstanceId: StateHash;
+  }>
+  | Readonly<{
+    direction: ProjectileDirection;
+    hit: GameUnitRef | null;
+    kind: 'shoot-damage-projectile';
     path: readonly GameLocation[];
     shooterInstanceId: StateHash;
   }>
@@ -1982,7 +1990,7 @@ const SUPPORTED_CARD_FIELDS = {
     otherNearbyAlliesPowerBonus preventsDamageFromUnitsWithPowerAtLeast provides ranged
     sacrificeMinionAtSummoningLocationForManaDiscount shootsDragProjectile siteProvidesNoThreshold
     spellcaster stealth strikesFirstWhileAttacking submerge summonToAnySite
-    tapToDamageEachUnitAtAdjacentLocation tapForMana takesLessDamage thresholds token
+    tapToDamageEachUnitAtAdjacentLocation tapToShootProjectileDamage tapForMana takesLessDamage thresholds token
     untapsAtEndOfControllerTurn voidwalk ward waterbound
   `.trim().split(/\s+/)),
   site: new Set(`
@@ -2730,6 +2738,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.voidwalk === true
       || card.waterbound === true
       || card.ranged === true
+      || card.tapToShootProjectileDamage !== undefined
       || card.shootsDragProjectile === true
       || card.siteProvidesNoThreshold === true
       || card.spellcaster === true
@@ -2780,6 +2789,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   }
   if (card.ranged !== undefined && typeof card.ranged !== 'boolean') {
     throw new RangeError(`${path}.ranged must be boolean`);
+  }
+  if (card.tapToShootProjectileDamage !== undefined
+    && (!Number.isSafeInteger(card.tapToShootProjectileDamage)
+      || card.tapToShootProjectileDamage < 1
+      || card.tapToShootProjectileDamage > MAX_COMBAT_STAT)) {
+    throw new RangeError(
+      `${path}.tapToShootProjectileDamage must be a safe integer between 1 and ${MAX_COMBAT_STAT}`,
+    );
   }
   if (card.shootsDragProjectile !== undefined && typeof card.shootsDragProjectile !== 'boolean') {
     throw new RangeError(`${path}.shootsDragProjectile must be boolean`);
@@ -3247,6 +3264,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.ranged === true ? { ranged: true } : {}),
             ...(card.sacrificeMinionAtSummoningLocationForManaDiscount === 2
               ? { sacrificeMinionAtSummoningLocationForManaDiscount: 2 as const }
+              : {}),
+            ...(card.tapToShootProjectileDamage !== undefined
+              ? { tapToShootProjectileDamage: card.tapToShootProjectileDamage }
               : {}),
             ...(card.shootsDragProjectile === true ? { shootsDragProjectile: true } : {}),
             ...(card.siteProvidesNoThreshold === true
@@ -4747,10 +4767,6 @@ function movementPaths(
   return paths;
 }
 
-function pathLocations(path: readonly RealmCell[], region: GameRegion = 'surface'): readonly GameLocation[] {
-  return path.map((cell) => ({ cell, region }));
-}
-
 function samePath(left: readonly GameLocation[], right: readonly GameLocation[]): boolean {
   return left.length === right.length
     && left.every((location, index) =>
@@ -4833,6 +4849,43 @@ function projectileStep(cell: RealmCell, direction: ProjectileDirection): RealmC
     : undefined;
 }
 
+type ProjectileOption = Readonly<{
+  direction: ProjectileDirection;
+  hit: GameUnitRef | null;
+  path: readonly GameLocation[];
+}>;
+
+function projectileOptions(
+  state: GameState,
+  shooter: GameUnitRef,
+  maximumSteps = Number.POSITIVE_INFINITY,
+): readonly ProjectileOption[] {
+  const directions = ['east', 'north', 'south', 'west'] as const;
+  const allUnits = [...unitRefs(state, 'north'), ...unitRefs(state, 'south')];
+  const status = unitStatus(state, shooter);
+  return directions.flatMap<ProjectileOption>((direction) => {
+    const path: GameLocation[] = [{ cell: status.location, region: status.region }];
+    while (true) {
+      const location = path.at(-1)!;
+      const hits = allUnits.filter((ref) => {
+        const target = unitStatus(state, ref);
+        return ref.instanceId !== shooter.instanceId
+          && !target.stealthed
+          && target.occupiedCells.includes(location.cell)
+          && target.region === location.region
+          && (path.length > 1 || ref.seat !== shooter.seat);
+      }).sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+      if (hits.length > 0) return hits.map((hit) => ({ direction, hit, path }));
+      if (path.length - 1 >= maximumSteps) break;
+      const nextCell = projectileStep(location.cell, direction);
+      const next = nextCell ? { cell: nextCell, region: status.region } : undefined;
+      if (!next || !locationExists(state, next)) break;
+      path.push(next);
+    }
+    return [{ direction, hit: null, path }];
+  });
+}
+
 function rangedProjectileRange(
   state: GameState,
   location: RealmCell,
@@ -4850,65 +4903,16 @@ function projectileDescriptorsForShooter(
   shooter: GameUnitRef,
   allowTapped = false,
 ): readonly GameActionDescriptor[] {
-  const seat = shooter.seat;
-  const directions = ['east', 'north', 'south', 'west'] as const;
-  const allUnits = [...unitRefs(state, 'north'), ...unitRefs(state, 'south')];
   const status = unitStatus(state, shooter);
   if (!status.ranged || (!allowTapped && status.tapped) || status.summoningSickness) return [];
   const range = rangedProjectileRange(state, status.location, status.region);
-  const startingEnemies = allUnits
-    .filter((ref) => {
-      const target = unitStatus(state, ref);
-      return ref.seat !== seat
-        && !target.stealthed
-        && target.occupiedCells.some((cell) => status.occupiedCells.includes(cell))
-        && target.region === status.region;
-    })
-    .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
-  return directions.flatMap<GameActionDescriptor>((direction) => {
-    if (startingEnemies.length > 0) {
-      return startingEnemies.map((hit) => ({
-        direction,
-        hit,
-        kind: 'shoot-projectile' as const,
-        path: pathLocations([status.location], status.region),
-        shooterInstanceId: shooter.instanceId,
-      }));
-    }
-    const cells: RealmCell[] = [status.location];
-    let current = status.location;
-    for (let step = 0; step < range; step += 1) {
-      const next = projectileStep(current, direction);
-      if (!next || !locationExists(state, { cell: next, region: status.region })) break;
-      cells.push(next);
-      const hits = allUnits
-        .filter((ref) => {
-          const target = unitStatus(state, ref);
-          return !target.stealthed
-            && target.occupiedCells.includes(next)
-            && target.region === status.region;
-        })
-        .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
-      const path = pathLocations(cells, status.region);
-      if (hits.length > 0) {
-        return hits.map((hit) => ({
-          direction,
-          hit,
-          kind: 'shoot-projectile' as const,
-          path,
-          shooterInstanceId: shooter.instanceId,
-        }));
-      }
-      current = next;
-    }
-    return [{
+  return projectileOptions(state, shooter, range).map(({ direction, hit, path }) => ({
       direction,
-      hit: null,
+      hit,
       kind: 'shoot-projectile' as const,
-      path: pathLocations(cells, status.region),
+      path,
       shooterInstanceId: shooter.instanceId,
-    }];
-  });
+    }));
 }
 
 function rangedDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
@@ -5004,8 +5008,6 @@ function queueRangedStep(state: GameState, sourceInstanceId: StateHash): GameSta
 }
 
 function dragProjectileDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
-  const directions = ['east', 'north', 'south', 'west'] as const;
-  const allUnits = [...unitRefs(state, 'north'), ...unitRefs(state, 'south')];
   return unitRefs(state, seat).flatMap((shooter) => {
     if (shooter.kind !== 'minion') return [];
     const unit = state.realm.units.find(({ instanceId }) => instanceId === shooter.instanceId);
@@ -5017,41 +5019,37 @@ function dragProjectileDescriptors(state: GameState, seat: GameSeat): readonly G
       || status.disabled
       || status.tapped
       || status.summoningSickness) return [];
-    return directions.flatMap<GameActionDescriptor>((direction) => {
-      const path: GameLocation[] = [{ cell: status.location, region: status.region }];
-      while (true) {
-        const location = path.at(-1)!;
-        const hits = allUnits.filter((ref) => {
-          const target = unitStatus(state, ref);
-          return !target.stealthed
-            && target.occupiedCells.includes(location.cell)
-            && target.region === location.region
-            && (path.length > 1 || ref.seat !== seat);
-        }).sort((left, right) => left.instanceId.localeCompare(right.instanceId));
-        if (hits.length > 0) {
-          return hits.flatMap((hit) => ([false, true] as const).map((fightOnArrival) => ({
-            direction,
-            fightOnArrival,
-            hit,
-            kind: 'shoot-drag-projectile' as const,
-            path,
-            shooterInstanceId: shooter.instanceId,
-          })));
-        }
-        const nextCell = projectileStep(location.cell, direction);
-        const next = nextCell ? { cell: nextCell, region: status.region } : undefined;
-        if (!next || !locationExists(state, next)) break;
-        path.push(next);
-      }
-      return [{
+    return projectileOptions(state, shooter).flatMap<GameActionDescriptor>(({ direction, hit, path }) =>
+      (hit ? [false, true] as const : [false] as const).map((fightOnArrival) => ({
         direction,
-        fightOnArrival: false,
-        hit: null,
+        fightOnArrival,
+        hit,
         kind: 'shoot-drag-projectile' as const,
         path,
         shooterInstanceId: shooter.instanceId,
-      }];
-    });
+      })));
+  });
+}
+
+function damageProjectileDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
+  return unitRefs(state, seat).flatMap((shooter) => {
+    if (shooter.kind !== 'minion') return [];
+    const unit = state.realm.units.find(({ instanceId }) => instanceId === shooter.instanceId);
+    if (!unit) throw new Error('unreachable damage projectile shooter');
+    const definition = cardDefinition(state, unit.cardId);
+    const status = unitStatus(state, shooter);
+    if (definition.cardType !== 'minion'
+      || definition.tapToShootProjectileDamage === undefined
+      || status.disabled
+      || status.tapped
+      || status.summoningSickness) return [];
+    return projectileOptions(state, shooter).map(({ direction, hit, path }) => ({
+      direction,
+      hit,
+      kind: 'shoot-damage-projectile' as const,
+      path,
+      shooterInstanceId: shooter.instanceId,
+    }));
   });
 }
 
@@ -5459,6 +5457,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     ...sparkmageDescriptors(state, seat),
     ...manaAbilityDescriptors(state, seat),
     ...movementDescriptors(state, seat),
+    ...damageProjectileDescriptors(state, seat),
     ...dragProjectileDescriptors(state, seat),
     ...rangedDescriptors(state, seat),
     { kind: 'end-turn' },
@@ -5645,6 +5644,12 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
       : `Finish ${pending?.purpose === 'defend' ? 'Defend' : 'Move and Attack'}`;
   }
   if (descriptor.kind === 'shoot-projectile') {
+    const target = descriptor.hit
+      ? `${descriptor.hit.kind} ${descriptor.hit.instanceId.slice(0, 15)}…`
+      : 'nothing';
+    return `Shoot ${descriptor.direction} at ${target}`;
+  }
+  if (descriptor.kind === 'shoot-damage-projectile') {
     const target = descriptor.hit
       ? `${descriptor.hit.kind} ${descriptor.hit.instanceId.slice(0, 15)}…`
       : 'nothing';
@@ -12515,6 +12520,88 @@ function applyDescriptor(
       ...(movement.purpose === 'defend' ? { pendingCombat } : {}),
       phase: 'movement',
     }), outcomes, draws];
+  }
+
+  if (descriptor.kind === 'shoot-damage-projectile') {
+    const legal = damageProjectileDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'shoot-damage-projectile'
+        && candidate.shooterInstanceId === descriptor.shooterInstanceId
+        && candidate.direction === descriptor.direction
+        && samePath(candidate.path, descriptor.path)
+        && (candidate.hit === null && descriptor.hit === null
+          || candidate.hit !== null && descriptor.hit !== null
+            && candidate.hit.instanceId === descriptor.hit.instanceId
+            && candidate.hit.kind === descriptor.hit.kind
+            && candidate.hit.seat === descriptor.hit.seat));
+    const source = state.realm.units.find(({ controller, instanceId }) =>
+      controller === seat && instanceId === descriptor.shooterInstanceId);
+    const definition = source ? cardDefinition(state, source.cardId) : undefined;
+    if (!legal || !source || definition?.cardType !== 'minion'
+      || definition.tapToShootProjectileDamage === undefined) {
+      throw new Error('unreachable illegal damage projectile');
+    }
+    const sourceRef: GameUnitRef = { instanceId: source.instanceId, kind: 'minion', seat };
+    const sourceStatus = unitStatus(state, sourceRef);
+    const tapped = moveAndTapUnit(state, sourceRef, {
+      cell: sourceStatus.location,
+      region: sourceStatus.region,
+    });
+    const interaction = recordInteraction(deepFreeze({
+      ...state,
+      players: tapped.players,
+      realm: tapped.realm,
+    }), [sourceRef]);
+    const shotState = deepFreeze({
+      ...state,
+      players: interaction.players,
+      realm: { ...tapped.realm, units: interaction.units },
+    });
+    const shot: GameOutcome = {
+      payload: {
+        direction: descriptor.direction,
+        hit: descriptor.hit,
+        path: descriptor.path,
+        seat,
+        shooterInstanceId: source.instanceId,
+      },
+      type: 'projectile-shot',
+    };
+    if (!descriptor.hit) {
+      return [withStateVersion(shotState, {}), [shot, ...interaction.outcomes], []];
+    }
+    const amount = definition.tapToShootProjectileDamage;
+    const targetStatus = unitStatus(shotState, descriptor.hit);
+    const pending: PendingCombat = deepFreeze({
+      allocations: [{ amount, targetInstanceId: descriptor.hit.instanceId }],
+      attacker: sourceRef,
+      attackingSeat: seat,
+      cell: descriptor.path.at(-1)!.cell,
+      combatants: [descriptor.hit],
+      defenders: [],
+      originalTarget: descriptor.hit,
+      ...(targetStatus.region === 'surface' ? {} : { region: targetStatus.region }),
+      targetRemoved: false,
+    });
+    const allocated: GameOutcome = {
+      payload: {
+        amount,
+        sourceInstanceId: source.instanceId,
+        targetInstanceId: descriptor.hit.instanceId,
+      },
+      type: 'projectile-damage-allocated',
+    };
+    const [damaged, outcomes, randomDraws] = resolveFightWindow(
+      shotState,
+      pending,
+      [shot, ...interaction.outcomes, allocated],
+      'attacker-unit',
+      true,
+      false,
+      [],
+      false,
+      true,
+    );
+    return [withStateVersion(damaged, {}), outcomes, randomDraws];
   }
 
   if (descriptor.kind === 'shoot-drag-projectile') {
