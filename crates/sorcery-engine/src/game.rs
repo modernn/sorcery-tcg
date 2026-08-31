@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::action::{ActionDescriptor, DeckZone};
-use crate::board::Cell;
+use crate::board::{Cell, Location, Region};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{
@@ -36,6 +36,7 @@ pub struct RulesContext {
 pub struct Position {
     active_seat: Seat,
     decision_seat: Seat,
+    pending_combat: Option<PendingCombat>,
     phase: Phase,
     players: [PlayerPosition; 2],
     prng: PrngState,
@@ -295,7 +296,31 @@ struct UnitPosition {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum UnitKind {
+    Avatar,
+    Minion,
+}
+
+impl UnitKind {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Avatar => "avatar",
+            Self::Minion => "minion",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PendingCombat {
+    attacker_instance_id: IdentityHash,
+    attacker_kind: UnitKind,
+    attacking_seat: Seat,
+    cell: Cell,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Phase {
+    Attack,
     Draw,
     Main,
     Mulligan,
@@ -304,6 +329,7 @@ enum Phase {
 impl Phase {
     const fn as_str(self) -> &'static str {
         match self {
+            Self::Attack => "attack",
             Self::Draw => "draw",
             Self::Main => "main",
             Self::Mulligan => "mulligan",
@@ -444,6 +470,7 @@ impl Game {
             position: Position {
                 active_seat: Seat::North,
                 decision_seat: Seat::North,
+                pending_combat: None,
                 phase: Phase::Mulligan,
                 players: [north, south],
                 prng,
@@ -492,6 +519,7 @@ impl Game {
     pub fn legal_actions(&self) -> Result<Vec<IssuedAction>, GameError> {
         let mut actions = Vec::new();
         match self.position.phase {
+            Phase::Attack => self.append_attack_actions(&mut actions)?,
             Phase::Draw => self.append_draw_actions(&mut actions)?,
             Phase::Mulligan => self.append_mulligan_actions(&mut actions)?,
             Phase::Main => self.append_main_actions(&mut actions)?,
@@ -502,6 +530,14 @@ impl Game {
                 .then_with(|| left.action_id.cmp(&right.action_id))
         });
         Ok(actions.into_iter().map(|(_, action)| action).collect())
+    }
+
+    fn append_attack_actions(&self, actions: &mut Vec<OrderedAction>) -> Result<(), GameError> {
+        let descriptor = ActionDescriptor::DeclineAttack;
+        let label = descriptor
+            .state_independent_label()
+            .ok_or_else(|| invalid("decline-attack action requires a label"))?;
+        self.push_action(actions, descriptor, label)
     }
 
     fn append_draw_actions(&self, actions: &mut Vec<OrderedAction>) -> Result<(), GameError> {
@@ -609,7 +645,66 @@ impl Game {
                 }
             }
         }
+        if !player.avatar.tapped {
+            self.append_unit_move_actions(
+                actions,
+                &player.avatar.card.instance_id,
+                player.avatar.location,
+            )?;
+        }
+        for unit in self
+            .position
+            .units
+            .iter()
+            .filter(|unit| unit.controller == seat && !unit.tapped && !unit.summoning_sickness)
+        {
+            self.append_unit_move_actions(actions, &unit.card.instance_id, unit.location)?;
+        }
+        if !player.avatar.tapped && !player.atlas.is_empty() {
+            let descriptor = ActionDescriptor::DrawSite;
+            let label = descriptor
+                .state_independent_label()
+                .ok_or_else(|| invalid("draw-site action requires a label"))?;
+            self.push_action(actions, descriptor, label)?;
+        }
         self.push_action(actions, ActionDescriptor::EndTurn, "End turn".to_owned())?;
+        Ok(())
+    }
+
+    fn append_unit_move_actions(
+        &self,
+        actions: &mut Vec<OrderedAction>,
+        instance_id: &IdentityHash,
+        start: Cell,
+    ) -> Result<(), GameError> {
+        let from = Location {
+            cell: start,
+            region: Region::Surface,
+        };
+        for destination in std::iter::once(start).chain(
+            start
+                .bordering(false)
+                .filter(|cell| self.position.sites[cell.index()].is_some()),
+        ) {
+            let to = Location {
+                cell: destination,
+                region: Region::Surface,
+            };
+            let mut path = vec![from];
+            if destination != start {
+                path.push(to);
+            }
+            let descriptor = ActionDescriptor::MoveAndAttack {
+                from,
+                path,
+                to,
+                unit_instance_id: instance_id.clone(),
+            };
+            let label = descriptor
+                .state_independent_label()
+                .ok_or_else(|| invalid("move-and-attack action requires a label"))?;
+            self.push_action(actions, descriptor, label)?;
+        }
         Ok(())
     }
 
@@ -711,6 +806,7 @@ impl Game {
             return Err(GameError::IllegalAction);
         }
         match &action.descriptor {
+            ActionDescriptor::DeclineAttack => self.apply_decline_attack_action(action.seat),
             ActionDescriptor::Draw { zone } => self.apply_draw_action(action.seat, *zone),
             ActionDescriptor::Mulligan {
                 atlas_order,
@@ -735,9 +831,52 @@ impl Game {
                 *cell,
                 *mana_cost,
             ),
+            ActionDescriptor::MoveAndAttack {
+                from,
+                path,
+                to,
+                unit_instance_id,
+            } => self.apply_move_and_attack_action(action.seat, *from, path, *to, unit_instance_id),
             ActionDescriptor::EndTurn => self.apply_end_turn_action(action.seat),
             _ => Err(GameError::IllegalAction),
         }
+    }
+
+    fn apply_decline_attack_action(
+        &mut self,
+        seat: Seat,
+    ) -> Result<Vec<(String, Value)>, GameError> {
+        let pending = self
+            .position
+            .pending_combat
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        if self.position.phase != Phase::Attack || pending.attacking_seat != seat {
+            return Err(GameError::IllegalAction);
+        }
+        if self.position.units.iter().any(|unit| {
+            unit.controller != seat
+                && unit.location == pending.cell
+                && !unit.tapped
+                && !unit.summoning_sickness
+        }) {
+            return Err(GameError::UnsupportedManifestFact(
+                "intercept window after declined attack".to_owned(),
+            ));
+        }
+        let attacker_instance_id = pending.attacker_instance_id.clone();
+        self.position.pending_combat = None;
+        self.position.phase = Phase::Main;
+        self.position.decision_seat = seat;
+        self.position.state_version += 1;
+        Ok(vec![(
+            "attack-declined".to_owned(),
+            json!({
+                "interceptWindowOpened": false,
+                "seat": seat,
+                "unitInstanceId": attacker_instance_id,
+            }),
+        )])
     }
 
     fn apply_draw_action(
@@ -776,6 +915,91 @@ impl Game {
         Ok(vec![(
             "card-drawn".to_owned(),
             json!({ "seat": seat, "zone": zone }),
+        )])
+    }
+
+    fn apply_move_and_attack_action(
+        &mut self,
+        seat: Seat,
+        from: Location,
+        path: &[Location],
+        to: Location,
+        unit_instance_id: &IdentityHash,
+    ) -> Result<Vec<(String, Value)>, GameError> {
+        if self.position.phase != Phase::Main
+            || seat != self.position.active_seat
+            || from.region != Region::Surface
+            || to.region != Region::Surface
+            || !(1..=2).contains(&path.len())
+            || path.first() != Some(&from)
+            || path.last() != Some(&to)
+            || self.position.sites[to.cell.index()].is_none()
+            || (path.len() == 1 && from != to)
+            || (path.len() == 2
+                && (from == to || !from.cell.bordering(false).any(|cell| cell == to.cell)))
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let (attacker_kind, current_location, ready) = {
+            let player = &self.position.players[seat_index(seat)];
+            if player.avatar.card.instance_id == *unit_instance_id {
+                (
+                    UnitKind::Avatar,
+                    player.avatar.location,
+                    !player.avatar.tapped,
+                )
+            } else {
+                let unit = self
+                    .position
+                    .units
+                    .iter()
+                    .find(|unit| unit.card.instance_id == *unit_instance_id)
+                    .ok_or(GameError::IllegalAction)?;
+                (
+                    UnitKind::Minion,
+                    unit.location,
+                    unit.controller == seat && !unit.tapped && !unit.summoning_sickness,
+                )
+            }
+        };
+        if !ready || current_location != from.cell {
+            return Err(GameError::IllegalAction);
+        }
+        match attacker_kind {
+            UnitKind::Avatar => {
+                let avatar = &mut self.position.players[seat_index(seat)].avatar;
+                avatar.location = to.cell;
+                avatar.tapped = true;
+            }
+            UnitKind::Minion => {
+                let unit = self
+                    .position
+                    .units
+                    .iter_mut()
+                    .find(|unit| unit.card.instance_id == *unit_instance_id)
+                    .ok_or(GameError::IllegalAction)?;
+                unit.location = to.cell;
+                unit.tapped = true;
+            }
+        }
+        self.position.pending_combat = Some(PendingCombat {
+            attacker_instance_id: unit_instance_id.clone(),
+            attacker_kind,
+            attacking_seat: seat,
+            cell: to.cell,
+        });
+        self.position.phase = Phase::Attack;
+        self.position.state_version += 1;
+        Ok(vec![(
+            "move-and-attack-activated".to_owned(),
+            json!({
+                "from": from,
+                "path": path,
+                "seat": seat,
+                "steps": path.len() - 1,
+                "to": to,
+                "unitInstanceId": unit_instance_id,
+            }),
         )])
     }
 
@@ -1014,6 +1238,11 @@ impl Game {
             .iter()
             .map(|unit| self.unit_value(unit))
             .collect();
+        let pending_combat = self
+            .position
+            .pending_combat
+            .as_ref()
+            .map_or(Value::Null, Self::pending_combat_value);
         json!({
             "activeSeat": self.position.active_seat,
             "cards": cards,
@@ -1023,7 +1252,7 @@ impl Game {
                 "schemaVersion": 1,
                 "stateVersion": self.position.state_version,
             },
-            "pendingCombat": null,
+            "pendingCombat": pending_combat,
             "phase": self.position.phase.as_str(),
             "players": {
                 "north": self.player_value(&self.position.players[0]),
@@ -1119,6 +1348,23 @@ impl Game {
             ("warded".to_owned(), json!(unit.warded)),
         ]);
         value
+    }
+
+    fn pending_combat_value(pending: &PendingCombat) -> Value {
+        json!({
+            "allocations": [],
+            "attacker": {
+                "instanceId": pending.attacker_instance_id,
+                "kind": pending.attacker_kind.as_str(),
+                "seat": pending.attacking_seat,
+            },
+            "attackingSeat": pending.attacking_seat,
+            "cell": pending.cell,
+            "combatants": [],
+            "defenders": [],
+            "originalTarget": null,
+            "targetRemoved": false,
+        })
     }
 }
 

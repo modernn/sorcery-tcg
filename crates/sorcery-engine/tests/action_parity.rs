@@ -13,6 +13,7 @@ fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
     match descriptor {
         ActionDescriptor::Mulligan { .. } => "mulligan",
         ActionDescriptor::Draw { .. } => "draw",
+        ActionDescriptor::DrawSite => "draw-site",
         ActionDescriptor::PlaySite { .. } => "play-site",
         ActionDescriptor::SummonMinion { .. } => "summon-minion",
         ActionDescriptor::MoveAndAttack { .. } => "move-and-attack",

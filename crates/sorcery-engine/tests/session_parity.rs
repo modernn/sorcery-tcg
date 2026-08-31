@@ -29,6 +29,7 @@ struct FixtureInitial {
 struct FixtureStep {
     event_ids: Vec<String>,
     event_types: Vec<String>,
+    legal_action_ids: Vec<String>,
     post_state_hash: String,
     pre_state_hash: String,
     random_draws_hash: String,
@@ -121,7 +122,7 @@ fn rejected_requests_should_not_mutate_authoritative_state() {
 }
 
 #[test]
-fn session_receipts_and_replay_should_match_typescript_through_repeated_setup_turns() {
+fn session_receipts_and_replay_should_match_typescript_through_first_movement() {
     let fixture = seed_31_fixture();
     let manifest = fixture
         .manifest_json
@@ -133,11 +134,18 @@ fn session_receipts_and_replay_should_match_typescript_through_repeated_setup_tu
         .expect("initial setup draws hash");
 
     let mut accepted_action_ids = Vec::new();
-    for step_index in 0..13 {
+    for step_index in 0..15 {
         let expected = &fixture.steps[step_index];
-        let action = session
-            .legal_actions()
-            .expect("legal mulligan actions")
+        let legal_actions = session.legal_actions().expect("legal actions");
+        assert_eq!(
+            legal_actions
+                .iter()
+                .map(|action| action.action_id.as_str())
+                .collect::<Vec<_>>(),
+            expected.legal_action_ids,
+            "legal action order at step {step_index}"
+        );
+        let action = legal_actions
             .into_iter()
             .find(|action| action.action_id.as_str() == expected.selected_action_id)
             .unwrap_or_else(|| panic!("fixture-selected legal action at step {step_index}"));

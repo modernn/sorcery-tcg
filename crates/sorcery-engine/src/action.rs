@@ -96,6 +96,8 @@ pub enum ActionDescriptor {
         /// Deck selected for the draw.
         zone: DeckZone,
     },
+    /// Tap the Avatar to draw the top Atlas card during the main phase.
+    DrawSite,
     /// Play a site from the player's hand.
     PlaySite {
         /// Stable rules card identity.
@@ -169,6 +171,7 @@ impl ActionDescriptor {
                 })
             }
             Self::Draw { zone } => Some(format!("Draw from {}", zone.as_str())),
+            Self::DrawSite => Some("Draw a site with Avatar".to_owned()),
             Self::MoveAndAttack {
                 path,
                 to,
