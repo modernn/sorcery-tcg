@@ -140,7 +140,7 @@ pub fn search_root_actions(
     for action in root_actions.into_iter().take(max_root_actions) {
         let mut branch = game.clone();
         let action_id = action.action_id().clone();
-        drop(branch.apply_action(&action)?);
+        branch.apply_action(&action)?;
         rollouts.push(continue_game(
             branch,
             north_policy,
@@ -184,7 +184,7 @@ fn continue_game(
         let selected = policy_for(seat, north_policy, south_policy)
             .select_action(game.observe(seat), &actions)?;
         action_ids.push(selected.action_id().clone());
-        drop(game.apply_action(selected)?);
+        game.apply_action(selected)?;
     }
     Ok(Rollout {
         action_ids,

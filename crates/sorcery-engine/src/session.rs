@@ -162,7 +162,7 @@ impl Session {
         let first_event_sequence = event_count
             .checked_add(1)
             .ok_or(SessionError::SequenceExhausted)?;
-        let outcomes = self.game.apply_action(&action)?;
+        let outcomes = self.game.apply_action_recorded(&action)?;
         let post_state_hash = self.game.state_hash()?;
         let events = create_events(
             action.action_id(),

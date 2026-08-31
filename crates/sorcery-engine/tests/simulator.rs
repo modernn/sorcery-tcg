@@ -1,7 +1,9 @@
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
+use sorcery_engine::contract::{ActionRequest, Seat};
 use sorcery_engine::game::Game;
 use sorcery_engine::policy::{PolicySnapshot, parse_policy_snapshot};
+use sorcery_engine::session::Session;
 use sorcery_engine::simulator::{replay_selected, run_game, search_root_actions};
 
 const HASH_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -116,5 +118,28 @@ fn selected_rollout_should_replay_authoritatively() {
     assert_eq!(
         session.state_hash().expect("authoritative state hash"),
         *rollout.final_state_hash()
+    );
+}
+
+#[test]
+fn speculative_and_recorded_transitions_should_produce_identical_state() {
+    let fixture = fixture();
+    let manifest = manifest(&fixture);
+    let mut game = Game::from_manifest_json(manifest).expect("valid speculative game");
+    let action = game.legal_actions().expect("legal action")[0].clone();
+    let mut session = Session::new(manifest).expect("valid authoritative session");
+
+    game.apply_action(&action).expect("speculative transition");
+    session
+        .step(ActionRequest {
+            action_id: action.action_id().to_string(),
+            seat: Seat::North,
+            state_version: 0,
+        })
+        .expect("recorded transition");
+
+    assert_eq!(
+        game.state_hash().expect("speculative state hash"),
+        session.state_hash().expect("recorded state hash")
     );
 }
