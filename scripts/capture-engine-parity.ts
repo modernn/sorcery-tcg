@@ -65,6 +65,7 @@ function captureGame(seed: number): JsonValue {
     if (!result.accepted) throw new Error(`issued action was rejected: ${result.reason.code}`);
     actionIds.push(action.actionId);
     steps.push({
+      events: result.receipt.events,
       eventIds: result.receipt.events.map(({ eventId }) => eventId),
       eventTypes: result.receipt.events.map(({ type }) => type),
       legalActionIds: legalActions.map(({ actionId }) => actionId),
@@ -72,6 +73,7 @@ function captureGame(seed: number): JsonValue {
       preStateHash,
       randomDrawsHash: hash(result.receipt.randomDraws),
       receiptId: result.receipt.receiptId,
+      selectedAction: action,
       selectedActionId: action.actionId,
       stateVersion: session.state.stateVersion,
     });
