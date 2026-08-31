@@ -458,6 +458,15 @@ type LeapAttackContinuation = Readonly<{
   strikeLocation: GameLocation;
 }>;
 
+type DragProjectileContinuation = Readonly<{
+  fightOnArrival: boolean;
+  kind: 'drag-projectile';
+  path: readonly GameLocation[];
+  pathIndex: number;
+  shooter: GameUnitRef;
+  target: GameUnitRef;
+}>;
+
 type DeathriteContinuation =
   | Readonly<{
     cardId: string;
@@ -478,6 +487,7 @@ type DeathriteContinuation =
     kind: 'first-strike';
     pending: PendingCombat;
   }>
+  | DragProjectileContinuation
   | LeapAttackContinuation
   | Readonly<{
     caster: GameUnitRef;
@@ -6973,6 +6983,11 @@ function applyDeathriteOrder(
     continuedStateVersioned = true;
   } else if (!resolution.pendingDeathrites
     && resolution.terminal.status === 'active'
+    && continuation?.kind === 'drag-projectile') {
+    continued = continueDragProjectile(resumedState, continuation, []);
+    continuedStateVersioned = true;
+  } else if (!resolution.pendingDeathrites
+    && resolution.terminal.status === 'active'
     && continuation?.kind === 'leap-attack') {
     continued = finishLeapAttack(resumedState, continuation);
   } else {
@@ -8227,6 +8242,87 @@ function beginFight(
     [...outcomes, started],
     [],
   ];
+}
+
+function continueDragProjectile(
+  state: GameState,
+  continuation: DragProjectileContinuation,
+  priorOutcomes: readonly GameOutcome[],
+  emitZeroStep = false,
+): readonly [GameState, readonly GameOutcome[], readonly EngineRandomDraw[]] {
+  const targetRemains = unitRefs(state, continuation.target.seat).some((candidate) =>
+    candidate.instanceId === continuation.target.instanceId
+    && candidate.kind === continuation.target.kind);
+  if (!targetRemains || state.terminal.status === 'finished') {
+    return [withStateVersion(state, {}), priorOutcomes, []];
+  }
+  let current = state;
+  let pathIndex = continuation.pathIndex;
+  const outcomes = [...priorOutcomes];
+  if (pathIndex < continuation.path.length - 1 || emitZeroStep) {
+    const segment = resolveDeclaredPath(
+      state,
+      continuation.target,
+      continuation.path.slice(pathIndex),
+      false,
+    );
+    pathIndex += segment.path.length - 1;
+    current = segment.state;
+    if (segment.path.length > 1 || emitZeroStep) {
+      outcomes.push({
+        payload: {
+          from: segment.path[0]!,
+          path: segment.path,
+          seat: continuation.shooter.seat,
+          sourceInstanceId: continuation.shooter.instanceId,
+          steps: segment.path.length - 1,
+          targetInstanceId: continuation.target.instanceId,
+          to: segment.path.at(-1)!,
+        },
+        type: 'unit-dragged',
+      });
+    }
+    outcomes.push(...segment.outcomes);
+    if (current.pendingDeathrites) {
+      const needsContinuation = pathIndex < continuation.path.length - 1
+        || continuation.fightOnArrival;
+      return [
+        withStateVersion(current, {
+          pendingDeathrites: {
+            ...current.pendingDeathrites,
+            ...(needsContinuation
+              ? { continuation: { ...continuation, pathIndex } }
+              : {}),
+          },
+        }),
+        outcomes,
+        [],
+      ];
+    }
+  }
+  const destination = continuation.path.at(-1)!;
+  const targetArrived = unitRefs(current, continuation.target.seat).some((candidate) =>
+    candidate.instanceId === continuation.target.instanceId
+    && candidate.kind === continuation.target.kind
+    && unitOccupiesLocation(current, candidate, destination));
+  const shooterRemains = current.realm.units.some(({ instanceId }) =>
+    instanceId === continuation.shooter.instanceId);
+  if (!continuation.fightOnArrival || !targetArrived || !shooterRemains
+    || current.terminal.status === 'finished') {
+    return [withStateVersion(current, {}), outcomes, []];
+  }
+  const pending: PendingCombat = deepFreeze({
+    allocations: [],
+    attacker: continuation.shooter,
+    attackingSeat: continuation.shooter.seat,
+    cell: destination.cell,
+    combatants: [],
+    defenders: [],
+    originalTarget: continuation.target,
+    ...(destination.region === 'surface' ? {} : { region: destination.region }),
+    targetRemoved: false,
+  });
+  return beginFight(current, pending, [continuation.target], outcomes);
 }
 
 function strikeUndefendedSite(
@@ -12409,8 +12505,6 @@ function applyDescriptor(
       return [withStateVersion(shotState, {}), [shot, ...interaction.outcomes], []];
     }
     const targetStatus = unitStatus(shotState, descriptor.hit);
-    const from: GameLocation = { cell: targetStatus.location, region: targetStatus.region };
-    const to: GameLocation = { cell: shooterStatus.location, region: shooterStatus.region };
     const contacted = descriptor.path.at(-1)!;
     const dragPath = [...descriptor.path].reverse().map((location): GameLocation => ({
       cell: translatedFootprint(
@@ -12420,47 +12514,14 @@ function applyDescriptor(
       )![0]!,
       region: location.region,
     }));
-    const path = resolveDeclaredPath(shotState, descriptor.hit, dragPath, false);
-    const actualTo = path.path.at(-1) ?? from;
-    const dragged: GameOutcome = {
-      payload: {
-        from,
-        path: path.path,
-        seat,
-        sourceInstanceId: shooter.instanceId,
-        steps: path.path.length - 1,
-        targetInstanceId: descriptor.hit.instanceId,
-        to: actualTo,
-      },
-      type: 'unit-dragged',
-    };
-    const outcomes = [shot, ...interaction.outcomes, dragged, ...path.outcomes];
-    if (path.state.pendingDeathrites) {
-      // ponytail: serialize the optional arrival fight only if this rare ordered
-      // drag interaction becomes an exercised actual-card path.
-      throw new Error('unsupported Deathrite ordering during drag-fight continuation');
-    }
-    const hitArrived = unitRefs(path.state, descriptor.hit.seat).some((candidate) =>
-      candidate.instanceId === descriptor.hit!.instanceId
-      && candidate.kind === descriptor.hit!.kind
-      && unitOccupiesLocation(path.state, candidate, to));
-    const shooterRemains = path.state.realm.units.some(({ instanceId }) => instanceId === shooter.instanceId);
-    if (!descriptor.fightOnArrival || !hitArrived || !shooterRemains
-      || path.state.terminal.status === 'finished') {
-      return [withStateVersion(path.state, {}), outcomes, []];
-    }
-    const pending: PendingCombat = deepFreeze({
-      allocations: [],
-      attacker: shooter,
-      attackingSeat: seat,
-      cell: to.cell,
-      combatants: [],
-      defenders: [],
-      originalTarget: descriptor.hit,
-      ...(to.region === 'surface' ? {} : { region: to.region }),
-      targetRemoved: false,
-    });
-    return beginFight(path.state, pending, [descriptor.hit], outcomes);
+    return continueDragProjectile(shotState, {
+      fightOnArrival: descriptor.fightOnArrival,
+      kind: 'drag-projectile',
+      path: dragPath,
+      pathIndex: 0,
+      shooter,
+      target: descriptor.hit,
+    }, [shot, ...interaction.outcomes], true);
   }
 
   if (descriptor.kind === 'continue-basic-movement') {

@@ -12584,6 +12584,210 @@ test('RULE-04 a drag projectile stops at the first visible unit and may fight af
   assert.equal(verifyGameReplay(fight), true);
 });
 
+test('RULE-03/04 a drag projectile resumes after ordered movement Deathrites before fighting', () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const base = manifest(143, {
+    northSpell: {
+      attack: 5,
+      defense: 5,
+      immobile: true,
+      manaCost: 1,
+      shootsDragProjectile: true,
+      thresholds: { ...thresholds, earth: 1 },
+    },
+    southSpell: {
+      attack: 3,
+      defense: 10,
+      manaCost: 1,
+      otherNearbyAlliesPowerBonus: 1,
+      thresholds: { ...thresholds, earth: 1 },
+    },
+  });
+  const preview = createGameSession(base).state.players;
+  const pudgeCardId = preview.north.hand.spellbook[0]?.cardId;
+  const rainCardId = preview.north.hand.spellbook[1]?.cardId;
+  const fragileIds = preview.south.hand.spellbook.slice(0, 2).map(({ cardId }) => cardId);
+  const targetCardId = preview.south.hand.spellbook[2]?.cardId;
+  assert.ok(pudgeCardId && rainCardId && targetCardId);
+  assert.equal(fragileIds.length, 2);
+  const cards = { ...base.cards };
+  cards[rainCardId] = {
+    cardType: 'magic',
+    damageEachAbovegroundMinion: 1,
+    manaCost: 0,
+    thresholds,
+  };
+  for (const fragileId of fragileIds) {
+    cards[fragileId] = {
+      attack: 1,
+      cardType: 'minion',
+      deathriteDrawSite: true,
+      defense: 1,
+      manaCost: 0,
+      stealth: true,
+      thresholds,
+    };
+  }
+  const gameManifest = createGameManifest({
+    authority: base.authority,
+    cards,
+    decks: base.decks,
+    firstSeat: base.firstSeat,
+    seed: base.seed,
+  });
+  const setup = (fragileCell: 'C1' | 'C2') => {
+    let setupSession = keep(keep(createGameSession(gameManifest)));
+    const take = (predicate: Parameters<typeof action>[1]): void => {
+      setupSession = accept(setupSession, action(setupSession, predicate));
+    };
+    take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === pudgeCardId
+      && descriptor.cell === 'C4');
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    if (fragileCell === 'C1') {
+      for (const fragileId of fragileIds) {
+        take(({ descriptor }) => descriptor.kind === 'summon-minion'
+          && descriptor.cardId === fragileId
+          && descriptor.cell === fragileCell);
+      }
+    }
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+    if (fragileCell === 'C2') {
+      for (const fragileId of fragileIds) {
+        take(({ descriptor }) => descriptor.kind === 'summon-minion'
+          && descriptor.cardId === fragileId
+          && descriptor.cell === fragileCell);
+      }
+    }
+    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === targetCardId
+      && descriptor.cell === 'C2');
+    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    take(({ descriptor }) => descriptor.kind === 'cast-magic' && descriptor.cardId === rainCardId);
+    const pudge = setupSession.state.realm.units.find(({ cardId }) => cardId === pudgeCardId);
+    const target = setupSession.state.realm.units.find(({ cardId }) => cardId === targetCardId);
+    const fragiles = setupSession.state.realm.units.filter(({ cardId }) => fragileIds.includes(cardId));
+    assert.ok(pudge && target);
+    assert.equal(fragiles.length, 2);
+    assert.equal(fragiles.every(({ damage }) => damage === 1), true);
+    return { fragiles, pudge, session: setupSession, target };
+  };
+  const { fragiles, pudge, session, target } = setup('C1');
+  const atlasBefore = session.state.players.south.atlas.length;
+  const atlasHandBefore = session.state.players.south.hand.atlas.length;
+  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'shoot-drag-projectile'
+      && descriptor.shooterInstanceId === pudge.instanceId
+      && descriptor.hit?.instanceId === target.instanceId
+      && descriptor.direction === 'south');
+  assert.deepEqual(choices.map(({ descriptor }) =>
+    descriptor.kind === 'shoot-drag-projectile' && descriptor.fightOnArrival), [false, true]);
+
+  const branches = choices.map((choice, choiceIndex) => {
+    assert.equal(choice.descriptor.kind, 'shoot-drag-projectile');
+    if (choice.descriptor.kind !== 'shoot-drag-projectile') throw new Error('unreachable');
+    const interrupted = stepGame(session, choice);
+    assert.equal(interrupted.accepted, true);
+    if (!interrupted.accepted) throw new Error('expected drag to reach Deathrite ordering');
+    assert.equal(interrupted.session.state.stateVersion, session.state.stateVersion + 1);
+    assert.deepEqual(interrupted.receipt.events.map(({ type }) => type), [
+      'projectile-shot',
+      'unit-dragged',
+    ]);
+    assert.equal(interrupted.session.state.phase, 'deathrite-order');
+    assert.equal(interrupted.session.state.decisionSeat, 'south');
+    assert.equal(interrupted.session.state.realm.units.find(({ instanceId }) =>
+      instanceId === target.instanceId)?.location, 'C3');
+    assert.equal(fragiles.every(({ instanceId }) => !interrupted.session.state.realm.units
+      .some((unit) => unit.instanceId === instanceId)), true);
+    assert.equal(fragiles.every(({ instanceId }) => !interrupted.session.state.players.south.cemetery
+      .some((card) => card.instanceId === instanceId)), true);
+    const restored = resumeGameCheckpoint(parseGameCheckpoint(serializeGameCheckpoint(
+      createGameCheckpoint(interrupted.session),
+    )));
+    assert.equal(
+      canonicalJson(restored as unknown as JsonValue),
+      canonicalJson(interrupted.session as unknown as JsonValue),
+    );
+    const orders = legalGameActions(restored.state, 'south').filter(({ descriptor }) =>
+      descriptor.kind === 'order-deathrites');
+    assert.equal(orders.length, 2);
+    assert.equal(legalGameActions(restored.state, 'north').length, 0);
+    const resolved = stepGame(restored, orders[choiceIndex]!);
+    assert.equal(resolved.accepted, true);
+    if (!resolved.accepted) throw new Error('expected drag to resume after Deathrites');
+    assert.equal(resolved.session.state.stateVersion, restored.state.stateVersion + 1);
+    const types = resolved.receipt.events.map(({ type }) => type);
+    assert.deepEqual(types.slice(0, 5), [
+      'deathrite-order-committed',
+      'site-drawn',
+      'site-drawn',
+      'minion-died',
+      'minion-died',
+    ]);
+    assert.equal(types[5], 'unit-dragged');
+    assert.equal(resolved.session.state.phase, 'main');
+    assert.equal(resolved.session.state.pendingDeathrites, undefined);
+    assert.equal(resolved.session.state.realm.units.find(({ instanceId }) =>
+      instanceId === target.instanceId)?.location, 'C4');
+    assert.equal(fragiles.every(({ instanceId }) => resolved.session.state.players.south.cemetery
+      .some((card) => card.instanceId === instanceId)), true);
+    assert.equal(resolved.session.state.players.south.atlas.length, atlasBefore - 2);
+    assert.equal(resolved.session.state.players.south.hand.atlas.length, atlasHandBefore + 2);
+    assert.equal(types.includes('fight-started'), choice.descriptor.fightOnArrival);
+    assert.equal(types.indexOf('fight-started') > types.indexOf('unit-dragged'),
+      choice.descriptor.fightOnArrival);
+    assert.equal(verifyGameReplay(resolved.session), true);
+    return resolved.session;
+  });
+  assert.equal(new Set(branches.map(({ state }) => hashGameState(state))).size, 2);
+
+  const finalEdge = setup('C2');
+  const finalChoices = legalGameActions(finalEdge.session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'shoot-drag-projectile'
+      && descriptor.shooterInstanceId === finalEdge.pudge.instanceId
+      && descriptor.hit?.instanceId === finalEdge.target.instanceId
+      && descriptor.direction === 'south');
+  for (const [choiceIndex, choice] of finalChoices.entries()) {
+    assert.equal(choice.descriptor.kind, 'shoot-drag-projectile');
+    if (choice.descriptor.kind !== 'shoot-drag-projectile') throw new Error('unreachable');
+    const interrupted = stepGame(finalEdge.session, choice);
+    assert.equal(interrupted.accepted, true);
+    if (!interrupted.accepted) throw new Error('expected final drag edge to reach Deathrites');
+    assert.equal(interrupted.session.state.stateVersion, finalEdge.session.state.stateVersion + 1);
+    assert.equal(interrupted.session.state.phase, 'deathrite-order');
+    assert.equal(interrupted.session.state.realm.units.find(({ instanceId }) =>
+      instanceId === finalEdge.target.instanceId)?.location, 'C4');
+    assert.equal(interrupted.receipt.events.some(({ type }) => type === 'fight-started'), false);
+    const restored = resumeGameCheckpoint(parseGameCheckpoint(serializeGameCheckpoint(
+      createGameCheckpoint(interrupted.session),
+    )));
+    const orders = legalGameActions(restored.state, 'south').filter(({ descriptor }) =>
+      descriptor.kind === 'order-deathrites');
+    assert.equal(orders.length, 2);
+    const resolved = stepGame(restored, orders[choiceIndex]!);
+    assert.equal(resolved.accepted, true);
+    if (!resolved.accepted) throw new Error('expected final-edge Deathrites to finish');
+    assert.equal(resolved.session.state.stateVersion, restored.state.stateVersion + 1);
+    const types = resolved.receipt.events.map(({ type }) => type);
+    assert.equal(types.includes('unit-dragged'), false);
+    assert.equal(types.includes('fight-started'), choice.descriptor.fightOnArrival);
+    assert.ok(!choice.descriptor.fightOnArrival
+      || types.indexOf('fight-started') > types.lastIndexOf('minion-died'));
+    assert.equal(resolved.session.state.phase, 'main');
+    assert.equal(verifyGameReplay(resolved.session), true);
+  }
+});
+
 test('RULE-03 Granary Rats suppresses its site threshold while enabled', () => {
   const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
   const north: GameDeckSpec = {
