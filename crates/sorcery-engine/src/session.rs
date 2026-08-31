@@ -329,6 +329,10 @@ impl Session {
         &self.manifest_json
     }
 
+    pub(crate) fn game_clone(&self) -> Game {
+        self.game.clone()
+    }
+
     /// Materializes replay-verification data at the authoritative boundary.
     ///
     /// # Errors

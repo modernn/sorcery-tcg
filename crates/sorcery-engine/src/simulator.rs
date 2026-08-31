@@ -18,6 +18,21 @@ pub struct Rollout {
     terminal: bool,
 }
 
+/// Branches rooted at one exact authoritative session checkpoint.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CheckpointSearch {
+    root_session_hash: IdentityHash,
+    rollouts: Vec<Rollout>,
+}
+
+impl CheckpointSearch {
+    /// Returns canonically ordered checkpoint branches.
+    #[must_use]
+    pub fn rollouts(&self) -> &[Rollout] {
+        &self.rollouts
+    }
+}
+
 impl Rollout {
     /// Returns canonical legal-action indices in application order.
     #[must_use]
@@ -152,6 +167,33 @@ pub fn search_root_actions(
     Ok(rollouts)
 }
 
+/// Branches directly from an authoritative session without serializing its checkpoint.
+///
+/// The root session is hashed once. Speculative nodes remain compact clones with no receipts,
+/// journals, serialization, or hashing.
+///
+/// # Errors
+///
+/// Returns [`SimulatorError`] when checkpoint hashing, search, policy selection, or a limit fails.
+pub fn search_from_checkpoint(
+    session: &Session,
+    north_policy: &PolicySnapshot,
+    south_policy: &PolicySnapshot,
+    max_actions: usize,
+    max_root_actions: usize,
+) -> Result<CheckpointSearch, SimulatorError> {
+    Ok(CheckpointSearch {
+        root_session_hash: session.session_hash()?,
+        rollouts: search_root_actions(
+            &session.game_clone(),
+            north_policy,
+            south_policy,
+            max_actions,
+            max_root_actions,
+        )?,
+    })
+}
+
 /// Replays one selected rollout through the authoritative receipt path.
 ///
 /// # Errors
@@ -159,7 +201,31 @@ pub fn search_root_actions(
 /// Returns [`SimulatorError`] when replay rejects an action or does not reproduce
 /// the speculative rollout's final state exactly.
 pub fn replay_selected(manifest_json: &str, rollout: &Rollout) -> Result<Session, SimulatorError> {
-    let mut session = Session::new(manifest_json)?;
+    apply_and_verify(Session::new(manifest_json)?, rollout)
+}
+
+/// Replays one selected branch from its exact authoritative checkpoint.
+///
+/// # Errors
+///
+/// Returns [`SimulatorError`] when the checkpoint differs, the branch index is invalid,
+/// or authoritative replay diverges.
+pub fn replay_checkpoint_branch(
+    session: &Session,
+    search: &CheckpointSearch,
+    branch_index: usize,
+) -> Result<Session, SimulatorError> {
+    if session.session_hash()? != search.root_session_hash {
+        return Err(SimulatorError::ReplayDiverged);
+    }
+    let rollout = search
+        .rollouts
+        .get(branch_index)
+        .ok_or(SimulatorError::ReplayDiverged)?;
+    apply_and_verify(session.clone(), rollout)
+}
+
+fn apply_and_verify(mut session: Session, rollout: &Rollout) -> Result<Session, SimulatorError> {
     if session.manifest_id() != &rollout.manifest_id {
         return Err(SimulatorError::ReplayDiverged);
     }

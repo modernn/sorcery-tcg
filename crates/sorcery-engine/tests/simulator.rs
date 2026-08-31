@@ -5,7 +5,10 @@ use sorcery_engine::game::Game;
 use sorcery_engine::policy::{PolicySnapshot, parse_policy_snapshot};
 use sorcery_engine::session::Session;
 use sorcery_engine::simulator::SimulatorError;
-use sorcery_engine::simulator::{replay_selected, run_game, search_root_actions};
+use sorcery_engine::simulator::{
+    replay_checkpoint_branch, replay_selected, run_game, search_from_checkpoint,
+    search_root_actions,
+};
 
 const HASH_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const HASH_B: &str = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -161,6 +164,39 @@ fn selected_rollout_should_reject_a_different_manifest() {
 
     assert!(matches!(
         replay_selected(&other, &rollout),
+        Err(SimulatorError::ReplayDiverged)
+    ));
+}
+
+#[test]
+fn checkpoint_search_should_replay_from_the_exact_midgame_root() {
+    let fixture = fixture();
+    let manifest = manifest(&fixture);
+    let policy = baseline_policy();
+    let mut root = Session::new(manifest).expect("root session");
+    for _ in 0..2 {
+        let action = root.legal_actions().expect("root actions")[0].clone();
+        assert!(matches!(
+            root.step(ActionRequest {
+                action_id: action.action_id.to_string(),
+                seat: action.seat,
+                state_version: action.state_version,
+            })
+            .expect("accepted prefix"),
+            sorcery_engine::session::StepResult::Accepted(_)
+        ));
+    }
+    let search = search_from_checkpoint(&root, &policy, &policy, MAX_ACTIONS, 2)
+        .expect("checkpoint branches");
+    let replay = replay_checkpoint_branch(&root, &search, 0).expect("checkpoint replay");
+
+    assert_eq!(search.rollouts().len(), 2);
+    assert!(replay.transcript().len() > root.transcript().len());
+    assert!(replay.verify_replay().expect("verified complete replay"));
+
+    let initial = Session::new(manifest).expect("different root");
+    assert!(matches!(
+        replay_checkpoint_branch(&initial, &search, 0),
         Err(SimulatorError::ReplayDiverged)
     ));
 }
