@@ -8,7 +8,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-use crate::action::{ActionDescriptor, DeckZone};
+use crate::action::{ActionDescriptor, CombatTarget, DeckZone};
 use crate::board::{Cell, Location, Region};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
@@ -265,6 +265,7 @@ struct PlayerPosition {
     air_thresholds_cast_this_turn: Option<u16>,
     atlas: Vec<CardInstance>,
     avatar: AvatarPosition,
+    cemetery: Vec<CardInstance>,
     domain_established: bool,
     hand_atlas: Vec<CardInstance>,
     hand_spellbook: Vec<CardInstance>,
@@ -316,11 +317,13 @@ struct PendingCombat {
     attacker_kind: UnitKind,
     attacking_seat: Seat,
     cell: Cell,
+    original_target: Option<CombatTarget>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Phase {
     Attack,
+    Defend,
     Draw,
     Main,
     Mulligan,
@@ -330,6 +333,7 @@ impl Phase {
     const fn as_str(self) -> &'static str {
         match self {
             Self::Attack => "attack",
+            Self::Defend => "defend",
             Self::Draw => "draw",
             Self::Main => "main",
             Self::Mulligan => "mulligan",
@@ -520,6 +524,7 @@ impl Game {
         let mut actions = Vec::new();
         match self.position.phase {
             Phase::Attack => self.append_attack_actions(&mut actions)?,
+            Phase::Defend => self.append_defend_actions(&mut actions)?,
             Phase::Draw => self.append_draw_actions(&mut actions)?,
             Phase::Mulligan => self.append_mulligan_actions(&mut actions)?,
             Phase::Main => self.append_main_actions(&mut actions)?,
@@ -533,11 +538,74 @@ impl Game {
     }
 
     fn append_attack_actions(&self, actions: &mut Vec<OrderedAction>) -> Result<(), GameError> {
+        for target in self.attack_targets()? {
+            let descriptor = ActionDescriptor::DeclareAttack { target };
+            let label = descriptor
+                .state_independent_label()
+                .ok_or_else(|| invalid("declare-attack action requires a label"))?;
+            self.push_action(actions, descriptor, label)?;
+        }
         let descriptor = ActionDescriptor::DeclineAttack;
         let label = descriptor
             .state_independent_label()
             .ok_or_else(|| invalid("decline-attack action requires a label"))?;
         self.push_action(actions, descriptor, label)
+    }
+
+    fn append_defend_actions(&self, actions: &mut Vec<OrderedAction>) -> Result<(), GameError> {
+        let target = self
+            .position
+            .pending_combat
+            .as_ref()
+            .and_then(|pending| pending.original_target.as_ref())
+            .ok_or(GameError::IllegalAction)?;
+        let descriptor = ActionDescriptor::CloseDefend {
+            original_target_participates: !matches!(target, CombatTarget::Site { .. }),
+        };
+        let label = descriptor
+            .state_independent_label()
+            .ok_or_else(|| invalid("close-defend action requires a label"))?;
+        self.push_action(actions, descriptor, label)
+    }
+
+    fn attack_targets(&self) -> Result<Vec<CombatTarget>, GameError> {
+        let pending = self
+            .position
+            .pending_combat
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        let opposing_seat = other_seat(pending.attacking_seat);
+        let opposing_player = &self.position.players[seat_index(opposing_seat)];
+        let mut targets = Vec::new();
+        if opposing_player.avatar.location == pending.cell {
+            targets.push(CombatTarget::Avatar {
+                instance_id: opposing_player.avatar.card.instance_id.clone(),
+                seat: opposing_seat,
+            });
+        }
+        targets.extend(
+            self.position
+                .units
+                .iter()
+                .filter(|unit| {
+                    unit.controller == opposing_seat
+                        && unit.location == pending.cell
+                        && !unit.stealthed
+                })
+                .map(|unit| CombatTarget::Minion {
+                    instance_id: unit.card.instance_id.clone(),
+                    seat: opposing_seat,
+                }),
+        );
+        if let Some(site) = &self.position.sites[pending.cell.index()]
+            && site.controller == opposing_seat
+        {
+            targets.push(CombatTarget::Site {
+                instance_id: site.card.instance_id.clone(),
+                seat: opposing_seat,
+            });
+        }
+        Ok(targets)
     }
 
     fn append_draw_actions(&self, actions: &mut Vec<OrderedAction>) -> Result<(), GameError> {
@@ -806,6 +874,12 @@ impl Game {
             return Err(GameError::IllegalAction);
         }
         match &action.descriptor {
+            ActionDescriptor::CloseDefend {
+                original_target_participates,
+            } => self.apply_close_defend_action(action.seat, *original_target_participates),
+            ActionDescriptor::DeclareAttack { target } => {
+                self.apply_declare_attack_action(action.seat, target)
+            }
             ActionDescriptor::DeclineAttack => self.apply_decline_attack_action(action.seat),
             ActionDescriptor::Draw { zone } => self.apply_draw_action(action.seat, *zone),
             ActionDescriptor::Mulligan {
@@ -838,7 +912,7 @@ impl Game {
                 unit_instance_id,
             } => self.apply_move_and_attack_action(action.seat, *from, path, *to, unit_instance_id),
             ActionDescriptor::EndTurn => self.apply_end_turn_action(action.seat),
-            _ => Err(GameError::IllegalAction),
+            ActionDescriptor::DrawSite => Err(GameError::IllegalAction),
         }
     }
 
@@ -877,6 +951,214 @@ impl Game {
                 "unitInstanceId": attacker_instance_id,
             }),
         )])
+    }
+
+    fn apply_declare_attack_action(
+        &mut self,
+        seat: Seat,
+        target: &CombatTarget,
+    ) -> Result<Vec<(String, Value)>, GameError> {
+        let pending = self
+            .position
+            .pending_combat
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        if self.position.phase != Phase::Attack
+            || pending.attacking_seat != seat
+            || !self.attack_targets()?.contains(target)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let attacker_instance_id = pending.attacker_instance_id.clone();
+        let cell = pending.cell;
+        let defending_seat = target.seat();
+        self.position
+            .pending_combat
+            .as_mut()
+            .ok_or(GameError::IllegalAction)?
+            .original_target = Some(target.clone());
+        self.position.decision_seat = defending_seat;
+        self.position.phase = Phase::Defend;
+        self.position.state_version += 1;
+        Ok(vec![(
+            "attack-declared".to_owned(),
+            json!({
+                "attackerInstanceId": attacker_instance_id,
+                "cell": cell,
+                "seat": seat,
+                "target": target,
+            }),
+        )])
+    }
+
+    fn apply_close_defend_action(
+        &mut self,
+        seat: Seat,
+        original_target_participates: bool,
+    ) -> Result<Vec<(String, Value)>, GameError> {
+        let pending = self
+            .position
+            .pending_combat
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        let target = pending
+            .original_target
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        let expected_participation = !matches!(target, CombatTarget::Site { .. });
+        if self.position.phase != Phase::Defend
+            || seat != target.seat()
+            || original_target_participates != expected_participation
+        {
+            return Err(GameError::IllegalAction);
+        }
+        if !matches!(target, CombatTarget::Minion { .. })
+            || pending.attacker_kind != UnitKind::Minion
+        {
+            return Err(GameError::UnsupportedManifestFact(
+                "site and avatar combat resolution".to_owned(),
+            ));
+        }
+        let mut outcomes = vec![(
+            "defend-window-closed".to_owned(),
+            json!({
+                "defenderCount": 0,
+                "originalTargetParticipates": original_target_participates,
+            }),
+        )];
+        outcomes.extend(self.resolve_simple_minion_fight()?);
+        self.position.state_version += 1;
+        Ok(outcomes)
+    }
+
+    fn resolve_simple_minion_fight(&mut self) -> Result<Vec<(String, Value)>, GameError> {
+        let pending = self
+            .position
+            .pending_combat
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        let attacker_id = pending.attacker_instance_id.clone();
+        let CombatTarget::Minion {
+            instance_id: target_id,
+            seat: target_seat,
+        } = pending
+            .original_target
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let target_id = target_id.clone();
+        let target_seat = *target_seat;
+        let attacking_seat = pending.attacking_seat;
+        let (attacker_index, attacker_attack, attacker_defense) =
+            self.simple_minion_combatant(&attacker_id)?;
+        let (target_index, target_attack, target_defense) =
+            self.simple_minion_combatant(&target_id)?;
+        if attacker_index == target_index {
+            return Err(GameError::IllegalAction);
+        }
+        self.position.units[attacker_index].damage = self.position.units[attacker_index]
+            .damage
+            .saturating_add(target_attack);
+        self.position.units[target_index].damage = self.position.units[target_index]
+            .damage
+            .saturating_add(attacker_attack);
+        let attacker_damage = self.position.units[attacker_index].damage;
+        let target_damage = self.position.units[target_index].damage;
+        let mut outcomes = vec![
+            (
+                "fight-started".to_owned(),
+                json!({
+                    "attackerInstanceId": attacker_id,
+                    "combatantInstanceIds": [target_id],
+                }),
+            ),
+            (
+                "strike-damage-allocated".to_owned(),
+                json!({
+                    "amount": attacker_attack,
+                    "strikerInstanceId": attacker_id,
+                    "targetInstanceId": target_id,
+                }),
+            ),
+            (
+                "damage-dealt".to_owned(),
+                json!({
+                    "accumulated": attacker_damage,
+                    "amount": target_attack,
+                    "direct": true,
+                    "instanceId": attacker_id,
+                    "seat": attacking_seat,
+                }),
+            ),
+            (
+                "damage-dealt".to_owned(),
+                json!({
+                    "accumulated": target_damage,
+                    "amount": attacker_attack,
+                    "direct": true,
+                    "instanceId": target_id,
+                    "seat": target_seat,
+                }),
+            ),
+        ];
+        if attacker_damage >= attacker_defense {
+            outcomes.push(self.remove_dead_minion(&attacker_id)?);
+        }
+        if target_damage >= target_defense {
+            outcomes.push(self.remove_dead_minion(&target_id)?);
+        }
+        self.position.pending_combat = None;
+        self.position.phase = Phase::Main;
+        self.position.decision_seat = attacking_seat;
+        Ok(outcomes)
+    }
+
+    fn simple_minion_combatant(
+        &self,
+        instance_id: &IdentityHash,
+    ) -> Result<(usize, u8, u8), GameError> {
+        let (index, unit) = self
+            .position
+            .units
+            .iter()
+            .enumerate()
+            .find(|(_, unit)| unit.card.instance_id == *instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        Ok((index, facts.attack, facts.defense))
+    }
+
+    fn remove_dead_minion(
+        &mut self,
+        instance_id: &IdentityHash,
+    ) -> Result<(String, Value), GameError> {
+        let index = self
+            .position
+            .units
+            .iter()
+            .position(|unit| unit.card.instance_id == *instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        let unit = self.position.units.remove(index);
+        let card_id = self.rules.cards[usize::from(unit.card.card_id.0)]
+            .id
+            .clone();
+        let owner = unit.card.owner;
+        self.position.players[seat_index(owner)]
+            .cemetery
+            .push(unit.card);
+        Ok((
+            "minion-died".to_owned(),
+            json!({
+                "cardId": card_id,
+                "instanceId": instance_id,
+                "owner": owner,
+            }),
+        ))
     }
 
     fn apply_draw_action(
@@ -987,6 +1269,7 @@ impl Game {
             attacker_kind,
             attacking_seat: seat,
             cell: to.cell,
+            original_target: None,
         });
         self.position.phase = Phase::Attack;
         self.position.state_version += 1;
@@ -1286,7 +1569,7 @@ impl Game {
                 "region": "surface",
                 "tapped": player.avatar.tapped,
             },
-            "cemetery": [],
+            "cemetery": self.cards_value(&player.cemetery),
             "domainEstablished": player.domain_established,
             "hand": {
                 "atlas": self.cards_value(&player.hand_atlas),
@@ -1362,7 +1645,7 @@ impl Game {
             "cell": pending.cell,
             "combatants": [],
             "defenders": [],
-            "originalTarget": null,
+            "originalTarget": pending.original_target,
             "targetRemoved": false,
         })
     }
@@ -1557,6 +1840,7 @@ fn create_player(
             .then_some(0),
         atlas: remaining_atlas,
         avatar,
+        cemetery: Vec::new(),
         domain_established: false,
         hand_atlas: atlas,
         hand_spellbook: spellbook,

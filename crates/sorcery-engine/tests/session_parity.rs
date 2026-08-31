@@ -122,7 +122,7 @@ fn rejected_requests_should_not_mutate_authoritative_state() {
 }
 
 #[test]
-fn session_receipts_and_replay_should_match_typescript_through_first_movement() {
+fn session_receipts_and_replay_should_match_through_first_fight() {
     let fixture = seed_31_fixture();
     let manifest = fixture
         .manifest_json
@@ -134,7 +134,7 @@ fn session_receipts_and_replay_should_match_typescript_through_first_movement() 
         .expect("initial setup draws hash");
 
     let mut accepted_action_ids = Vec::new();
-    for step_index in 0..15 {
+    for step_index in 0..82 {
         let expected = &fixture.steps[step_index];
         let legal_actions = session.legal_actions().expect("legal actions");
         assert_eq!(
@@ -156,7 +156,7 @@ fn session_receipts_and_replay_should_match_typescript_through_first_movement() 
                 seat: action.seat,
                 state_version: action.state_version,
             })
-            .expect("accepted authoritative step");
+            .unwrap_or_else(|error| panic!("accepted authoritative step {step_index}: {error}"));
         let StepResult::Accepted(receipt) = result else {
             panic!("fixture action must be accepted");
         };

@@ -58,7 +58,7 @@ pub enum CombatTarget {
 }
 
 impl CombatTarget {
-    fn kind(&self) -> &'static str {
+    pub(crate) fn kind(&self) -> &'static str {
         match self {
             Self::Avatar { .. } => "avatar",
             Self::Minion { .. } => "minion",
@@ -66,11 +66,19 @@ impl CombatTarget {
         }
     }
 
-    fn instance_id(&self) -> &IdentityHash {
+    pub(crate) fn instance_id(&self) -> &IdentityHash {
         match self {
             Self::Avatar { instance_id, .. }
             | Self::Minion { instance_id, .. }
             | Self::Site { instance_id, .. } => instance_id,
+        }
+    }
+
+    pub(crate) const fn seat(&self) -> Seat {
+        match self {
+            Self::Avatar { seat, .. } | Self::Minion { seat, .. } | Self::Site { seat, .. } => {
+                *seat
+            }
         }
     }
 }
