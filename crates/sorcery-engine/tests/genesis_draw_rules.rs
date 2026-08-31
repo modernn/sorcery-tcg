@@ -1031,3 +1031,253 @@ fn optional_site_genesis_should_issue_decline_and_paid_token_branches() {
     );
     assert_exact_replay(&paid);
 }
+
+fn geomancer_manifest(seed: u32, north_atlas: &[&str]) -> String {
+    let mut geomancer = avatar(false, 20);
+    geomancer["earthSitePlayCreatesAdjacentRubble"] = json!(true);
+    geomancer["replaceAdjacentRubbleWithTopAtlasSite"] = json!(true);
+    let mut value = manifest_value(seed, &geomancer, &minion(1, 1), &minion(1, 1), 4, 4, 4);
+    let cards = value["cards"].as_object_mut().expect("card definitions");
+    cards.remove("north-site");
+    cards.remove("south-site");
+    let mut earth_site = site();
+    earth_site["genesisPayOneManaToSummonToken"] = json!("foot-soldier");
+    for card_id in north_atlas {
+        cards.insert((*card_id).to_owned(), earth_site.clone());
+    }
+    for card_id in [
+        "south-site-1",
+        "south-site-2",
+        "south-site-3",
+        "south-site-4",
+    ] {
+        cards.insert(
+            card_id.to_owned(),
+            json!({ "cardType": "site", "elements": [] }),
+        );
+    }
+    cards.insert(
+        "foot-soldier".to_owned(),
+        json!({
+            "attack": 1,
+            "cardType": "minion",
+            "defense": 1,
+            "manaCost": 0,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            "token": true,
+        }),
+    );
+    value["decks"]["north"]["atlas"] = json!(north_atlas);
+    value["decks"]["south"]["atlas"] = json!([
+        "south-site-1",
+        "south-site-2",
+        "south-site-3",
+        "south-site-4",
+    ]);
+    finish_manifest(value)
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one direct proof covers Geomancer creation, private replacement, and deferred Genesis"
+)]
+fn geomancer_should_create_rubble_and_privately_replace_it_with_top_atlas_site() {
+    let ready = |manifest: &str| {
+        let mut session = Session::new(manifest).expect("valid Geomancer scenario");
+        keep(&mut session);
+        keep(&mut session);
+        let origin = state(&session);
+        let avatar_id = origin["players"]["north"]["avatar"]["card"]["instanceId"].clone();
+        let expected_rubble_id = identity_hash(&json!({
+            "cell": "C3",
+            "kind": "rubble",
+            "sourceInstanceId": avatar_id,
+            "stateVersion": origin["stateVersion"],
+        }))
+        .expect("deterministic Rubble identity");
+        let (_, first) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site"
+                && descriptor["cell"] == "C4"
+                && descriptor["createRubbleAt"] == "C3"
+                && descriptor["genesisTokenChoice"] == "decline"
+        });
+        assert_eq!(event_types(&first), ["site-played", "rubble-created"]);
+        assert_eq!(
+            first.events[1].payload,
+            json!({
+                "cell": "C3",
+                "instanceId": expected_rubble_id,
+                "sourceInstanceId": avatar_id,
+            })
+        );
+        assert_eq!(state(&session)["realm"]["sites"]["C3"]["rubble"], true);
+        assert!(first.random_draws.is_empty());
+
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+        });
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+        session
+    };
+
+    let north_atlas = [
+        "rustic-village-1",
+        "rustic-village-2",
+        "rustic-village-3",
+        "rustic-village-4",
+    ];
+    let manifest = geomancer_manifest(104, &north_atlas);
+    let mut session = ready(&manifest);
+    let before = state(&session);
+    let top = before["players"]["north"]["atlas"][0].clone();
+    let replacement = session
+        .legal_actions()
+        .expect("replacement actions")
+        .into_iter()
+        .find(|action| {
+            action.descriptor["kind"] == "replace-rubble-with-top-atlas-site"
+                && action.descriptor["targetCell"] == "C3"
+        })
+        .expect("engine-issued private replacement");
+    assert_eq!(
+        replacement.label,
+        "Replace Rubble at C3 with the top site of your Atlas"
+    );
+    let replacement_json = serde_json::to_string(&replacement).expect("replacement JSON");
+    assert!(!replacement_json.contains(top["cardId"].as_str().expect("top card ID")));
+    assert!(!replacement_json.contains(top["instanceId"].as_str().expect("top instance ID")));
+
+    let mut covered = session.clone();
+    let (_, covered_receipt) = accept_where(&mut covered, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C3"
+            && descriptor["createRubbleAt"] == "B4"
+            && descriptor["genesisTokenChoice"] == "decline"
+    });
+    assert_eq!(
+        event_types(&covered_receipt),
+        ["rubble-replaced", "site-played", "rubble-created"]
+    );
+    assert_eq!(
+        state(&covered)["realm"]["sites"]["C3"]["rubble"],
+        Value::Null
+    );
+    assert_eq!(state(&covered)["realm"]["sites"]["B4"]["rubble"], true);
+    assert_exact_replay(&covered);
+
+    let avatar_id = before["players"]["north"]["avatar"]["card"]["instanceId"].clone();
+    let mut moved = session.clone();
+    let (_, movement) = accept_where(&mut moved, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == avatar_id
+            && descriptor["to"]["cell"] == "C3"
+    });
+    assert_eq!(event_types(&movement), ["move-and-attack-activated"]);
+    assert_eq!(
+        state(&moved)["players"]["north"]["avatar"]["location"],
+        "C3"
+    );
+    accept_where(&mut moved, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
+    assert_exact_replay(&moved);
+
+    let rotated = [
+        "rustic-village-2",
+        "rustic-village-3",
+        "rustic-village-4",
+        "rustic-village-1",
+    ];
+    let hidden_alternative = ready(&geomancer_manifest(104, &rotated));
+    let alternative_top = state(&hidden_alternative)["players"]["north"]["atlas"][0].clone();
+    assert_ne!(alternative_top["cardId"], top["cardId"]);
+    let alternative_replacement = hidden_alternative
+        .legal_actions()
+        .expect("alternative replacement actions")
+        .into_iter()
+        .find(|action| action.descriptor["kind"] == "replace-rubble-with-top-atlas-site")
+        .expect("alternative private replacement");
+    assert_eq!(alternative_replacement.descriptor, replacement.descriptor);
+    assert_eq!(alternative_replacement.action_id, replacement.action_id);
+
+    let StepResult::Accepted(replaced) = session
+        .step(ActionRequest {
+            action_id: replacement.action_id.to_string(),
+            seat: replacement.seat,
+            state_version: replacement.state_version,
+        })
+        .expect("authoritative Rubble replacement")
+    else {
+        panic!("engine-issued Rubble replacement must be accepted");
+    };
+    assert_eq!(event_types(&replaced), ["rubble-replaced", "site-played"]);
+    assert!(replaced.random_draws.is_empty());
+    let replaced_state = state(&session);
+    assert_eq!(replaced_state["phase"], "genesis");
+    assert_eq!(replaced_state["players"]["north"]["avatar"]["tapped"], true);
+    assert_eq!(replaced_state["players"]["north"]["atlas"], json!([]));
+    assert_eq!(
+        replaced_state["players"]["north"]["hand"]["atlas"]
+            .as_array()
+            .map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(
+        replaced_state["realm"]["sites"]["C3"]["instanceId"],
+        top["instanceId"]
+    );
+    assert_eq!(
+        replaced_state["realm"]["sites"]
+            .as_object()
+            .expect("realm sites")
+            .values()
+            .filter(|site| site["rubble"] == true)
+            .count(),
+        0
+    );
+    assert_eq!(
+        replaced_state["pendingGenesisToken"]["sourceInstanceId"],
+        top["instanceId"]
+    );
+
+    let choices = session.legal_actions().expect("deferred Genesis choices");
+    assert_eq!(choices.len(), 2);
+    assert!(
+        choices
+            .iter()
+            .all(|action| action.descriptor["kind"] == "resolve-genesis-token")
+    );
+    let expected_token_id = identity_hash(&json!({
+        "cardId": "foot-soldier",
+        "cell": "C3",
+        "ordinal": 0,
+        "owner": "north",
+        "source": "token",
+        "sourceInstanceId": top["instanceId"],
+        "stateVersion": replaced_state["stateVersion"],
+    }))
+    .expect("deterministic deferred token identity");
+    let (_, paid) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-genesis-token" && descriptor["choice"] == "pay-one-mana"
+    });
+    assert_eq!(event_types(&paid), ["minion-summoned"]);
+    assert!(paid.random_draws.is_empty());
+    let final_state = state(&session);
+    assert_eq!(final_state["phase"], "main");
+    assert_eq!(final_state["pendingGenesisToken"], Value::Null);
+    assert_eq!(final_state["players"]["north"]["mana"], 1);
+    assert_eq!(final_state["realm"]["units"][0]["cardId"], "foot-soldier");
+    assert_eq!(
+        final_state["realm"]["units"][0]["instanceId"],
+        json!(expected_token_id)
+    );
+    assert_exact_replay(&session);
+}

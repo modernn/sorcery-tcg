@@ -136,9 +136,24 @@ pub enum ActionDescriptor {
         card_instance_id: IdentityHash,
         /// Empty realm cell receiving the site.
         cell: Cell,
+        /// Empty cell receiving mandatory Geomancer Rubble, when issued.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        create_rubble_at: Option<Cell>,
         /// Issued branch for a site with optional paid-token Genesis.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         genesis_token_choice: Option<GenesisTokenChoice>,
+    },
+    /// Replace adjacent Rubble with the still-hidden top Atlas site.
+    ReplaceRubbleWithTopAtlasSite {
+        /// Public Rubble cell being replaced.
+        target_cell: Cell,
+        /// Exact public Rubble identity that made the action legal.
+        target_rubble_instance_id: IdentityHash,
+    },
+    /// Resolve a deferred paid-token Genesis after a hidden site is revealed.
+    ResolveGenesisToken {
+        /// Decline or pay for the revealed site's token.
+        choice: GenesisTokenChoice,
     },
     /// Summon a minion from the player's hand.
     SummonMinion {
@@ -254,7 +269,12 @@ impl ActionDescriptor {
                 .to_owned(),
             ),
             Self::EndTurn => Some("End turn".to_owned()),
-            Self::PlaySite { .. } | Self::SummonMinion { .. } => None,
+            Self::ReplaceRubbleWithTopAtlasSite { target_cell, .. } => Some(format!(
+                "Replace Rubble at {target_cell} with the top site of your Atlas"
+            )),
+            Self::PlaySite { .. }
+            | Self::ResolveGenesisToken { .. }
+            | Self::SummonMinion { .. } => None,
         }
     }
 }
@@ -294,17 +314,20 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     card_id: left_card,
                     card_instance_id: left_instance,
                     cell: left_cell,
+                    create_rubble_at: left_rubble,
                     genesis_token_choice: left_choice,
                 },
                 ActionDescriptor::PlaySite {
                     card_id: right_card,
                     card_instance_id: right_instance,
                     cell: right_cell,
+                    create_rubble_at: right_rubble,
                     genesis_token_choice: right_choice,
                 },
             ) => compare_json_strings(left_card, right_card)
                 .then_with(|| left_instance.cmp(right_instance))
                 .then_with(|| left_cell.cmp(right_cell))
+                .then_with(|| compare_optional_cells(*left_rubble, *right_rubble))
                 .then_with(|| compare_optional_genesis_choices(*left_choice, *right_choice)),
             (
                 ActionDescriptor::SummonMinion {
@@ -369,6 +392,22 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                         ActionDescriptor::Draw { zone: left },
                         ActionDescriptor::Draw { zone: right },
                     ) => deck_zone_order(*left).cmp(&deck_zone_order(*right)),
+                    (
+                        ActionDescriptor::ReplaceRubbleWithTopAtlasSite {
+                            target_cell: left_cell,
+                            target_rubble_instance_id: left_id,
+                        },
+                        ActionDescriptor::ReplaceRubbleWithTopAtlasSite {
+                            target_cell: right_cell,
+                            target_rubble_instance_id: right_id,
+                        },
+                    ) => left_cell
+                        .cmp(right_cell)
+                        .then_with(|| left_id.cmp(right_id)),
+                    (
+                        ActionDescriptor::ResolveGenesisToken { choice: left },
+                        ActionDescriptor::ResolveGenesisToken { choice: right },
+                    ) => left.cmp(right),
                     _ => Ordering::Equal,
                 }),
         })
@@ -387,6 +426,15 @@ fn compare_optional_genesis_choices(
     left: Option<GenesisTokenChoice>,
     right: Option<GenesisTokenChoice>,
 ) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => left.cmp(&right),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+fn compare_optional_cells(left: Option<Cell>, right: Option<Cell>) -> Ordering {
     match (left, right) {
         (Some(left), Some(right)) => left.cmp(&right),
         (Some(_), None) => Ordering::Less,
@@ -437,10 +485,12 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::DrawSite => 5,
         ActionDescriptor::DrawSpell => 6,
         ActionDescriptor::EndTurn => 7,
-        ActionDescriptor::Mulligan { .. } => 8,
-        ActionDescriptor::PlaySite { .. } => 9,
-        ActionDescriptor::SummonMinion { .. } => 10,
-        ActionDescriptor::MoveAndAttack { .. } => 11,
+        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 8,
+        ActionDescriptor::ResolveGenesisToken { .. } => 9,
+        ActionDescriptor::Mulligan { .. } => 10,
+        ActionDescriptor::PlaySite { .. } => 11,
+        ActionDescriptor::SummonMinion { .. } => 12,
+        ActionDescriptor::MoveAndAttack { .. } => 13,
     }
 }
 

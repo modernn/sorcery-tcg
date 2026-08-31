@@ -17,6 +17,10 @@ fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
         ActionDescriptor::DrawSite => "draw-site",
         ActionDescriptor::DrawSpell => "draw-spell",
         ActionDescriptor::PlaySite { .. } => "play-site",
+        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => {
+            "replace-rubble-with-top-atlas-site"
+        }
+        ActionDescriptor::ResolveGenesisToken { .. } => "resolve-genesis-token",
         ActionDescriptor::SummonMinion { .. } => "summon-minion",
         ActionDescriptor::MoveAndAttack { .. } => "move-and-attack",
         ActionDescriptor::DeclineAttack => "decline-attack",

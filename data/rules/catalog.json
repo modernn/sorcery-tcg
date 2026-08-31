@@ -1366,15 +1366,15 @@
         "RULE-03"
       ],
       "plainLanguage": "Geomancer creates Rubble and privately replaces it with the top Atlas site.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "rubble"
       ],
       "actionHints": [],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-02/03 Geomancer creates Rubble and privately replaces it with the top Atlas site"
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "geomancer_should_create_rubble_and_privately_replace_it_with_top_atlas_site"
       }
     },
     {

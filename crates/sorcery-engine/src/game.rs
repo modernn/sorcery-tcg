@@ -16,7 +16,7 @@ use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{
     CardFacts, DamagePrevention, Element, EndTurnStealth, FactError, MagicEffect, MinionFacts,
-    MinionGenesis, Thresholds, parse_card_definition, validate_identifier,
+    MinionGenesis, SiteFacts, Thresholds, parse_card_definition, validate_identifier,
 };
 use crate::prng::PrngState;
 
@@ -39,9 +39,11 @@ pub struct Position {
     active_seat: Seat,
     decision_seat: Seat,
     pending_combat: Option<PendingCombat>,
+    pending_genesis_token: GenesisTokenState,
     phase: Phase,
     players: [PlayerPosition; 2],
     prng: PrngState,
+    rubble: [Option<IdentityHash>; 20],
     sites: [Option<SitePosition>; 20],
     state_version: u64,
     terminal: Option<TerminalResult>,
@@ -360,11 +362,26 @@ struct PendingCombat {
     original_target: Option<CombatTarget>,
 }
 
+#[derive(Clone, Debug)]
+struct PendingGenesisToken {
+    cell: Cell,
+    seat: Seat,
+    source_instance_id: IdentityHash,
+}
+
+#[derive(Clone, Debug)]
+enum GenesisTokenState {
+    Absent,
+    Pending(PendingGenesisToken),
+    Resolved,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Phase {
     Attack,
     Defend,
     Draw,
+    Genesis,
     Main,
     Mulligan,
     Terminal,
@@ -376,6 +393,7 @@ impl Phase {
             Self::Attack => "attack",
             Self::Defend => "defend",
             Self::Draw => "draw",
+            Self::Genesis => "genesis",
             Self::Main => "main",
             Self::Mulligan => "mulligan",
             Self::Terminal => "terminal",
@@ -475,6 +493,18 @@ fn token_reference(facts: &CardFacts) -> Option<&str> {
         },
         _ => None,
     }
+}
+
+fn has_immediate_site_genesis_other_than_paid_token(facts: &SiteFacts) -> bool {
+    facts.genesis_discard_top_spells
+        || facts.genesis_draw_spell_per_adjacent_same_card
+        || facts.genesis_enemies_lose_stealth
+        || facts.genesis_gain_mana.is_some()
+        || facts.genesis_gain_mana_if_only_controlled_copy
+        || facts.genesis_heal_nearby_avatars
+        || facts.genesis_immobilize_nearby_until_next_turn
+        || facts.genesis_may_bottom_next_spell
+        || facts.genesis_reorder_next_spells
 }
 
 fn validate_deck(deck: &Deck, cards: &BTreeMap<String, CardFacts>) -> Result<(), GameError> {
@@ -583,9 +613,11 @@ impl Game {
                 active_seat: Seat::North,
                 decision_seat: Seat::North,
                 pending_combat: None,
+                pending_genesis_token: GenesisTokenState::Absent,
                 phase: Phase::Mulligan,
                 players: [north, south],
                 prng,
+                rubble: std::array::from_fn(|_| None),
                 sites: std::array::from_fn(|_| None),
                 state_version: 0,
                 terminal: None,
@@ -692,6 +724,7 @@ impl Game {
             Phase::Attack => self.append_attack_actions(&mut actions)?,
             Phase::Defend => self.append_defend_actions(&mut actions)?,
             Phase::Draw => self.append_draw_actions(&mut actions)?,
+            Phase::Genesis => self.append_genesis_actions(&mut actions)?,
             Phase::Mulligan => self.append_mulligan_actions(&mut actions)?,
             Phase::Main => self.append_main_actions(&mut actions)?,
             Phase::Terminal => {}
@@ -786,6 +819,43 @@ impl Game {
         Ok(())
     }
 
+    fn append_genesis_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
+        let GenesisTokenState::Pending(pending) = &self.position.pending_genesis_token else {
+            return Err(invalid("Genesis phase lacks its pending token choice"));
+        };
+        if pending.seat != self.position.decision_seat {
+            return Err(invalid("Genesis token choice belongs to another seat"));
+        }
+        self.push_action(
+            actions,
+            ActionDescriptor::ResolveGenesisToken {
+                choice: GenesisTokenChoice::Decline,
+            },
+            "Decline the optional Genesis token".to_owned(),
+        );
+        if self.position.players[seat_index(pending.seat)].mana > 0 {
+            let site = self.position.sites[pending.cell.index()]
+                .as_ref()
+                .ok_or_else(|| invalid("pending Genesis token source is missing"))?;
+            let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
+            else {
+                return Err(invalid("pending Genesis token source is not a site"));
+            };
+            let token_card_id = facts
+                .genesis_pay_one_mana_to_summon_token
+                .as_deref()
+                .ok_or_else(|| invalid("pending Genesis site lacks its token fact"))?;
+            self.push_action(
+                actions,
+                ActionDescriptor::ResolveGenesisToken {
+                    choice: GenesisTokenChoice::PayOneMana,
+                },
+                format!("Pay 1 to summon {token_card_id}"),
+            );
+        }
+        Ok(())
+    }
+
     fn append_mulligan_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
         let seat = self.position.decision_seat;
         let player = &self.position.players[seat_index(seat)];
@@ -838,16 +908,22 @@ impl Game {
     fn append_main_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
         let seat = self.position.decision_seat;
         let player = &self.position.players[seat_index(seat)];
+        let CardFacts::Avatar(avatar) =
+            &self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts
+        else {
+            return Err(invalid("player Avatar lacks Avatar facts"));
+        };
         if !player.avatar.tapped {
             let cells = self.legal_site_cells(seat);
             for card in &player.hand_atlas {
                 let definition = &self.rules.cards[usize::from(card.card_id.0)];
                 let card_id = &definition.id;
-                let paid_token = matches!(
-                    &definition.facts,
-                    CardFacts::Site(facts)
-                        if facts.genesis_pay_one_mana_to_summon_token.is_some()
-                );
+                let CardFacts::Site(site_facts) = &definition.facts else {
+                    return Err(invalid("Atlas hand card lacks Site facts"));
+                };
+                let paid_token = site_facts.genesis_pay_one_mana_to_summon_token.is_some();
+                let creates_rubble = avatar.earth_site_play_creates_adjacent_rubble
+                    && site_facts.elements.contains(Element::Earth);
                 let token_choices = if paid_token {
                     [
                         Some(GenesisTokenChoice::Decline),
@@ -857,27 +933,70 @@ impl Game {
                     [None, None]
                 };
                 for cell in &cells {
+                    let rubble_choices: Vec<_> = if creates_rubble {
+                        let candidates: Vec<_> = player
+                            .avatar
+                            .location
+                            .bordering(false)
+                            .filter(|candidate| {
+                                candidate != cell
+                                    && self.position.sites[candidate.index()].is_none()
+                                    && self.position.rubble[candidate.index()].is_none()
+                            })
+                            .map(Some)
+                            .collect();
+                        if candidates.is_empty() {
+                            vec![None]
+                        } else {
+                            candidates
+                        }
+                    } else {
+                        vec![None]
+                    };
                     for genesis_token_choice in
                         token_choices
                             .into_iter()
                             .take(if paid_token { 2 } else { 1 })
                     {
-                        let suffix = match genesis_token_choice {
+                        let token_suffix = match genesis_token_choice {
                             Some(GenesisTokenChoice::Decline) => " (decline Genesis)",
                             Some(GenesisTokenChoice::PayOneMana) => " (pay 1 for Genesis)",
                             None => "",
                         };
-                        self.push_action(
-                            actions,
-                            ActionDescriptor::PlaySite {
-                                card_id: card_id.clone(),
-                                card_instance_id: card.instance_id.clone(),
-                                cell: *cell,
-                                genesis_token_choice,
-                            },
-                            format!("Play {card_id} at {cell}{suffix}"),
-                        );
+                        for create_rubble_at in &rubble_choices {
+                            let rubble_suffix = create_rubble_at.map_or_else(String::new, |cell| {
+                                format!(" — create Rubble at {cell}")
+                            });
+                            self.push_action(
+                                actions,
+                                ActionDescriptor::PlaySite {
+                                    card_id: card_id.clone(),
+                                    card_instance_id: card.instance_id.clone(),
+                                    cell: *cell,
+                                    create_rubble_at: *create_rubble_at,
+                                    genesis_token_choice,
+                                },
+                                format!("Play {card_id} at {cell}{token_suffix}{rubble_suffix}"),
+                            );
+                        }
                     }
+                }
+            }
+            if avatar.replace_adjacent_rubble_with_top_atlas_site && !player.atlas.is_empty() {
+                for target_cell in player.avatar.location.bordering(false) {
+                    let Some(target_rubble_instance_id) =
+                        self.position.rubble[target_cell.index()].as_ref()
+                    else {
+                        continue;
+                    };
+                    let descriptor = ActionDescriptor::ReplaceRubbleWithTopAtlasSite {
+                        target_cell,
+                        target_rubble_instance_id: target_rubble_instance_id.clone(),
+                    };
+                    let label = descriptor
+                        .state_independent_label()
+                        .ok_or_else(|| invalid("Rubble replacement requires a label"))?;
+                    self.push_action(actions, descriptor, label);
                 }
             }
         }
@@ -957,11 +1076,6 @@ impl Game {
                 .state_independent_label()
                 .ok_or_else(|| invalid("draw-site action requires a label"))?;
             self.push_action(actions, descriptor, label);
-            let CardFacts::Avatar(avatar) =
-                &self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts
-            else {
-                return Err(invalid("player Avatar lacks Avatar facts"));
-            };
             if avatar.draw_spell {
                 let descriptor = ActionDescriptor::DrawSpell;
                 let label = descriptor
@@ -1009,7 +1123,7 @@ impl Game {
         for destination in std::iter::once(start).chain(
             start
                 .bordering(connects_top_bottom)
-                .filter(|cell| self.position.sites[cell.index()].is_some()),
+                .filter(|cell| self.surface_location_exists(*cell)),
         ) {
             let to = Location {
                 cell: destination,
@@ -1043,6 +1157,10 @@ impl Game {
                     .is_some_and(|site| site.controller == seat)
                     .then_some(Cell::ALL[index])
             })
+    }
+
+    fn surface_location_exists(&self, cell: Cell) -> bool {
+        self.position.sites[cell.index()].is_some() || self.position.rubble[cell.index()].is_some()
     }
 
     fn minion_can_move_and_attack(&self, unit: &UnitPosition, seat: Seat) -> bool {
@@ -1168,7 +1286,8 @@ impl Game {
     fn legal_site_cells(&self, seat: Seat) -> Vec<Cell> {
         let player = &self.position.players[seat_index(seat)];
         if !player.domain_established {
-            return (self.position.sites[player.avatar.location.index()].is_none())
+            return self.position.sites[player.avatar.location.index()]
+                .is_none()
                 .then_some(player.avatar.location)
                 .into_iter()
                 .collect();
@@ -1233,19 +1352,19 @@ impl Game {
                 atlas_order,
                 spellbook_order,
             } => self.apply_mulligan_action(action.seat, atlas_order, spellbook_order, outcomes),
-            ActionDescriptor::PlaySite {
-                card_id,
-                card_instance_id,
-                cell,
-                genesis_token_choice,
-            } => self.apply_play_site_action(
+            ActionDescriptor::PlaySite { .. } => self.apply_play_site_action(action, outcomes),
+            ActionDescriptor::ReplaceRubbleWithTopAtlasSite {
+                target_cell,
+                target_rubble_instance_id,
+            } => self.apply_replace_rubble_action(
                 action.seat,
-                card_id,
-                card_instance_id,
-                *cell,
-                *genesis_token_choice,
+                *target_cell,
+                target_rubble_instance_id,
                 outcomes,
             ),
+            ActionDescriptor::ResolveGenesisToken { choice } => {
+                self.apply_resolve_genesis_token(action.seat, *choice, outcomes)
+            }
             ActionDescriptor::SummonMinion { .. } => {
                 self.apply_summon_minion_action(action, outcomes)
             }
@@ -1944,7 +2063,7 @@ impl Game {
             || !(1..=2).contains(&path.len())
             || path.first() != Some(&from)
             || path.last() != Some(&to)
-            || self.position.sites[to.cell.index()].is_none()
+            || !self.surface_location_exists(to.cell)
             || (path.len() == 1 && from != to)
         {
             return Err(GameError::IllegalAction);
@@ -2079,13 +2198,23 @@ impl Game {
     )]
     fn apply_play_site_action(
         &mut self,
-        seat: Seat,
-        card_id: &str,
-        card_instance_id: &IdentityHash,
-        cell: Cell,
-        genesis_token_choice: Option<GenesisTokenChoice>,
+        action: &IssuedAction,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        let ActionDescriptor::PlaySite {
+            card_id,
+            card_instance_id,
+            cell,
+            create_rubble_at,
+            genesis_token_choice,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let seat = action.seat;
+        let cell = *cell;
+        let create_rubble_at = *create_rubble_at;
+        let genesis_token_choice = *genesis_token_choice;
         let origin_state_version = self.position.state_version;
         let player_index = seat_index(seat);
         let player = &self.position.players[player_index];
@@ -2100,7 +2229,7 @@ impl Game {
             .iter()
             .position(|card| {
                 card.instance_id == *card_instance_id
-                    && self.rules.cards[usize::from(card.card_id.0)].id == card_id
+                    && self.rules.cards[usize::from(card.card_id.0)].id == card_id.as_str()
             })
             .ok_or(GameError::IllegalAction)?;
         let played_card_id = player.hand_atlas[hand_index].card_id;
@@ -2108,6 +2237,45 @@ impl Game {
         let CardFacts::Site(facts) = &definition.facts else {
             return Err(GameError::IllegalAction);
         };
+        let CardFacts::Avatar(avatar_facts) =
+            &self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let rubble_candidates: Vec<_> = if avatar_facts.earth_site_play_creates_adjacent_rubble
+            && facts.elements.contains(Element::Earth)
+        {
+            player
+                .avatar
+                .location
+                .bordering(false)
+                .filter(|candidate| {
+                    *candidate != cell
+                        && self.position.sites[candidate.index()].is_none()
+                        && self.position.rubble[candidate.index()].is_none()
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if if rubble_candidates.is_empty() {
+            create_rubble_at.is_some()
+        } else {
+            !create_rubble_at.is_some_and(|cell| rubble_candidates.contains(&cell))
+        } {
+            return Err(GameError::IllegalAction);
+        }
+        let rubble = create_rubble_at
+            .map(|rubble_cell| {
+                identity_hash(&json!({
+                    "cell": rubble_cell,
+                    "kind": "rubble",
+                    "sourceInstanceId": player.avatar.card.instance_id,
+                    "stateVersion": origin_state_version,
+                }))
+            })
+            .transpose()?;
+        let avatar_instance_id = player.avatar.card.instance_id.clone();
         let genesis_token_card_id = facts.genesis_pay_one_mana_to_summon_token.clone();
         match (&genesis_token_card_id, genesis_token_choice) {
             (Some(_), Some(GenesisTokenChoice::Decline | GenesisTokenChoice::PayOneMana))
@@ -2164,6 +2332,7 @@ impl Game {
         let card = self.position.players[player_index]
             .hand_atlas
             .remove(hand_index);
+        let replaced_rubble = self.position.rubble[cell.index()].take();
         let player = &mut self.position.players[player_index];
         player.avatar.tapped = true;
         player.domain_established = true;
@@ -2173,6 +2342,15 @@ impl Game {
             controller: seat,
         });
         self.position.state_version += 1;
+        if let Some(rubble_instance_id) = replaced_rubble {
+            outcomes.push("rubble-replaced", || {
+                json!({
+                    "cell": cell,
+                    "instanceId": rubble_instance_id,
+                    "targetSiteInstanceId": card_instance_id,
+                })
+            });
+        }
         outcomes.push("site-played", || {
             json!({
                 "cardId": card_id,
@@ -2272,6 +2450,18 @@ impl Game {
                 });
             }
         }
+        if self.position.terminal.is_none()
+            && let (Some(rubble_cell), Some(rubble_instance_id)) = (create_rubble_at, rubble)
+        {
+            self.position.rubble[rubble_cell.index()] = Some(rubble_instance_id.clone());
+            outcomes.push("rubble-created", || {
+                json!({
+                    "cell": rubble_cell,
+                    "instanceId": rubble_instance_id,
+                    "sourceInstanceId": avatar_instance_id,
+                })
+            });
+        }
         Ok(())
     }
 
@@ -2329,6 +2519,156 @@ impl Game {
             tapped: false,
             warded: matches!(facts.damage_prevention, Some(DamagePrevention::Ward)),
         })
+    }
+
+    fn apply_replace_rubble_action(
+        &mut self,
+        seat: Seat,
+        target_cell: Cell,
+        target_rubble_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let player_index = seat_index(seat);
+        let player = &self.position.players[player_index];
+        let CardFacts::Avatar(avatar_facts) =
+            &self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        if self.position.phase != Phase::Main
+            || !avatar_facts.replace_adjacent_rubble_with_top_atlas_site
+            || player.avatar.tapped
+            || !player
+                .avatar
+                .location
+                .bordering(false)
+                .any(|cell| cell == target_cell)
+            || self.position.rubble[target_cell.index()].as_ref() != Some(target_rubble_instance_id)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let top = player.atlas.first().ok_or(GameError::IllegalAction)?;
+        let definition = &self.rules.cards[usize::from(top.card_id.0)];
+        let CardFacts::Site(facts) = &definition.facts else {
+            return Err(GameError::IllegalAction);
+        };
+        if has_immediate_site_genesis_other_than_paid_token(facts) {
+            return Err(GameError::UnsupportedManifestFact(
+                "site Genesis after Rubble replacement".to_owned(),
+            ));
+        }
+        let pending_token = facts
+            .genesis_pay_one_mana_to_summon_token
+            .as_ref()
+            .map(|_| top.instance_id.clone());
+        let next_mana = player.mana.checked_add(1).ok_or(GameError::IllegalAction)?;
+        let card = self.position.players[player_index].atlas.remove(0);
+        let card_id = self.rules.cards[usize::from(card.card_id.0)].id.clone();
+        let card_instance_id = card.instance_id.clone();
+        let player = &mut self.position.players[player_index];
+        player.avatar.tapped = true;
+        player.domain_established = true;
+        player.mana = next_mana;
+        self.position.rubble[target_cell.index()] = None;
+        self.position.sites[target_cell.index()] = Some(SitePosition {
+            card,
+            controller: seat,
+        });
+        if let Some(source_instance_id) = pending_token {
+            self.position.pending_genesis_token = GenesisTokenState::Pending(PendingGenesisToken {
+                cell: target_cell,
+                seat,
+                source_instance_id,
+            });
+            self.position.phase = Phase::Genesis;
+        }
+        self.position.state_version += 1;
+        outcomes.push("rubble-replaced", || {
+            json!({
+                "cell": target_cell,
+                "instanceId": target_rubble_instance_id,
+                "targetSiteInstanceId": card_instance_id,
+            })
+        });
+        outcomes.push("site-played", || {
+            json!({
+                "cardId": card_id,
+                "cell": target_cell,
+                "instanceId": card_instance_id,
+                "seat": seat,
+            })
+        });
+        Ok(())
+    }
+
+    fn apply_resolve_genesis_token(
+        &mut self,
+        seat: Seat,
+        choice: GenesisTokenChoice,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let GenesisTokenState::Pending(pending) = &self.position.pending_genesis_token else {
+            return Err(GameError::IllegalAction);
+        };
+        if self.position.phase != Phase::Genesis || pending.seat != seat {
+            return Err(GameError::IllegalAction);
+        }
+        let site = self.position.sites[pending.cell.index()]
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        if site.card.instance_id != pending.source_instance_id {
+            return Err(GameError::IllegalAction);
+        }
+        let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let token_card_id = facts
+            .genesis_pay_one_mana_to_summon_token
+            .as_deref()
+            .ok_or(GameError::IllegalAction)?;
+        let paid = choice == GenesisTokenChoice::PayOneMana;
+        if paid && self.position.players[seat_index(seat)].mana == 0 {
+            return Err(GameError::IllegalAction);
+        }
+        let token = paid
+            .then(|| {
+                self.create_token_unit(
+                    seat,
+                    token_card_id,
+                    &pending.source_instance_id,
+                    pending.cell,
+                    self.position.state_version,
+                )
+            })
+            .transpose()?;
+        let cell = pending.cell;
+        let source_instance_id = pending.source_instance_id.clone();
+        self.position.pending_genesis_token = GenesisTokenState::Resolved;
+        self.position.phase = Phase::Main;
+        if let Some(token) = token {
+            self.position.players[seat_index(seat)].mana -= 1;
+            let card_id = self.rules.cards[usize::from(token.card.card_id.0)]
+                .id
+                .clone();
+            let instance_id = token.card.instance_id.clone();
+            let owner = token.card.owner;
+            self.position.units.push(token);
+            outcomes.push("minion-summoned", || {
+                json!({
+                    "cardId": card_id,
+                    "cell": cell,
+                    "instanceId": instance_id,
+                    "manaPaid": 1,
+                    "owner": owner,
+                    "seat": seat,
+                    "sourceInstanceId": source_instance_id,
+                    "token": true,
+                })
+            });
+        }
+        self.position.state_version += 1;
+        Ok(())
     }
 
     fn apply_mana_activation(
@@ -2680,9 +3020,23 @@ impl Game {
         let sites: Map<_, _> = Cell::ALL
             .into_iter()
             .filter_map(|cell| {
-                self.position.sites[cell.index()]
-                    .as_ref()
-                    .map(|site| (cell.to_string(), self.site_value(site)))
+                self.position.sites[cell.index()].as_ref().map_or_else(
+                    || {
+                        self.position.rubble[cell.index()]
+                            .as_ref()
+                            .map(|instance_id| {
+                                (
+                                    cell.to_string(),
+                                    json!({
+                                        "controller": Value::Null,
+                                        "instanceId": instance_id,
+                                        "rubble": true,
+                                    }),
+                                )
+                            })
+                    },
+                    |site| Some((cell.to_string(), self.site_value(site))),
+                )
             })
             .collect();
         let units: Vec<_> = self
@@ -2696,7 +3050,7 @@ impl Game {
             .pending_combat
             .as_ref()
             .map_or(Value::Null, Self::pending_combat_value);
-        json!({
+        let mut value = json!({
             "activeSeat": self.position.active_seat,
             "cards": cards,
             "decisionSeat": self.position.decision_seat,
@@ -2716,7 +3070,26 @@ impl Game {
             "stateVersion": self.position.state_version,
             "terminal": self.terminal_value(),
             "turnNumber": self.position.turn_number,
-        })
+        });
+        if let Value::Object(object) = &mut value {
+            match &self.position.pending_genesis_token {
+                GenesisTokenState::Absent => {}
+                GenesisTokenState::Pending(pending) => {
+                    object.insert(
+                        "pendingGenesisToken".to_owned(),
+                        json!({
+                            "cell": pending.cell,
+                            "seat": pending.seat,
+                            "sourceInstanceId": pending.source_instance_id,
+                        }),
+                    );
+                }
+                GenesisTokenState::Resolved => {
+                    object.insert("pendingGenesisToken".to_owned(), Value::Null);
+                }
+            }
+        }
+        value
     }
 
     /// Hashes the materialized authoritative state.
