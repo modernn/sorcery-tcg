@@ -81,7 +81,7 @@ function lessons(
   return selected as readonly PrivateStarterPreset[];
 }
 
-async function outputPath(revisionId: string): Promise<string> {
+async function outputPath(revisionId: string, outputId: string): Promise<string> {
   const authorityRoot = resolve(REPOSITORY_ROOT, '.local', 'authority');
   const outputDirectory = resolve(authorityRoot, 'reports', revisionId);
   await mkdir(outputDirectory, { recursive: true });
@@ -89,7 +89,7 @@ async function outputPath(revisionId: string): Promise<string> {
     authorityRoot,
     `reports/${revisionId}`,
   );
-  const path = resolve(confinedDirectory, 'novelty-gauntlet.json');
+  const path = resolve(confinedDirectory, `${outputId}.json`);
   try {
     if ((await lstat(path)).isSymbolicLink()) {
       throw new Error('private novelty gauntlet output path may not be a symbolic link or junction');
@@ -102,10 +102,11 @@ async function outputPath(revisionId: string): Promise<string> {
 
 async function saveCheckpoints(
   revisionId: string,
+  outputId: string,
   checkpoints: ReadonlyMap<string, GameCheckpoint>,
 ): Promise<number> {
   const authorityRoot = resolve(REPOSITORY_ROOT, '.local', 'authority');
-  const relativeDirectory = `checkpoints/${revisionId}/novelty-gauntlet`;
+  const relativeDirectory = `checkpoints/${revisionId}/${outputId}`;
   await mkdir(resolve(authorityRoot, relativeDirectory), { recursive: true });
   const directory = await resolveWithinAuthorityRoot(authorityRoot, relativeDirectory);
   for (const [checkpointId, checkpoint] of [...checkpoints.entries()]
@@ -128,6 +129,7 @@ async function saveCheckpoints(
 export async function runPrivateNoveltyGauntlet(
   scenarioPath = DEFAULT_SCENARIO,
   maxActions = NOVELTY_ROLLOUT_ACTION_LIMIT,
+  outputId = 'novelty-gauntlet',
 ): Promise<Readonly<{ outputPath: string; report: PrivateNoveltyGauntletReport }>> {
   if (!Number.isSafeInteger(maxActions) || maxActions < 0
     || maxActions > NOVELTY_ROLLOUT_ACTION_LIMIT) {
@@ -135,8 +137,8 @@ export async function runPrivateNoveltyGauntlet(
   }
   const selected = lessons(await loadPrivateStarterCatalog(scenarioPath));
   const revisionId = selected[0]!.manifest.authority.revisionId;
-  if (!REVISION_PATTERN.test(revisionId)) {
-    throw new TypeError('private novelty revisionId must be one confined path segment');
+  if (!REVISION_PATTERN.test(revisionId) || !REVISION_PATTERN.test(outputId)) {
+    throw new TypeError('private novelty revisionId and outputId must be confined path segments');
   }
   if (selected.some(({ manifest }) => manifest.authority.revisionId !== revisionId)) {
     throw new Error('private novelty lesson manifests must use one authority revision');
@@ -181,7 +183,7 @@ export async function runPrivateNoveltyGauntlet(
     }
   }
 
-  const savedCheckpoints = await saveCheckpoints(revisionId, checkpoints);
+  const savedCheckpoints = await saveCheckpoints(revisionId, outputId, checkpoints);
   const report: PrivateNoveltyGauntletReport = deepFreeze({
     classification: 'authority-private' as const,
     jobs,
@@ -195,7 +197,7 @@ export async function runPrivateNoveltyGauntlet(
       savedCheckpoints,
     },
   });
-  const destination = await outputPath(revisionId);
+  const destination = await outputPath(revisionId, outputId);
   await writeFile(destination, `${canonicalJson(report as unknown as JsonValue)}\n`, 'utf8');
   return { outputPath: destination, report };
 }

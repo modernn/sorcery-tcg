@@ -17,6 +17,7 @@ import { loadPrivateStarterCatalog } from '../../src/commands/run-private-game-c
 import { runBounded } from '../helpers/bounded-process.ts';
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
+const TEST_OUTPUT_ID = 'novelty-gauntlet-test';
 
 test('private novelty gauntlet runs both actual lessons and seat swaps without leaking card data', async () => {
   let networkCalls = 0;
@@ -28,8 +29,8 @@ test('private novelty gauntlet runs both actual lessons and seat swaps without l
   try {
     const lessons = (await loadPrivateStarterCatalog())
       .filter(({ id }) => id.endsWith('-lesson'));
-    const first = await runPrivateNoveltyGauntlet(undefined, 1);
-    const second = await runPrivateNoveltyGauntlet(undefined, 1);
+    const first = await runPrivateNoveltyGauntlet(undefined, 1, TEST_OUTPUT_ID);
+    const second = await runPrivateNoveltyGauntlet(undefined, 1, TEST_OUTPUT_ID);
 
     assert.equal(networkCalls, 0);
     assert.equal(
@@ -95,7 +96,7 @@ test('private novelty gauntlet runs both actual lessons and seat swaps without l
     const relativeOutput = relative(REPOSITORY_ROOT, first.outputPath).replaceAll('\\', '/');
     assert.equal(
       relativeOutput,
-      `.local/authority/reports/${lessons[0]!.manifest.authority.revisionId}/novelty-gauntlet.json`,
+      `.local/authority/reports/${lessons[0]!.manifest.authority.revisionId}/${TEST_OUTPUT_ID}.json`,
     );
     const ignored = await runBounded('git', ['check-ignore', '--quiet', relativeOutput], REPOSITORY_ROOT);
     assert.equal(ignored.code, 0, ignored.stderr);
@@ -106,7 +107,7 @@ test('private novelty gauntlet runs both actual lessons and seat swaps without l
       'authority',
       'checkpoints',
       lessons[0]!.manifest.authority.revisionId,
-      'novelty-gauntlet',
+      TEST_OUTPUT_ID,
     );
     const checkpointFiles = await readdir(checkpointDirectory);
     assert.equal(checkpointFiles.length >= first.report.totals.savedCheckpoints, true);
