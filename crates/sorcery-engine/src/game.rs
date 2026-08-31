@@ -12,7 +12,10 @@ use crate::action::ActionDescriptor;
 use crate::board::Cell;
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
-use crate::facts::{CardFacts, FactError, MagicEffect, parse_card_definition, validate_identifier};
+use crate::facts::{
+    CardFacts, Element, FactError, MagicEffect, Thresholds, parse_card_definition,
+    validate_identifier,
+};
 use crate::prng::PrngState;
 
 const ENGINE_VERSION: &str = "sorcery-core-v1";
@@ -39,6 +42,7 @@ pub struct Position {
     sites: [Option<SitePosition>; 20],
     state_version: u64,
     turn_number: u64,
+    units: Vec<UnitPosition>,
 }
 
 /// A game with immutable rules and independently cloneable dynamic state.
@@ -249,6 +253,7 @@ struct CardInstance {
 #[derive(Clone, Debug)]
 struct AvatarPosition {
     card: CardInstance,
+    last_interacted_turn: Option<u64>,
     life: u16,
     location: Cell,
     tapped: bool,
@@ -271,6 +276,22 @@ struct PlayerPosition {
 struct SitePosition {
     card: CardInstance,
     controller: Seat,
+}
+
+#[derive(Clone, Debug)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "named dynamic flags preserve distinct authoritative unit state"
+)]
+struct UnitPosition {
+    card: CardInstance,
+    controller: Seat,
+    damage: u8,
+    location: Cell,
+    stealthed: bool,
+    summoning_sickness: bool,
+    tapped: bool,
+    warded: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -420,6 +441,7 @@ impl Game {
                 sites: std::array::from_fn(|_| None),
                 state_version: 0,
                 turn_number: 0,
+                units: Vec::new(),
             },
         })
     }
@@ -518,26 +540,88 @@ impl Game {
     }
 
     fn append_main_actions(&self, actions: &mut Vec<OrderedAction>) -> Result<(), GameError> {
-        let player = &self.position.players[seat_index(self.position.decision_seat)];
-        if player.avatar.tapped {
-            return Ok(());
-        }
-        let cells = self.legal_site_cells(self.position.decision_seat);
-        for card in &player.hand_atlas {
-            let card_id = &self.rules.cards[usize::from(card.card_id.0)].id;
-            for cell in &cells {
-                self.push_action(
-                    actions,
-                    ActionDescriptor::PlaySite {
-                        card_id: card_id.clone(),
-                        card_instance_id: card.instance_id.clone(),
-                        cell: *cell,
-                    },
-                    format!("Play {card_id} at {cell}"),
-                )?;
+        let seat = self.position.decision_seat;
+        let player = &self.position.players[seat_index(seat)];
+        if !player.avatar.tapped {
+            let cells = self.legal_site_cells(seat);
+            for card in &player.hand_atlas {
+                let card_id = &self.rules.cards[usize::from(card.card_id.0)].id;
+                for cell in &cells {
+                    self.push_action(
+                        actions,
+                        ActionDescriptor::PlaySite {
+                            card_id: card_id.clone(),
+                            card_instance_id: card.instance_id.clone(),
+                            cell: *cell,
+                        },
+                        format!("Play {card_id} at {cell}"),
+                    )?;
+                }
             }
         }
+        if !player.domain_established {
+            return Ok(());
+        }
+        let caster_cell = player.avatar.location;
+        if self.position.sites[caster_cell.index()]
+            .as_ref()
+            .is_some_and(|site| site.controller == seat)
+        {
+            for card in &player.hand_spellbook {
+                let definition = &self.rules.cards[usize::from(card.card_id.0)];
+                let CardFacts::Minion(facts) = &definition.facts else {
+                    continue;
+                };
+                if facts.mana_cost <= u64::from(player.mana)
+                    && self.thresholds_met(seat, facts.thresholds)
+                {
+                    self.push_action(
+                        actions,
+                        ActionDescriptor::SummonMinion {
+                            card_id: definition.id.clone(),
+                            card_instance_id: card.instance_id.clone(),
+                            caster_instance_id: player.avatar.card.instance_id.clone(),
+                            cell: caster_cell,
+                            mana_cost: facts.mana_cost,
+                        },
+                        format!(
+                            "Summon {} at {} ({} mana)",
+                            definition.id, caster_cell, facts.mana_cost
+                        ),
+                    )?;
+                }
+            }
+        }
+        self.push_action(actions, ActionDescriptor::EndTurn, "End turn".to_owned())?;
         Ok(())
+    }
+
+    fn thresholds_met(&self, seat: Seat, thresholds: Thresholds) -> bool {
+        let mut affinities = [0_u64; 4];
+        for site in self
+            .position
+            .sites
+            .iter()
+            .flatten()
+            .filter(|site| site.controller == seat)
+        {
+            let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
+            else {
+                continue;
+            };
+            for element in facts.elements.iter() {
+                affinities[match element {
+                    Element::Earth => 0,
+                    Element::Fire => 1,
+                    Element::Water => 2,
+                    Element::Air => 3,
+                }] += 1;
+            }
+        }
+        affinities
+            .into_iter()
+            .zip(thresholds.canonical())
+            .all(|(available, required)| available >= required)
     }
 
     fn push_action(
@@ -615,6 +699,20 @@ impl Game {
                 card_instance_id,
                 cell,
             } => self.apply_play_site_action(action.seat, card_id, card_instance_id, *cell),
+            ActionDescriptor::SummonMinion {
+                card_id,
+                card_instance_id,
+                caster_instance_id,
+                cell,
+                mana_cost,
+            } => self.apply_summon_minion_action(
+                action.seat,
+                card_id,
+                card_instance_id,
+                caster_instance_id,
+                *cell,
+                *mana_cost,
+            ),
             _ => Err(GameError::IllegalAction),
         }
     }
@@ -711,6 +809,77 @@ impl Game {
         )])
     }
 
+    fn apply_summon_minion_action(
+        &mut self,
+        seat: Seat,
+        card_id: &str,
+        card_instance_id: &IdentityHash,
+        caster_instance_id: &IdentityHash,
+        cell: Cell,
+        mana_cost: u64,
+    ) -> Result<Vec<(String, Value)>, GameError> {
+        let player_index = seat_index(seat);
+        let player = &self.position.players[player_index];
+        if self.position.phase != Phase::Main
+            || !player.domain_established
+            || player.avatar.card.instance_id != *caster_instance_id
+            || player.avatar.location != cell
+            || !self.position.sites[cell.index()]
+                .as_ref()
+                .is_some_and(|site| site.controller == seat)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let hand_index = player
+            .hand_spellbook
+            .iter()
+            .position(|card| {
+                card.instance_id == *card_instance_id
+                    && self.rules.cards[usize::from(card.card_id.0)].id == card_id
+            })
+            .ok_or(GameError::IllegalAction)?;
+        let definition =
+            &self.rules.cards[usize::from(player.hand_spellbook[hand_index].card_id.0)];
+        let CardFacts::Minion(facts) = &definition.facts else {
+            return Err(GameError::IllegalAction);
+        };
+        if facts.mana_cost != mana_cost
+            || mana_cost > u64::from(player.mana)
+            || !self.thresholds_met(seat, facts.thresholds)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let paid_mana = u16::try_from(mana_cost).map_err(|_| GameError::IllegalAction)?;
+        let card = self.position.players[player_index]
+            .hand_spellbook
+            .remove(hand_index);
+        let player = &mut self.position.players[player_index];
+        player.mana -= paid_mana;
+        player.avatar.last_interacted_turn = Some(self.position.turn_number);
+        self.position.units.push(UnitPosition {
+            card,
+            controller: seat,
+            damage: 0,
+            location: cell,
+            stealthed: false,
+            summoning_sickness: true,
+            tapped: false,
+            warded: false,
+        });
+        self.position.state_version += 1;
+        Ok(vec![(
+            "minion-summoned".to_owned(),
+            json!({
+                "cardId": card_id,
+                "casterInstanceId": caster_instance_id,
+                "cell": cell,
+                "instanceId": card_instance_id,
+                "manaPaid": mana_cost,
+                "seat": seat,
+            }),
+        )])
+    }
+
     /// Materializes the authoritative JSON state used for receipts and replay.
     #[must_use]
     pub fn authoritative_state(&self) -> Value {
@@ -728,6 +897,12 @@ impl Game {
                     .map(|site| (cell.to_string(), self.site_value(site)))
             })
             .collect();
+        let units: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .map(|unit| self.unit_value(unit))
+            .collect();
         json!({
             "activeSeat": self.position.active_seat,
             "cards": cards,
@@ -743,7 +918,7 @@ impl Game {
                 "north": self.player_value(&self.position.players[0]),
                 "south": self.player_value(&self.position.players[1]),
             },
-            "realm": { "sites": sites, "units": [] },
+            "realm": { "sites": sites, "units": units },
             "schemaVersion": 1,
             "stateVersion": self.position.state_version,
             "terminal": { "status": "active" },
@@ -786,6 +961,12 @@ impl Game {
         {
             object.insert("airThresholdsCastThisTurn".to_owned(), json!(count));
         }
+        if let (Some(turn), Some(avatar)) = (
+            player.avatar.last_interacted_turn,
+            value.get_mut("avatar").and_then(Value::as_object_mut),
+        ) {
+            avatar.insert("lastInteractedTurn".to_owned(), json!(turn));
+        }
         value
     }
 
@@ -805,6 +986,27 @@ impl Game {
     fn site_value(&self, site: &SitePosition) -> Value {
         let mut value = self.card_value(&site.card);
         value["controller"] = json!(site.controller);
+        value
+    }
+
+    fn unit_value(&self, unit: &UnitPosition) -> Value {
+        let mut value = self.card_value(&unit.card);
+        let Value::Object(object) = &mut value else {
+            return value;
+        };
+        object.extend([
+            ("controller".to_owned(), json!(unit.controller)),
+            ("damage".to_owned(), json!(unit.damage)),
+            ("location".to_owned(), json!(unit.location)),
+            ("region".to_owned(), json!("surface")),
+            ("stealthed".to_owned(), json!(unit.stealthed)),
+            (
+                "summoningSickness".to_owned(),
+                json!(unit.summoning_sickness),
+            ),
+            ("tapped".to_owned(), json!(unit.tapped)),
+            ("warded".to_owned(), json!(unit.warded)),
+        ]);
         value
     }
 }
@@ -984,6 +1186,7 @@ fn create_player(
     };
     let avatar = AvatarPosition {
         card: card_instance(rules, avatar_card_id, seat, CardSource::Avatar, 0)?,
+        last_interacted_turn: None,
         life: u16::from(avatar_facts.life),
         location: Cell::parse(if seat == Seat::North { "C4" } else { "C1" })
             .map_err(|_| invalid("avatar start cell must be valid"))?,

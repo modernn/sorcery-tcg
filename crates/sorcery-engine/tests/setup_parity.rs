@@ -129,6 +129,24 @@ fn setup_and_mulligans_should_match_typescript_seed_31() {
         game.state_hash().expect("site post-state hash").as_str(),
         fixture.steps[2].post_state_hash
     );
+    let summon_actions = game.legal_actions().expect("post-site main actions");
+    assert_eq!(
+        summon_actions
+            .iter()
+            .map(|action| action.action_id().as_str())
+            .collect::<Vec<_>>(),
+        fixture.steps[3].legal_action_ids
+    );
+    let summon_action = summon_actions
+        .iter()
+        .find(|action| action.action_id().as_str() == fixture.steps[3].selected_action_id)
+        .expect("fixture summon action");
+    game.apply_action(summon_action)
+        .expect("apply first summon");
+    assert_eq!(
+        game.state_hash().expect("summon post-state hash").as_str(),
+        fixture.steps[3].post_state_hash
+    );
 }
 
 #[test]

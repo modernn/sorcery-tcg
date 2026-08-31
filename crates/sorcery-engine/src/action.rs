@@ -116,7 +116,7 @@ pub enum ActionDescriptor {
         /// Realm cell receiving the minion.
         cell: Cell,
         /// Mana paid for the summon.
-        mana_cost: u32,
+        mana_cost: u64,
     },
     /// Tap a unit and follow an issued movement path before choosing an attack.
     MoveAndAttack {
