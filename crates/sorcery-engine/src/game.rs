@@ -254,6 +254,7 @@ struct CardInstance {
 #[derive(Clone, Debug)]
 struct AvatarPosition {
     card: CardInstance,
+    death_door_turn: Option<u64>,
     last_interacted_turn: Option<u64>,
     life: u16,
     location: Cell,
@@ -289,6 +290,7 @@ struct UnitPosition {
     card: CardInstance,
     controller: Seat,
     damage: u8,
+    last_interacted_turn: Option<u64>,
     location: Cell,
     stealthed: bool,
     summoning_sickness: bool,
@@ -1012,13 +1014,6 @@ impl Game {
         {
             return Err(GameError::IllegalAction);
         }
-        if !matches!(target, CombatTarget::Minion { .. })
-            || pending.attacker_kind != UnitKind::Minion
-        {
-            return Err(GameError::UnsupportedManifestFact(
-                "site and avatar combat resolution".to_owned(),
-            ));
-        }
         let mut outcomes = vec![(
             "defend-window-closed".to_owned(),
             json!({
@@ -1026,9 +1021,150 @@ impl Game {
                 "originalTargetParticipates": original_target_participates,
             }),
         )];
-        outcomes.extend(self.resolve_simple_minion_fight()?);
+        match target {
+            CombatTarget::Site { .. } => outcomes.extend(self.resolve_undefended_site_strike()?),
+            CombatTarget::Minion { .. } if pending.attacker_kind == UnitKind::Minion => {
+                outcomes.extend(self.resolve_simple_minion_fight()?);
+            }
+            CombatTarget::Avatar { .. } | CombatTarget::Minion { .. } => {
+                return Err(GameError::UnsupportedManifestFact(
+                    "avatar combat resolution".to_owned(),
+                ));
+            }
+        }
         self.position.state_version += 1;
         Ok(outcomes)
+    }
+
+    fn resolve_undefended_site_strike(&mut self) -> Result<Vec<(String, Value)>, GameError> {
+        let pending = self
+            .position
+            .pending_combat
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        let CombatTarget::Site {
+            instance_id: site_instance_id,
+            seat: target_seat,
+        } = pending
+            .original_target
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let attacker_id = pending.attacker_instance_id.clone();
+        let attacker_kind = pending.attacker_kind;
+        let attacking_seat = pending.attacking_seat;
+        let cell = pending.cell;
+        let site_instance_id = site_instance_id.clone();
+        let target_seat = *target_seat;
+        let site = self.position.sites[cell.index()]
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        if site.card.instance_id != site_instance_id || site.controller != target_seat {
+            return Err(GameError::IllegalAction);
+        }
+        let attack = self.attacker_power(attacker_kind, attacking_seat, &attacker_id)?;
+        self.record_attacker_interaction(attacker_kind, attacking_seat, &attacker_id)?;
+
+        let avatar = &mut self.position.players[seat_index(target_seat)].avatar;
+        let old_life = avatar.life;
+        avatar.life = avatar.life.saturating_sub(u16::from(attack));
+        let lost = old_life - avatar.life;
+        let reached_deaths_door = old_life > 0 && avatar.life == 0;
+        if reached_deaths_door {
+            avatar.death_door_turn = Some(self.position.turn_number);
+        }
+        let life = avatar.life;
+        self.position.pending_combat = None;
+        self.position.phase = Phase::Main;
+        self.position.decision_seat = self.position.active_seat;
+
+        let mut outcomes = vec![(
+            "undefended-site-struck".to_owned(),
+            json!({
+                "amount": attack,
+                "attackerInstanceId": attacker_id,
+                "cell": cell,
+                "siteInstanceId": site_instance_id,
+            }),
+        )];
+        if lost > 0 {
+            outcomes.push((
+                "avatar-life-lost".to_owned(),
+                json!({ "amount": lost, "life": life, "seat": target_seat }),
+            ));
+        }
+        if reached_deaths_door {
+            outcomes.push((
+                "avatar-reached-deaths-door".to_owned(),
+                json!({ "seat": target_seat, "turnNumber": self.position.turn_number }),
+            ));
+        }
+        Ok(outcomes)
+    }
+
+    fn attacker_power(
+        &self,
+        kind: UnitKind,
+        seat: Seat,
+        instance_id: &IdentityHash,
+    ) -> Result<u8, GameError> {
+        let card_id = match kind {
+            UnitKind::Avatar => {
+                let avatar = &self.position.players[seat_index(seat)].avatar;
+                if avatar.card.instance_id != *instance_id {
+                    return Err(GameError::IllegalAction);
+                }
+                avatar.card.card_id
+            }
+            UnitKind::Minion => {
+                self.position
+                    .units
+                    .iter()
+                    .find(|unit| unit.card.instance_id == *instance_id && unit.controller == seat)
+                    .ok_or(GameError::IllegalAction)?
+                    .card
+                    .card_id
+            }
+        };
+        match &self.rules.cards[usize::from(card_id.0)].facts {
+            CardFacts::Avatar(facts) => Ok(facts.attack),
+            CardFacts::Minion(facts) => Ok(facts.attack),
+            _ => Err(GameError::IllegalAction),
+        }
+    }
+
+    fn record_attacker_interaction(
+        &mut self,
+        kind: UnitKind,
+        seat: Seat,
+        instance_id: &IdentityHash,
+    ) -> Result<(), GameError> {
+        match kind {
+            UnitKind::Avatar => {
+                let avatar = &mut self.position.players[seat_index(seat)].avatar;
+                if avatar.card.instance_id != *instance_id {
+                    return Err(GameError::IllegalAction);
+                }
+                avatar.last_interacted_turn = Some(self.position.turn_number);
+            }
+            UnitKind::Minion => {
+                let unit = self
+                    .position
+                    .units
+                    .iter_mut()
+                    .find(|unit| unit.card.instance_id == *instance_id && unit.controller == seat)
+                    .ok_or(GameError::IllegalAction)?;
+                if unit.stealthed {
+                    return Err(GameError::UnsupportedManifestFact(
+                        "stealthed site attacker interaction".to_owned(),
+                    ));
+                }
+                unit.last_interacted_turn = Some(self.position.turn_number);
+            }
+        }
+        Ok(())
     }
 
     fn resolve_simple_minion_fight(&mut self) -> Result<Vec<(String, Value)>, GameError> {
@@ -1428,6 +1564,7 @@ impl Game {
             card,
             controller: seat,
             damage: 0,
+            last_interacted_turn: None,
             location: cell,
             stealthed: false,
             summoning_sickness: true,
@@ -1563,7 +1700,7 @@ impl Game {
             "atlas": self.cards_value(&player.atlas),
             "avatar": {
                 "card": self.card_value(&player.avatar.card),
-                "deathDoorTurn": null,
+                "deathDoorTurn": player.avatar.death_door_turn,
                 "life": player.avatar.life,
                 "location": player.avatar.location,
                 "region": "surface",
@@ -1630,6 +1767,9 @@ impl Game {
             ("tapped".to_owned(), json!(unit.tapped)),
             ("warded".to_owned(), json!(unit.warded)),
         ]);
+        if let Some(turn) = unit.last_interacted_turn {
+            object.insert("lastInteractedTurn".to_owned(), json!(turn));
+        }
         value
     }
 
@@ -1826,6 +1966,7 @@ fn create_player(
     };
     let avatar = AvatarPosition {
         card: card_instance(rules, avatar_card_id, seat, CardSource::Avatar, 0)?,
+        death_door_turn: None,
         last_interacted_turn: None,
         life: u16::from(avatar_facts.life),
         location: Cell::parse(if seat == Seat::North { "C4" } else { "C1" })
