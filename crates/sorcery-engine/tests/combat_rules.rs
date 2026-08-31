@@ -1,6 +1,7 @@
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
-use sorcery_engine::contract::{ActionRequest, Receipt};
+use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
+use sorcery_engine::game::{Game, GameOutcome};
 use sorcery_engine::session::{Session, StepResult};
 
 struct AttackSetup {
@@ -9,7 +10,21 @@ struct AttackSetup {
     target_instance_id: String,
 }
 
-fn scenario_manifest(seed: u32, minion_defense: u64, avatar_life: u64) -> String {
+struct AvatarAttackSetup {
+    north_avatar_instance_id: String,
+    north_minion_instance_id: String,
+    session: Session,
+    south_avatar_instance_id: String,
+}
+
+fn scenario_manifest(
+    seed: u32,
+    minion_attack: u64,
+    minion_defense: u64,
+    minion_lethal: bool,
+    avatar_attack: u64,
+    avatar_life: u64,
+) -> String {
     let fixture: Value = serde_json::from_str(include_str!(
         "../../../tests/engine/fixtures/typescript-parity-v1.json"
     ))
@@ -29,8 +44,19 @@ fn scenario_manifest(seed: u32, minion_defense: u64, avatar_life: u64) -> String
         .values_mut()
     {
         match card["cardType"].as_str() {
-            Some("avatar") => card["life"] = json!(avatar_life),
-            Some("minion") => card["defense"] = json!(minion_defense),
+            Some("avatar") => {
+                card["attack"] = json!(avatar_attack);
+                card["life"] = json!(avatar_life);
+            }
+            Some("minion") => {
+                card["attack"] = json!(minion_attack);
+                card["defense"] = json!(minion_defense);
+                if minion_lethal {
+                    card["lethal"] = json!(true);
+                } else if let Some(card) = card.as_object_mut() {
+                    card.remove("lethal");
+                }
+            }
             _ => {}
         }
     }
@@ -69,8 +95,12 @@ fn keep(session: &mut Session) {
 }
 
 fn north_attacks_at_c2(seed: u32, minion_defense: u64, avatar_life: u64) -> AttackSetup {
-    let manifest = scenario_manifest(seed, minion_defense, avatar_life);
-    let mut session = Session::new(&manifest).expect("valid scenario session");
+    let manifest = scenario_manifest(seed, 1, minion_defense, false, 1, avatar_life);
+    north_attacks_with_manifest(&manifest)
+}
+
+fn north_attacks_with_manifest(manifest: &str) -> AttackSetup {
+    let mut session = Session::new(manifest).expect("valid scenario session");
     keep(&mut session);
     keep(&mut session);
 
@@ -141,6 +171,111 @@ fn north_attacks_at_c2(seed: u32, minion_defense: u64, avatar_life: u64) -> Atta
     }
 }
 
+fn north_avatar_attacks_south_at_c2(seed: u32) -> AvatarAttackSetup {
+    let manifest = scenario_manifest(seed, 1, 1, false, 2, 1);
+    let mut session = Session::new(&manifest).expect("valid Avatar combat session");
+    keep(&mut session);
+    keep(&mut session);
+    let opening = state(&session);
+    let north_avatar_instance_id = opening["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("north Avatar instance identity")
+        .to_owned();
+    let south_avatar_instance_id = opening["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("south Avatar instance identity")
+        .to_owned();
+
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
+    let (summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C4"
+    });
+    let north_minion_instance_id = summon["cardInstanceId"]
+        .as_str()
+        .expect("north minion instance identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == north_minion_instance_id
+            && descriptor["to"]["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == north_minion_instance_id
+            && descriptor["to"]["cell"] == "C2"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == north_avatar_instance_id
+            && descriptor["to"]["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == south_avatar_instance_id
+            && descriptor["to"]["cell"] == "C2"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == north_avatar_instance_id
+            && descriptor["to"]["cell"] == "C2"
+    });
+    AvatarAttackSetup {
+        north_avatar_instance_id,
+        north_minion_instance_id,
+        session,
+        south_avatar_instance_id,
+    }
+}
+
 fn state(session: &Session) -> Value {
     session.replay_value().expect("authoritative replay value")["state"].clone()
 }
@@ -166,6 +301,455 @@ fn assert_exact_replay(session: &Session) {
     );
     assert_eq!(replayed.transcript(), session.transcript());
     assert!(session.verify_replay().expect("verified replay"));
+}
+
+fn replay_game(session: &Session) -> Game {
+    let mut game = Game::from_manifest_json(session.manifest_json()).expect("valid replay game");
+    for receipt in session.transcript() {
+        let action = game
+            .legal_actions()
+            .expect("replay legal actions")
+            .into_iter()
+            .find(|action| {
+                action
+                    .to_legal_action()
+                    .is_ok_and(|action| action.action_id == receipt.action_id)
+            })
+            .expect("recorded engine-issued action");
+        game.apply_action(&action).expect("replay action");
+    }
+    game
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one direct rule proof keeps each exact combat transcript together"
+)]
+fn lethal_requires_positive_minion_damage() {
+    let resolve = |attack, seed| {
+        let manifest = scenario_manifest(seed, attack, 5, true, 1, 20);
+        let mut setup = north_attacks_with_manifest(&manifest);
+        accept_where(&mut setup.session, |descriptor| {
+            descriptor["kind"] == "declare-attack"
+                && descriptor["target"]["kind"] == "minion"
+                && descriptor["target"]["instanceId"] == setup.target_instance_id
+        });
+        let (_, fight) = accept_where(&mut setup.session, |descriptor| {
+            descriptor["kind"] == "close-defend" && descriptor["originalTargetParticipates"] == true
+        });
+        (setup, fight)
+    };
+
+    let (positive, fight) = resolve(1, 45);
+    let positive_state = state(&positive.session);
+    let north_card_id = positive_state["players"]["north"]["cemetery"][0]["cardId"].clone();
+    let south_card_id = positive_state["players"]["south"]["cemetery"][0]["cardId"].clone();
+    assert_eq!(
+        event_values(&fight),
+        vec![
+            json!({
+                "payload": { "defenderCount": 0, "originalTargetParticipates": true },
+                "type": "defend-window-closed",
+            }),
+            json!({
+                "payload": {
+                    "attackerInstanceId": positive.attacker_instance_id,
+                    "combatantInstanceIds": [positive.target_instance_id],
+                },
+                "type": "fight-started",
+            }),
+            json!({
+                "payload": {
+                    "amount": 1,
+                    "strikerInstanceId": positive.attacker_instance_id,
+                    "targetInstanceId": positive.target_instance_id,
+                },
+                "type": "strike-damage-allocated",
+            }),
+            json!({
+                "payload": {
+                    "accumulated": 1,
+                    "amount": 1,
+                    "direct": true,
+                    "instanceId": positive.attacker_instance_id,
+                    "seat": "north",
+                },
+                "type": "damage-dealt",
+            }),
+            json!({
+                "payload": {
+                    "accumulated": 1,
+                    "amount": 1,
+                    "direct": true,
+                    "instanceId": positive.target_instance_id,
+                    "seat": "south",
+                },
+                "type": "damage-dealt",
+            }),
+            json!({
+                "payload": {
+                    "cardId": north_card_id,
+                    "instanceId": positive.attacker_instance_id,
+                    "owner": "north",
+                },
+                "type": "minion-died",
+            }),
+            json!({
+                "payload": {
+                    "cardId": south_card_id,
+                    "instanceId": positive.target_instance_id,
+                    "owner": "south",
+                },
+                "type": "minion-died",
+            }),
+        ]
+    );
+    assert_eq!(
+        positive_state["players"]["north"]["cemetery"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(
+        positive_state["players"]["south"]["cemetery"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+    assert_exact_replay(&positive.session);
+
+    let (zero, fight) = resolve(0, 44);
+    assert_eq!(
+        event_values(&fight),
+        vec![
+            json!({
+                "payload": { "defenderCount": 0, "originalTargetParticipates": true },
+                "type": "defend-window-closed",
+            }),
+            json!({
+                "payload": {
+                    "attackerInstanceId": zero.attacker_instance_id,
+                    "combatantInstanceIds": [zero.target_instance_id],
+                },
+                "type": "fight-started",
+            }),
+            json!({
+                "payload": {
+                    "amount": 0,
+                    "strikerInstanceId": zero.attacker_instance_id,
+                    "targetInstanceId": zero.target_instance_id,
+                },
+                "type": "strike-damage-allocated",
+            }),
+            json!({
+                "payload": {
+                    "accumulated": 0,
+                    "amount": 0,
+                    "direct": true,
+                    "instanceId": zero.attacker_instance_id,
+                    "seat": "north",
+                },
+                "type": "damage-dealt",
+            }),
+            json!({
+                "payload": {
+                    "accumulated": 0,
+                    "amount": 0,
+                    "direct": true,
+                    "instanceId": zero.target_instance_id,
+                    "seat": "south",
+                },
+                "type": "damage-dealt",
+            }),
+        ]
+    );
+    let zero_state = state(&zero.session);
+    assert_eq!(
+        zero_state["realm"]["units"].as_array().map(Vec::len),
+        Some(3)
+    );
+    assert_eq!(
+        zero_state["players"]["north"]["cemetery"]
+            .as_array()
+            .map(Vec::len),
+        Some(0)
+    );
+    assert_eq!(
+        zero_state["players"]["south"]["cemetery"]
+            .as_array()
+            .map(Vec::len),
+        Some(0)
+    );
+    assert_exact_replay(&zero.session);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one direct rule proof keeps the exact three-fight transcript together"
+)]
+fn deaths_door_prevents_same_turn_damage_and_later_simultaneous_death_blows_draw() {
+    let AvatarAttackSetup {
+        north_avatar_instance_id,
+        north_minion_instance_id,
+        mut session,
+        south_avatar_instance_id,
+    } = north_avatar_attacks_south_at_c2(67);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "declare-attack"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["instanceId"] == south_avatar_instance_id
+    });
+    let (_, first_fight) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "close-defend" && descriptor["originalTargetParticipates"] == true
+    });
+    assert_eq!(
+        event_values(&first_fight),
+        vec![
+            json!({
+                "payload": { "defenderCount": 0, "originalTargetParticipates": true },
+                "type": "defend-window-closed",
+            }),
+            json!({
+                "payload": {
+                    "attackerInstanceId": north_avatar_instance_id,
+                    "combatantInstanceIds": [south_avatar_instance_id],
+                },
+                "type": "fight-started",
+            }),
+            json!({
+                "payload": {
+                    "amount": 2,
+                    "strikerInstanceId": north_avatar_instance_id,
+                    "targetInstanceId": south_avatar_instance_id,
+                },
+                "type": "strike-damage-allocated",
+            }),
+            json!({
+                "payload": {
+                    "amount": 2,
+                    "direct": true,
+                    "instanceId": north_avatar_instance_id,
+                    "seat": "north",
+                },
+                "type": "damage-dealt",
+            }),
+            json!({
+                "payload": { "amount": 1, "life": 0, "seat": "north" },
+                "type": "avatar-life-lost",
+            }),
+            json!({
+                "payload": { "seat": "north", "turnNumber": 7 },
+                "type": "avatar-reached-deaths-door",
+            }),
+            json!({
+                "payload": {
+                    "amount": 2,
+                    "direct": true,
+                    "instanceId": south_avatar_instance_id,
+                    "seat": "south",
+                },
+                "type": "damage-dealt",
+            }),
+            json!({
+                "payload": { "amount": 1, "life": 0, "seat": "south" },
+                "type": "avatar-life-lost",
+            }),
+            json!({
+                "payload": { "seat": "south", "turnNumber": 7 },
+                "type": "avatar-reached-deaths-door",
+            }),
+        ]
+    );
+    let first_state = state(&session);
+    assert_eq!(first_state["players"]["north"]["avatar"]["life"], 0);
+    assert_eq!(first_state["players"]["south"]["avatar"]["life"], 0);
+    assert_eq!(
+        first_state["players"]["north"]["avatar"]["deathDoorTurn"],
+        7
+    );
+    assert_eq!(
+        first_state["players"]["south"]["avatar"]["deathDoorTurn"],
+        7
+    );
+    assert_eq!(first_state["terminal"], json!({ "status": "active" }));
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == north_minion_instance_id
+            && descriptor["to"]["cell"] == "C2"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "declare-attack"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["instanceId"] == south_avatar_instance_id
+    });
+    let (_, prevented) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "close-defend" && descriptor["originalTargetParticipates"] == true
+    });
+    let dead_minion_card_id = state(&session)["players"]["north"]["cemetery"][0]["cardId"].clone();
+    assert_eq!(
+        event_values(&prevented),
+        vec![
+            json!({
+                "payload": { "defenderCount": 0, "originalTargetParticipates": true },
+                "type": "defend-window-closed",
+            }),
+            json!({
+                "payload": {
+                    "attackerInstanceId": north_minion_instance_id,
+                    "combatantInstanceIds": [south_avatar_instance_id],
+                },
+                "type": "fight-started",
+            }),
+            json!({
+                "payload": {
+                    "amount": 1,
+                    "strikerInstanceId": north_minion_instance_id,
+                    "targetInstanceId": south_avatar_instance_id,
+                },
+                "type": "strike-damage-allocated",
+            }),
+            json!({
+                "payload": {
+                    "accumulated": 2,
+                    "amount": 2,
+                    "direct": true,
+                    "instanceId": north_minion_instance_id,
+                    "seat": "north",
+                },
+                "type": "damage-dealt",
+            }),
+            json!({
+                "payload": {
+                    "amount": 0,
+                    "attemptedAmount": 1,
+                    "direct": true,
+                    "instanceId": south_avatar_instance_id,
+                    "prevented": true,
+                    "seat": "south",
+                },
+                "type": "damage-dealt",
+            }),
+            json!({
+                "payload": {
+                    "cardId": dead_minion_card_id,
+                    "instanceId": north_minion_instance_id,
+                    "owner": "north",
+                },
+                "type": "minion-died",
+            }),
+        ]
+    );
+    assert_eq!(state(&session)["terminal"], json!({ "status": "active" }));
+
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == south_avatar_instance_id
+            && descriptor["to"]["cell"] == "C2"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "declare-attack"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["instanceId"] == north_avatar_instance_id
+    });
+    let (_, death_blows) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "close-defend" && descriptor["originalTargetParticipates"] == true
+    });
+    assert_eq!(
+        event_values(&death_blows),
+        vec![
+            json!({
+                "payload": { "defenderCount": 0, "originalTargetParticipates": true },
+                "type": "defend-window-closed",
+            }),
+            json!({
+                "payload": {
+                    "attackerInstanceId": south_avatar_instance_id,
+                    "combatantInstanceIds": [north_avatar_instance_id],
+                },
+                "type": "fight-started",
+            }),
+            json!({
+                "payload": {
+                    "amount": 2,
+                    "strikerInstanceId": south_avatar_instance_id,
+                    "targetInstanceId": north_avatar_instance_id,
+                },
+                "type": "strike-damage-allocated",
+            }),
+            json!({
+                "payload": {
+                    "amount": 2,
+                    "direct": true,
+                    "instanceId": south_avatar_instance_id,
+                    "seat": "south",
+                },
+                "type": "damage-dealt",
+            }),
+            json!({
+                "payload": { "instanceId": south_avatar_instance_id, "seat": "south" },
+                "type": "death-blow",
+            }),
+            json!({
+                "payload": {
+                    "amount": 2,
+                    "direct": true,
+                    "instanceId": north_avatar_instance_id,
+                    "seat": "north",
+                },
+                "type": "damage-dealt",
+            }),
+            json!({
+                "payload": { "instanceId": north_avatar_instance_id, "seat": "north" },
+                "type": "death-blow",
+            }),
+            json!({
+                "payload": { "reason": "simultaneous_avatar_defeat", "result": "draw" },
+                "type": "game-ended",
+            }),
+        ]
+    );
+    assert_eq!(
+        state(&session)["terminal"],
+        json!({
+            "reason": "simultaneous_avatar_defeat",
+            "result": "draw",
+            "status": "finished",
+        })
+    );
+    assert_eq!(replay_game(&session).outcome(), Some(GameOutcome::Draw));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn terminal_outcome_exposes_winner_and_loser() {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../tests/engine/fixtures/typescript-parity-v1.json"
+    ))
+    .expect("valid checked-in TypeScript parity fixture");
+    let game = fixture["games"]
+        .as_array()
+        .and_then(|games| games.iter().find(|game| game["seed"] == 31))
+        .expect("seed-31 fixture game");
+    let manifest_json = game["manifestJson"]
+        .as_str()
+        .expect("seed-31 manifest JSON");
+    let action_ids: Vec<IdentityHash> =
+        serde_json::from_value(game["actionIds"].clone()).expect("fixture action identities");
+    let session = Session::replay(manifest_json, &action_ids).expect("fixture replay");
+    assert_eq!(
+        replay_game(&session).outcome(),
+        Some(GameOutcome::Win {
+            loser: Seat::North,
+            winner: Seat::South,
+        })
+    );
 }
 
 #[test]

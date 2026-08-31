@@ -1905,7 +1905,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Lethal kills a tougher minion with positive damage but not zero damage.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "lethal"
       ],
@@ -1914,8 +1914,8 @@
         "damage"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Lethal kills a tougher minion with positive damage but not zero damage"
+        "file": "crates/sorcery-engine/tests/combat_rules.rs",
+        "testName": "lethal_requires_positive_minion_damage"
       }
     },
     {
@@ -2730,7 +2730,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Death's Door prevents same-turn direct damage and later simultaneous death blows draw.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "deaths-door"
       ],
@@ -2743,8 +2743,8 @@
         "card-draw"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Death's Door prevents same-turn direct damage and later simultaneous death blows draw"
+        "file": "crates/sorcery-engine/tests/combat_rules.rs",
+        "testName": "deaths_door_prevents_same_turn_damage_and_later_simultaneous_death_blows_draw"
       }
     },
     {
