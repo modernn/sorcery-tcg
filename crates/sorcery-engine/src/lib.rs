@@ -3,6 +3,7 @@
 pub mod canonical;
 pub mod checkpoint;
 pub mod contract;
+pub mod deck;
 pub mod facts;
 pub mod game;
 pub mod prng;
