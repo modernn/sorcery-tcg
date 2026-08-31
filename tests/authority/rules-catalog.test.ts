@@ -26,7 +26,7 @@ test('the public rules catalog stays linked to direct scenario proofs', () => {
     assert.match(
       rule.scenarioProof.file,
       rule.implementationStatus === 'rust-supported'
-        ? /^crates\/sorcery-engine\/tests\/[\w-]+\.rs$/u
+        ? /^crates\/sorcery-engine\/(?:src\/game\.rs|tests\/[\w-]+\.rs)$/u
         : /^tests\/engine\/[\w-]+\.test\.ts$/u,
     );
     const proofUrl = new URL(`../../${rule.scenarioProof.file}`, import.meta.url);

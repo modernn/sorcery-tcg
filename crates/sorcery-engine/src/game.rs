@@ -1352,14 +1352,23 @@ impl Game {
 
     fn legal_site_cells(&self, seat: Seat) -> Vec<Cell> {
         let player = &self.position.players[seat_index(seat)];
-        if !player.domain_established {
-            return self.position.sites[player.avatar.location.index()]
-                .is_none()
-                .then_some(player.avatar.location)
+        let controlled_cells: Vec<_> = self.controlled_site_cells(seat).collect();
+        if controlled_cells.is_empty() {
+            let minimum_distance = Cell::ALL
                 .into_iter()
+                .filter(|cell| self.position.sites[cell.index()].is_none())
+                .map(|cell| player.avatar.location.manhattan_distance(cell))
+                .min();
+            return Cell::ALL
+                .into_iter()
+                .filter(|cell| self.position.sites[cell.index()].is_none())
+                .filter(|cell| {
+                    Some(player.avatar.location.manhattan_distance(*cell)) == minimum_distance
+                })
                 .collect();
         }
-        self.controlled_site_cells(seat)
+        controlled_cells
+            .into_iter()
             .flat_map(|cell| cell.bordering(false))
             .filter(|cell| self.position.sites[cell.index()].is_none())
             .collect::<BTreeSet<_>>()
@@ -3817,4 +3826,93 @@ fn resolve_mulligan_zone(
     deck.extend(returned);
     hand.extend(deck.drain(..order.len()));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::synthetic::synthetic_demo_manifest_json;
+
+    fn play_site_actions(game: &Game, card_instance_id: &IdentityHash) -> Vec<IssuedAction> {
+        game.legal_actions()
+            .expect("legal actions")
+            .into_iter()
+            .filter(|action| match &action.descriptor {
+                ActionDescriptor::PlaySite {
+                    card_instance_id: candidate,
+                    ..
+                } => *candidate == *card_instance_id,
+                _ => false,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn zero_site_recovery_should_issue_every_nearest_cell_in_canonical_order() {
+        let manifest = synthetic_demo_manifest_json(267).expect("synthetic manifest");
+        let mut game = Game::from_manifest_json(&manifest).expect("valid game");
+        let c3 = Cell::parse("C3").expect("C3");
+        let c4 = Cell::parse("C4").expect("C4");
+        let south_site = game.position.players[seat_index(Seat::South)]
+            .hand_atlas
+            .remove(0);
+        game.position.sites[c3.index()] = Some(SitePosition {
+            card: south_site,
+            controller: Seat::South,
+        });
+        game.position.rubble[c4.index()] = Some(
+            identity_hash(&json!({ "fixture": "zero-site-recovery-rubble" }))
+                .expect("Rubble identity"),
+        );
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.avatar.location = c3;
+        north.avatar.tapped = false;
+        north.domain_established = true;
+        let recovery_card = north.hand_atlas[0].instance_id.clone();
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+
+        let recovery_actions = play_site_actions(&game, &recovery_card);
+        assert_eq!(
+            recovery_actions
+                .iter()
+                .map(|action| match action.descriptor {
+                    ActionDescriptor::PlaySite { cell, .. } => cell,
+                    _ => unreachable!("filtered PlaySite action"),
+                })
+                .collect::<Vec<_>>(),
+            ["B3", "C2", "C4", "D3"].map(|cell| Cell::parse(cell).expect("valid cell"))
+        );
+
+        let mut forged = recovery_actions[0].clone();
+        let ActionDescriptor::PlaySite { cell, .. } = &mut forged.descriptor else {
+            unreachable!("filtered PlaySite action");
+        };
+        *cell = Cell::parse("A1").expect("A1");
+        let before_forgery = game.authoritative_state();
+        assert!(matches!(
+            game.apply_action(&forged),
+            Err(GameError::IllegalAction)
+        ));
+        assert_eq!(game.authoritative_state(), before_forgery);
+
+        game.position.players[seat_index(Seat::North)]
+            .avatar
+            .location = c4;
+        let replacement_actions = play_site_actions(&game, &recovery_card);
+        assert_eq!(replacement_actions.len(), 1);
+        let outcomes = game
+            .apply_action_recorded(&replacement_actions[0])
+            .expect("issued Rubble replacement");
+        assert_eq!(
+            outcomes
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            ["rubble-replaced", "site-played"]
+        );
+        assert!(game.position.rubble[c4.index()].is_none());
+        assert!(game.position.sites[c4.index()].is_some());
+    }
 }
