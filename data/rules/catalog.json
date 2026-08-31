@@ -146,7 +146,7 @@
         "RULE-03"
       ],
       "plainLanguage": "A draw-spell Avatar pays its tap cost and keeps the drawn identity private.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "draw",
@@ -157,8 +157,8 @@
         "card-draw"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 a draw-spell Avatar pays its tap cost and keeps the drawn identity private"
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "avatar_draw_spell_should_pay_tap_and_keep_identity_private"
       }
     },
     {
@@ -1030,7 +1030,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Genesis draws a hidden site and an empty Atlas loses after summoning.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "genesis"
       ],
@@ -1044,8 +1044,8 @@
         "summon"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Genesis draws a hidden site and an empty Atlas loses after summoning"
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "genesis_draw_site_should_keep_identity_private_and_deck_out_after_summon"
       }
     },
     {
@@ -1054,7 +1054,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Genesis draws a hidden spell and an empty Spellbook loses after summoning.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "genesis"
       ],
@@ -1068,8 +1068,8 @@
         "summon"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Genesis draws a hidden spell and an empty Spellbook loses after summoning"
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "genesis_draw_spell_should_keep_identity_private_and_deck_out_after_summon"
       }
     },
     {
@@ -1078,7 +1078,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Numeric Genesis spell draw counts draw ordered hidden cards.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "genesis"
       ],
@@ -1089,8 +1089,8 @@
         "card-draw"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 numeric Genesis spell draw counts draw ordered hidden cards"
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "numeric_genesis_spell_draws_should_preserve_top_order"
       }
     },
     {
@@ -1099,7 +1099,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Numeric Genesis spell draws exhaust 2, 1, or 0 remaining cards before deck loss.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "genesis"
       ],
@@ -1111,8 +1111,8 @@
         "card-draw"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 numeric Genesis spell draws exhaust 2, 1, or 0 remaining cards before deck loss"
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "numeric_genesis_spell_draws_should_exhaust_before_deck_out"
       }
     },
     {
@@ -1165,7 +1165,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Genesis life loss reaches but cannot cross Death's Door.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "genesis",
         "deaths-door"
@@ -1176,8 +1176,8 @@
         "loss"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Genesis life loss reaches but cannot cross Death's Door"
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "genesis_life_loss_should_reach_but_not_cross_deaths_door"
       }
     },
     {
@@ -1186,7 +1186,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Grain Sparrow Genesis gains controller life through shared healing semantics.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "genesis"
       ],
@@ -1197,8 +1197,8 @@
         "healing"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Grain Sparrow Genesis gains controller life through shared healing semantics"
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "genesis_heal_should_cap_at_max_and_not_heal_deaths_door"
       }
     },
     {
@@ -1563,7 +1563,7 @@
         "RULE-04"
       ],
       "plainLanguage": "An undamaged 0/0 Genesis minion survives until it takes positive damage.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "genesis"
       ],
@@ -1572,8 +1572,8 @@
         "damage"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03/04 an undamaged 0/0 Genesis minion survives until it takes positive damage"
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "undamaged_zero_defense_genesis_minion_should_survive_until_positive_damage"
       }
     },
     {

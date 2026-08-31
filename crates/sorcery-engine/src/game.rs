@@ -13,8 +13,8 @@ use crate::board::{Cell, Location, Region};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{
-    CardFacts, Element, FactError, MagicEffect, MinionFacts, Thresholds, parse_card_definition,
-    validate_identifier,
+    CardFacts, Element, FactError, MagicEffect, MinionFacts, MinionGenesis, Thresholds,
+    parse_card_definition, validate_identifier,
 };
 use crate::prng::PrngState;
 
@@ -892,6 +892,18 @@ impl Game {
                 .state_independent_label()
                 .ok_or_else(|| invalid("draw-site action requires a label"))?;
             self.push_action(actions, descriptor, label);
+            let CardFacts::Avatar(avatar) =
+                &self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts
+            else {
+                return Err(invalid("player Avatar lacks Avatar facts"));
+            };
+            if avatar.draw_spell {
+                let descriptor = ActionDescriptor::DrawSpell;
+                let label = descriptor
+                    .state_independent_label()
+                    .ok_or_else(|| invalid("draw-spell action requires a label"))?;
+                self.push_action(actions, descriptor, label);
+            }
         }
         self.push_action(actions, ActionDescriptor::EndTurn, "End turn".to_owned());
         Ok(())
@@ -1153,6 +1165,9 @@ impl Game {
             ActionDescriptor::EndTurn => self.apply_end_turn_action(action.seat, outcomes),
             ActionDescriptor::DrawSite => {
                 self.apply_draw_action(action.seat, DeckZone::Atlas, true, outcomes)
+            }
+            ActionDescriptor::DrawSpell => {
+                self.apply_draw_action(action.seat, DeckZone::Spellbook, true, outcomes)
             }
         }
     }
@@ -1677,12 +1692,16 @@ impl Game {
     ) -> Result<(), GameError> {
         let player_index = seat_index(seat);
         let player = &self.position.players[player_index];
+        let avatar_can_draw_spell = matches!(
+            self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts,
+            CardFacts::Avatar(facts) if facts.draw_spell
+        );
         if seat != self.position.active_seat
             || avatar_draw
-                && (zone != DeckZone::Atlas
-                    || self.position.phase != Phase::Main
+                && (self.position.phase != Phase::Main
                     || player.avatar.tapped
-                    || !player.domain_established)
+                    || !player.domain_established
+                    || zone == DeckZone::Spellbook && !avatar_can_draw_spell)
             || !avatar_draw && self.position.phase != Phase::Draw
         {
             return Err(GameError::IllegalAction);
@@ -1690,7 +1709,29 @@ impl Game {
         let player = &mut self.position.players[player_index];
         if avatar_draw {
             player.avatar.tapped = true;
+            if zone == DeckZone::Spellbook {
+                player.avatar.last_interacted_turn = Some(self.position.turn_number);
+            }
         }
+        if !self.draw_private_card(seat, zone) {
+            self.finish_deck_empty(seat, outcomes);
+            self.position.state_version += 1;
+            return Ok(());
+        }
+        self.position.phase = Phase::Main;
+        self.position.state_version += 1;
+        if avatar_draw && zone == DeckZone::Atlas {
+            outcomes.push("site-drawn", || json!({ "seat": seat }));
+        } else if avatar_draw {
+            outcomes.push("spell-drawn", || json!({ "seat": seat }));
+        } else {
+            outcomes.push("card-drawn", || json!({ "seat": seat, "zone": zone }));
+        }
+        Ok(())
+    }
+
+    fn draw_private_card(&mut self, seat: Seat, zone: DeckZone) -> bool {
+        let player = &mut self.position.players[seat_index(seat)];
         let card = match zone {
             DeckZone::Atlas => (!player.atlas.is_empty()).then(|| player.atlas.remove(0)),
             DeckZone::Spellbook => {
@@ -1698,21 +1739,13 @@ impl Game {
             }
         };
         let Some(card) = card else {
-            self.finish_deck_empty(seat, outcomes);
-            return Ok(());
+            return false;
         };
         match zone {
             DeckZone::Atlas => player.hand_atlas.push(card),
             DeckZone::Spellbook => player.hand_spellbook.push(card),
         }
-        self.position.phase = Phase::Main;
-        self.position.state_version += 1;
-        if avatar_draw {
-            outcomes.push("site-drawn", || json!({ "seat": seat }));
-        } else {
-            outcomes.push("card-drawn", || json!({ "seat": seat, "zone": zone }));
-        }
-        Ok(())
+        true
     }
 
     fn finish_deck_empty(&mut self, loser: Seat, outcomes: &mut OutcomeLog<'_>) {
@@ -1723,7 +1756,6 @@ impl Game {
             reason: WinReason::DeckEmpty,
             winner,
         });
-        self.position.state_version += 1;
         outcomes.push(
             "game-ended",
             || json!({ "loser": loser, "reason": "deck_empty", "winner": winner }),
@@ -1946,6 +1978,20 @@ impl Game {
         let CardFacts::Minion(facts) = &definition.facts else {
             return Err(GameError::IllegalAction);
         };
+        let genesis = facts.genesis;
+        if matches!(
+            genesis,
+            Some(
+                MinionGenesis::DamageEachOtherUnitHereOne
+                    | MinionGenesis::DisableSelfUntilDamaged
+                    | MinionGenesis::MayDamageTargetAdjacentUnitTwo
+                    | MinionGenesis::StrikeEachEnemyHere
+            )
+        ) {
+            return Err(GameError::UnsupportedManifestFact(
+                "minion Genesis effect".to_owned(),
+            ));
+        }
         if !self
             .summon_destinations(seat, facts)
             .any(|destination| destination.cell == *cell && destination.mana_cost == *mana_cost)
@@ -1983,7 +2029,121 @@ impl Game {
                 "seat": seat,
             })
         });
+        self.apply_minion_genesis(seat, card_instance_id, genesis, outcomes)?;
         Ok(())
+    }
+
+    fn apply_minion_genesis(
+        &mut self,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+        genesis: Option<MinionGenesis>,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        match genesis {
+            None => {}
+            Some(MinionGenesis::DrawSite) => {
+                self.apply_genesis_draws(seat, source_instance_id, DeckZone::Atlas, 1, outcomes);
+            }
+            Some(MinionGenesis::DrawSpells(count)) => {
+                self.apply_genesis_draws(
+                    seat,
+                    source_instance_id,
+                    DeckZone::Spellbook,
+                    count,
+                    outcomes,
+                );
+            }
+            Some(MinionGenesis::HealControllerTwo) => {
+                let player = &mut self.position.players[seat_index(seat)];
+                let CardFacts::Avatar(avatar_facts) =
+                    self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                let old_life = player.avatar.life;
+                if old_life > 0 {
+                    player.avatar.life =
+                        old_life.saturating_add(2).min(u16::from(avatar_facts.life));
+                }
+                let amount = player.avatar.life - old_life;
+                if amount > 0 {
+                    let life = player.avatar.life;
+                    outcomes.push("avatar-healed", || {
+                        json!({
+                            "amount": amount,
+                            "attemptedAmount": 2,
+                            "life": life,
+                            "seat": seat,
+                            "sourceInstanceId": source_instance_id,
+                        })
+                    });
+                }
+            }
+            Some(MinionGenesis::LoseControllerLifeTwo) => {
+                let player = &mut self.position.players[seat_index(seat)];
+                let old_life = player.avatar.life;
+                player.avatar.life = old_life.saturating_sub(2);
+                let amount = old_life - player.avatar.life;
+                if amount > 0 {
+                    let life = player.avatar.life;
+                    outcomes.push("avatar-life-lost", || {
+                        json!({
+                            "amount": amount,
+                            "life": life,
+                            "seat": seat,
+                            "sourceInstanceId": source_instance_id,
+                        })
+                    });
+                    if life == 0 {
+                        player.avatar.death_door_turn = Some(self.position.turn_number);
+                        let turn_number = self.position.turn_number;
+                        outcomes.push("avatar-reached-deaths-door", || {
+                            json!({
+                                "seat": seat,
+                                "sourceInstanceId": source_instance_id,
+                                "turnNumber": turn_number,
+                            })
+                        });
+                    }
+                }
+            }
+            Some(
+                MinionGenesis::DamageEachOtherUnitHereOne
+                | MinionGenesis::DisableSelfUntilDamaged
+                | MinionGenesis::MayDamageTargetAdjacentUnitTwo
+                | MinionGenesis::StrikeEachEnemyHere,
+            ) => {
+                return Err(GameError::UnsupportedManifestFact(
+                    "minion Genesis effect".to_owned(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_genesis_draws(
+        &mut self,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+        zone: DeckZone,
+        count: u8,
+        outcomes: &mut OutcomeLog<'_>,
+    ) {
+        for _ in 0..count {
+            if !self.draw_private_card(seat, zone) {
+                self.finish_deck_empty(seat, outcomes);
+                break;
+            }
+            outcomes.push(
+                if zone == DeckZone::Atlas {
+                    "site-drawn"
+                } else {
+                    "spell-drawn"
+                },
+                || json!({ "seat": seat, "sourceInstanceId": source_instance_id }),
+            );
+        }
     }
 
     fn apply_end_turn_action(

@@ -109,6 +109,8 @@ pub enum ActionDescriptor {
     },
     /// Tap the Avatar to draw the top Atlas card during the main phase.
     DrawSite,
+    /// Tap a capable Avatar to draw the top Spellbook card during the main phase.
+    DrawSpell,
     /// Play a site from the player's hand.
     PlaySite {
         /// Stable rules card identity.
@@ -183,6 +185,7 @@ impl ActionDescriptor {
             }
             Self::Draw { zone } => Some(format!("Draw from {}", zone.as_str())),
             Self::DrawSite => Some("Draw a site with Avatar".to_owned()),
+            Self::DrawSpell => Some("Draw a spell with Avatar".to_owned()),
             Self::MoveAndAttack {
                 path,
                 to,
@@ -365,11 +368,12 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::DeclineAttack => 2,
         ActionDescriptor::Draw { .. } => 3,
         ActionDescriptor::DrawSite => 4,
-        ActionDescriptor::EndTurn => 5,
-        ActionDescriptor::Mulligan { .. } => 6,
-        ActionDescriptor::PlaySite { .. } => 7,
-        ActionDescriptor::SummonMinion { .. } => 8,
-        ActionDescriptor::MoveAndAttack { .. } => 9,
+        ActionDescriptor::DrawSpell => 5,
+        ActionDescriptor::EndTurn => 6,
+        ActionDescriptor::Mulligan { .. } => 7,
+        ActionDescriptor::PlaySite { .. } => 8,
+        ActionDescriptor::SummonMinion { .. } => 9,
+        ActionDescriptor::MoveAndAttack { .. } => 10,
     }
 }
 
