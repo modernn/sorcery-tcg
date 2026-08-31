@@ -151,6 +151,7 @@ export type GameCardDefinition =
     cardType: 'site';
     connectsBurrowedAllies?: boolean;
     elements: readonly GameElement[];
+    flyToNearbyVoidOncePerTurnAtAirThreshold?: 3;
     genesisDiscardTopSpells?: 2;
     genesisDrawSpellPerAdjacentSameCard?: boolean;
     genesisEnemiesLoseStealth?: true;
@@ -160,7 +161,9 @@ export type GameCardDefinition =
     genesisImmobilizeNearbyUntilNextTurn?: true;
     genesisMayBottomNextSpell?: true;
     genesisPayOneManaToSummonToken?: string;
+    genesisReorderNextSpells?: 3;
     isTower?: true;
+    minionsHereGainVoidwalkUntilLeavingVoid?: true;
     ordinaryMinionManaDiscount?: 1;
     preventsUnitsWithPowerAtLeastFromEntering?: number;
     rangedUnitsHereRangeBonus?: 1;
@@ -313,7 +316,10 @@ type CardInstance = Readonly<{
   source: 'atlas' | 'avatar' | 'spellbook' | 'token';
 }>;
 
-type SiteInstance = Readonly<CardInstance & { controller: GameSeat }>;
+type SiteInstance = Readonly<CardInstance & {
+  controller: GameSeat;
+  lastFlightTurn?: number;
+}>;
 
 type AuraInstance = Readonly<CardInstance & {
   cells: TwoByTwoArea;
@@ -354,6 +360,7 @@ type UnitInstance = Readonly<CardInstance & {
   lastPickedUpArtifactsTurn?: number;
   location: RealmCell;
   occupiedCells?: TwoByTwoArea;
+  planarGateVoidwalk?: true;
   region: GameRegion;
   stealthed: boolean;
   summoningSickness: boolean;
@@ -457,6 +464,12 @@ type PendingGenesisSpell = Readonly<{
   sourceInstanceId: StateHash;
 }>;
 
+type PendingGenesisSpellOrder = Readonly<{
+  count: number;
+  seat: GameSeat;
+  sourceInstanceId: StateHash;
+}>;
+
 type PendingGenesisToken = Readonly<{
   cell: RealmCell;
   seat: GameSeat;
@@ -516,6 +529,7 @@ export type GameState = Readonly<{
   pendingCombat: PendingCombat | null;
   pendingEndTurnAura?: PendingEndTurnAura | null;
   pendingGenesisSpell?: PendingGenesisSpell | null;
+  pendingGenesisSpellOrder?: PendingGenesisSpellOrder | null;
   pendingGenesisToken?: PendingGenesisToken | null;
   pendingRandomOutcome?: PendingRandomOutcome | null;
   pendingRangedStep?: PendingRangedStep | null;
@@ -664,10 +678,19 @@ type GameActionDescriptor =
     kind: 'resolve-genesis-spell';
   }>
   | Readonly<{
+    kind: 'resolve-genesis-spell-order';
+    order: readonly number[];
+  }>
+  | Readonly<{
     kind: 'activate-site-destruction';
     sourceSiteInstanceId: StateHash;
     targetCell: RealmCell;
     targetSiteInstanceId: StateHash;
+  }>
+  | Readonly<{
+    kind: 'fly-site';
+    sourceSiteInstanceId: StateHash;
+    targetCell: RealmCell;
   }>
   | Readonly<{
     bearer?: GameUnitRef;
@@ -1488,7 +1511,8 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
           status.movesOnlyForward,
           status.burrowing,
           status.submerge,
-          status.voidwalk,
+          status.intrinsicVoidwalk,
+          status.planarGateVoidwalk,
           status.connectsTopBottom,
           status.immobile,
           ally.kind === 'minion',
@@ -1578,7 +1602,8 @@ function magicDescriptors(state: GameState, seat: GameSeat): readonly GameAction
             enemyStatus.movesOnlyForward,
             enemyStatus.burrowing,
             enemyStatus.submerge,
-            enemyStatus.voidwalk,
+            enemyStatus.intrinsicVoidwalk,
+            enemyStatus.planarGateVoidwalk,
             enemyStatus.connectsTopBottom,
             enemyStatus.immobile,
             true,
@@ -1864,10 +1889,13 @@ const SUPPORTED_CARD_FIELDS = {
   site: new Set(`
     airborneMinionsAtopMoveFreelyAway blocksGroundMinionEntryWhileMinionAtop
     cannotBeMovedDestroyedOrModified cardType connectsBurrowedAllies elements
+    flyToNearbyVoidOncePerTurnAtAirThreshold
     genesisDiscardTopSpells genesisDrawSpellPerAdjacentSameCard genesisEnemiesLoseStealth
     genesisGainMana genesisGainManaIfOnlyControlledCopy genesisHealNearbyAvatars
     genesisImmobilizeNearbyUntilNextTurn genesisMayBottomNextSpell genesisPayOneManaToSummonToken
+    genesisReorderNextSpells
     isTower ordinaryMinionManaDiscount rangedUnitsHereRangeBonus sacrificeToDestroyNearbySite
+    minionsHereGainVoidwalkUntilLeavingVoid
     preventsUnitsWithPowerAtLeastFromEntering
   `.trim().split(/\s+/)),
 } satisfies Readonly<Record<GameCardDefinition['cardType'], ReadonlySet<string>>>;
@@ -1938,6 +1966,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         `${path}.cannotBeMovedDestroyedOrModified must be true when defined`,
       );
     }
+    if (card.flyToNearbyVoidOncePerTurnAtAirThreshold !== undefined
+      && card.flyToNearbyVoidOncePerTurnAtAirThreshold !== 3) {
+      throw new RangeError(
+        `${path}.flyToNearbyVoidOncePerTurnAtAirThreshold must be 3`,
+      );
+    }
     if (card.preventsUnitsWithPowerAtLeastFromEntering !== undefined
       && (!Number.isSafeInteger(card.preventsUnitsWithPowerAtLeastFromEntering)
         || card.preventsUnitsWithPowerAtLeastFromEntering < 1
@@ -1979,6 +2013,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     if (card.isTower !== undefined && card.isTower !== true) {
       throw new RangeError(`${path}.isTower must be true when defined`);
     }
+    if (card.minionsHereGainVoidwalkUntilLeavingVoid !== undefined
+      && card.minionsHereGainVoidwalkUntilLeavingVoid !== true) {
+      throw new RangeError(
+        `${path}.minionsHereGainVoidwalkUntilLeavingVoid must be true when defined`,
+      );
+    }
     if (card.genesisPayOneManaToSummonToken !== undefined) {
       requireCardId(
         card.genesisPayOneManaToSummonToken,
@@ -1993,7 +2033,8 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         || card.genesisGainManaIfOnlyControlledCopy !== undefined
         || card.genesisHealNearbyAvatars !== undefined
         || card.genesisImmobilizeNearbyUntilNextTurn !== undefined
-        || card.genesisMayBottomNextSpell !== undefined)) {
+        || card.genesisMayBottomNextSpell !== undefined
+        || card.genesisReorderNextSpells !== undefined)) {
       throw new RangeError(`${path} simultaneous paid-token and another site Genesis are unsupported`);
     }
     if (card.genesisDrawSpellPerAdjacentSameCard !== undefined
@@ -2021,8 +2062,25 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         || card.genesisGainManaIfOnlyControlledCopy !== undefined
         || card.genesisHealNearbyAvatars !== undefined
         || card.genesisImmobilizeNearbyUntilNextTurn !== undefined
-        || card.genesisPayOneManaToSummonToken !== undefined)) {
+        || card.genesisPayOneManaToSummonToken !== undefined
+        || card.genesisReorderNextSpells !== undefined)) {
       throw new RangeError(`${path} simultaneous next-spell and another site Genesis are unsupported`);
+    }
+    if (card.genesisReorderNextSpells !== undefined
+      && card.genesisReorderNextSpells !== 3) {
+      throw new RangeError(`${path}.genesisReorderNextSpells must be 3`);
+    }
+    if (card.genesisReorderNextSpells === 3
+      && (card.genesisDiscardTopSpells !== undefined
+        || card.genesisDrawSpellPerAdjacentSameCard
+        || card.genesisEnemiesLoseStealth
+        || card.genesisGainMana !== undefined
+        || card.genesisGainManaIfOnlyControlledCopy !== undefined
+        || card.genesisHealNearbyAvatars !== undefined
+        || card.genesisImmobilizeNearbyUntilNextTurn !== undefined
+        || card.genesisMayBottomNextSpell !== undefined
+        || card.genesisPayOneManaToSummonToken !== undefined)) {
+      throw new RangeError(`${path} simultaneous spell-order and another site Genesis are unsupported`);
     }
     if (card.connectsBurrowedAllies !== undefined && typeof card.connectsBurrowedAllies !== 'boolean') {
       throw new RangeError(`${path}.connectsBurrowedAllies must be boolean`);
@@ -2843,6 +2901,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             cardType: 'site' as const,
             ...(card.connectsBurrowedAllies === true ? { connectsBurrowedAllies: true } : {}),
             elements: [...card.elements],
+            ...(card.flyToNearbyVoidOncePerTurnAtAirThreshold === 3
+              ? { flyToNearbyVoidOncePerTurnAtAirThreshold: 3 as const }
+              : {}),
             ...(card.genesisDiscardTopSpells === 2 ? { genesisDiscardTopSpells: 2 as const } : {}),
             ...(card.cannotBeMovedDestroyedOrModified === true
               ? { cannotBeMovedDestroyedOrModified: true as const }
@@ -2869,7 +2930,13 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.genesisPayOneManaToSummonToken
               ? { genesisPayOneManaToSummonToken: card.genesisPayOneManaToSummonToken }
               : {}),
+            ...(card.genesisReorderNextSpells === 3
+              ? { genesisReorderNextSpells: 3 as const }
+              : {}),
             ...(card.isTower === true ? { isTower: true as const } : {}),
+            ...(card.minionsHereGainVoidwalkUntilLeavingVoid === true
+              ? { minionsHereGainVoidwalkUntilLeavingVoid: true as const }
+              : {}),
             ...(card.ordinaryMinionManaDiscount === 1
               ? { ordinaryMinionManaDiscount: 1 as const }
               : {}),
@@ -3690,6 +3757,25 @@ function atopTowerPowerBonus(
   return siteDefinition.cardType === 'site' && siteDefinition.isTower === true ? 2 : 0;
 }
 
+function cellsAtPlanarGate(
+  state: GameState,
+  cells: readonly RealmCell[],
+  region: GameRegion,
+): boolean {
+  if (region === 'void') return false;
+  return cells.some((cell) => {
+    const site = state.realm.sites[cell];
+    if (!site || isRubble(site)) return false;
+    const definition = cardDefinition(state, site.cardId);
+    return definition.cardType === 'site'
+      && definition.minionsHereGainVoidwalkUntilLeavingVoid === true;
+  });
+}
+
+function minionAtPlanarGate(state: GameState, unit: UnitInstance): boolean {
+  return cellsAtPlanarGate(state, unitOccupiedCells(unit), unit.region);
+}
+
 function unitStatus(
   state: GameState,
   ref: GameUnitRef,
@@ -3705,12 +3791,14 @@ function unitStatus(
   defense: number;
   disabled: boolean;
   immobile: boolean;
+  intrinsicVoidwalk: boolean;
   lethal: boolean;
   location: RealmCell;
   occupiedCells: readonly RealmCell[];
   movementSteps: number;
   movesOnlyForward: boolean;
   movesOnlySideways: boolean;
+  planarGateVoidwalk: boolean;
   ranged: boolean;
   region: GameRegion;
   spellcaster: boolean;
@@ -3746,12 +3834,14 @@ function unitStatus(
         { cell: avatar.location, region: avatar.region },
         false,
       ),
+      intrinsicVoidwalk: false,
       lethal: bearerHasLethal(state, ref),
       location: avatar.location,
       occupiedCells: [avatar.location],
       movementSteps: 1,
       movesOnlyForward: false,
       movesOnlySideways: false,
+      planarGateVoidwalk: false,
       ranged: false,
       region: avatar.region,
       spellcaster: true,
@@ -3769,6 +3859,9 @@ function unitStatus(
   const definition = cardDefinition(state, unit.cardId);
   if (definition.cardType !== 'minion') throw new Error('minion lacks minion definition');
   const disabled = minionDisabled(state, unit);
+  const printedVoidwalk = !disabled && definition.voidwalk === true;
+  const planarGateVoidwalk = !disabled
+    && (unit.planarGateVoidwalk === true || minionAtPlanarGate(state, unit));
   const towerPowerBonus = atopTowerPowerBonus(state, unit, definition, disabled);
   const powerBonus = temporaryPowerBonus(unit.temporaryPowerSources)
     + bearerPowerBonus(state, ref)
@@ -3794,12 +3887,14 @@ function unitStatus(
     immobile: unitOccupiedCells(unit).some((cell) =>
       locationInImmobileArea(state, { cell, region: unit.region }, true))
       || (!disabled && definition.immobile === true),
+    intrinsicVoidwalk: printedVoidwalk,
     lethal: !disabled && (definition.lethal === true || bearerHasLethal(state, ref)),
     location: unit.location,
     occupiedCells: unitOccupiedCells(unit),
     movementSteps: disabled ? 0 : 1 + (definition.movementBonus ?? 0),
     movesOnlyForward: !disabled && definition.movesOnlyForward === true,
     movesOnlySideways: !disabled && definition.movesOnlySideways === true,
+    planarGateVoidwalk,
     ranged: !disabled && (definition.ranged === true || towerPowerBonus > 0),
     region: unit.region,
     spellcaster: !disabled && (definition.spellcaster === true || towerPowerBonus > 0),
@@ -3809,7 +3904,7 @@ function unitStatus(
     summoningSickness: unit.summoningSickness,
     tapped: unit.tapped,
     takesLessDamage: disabled ? 0 : (definition.takesLessDamage ?? 0),
-    voidwalk: !disabled && definition.voidwalk === true,
+    voidwalk: printedVoidwalk || planarGateVoidwalk,
   };
 }
 
@@ -4385,6 +4480,7 @@ function movementPaths(
   burrowing = false,
   submerge = false,
   voidwalk = false,
+  planarGateVoidwalk = false,
   connectsTopBottom = false,
   immobile = false,
   movingMinion = false,
@@ -4396,11 +4492,18 @@ function movementPaths(
   if (!footprintLocationExists(state, occupiedCells, start.region)) return [];
   if (immobile) return [[start]];
   const paths: GameLocation[][] = [[start]];
-  let frontier: Array<Readonly<{ cost: number; path: GameLocation[] }>> = [{ cost: 0, path: [start] }];
+  let frontier: Array<Readonly<{
+    cost: number;
+    path: GameLocation[];
+    planarGateVoidwalk: boolean;
+  }>> = [{ cost: 0, path: [start], planarGateVoidwalk }];
   while (frontier.length > 0) {
-    frontier = frontier.flatMap(({ cost, path }) => {
+    frontier = frontier.flatMap(({ cost, path, planarGateVoidwalk: carriedVoidwalk }) => {
       const current = path.at(-1)!;
       const currentCells = translatedFootprint(occupiedCells, start.cell, current.cell) ?? [];
+      const canVoidwalk = voidwalk
+        || carriedVoidwalk
+        || movingMinion && cellsAtPlanarGate(state, currentCells, current.region);
       if (movingUnit && currentCells.some((cell) =>
         locationInImmobileArea(state, { cell, region: current.region }, movingMinion))) return [];
       const tunnelHops = current.region === 'underground' && burrowing
@@ -4418,7 +4521,7 @@ function movementPaths(
           ...(submerge && isWaterSite(state, current.cell)
             ? [{ cell: current.cell, region: 'underwater' as const }]
             : []),
-          ...(voidwalk
+          ...(canVoidwalk
             ? borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'void' as const }))
             : []),
         ]
@@ -4430,7 +4533,7 @@ function movementPaths(
             ...(submerge
               ? borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'underwater' as const }))
               : []),
-            ...(voidwalk
+            ...(canVoidwalk
               ? borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'void' as const }))
               : []),
           ]
@@ -4441,11 +4544,11 @@ function movementPaths(
             ...(burrowing
               ? borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'underground' as const }))
               : []),
-            ...(voidwalk
+            ...(canVoidwalk
               ? borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'void' as const }))
               : []),
           ]
-          : current.region === 'void' && voidwalk
+          : current.region === 'void' && canVoidwalk
             ? [
               ...borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'void' as const })),
               ...borderingCells(current.cell, connectsTopBottom).map((cell) => ({ cell, region: 'surface' as const })),
@@ -4502,6 +4605,7 @@ function movementPaths(
             purpose,
           ),
           path: [...path, candidate],
+          planarGateVoidwalk: !voidwalk && candidate.region === 'void' && canVoidwalk,
         }))
         .filter(({ cost: nextCost }) => nextCost <= maximumSteps);
     });
@@ -4537,7 +4641,8 @@ function defendPaths(
     unit.movesOnlyForward,
     unit.burrowing,
     unit.submerge,
-    unit.voidwalk,
+    unit.intrinsicVoidwalk,
+    unit.planarGateVoidwalk,
     unit.connectsTopBottom,
     unit.immobile,
     ref.kind === 'minion',
@@ -4567,7 +4672,8 @@ function movementDescriptors(state: GameState, seat: GameSeat): readonly GameAct
       unit.movesOnlyForward,
       unit.burrowing,
       unit.submerge,
-      unit.voidwalk,
+      unit.intrinsicVoidwalk,
+      unit.planarGateVoidwalk,
       unit.connectsTopBottom,
       unit.immobile,
       ref.kind === 'minion',
@@ -4724,7 +4830,8 @@ function rangedStepDescriptors(state: GameState, seat: GameSeat): readonly GameA
       status.movesOnlyForward,
       status.burrowing,
       status.submerge,
-      status.voidwalk,
+      status.intrinsicVoidwalk,
+      status.planarGateVoidwalk,
       status.connectsTopBottom,
       status.immobile,
       true,
@@ -4913,6 +5020,27 @@ function siteDestructionDescriptors(state: GameState, seat: GameSeat): readonly 
   });
 }
 
+function siteFlightDescriptors(state: GameState, seat: GameSeat): readonly GameActionDescriptor[] {
+  if (affinity(state, seat).air < 3) return [];
+  return REALM_CELLS.flatMap((sourceCell) => {
+    const source = state.realm.sites[sourceCell];
+    if (!source || isRubble(source) || source.controller !== seat
+      || source.lastFlightTurn === state.turnNumber
+      || siteCannotBeMovedDestroyedOrModified(state, source)) return [];
+    const definition = cardDefinition(state, source.cardId);
+    if (definition.cardType !== 'site'
+      || definition.flyToNearbyVoidOncePerTurnAtAirThreshold !== 3) return [];
+    return [...borderingCells(sourceCell), ...diagonalCells(sourceCell)]
+      .filter((targetCell) => state.realm.sites[targetCell] === undefined)
+      .sort()
+      .map((targetCell) => ({
+        kind: 'fly-site' as const,
+        sourceSiteInstanceId: source.instanceId,
+        targetCell,
+      }));
+  });
+}
+
 function attackTargets(state: GameState, pending: PendingCombat): readonly CombatTarget[] {
   const defendingSeat = otherSeat(pending.attackingSeat);
   const attackerAirborne = unitStatus(state, pending.attacker).airborne;
@@ -5027,6 +5155,12 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     ];
   }
   if (state.phase === 'genesis') {
+    if (state.pendingGenesisSpellOrder?.seat === seat) {
+      return permutations(Array.from(
+        { length: state.pendingGenesisSpellOrder.count },
+        (_, index) => index,
+      )).map((order) => ({ kind: 'resolve-genesis-spell-order' as const, order }));
+    }
     if (state.pendingGenesisToken?.seat === seat) {
       return [
         { choice: 'decline', kind: 'resolve-genesis-token' },
@@ -5158,6 +5292,7 @@ function actionDescriptors(state: GameState, seat: GameSeat): readonly GameActio
     ...artifactRollDamageAbilityDescriptors(state, seat),
     ...pickUpArtifactDescriptors(state, seat),
     ...dropArtifactDescriptors(state, seat),
+    ...siteFlightDescriptors(state, seat),
     ...siteDestructionDescriptors(state, seat),
     ...areaDamageAbilityDescriptors(state, seat),
     ...discardRandomDamageDescriptors(state, seat),
@@ -5212,6 +5347,10 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
       ? `Put ${nextSpell?.cardId ?? 'next spell'} on bottom`
       : `Keep ${nextSpell?.cardId ?? 'next spell'} on top`;
   }
+  if (descriptor.kind === 'resolve-genesis-spell-order') {
+    const top = state.players[state.decisionSeat].spellbook.slice(0, descriptor.order.length);
+    return `Order next spells ${descriptor.order.map((index) => top[index]?.cardId ?? '?').join(', ')}`;
+  }
   if (descriptor.kind === 'resolve-end-turn-aura-random') {
     return `Choose unit ${descriptor.outcomeInstanceId.slice(0, 15)}… for the Aura's random damage`;
   }
@@ -5246,6 +5385,9 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
   }
   if (descriptor.kind === 'activate-site-destruction') {
     return `Sacrifice site to destroy ${descriptor.targetCell}`;
+  }
+  if (descriptor.kind === 'fly-site') {
+    return `Fly site to ${descriptor.targetCell}`;
   }
   if (descriptor.kind === 'summon-minion') {
     const genesis = descriptor.genesisDamageChoice === 'target' && descriptor.genesisDamageTarget
@@ -5556,6 +5698,12 @@ function moveUnit(
     throw new Error('unreachable minion move');
   }
   const moving = state.realm.units.find(({ instanceId }) => instanceId === ref.instanceId)!;
+  const movingDefinition = cardDefinition(state, moving.cardId);
+  if (movingDefinition.cardType !== 'minion') throw new Error('realm minion lacks minion definition');
+  const retainsPlanarGateVoidwalk = movingDefinition.voidwalk !== true
+    && !minionDisabled(state, moving)
+    && location.region === 'void'
+    && (moving.planarGateVoidwalk === true || minionAtPlanarGate(state, moving));
   const artifacts = state.realm.artifacts?.map((artifact) =>
     'bearer' in artifact
       && artifact.bearer.instanceId === ref.instanceId
@@ -5576,9 +5724,12 @@ function moveUnit(
     realm: {
       ...state.realm,
       ...(artifacts ? { artifacts } : {}),
-      units: state.realm.units.map((unit) => unit.instanceId === ref.instanceId
-        ? deepFreeze({
-          ...unit,
+      units: state.realm.units.map((unit) => {
+        if (unit.instanceId !== ref.instanceId) return unit;
+        const baseUnit = { ...unit };
+        delete baseUnit.planarGateVoidwalk;
+        return deepFreeze({
+          ...baseUnit,
           location: location.cell,
           ...(unit.occupiedCells
             ? {
@@ -5591,8 +5742,9 @@ function moveUnit(
             : {}),
           region: location.region,
           tapped: tap || unit.tapped,
-        })
-        : unit),
+          ...(retainsPlanarGateVoidwalk ? { planarGateVoidwalk: true as const } : {}),
+        });
+      }),
     },
   };
 }
@@ -6470,10 +6622,16 @@ function minionRegionDisposition(state: GameState, unit: UnitInstance): MinionRe
     return unit.region === 'void' ? 'banished' : 'dies';
   }
   if (unit.region === 'surface') return 'survives';
+  if (unit.region === 'void') {
+    return unitStatus(state, {
+      instanceId: unit.instanceId,
+      kind: 'minion',
+      seat: unit.controller,
+    }).voidwalk ? 'survives' : 'banished';
+  }
   const definition = cardDefinition(state, unit.cardId);
   if (definition.cardType !== 'minion') throw new Error('realm minion lacks minion definition');
   const disabled = minionDisabled(state, unit);
-  if (unit.region === 'void') return !disabled && definition.voidwalk === true ? 'survives' : 'banished';
   if (unit.region === 'underground') return !disabled && definition.burrowing === true ? 'survives' : 'dies';
   return !disabled && definition.submerge === true ? 'survives' : 'dies';
 }
@@ -7745,6 +7903,80 @@ function applyDescriptor(
     ];
   }
 
+  if (descriptor.kind === 'fly-site') {
+    const legal = siteFlightDescriptors(state, seat).some((candidate) =>
+      candidate.kind === 'fly-site'
+        && candidate.sourceSiteInstanceId === descriptor.sourceSiteInstanceId
+        && candidate.targetCell === descriptor.targetCell);
+    const sourceEntry = REALM_CELLS
+      .map((cell) => ({ cell, site: state.realm.sites[cell] }))
+      .find(({ site }) => site?.instanceId === descriptor.sourceSiteInstanceId);
+    if (!legal || !sourceEntry?.site || isRubble(sourceEntry.site)) {
+      throw new Error('unreachable illegal site flight');
+    }
+    const sourceCell = sourceEntry.cell;
+    const carriedAvatarInstanceIds = (['north', 'south'] as const)
+      .filter((avatarSeat) => state.players[avatarSeat].avatar.location === sourceCell)
+      .map((avatarSeat) => state.players[avatarSeat].avatar.card.instanceId);
+    const carriedMinionInstanceIds = state.realm.units
+      .filter((unit) => unit.location === sourceCell && unit.occupiedCells === undefined)
+      .map(({ instanceId }) => instanceId);
+    const carriedArtifactInstanceIds = (state.realm.artifacts ?? [])
+      .filter((artifact) => !('bearer' in artifact) && artifact.location === sourceCell)
+      .map(({ instanceId }) => instanceId);
+    const sites = { ...state.realm.sites };
+    delete sites[sourceCell];
+    sites[descriptor.targetCell] = deepFreeze({
+      ...sourceEntry.site,
+      lastFlightTurn: state.turnNumber,
+    });
+    const moved = deepFreeze({
+      ...state,
+      players: deepFreeze(Object.fromEntries((['north', 'south'] as const).map((avatarSeat) => {
+        const movingPlayer = state.players[avatarSeat];
+        return [avatarSeat, movingPlayer.avatar.location === sourceCell
+          ? deepFreeze({
+            ...movingPlayer,
+            avatar: { ...movingPlayer.avatar, location: descriptor.targetCell },
+          })
+          : movingPlayer];
+      })) as Record<GameSeat, PlayerState>),
+      realm: {
+        ...state.realm,
+        ...(state.realm.artifacts
+          ? {
+            artifacts: state.realm.artifacts.map((artifact) =>
+              !('bearer' in artifact) && artifact.location === sourceCell
+                ? deepFreeze({ ...artifact, location: descriptor.targetCell })
+                : artifact),
+          }
+          : {}),
+        sites,
+        units: state.realm.units.map((unit) =>
+          unit.location === sourceCell && unit.occupiedCells === undefined
+            ? deepFreeze({ ...unit, location: descriptor.targetCell })
+            : unit),
+      },
+    });
+    const settlement = settleRegionOccupancy(moved);
+    return [
+      withStateVersion(settlement.state, {}),
+      [{
+        payload: {
+          carriedArtifactInstanceIds,
+          carriedAvatarInstanceIds,
+          carriedMinionInstanceIds,
+          from: sourceCell,
+          instanceId: sourceEntry.site.instanceId,
+          seat,
+          to: descriptor.targetCell,
+        },
+        type: 'site-flown',
+      }, ...settlement.outcomes],
+      [],
+    ];
+  }
+
   if (descriptor.kind === 'resolve-genesis-spell') {
     const pending = state.pendingGenesisSpell;
     const nextSpell = player.spellbook[0];
@@ -7766,6 +7998,39 @@ function applyDescriptor(
       [{
         payload: { seat, sourceInstanceId: pending.sourceInstanceId },
         type: descriptor.choice === 'bottom-next' ? 'spell-bottomed' : 'spell-kept',
+      }],
+      [],
+    ];
+  }
+
+  if (descriptor.kind === 'resolve-genesis-spell-order') {
+    const pending = state.pendingGenesisSpellOrder;
+    if (state.phase !== 'genesis'
+      || !pending
+      || pending.seat !== seat
+      || descriptor.order.length !== pending.count
+      || new Set(descriptor.order).size !== pending.count
+      || descriptor.order.some((index) => !Number.isSafeInteger(index)
+        || index < 0 || index >= pending.count)) {
+      throw new Error('unreachable illegal Genesis spell order');
+    }
+    const top = player.spellbook.slice(0, pending.count);
+    const updatedPlayer = deepFreeze({
+      ...player,
+      spellbook: [
+        ...descriptor.order.map((index) => top[index]!),
+        ...player.spellbook.slice(pending.count),
+      ],
+    });
+    return [
+      withStateVersion(state, {
+        pendingGenesisSpellOrder: null,
+        phase: 'main',
+        players: replacePlayer(state, seat, updatedPlayer),
+      }),
+      [{
+        payload: { count: pending.count, seat, sourceInstanceId: pending.sourceInstanceId },
+        type: 'spells-reordered',
       }],
       [],
     ];
@@ -8017,6 +8282,17 @@ function applyDescriptor(
       && settlement.state.players[seat].spellbook.length > 0
       ? deepFreeze({ seat, sourceInstanceId: card.instanceId })
       : undefined;
+    const pendingGenesisSpellOrderCount = definition.genesisReorderNextSpells === 3
+      ? Math.min(definition.genesisReorderNextSpells, settlement.state.players[seat].spellbook.length)
+      : 0;
+    const pendingGenesisSpellOrder = terminal.status === 'active'
+      && pendingGenesisSpellOrderCount > 0
+      ? deepFreeze({
+        count: pendingGenesisSpellOrderCount,
+        seat,
+        sourceInstanceId: card.instanceId,
+      })
+      : undefined;
     const pendingGenesisToken = terminal.status === 'active'
       && descriptor.genesisTokenChoice === 'defer'
       && definition.genesisPayOneManaToSummonToken !== undefined
@@ -8025,9 +8301,10 @@ function applyDescriptor(
     const resolvedState = deepFreeze({
         ...(terminal.status === 'finished'
           ? { phase: 'terminal' as const }
-          : pendingGenesisToken || pendingGenesisSpell
+          : pendingGenesisToken || pendingGenesisSpell || pendingGenesisSpellOrder
             ? {
               ...(pendingGenesisSpell ? { pendingGenesisSpell } : {}),
+              ...(pendingGenesisSpellOrder ? { pendingGenesisSpellOrder } : {}),
               ...(pendingGenesisToken ? { pendingGenesisToken } : {}),
               phase: 'genesis' as const,
             }

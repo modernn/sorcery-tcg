@@ -941,7 +941,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       assert.equal(preset.usesOnlyOrdinaryOrExceptionalCards, false);
       assert.equal(
         preset.manifest.decks.north.atlas.length,
-        preset.id === 'air-vs-earth-lesson' ? 13 : 16,
+        16,
       );
       assert.equal(
         preset.manifest.decks.north.spellbook.length,
@@ -949,7 +949,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       );
       assert.equal(
         preset.manifest.decks.south.atlas.length,
-        preset.id === 'air-vs-earth-lesson' ? 16 : 13,
+        16,
       );
       assert.equal(
         preset.manifest.decks.south.spellbook.length,
@@ -978,10 +978,13 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   );
   const airLesson = starterCatalog[0]!;
   assert.deepEqual(summarize(airLesson, 'north', 'atlas'), {
+    'Cloud City': 1,
     'Dark Tower': 3,
     'Gothic Tower': 3,
     'Lone Tower': 3,
     'Mountain Pass': 2,
+    Observatory: 1,
+    'Planar Gate': 1,
     'Updraft Ridge': 2,
   });
   assert.deepEqual(summarize(airLesson, 'north', 'spellbook'), {
@@ -1533,7 +1536,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     starterCatalog[0]!.cardNames[starterCatalog[0]!.manifest.decks.north.avatar],
     'Sparkmage',
   );
-  assert.match(starterCatalog[0]!.label, /Air Beta vs Earth Beta.*one boxed precon each/);
+  assert.match(starterCatalog[0]!.label, /Air Beta vs Earth Beta.*exact boxed precons/);
   assert.equal(Object.values(starterCatalog.find(({ id }) =>
     id === 'water-starter')!.cardNames).includes('Autumn River'), true);
   assert.equal(Object.values(starterCatalog.find(({ id }) =>
@@ -1674,7 +1677,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     .find(({ name }) => name === 'Nimbus Jinn')?.copies, 2);
   assert.equal(result.airNimbusJinn.replayVerified, true);
   assert.equal(result.airHeadlessHaunt.headlessHaunt, 'Headless Haunt');
-  assert.equal(result.airHeadlessHaunt.seed, 4);
+  assert.equal(result.airHeadlessHaunt.seed, 6);
   assert.equal(result.airHeadlessHaunt.acceptedActionCount > 0, true);
   assert.equal(result.airHeadlessHaunt.startTurnPhaseVerified, true);
   assert.equal(result.airHeadlessHaunt.legalTriggerVerified, true);

@@ -1683,6 +1683,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   blink: NormalizedCard;
   bury: NormalizedCard;
   caveIn: NormalizedCard;
+  cloudCity: NormalizedCard;
   craterize: NormalizedCard;
   siegeBallista: NormalizedCard;
   payloadTrebuchet: NormalizedCard;
@@ -1720,6 +1721,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   slingPixies: NormalizedCard;
   spireLich: NormalizedCard;
   nimbusJinn: NormalizedCard;
+  observatory: NormalizedCard;
   headlessHaunt: NormalizedCard;
   raiseDead: NormalizedCard;
   devilsEgg: NormalizedCard;
@@ -1803,6 +1805,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   wraetannisTitan: NormalizedCard;
   slumberingGiantess: NormalizedCard;
   polarBears: NormalizedCard;
+  planarGate: NormalizedCard;
   pirateShip: NormalizedCard;
   pudgeButcher: NormalizedCard;
   rainOfArrows: NormalizedCard;
@@ -2470,6 +2473,68 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || updraftRidge.thresholds.water !== 0
     || updraftRidge.rarity !== 'exceptional') {
     throw new Error('private Airborne free-departure site no longer matches its supported facts');
+  }
+  const cloudCity = snapshot.cards.find(({ name }) => name === 'Cloud City');
+  if (!cloudCity
+    || cloudCity.stableId
+      !== 'card:6038dc68f1ce4a4e62303770504d5fe87eaf3abc7059e0f1da8fefd8599b93c6'
+    || cloudCity.officialSourceId !== '001-cloud_city-b-f'
+    || cloudCity.cardType !== 'site'
+    || ruleTextDigest(cloudCity.rulesText)
+      !== 'sha256:af3f7b4d64516ac092b148db912ced51ef3cf9c62aaa768ea32410e756805edb'
+    || cloudCity.manaCost !== null
+    || cloudCity.attack !== null
+    || cloudCity.defense !== null
+    || cloudCity.life !== null
+    || cloudCity.elements.length !== 1
+    || cloudCity.elements[0] !== 'air'
+    || cloudCity.thresholds.air !== 1
+    || cloudCity.thresholds.earth !== 0
+    || cloudCity.thresholds.fire !== 0
+    || cloudCity.thresholds.water !== 0
+    || cloudCity.rarity !== 'unique') {
+    throw new Error('private flying site no longer matches its supported facts');
+  }
+  const observatory = snapshot.cards.find(({ name }) => name === 'Observatory');
+  if (!observatory
+    || observatory.stableId
+      !== 'card:e5ab76577919287f931555dc4a6dbf2147c873b33b946675e95114cc2fa42e40'
+    || observatory.officialSourceId !== '001-observatory-b-f'
+    || observatory.cardType !== 'site'
+    || ruleTextDigest(observatory.rulesText)
+      !== 'sha256:ddc868530ece92da7d1e4b883f54b108201f50f74412014179348b658fc7c994'
+    || observatory.manaCost !== null
+    || observatory.attack !== null
+    || observatory.defense !== null
+    || observatory.life !== null
+    || observatory.elements.length !== 1
+    || observatory.elements[0] !== 'air'
+    || observatory.thresholds.air !== 1
+    || observatory.thresholds.earth !== 0
+    || observatory.thresholds.fire !== 0
+    || observatory.thresholds.water !== 0
+    || observatory.rarity !== 'elite') {
+    throw new Error('private spell-ordering site no longer matches its supported facts');
+  }
+  const planarGate = snapshot.cards.find(({ name }) => name === 'Planar Gate');
+  if (!planarGate
+    || planarGate.stableId
+      !== 'card:4f7ac037cdf1e82515bb742cbea2b211786bbc7ad0207e9b3229fece1e4d2e30'
+    || planarGate.officialSourceId !== '001-planar_gate-b-f'
+    || planarGate.cardType !== 'site'
+    || ruleTextDigest(planarGate.rulesText)
+      !== 'sha256:9a71f7047f55e0612433c383d7c4b2b3aceb9503ee797296af71c5ae6e6023a1'
+    || planarGate.manaCost !== null
+    || planarGate.attack !== null
+    || planarGate.defense !== null
+    || planarGate.life !== null
+    || planarGate.elements.length !== 0
+    || planarGate.thresholds.air !== 0
+    || planarGate.thresholds.earth !== 0
+    || planarGate.thresholds.fire !== 0
+    || planarGate.thresholds.water !== 0
+    || planarGate.rarity !== 'elite') {
+    throw new Error('private Voidwalk-granting site no longer matches its supported facts');
   }
   const blink = snapshot.cards.find(({ name }) => name === 'Blink');
   const blinkTokens = blink?.rulesText.toLowerCase().match(/[a-z]+/g) ?? [];
@@ -4219,6 +4284,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     borderMilitia,
     bury,
     caveIn,
+    cloudCity,
     craterize,
     siegeBallista,
     payloadTrebuchet,
@@ -4255,6 +4321,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     slingPixies,
     spireLich,
     nimbusJinn,
+    observatory,
     headlessHaunt,
     raiseDead,
     devilsEgg,
@@ -4302,6 +4369,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     movementTwoMinion,
     overpower,
     polarBears,
+    planarGate,
     pirateShip,
     poisonousDagger,
     pudgeButcher,
@@ -4491,6 +4559,9 @@ function gameDefinition(
   discardSiteAsAdditionalCost = false,
   destroyTargetSite = false,
   damageUnitsAboveAndBelowTargetSiteByManhattanDistance?: readonly [number, number, number, number, number],
+  flyToNearbyVoidOncePerTurnAtAirThreshold = false,
+  siteGenesisReorderNextSpells = false,
+  minionsHereGainVoidwalkUntilLeavingVoid = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4562,6 +4633,9 @@ function gameDefinition(
       cardType: 'site',
       ...(connectsBurrowedAllies ? { connectsBurrowedAllies: true } : {}),
       elements: card.elements,
+      ...(flyToNearbyVoidOncePerTurnAtAirThreshold
+        ? { flyToNearbyVoidOncePerTurnAtAirThreshold: 3 as const }
+        : {}),
       ...(siteGenesisDiscardTopSpells
         ? { genesisDiscardTopSpells: siteGenesisDiscardTopSpells }
         : {}),
@@ -4574,6 +4648,10 @@ function gameDefinition(
         ? { genesisPayOneManaToSummonToken: siteGenesisPayOneManaToSummonToken }
         : {}),
       ...(siteGenesisMayBottomNextSpell ? { genesisMayBottomNextSpell: true } : {}),
+      ...(siteGenesisReorderNextSpells ? { genesisReorderNextSpells: 3 as const } : {}),
+      ...(minionsHereGainVoidwalkUntilLeavingVoid
+        ? { minionsHereGainVoidwalkUntilLeavingVoid: true as const }
+        : {}),
       ...(ordinaryMinionManaDiscount ? { ordinaryMinionManaDiscount } : {}),
       ...(rangedUnitsHereRangeBonus ? { rangedUnitsHereRangeBonus: 1 as const } : {}),
       ...(sacrificeToDestroyNearbySite ? { sacrificeToDestroyNearbySite: true } : {}),
@@ -5082,6 +5160,9 @@ function buildManifest(
       ...Array(3).fill(input.loneTower.stableId),
       ...Array(2).fill(input.mountainPass.stableId),
       ...Array(2).fill(input.updraftRidge.stableId),
+      input.cloudCity.stableId,
+      input.observatory.stableId,
+      input.planarGate.stableId,
     ],
     avatar: input.sparkmage.stableId,
     spellbook: [
@@ -5981,6 +6062,9 @@ function buildManifest(
       card.stableId === input.craterize.stableId,
       card.stableId === input.craterize.stableId,
       card.stableId === input.craterize.stableId ? [10, 7, 4, 2, 1] as const : undefined,
+      card.stableId === input.cloudCity.stableId,
+      card.stableId === input.observatory.stableId,
+      card.stableId === input.planarGate.stableId,
     ),
   ]));
   return {
@@ -8069,12 +8153,12 @@ export async function loadPrivateStarterCatalog(
   const lessons = [
     [
       'air-vs-earth-lesson',
-      'Air Beta vs Earth Beta — supported cards from one boxed precon each',
+      'Air Beta vs Earth Beta — exact boxed precons',
       input.config.airSeed,
     ],
     [
       'earth-vs-air-lesson',
-      'Earth Beta vs Air Beta — supported cards from one boxed precon each',
+      'Earth Beta vs Air Beta — exact boxed precons',
       7_382,
     ],
   ] as const;

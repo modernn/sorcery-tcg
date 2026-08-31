@@ -15,6 +15,7 @@ import {
   type GameDeckSpec,
   type GameLegalAction,
   type GameManifest,
+  type GameReceipt,
   type GameSession,
 } from '../../src/engine/game.ts';
 
@@ -104,6 +105,7 @@ type SiteFacts = Readonly<{
   cannotBeMovedDestroyedOrModified?: true;
   connectsBurrowedAllies?: boolean;
   elements?: readonly ('air' | 'earth' | 'fire' | 'water')[];
+  flyToNearbyVoidOncePerTurnAtAirThreshold?: 3;
   genesisDiscardTopSpells?: 2;
   genesisDrawSpellPerAdjacentSameCard?: boolean;
   genesisGainMana?: number;
@@ -111,6 +113,8 @@ type SiteFacts = Readonly<{
   genesisHealNearbyAvatars?: 3;
   genesisImmobilizeNearbyUntilNextTurn?: true;
   genesisMayBottomNextSpell?: true;
+  genesisReorderNextSpells?: 3;
+  minionsHereGainVoidwalkUntilLeavingVoid?: true;
   rangedUnitsHereRangeBonus?: 1;
   sacrificeToDestroyNearbySite?: true;
 }>;
@@ -158,6 +162,9 @@ function cardsFor(
         cardType: 'site',
         connectsBurrowedAllies: site.connectsBurrowedAllies ?? false,
         elements: site.elements ?? ['earth'],
+        ...(site.flyToNearbyVoidOncePerTurnAtAirThreshold === 3
+          ? { flyToNearbyVoidOncePerTurnAtAirThreshold: 3 as const }
+          : {}),
         ...(site.genesisDiscardTopSpells === 2 ? { genesisDiscardTopSpells: 2 as const } : {}),
         genesisDrawSpellPerAdjacentSameCard:
           site.genesisDrawSpellPerAdjacentSameCard ?? false,
@@ -173,6 +180,12 @@ function cardsFor(
           : {}),
         ...(site.genesisMayBottomNextSpell === true
           ? { genesisMayBottomNextSpell: true as const }
+          : {}),
+        ...(site.genesisReorderNextSpells === 3
+          ? { genesisReorderNextSpells: 3 as const }
+          : {}),
+        ...(site.minionsHereGainVoidwalkUntilLeavingVoid === true
+          ? { minionsHereGainVoidwalkUntilLeavingVoid: true as const }
           : {}),
         ...(site.rangedUnitsHereRangeBonus === 1
           ? { rangedUnitsHereRangeBonus: 1 as const }
@@ -10214,6 +10227,70 @@ test('RULE-03 seasonal River Genesis privately keeps or bottoms the next spell',
   assert.equal(verifyGameReplay(bottomed.session), true);
 });
 
+test('RULE-03 Observatory privately reorders the next three spells without drawing', () => {
+  const base = deck('observatory-north');
+  const north = { ...base, atlas: base.atlas.map(() => 'observatory-site') };
+  const gameManifest = manifest(161, {
+    north,
+    site: { genesisReorderNextSpells: 3 },
+  });
+  assert.throws(() => createGameManifest({
+    ...gameManifest,
+    cards: {
+      ...gameManifest.cards,
+      'observatory-site': {
+        ...gameManifest.cards['observatory-site']!,
+        genesisReorderNextSpells: 2,
+      } as unknown as GameCardDefinition,
+    },
+  }), /genesisReorderNextSpells must be 3/);
+
+  const checkpoint = keep(keep(createGameSession(gameManifest)));
+  const before = checkpoint.state.players.north.spellbook;
+  const play = action(checkpoint, ({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardId === 'observatory-site' && descriptor.cell === 'C4');
+  if (play.descriptor.kind !== 'play-site') throw new Error('expected Observatory play');
+  const played = stepGame(checkpoint, play);
+  assert.equal(played.accepted, true);
+  if (!played.accepted) return;
+  assert.equal(played.session.state.phase, 'genesis');
+  assert.deepEqual(played.session.state.players.north.spellbook, before);
+
+  const choices = legalGameActions(played.session.state, 'north');
+  assert.equal(choices.length, 6);
+  assert.equal(choices.every(({ descriptor }) =>
+    descriptor.kind === 'resolve-genesis-spell-order'
+      && descriptor.order.length === 3
+      && !canonicalJson(descriptor as unknown as JsonValue).includes(before[0]!.instanceId)), true);
+  const identity = choices.find(({ descriptor }) =>
+    descriptor.kind === 'resolve-genesis-spell-order'
+      && descriptor.order.join(',') === '0,1,2');
+  const reverse = choices.find(({ descriptor }) =>
+    descriptor.kind === 'resolve-genesis-spell-order'
+      && descriptor.order.join(',') === '2,1,0');
+  assert.ok(identity);
+  assert.ok(reverse);
+  const kept = stepGame(played.session, identity);
+  const reversed = stepGame(played.session, reverse);
+  assert.equal(kept.accepted, true);
+  assert.equal(reversed.accepted, true);
+  if (!kept.accepted || !reversed.accepted) return;
+  assert.deepEqual(kept.session.state.players.north.spellbook, before);
+  assert.deepEqual(reversed.session.state.players.north.spellbook.slice(0, 3), before.slice(0, 3).reverse());
+  assert.deepEqual(reversed.session.state.players.north.spellbook.slice(3), before.slice(3));
+  assert.deepEqual(reversed.receipt.events.map(({ payload, type }) => ({ payload, type })), [{
+    payload: { count: 3, seat: 'north', sourceInstanceId: play.descriptor.cardInstanceId },
+    type: 'spells-reordered',
+  }]);
+  assert.deepEqual(reversed.receipt.randomDraws, []);
+  assert.equal(
+    canonicalJson(observeGame(kept.session.state, 'south') as unknown as JsonValue),
+    canonicalJson(observeGame(reversed.session.state, 'south') as unknown as JsonValue),
+  );
+  assert.equal(verifyGameReplay(kept.session), true);
+  assert.equal(verifyGameReplay(reversed.session), true);
+});
+
 test('RULE-03 adjacent matching sites trigger one spell draw apiece and a short deck loses', () => {
   const base = deck('leyline-north');
   const north = {
@@ -12262,6 +12339,63 @@ test('RULE-04 Airborne moves diagonally and restricts attacks and Intercept', ()
   assert.equal(verifyGameReplay(session), true);
 });
 
+test('RULE-02 Cloud City flies once per turn at three Air affinity and carries normal occupants', () => {
+  let session = keep(createGameSession(manifest(136, {
+    northSpell: {
+      attack: 2,
+      defense: 2,
+      manaCost: 1,
+      thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+    },
+    site: {
+      elements: ['air'],
+      flyToNearbyVoidOncePerTurnAtAirThreshold: 3,
+    },
+  })));
+  session = keep(session);
+  const take = (predicate: (candidate: GameLegalAction) => boolean): GameReceipt => {
+    const result = stepGame(session, action(session, predicate));
+    assert.equal(result.accepted, true);
+    session = result.session;
+    return result.receipt;
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C4');
+  const sourceSiteId = session.state.realm.sites.C4?.instanceId;
+  const minionId = session.state.realm.units[0]?.instanceId;
+  assert.ok(sourceSiteId);
+  assert.ok(minionId);
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'fly-site'), false);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B3');
+
+  const manaBefore = session.state.players.north.mana;
+  const receipt = take(({ descriptor }) => descriptor.kind === 'fly-site'
+    && descriptor.sourceSiteInstanceId === sourceSiteId
+    && descriptor.targetCell === 'D4');
+  assert.equal(session.state.realm.sites.C4, undefined);
+  assert.equal(session.state.realm.sites.D4?.instanceId, sourceSiteId);
+  assert.equal(session.state.players.north.avatar.location, 'D4');
+  assert.equal(session.state.realm.units.find(({ instanceId }) => instanceId === minionId)?.location, 'D4');
+  assert.equal(session.state.players.north.mana, manaBefore);
+  assert.equal(receipt.events.some(({ type }) => type === 'site-flown'), true);
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'fly-site' && descriptor.sourceSiteInstanceId === sourceSiteId), false);
+  assert.equal(verifyGameReplay(session), true);
+});
+
 test('RULE-04 Updraft Ridge gives only Airborne minions a free departure to move or Defend', () => {
   const base = manifest(162, {
     spell: {
@@ -13778,6 +13912,96 @@ test('RULE-04 Voidwalk summons to any void and moves between adjacent void and s
     && descriptor.unitInstanceId === unitId
     && descriptor.to.cell === 'B4' && descriptor.to.region === 'surface');
   take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 Planar Gate grants minions Voidwalk only until they leave the void', () => {
+  const baseNorth = deck('gate-north');
+  const north = { ...baseNorth, atlas: baseNorth.atlas.map(() => 'planar-gate') };
+  const withGateEverywhere = manifest(162, {
+    north,
+    northSpell: {
+      attack: 2,
+      defense: 2,
+      manaCost: 1,
+      movementBonus: 2,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+    site: { minionsHereGainVoidwalkUntilLeavingVoid: true },
+  });
+  const southSiteIds = new Set(withGateEverywhere.decks.south.atlas);
+  const cards = Object.fromEntries(Object.entries(withGateEverywhere.cards).map(([cardId, card]) => {
+    if (card.cardType !== 'site' || !southSiteIds.has(cardId)) return [cardId, card];
+    const ordinarySite = { ...card };
+    delete ordinarySite.minionsHereGainVoidwalkUntilLeavingVoid;
+    return [cardId, ordinarySite];
+  })) as Record<string, GameCardDefinition>;
+  const gameManifest = createGameManifest({ ...withGateEverywhere, cards });
+  let session = keep(keep(createGameSession(gameManifest)));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C4');
+  const unitId = session.state.realm.units[0]?.instanceId;
+  assert.ok(unitId);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === unitId
+    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+      === 'C4/surface,B4/void');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  assert.equal(session.state.realm.units.find(({ instanceId }) => instanceId === unitId)
+    ?.planarGateVoidwalk, true);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === unitId
+      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+        === 'B4/void,B3/void'), true);
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === unitId
+    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+      === 'B4/void,B3/void');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+  const exits = legalGameActions(session.state, 'north');
+  assert.equal(exits.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === unitId
+    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+      === 'B3/void,C3/surface,D3/void'), false);
+  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    && descriptor.unitInstanceId === unitId
+    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+      === 'B3/void,C3/surface');
+  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  assert.equal(session.state.realm.units.find(({ instanceId }) => instanceId === unitId)
+    ?.planarGateVoidwalk, undefined);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === unitId
+      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+        === 'C3/surface,D3/void'), false);
   assert.equal(verifyGameReplay(session), true);
 });
 
