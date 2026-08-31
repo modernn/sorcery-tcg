@@ -37,16 +37,21 @@ fn manifest() -> String {
 fn checkpoint_should_restore_accepted_and_rejected_attempts() {
     let mut session = Session::new(&manifest()).expect("valid session");
     let north = session.legal_actions().expect("north actions")[0].clone();
-    assert!(matches!(
-        session
-            .step(ActionRequest {
-                action_id: north.action_id.to_string(),
-                seat: north.seat,
-                state_version: north.state_version,
-            })
-            .expect("accepted north action"),
-        StepResult::Accepted(_)
-    ));
+    let StepResult::Accepted(north_receipt) = session
+        .step(ActionRequest {
+            action_id: north.action_id.to_string(),
+            seat: north.seat,
+            state_version: north.state_version,
+        })
+        .expect("accepted north action")
+    else {
+        panic!("north action was rejected");
+    };
+    let north_last_event = north_receipt
+        .events
+        .last()
+        .expect("north event")
+        .event_sequence;
     assert!(matches!(
         session
             .step(ActionRequest {
@@ -58,13 +63,24 @@ fn checkpoint_should_restore_accepted_and_rejected_attempts() {
         StepResult::Rejected(_)
     ));
     let south = session.legal_actions().expect("south actions")[0].clone();
-    session
+    let StepResult::Accepted(south_receipt) = session
         .step(ActionRequest {
             action_id: south.action_id.to_string(),
             seat: south.seat,
             state_version: south.state_version,
         })
-        .expect("accepted south action");
+        .expect("accepted south action")
+    else {
+        panic!("south action was rejected");
+    };
+    assert_eq!(
+        south_receipt
+            .events
+            .first()
+            .expect("south event")
+            .event_sequence,
+        north_last_event + 1
+    );
 
     let checkpoint = create_game_checkpoint(&session).expect("captured checkpoint");
     let serialized = serialize_game_checkpoint(&checkpoint).expect("canonical checkpoint");

@@ -24,12 +24,12 @@ available; Linux reports `/proc/self/status` `VmHWM`.
 
 | Release workload | TypeScript | Rust | Ratio |
 | --- | ---: | ---: | ---: |
-| Transitions/second | 362.222 | 603,642.483 | 1,666.5x |
-| Search nodes/second (horizon 2) | 207.255 | 53,085.662 | 256.1x |
-| Fully replayed and re-verified games/second | 0.706 | 1.930 | 2.73x |
+| Transitions/second | 362.222 | 600,051.263 | 1,656.6x |
+| Search nodes/second (horizon 2) | 207.255 | 52,806.565 | 254.8x |
+| Fully replayed and re-verified games/second | 0.706 | 3.411 | 4.83x |
 
 The JSON baselines retain aggregate, median, and p95 measurements. Rust's
-20-sample comparable run exceeds the mature transition target; authoritative
-replay remains below the initial 3x target and is still an optimization gate.
-Windows peak RSS is unavailable in the stdlib-only harness, so a final Linux
-release run must supply that measurement before cutover.
+20-sample comparable run exceeds the mature transition target and the initial
+3x fully replayed-game target. Windows peak RSS is unavailable in the
+stdlib-only harness, so a final Linux release run must supply that measurement
+before cutover.

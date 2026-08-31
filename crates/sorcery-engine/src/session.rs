@@ -25,8 +25,10 @@ pub enum StepResult {
 #[derive(Clone, Debug)]
 pub struct Session {
     attempts: Vec<Attempt>,
+    event_count: u64,
     game: Game,
     manifest_json: String,
+    state_hash: IdentityHash,
     transcript: Vec<Receipt>,
 }
 
@@ -93,10 +95,14 @@ impl Session {
     ///
     /// Returns [`SessionError`] when the manifest or deterministic setup is invalid.
     pub fn new(manifest_json: &str) -> Result<Self, SessionError> {
+        let game = Game::from_manifest_json(manifest_json)?;
+        let state_hash = game.state_hash()?;
         Ok(Self {
             attempts: Vec::new(),
-            game: Game::from_manifest_json(manifest_json)?,
+            event_count: 0,
+            game,
             manifest_json: manifest_json.to_owned(),
+            state_hash,
             transcript: Vec::new(),
         })
     }
@@ -125,7 +131,7 @@ impl Session {
     /// Returns [`SessionError`] when authoritative hashing or receipt creation fails.
     pub fn step(&mut self, request: ActionRequest) -> Result<StepResult, SessionError> {
         let state_version = self.game.position().state_version();
-        let state_hash = self.game.state_hash()?;
+        let state_hash = self.state_hash.clone();
         if request.state_version != state_version {
             return self.reject(
                 request,
@@ -155,18 +161,19 @@ impl Session {
         };
 
         let receipt_sequence = next_sequence(self.transcript.len())?;
-        let event_count = self.transcript.iter().try_fold(0_u64, |count, receipt| {
-            let length =
-                u64::try_from(receipt.events.len()).map_err(|_| SessionError::SequenceExhausted)?;
-            count
-                .checked_add(length)
-                .ok_or(SessionError::SequenceExhausted)
-        })?;
-        let first_event_sequence = event_count
+        let attempt_sequence = next_sequence(self.attempts.len())?;
+        let first_event_sequence = self
+            .event_count
             .checked_add(1)
             .ok_or(SessionError::SequenceExhausted)?;
         let outcomes = self.game.apply_action_recorded(&action)?;
         let post_state_hash = self.game.state_hash()?;
+        let next_event_count = self
+            .event_count
+            .checked_add(
+                u64::try_from(outcomes.len()).map_err(|_| SessionError::SequenceExhausted)?,
+            )
+            .ok_or(SessionError::SequenceExhausted)?;
         let events = create_events(
             &action_id,
             receipt_sequence,
@@ -177,7 +184,7 @@ impl Session {
             action_id,
             events,
             next_state_version: self.game.position().state_version(),
-            post_state_hash,
+            post_state_hash: post_state_hash.clone(),
             pre_state_hash: state_hash.clone(),
             random_draws: Vec::new(),
             receipt_sequence,
@@ -185,13 +192,15 @@ impl Session {
             state_version,
         })?;
         self.attempts.push(accepted_attempt(
-            next_sequence(self.attempts.len())?,
+            attempt_sequence,
             request,
             state_version,
             state_hash,
             receipt.receipt_id.clone(),
         ));
         self.transcript.push(receipt.clone());
+        self.event_count = next_event_count;
+        self.state_hash = post_state_hash;
         Ok(StepResult::Accepted(receipt))
     }
 
@@ -270,7 +279,7 @@ impl Session {
     ///
     /// Returns [`CanonicalError`] when state materialization cannot be canonicalized.
     pub fn state_hash(&self) -> Result<IdentityHash, CanonicalError> {
-        self.game.state_hash()
+        Ok(self.state_hash.clone())
     }
 
     /// Hashes authoritative setup draw records.
