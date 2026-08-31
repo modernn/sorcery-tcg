@@ -8,5 +8,6 @@ pub mod contract;
 pub mod deck;
 pub mod facts;
 pub mod game;
+pub mod policy;
 pub mod prng;
 pub mod session;
