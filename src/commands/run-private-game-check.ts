@@ -1503,6 +1503,15 @@ export type PrivateGameCheck = Readonly<{
     slyFoxEnemyWaterUnavailable: boolean;
     summonedToEnemyWater: boolean;
   }>;
+  waterConditionalStealth: Readonly<{
+    acceptedActionCount: number;
+    deck: DeckList;
+    gainedStealthAtEndOfTurn: boolean;
+    replayVerified: boolean;
+    seed: number;
+    summonedUnstealthed: boolean;
+    survivorsOfSerava: string;
+  }>;
   waterEndTurnStealth: Readonly<{
     acceptedActionCount: number;
     attackSiteAvailable: boolean;
@@ -1786,6 +1795,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   sinkhole: NormalizedCard;
   simpleVillage: NormalizedCard;
   slyFox: NormalizedCard;
+  survivorsOfSerava: NormalizedCard;
   spire: NormalizedCard;
   stealthMinion: NormalizedCard;
   stealthTargetMinion: NormalizedCard;
@@ -3480,6 +3490,22 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || slyFox.rarity !== 'ordinary') {
     throw new Error('private end-turn Stealth minion no longer matches its supported facts');
   }
+  const survivorsOfSerava = snapshot.cards.find(({ name }) => name === 'Survivors of Serava');
+  if (!survivorsOfSerava
+    || survivorsOfSerava.cardType !== 'minion'
+    || ruleTextDigest(survivorsOfSerava.rulesText) !== 'sha256:cbea613886dbaebb9eb6a5003000b30c371f04fab216b7dbd415674789e393d4'
+    || survivorsOfSerava.manaCost !== 2
+    || survivorsOfSerava.attack !== 2
+    || survivorsOfSerava.defense !== 2
+    || survivorsOfSerava.elements.length !== 1
+    || survivorsOfSerava.elements[0] !== 'water'
+    || survivorsOfSerava.thresholds.air !== 0
+    || survivorsOfSerava.thresholds.earth !== 0
+    || survivorsOfSerava.thresholds.fire !== 0
+    || survivorsOfSerava.thresholds.water !== 1
+    || survivorsOfSerava.rarity !== 'ordinary') {
+    throw new Error('private conditional end-turn Stealth minion no longer matches its supported facts');
+  }
   const sedgeCrabs = snapshot.cards.find(({ name }) => name === 'Sedge Crabs');
   if (!sedgeCrabs
     || sedgeCrabs.cardType !== 'minion'
@@ -4395,6 +4421,7 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     sinkhole,
     simpleVillage,
     slyFox,
+    survivorsOfSerava,
     spire,
     stealthMinion,
     stealthTargetMinion,
@@ -4463,6 +4490,7 @@ function gameDefinition(
   airborne = false,
   stealth = false,
   gainsStealthAtEndOfTurn = false,
+  gainsStealthAtEndOfTurnIfNoEnemiesNearby = false,
   movesOnlySideways = false,
   submerge = false,
   burrowing = false,
@@ -4799,6 +4827,7 @@ function gameDefinition(
       genesisDrawSite,
       ...(genesisLoseControllerLife ? { genesisLoseControllerLife } : {}),
       gainsStealthAtEndOfTurn,
+      gainsStealthAtEndOfTurnIfNoEnemiesNearby,
       immobile,
       lethal,
       ...(lanceCount ? { lanceCount } : {}),
@@ -4858,7 +4887,7 @@ function gameDefinition(
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-chain-lightning' | 'air-devils-egg' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-kite-archer' | 'air-leyline' | 'air-lightning-bolt' | 'air-lucky-charm' | 'air-nimbus-jinn' | 'air-rain-of-arrows' | 'air-raise-dead' | 'air-skirmishers-of-mu' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-thunderstorm' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-craterize' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-chain-lightning' | 'air-devils-egg' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-kite-archer' | 'air-leyline' | 'air-lightning-bolt' | 'air-lucky-charm' | 'air-nimbus-jinn' | 'air-rain-of-arrows' | 'air-raise-dead' | 'air-skirmishers-of-mu' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-thunderstorm' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-craterize' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-conditional-stealth' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -5481,6 +5510,9 @@ function buildManifest(
     input.slyFox,
     input.sedgeCrabs,
   ]);
+  const waterConditionalStealthDeck = elementalDeck('water', [
+    input.survivorsOfSerava,
+  ]);
   const waterFreezeDeck = elementalDeck('water', [
     input.healingMinion,
     input.slyFox,
@@ -5693,6 +5725,8 @@ function buildManifest(
           ? fireVikingsDeck
         : scenario === 'fire-reckless-squire'
           ? fireRecklessSquireDeck
+        : scenario === 'water-conditional-stealth'
+          ? waterConditionalStealthDeck
         : scenario === 'water-edge-connection'
           ? waterEdgeConnectionDeck
         : scenario === 'water-drowned'
@@ -5776,6 +5810,8 @@ function buildManifest(
       ? airZapDeck
       : scenario === 'airborne' || scenario === 'movement-two' || scenario === 'stealth'
       ? airborneDeck
+      : scenario === 'water-conditional-stealth'
+        ? waterConditionalStealthDeck
       : scenario === 'water-starter'
         ? waterStarterDeck
       : scenario === 'water-edge-connection'
@@ -5946,6 +5982,7 @@ function buildManifest(
         || card.stableId === input.midnightRogue.stableId
         || card.stableId === input.deadOfNightDemon.stableId,
       card.stableId === input.slyFox.stableId,
+      card.stableId === input.survivorsOfSerava.stableId,
       card.stableId === input.sedgeCrabs.stableId,
       card.stableId === input.submergeMinion.stableId
         || card.stableId === input.drowned.stableId
@@ -10567,6 +10604,46 @@ function findHuntersLodgeOpening(
     }
   }
   throw new Error("private Hunter's Lodge scenario no longer produces its supported opening");
+}
+
+function findWaterConditionalStealthOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  seed: number;
+  session: GameSession;
+  siteInstanceIds: readonly [string, string];
+  southSiteInstanceId: string;
+  survivorsInstanceId: string;
+}> {
+  // ponytail: bounded reuse of the Sly Fox seed avoids another private config field.
+  for (let offset = 1; offset <= 4096; offset += 1) {
+    const seed = input.config.slyFoxSeed + offset;
+    const built = buildManifest(input, seed, 'water-conditional-stealth');
+    const session = createGameSession(built.manifest);
+    const siteInstanceIds = session.state.players.north.hand.atlas
+      .filter(({ cardId }) => {
+        const definition = session.state.cards[cardId];
+        return definition?.cardType === 'site' && definition.elements.includes('water');
+      })
+      .slice(0, 2)
+      .map(({ instanceId }) => instanceId);
+    const survivorsInstanceId = session.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === input.survivorsOfSerava.stableId)?.instanceId;
+    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+    if (siteInstanceIds.length === 2 && southSiteInstanceId && survivorsInstanceId) {
+      return {
+        ...built,
+        seed,
+        session,
+        siteInstanceIds: siteInstanceIds as [string, string],
+        southSiteInstanceId,
+        survivorsInstanceId,
+      };
+    }
+  }
+  throw new Error('private conditional end-turn Stealth scenario no longer produces its supported opening');
 }
 
 function findWaterOpening(
@@ -23290,6 +23367,60 @@ function runEarthHuntersLodge(
   });
 }
 
+function runWaterConditionalStealth(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): PrivateGameCheck['waterConditionalStealth'] {
+  const opening = findWaterConditionalStealthOpening(input);
+  let session = keep(keep(opening.session));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    session = accept(session, action(session, predicate));
+  };
+
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.siteInstanceIds[0]
+    && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.southSiteInstanceId);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site'
+    && descriptor.cardInstanceId === opening.siteInstanceIds[1]
+    && descriptor.cell === 'C3');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cardInstanceId === opening.survivorsInstanceId
+    && descriptor.cell === 'C3');
+  const summoned = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.survivorsInstanceId);
+  const endResult = stepGame(session, action(session, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  if (!endResult.accepted) {
+    throw new Error('private conditional end-turn Stealth resolution was rejected');
+  }
+  session = endResult.session;
+  const events = endResult.receipt.events;
+  const stealthGainedIndex = events.findIndex(({ payload, type }) =>
+    type === 'stealth-gained'
+      && isJsonRecord(payload)
+      && payload.instanceId === opening.survivorsInstanceId);
+  const turnEndedIndex = events.findIndex(({ type }) => type === 'turn-ended');
+  const stealthed = session.state.realm.units.find(({ instanceId }) =>
+    instanceId === opening.survivorsInstanceId);
+
+  return Object.freeze({
+    acceptedActionCount: session.transcript.length,
+    deck: deckList(opening.manifest.decks.north, opening.names),
+    gainedStealthAtEndOfTurn: stealthed?.stealthed === true
+      && stealthGainedIndex >= 0
+      && stealthGainedIndex < turnEndedIndex,
+    replayVerified: verifyGameReplay(session),
+    seed: opening.seed,
+    summonedUnstealthed: summoned?.stealthed === false,
+    survivorsOfSerava: input.survivorsOfSerava.name,
+  });
+}
+
 function runWaterEndTurnStealth(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): PrivateGameCheck['waterEndTurnStealth'] {
@@ -24285,6 +24416,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const waterLure = runWaterLure(input);
   const waterMesmerism = runWaterMesmerism(input);
   const waterPirateShip = runWaterPirateShip(input);
+  const waterConditionalStealth = runWaterConditionalStealth(input);
   const waterEndTurnStealth = runWaterEndTurnStealth(input);
   const waterFreeze = runWaterFreeze(input);
   const waterGnarledWendigo = runWaterGnarledWendigo(input);
@@ -24536,6 +24668,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     waterLure,
     waterMesmerism,
     waterPirateShip,
+    waterConditionalStealth,
     waterEndTurnStealth,
     waterFreeze,
     waterGnarledWendigo,

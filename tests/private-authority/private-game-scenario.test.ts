@@ -2903,6 +2903,17 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.waterLugbog.deck.spellbook
     .find(({ name }) => name === 'Sly Fox')?.copies, 4);
   assert.equal(result.waterLugbog.replayVerified, true);
+  assert.equal(result.waterConditionalStealth.survivorsOfSerava, 'Survivors of Serava');
+  assert.equal(result.waterConditionalStealth.acceptedActionCount, 11);
+  assert.equal(result.waterConditionalStealth.summonedUnstealthed, true);
+  assert.equal(result.waterConditionalStealth.gainedStealthAtEndOfTurn, true);
+  assert.equal(result.waterConditionalStealth.deck.atlas
+    .reduce((total, card) => total + card.copies, 0), 30);
+  assert.equal(result.waterConditionalStealth.deck.spellbook
+    .reduce((total, card) => total + card.copies, 0), 60);
+  assert.equal(result.waterConditionalStealth.deck.spellbook
+    .find(({ name }) => name === 'Survivors of Serava')?.copies, 4);
+  assert.equal(result.waterConditionalStealth.replayVerified, true);
   assert.equal(result.waterEndTurnStealth.slyFox, 'Sly Fox');
   assert.equal(result.waterEndTurnStealth.acceptedActionCount, 23);
   assert.equal(result.waterEndTurnStealth.summonedUnstealthed, true);

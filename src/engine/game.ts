@@ -243,6 +243,7 @@ export type GameCardDefinition =
     genesisLoseControllerLife?: 2;
     gainsPowerRangedAndSpellcasterAtopTower?: 2;
     gainsStealthAtEndOfTurn?: boolean;
+    gainsStealthAtEndOfTurnIfNoEnemiesNearby?: boolean;
     immobile?: boolean;
     lanceCount?: 1 | 2 | 3;
     lethal?: boolean;
@@ -1972,7 +1973,8 @@ const SUPPORTED_CARD_FIELDS = {
     discardSpellToDamageRandomOtherUnitHere diesAtEndOfControllerTurn genesisDamageEachOtherUnitHere
     genesisDisableSelfUntilDamaged genesisDrawSite genesisDrawSpells genesisHealController
     genesisLoseControllerLife genesisMayDamageTargetAdjacentUnit genesisStrikeEachEnemyHere
-    gainsPowerRangedAndSpellcasterAtopTower gainsStealthAtEndOfTurn immobile lanceCount lethal
+    gainsPowerRangedAndSpellcasterAtopTower gainsStealthAtEndOfTurn
+    gainsStealthAtEndOfTurnIfNoEnemiesNearby immobile lanceCount lethal
     manaCost mayRangedStrikeOnceDuringBasicMovement mayStepAfterRangedStrike mortal movementBonus
     movesOnlyForward movesOnlySideways
     mustBeCastBurrowed mustBeCastSubmerged mustBeCastToOuterColumn mustBeCastToWaterSite
@@ -2630,6 +2632,18 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.gainsStealthAtEndOfTurn !== undefined && typeof card.gainsStealthAtEndOfTurn !== 'boolean') {
     throw new RangeError(`${path}.gainsStealthAtEndOfTurn must be boolean`);
   }
+  if (card.gainsStealthAtEndOfTurnIfNoEnemiesNearby !== undefined
+    && typeof card.gainsStealthAtEndOfTurnIfNoEnemiesNearby !== 'boolean') {
+    throw new RangeError(
+      `${path}.gainsStealthAtEndOfTurnIfNoEnemiesNearby must be boolean`,
+    );
+  }
+  if (card.gainsStealthAtEndOfTurn === true
+    && card.gainsStealthAtEndOfTurnIfNoEnemiesNearby === true) {
+    throw new RangeError(
+      `${path} simultaneous unconditional and conditional end-turn Stealth are unsupported`,
+    );
+  }
   if (card.immobile !== undefined && typeof card.immobile !== 'boolean') {
     throw new RangeError(`${path}.immobile must be boolean`);
   }
@@ -2819,7 +2833,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     throw new RangeError(`${path} Waterbound Stealth tokens are unsupported`);
   }
   if (card.waterbound
-    && (card.ward || card.gainsStealthAtEndOfTurn)) {
+    && (card.ward
+      || card.gainsStealthAtEndOfTurn
+      || card.gainsStealthAtEndOfTurnIfNoEnemiesNearby)) {
     throw new RangeError(`${path} Waterbound with Ward or end-turn Stealth is unsupported`);
   }
   if (card.waterbound
@@ -3190,6 +3206,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? { gainsPowerRangedAndSpellcasterAtopTower: 2 as const }
               : {}),
             ...(card.gainsStealthAtEndOfTurn === true ? { gainsStealthAtEndOfTurn: true } : {}),
+            ...(card.gainsStealthAtEndOfTurnIfNoEnemiesNearby === true
+              ? { gainsStealthAtEndOfTurnIfNoEnemiesNearby: true }
+              : {}),
             ...(card.immobile === true ? { immobile: true } : {}),
             ...(card.lanceCount !== undefined ? { lanceCount: card.lanceCount } : {}),
             ...(card.lethal === true ? { lethal: true } : {}),
@@ -13136,7 +13155,14 @@ function applyDescriptor(
   const stealthGained = endState.realm.units.filter((unit) => {
     if (unit.controller !== seat || minionDisabled(endState, unit) || unit.stealthed) return false;
     const definition = cardDefinition(endState, unit.cardId);
-    return definition.cardType === 'minion' && definition.gainsStealthAtEndOfTurn === true;
+    if (definition.cardType !== 'minion') return false;
+    if (definition.gainsStealthAtEndOfTurn === true) return true;
+    if (definition.gainsStealthAtEndOfTurnIfNoEnemiesNearby !== true) return false;
+    return !unitRefs(endState, otherSeat(unit.controller)).some((enemyRef) => {
+      const enemy = unitStatus(endState, enemyRef);
+      return enemy.region === unit.region
+        && footprintNearby(unitOccupiedCells(unit), enemy.occupiedCells);
+    });
   });
   const stealthGainedIds = new Set(stealthGained.map(({ instanceId }) => instanceId));
   const endPhaseUntapped = endState.realm.units.filter((unit) => {

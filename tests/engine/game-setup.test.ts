@@ -54,6 +54,7 @@ type SpellFacts = Readonly<{
   discardRandomCardInsteadOfMana?: true;
   diesAtEndOfControllerTurn?: true;
   gainsStealthAtEndOfTurn?: boolean;
+  gainsStealthAtEndOfTurnIfNoEnemiesNearby?: boolean;
   genesisDrawSpells?: number;
   genesisDrawSite?: boolean;
   genesisHealController?: 2;
@@ -234,6 +235,8 @@ function cardsFor(
           ? { diesAtEndOfControllerTurn: true as const }
           : {}),
         gainsStealthAtEndOfTurn: facts.gainsStealthAtEndOfTurn ?? false,
+        gainsStealthAtEndOfTurnIfNoEnemiesNearby:
+          facts.gainsStealthAtEndOfTurnIfNoEnemiesNearby ?? false,
         ...(facts.genesisDrawSpells !== undefined
           ? { genesisDrawSpells: facts.genesisDrawSpells }
           : {}),
@@ -416,6 +419,54 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /futureUnsupportedMechanic is unsupported/);
+  const conditionalStealthManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        gainsStealthAtEndOfTurnIfNoEnemiesNearby: true,
+      } as unknown as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    conditionalStealthManifest.cards[firstSpell]?.cardType === 'minion'
+      && (conditionalStealthManifest.cards[firstSpell] as unknown as Readonly<Record<string, unknown>>)
+        .gainsStealthAtEndOfTurnIfNoEnemiesNearby,
+    true,
+  );
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        gainsStealthAtEndOfTurnIfNoEnemiesNearby: 'yes',
+      } as unknown as GameCardDefinition,
+    },
+  }), /gainsStealthAtEndOfTurnIfNoEnemiesNearby must be boolean/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        gainsStealthAtEndOfTurn: true,
+        gainsStealthAtEndOfTurnIfNoEnemiesNearby: true,
+      } as GameCardDefinition,
+    },
+  }), /simultaneous unconditional and conditional end-turn Stealth/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        gainsStealthAtEndOfTurnIfNoEnemiesNearby: true,
+        waterbound: true,
+      } as GameCardDefinition,
+    },
+  }), /Waterbound with Ward or end-turn Stealth/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -13874,6 +13925,120 @@ test('RULE-04 Sly Fox gains Stealth once at the end of its controller turn', () 
   session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
   assert.equal(session.transcript.at(-1)?.events.some(({ type }) => type === 'stealth-gained'), false);
   assert.equal(verifyGameReplay(session), true);
+});
+
+test('RULE-04 conditional end-turn Stealth requires no nearby enemy in the same region', () => {
+  let prepared = keep(keep(createGameSession(manifest(241, {
+    northSpell: {
+      attack: 2,
+      defense: 2,
+      gainsStealthAtEndOfTurnIfNoEnemiesNearby: true,
+      manaCost: 0,
+      submerge: true,
+      summonToAnySite: true,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+    site: { elements: ['water'] },
+    southSpell: {
+      attack: 1,
+      defense: 1,
+      manaCost: 0,
+      stealth: true,
+      summonToAnySite: true,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+  }))));
+  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
+    prepared = accept(prepared, action(prepared, predicate));
+  };
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B4');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B1');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B3');
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B2');
+  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    && descriptor.cell === 'B3' && (descriptor.region ?? 'surface') === 'surface');
+  const enemyInstanceId = prepared.state.realm.units
+    .find(({ controller }) => controller === 'south')?.instanceId;
+  assert.ok(enemyInstanceId);
+  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const checkpoint = prepared;
+
+  const summon = (cell: 'C1' | 'C4', region: 'surface' | 'underwater'): GameSession =>
+    accept(checkpoint, action(checkpoint, ({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cell === cell && (descriptor.region ?? 'surface') === region));
+  const sourceId = (session: GameSession): string => {
+    const instanceId = session.state.realm.units
+      .find(({ controller }) => controller === 'north')?.instanceId;
+    assert.ok(instanceId);
+    return instanceId;
+  };
+
+  let avatarBlocked = summon('C1', 'surface');
+  const avatarBlockedId = sourceId(avatarBlocked);
+  avatarBlocked = accept(avatarBlocked, action(avatarBlocked, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  assert.equal(avatarBlocked.state.realm.units
+    .find(({ instanceId }) => instanceId === avatarBlockedId)?.stealthed, false);
+  assert.deepEqual(avatarBlocked.transcript.at(-1)?.events.map(({ type }) => type), [
+    'turn-ended',
+    'turn-started',
+  ]);
+  assert.equal(verifyGameReplay(avatarBlocked), true);
+
+  let otherRegion = summon('C1', 'underwater');
+  const otherRegionId = sourceId(otherRegion);
+  otherRegion = accept(otherRegion, action(otherRegion, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  assert.equal(otherRegion.state.realm.units
+    .find(({ instanceId }) => instanceId === otherRegionId)?.stealthed, true);
+  assert.deepEqual(otherRegion.transcript.at(-1)?.events.map(({ type }) => type), [
+    'stealth-gained',
+    'turn-ended',
+    'turn-started',
+  ]);
+  assert.equal(verifyGameReplay(otherRegion), true);
+
+  let minionBlocked = summon('C4', 'surface');
+  const minionBlockedId = sourceId(minionBlocked);
+  minionBlocked = accept(minionBlocked, action(minionBlocked, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  assert.equal(minionBlocked.state.realm.units
+    .find(({ instanceId }) => instanceId === minionBlockedId)?.stealthed, false);
+  minionBlocked = accept(minionBlocked, action(minionBlocked, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  minionBlocked = accept(minionBlocked, action(minionBlocked, ({ descriptor }) =>
+    descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === enemyInstanceId
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'B3,B2'));
+  minionBlocked = accept(minionBlocked, action(minionBlocked, ({ descriptor }) =>
+    descriptor.kind === 'decline-attack'));
+  minionBlocked = accept(minionBlocked, action(minionBlocked, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  minionBlocked = accept(minionBlocked, action(minionBlocked, ({ descriptor }) =>
+    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  minionBlocked = accept(minionBlocked, action(minionBlocked, ({ descriptor }) =>
+    descriptor.kind === 'end-turn'));
+  assert.equal(minionBlocked.state.realm.units
+    .find(({ instanceId }) => instanceId === minionBlockedId)?.stealthed, true);
+  assert.deepEqual(minionBlocked.transcript.at(-1)?.events.map(({ type }) => type), [
+    'stealth-gained',
+    'turn-ended',
+    'turn-started',
+  ]);
+  assert.equal(verifyGameReplay(minionBlocked), true);
 });
 
 test('RULE-04 Scent Hounds permanently removes nearby enemy Stealth', () => {
