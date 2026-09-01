@@ -252,17 +252,55 @@ impl DeckDiagnostic {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeckValidation {
     /// Canonical counted deck.
-    pub deck: CanonicalDeck,
+    deck: CanonicalDeck,
     /// Identity of the format plus canonical composition.
-    pub deck_id: IdentityHash,
+    deck_id: IdentityHash,
     /// Whether all currently modeled Constructed rules pass.
-    pub format_legal: bool,
+    format_legal: bool,
     /// Whether the current engine can instantiate every card and zone.
-    pub engine_supported: bool,
+    engine_supported: bool,
     /// Whether the candidate is both format-legal and engine-supported.
-    pub ranked_eligible: bool,
+    ranked_eligible: bool,
     /// Deterministically ordered validation findings.
-    pub diagnostics: Vec<DeckDiagnostic>,
+    diagnostics: Vec<DeckDiagnostic>,
+}
+
+impl DeckValidation {
+    /// Returns the canonical counted deck.
+    #[must_use]
+    pub const fn deck(&self) -> &CanonicalDeck {
+        &self.deck
+    }
+
+    /// Returns the identity of the format plus canonical composition.
+    #[must_use]
+    pub const fn deck_id(&self) -> &IdentityHash {
+        &self.deck_id
+    }
+
+    /// Returns whether all currently modeled format rules pass.
+    #[must_use]
+    pub const fn format_legal(&self) -> bool {
+        self.format_legal
+    }
+
+    /// Returns whether the engine can instantiate every card and zone.
+    #[must_use]
+    pub const fn engine_supported(&self) -> bool {
+        self.engine_supported
+    }
+
+    /// Returns whether the deck is both format-legal and engine-supported.
+    #[must_use]
+    pub const fn ranked_eligible(&self) -> bool {
+        self.ranked_eligible
+    }
+
+    /// Returns deterministically ordered validation findings.
+    #[must_use]
+    pub fn diagnostics(&self) -> &[DeckDiagnostic] {
+        &self.diagnostics
+    }
 }
 
 /// Deck validation could not produce a trustworthy result.

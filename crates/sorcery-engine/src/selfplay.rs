@@ -6,24 +6,37 @@ use std::fmt;
 
 use crate::canonical::IdentityHash;
 use crate::contract::Seat;
-use crate::deck::DeckValidation;
+use crate::deck::{CanonicalDeck, DeckValidation};
 use crate::game::{Game, GameOutcome};
 use crate::policy::{PolicyError, PolicySnapshot};
 use crate::simulator::{SimulatorError, replay_selected, run_game};
 
-/// One side of a seat-swapped policy evaluation pair.
+/// One complete seat-swapped policy evaluation pair.
 #[derive(Clone, Copy, Debug)]
-pub struct SelfPlayCase<'a> {
-    /// Seed declared by the manifest.
+pub struct SelfPlayPair<'a> {
+    /// Seed declared by both manifests.
     pub seed: u32,
     /// Stable opponent or matchup grouping used for regression gates.
     pub subgroup: &'a str,
-    /// Canonical manifest bytes for this seat orientation.
-    pub manifest_json: &'a str,
-    /// Seat controlled by the policy being evaluated.
-    pub candidate_seat: Seat,
+    /// Canonical manifest with the candidate deck in the North seat.
+    pub candidate_as_north_manifest_json: &'a str,
+    /// Canonical manifest with the candidate deck in the South seat.
+    pub candidate_as_south_manifest_json: &'a str,
     /// Fixed opposing policy.
     pub opponent: &'a PolicySnapshot,
+    /// Validated deck bound to the opposing policy.
+    pub opponent_deck: &'a DeckValidation,
+}
+
+#[derive(Debug)]
+struct PreparedPair<'a> {
+    seed: u32,
+    subgroup: &'a str,
+    candidate_as_north_manifest_json: &'a str,
+    candidate_as_south_manifest_json: &'a str,
+    candidate_as_north: Game,
+    candidate_as_south: Game,
+    opponent: &'a PolicySnapshot,
 }
 
 /// Integer policy score; a win is two half-points and a draw is one.
@@ -138,18 +151,18 @@ impl From<serde_json::Error> for SelfPlayError {
 pub fn train_and_promote(
     champion: &PolicySnapshot,
     assigned_deck: &DeckValidation,
-    training: &[SelfPlayCase<'_>],
-    heldout: &[SelfPlayCase<'_>],
+    training: &[SelfPlayPair<'_>],
+    heldout: &[SelfPlayPair<'_>],
     max_actions: usize,
 ) -> Result<PromotionResult, SelfPlayError> {
-    if !assigned_deck.ranked_eligible || champion.deck_id() != &assigned_deck.deck_id {
+    if !assigned_deck.ranked_eligible() || champion.deck_id() != assigned_deck.deck_id() {
         return Err(SelfPlayError::Invalid(
             "self-play requires the champion's ranked-eligible assigned deck",
         ));
     }
-    validate_suite(training)?;
-    validate_suite(heldout)?;
-    let training_seeds = seeds(training);
+    let training = prepare_suite(training, assigned_deck, champion)?;
+    let heldout = prepare_suite(heldout, assigned_deck, champion)?;
+    let training_seeds = seeds(&training);
     if heldout
         .iter()
         .any(|case| training_seeds.contains(&case.seed))
@@ -161,8 +174,13 @@ pub fn train_and_promote(
 
     let mut nominee: Option<(PolicySnapshot, SelfPlayScore)> = None;
     for child in champion.neighbors()? {
-        let score = match score_policy(&child, &assigned_deck.deck_id, training, max_actions, false)
-        {
+        let score = match score_policy(
+            &child,
+            assigned_deck.deck_id(),
+            &training,
+            max_actions,
+            false,
+        ) {
             Ok(score) => score,
             Err(SelfPlayError::NonTerminal) => continue,
             Err(error) => return Err(error),
@@ -179,10 +197,20 @@ pub fn train_and_promote(
     let (nominee, nominee_training) = nominee.ok_or(SelfPlayError::Invalid(
         "champion produced no policy neighbors",
     ))?;
-    let champion_heldout =
-        score_policy(champion, &assigned_deck.deck_id, heldout, max_actions, true)?;
-    let nominee_heldout =
-        score_policy(&nominee, &assigned_deck.deck_id, heldout, max_actions, true)?;
+    let champion_heldout = score_policy(
+        champion,
+        assigned_deck.deck_id(),
+        &heldout,
+        max_actions,
+        true,
+    )?;
+    let nominee_heldout = score_policy(
+        &nominee,
+        assigned_deck.deck_id(),
+        &heldout,
+        max_actions,
+        true,
+    )?;
     let promoted = improves_without_regression(&nominee_heldout, &champion_heldout);
     let nominee_policy_id = nominee.policy_id().clone();
     Ok(PromotionResult {
@@ -206,7 +234,7 @@ fn improves_without_regression(candidate: &SelfPlayScore, champion: &SelfPlaySco
 fn score_policy(
     candidate: &PolicySnapshot,
     assigned_deck_id: &IdentityHash,
-    cases: &[SelfPlayCase<'_>],
+    pairs: &[PreparedPair<'_>],
     max_actions: usize,
     verify_replays: bool,
 ) -> Result<SelfPlayScore, SelfPlayError> {
@@ -220,102 +248,221 @@ fn score_policy(
         half_points: 0,
         subgroup_half_points: BTreeMap::new(),
     };
-    for case in cases {
-        let game = Game::from_manifest_json(case.manifest_json).map_err(SimulatorError::from)?;
-        candidate.validate_binding(
-            game.rules().authority_hash(),
-            assigned_deck_id,
-            game.rules().engine_version(),
-        )?;
-        case.opponent.validate_binding(
-            game.rules().authority_hash(),
-            case.opponent.deck_id(),
-            game.rules().engine_version(),
-        )?;
-        let (north, south) = match case.candidate_seat {
-            Seat::North => (candidate, case.opponent),
-            Seat::South => (case.opponent, candidate),
-        };
-        let rollout = run_game(game, north, south, max_actions)?;
-        let outcome = rollout.outcome().ok_or(SelfPlayError::NonTerminal)?;
-        if verify_replays {
-            let replay = replay_selected(case.manifest_json, &rollout)?;
-            if replay.outcome() != Some(outcome) {
-                return Err(SelfPlayError::Invalid(
-                    "heldout replay did not reproduce the rollout outcome",
-                ));
+    for pair in pairs {
+        for (candidate_seat, manifest_json, game) in [
+            (
+                Seat::North,
+                pair.candidate_as_north_manifest_json,
+                &pair.candidate_as_north,
+            ),
+            (
+                Seat::South,
+                pair.candidate_as_south_manifest_json,
+                &pair.candidate_as_south,
+            ),
+        ] {
+            candidate.validate_binding(
+                game.rules().authority_hash(),
+                assigned_deck_id,
+                game.rules().engine_version(),
+            )?;
+            let (north, south) = match candidate_seat {
+                Seat::North => (candidate, pair.opponent),
+                Seat::South => (pair.opponent, candidate),
+            };
+            let rollout = run_game(game.clone(), north, south, max_actions)?;
+            let outcome = rollout.outcome().ok_or(SelfPlayError::NonTerminal)?;
+            if verify_replays {
+                let replay = replay_selected(manifest_json, &rollout)?;
+                if replay.outcome() != Some(outcome) {
+                    return Err(SelfPlayError::Invalid(
+                        "heldout replay did not reproduce the rollout outcome",
+                    ));
+                }
             }
-        }
-        let half_points = match outcome {
-            GameOutcome::Draw => 1,
-            GameOutcome::Win { winner, .. } if winner == case.candidate_seat => 2,
-            GameOutcome::Win { .. } => 0,
-        };
-        score.games = score
-            .games
-            .checked_add(1)
-            .ok_or(SelfPlayError::Invalid("self-play game count overflowed"))?;
-        score.half_points =
-            score
-                .half_points
+            let half_points = match outcome {
+                GameOutcome::Draw => 1,
+                GameOutcome::Win { winner, .. } if winner == candidate_seat => 2,
+                GameOutcome::Win { .. } => 0,
+            };
+            score.games = score
+                .games
+                .checked_add(1)
+                .ok_or(SelfPlayError::Invalid("self-play game count overflowed"))?;
+            score.half_points =
+                score
+                    .half_points
+                    .checked_add(half_points)
+                    .ok_or(SelfPlayError::Invalid(
+                        "self-play half-point total overflowed",
+                    ))?;
+            let subgroup = score
+                .subgroup_half_points
+                .entry(pair.subgroup.to_owned())
+                .or_default();
+            *subgroup = subgroup
                 .checked_add(half_points)
                 .ok_or(SelfPlayError::Invalid(
-                    "self-play half-point total overflowed",
+                    "self-play subgroup score overflowed",
                 ))?;
-        let subgroup = score
-            .subgroup_half_points
-            .entry(case.subgroup.to_owned())
-            .or_default();
-        *subgroup = subgroup
-            .checked_add(half_points)
-            .ok_or(SelfPlayError::Invalid(
-                "self-play subgroup score overflowed",
-            ))?;
+        }
     }
     Ok(score)
 }
 
-fn seeds(cases: &[SelfPlayCase<'_>]) -> BTreeSet<u32> {
-    cases.iter().map(|case| case.seed).collect()
+fn seeds(pairs: &[PreparedPair<'_>]) -> BTreeSet<u32> {
+    pairs.iter().map(|pair| pair.seed).collect()
 }
 
-fn validate_suite(cases: &[SelfPlayCase<'_>]) -> Result<(), SelfPlayError> {
-    if cases.is_empty() {
+fn prepare_suite<'a>(
+    pairs: &[SelfPlayPair<'a>],
+    assigned_deck: &DeckValidation,
+    champion: &PolicySnapshot,
+) -> Result<Vec<PreparedPair<'a>>, SelfPlayError> {
+    if pairs.is_empty() {
         return Err(SelfPlayError::Invalid(
             "self-play suites must contain at least one seat-swapped pair",
         ));
     }
-    let mut pairs = BTreeMap::<(u32, &str), u8>::new();
-    for case in cases {
-        if case.subgroup.trim().is_empty() {
+    let mut seen = BTreeSet::new();
+    let mut prepared = Vec::with_capacity(pairs.len());
+    for pair in pairs {
+        if pair.subgroup.trim().is_empty() {
             return Err(SelfPlayError::Invalid(
                 "self-play subgroup must be nonempty",
             ));
         }
-        let manifest: serde_json::Value = serde_json::from_str(case.manifest_json)?;
-        if manifest.get("seed").and_then(serde_json::Value::as_u64) != Some(u64::from(case.seed)) {
+        if !seen.insert((pair.seed, pair.subgroup)) {
             return Err(SelfPlayError::Invalid(
-                "self-play case seed does not match its manifest",
+                "self-play suite repeats a seed and subgroup pair",
             ));
         }
-        let seat_bit = match case.candidate_seat {
-            Seat::North => 1,
-            Seat::South => 2,
+        if !pair.opponent_deck.ranked_eligible()
+            || pair.opponent.deck_id() != pair.opponent_deck.deck_id()
+        {
+            return Err(SelfPlayError::Invalid(
+                "self-play requires the opponent's ranked-eligible assigned deck",
+            ));
+        }
+        let north_raw: serde_json::Value =
+            serde_json::from_str(pair.candidate_as_north_manifest_json)?;
+        let south_raw: serde_json::Value =
+            serde_json::from_str(pair.candidate_as_south_manifest_json)?;
+        if manifest_seed(&north_raw) != Some(pair.seed)
+            || manifest_seed(&south_raw) != Some(pair.seed)
+        {
+            return Err(SelfPlayError::Invalid(
+                "self-play pair seed does not match both manifests",
+            ));
+        }
+        if shared_manifest_body(&north_raw) != shared_manifest_body(&south_raw) {
+            return Err(SelfPlayError::Invalid(
+                "self-play seat pair changed authority, card facts, engine, seed, or setup",
+            ));
+        }
+        let north_decks = manifest_decks(&north_raw)?;
+        let south_decks = manifest_decks(&south_raw)?;
+        if north_decks.0 != south_decks.1 || north_decks.1 != south_decks.0 {
+            return Err(SelfPlayError::Invalid(
+                "self-play manifests are not exact deck seat swaps",
+            ));
+        }
+        if !manifest_deck_matches(north_decks.0, assigned_deck.deck())
+            || !manifest_deck_matches(north_decks.1, pair.opponent_deck.deck())
+        {
+            return Err(SelfPlayError::Invalid(
+                "self-play manifest decks do not match their validated assignments",
+            ));
+        }
+        let candidate_as_north = Game::from_manifest_json(pair.candidate_as_north_manifest_json)
+            .map_err(SimulatorError::from)?;
+        let candidate_as_south = Game::from_manifest_json(pair.candidate_as_south_manifest_json)
+            .map_err(SimulatorError::from)?;
+        for game in [&candidate_as_north, &candidate_as_south] {
+            champion.validate_binding(
+                game.rules().authority_hash(),
+                assigned_deck.deck_id(),
+                game.rules().engine_version(),
+            )?;
+            pair.opponent.validate_binding(
+                game.rules().authority_hash(),
+                pair.opponent_deck.deck_id(),
+                game.rules().engine_version(),
+            )?;
+        }
+        prepared.push(PreparedPair {
+            seed: pair.seed,
+            subgroup: pair.subgroup,
+            candidate_as_north_manifest_json: pair.candidate_as_north_manifest_json,
+            candidate_as_south_manifest_json: pair.candidate_as_south_manifest_json,
+            candidate_as_north,
+            candidate_as_south,
+            opponent: pair.opponent,
+        });
+    }
+    Ok(prepared)
+}
+
+fn manifest_seed(manifest: &serde_json::Value) -> Option<u32> {
+    u32::try_from(manifest.get("seed")?.as_u64()?).ok()
+}
+
+fn shared_manifest_body(manifest: &serde_json::Value) -> Option<serde_json::Value> {
+    let mut body = manifest.as_object()?.clone();
+    body.remove("decks")?;
+    body.remove("manifestId")?;
+    Some(serde_json::Value::Object(body))
+}
+
+fn manifest_decks(
+    manifest: &serde_json::Value,
+) -> Result<(&serde_json::Value, &serde_json::Value), SelfPlayError> {
+    let decks = manifest
+        .get("decks")
+        .and_then(serde_json::Value::as_object)
+        .ok_or(SelfPlayError::Invalid("self-play manifest lacks decks"))?;
+    Ok((
+        decks.get("north").ok_or(SelfPlayError::Invalid(
+            "self-play manifest lacks North deck",
+        ))?,
+        decks.get("south").ok_or(SelfPlayError::Invalid(
+            "self-play manifest lacks South deck",
+        ))?,
+    ))
+}
+
+fn manifest_deck_matches(manifest: &serde_json::Value, expected: &CanonicalDeck) -> bool {
+    let Some(deck) = manifest.as_object() else {
+        return false;
+    };
+    if deck.get("avatar").and_then(serde_json::Value::as_str) != Some(&expected.avatar) {
+        return false;
+    }
+    [
+        ("atlas", expected.atlas.as_slice()),
+        ("spellbook", expected.spellbook.as_slice()),
+    ]
+    .into_iter()
+    .all(|(zone, expected)| {
+        let Some(ids) = deck.get(zone).and_then(serde_json::Value::as_array) else {
+            return false;
         };
-        let pair = pairs.entry((case.seed, case.subgroup)).or_default();
-        if *pair & seat_bit != 0 {
-            return Err(SelfPlayError::Invalid(
-                "self-play suite repeats a seat in one matchup",
-            ));
+        let mut counts = BTreeMap::<&str, u32>::new();
+        for id in ids {
+            let Some(id) = id.as_str() else {
+                return false;
+            };
+            let count = counts.entry(id).or_default();
+            let Some(next) = count.checked_add(1) else {
+                return false;
+            };
+            *count = next;
         }
-        *pair |= seat_bit;
-    }
-    if pairs.values().any(|pair| *pair != 3) {
-        return Err(SelfPlayError::Invalid(
-            "self-play suite must evaluate every matchup from both seats",
-        ));
-    }
-    Ok(())
+        counts.len() == expected.len()
+            && expected
+                .iter()
+                .all(|row| counts.get(row.card_id.as_str()).copied() == Some(row.copies))
+    })
 }
 
 #[cfg(test)]

@@ -76,7 +76,11 @@ fn modeled_constructed_accepts_exact_thirty_card_atlas_and_sixty_card_spellbook(
     let validation = validate_deck(candidate, &cards, FormatContext::constructed())
         .expect("valid modeled Constructed deck");
 
-    assert!(validation.ranked_eligible, "{:#?}", validation.diagnostics);
+    assert!(
+        validation.ranked_eligible(),
+        "{:#?}",
+        validation.diagnostics()
+    );
 }
 
 #[test]
@@ -101,7 +105,7 @@ fn modeled_constructed_enforces_each_rarity_copy_limit() {
             .expect("copy-limit diagnostic");
 
         assert!(
-            validation.diagnostics.iter().any(|diagnostic| matches!(
+            validation.diagnostics().iter().any(|diagnostic| matches!(
                 diagnostic,
                 DeckDiagnostic::CopyLimitExceeded {
                     actual,
@@ -111,7 +115,7 @@ fn modeled_constructed_enforces_each_rarity_copy_limit() {
                 } if *actual == limit + 1 && *actual_limit == limit && *actual_rarity == rarity
             )),
             "missing {rarity:?} limit diagnostic: {:#?}",
-            validation.diagnostics
+            validation.diagnostics()
         );
     }
 }
@@ -128,7 +132,7 @@ fn zone_shape_rejects_a_minion_in_the_atlas() {
     let validation = validate_deck(candidate, &cards, FormatContext::constructed())
         .expect("wrong-zone diagnostic");
 
-    assert!(validation.diagnostics.iter().any(|diagnostic| matches!(
+    assert!(validation.diagnostics().iter().any(|diagnostic| matches!(
         diagnostic,
         DeckDiagnostic::WrongCardType {
             zone: DeckZone::Atlas,
@@ -151,9 +155,9 @@ fn unsupported_mechanics_preserve_format_legality_but_block_ranked_use() {
 
     assert_eq!(
         (
-            validation.format_legal,
-            validation.engine_supported,
-            validation.ranked_eligible,
+            validation.format_legal(),
+            validation.engine_supported(),
+            validation.ranked_eligible(),
         ),
         (true, false, false)
     );
@@ -172,8 +176,8 @@ fn canonical_identity_and_rows_ignore_candidate_row_order() {
         validate_deck(reversed, &cards, FormatContext::constructed()).expect("reversed deck");
 
     assert_eq!(
-        (forward.deck, forward.deck_id),
-        (backward.deck, backward.deck_id)
+        (forward.deck(), forward.deck_id()),
+        (backward.deck(), backward.deck_id())
     );
 }
 
@@ -191,12 +195,12 @@ fn pricing_selects_the_deterministic_minimum_printing_and_totals_exact_cents() {
     ];
     prices.extend(
         validation
-            .deck
+            .deck()
             .atlas
             .iter()
             .map(|row| price(&row.card_id, &format!("printing:{}", row.card_id), 10)),
     );
-    prices.extend(validation.deck.spellbook.iter().map(|row| {
+    prices.extend(validation.deck().spellbook.iter().map(|row| {
         let cents = if row.card_id == "card:spell-00" {
             25
         } else {
