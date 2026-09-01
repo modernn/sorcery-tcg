@@ -38,9 +38,9 @@ Output conforms to [rust-engine-benchmark.schema.json](rust-engine-benchmark.sch
 `peakRssBytes` is `null` when safe stdlib-only peak RSS measurement is not
 available; Linux reports `/proc/self/status` `VmHWM`.
 
-The checked-in 2026-08-31 Rust baseline is the original comparable v1 result and
-therefore has no paired-rollout section. It remains historical evidence until a
-clean-reboot v2 baseline replaces it; short estimates must not overwrite it.
+The checked-in 2026-08-31 Rust baseline remains the original comparable v1 result.
+The clean-restart 2026-09-01 v2 baseline adds the paired-rollout contract without
+overwriting that historical evidence.
 
 ## Cutover baselines (2026-08-31)
 
@@ -55,3 +55,21 @@ The JSON baselines retain aggregate, median, and p95 measurements. Rust's
 3x fully replayed-game target. Windows peak RSS is unavailable in the
 stdlib-only harness, so a final Linux release run must supply that measurement
 before cutover.
+
+## Clean-restart release measurements (2026-09-01)
+
+The 20-sample single-thread v2 run recorded 472,673.560 transitions/second,
+58,879.355 search nodes/second, and 4.059 fully replayed and re-verified
+games/second. Median and p95 throughput were 483,329.604 and 499,886.903
+transitions/second, 58,951.288 and 60,210.738 search nodes/second, and 4.154 and
+4.287 replayed games/second. The lightweight paired workload measured median and
+p95 speculative throughput of 1,907.378 and 1,952.972 games/second, estimating
+114,442 speculative games in 60 seconds on one thread.
+
+Five 256-game authoritative batches at eight workers measured 18.936 replayed
+games/second median and 19.350 peak. Three concurrent eight-worker processes on
+the 24-logical-CPU host measured 40.852 games/second median and 41.035 peak over
+three 384-game samples: about 2,451 authoritative games in 60 seconds. A separate
+eight-worker run observed a 41,181,184-byte peak working set. GPU execution was
+not used; the authoritative branch-heavy state machine has no measured GPU-suited
+kernel.
