@@ -27,7 +27,7 @@ game when a manifest fact was accepted but ignored.
 | Every Rust change | locked workspace format, check, Clippy, and tests | Legality, replay, policy, and statistical regressions |
 | Every self-play change | `cargo test --locked -p sorcery-engine --test selfplay` | Fast contract and failure-path coverage |
 | Before accepting a self-play slice | `pnpm game:selfplay-acceptance` | Two independent 20-pair promotions and fresh 20-pair audits must agree exactly |
-| After a clean reboot | bounded release soak across the locked opponent portfolio | Termination rate, determinism, seat symmetry, throughput, and peak memory |
+| After a clean reboot | `pnpm game:selfplay-soak` | Bounded termination, byte determinism, seat symmetry, and authoritative selected replay |
 | Before ranked claims | all catalog scenarios proved in Rust plus private authority verification | No silent partial-rule results |
 
 The release acceptance gate currently takes about three minutes on this host. It is ignored by the
