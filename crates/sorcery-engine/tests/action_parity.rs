@@ -12,6 +12,8 @@ const COMBAT_RESPONSE_FIXTURE: &str =
     include_str!("../../../tests/engine/fixtures/combat-response-action-v1.json");
 const DEATHRITE_ORDER_FIXTURE: &str =
     include_str!("../../../tests/engine/fixtures/deathrite-order-action-v1.json");
+const SHOOT_DAMAGE_PROJECTILE_FIXTURE: &str =
+    include_str!("../../../tests/engine/fixtures/shoot-damage-projectile-action-v1.json");
 const NORTH_AVATAR: &str =
     "sha256:310a489a62739a8b1a6a13bf949daa8dc42ab0995619e5288691a0ac86a2472e";
 
@@ -39,8 +41,100 @@ fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
         ActionDescriptor::CloseDefend { .. } => "close-defend",
         ActionDescriptor::Intercept { .. } => "intercept",
         ActionDescriptor::OrderDeathrites { .. } => "order-deathrites",
+        ActionDescriptor::ShootDamageProjectile { .. } => "shoot-damage-projectile",
         ActionDescriptor::CloseIntercept {} => "close-intercept",
         ActionDescriptor::EndTurn => "end-turn",
+    }
+}
+
+#[test]
+fn shoot_damage_projectile_descriptors_labels_order_and_ids_should_match_typescript() {
+    let fixture: Value = serde_json::from_str(SHOOT_DAMAGE_PROJECTILE_FIXTURE)
+        .expect("valid Shoot Damage Projectile fixture");
+    assert_eq!(fixture["schemaVersion"], 1);
+    assert_eq!(fixture["source"], "typescript-legality-engine");
+    let contract = fixture["contract"].as_str().expect("action contract");
+    let seat: Seat = serde_json::from_value(fixture["seat"].clone()).expect("fixture seat");
+    let state_version = fixture["stateVersion"]
+        .as_u64()
+        .expect("fixture state version");
+    let mut ordered = Vec::new();
+    let mut labels = Vec::new();
+
+    for action in fixture["actions"].as_array().expect("fixture actions") {
+        let descriptor: ActionDescriptor = serde_json::from_value(action["descriptor"].clone())
+            .expect("typed Shoot Damage Projectile descriptor");
+        assert!(matches!(
+            descriptor,
+            ActionDescriptor::ShootDamageProjectile { .. }
+        ));
+        assert_eq!(descriptor_kind(&descriptor), "shoot-damage-projectile");
+        let serialized = serde_json::to_value(&descriptor).expect("serialized descriptor");
+        assert_eq!(serialized, action["descriptor"]);
+        let expected_id =
+            IdentityHash::parse(action["actionId"].as_str().expect("TypeScript action ID"))
+                .expect("valid TypeScript action ID");
+        assert_eq!(
+            opaque_action_id(contract, seat, state_version, &serialized)
+                .expect("Rust action identity"),
+            expected_id
+        );
+        labels.push(
+            descriptor
+                .state_independent_label()
+                .expect("state-independent projectile label"),
+        );
+        ordered.push((
+            canonical_json(&serialized).expect("canonical descriptor"),
+            expected_id,
+        ));
+    }
+
+    ordered.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+    assert_eq!(
+        ordered
+            .into_iter()
+            .map(|(_, action_id)| action_id.to_string())
+            .collect::<Vec<_>>(),
+        fixture["canonicalActionIds"]
+            .as_array()
+            .expect("canonical TypeScript order")
+            .iter()
+            .map(|action_id| action_id.as_str().expect("action ID").to_owned())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        labels,
+        [
+            "Shoot east at nothing",
+            "Shoot north at nothing",
+            "Shoot south at minion sha256:b58208bd…",
+            "Shoot west at nothing",
+        ]
+    );
+
+    for invalid in [
+        json!({
+            "direction": "south",
+            "kind": "shoot-damage-projectile",
+            "path": [{ "cell": "C4", "region": "surface" }],
+            "shooterInstanceId": fixture["shooterInstanceId"],
+        }),
+        json!({
+            "direction": "south",
+            "hit": null,
+            "kind": "shoot-damage-projectile",
+            "path": [],
+        }),
+        json!({
+            "direction": "diagonal",
+            "hit": null,
+            "kind": "shoot-damage-projectile",
+            "path": [{ "cell": "C4", "region": "surface" }],
+            "shooterInstanceId": fixture["shooterInstanceId"],
+        }),
+    ] {
+        assert!(serde_json::from_value::<ActionDescriptor>(invalid).is_err());
     }
 }
 

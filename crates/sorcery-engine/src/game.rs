@@ -10,15 +10,15 @@ use serde_json::{Map, Value, json};
 
 use crate::action::{
     ActionDescriptor, CombatTarget, DeckZone, GenesisDamageChoice, GenesisSpellChoice,
-    GenesisTokenChoice, UnitTarget, compare_canonical,
+    GenesisTokenChoice, ProjectileDirection, UnitTarget, compare_canonical,
 };
 use crate::board::{Cell, Location, Region};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{
     BasicMovementRestriction, CardFacts, DamagePrevention, Element, EndTurnStealth, FactError,
-    MagicEffect, MinionFacts, MinionGenesis, SiteFacts, Thresholds, parse_card_definition,
-    validate_identifier,
+    MagicEffect, MinionFacts, MinionGenesis, RequiredCastRegion, SiteFacts, Thresholds,
+    parse_card_definition, validate_identifier,
 };
 use crate::prng::PrngState;
 
@@ -681,6 +681,16 @@ impl Game {
             return Err(GameError::UnsupportedManifestFact(
                 "occupiesSquareArea".to_owned(),
             ));
+        }
+        if let Some(field) = parsed_facts.values().find_map(|facts| match facts {
+            CardFacts::Minion(facts) => match facts.required_cast_region {
+                Some(RequiredCastRegion::Underground) => Some("mustBeCastBurrowed"),
+                Some(RequiredCastRegion::Underwater) => Some("mustBeCastSubmerged"),
+                None => None,
+            },
+            _ => None,
+        }) {
+            return Err(GameError::UnsupportedManifestFact(field.to_owned()));
         }
 
         let mut cards = Vec::with_capacity(manifest.cards.len());
@@ -1610,6 +1620,14 @@ impl Game {
                 .ok_or_else(|| invalid("activate-mana action requires a label"))?;
             self.push_action(actions, descriptor, label);
         }
+        for unit in &self.position.units {
+            for descriptor in self.damage_projectile_descriptors(seat, &unit.card.instance_id)? {
+                let label = descriptor
+                    .state_independent_label()
+                    .ok_or_else(|| invalid("shoot-damage-projectile action requires a label"))?;
+                self.push_action(actions, descriptor, label);
+            }
+        }
         if !player.avatar.tapped {
             self.append_unit_move_actions(
                 actions,
@@ -1693,6 +1711,134 @@ impl Game {
             return None;
         };
         facts.tap_for_mana
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one ray generator keeps projectile visibility and stopping rules together"
+    )]
+    fn damage_projectile_descriptors(
+        &self,
+        seat: Seat,
+        shooter_instance_id: &IdentityHash,
+    ) -> Result<Vec<ActionDescriptor>, GameError> {
+        if self.position.phase != Phase::Main
+            || self.position.active_seat != seat
+            || self.position.decision_seat != seat
+        {
+            return Ok(Vec::new());
+        }
+        let Some(shooter) =
+            self.position.units.iter().find(|unit| {
+                unit.controller == seat && unit.card.instance_id == *shooter_instance_id
+            })
+        else {
+            return Ok(Vec::new());
+        };
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(shooter.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        if facts.tap_to_shoot_projectile_damage.is_none()
+            || self.minion_is_disabled(shooter)
+            || shooter.tapped
+            || shooter.summoning_sickness
+        {
+            return Ok(Vec::new());
+        }
+
+        let origin = Location {
+            cell: shooter.location,
+            region: Region::Surface,
+        };
+        let mut descriptors = Vec::new();
+        for direction in [
+            ProjectileDirection::East,
+            ProjectileDirection::North,
+            ProjectileDirection::South,
+            ProjectileDirection::West,
+        ] {
+            let mut path = vec![origin];
+            loop {
+                let location = *path.last().ok_or(GameError::IllegalAction)?;
+                let mut hits = Vec::new();
+                for target_seat in [Seat::North, Seat::South] {
+                    let avatar = &self.position.players[seat_index(target_seat)].avatar;
+                    if avatar.card.instance_id != *shooter_instance_id
+                        && avatar.location == location.cell
+                        && (path.len() > 1 || target_seat != seat)
+                    {
+                        hits.push(UnitTarget::Avatar {
+                            instance_id: avatar.card.instance_id.clone(),
+                            seat: target_seat,
+                        });
+                    }
+                }
+                hits.extend(
+                    self.position
+                        .units
+                        .iter()
+                        .filter(|unit| {
+                            unit.card.instance_id != *shooter_instance_id
+                                && unit.location == location.cell
+                                && (!unit.stealthed || self.minion_is_disabled(unit))
+                                && (path.len() > 1 || unit.controller != seat)
+                        })
+                        .map(|unit| UnitTarget::Minion {
+                            instance_id: unit.card.instance_id.clone(),
+                            seat: unit.controller,
+                        }),
+                );
+                if !hits.is_empty() {
+                    hits.sort_unstable_by(|left, right| {
+                        left.instance_id().cmp(right.instance_id())
+                    });
+                    descriptors.extend(hits.into_iter().map(|hit| {
+                        ActionDescriptor::ShootDamageProjectile {
+                            direction,
+                            hit: Some(hit),
+                            path: path.clone(),
+                            shooter_instance_id: shooter_instance_id.clone(),
+                        }
+                    }));
+                    break;
+                }
+                let Some(next) = Self::projectile_step(location.cell, direction) else {
+                    descriptors.push(ActionDescriptor::ShootDamageProjectile {
+                        direction,
+                        hit: None,
+                        path,
+                        shooter_instance_id: shooter_instance_id.clone(),
+                    });
+                    break;
+                };
+                if !self.surface_location_exists(next) {
+                    descriptors.push(ActionDescriptor::ShootDamageProjectile {
+                        direction,
+                        hit: None,
+                        path,
+                        shooter_instance_id: shooter_instance_id.clone(),
+                    });
+                    break;
+                }
+                path.push(Location {
+                    cell: next,
+                    region: Region::Surface,
+                });
+            }
+        }
+        Ok(descriptors)
+    }
+
+    fn projectile_step(cell: Cell, direction: ProjectileDirection) -> Option<Cell> {
+        let index = cell.index();
+        match direction {
+            ProjectileDirection::East if cell.file_index() < 4 => Some(Cell::ALL[index + 4]),
+            ProjectileDirection::North if cell.rank_index() < 3 => Some(Cell::ALL[index + 1]),
+            ProjectileDirection::South if cell.rank_index() > 0 => Some(Cell::ALL[index - 1]),
+            ProjectileDirection::West if cell.file_index() > 0 => Some(Cell::ALL[index - 4]),
+            _ => None,
+        }
     }
 
     fn spellcasters(&self, seat: Seat) -> Vec<(UnitKind, IdentityHash)> {
@@ -2259,6 +2405,10 @@ impl Game {
         Ok(outcomes)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "closed typed dispatch keeps authoritative action routing explicit"
+    )]
     fn apply_action_with_log(
         &mut self,
         action: &IssuedAction,
@@ -2332,6 +2482,9 @@ impl Game {
             ActionDescriptor::ResolveGenesisToken { choice } => {
                 self.apply_resolve_genesis_token(action.seat, *choice, outcomes)
             }
+            ActionDescriptor::ShootDamageProjectile { .. } => {
+                self.apply_damage_projectile_action(action, outcomes)
+            }
             ActionDescriptor::SummonMinion { .. } => {
                 self.apply_summon_minion_action(action, outcomes)
             }
@@ -2362,6 +2515,107 @@ impl Game {
                 self.apply_draw_action(action.seat, DeckZone::Spellbook, true, outcomes)
             }
         }
+    }
+
+    fn apply_damage_projectile_action(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::ShootDamageProjectile {
+            direction,
+            hit,
+            path,
+            shooter_instance_id,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        if !self
+            .damage_projectile_descriptors(action.seat, shooter_instance_id)?
+            .iter()
+            .any(|candidate| candidate == &action.descriptor)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let shooter_index = self
+            .position
+            .units
+            .iter()
+            .position(|unit| {
+                unit.controller == action.seat && unit.card.instance_id == *shooter_instance_id
+            })
+            .ok_or(GameError::IllegalAction)?;
+        let CardFacts::Minion(facts) =
+            &self.rules.cards[usize::from(self.position.units[shooter_index].card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let amount = u16::from(
+            facts
+                .tap_to_shoot_projectile_damage
+                .ok_or(GameError::IllegalAction)?,
+        );
+        let (current_power, lethal) =
+            self.combatant_attack_and_lethal(UnitKind::Minion, action.seat, shooter_instance_id)?;
+        self.position.units[shooter_index].tapped = true;
+        outcomes.push("projectile-shot", || {
+            json!({
+                "direction": direction,
+                "hit": hit,
+                "path": path,
+                "seat": action.seat,
+                "shooterInstanceId": shooter_instance_id,
+            })
+        });
+        self.record_unit_interaction(UnitKind::Minion, action.seat, shooter_instance_id, outcomes)?;
+        let Some(target) = hit else {
+            self.position.state_version += 1;
+            return Ok(());
+        };
+        outcomes.push("projectile-damage-allocated", || {
+            json!({
+                "amount": amount,
+                "sourceInstanceId": shooter_instance_id,
+                "targetInstanceId": target.instance_id(),
+            })
+        });
+        let target_kind = match target {
+            UnitTarget::Avatar { .. } => UnitKind::Avatar,
+            UnitTarget::Minion { .. } => UnitKind::Minion,
+        };
+        let damage = self.apply_simple_damage(
+            target_kind,
+            target.seat(),
+            target.instance_id(),
+            amount,
+            UnitDamageSource {
+                current_power,
+                lethal,
+            },
+            outcomes,
+        )?;
+        if damage.minion_died || damage.avatar_defeated {
+            let target_instance_id = target.instance_id().clone();
+            let target_seat = target.seat();
+            self.begin_minion_deaths(
+                if damage.minion_died {
+                    std::slice::from_ref(&target_instance_id)
+                } else {
+                    &[]
+                },
+                if damage.avatar_defeated {
+                    std::slice::from_ref(&target_seat)
+                } else {
+                    &[]
+                },
+                Phase::Main,
+                self.position.active_seat,
+                outcomes,
+            )?;
+        }
+        self.position.state_version += 1;
+        Ok(())
     }
 
     fn apply_decline_attack_action(

@@ -1637,7 +1637,7 @@
         "RULE-04"
       ],
       "plainLanguage": "A ready minion may tap to shoot a fixed-damage projectile to the first visible unit.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "tap"
@@ -1646,8 +1646,8 @@
         "damage"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 a ready minion may tap to shoot a fixed-damage projectile to the first visible unit"
+        "file": "crates/sorcery-engine/tests/damage_projectile_rules.rs",
+        "testName": "ready_minion_should_tap_to_shoot_fixed_damage_at_first_visible_unit"
       }
     },
     {

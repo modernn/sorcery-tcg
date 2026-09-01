@@ -49,6 +49,27 @@ pub enum GenesisDamageChoice {
     Target,
 }
 
+/// A cardinal projectile ray direction in canonical string order.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProjectileDirection {
+    /// Increasing file.
+    East,
+    /// Increasing rank.
+    North,
+    /// Decreasing rank.
+    South,
+    /// Decreasing file.
+    West,
+}
+
+fn required_nullable_unit_target<'de, D>(deserializer: D) -> Result<Option<UnitTarget>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<UnitTarget>::deserialize(deserializer)
+}
+
 impl DeckZone {
     const fn as_str(self) -> &'static str {
         match self {
@@ -276,6 +297,18 @@ pub enum ActionDescriptor {
         /// Authoritative moving unit identity.
         unit_instance_id: IdentityHash,
     },
+    /// Tap a ready minion to shoot its fixed-damage projectile along one issued ray.
+    ShootDamageProjectile {
+        /// Cardinal direction of travel.
+        direction: ProjectileDirection,
+        /// First visible unit hit, or explicit null when the ray is empty.
+        #[serde(deserialize_with = "required_nullable_unit_target")]
+        hit: Option<UnitTarget>,
+        /// Complete ray, including the shooter's origin.
+        path: Vec<Location>,
+        /// Authoritative source minion identity.
+        shooter_instance_id: IdentityHash,
+    },
     /// Decline to attack after moving or tapping in place.
     DeclineAttack,
     /// Attack one engine-issued target.
@@ -402,6 +435,25 @@ impl ActionDescriptor {
                     .join(" → ");
                 format!("Move {}… {path}", short_identity(unit_instance_id))
             }),
+            Self::ShootDamageProjectile { direction, hit, .. } => {
+                let direction = match direction {
+                    ProjectileDirection::East => "east",
+                    ProjectileDirection::North => "north",
+                    ProjectileDirection::South => "south",
+                    ProjectileDirection::West => "west",
+                };
+                let target = hit.as_ref().map_or_else(
+                    || "nothing".to_owned(),
+                    |target| {
+                        format!(
+                            "{} {}…",
+                            target.kind(),
+                            short_identity(target.instance_id())
+                        )
+                    },
+                );
+                Some(format!("Shoot {direction} at {target}"))
+            }
             Self::DeclineAttack => Some("Decline attack".to_owned()),
             Self::DeclareAttack { target } => Some(format!(
                 "Attack {} {}…",
@@ -601,6 +653,24 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 compare_card_prefix(left, right).then(Ordering::Greater)
             }
             (
+                ActionDescriptor::ShootDamageProjectile {
+                    direction: left_direction,
+                    hit: left_hit,
+                    path: left_path,
+                    shooter_instance_id: left_shooter,
+                },
+                ActionDescriptor::ShootDamageProjectile {
+                    direction: right_direction,
+                    hit: right_hit,
+                    path: right_path,
+                    shooter_instance_id: right_shooter,
+                },
+            ) => left_direction
+                .cmp(right_direction)
+                .then_with(|| compare_nullable_unit_targets(left_hit.as_ref(), right_hit.as_ref()))
+                .then_with(|| compare_json_array(left_path, right_path, Location::cmp))
+                .then_with(|| left_shooter.cmp(right_shooter)),
+            (
                 ActionDescriptor::MoveAndAttack {
                     from: left_from,
                     path: left_path,
@@ -761,6 +831,18 @@ fn compare_optional_unit_targets(
     }
 }
 
+fn compare_nullable_unit_targets(
+    left: Option<&UnitTarget>,
+    right: Option<&UnitTarget>,
+) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => compare_unit_targets(left, right),
+        (Some(_), None) => Ordering::Greater,
+        (None, Some(_)) => Ordering::Less,
+        (None, None) => Ordering::Equal,
+    }
+}
+
 fn compare_optional_identities(
     left: Option<&IdentityHash>,
     right: Option<&IdentityHash>,
@@ -789,8 +871,9 @@ const fn descriptor_group(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::CastMagic { .. }
         | ActionDescriptor::PlaySite { .. }
         | ActionDescriptor::SummonMinion { .. } => 2,
-        ActionDescriptor::Defend { .. } | ActionDescriptor::MoveAndAttack { .. } => 3,
-        _ => 4,
+        ActionDescriptor::ShootDamageProjectile { .. } => 3,
+        ActionDescriptor::Defend { .. } | ActionDescriptor::MoveAndAttack { .. } => 4,
+        _ => 5,
     }
 }
 
@@ -843,7 +926,8 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::ResolveGenesisToken { .. } => 17,
         ActionDescriptor::Mulligan { .. } => 18,
         ActionDescriptor::PlaySite { .. } => 19,
-        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 20,
+        ActionDescriptor::ShootDamageProjectile { .. } => 20,
+        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 21,
     }
 }
 
