@@ -584,7 +584,7 @@ struct SummonDestination {
 struct MovementProfile {
     airborne: bool,
     connects_top_bottom: bool,
-    maximum_steps: usize,
+    maximum_cost: Option<usize>,
     moving_minion: bool,
     restriction: Option<BasicMovementRestriction>,
     seat: Seat,
@@ -771,9 +771,7 @@ fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
 
 fn unsupported_selfplay_site(facts: &SiteFacts) -> Option<&'static str> {
     account_for_selfplay_site_fields(facts);
-    if facts.airborne_minions_atop_move_freely_away {
-        Some("airborneMinionsAtopMoveFreelyAway")
-    } else if facts.cannot_be_moved_destroyed_or_modified {
+    if facts.cannot_be_moved_destroyed_or_modified {
         Some("cannotBeMovedDestroyedOrModified")
     } else if facts.connects_burrowed_allies {
         Some("connectsBurrowedAllies")
@@ -1513,7 +1511,7 @@ impl Game {
                 MovementProfile {
                     airborne: false,
                     connects_top_bottom: false,
-                    maximum_steps: 1,
+                    maximum_cost: Some(1),
                     moving_minion: false,
                     restriction: None,
                     seat,
@@ -1546,10 +1544,10 @@ impl Game {
                 MovementProfile {
                     airborne: facts.airborne,
                     connects_top_bottom: facts.connects_top_bottom,
-                    maximum_steps: if facts.cannot_defend || facts.immobile {
-                        0
+                    maximum_cost: if facts.cannot_defend || facts.immobile {
+                        None
                     } else {
-                        1 + usize::from(facts.movement_bonus.unwrap_or(0))
+                        Some(1 + usize::from(facts.movement_bonus.unwrap_or(0)))
                     },
                     moving_minion: true,
                     restriction: facts.movement_restriction,
@@ -1985,7 +1983,7 @@ impl Game {
                 MovementProfile {
                     airborne: false,
                     connects_top_bottom: false,
-                    maximum_steps: 1,
+                    maximum_cost: Some(1),
                     moving_minion: false,
                     restriction: None,
                     seat,
@@ -2010,10 +2008,10 @@ impl Game {
                 MovementProfile {
                     airborne: facts.airborne,
                     connects_top_bottom: facts.connects_top_bottom,
-                    maximum_steps: if facts.immobile {
-                        0
+                    maximum_cost: if facts.immobile {
+                        None
                     } else {
-                        1 + usize::from(facts.movement_bonus.unwrap_or(0))
+                        Some(1 + usize::from(facts.movement_bonus.unwrap_or(0)))
                     },
                     moving_minion: true,
                     restriction: facts.movement_restriction,
@@ -2575,11 +2573,18 @@ impl Game {
             region: Region::Surface,
         };
         let mut paths = vec![vec![start]];
-        let mut frontier = paths.clone();
-        for _ in 0..profile.maximum_steps {
+        let Some(maximum_cost) = profile.maximum_cost else {
+            return paths;
+        };
+        let mut frontier = vec![(0_usize, vec![start])];
+        while !frontier.is_empty() {
             let mut next_frontier = Vec::new();
-            for path in frontier {
+            for (cost, path) in frontier {
                 let current = *path.last().expect("movement path starts nonempty");
+                let step_cost = self.surface_movement_step_cost(current.cell, profile);
+                if cost == maximum_cost && step_cost != 0 {
+                    continue;
+                }
                 for cell in current.cell.bordering(profile.connects_top_bottom).chain(
                     profile
                         .airborne
@@ -2600,15 +2605,33 @@ impl Game {
                     {
                         continue;
                     }
+                    let next_cost = cost + step_cost;
+                    if next_cost > maximum_cost {
+                        continue;
+                    }
                     let mut next = path.clone();
                     next.push(candidate);
-                    next_frontier.push(next);
+                    next_frontier.push((next_cost, next));
                 }
             }
             frontier = next_frontier;
-            paths.extend(frontier.iter().cloned());
+            paths.extend(frontier.iter().map(|(_, path)| path.clone()));
         }
         paths
+    }
+
+    fn surface_movement_step_cost(&self, current: Cell, profile: MovementProfile) -> usize {
+        if !profile.airborne || !profile.moving_minion {
+            return 1;
+        }
+        let Some(site) = &self.position.sites[current.index()] else {
+            return 1;
+        };
+        let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
+        else {
+            return 1;
+        };
+        usize::from(!facts.airborne_minions_atop_move_freely_away)
     }
 
     fn surface_entry_allowed(
@@ -5335,7 +5358,7 @@ impl Game {
                     MovementProfile {
                         airborne: false,
                         connects_top_bottom: false,
-                        maximum_steps: 1,
+                        maximum_cost: Some(1),
                         moving_minion: false,
                         restriction: None,
                         seat,
@@ -5360,10 +5383,10 @@ impl Game {
                     MovementProfile {
                         airborne: facts.airborne,
                         connects_top_bottom: facts.connects_top_bottom,
-                        maximum_steps: if facts.immobile {
-                            0
+                        maximum_cost: if facts.immobile {
+                            None
                         } else {
-                            1 + usize::from(facts.movement_bonus.unwrap_or(0))
+                            Some(1 + usize::from(facts.movement_bonus.unwrap_or(0)))
                         },
                         moving_minion: true,
                         restriction: facts.movement_restriction,

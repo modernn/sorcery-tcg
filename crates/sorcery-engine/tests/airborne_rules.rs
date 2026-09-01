@@ -68,6 +68,63 @@ fn scenario_manifest(seed: u32, attacker: &Value, responder: &Value) -> String {
     canonical_json(&manifest).expect("canonical synthetic manifest")
 }
 
+fn updraft_manifest(seed: u32) -> String {
+    let avatar = json!({
+        "attack": 1,
+        "cardType": "avatar",
+        "defense": 1,
+        "drawSpell": false,
+        "life": 20,
+    });
+    let site = json!({ "cardType": "site", "elements": ["air"] });
+    let mut manifest = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "updraft-ridge" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-updraft-ridge-v1",
+        },
+        "cards": {
+            "north-airborne": minion(true, false),
+            "north-avatar": avatar,
+            "north-ground": minion(false, false),
+            "north-site": site,
+            "north-updraft": {
+                "airborneMinionsAtopMoveFreelyAway": true,
+                "cardType": "site",
+                "elements": ["air"],
+            },
+            "south-avatar": avatar,
+            "south-minion": minion(false, false),
+            "south-site": site,
+        },
+        "decks": {
+            "north": {
+                "atlas": ["north-updraft", "north-site", "north-site", "north-site"],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-airborne", "north-airborne", "north-airborne", "north-airborne",
+                    "north-ground", "north-ground", "north-ground", "north-ground"
+                ],
+            },
+            "south": {
+                "atlas": ["south-site", "south-site", "south-site", "south-site"],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-minion", "south-minion", "south-minion", "south-minion",
+                    "south-minion", "south-minion", "south-minion", "south-minion"
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    manifest["manifestId"] = json!(identity_hash(&manifest).expect("manifest identity"));
+    canonical_json(&manifest).expect("canonical Updraft Ridge manifest")
+}
+
 fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
     let action = session
         .legal_actions()
@@ -509,4 +566,139 @@ fn assert_airborne_defends_along_a_diagonal_path() {
         (json!("C2"), json!(true))
     );
     assert_exact_replay(&setup.session);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one direct Updraft Ridge proof covers ordered Move and Defend paths"
+)]
+fn rule_catalog_0102_updraft_ridge_gives_only_airborne_minions_a_free_departure() {
+    let manifest = updraft_manifest(310);
+    let mut session = Session::new(&manifest).expect("valid Updraft Ridge scenario");
+    keep(&mut session);
+    keep(&mut session);
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-updraft"
+            && descriptor["cell"] == "C4"
+    });
+    let (airborne_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-airborne"
+            && descriptor["cell"] == "C4"
+    });
+    let airborne_id = airborne_summon["cardInstanceId"]
+        .as_str()
+        .expect("Airborne identity")
+        .to_owned();
+    let (ground_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ground"
+            && descriptor["cell"] == "C4"
+    });
+    let ground_id = ground_summon["cardInstanceId"]
+        .as_str()
+        .expect("ground identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-site"
+            && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-site"
+            && descriptor["cell"] == "C2"
+    });
+
+    assert_eq!(
+        movement_paths(&session, &airborne_id),
+        ["C4,C3,C2", "C4,C3,C4", "C4,C3", "C4"]
+    );
+    assert_eq!(movement_paths(&session, &ground_id), ["C4,C3", "C4"]);
+
+    let expected_free_path = json!([
+        { "cell": "C4", "region": "surface" },
+        { "cell": "C3", "region": "surface" },
+        { "cell": "C2", "region": "surface" },
+    ]);
+    let mut moved = session.clone();
+    let (_, movement) = accept_where(&mut moved, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == airborne_id
+            && descriptor["path"] == expected_free_path
+    });
+    assert_eq!(movement.events[0].event_type, "move-and-attack-activated");
+    assert_eq!(movement.events[0].payload["steps"], 2);
+    assert_exact_replay(&moved);
+
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let south_avatar_id = state(&session)["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == south_avatar_id
+            && descriptor["from"]["cell"] == "C1"
+            && descriptor["to"]["cell"] == "C2"
+    });
+    if state(&session)["phase"] == "intercept" {
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "close-intercept"
+        });
+    }
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "declare-attack" && descriptor["target"]["kind"] == "site"
+    });
+
+    let defend_actions = session
+        .legal_actions()
+        .expect("Updraft Ridge Defend actions");
+    assert!(defend_actions.iter().any(|action| {
+        action.descriptor["kind"] == "defend"
+            && action.descriptor["unitInstanceId"] == airborne_id
+            && action.descriptor["path"] == expected_free_path
+    }));
+    assert!(!defend_actions.iter().any(|action| {
+        action.descriptor["kind"] == "defend"
+            && action.descriptor["unitInstanceId"] == ground_id
+            && action.descriptor["path"] == expected_free_path
+    }));
+    let (_, defended) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "defend"
+            && descriptor["unitInstanceId"] == airborne_id
+            && descriptor["path"] == expected_free_path
+    });
+    assert_eq!(defended.events[0].event_type, "defender-joined");
+    assert_eq!(defended.events[0].payload["steps"], 2);
+    assert_exact_replay(&session);
 }

@@ -13,7 +13,7 @@ fn minion() -> Value {
     })
 }
 
-fn scenario_manifest(seed: u32, responder: &Value) -> String {
+fn scenario_manifest(seed: u32, responder: &Value, south_site: &Value) -> String {
     let avatar = json!({
         "attack": 1,
         "cardType": "avatar",
@@ -35,7 +35,7 @@ fn scenario_manifest(seed: u32, responder: &Value) -> String {
             "north-site": site,
             "south-avatar": avatar,
             "south-responder": responder,
-            "south-site": site,
+            "south-site": south_site,
         },
         "decks": {
             "north": {
@@ -120,7 +120,15 @@ struct AttackSetup {
 }
 
 fn attack_checkpoint(seed: u32, responder: &Value) -> AttackSetup {
-    let manifest = scenario_manifest(seed, responder);
+    attack_checkpoint_with_site(
+        seed,
+        responder,
+        &json!({ "cardType": "site", "elements": ["earth"] }),
+    )
+}
+
+fn attack_checkpoint_with_site(seed: u32, responder: &Value, south_site: &Value) -> AttackSetup {
+    let manifest = scenario_manifest(seed, responder, south_site);
     let mut session = Session::new(&manifest).expect("valid Intercept scenario");
     keep(&mut session);
     keep(&mut session);
@@ -206,6 +214,83 @@ fn attack_checkpoint(seed: u32, responder: &Value) -> AttackSetup {
         session,
         target_id,
     }
+}
+
+#[test]
+fn cannot_defend_airborne_minion_cannot_use_free_updraft_departure() {
+    let mut responder = minion();
+    responder["airborne"] = json!(true);
+    responder["cannotDefend"] = json!(true);
+    let setup = attack_checkpoint_with_site(
+        50,
+        &responder,
+        &json!({
+            "airborneMinionsAtopMoveFreelyAway": true,
+            "cardType": "site",
+            "elements": ["earth", "air"],
+        }),
+    );
+    let mut session = setup.session;
+    if state(&session)["phase"] == "intercept" {
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "close-intercept"
+        });
+    }
+    let target_site_id = site_id(&session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "declare-attack"
+            && descriptor["target"]["kind"] == "site"
+            && descriptor["target"]["instanceId"] == target_site_id
+    });
+    assert!(
+        session
+            .legal_actions()
+            .expect("Defend actions")
+            .iter()
+            .all(|action| {
+                action.descriptor["kind"] != "defend"
+                    || action.descriptor["unitInstanceId"] != setup.distant_responder_id
+            })
+    );
+    exact_replay(&session);
+}
+
+#[test]
+fn adjacent_updraft_sites_keep_airborne_defend_paths_bounded() {
+    let mut responder = minion();
+    responder["airborne"] = json!(true);
+    let setup = attack_checkpoint_with_site(
+        51,
+        &responder,
+        &json!({
+            "airborneMinionsAtopMoveFreelyAway": true,
+            "cardType": "site",
+            "elements": ["earth", "air"],
+        }),
+    );
+    let mut session = setup.session;
+    if state(&session)["phase"] == "intercept" {
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "close-intercept"
+        });
+    }
+    let target_site_id = site_id(&session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "declare-attack"
+            && descriptor["target"]["kind"] == "site"
+            && descriptor["target"]["instanceId"] == target_site_id
+    });
+    let defend_count = session
+        .legal_actions()
+        .expect("bounded Defend actions")
+        .iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "defend"
+                && action.descriptor["unitInstanceId"] == setup.distant_responder_id
+        })
+        .count();
+    assert_eq!(defend_count, 2);
+    exact_replay(&session);
 }
 
 fn site_id(session: &Session) -> String {
