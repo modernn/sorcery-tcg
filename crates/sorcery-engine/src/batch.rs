@@ -115,6 +115,11 @@ impl FinishedTerminal {
                 result: DrawResult::Draw,
                 status: FinishedStatus::Finished,
             }),
+            (GameOutcome::Draw, GameEndReason::SimultaneousDefeat) => Some(Self::Draw {
+                reason: DrawReason::SimultaneousDefeat,
+                result: DrawResult::Draw,
+                status: FinishedStatus::Finished,
+            }),
             (GameOutcome::Win { loser, winner }, GameEndReason::AvatarDefeated) => {
                 Some(Self::Win {
                     loser,
@@ -130,7 +135,10 @@ impl FinishedTerminal {
                 winner,
             }),
             (GameOutcome::Draw, GameEndReason::AvatarDefeated | GameEndReason::DeckEmpty)
-            | (GameOutcome::Win { .. }, GameEndReason::SimultaneousAvatarDefeat) => None,
+            | (
+                GameOutcome::Win { .. },
+                GameEndReason::SimultaneousAvatarDefeat | GameEndReason::SimultaneousDefeat,
+            ) => None,
         }
     }
 

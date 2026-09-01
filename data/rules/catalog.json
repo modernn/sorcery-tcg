@@ -2497,15 +2497,15 @@
         "RULE-05"
       ],
       "plainLanguage": "AP commits before NAP, then NAP Deathrites resolve before AP Deathrites.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [],
       "eventHints": [
         "resolution"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-05 AP commits before NAP, then NAP Deathrites resolve before AP Deathrites"
+        "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
+        "testName": "ap_should_commit_deathrite_order_before_nap_resolves_first"
       }
     },
     {
@@ -2514,7 +2514,7 @@
         "RULE-05"
       ],
       "plainLanguage": "NAP then AP Deathrites resolve before simultaneous deaths enter their cemeteries.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [],
       "eventHints": [
@@ -2523,8 +2523,8 @@
         "resolution"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-05 NAP then AP Deathrites resolve before simultaneous deaths enter their cemeteries"
+        "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
+        "testName": "simultaneous_deathrites_should_resolve_nap_then_ap_before_cemetery_entry"
       }
     },
     {
@@ -2533,7 +2533,7 @@
         "RULE-05"
       ],
       "plainLanguage": "Bladderblimp Deathrite makes each player lose life for their nearby sites.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "deathrite"
       ],
@@ -2542,8 +2542,8 @@
         "loss"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-05 Bladderblimp Deathrite makes each player lose life for their nearby sites"
+        "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
+        "testName": "bladderblimp_deathrite_should_count_each_players_nearby_controlled_sites"
       }
     },
     {
@@ -2552,7 +2552,7 @@
         "RULE-05"
       ],
       "plainLanguage": "Deathrite damages each other remaining unit here in simultaneous chained batches.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "deathrite"
       ],
@@ -2561,8 +2561,8 @@
         "damage"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-05 Deathrite damages each other remaining unit here in simultaneous chained batches"
+        "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
+        "testName": "deathrite_area_damage_should_chain_in_ordered_simultaneous_batches"
       }
     },
     {
@@ -2571,7 +2571,7 @@
         "RULE-05"
       ],
       "plainLanguage": "Deathrite uses its moved last location with Ward, reduction, and Lethal.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "deathrite",
         "ward",
@@ -2584,8 +2584,8 @@
         "movement"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-05 Deathrite uses its moved last location with Ward, reduction, and Lethal"
+        "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
+        "testName": "deathrite_area_damage_should_use_last_location_ward_reduction_and_lethal"
       }
     },
     {
@@ -2594,7 +2594,7 @@
         "RULE-05"
       ],
       "plainLanguage": "Deathrite preserves its unit-source power snapshot before cemetery entry.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "deathrite",
         "derived-power"
@@ -2604,8 +2604,8 @@
         "cemetery-entry"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-05 Deathrite preserves its unit-source power snapshot before cemetery entry"
+        "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
+        "testName": "deathrite_damage_should_preserve_source_power_until_resolution"
       }
     },
     {
@@ -2614,7 +2614,7 @@
         "RULE-05"
       ],
       "plainLanguage": "Deathrite healing caps at maximum, fails at Death's Door, and precedes cemetery entry.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "deathrite",
         "deaths-door"
@@ -2628,8 +2628,8 @@
         "healing"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-05 Deathrite healing caps at maximum, fails at Death's Door, and precedes cemetery entry"
+        "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
+        "testName": "deathrite_healing_should_cap_skip_deaths_door_and_precede_cemetery_entry"
       }
     },
     {

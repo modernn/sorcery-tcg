@@ -313,6 +313,11 @@ pub enum ActionDescriptor {
         /// Authoritative target identity.
         target_instance_id: IdentityHash,
     },
+    /// Commit one source first within the acting player's simultaneous Deathrites.
+    OrderDeathrites {
+        /// Authoritative dead minion source identity.
+        source_instance_id: IdentityHash,
+    },
     /// End the acting player's turn.
     EndTurn,
 }
@@ -443,6 +448,7 @@ impl ActionDescriptor {
                 "Replace Rubble at {target_cell} with the top site of your Atlas"
             )),
             Self::PlaySite { .. }
+            | Self::OrderDeathrites { .. }
             | Self::ResolveGenesisSpell { .. }
             | Self::ResolveGenesisSpellOrder { .. }
             | Self::ResolveGenesisToken { .. }
@@ -664,6 +670,14 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                         ActionDescriptor::Intercept {
                             unit_instance_id: right,
                         },
+                    )
+                    | (
+                        ActionDescriptor::OrderDeathrites {
+                            source_instance_id: left,
+                        },
+                        ActionDescriptor::OrderDeathrites {
+                            source_instance_id: right,
+                        },
                     ) => left.cmp(right),
                     (
                         ActionDescriptor::DeclareAttack { target: left },
@@ -822,14 +836,14 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::DrawSpell => 10,
         ActionDescriptor::EndTurn => 11,
         ActionDescriptor::Intercept { .. } => 12,
-        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 13,
-        ActionDescriptor::ResolveGenesisSpell { .. } => 14,
-        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 15,
-        ActionDescriptor::ResolveGenesisToken { .. } => 16,
-        ActionDescriptor::Mulligan { .. } => 17,
-        ActionDescriptor::PlaySite { .. } => 18,
-        ActionDescriptor::SummonMinion { .. } => 19,
-        ActionDescriptor::MoveAndAttack { .. } => 20,
+        ActionDescriptor::OrderDeathrites { .. } => 13,
+        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 14,
+        ActionDescriptor::ResolveGenesisSpell { .. } => 15,
+        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 16,
+        ActionDescriptor::ResolveGenesisToken { .. } => 17,
+        ActionDescriptor::Mulligan { .. } => 18,
+        ActionDescriptor::PlaySite { .. } => 19,
+        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 20,
     }
 }
 

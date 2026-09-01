@@ -41,6 +41,7 @@ pub struct Position {
     active_seat: Seat,
     decision_seat: Seat,
     pending_combat: Option<PendingCombat>,
+    pending_deathrites: Option<PendingDeathrites>,
     pending_genesis_spell: PendingField<PendingGenesisSpell>,
     pending_genesis_spell_order: PendingField<PendingGenesisSpellOrder>,
     pending_genesis_token: PendingField<PendingGenesisToken>,
@@ -380,8 +381,44 @@ struct PendingCombat {
 }
 
 #[derive(Clone, Debug)]
+struct PendingDeathriteSource {
+    controller: Seat,
+    current_power: u16,
+    instance_id: IdentityHash,
+    lethal: bool,
+    unit: UnitPosition,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DeathriteStage {
+    ActiveOrder,
+    NonActiveOrder,
+    Resolve,
+}
+
+#[derive(Clone, Debug)]
+struct PendingDeathriteBatch {
+    active_order: Vec<PendingDeathriteSource>,
+    active_remaining: Vec<PendingDeathriteSource>,
+    non_active_order: Vec<PendingDeathriteSource>,
+    non_active_remaining: Vec<PendingDeathriteSource>,
+    resolving: Vec<PendingDeathriteSource>,
+    stage: DeathriteStage,
+}
+
+#[derive(Clone, Debug)]
+struct PendingDeathrites {
+    batches: Vec<PendingDeathriteBatch>,
+    corpses: Vec<UnitPosition>,
+    deck_losers: Vec<Seat>,
+    defeated_avatars: Vec<Seat>,
+    return_decision_seat: Seat,
+    return_phase: Phase,
+}
+
+#[derive(Clone, Debug)]
 struct StrikeAllocation {
-    amount: u8,
+    amount: u16,
     target_instance_id: IdentityHash,
 }
 
@@ -416,6 +453,7 @@ enum PendingField<T> {
 enum Phase {
     Allocate,
     Attack,
+    DeathriteOrder,
     Defend,
     Draw,
     Genesis,
@@ -430,6 +468,7 @@ impl Phase {
         match self {
             Self::Allocate => "allocate",
             Self::Attack => "attack",
+            Self::DeathriteOrder => "deathrite-order",
             Self::Defend => "defend",
             Self::Draw => "draw",
             Self::Genesis => "genesis",
@@ -459,16 +498,26 @@ pub enum GameEndReason {
     DeckEmpty,
     /// Both Avatars were defeated by one simultaneous damage batch.
     SimultaneousAvatarDefeat,
+    /// Both players lost through a combined Avatar/deck defeat batch.
+    SimultaneousDefeat,
 }
 
 #[derive(Clone, Copy, Debug)]
 enum TerminalResult {
-    Draw,
+    Draw {
+        reason: DrawReason,
+    },
     Win {
         loser: Seat,
         reason: WinReason,
         winner: Seat,
     },
+}
+
+#[derive(Clone, Copy, Debug)]
+enum DrawReason {
+    SimultaneousAvatarDefeat,
+    SimultaneousDefeat,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -483,8 +532,16 @@ struct DamageResult {
 }
 
 #[derive(Clone, Copy)]
+struct MinionDamageStatus {
+    damage_prevention: Option<DamagePrevention>,
+    defense: u16,
+    disabled: bool,
+    index: usize,
+}
+
+#[derive(Clone, Copy)]
 struct UnitDamageSource {
-    current_power: u8,
+    current_power: u16,
     lethal: bool,
 }
 
@@ -659,6 +716,7 @@ impl Game {
                 active_seat: Seat::North,
                 decision_seat: Seat::North,
                 pending_combat: None,
+                pending_deathrites: None,
                 pending_genesis_spell: PendingField::Absent,
                 pending_genesis_spell_order: PendingField::Absent,
                 pending_genesis_token: PendingField::Absent,
@@ -713,7 +771,7 @@ impl Game {
     #[must_use]
     pub const fn outcome(&self) -> Option<GameOutcome> {
         match self.position.terminal {
-            Some(TerminalResult::Draw) => Some(GameOutcome::Draw),
+            Some(TerminalResult::Draw { .. }) => Some(GameOutcome::Draw),
             Some(TerminalResult::Win { loser, winner, .. }) => {
                 Some(GameOutcome::Win { loser, winner })
             }
@@ -725,7 +783,12 @@ impl Game {
     #[must_use]
     pub const fn terminal_reason(&self) -> Option<GameEndReason> {
         match self.position.terminal {
-            Some(TerminalResult::Draw) => Some(GameEndReason::SimultaneousAvatarDefeat),
+            Some(TerminalResult::Draw {
+                reason: DrawReason::SimultaneousAvatarDefeat,
+            }) => Some(GameEndReason::SimultaneousAvatarDefeat),
+            Some(TerminalResult::Draw {
+                reason: DrawReason::SimultaneousDefeat,
+            }) => Some(GameEndReason::SimultaneousDefeat),
             Some(TerminalResult::Win {
                 reason: WinReason::AvatarDefeated,
                 ..
@@ -771,6 +834,7 @@ impl Game {
         match self.position.phase {
             Phase::Allocate => self.append_allocate_actions(&mut actions)?,
             Phase::Attack => self.append_attack_actions(&mut actions)?,
+            Phase::DeathriteOrder => self.append_deathrite_order_actions(&mut actions)?,
             Phase::Defend => self.append_defend_actions(&mut actions)?,
             Phase::Draw => self.append_draw_actions(&mut actions)?,
             Phase::Genesis => self.append_genesis_actions(&mut actions)?,
@@ -804,7 +868,7 @@ impl Game {
         let assigned = pending
             .allocations
             .iter()
-            .try_fold(0_u8, |total, allocation| {
+            .try_fold(0_u16, |total, allocation| {
                 total.checked_add(allocation.amount)
             })
             .ok_or(GameError::IllegalAction)?;
@@ -827,6 +891,47 @@ impl Game {
             self.push_action(actions, descriptor, label);
         }
         Ok(())
+    }
+
+    fn append_deathrite_order_actions(
+        &self,
+        actions: &mut Vec<IssuedAction>,
+    ) -> Result<(), GameError> {
+        let sources = self.pending_deathrite_order()?;
+        for source in sources {
+            let descriptor = ActionDescriptor::OrderDeathrites {
+                source_instance_id: source.instance_id.clone(),
+            };
+            let card_id = &self.rules.cards[usize::from(source.unit.card.card_id.0)].id;
+            self.push_action(
+                actions,
+                descriptor,
+                format!("Order {card_id} first within your Deathrites"),
+            );
+        }
+        Ok(())
+    }
+
+    fn pending_deathrite_order(&self) -> Result<&[PendingDeathriteSource], GameError> {
+        let batch = self
+            .position
+            .pending_deathrites
+            .as_ref()
+            .and_then(|pending| pending.batches.first())
+            .ok_or(GameError::IllegalAction)?;
+        let sources = match batch.stage {
+            DeathriteStage::ActiveOrder => &batch.active_remaining,
+            DeathriteStage::NonActiveOrder => &batch.non_active_remaining,
+            DeathriteStage::Resolve => return Err(GameError::IllegalAction),
+        };
+        if sources.len() < 2
+            || sources
+                .first()
+                .is_none_or(|source| source.controller != self.position.decision_seat)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        Ok(sources)
     }
 
     fn append_attack_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
@@ -1624,6 +1729,64 @@ impl Game {
                 .unwrap_or(false)
     }
 
+    fn minion_current_stats(&self, unit: &UnitPosition) -> Result<(u16, u16, bool), GameError> {
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let disabled = self.minion_is_disabled(unit);
+        let nearby = |source: &UnitPosition| {
+            source.location == unit.location
+                || source
+                    .location
+                    .bordering(false)
+                    .chain(source.location.diagonals(false))
+                    .any(|cell| cell == unit.location)
+        };
+        let mut bonus = 0_u16;
+        for source in &self.position.units {
+            if source.card.instance_id == unit.card.instance_id
+                || source.controller != unit.controller
+                || self.minion_is_disabled(source)
+            {
+                continue;
+            }
+            let CardFacts::Minion(source_facts) =
+                &self.rules.cards[usize::from(source.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            if source_facts.other_nearby_allies_power_bonus && nearby(source) {
+                bonus = bonus.checked_add(1).ok_or(GameError::IllegalAction)?;
+            }
+            if facts.mortal && source_facts.other_controlled_mortals_power_bonus {
+                bonus = bonus.checked_add(1).ok_or(GameError::IllegalAction)?;
+            }
+        }
+        if !disabled && facts.gains_power_ranged_and_spellcaster_atop_tower {
+            let atop_tower = self.position.sites[unit.location.index()]
+                .as_ref()
+                .is_some_and(|site| {
+                    matches!(
+                        &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                        CardFacts::Site(site_facts) if site_facts.is_tower
+                    )
+                });
+            if atop_tower {
+                bonus = bonus.checked_add(2).ok_or(GameError::IllegalAction)?;
+            }
+        }
+        Ok((
+            u16::from(facts.attack)
+                .checked_add(bonus)
+                .ok_or(GameError::IllegalAction)?,
+            u16::from(facts.defense)
+                .checked_add(bonus)
+                .ok_or(GameError::IllegalAction)?,
+            !disabled && facts.lethal,
+        ))
+    }
+
     fn minion_caster_suffix(&self, seat: Seat, instance_id: &IdentityHash) -> String {
         if self.spellcaster_kind(seat, instance_id) == Some(UnitKind::Minion) {
             format!(" with minion {}…", &instance_id.as_str()[..15])
@@ -2136,6 +2299,9 @@ impl Game {
                 unit_instance_id,
                 outcomes,
             ),
+            ActionDescriptor::OrderDeathrites { source_instance_id } => {
+                self.apply_deathrite_order_action(action.seat, source_instance_id, outcomes)
+            }
             ActionDescriptor::EndTurn => self.apply_end_turn_action(action.seat, outcomes),
             ActionDescriptor::Intercept { unit_instance_id } => {
                 self.apply_intercept_action(action.seat, unit_instance_id, outcomes)
@@ -2313,7 +2479,7 @@ impl Game {
         target_instance_id: &IdentityHash,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
-        let amount = u8::try_from(amount).map_err(|_| GameError::IllegalAction)?;
+        let amount = u16::try_from(amount).map_err(|_| GameError::IllegalAction)?;
         let pending = self
             .position
             .pending_combat
@@ -2336,7 +2502,7 @@ impl Game {
         let assigned = pending
             .allocations
             .iter()
-            .try_fold(0_u8, |total, allocation| {
+            .try_fold(0_u16, |total, allocation| {
                 total.checked_add(allocation.amount)
             })
             .ok_or(GameError::IllegalAction)?;
@@ -2621,7 +2787,7 @@ impl Game {
 
         let avatar = &mut self.position.players[seat_index(target_seat)].avatar;
         let old_life = avatar.life;
-        avatar.life = avatar.life.saturating_sub(u16::from(attack));
+        avatar.life = avatar.life.saturating_sub(attack);
         let lost = old_life - avatar.life;
         let reached_deaths_door = old_life > 0 && avatar.life == 0;
         if reached_deaths_door {
@@ -2661,29 +2827,30 @@ impl Game {
         kind: UnitKind,
         seat: Seat,
         instance_id: &IdentityHash,
-    ) -> Result<(u8, bool), GameError> {
-        let card_id = match kind {
+    ) -> Result<(u16, bool), GameError> {
+        match kind {
             UnitKind::Avatar => {
                 let avatar = &self.position.players[seat_index(seat)].avatar;
                 if avatar.card.instance_id != *instance_id {
                     return Err(GameError::IllegalAction);
                 }
-                avatar.card.card_id
+                let CardFacts::Avatar(facts) =
+                    &self.rules.cards[usize::from(avatar.card.card_id.0)].facts
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                Ok((u16::from(facts.attack), false))
             }
             UnitKind::Minion => {
-                self.position
+                let unit = self
+                    .position
                     .units
                     .iter()
                     .find(|unit| unit.card.instance_id == *instance_id && unit.controller == seat)
-                    .ok_or(GameError::IllegalAction)?
-                    .card
-                    .card_id
+                    .ok_or(GameError::IllegalAction)?;
+                let (attack, _, lethal) = self.minion_current_stats(unit)?;
+                Ok((attack, lethal))
             }
-        };
-        match &self.rules.cards[usize::from(card_id.0)].facts {
-            CardFacts::Avatar(facts) => Ok((facts.attack, false)),
-            CardFacts::Minion(facts) => Ok((facts.attack, facts.lethal)),
-            _ => Err(GameError::IllegalAction),
         }
     }
 
@@ -2879,7 +3046,7 @@ impl Game {
             .filter(|(_, _, _, _, can_strike)| *can_strike)
             .map(|(_, _, attack, lethal, _)| {
                 (
-                    u16::from(*attack),
+                    *attack,
                     UnitDamageSource {
                         current_power: *attack,
                         lethal: *lethal,
@@ -2911,7 +3078,7 @@ impl Game {
                 kind,
                 target.seat(),
                 target.instance_id(),
-                u16::from(allocation.amount),
+                allocation.amount,
                 UnitDamageSource {
                     current_power: attacker_attack,
                     lethal: attacker_lethal,
@@ -2926,49 +3093,36 @@ impl Game {
                 || json!({ "instanceId": instance_id, "seat": seat }),
             );
         }
+        let mut dead_minions = Vec::new();
         if attacker_damage.minion_died {
-            self.remove_dead_minion(&attacker_id, outcomes)?;
+            dead_minions.push(attacker_id);
         }
-        for (target, result) in &combatant_results {
-            if result.minion_died {
-                self.remove_dead_minion(target.instance_id(), outcomes)?;
-            }
+        dead_minions.extend(
+            combatant_results
+                .iter()
+                .filter(|(_, result)| result.minion_died)
+                .map(|(target, _)| target.instance_id().clone()),
+        );
+        let mut defeated_avatars = Vec::new();
+        if attacker_damage.avatar_defeated {
+            defeated_avatars.push(attacking_seat);
         }
-        let combatant_avatar_defeated = combatant_results
-            .iter()
-            .find_map(|(target, result)| result.avatar_defeated.then_some(target.seat()));
+        defeated_avatars.extend(
+            combatant_results
+                .iter()
+                .filter_map(|(target, result)| result.avatar_defeated.then_some(target.seat())),
+        );
         self.position.pending_combat = None;
         self.position.decision_seat = self.position.active_seat;
-        if attacker_damage.avatar_defeated && combatant_avatar_defeated.is_some() {
-            self.position.phase = Phase::Terminal;
-            self.position.terminal = Some(TerminalResult::Draw);
-            outcomes.push("game-ended", || {
-                json!({
-                    "reason": "simultaneous_avatar_defeat",
-                    "result": "draw",
-                })
-            });
-        } else if let Some(loser) = attacker_damage
-            .avatar_defeated
-            .then_some(attacking_seat)
-            .or(combatant_avatar_defeated)
-        {
-            let winner = other_seat(loser);
-            self.position.phase = Phase::Terminal;
-            self.position.terminal = Some(TerminalResult::Win {
-                loser,
-                reason: WinReason::AvatarDefeated,
-                winner,
-            });
-            outcomes.push("game-ended", || {
-                json!({
-                    "loser": loser,
-                    "reason": "avatar_defeated",
-                    "winner": winner,
-                })
-            });
-        } else {
-            self.position.phase = Phase::Main;
+        self.position.phase = Phase::Main;
+        if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
+            self.begin_minion_deaths(
+                &dead_minions,
+                &defeated_avatars,
+                Phase::Main,
+                self.position.active_seat,
+                outcomes,
+            )?;
         }
         Ok(())
     }
@@ -3008,7 +3162,7 @@ impl Game {
                     match prevention {
                         Some(DamagePrevention::PreventsDamageFromUnitsWithPowerAtLeast(
                             threshold,
-                        )) if source.current_power >= threshold => 0,
+                        )) if source.current_power >= u16::from(threshold) => 0,
                         Some(DamagePrevention::TakesOneLessDamage) => amount.saturating_sub(1),
                         _ => *amount,
                     }
@@ -3061,15 +3215,11 @@ impl Game {
             );
         }
         Ok(DamageResult {
-            minion_died: accumulated > 0 && (accumulated >= u16::from(defense) || lethal_dealt),
+            minion_died: accumulated > 0 && (accumulated >= defense || lethal_dealt),
             avatar_defeated: false,
         })
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one damage helper preserves exact minion and Avatar event ordering"
-    )]
     fn apply_simple_damage(
         &mut self,
         kind: UnitKind,
@@ -3079,11 +3229,48 @@ impl Game {
         source: UnitDamageSource,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<DamageResult, GameError> {
+        let status = if kind == UnitKind::Minion {
+            Some(self.minion_damage_status(instance_id)?)
+        } else {
+            None
+        };
+        self.apply_simple_damage_with_status(
+            kind,
+            seat,
+            instance_id,
+            amount,
+            source,
+            status,
+            outcomes,
+        )
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        clippy::too_many_lines,
+        reason = "the damage transaction keeps its typed source, snapshot, and event sink explicit"
+    )]
+    fn apply_simple_damage_with_status(
+        &mut self,
+        kind: UnitKind,
+        seat: Seat,
+        instance_id: &IdentityHash,
+        amount: u16,
+        source: UnitDamageSource,
+        minion_status: Option<MinionDamageStatus>,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<DamageResult, GameError> {
         match kind {
             UnitKind::Minion => {
-                let (index, _, defense, damage_prevention) =
-                    self.simple_minion_combatant(instance_id)?;
-                let disabled = self.minion_is_disabled(&self.position.units[index]);
+                let MinionDamageStatus {
+                    damage_prevention,
+                    defense,
+                    disabled,
+                    index,
+                } = minion_status.ok_or(GameError::IllegalAction)?;
+                if self.position.units[index].card.instance_id != *instance_id {
+                    return Err(GameError::IllegalAction);
+                }
                 let unit = &mut self.position.units[index];
                 let ward_broken = amount > 0 && unit.warded;
                 if ward_broken {
@@ -3097,7 +3284,7 @@ impl Game {
                     match damage_prevention {
                         Some(DamagePrevention::PreventsDamageFromUnitsWithPowerAtLeast(
                             threshold,
-                        )) if source.current_power >= threshold => 0,
+                        )) if source.current_power >= u16::from(threshold) => 0,
                         Some(DamagePrevention::TakesOneLessDamage) => amount.saturating_sub(1),
                         _ => amount,
                     }
@@ -3137,7 +3324,7 @@ impl Game {
                 }
                 Ok(DamageResult {
                     minion_died: accumulated > 0
-                        && (accumulated >= u16::from(defense) || source.lethal && dealt > 0),
+                        && (accumulated >= defense || source.lethal && dealt > 0),
                     avatar_defeated: false,
                 })
             }
@@ -3230,7 +3417,7 @@ impl Game {
     fn simple_minion_combatant(
         &self,
         instance_id: &IdentityHash,
-    ) -> Result<(usize, u8, u8, Option<DamagePrevention>), GameError> {
+    ) -> Result<(usize, u16, u16, Option<DamagePrevention>), GameError> {
         let (index, unit) = self
             .position
             .units
@@ -3242,48 +3429,561 @@ impl Game {
         else {
             return Err(GameError::IllegalAction);
         };
-        Ok((index, facts.attack, facts.defense, facts.damage_prevention))
+        let (attack, defense, _) = self.minion_current_stats(unit)?;
+        Ok((index, attack, defense, facts.damage_prevention))
     }
 
-    fn remove_dead_minion(
-        &mut self,
+    fn minion_damage_status(
+        &self,
         instance_id: &IdentityHash,
+    ) -> Result<MinionDamageStatus, GameError> {
+        let (index, _, defense, damage_prevention) = self.simple_minion_combatant(instance_id)?;
+        Ok(MinionDamageStatus {
+            damage_prevention,
+            defense,
+            disabled: self.minion_is_disabled(&self.position.units[index]),
+            index,
+        })
+    }
+
+    fn make_deathrite_batch(
+        &self,
+        sources: Vec<PendingDeathriteSource>,
+    ) -> Option<PendingDeathriteBatch> {
+        if sources.is_empty() {
+            return None;
+        }
+        let (active, non_active): (Vec<_>, Vec<_>) = sources
+            .into_iter()
+            .partition(|source| source.controller == self.position.active_seat);
+        let active_needs_order = active.len() > 1;
+        let non_active_needs_order = non_active.len() > 1;
+        let stage = if active_needs_order {
+            DeathriteStage::ActiveOrder
+        } else if non_active_needs_order {
+            DeathriteStage::NonActiveOrder
+        } else {
+            DeathriteStage::Resolve
+        };
+        let resolving = if stage == DeathriteStage::Resolve {
+            non_active.iter().chain(&active).cloned().collect()
+        } else {
+            Vec::new()
+        };
+        Some(PendingDeathriteBatch {
+            active_order: if active_needs_order {
+                Vec::new()
+            } else {
+                active.clone()
+            },
+            active_remaining: if active_needs_order {
+                active
+            } else {
+                Vec::new()
+            },
+            non_active_order: if non_active_needs_order {
+                Vec::new()
+            } else {
+                non_active.clone()
+            },
+            non_active_remaining: if non_active_needs_order {
+                non_active
+            } else {
+                Vec::new()
+            },
+            resolving,
+            stage,
+        })
+    }
+
+    fn collect_minion_deaths(
+        &mut self,
+        instance_ids: &[IdentityHash],
+    ) -> Result<(Vec<PendingDeathriteSource>, Vec<UnitPosition>), GameError> {
+        let mut seen = BTreeSet::new();
+        let mut corpses = Vec::new();
+        let mut sources = Vec::new();
+        let mut pending_ids = instance_ids.to_vec();
+        while !pending_ids.is_empty() {
+            let mut batch = Vec::new();
+            let mut batch_ids = BTreeSet::new();
+            for instance_id in &pending_ids {
+                if seen.contains(instance_id) || !batch_ids.insert(instance_id.clone()) {
+                    continue;
+                }
+                batch.push(
+                    self.position
+                        .units
+                        .iter()
+                        .find(|unit| unit.card.instance_id == *instance_id)
+                        .cloned()
+                        .ok_or(GameError::IllegalAction)?,
+                );
+            }
+            for unit in &batch {
+                let CardFacts::Minion(facts) =
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                let has_deathrite = facts.deathrite_damage_each_unit_here.is_some()
+                    || facts.deathrite_draw_site
+                    || facts.deathrite_heal.is_some()
+                    || facts.deathrite_lose_life_per_nearby_site_controlled;
+                if has_deathrite && !self.minion_is_disabled(unit) {
+                    let (current_power, _, lethal) = self.minion_current_stats(unit)?;
+                    sources.push(PendingDeathriteSource {
+                        controller: unit.controller,
+                        current_power,
+                        instance_id: unit.card.instance_id.clone(),
+                        lethal,
+                        unit: unit.clone(),
+                    });
+                }
+                seen.insert(unit.card.instance_id.clone());
+            }
+            corpses.extend(batch);
+            self.position
+                .units
+                .retain(|unit| !seen.contains(&unit.card.instance_id));
+            pending_ids = self
+                .position
+                .units
+                .iter()
+                .map(|unit| {
+                    self.minion_current_stats(unit).map(|(_, defense, _)| {
+                        (unit.damage > 0 && unit.damage >= defense)
+                            .then(|| unit.card.instance_id.clone())
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten()
+                .collect();
+        }
+        Ok((sources, corpses))
+    }
+
+    fn begin_minion_deaths(
+        &mut self,
+        instance_ids: &[IdentityHash],
+        defeated_avatars: &[Seat],
+        return_phase: Phase,
+        return_decision_seat: Seat,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
-        let index = self
-            .position
-            .units
-            .iter()
-            .position(|unit| unit.card.instance_id == *instance_id)
-            .ok_or(GameError::IllegalAction)?;
-        let unit = self.position.units.remove(index);
-        let card_id = self.rules.cards[usize::from(unit.card.card_id.0)]
-            .id
-            .clone();
-        let owner = unit.card.owner;
-        let token = unit.card.source == CardSource::Token;
-        if !token {
-            self.position.players[seat_index(owner)]
-                .cemetery
-                .push(unit.card);
+        let (sources, corpses) = self.collect_minion_deaths(instance_ids)?;
+        let batch = self.make_deathrite_batch(sources);
+        let mut unique_defeated = Vec::new();
+        for seat in defeated_avatars {
+            if !unique_defeated.contains(seat) {
+                unique_defeated.push(*seat);
+            }
         }
-        outcomes.push("minion-died", || {
-            json!({
-                "cardId": card_id,
-                "instanceId": instance_id,
-                "owner": owner,
-            })
-        });
-        if token {
-            outcomes.push("minion-banished", || {
-                json!({
-                    "cardId": card_id,
-                    "instanceId": instance_id,
-                    "owner": owner,
+        let pending = PendingDeathrites {
+            batches: batch.into_iter().collect(),
+            corpses,
+            deck_losers: Vec::new(),
+            defeated_avatars: unique_defeated,
+            return_decision_seat,
+            return_phase,
+        };
+        self.drive_deathrites(pending, outcomes)
+    }
+
+    fn apply_deathrite_order_action(
+        &mut self,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        if self.position.phase != Phase::DeathriteOrder
+            || seat != self.position.decision_seat
+            || !self
+                .pending_deathrite_order()?
+                .iter()
+                .any(|source| source.instance_id == *source_instance_id)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let mut pending = self
+            .position
+            .pending_deathrites
+            .take()
+            .ok_or(GameError::IllegalAction)?;
+        Self::commit_deathrite_order(&mut pending, source_instance_id)?;
+        outcomes.push(
+            "deathrite-order-committed",
+            || json!({ "seat": seat, "sourceInstanceId": source_instance_id }),
+        );
+        self.drive_deathrites(pending, outcomes)?;
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    fn commit_deathrite_order(
+        pending: &mut PendingDeathrites,
+        source_instance_id: &IdentityHash,
+    ) -> Result<(), GameError> {
+        let batch = pending
+            .batches
+            .first_mut()
+            .ok_or(GameError::IllegalAction)?;
+        let active_stage = batch.stage == DeathriteStage::ActiveOrder;
+        let (committed, remaining) = if active_stage {
+            (&mut batch.active_order, &mut batch.active_remaining)
+        } else if batch.stage == DeathriteStage::NonActiveOrder {
+            (&mut batch.non_active_order, &mut batch.non_active_remaining)
+        } else {
+            return Err(GameError::IllegalAction);
+        };
+        if remaining.len() < 2 {
+            return Err(GameError::IllegalAction);
+        }
+        let index = remaining
+            .iter()
+            .position(|source| source.instance_id == *source_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        committed.push(remaining.remove(index));
+        if remaining.len() == 1 {
+            committed.push(remaining.remove(0));
+        }
+        if remaining.len() > 1 {
+            return Ok(());
+        }
+        if active_stage && batch.non_active_remaining.len() > 1 {
+            batch.stage = DeathriteStage::NonActiveOrder;
+            return Ok(());
+        }
+        batch.resolving = batch
+            .non_active_order
+            .iter()
+            .chain(&batch.active_order)
+            .cloned()
+            .collect();
+        batch.stage = DeathriteStage::Resolve;
+        Ok(())
+    }
+
+    fn drive_deathrites(
+        &mut self,
+        mut pending: PendingDeathrites,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        loop {
+            let Some(batch) = pending.batches.first_mut() else {
+                self.finish_deathrites(pending, outcomes);
+                return Ok(());
+            };
+            if batch.stage != DeathriteStage::Resolve {
+                let sources = match batch.stage {
+                    DeathriteStage::ActiveOrder => &batch.active_remaining,
+                    DeathriteStage::NonActiveOrder => &batch.non_active_remaining,
+                    DeathriteStage::Resolve => unreachable!(),
+                };
+                let seat = sources
+                    .first()
+                    .map(|source| source.controller)
+                    .ok_or(GameError::IllegalAction)?;
+                self.position.pending_deathrites = Some(pending);
+                self.position.phase = Phase::DeathriteOrder;
+                self.position.decision_seat = seat;
+                return Ok(());
+            }
+            if batch.resolving.is_empty() {
+                pending.batches.remove(0);
+                continue;
+            }
+            let source = batch.resolving.remove(0);
+            self.apply_deathrite_source(&source, &mut pending, outcomes)?;
+        }
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one Deathrite transaction preserves the printed effect and event order"
+    )]
+    fn apply_deathrite_source(
+        &mut self,
+        source: &PendingDeathriteSource,
+        pending: &mut PendingDeathrites,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let CardFacts::Minion(facts) = self.rules.cards[usize::from(source.unit.card.card_id.0)]
+            .facts
+            .clone()
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let mut triggered_deaths = Vec::new();
+        if let Some(amount) = facts.deathrite_damage_each_unit_here {
+            let mut targets = Vec::new();
+            for seat in [Seat::North, Seat::South] {
+                let avatar = &self.position.players[seat_index(seat)].avatar;
+                if avatar.location == source.unit.location {
+                    targets.push((avatar.card.instance_id.clone(), UnitKind::Avatar, seat));
+                }
+            }
+            targets.extend(
+                self.position
+                    .units
+                    .iter()
+                    .filter(|unit| unit.location == source.unit.location)
+                    .map(|unit| {
+                        (
+                            unit.card.instance_id.clone(),
+                            UnitKind::Minion,
+                            unit.controller,
+                        )
+                    }),
+            );
+            targets.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+            let targets = targets
+                .into_iter()
+                .map(|(instance_id, kind, seat)| {
+                    let status = if kind == UnitKind::Minion {
+                        Some(self.minion_damage_status(&instance_id)?)
+                    } else {
+                        None
+                    };
+                    Ok((instance_id, kind, seat, status))
                 })
-            });
+                .collect::<Result<Vec<_>, GameError>>()?;
+            for (target_instance_id, _, _, _) in &targets {
+                outcomes.push("deathrite-damage-allocated", || {
+                    json!({
+                        "amount": amount,
+                        "sourceInstanceId": source.instance_id,
+                        "targetInstanceId": target_instance_id,
+                    })
+                });
+            }
+            for (target_instance_id, kind, seat, status) in targets {
+                let result = self.apply_deathrite_damage(
+                    kind,
+                    seat,
+                    &target_instance_id,
+                    u16::from(amount),
+                    UnitDamageSource {
+                        current_power: source.current_power,
+                        lethal: source.lethal,
+                    },
+                    status,
+                    outcomes,
+                )?;
+                if result.minion_died {
+                    triggered_deaths.push(target_instance_id);
+                }
+                if result.avatar_defeated && !pending.defeated_avatars.contains(&seat) {
+                    pending.defeated_avatars.push(seat);
+                }
+            }
+        }
+        if let Some(amount) = facts.deathrite_heal {
+            self.heal_avatar(
+                source.controller,
+                u16::from(amount),
+                &source.instance_id,
+                outcomes,
+            )?;
+        }
+        if facts.deathrite_lose_life_per_nearby_site_controlled {
+            let mut nearby = BTreeSet::from([source.unit.location]);
+            nearby.extend(source.unit.location.bordering(false));
+            nearby.extend(source.unit.location.diagonals(false));
+            for seat in [Seat::North, Seat::South] {
+                let attempted = Cell::ALL
+                    .into_iter()
+                    .filter(|cell| {
+                        nearby.contains(cell)
+                            && self.position.sites[cell.index()]
+                                .as_ref()
+                                .is_some_and(|site| site.controller == seat)
+                    })
+                    .count();
+                let attempted = u16::try_from(attempted).map_err(|_| GameError::IllegalAction)?;
+                let avatar = &mut self.position.players[seat_index(seat)].avatar;
+                let old_life = avatar.life;
+                avatar.life = old_life.saturating_sub(attempted);
+                let lost = old_life - avatar.life;
+                let reached_deaths_door = old_life > 0 && avatar.life == 0;
+                if reached_deaths_door {
+                    avatar.death_door_turn = Some(self.position.turn_number);
+                }
+                let life = avatar.life;
+                if lost > 0 {
+                    outcomes.push("avatar-life-lost", || {
+                        json!({
+                            "amount": lost,
+                            "life": life,
+                            "seat": seat,
+                            "sourceInstanceId": source.instance_id,
+                        })
+                    });
+                }
+                if reached_deaths_door {
+                    let turn_number = self.position.turn_number;
+                    outcomes.push("avatar-reached-deaths-door", || {
+                        json!({
+                            "seat": seat,
+                            "sourceInstanceId": source.instance_id,
+                            "turnNumber": turn_number,
+                        })
+                    });
+                }
+            }
+        }
+        if facts.deathrite_draw_site {
+            if self.draw_private_card(source.controller, DeckZone::Atlas) {
+                outcomes.push("site-drawn", || {
+                    json!({
+                        "seat": source.controller,
+                        "sourceInstanceId": source.instance_id,
+                    })
+                });
+            } else if !pending.deck_losers.contains(&source.controller) {
+                pending.deck_losers.push(source.controller);
+            }
+        }
+        if !triggered_deaths.is_empty() {
+            let (sources, corpses) = self.collect_minion_deaths(&triggered_deaths)?;
+            pending.corpses.extend(corpses);
+            if let Some(batch) = self.make_deathrite_batch(sources) {
+                pending.batches.insert(0, batch);
+            }
         }
         Ok(())
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Deathrite damage adds one target snapshot to the shared damage transaction"
+    )]
+    fn apply_deathrite_damage(
+        &mut self,
+        kind: UnitKind,
+        seat: Seat,
+        instance_id: &IdentityHash,
+        amount: u16,
+        source: UnitDamageSource,
+        minion_status: Option<MinionDamageStatus>,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<DamageResult, GameError> {
+        if kind == UnitKind::Minion {
+            let unit = self
+                .position
+                .units
+                .iter_mut()
+                .find(|unit| unit.card.instance_id == *instance_id)
+                .ok_or(GameError::IllegalAction)?;
+            if amount > 0 && unit.warded {
+                unit.warded = false;
+                outcomes.push("damage-dealt", || {
+                    json!({
+                        "amount": 0,
+                        "attemptedAmount": amount,
+                        "direct": true,
+                        "instanceId": instance_id,
+                        "prevented": true,
+                        "seat": seat,
+                    })
+                });
+                outcomes.push(
+                    "ward-broken",
+                    || json!({ "instanceId": instance_id, "seat": seat }),
+                );
+                return Ok(DamageResult {
+                    minion_died: false,
+                    avatar_defeated: false,
+                });
+            }
+        }
+        self.apply_simple_damage_with_status(
+            kind,
+            seat,
+            instance_id,
+            amount,
+            source,
+            minion_status,
+            outcomes,
+        )
+    }
+
+    fn finish_deathrites(&mut self, pending: PendingDeathrites, outcomes: &mut OutcomeLog<'_>) {
+        for corpse in pending.corpses {
+            let card_id = self.rules.cards[usize::from(corpse.card.card_id.0)]
+                .id
+                .clone();
+            let instance_id = corpse.card.instance_id.clone();
+            let owner = corpse.card.owner;
+            let token = corpse.card.source == CardSource::Token;
+            if !token {
+                self.position.players[seat_index(owner)]
+                    .cemetery
+                    .push(corpse.card);
+            }
+            outcomes.push(
+                "minion-died",
+                || json!({ "cardId": card_id, "instanceId": instance_id, "owner": owner }),
+            );
+            if token {
+                outcomes.push(
+                    "minion-banished",
+                    || json!({ "cardId": card_id, "instanceId": instance_id, "owner": owner }),
+                );
+            }
+        }
+        self.position.pending_deathrites = None;
+        let defeated = pending.defeated_avatars;
+        let deck_losers = pending.deck_losers;
+        let losers: Vec<_> = [Seat::North, Seat::South]
+            .into_iter()
+            .filter(|seat| defeated.contains(seat) || deck_losers.contains(seat))
+            .collect();
+        if losers.len() == 2 {
+            let reason = if defeated.len() == 2 && deck_losers.is_empty() {
+                DrawReason::SimultaneousAvatarDefeat
+            } else {
+                DrawReason::SimultaneousDefeat
+            };
+            self.position.phase = Phase::Terminal;
+            self.position.terminal = Some(TerminalResult::Draw { reason });
+            outcomes.push("game-ended", || {
+                json!({
+                    "reason": match reason {
+                        DrawReason::SimultaneousAvatarDefeat => "simultaneous_avatar_defeat",
+                        DrawReason::SimultaneousDefeat => "simultaneous_defeat",
+                    },
+                    "result": "draw",
+                })
+            });
+        } else if let Some(&loser) = losers.first() {
+            let winner = other_seat(loser);
+            let reason = if defeated.contains(&loser) {
+                WinReason::AvatarDefeated
+            } else {
+                WinReason::DeckEmpty
+            };
+            self.position.phase = Phase::Terminal;
+            self.position.terminal = Some(TerminalResult::Win {
+                loser,
+                reason,
+                winner,
+            });
+            outcomes.push("game-ended", || {
+                json!({
+                    "loser": loser,
+                    "reason": match reason {
+                        WinReason::AvatarDefeated => "avatar_defeated",
+                        WinReason::DeckEmpty => "deck_empty",
+                    },
+                    "winner": winner,
+                })
+            });
+        } else {
+            self.position.phase = pending.return_phase;
+            self.position.decision_seat = pending.return_decision_seat;
+        }
     }
 
     fn apply_draw_action(
@@ -3363,23 +4063,6 @@ impl Game {
             "game-ended",
             || json!({ "loser": loser, "reason": "deck_empty", "winner": winner }),
         );
-    }
-
-    fn finish_avatar_defeat(&mut self, loser: Seat, outcomes: &mut OutcomeLog<'_>) {
-        let winner = other_seat(loser);
-        self.position.phase = Phase::Terminal;
-        self.position.terminal = Some(TerminalResult::Win {
-            loser,
-            reason: WinReason::AvatarDefeated,
-            winner,
-        });
-        outcomes.push("game-ended", || {
-            json!({
-                "loser": loser,
-                "reason": "avatar_defeated",
-                "winner": winner,
-            })
-        });
     }
 
     #[expect(
@@ -4465,10 +5148,7 @@ impl Game {
         let genesis = facts.genesis;
         let starts_stealthed = facts.stealth;
         let starts_warded = facts.damage_prevention == Some(DamagePrevention::Ward);
-        if matches!(
-            genesis,
-            Some(MinionGenesis::DamageEachOtherUnitHereOne | MinionGenesis::StrikeEachEnemyHere)
-        ) {
+        if genesis == Some(MinionGenesis::StrikeEachEnemyHere) {
             return Err(GameError::UnsupportedManifestFact(
                 "minion Genesis effect".to_owned(),
             ));
@@ -4617,13 +5297,108 @@ impl Game {
                     _ => return Err(GameError::IllegalAction),
                 }
             }
-            Some(
-                MinionGenesis::DamageEachOtherUnitHereOne | MinionGenesis::StrikeEachEnemyHere,
-            ) => {
+            Some(MinionGenesis::DamageEachOtherUnitHereOne) => {
+                self.apply_genesis_area_damage(source_instance_id, outcomes)?;
+            }
+            Some(MinionGenesis::StrikeEachEnemyHere) => {
                 return Err(GameError::UnsupportedManifestFact(
                     "minion Genesis effect".to_owned(),
                 ));
             }
+        }
+        Ok(())
+    }
+
+    fn apply_genesis_area_damage(
+        &mut self,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let source = self
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == *source_instance_id)
+            .cloned()
+            .ok_or(GameError::IllegalAction)?;
+        let (current_power, lethal) = self.combatant_attack_and_lethal(
+            UnitKind::Minion,
+            source.controller,
+            source_instance_id,
+        )?;
+        let mut targets = Vec::new();
+        for seat in [Seat::North, Seat::South] {
+            let avatar = &self.position.players[seat_index(seat)].avatar;
+            if avatar.location == source.location {
+                targets.push((avatar.card.instance_id.clone(), UnitKind::Avatar, seat));
+            }
+        }
+        targets.extend(
+            self.position
+                .units
+                .iter()
+                .filter(|unit| {
+                    unit.location == source.location && unit.card.instance_id != *source_instance_id
+                })
+                .map(|unit| {
+                    (
+                        unit.card.instance_id.clone(),
+                        UnitKind::Minion,
+                        unit.controller,
+                    )
+                }),
+        );
+        targets.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        let targets = targets
+            .into_iter()
+            .map(|(instance_id, kind, seat)| {
+                let status = if kind == UnitKind::Minion {
+                    Some(self.minion_damage_status(&instance_id)?)
+                } else {
+                    None
+                };
+                Ok((instance_id, kind, seat, status))
+            })
+            .collect::<Result<Vec<_>, GameError>>()?;
+        for (target_instance_id, _, _, _) in &targets {
+            outcomes.push("genesis-damage-allocated", || {
+                json!({
+                    "amount": 1,
+                    "sourceInstanceId": source_instance_id,
+                    "targetInstanceId": target_instance_id,
+                })
+            });
+        }
+        let mut dead_minions = Vec::new();
+        let mut defeated_avatars = Vec::new();
+        for (target_instance_id, kind, seat, status) in targets {
+            let result = self.apply_simple_damage_with_status(
+                kind,
+                seat,
+                &target_instance_id,
+                1,
+                UnitDamageSource {
+                    current_power,
+                    lethal,
+                },
+                status,
+                outcomes,
+            )?;
+            if result.minion_died {
+                dead_minions.push(target_instance_id);
+            }
+            if result.avatar_defeated && !defeated_avatars.contains(&seat) {
+                defeated_avatars.push(seat);
+            }
+        }
+        if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
+            self.begin_minion_deaths(
+                &dead_minions,
+                &defeated_avatars,
+                Phase::Main,
+                self.position.active_seat,
+                outcomes,
+            )?;
         }
         Ok(())
     }
@@ -4658,11 +5433,23 @@ impl Game {
             },
             outcomes,
         )?;
-        if damage.minion_died {
-            self.remove_dead_minion(&target_instance_id, outcomes)?;
-        }
-        if damage.avatar_defeated {
-            self.finish_avatar_defeat(target.seat(), outcomes);
+        if damage.minion_died || damage.avatar_defeated {
+            let defeated_seat = target.seat();
+            self.begin_minion_deaths(
+                if damage.minion_died {
+                    std::slice::from_ref(&target_instance_id)
+                } else {
+                    &[]
+                },
+                if damage.avatar_defeated {
+                    std::slice::from_ref(&defeated_seat)
+                } else {
+                    &[]
+                },
+                Phase::Main,
+                self.position.active_seat,
+                outcomes,
+            )?;
         }
         Ok(())
     }
@@ -4892,8 +5679,59 @@ impl Game {
         });
         if let Value::Object(object) = &mut value {
             self.insert_pending_genesis_state(object);
+            if let Some(pending) = &self.position.pending_deathrites {
+                object.insert(
+                    "pendingDeathrites".to_owned(),
+                    self.pending_deathrites_value(pending),
+                );
+            }
         }
         value
+    }
+
+    fn pending_deathrites_value(&self, pending: &PendingDeathrites) -> Value {
+        let source_value = |source: &PendingDeathriteSource| {
+            json!({
+                "controller": source.controller,
+                "currentPower": source.current_power,
+                "instanceId": source.instance_id,
+                "lethal": source.lethal,
+                "unit": self.unit_value(&source.unit),
+            })
+        };
+        let sources_json = |sources: &[PendingDeathriteSource]| {
+            Value::Array(sources.iter().map(&source_value).collect())
+        };
+        let batches = pending
+            .batches
+            .iter()
+            .map(|batch| {
+                json!({
+                    "activeOrder": sources_json(&batch.active_order),
+                    "activeRemaining": sources_json(&batch.active_remaining),
+                    "nonActiveOrder": sources_json(&batch.non_active_order),
+                    "nonActiveRemaining": sources_json(&batch.non_active_remaining),
+                    "resolving": sources_json(&batch.resolving),
+                    "stage": match batch.stage {
+                        DeathriteStage::ActiveOrder => "active-order",
+                        DeathriteStage::NonActiveOrder => "non-active-order",
+                        DeathriteStage::Resolve => "resolve",
+                    },
+                })
+            })
+            .collect::<Vec<_>>();
+        json!({
+            "batches": batches,
+            "corpses": pending
+                .corpses
+                .iter()
+                .map(|corpse| self.unit_value(corpse))
+                .collect::<Vec<_>>(),
+            "deckLosers": pending.deck_losers,
+            "defeatedAvatars": pending.defeated_avatars,
+            "returnDecisionSeat": pending.return_decision_seat,
+            "returnPhase": pending.return_phase.as_str(),
+        })
     }
 
     fn insert_pending_genesis_state(&self, object: &mut Map<String, Value>) {
@@ -5074,8 +5912,11 @@ impl Game {
         self.position.terminal.map_or_else(
             || json!({ "status": "active" }),
             |terminal| match terminal {
-                TerminalResult::Draw => json!({
-                    "reason": "simultaneous_avatar_defeat",
+                TerminalResult::Draw { reason } => json!({
+                    "reason": match reason {
+                        DrawReason::SimultaneousAvatarDefeat => "simultaneous_avatar_defeat",
+                        DrawReason::SimultaneousDefeat => "simultaneous_defeat",
+                    },
                     "result": "draw",
                     "status": "finished",
                 }),

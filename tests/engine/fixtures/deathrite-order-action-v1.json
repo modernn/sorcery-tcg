@@ -1,0 +1,27 @@
+{
+  "actions": [
+    {
+      "actionId": "sha256:8699570ca280bfced3ce07d08eff4e8a9a2a8a2ea2e1307f9272826f8e94ab1a",
+      "descriptor": {
+        "kind": "order-deathrites",
+        "sourceInstanceId": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    },
+    {
+      "actionId": "sha256:38fbee84e1a53362ca6464b2e05e703835e2602d8038857b15ab4b15e5b6e012",
+      "descriptor": {
+        "kind": "order-deathrites",
+        "sourceInstanceId": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+      }
+    }
+  ],
+  "canonicalActionIds": [
+    "sha256:8699570ca280bfced3ce07d08eff4e8a9a2a8a2ea2e1307f9272826f8e94ab1a",
+    "sha256:38fbee84e1a53362ca6464b2e05e703835e2602d8038857b15ab4b15e5b6e012"
+  ],
+  "contract": "sorcery-core-v1",
+  "schemaVersion": 1,
+  "seat": "south",
+  "source": "typescript-legality-engine",
+  "stateVersion": 23
+}
