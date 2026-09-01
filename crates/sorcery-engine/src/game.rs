@@ -568,6 +568,12 @@ struct MovementProfile {
     seat: Seat,
 }
 
+struct ProjectileOption {
+    direction: ProjectileDirection,
+    hit: Option<UnitTarget>,
+    path: Vec<Location>,
+}
+
 enum OutcomeLog<'a> {
     Ignore,
     Record(&'a mut Vec<(String, Value)>),
@@ -682,13 +688,23 @@ impl Game {
                 "occupiesSquareArea".to_owned(),
             ));
         }
-        if let Some(field) = parsed_facts.values().find_map(|facts| match facts {
-            CardFacts::Minion(facts) => match facts.required_cast_region {
-                Some(RequiredCastRegion::Underground) => Some("mustBeCastBurrowed"),
-                Some(RequiredCastRegion::Underwater) => Some("mustBeCastSubmerged"),
-                None => None,
-            },
-            _ => None,
+        if let Some(field) = parsed_facts.values().find_map(|facts| {
+            let CardFacts::Minion(facts) = facts else {
+                return None;
+            };
+            if facts.lance_count.is_some() {
+                Some("lanceCount")
+            } else if facts.may_step_after_ranged_strike {
+                Some("mayStepAfterRangedStrike")
+            } else if facts.may_ranged_strike_once_during_basic_movement {
+                Some("mayRangedStrikeOnceDuringBasicMovement")
+            } else {
+                match facts.required_cast_region {
+                    Some(RequiredCastRegion::Underground) => Some("mustBeCastBurrowed"),
+                    Some(RequiredCastRegion::Underwater) => Some("mustBeCastSubmerged"),
+                    None => None,
+                }
+            }
         }) {
             return Err(GameError::UnsupportedManifestFact(field.to_owned()));
         }
@@ -1621,6 +1637,12 @@ impl Game {
             self.push_action(actions, descriptor, label);
         }
         for unit in &self.position.units {
+            for descriptor in self.ranged_projectile_descriptors(seat, &unit.card.instance_id)? {
+                let label = descriptor
+                    .state_independent_label()
+                    .ok_or_else(|| invalid("shoot-projectile action requires a label"))?;
+                self.push_action(actions, descriptor, label);
+            }
             for descriptor in self.damage_projectile_descriptors(seat, &unit.card.instance_id)? {
                 let label = descriptor
                     .state_independent_label()
@@ -1713,10 +1735,6 @@ impl Game {
         facts.tap_for_mana
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one ray generator keeps projectile visibility and stopping rules together"
-    )]
     fn damage_projectile_descriptors(
         &self,
         seat: Seat,
@@ -1747,11 +1765,83 @@ impl Game {
             return Ok(Vec::new());
         }
 
+        Ok(self
+            .projectile_options(shooter, usize::MAX)
+            .into_iter()
+            .map(|option| ActionDescriptor::ShootDamageProjectile {
+                direction: option.direction,
+                hit: option.hit,
+                path: option.path,
+                shooter_instance_id: shooter_instance_id.clone(),
+            })
+            .collect())
+    }
+
+    fn ranged_projectile_descriptors(
+        &self,
+        seat: Seat,
+        shooter_instance_id: &IdentityHash,
+    ) -> Result<Vec<ActionDescriptor>, GameError> {
+        if self.position.phase != Phase::Main
+            || self.position.active_seat != seat
+            || self.position.decision_seat != seat
+        {
+            return Ok(Vec::new());
+        }
+        let Some(shooter) =
+            self.position.units.iter().find(|unit| {
+                unit.controller == seat && unit.card.instance_id == *shooter_instance_id
+            })
+        else {
+            return Ok(Vec::new());
+        };
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(shooter.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        if !facts.ranged
+            || self.minion_is_disabled(shooter)
+            || shooter.tapped
+            || shooter.summoning_sickness
+        {
+            return Ok(Vec::new());
+        }
+        let maximum_steps = if self.position.sites[shooter.location.index()]
+            .as_ref()
+            .is_some_and(|site| {
+                matches!(
+                    &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                    CardFacts::Site(site_facts) if site_facts.ranged_units_here_range_bonus
+                )
+            }) {
+            2
+        } else {
+            1
+        };
+        Ok(self
+            .projectile_options(shooter, maximum_steps)
+            .into_iter()
+            .map(|option| ActionDescriptor::ShootProjectile {
+                direction: option.direction,
+                hit: option.hit,
+                path: option.path,
+                shooter_instance_id: shooter_instance_id.clone(),
+            })
+            .collect())
+    }
+
+    fn projectile_options(
+        &self,
+        shooter: &UnitPosition,
+        maximum_steps: usize,
+    ) -> Vec<ProjectileOption> {
+        let seat = shooter.controller;
+        let shooter_instance_id = &shooter.card.instance_id;
         let origin = Location {
             cell: shooter.location,
             region: Region::Surface,
         };
-        let mut descriptors = Vec::new();
+        let mut options = Vec::new();
         for direction in [
             ProjectileDirection::East,
             ProjectileDirection::North,
@@ -1760,7 +1850,7 @@ impl Game {
         ] {
             let mut path = vec![origin];
             loop {
-                let location = *path.last().ok_or(GameError::IllegalAction)?;
+                let location = path.last().copied().unwrap_or(origin);
                 let mut hits = Vec::new();
                 for target_seat in [Seat::North, Seat::South] {
                     let avatar = &self.position.players[seat_index(target_seat)].avatar;
@@ -1793,31 +1883,34 @@ impl Game {
                     hits.sort_unstable_by(|left, right| {
                         left.instance_id().cmp(right.instance_id())
                     });
-                    descriptors.extend(hits.into_iter().map(|hit| {
-                        ActionDescriptor::ShootDamageProjectile {
-                            direction,
-                            hit: Some(hit),
-                            path: path.clone(),
-                            shooter_instance_id: shooter_instance_id.clone(),
-                        }
+                    options.extend(hits.into_iter().map(|hit| ProjectileOption {
+                        direction,
+                        hit: Some(hit),
+                        path: path.clone(),
                     }));
                     break;
                 }
-                let Some(next) = Self::projectile_step(location.cell, direction) else {
-                    descriptors.push(ActionDescriptor::ShootDamageProjectile {
+                if path.len() > maximum_steps {
+                    options.push(ProjectileOption {
                         direction,
                         hit: None,
                         path,
-                        shooter_instance_id: shooter_instance_id.clone(),
+                    });
+                    break;
+                }
+                let Some(next) = Self::projectile_step(location.cell, direction) else {
+                    options.push(ProjectileOption {
+                        direction,
+                        hit: None,
+                        path,
                     });
                     break;
                 };
                 if !self.surface_location_exists(next) {
-                    descriptors.push(ActionDescriptor::ShootDamageProjectile {
+                    options.push(ProjectileOption {
                         direction,
                         hit: None,
                         path,
-                        shooter_instance_id: shooter_instance_id.clone(),
                     });
                     break;
                 }
@@ -1827,7 +1920,7 @@ impl Game {
                 });
             }
         }
-        Ok(descriptors)
+        options
     }
 
     fn projectile_step(cell: Cell, direction: ProjectileDirection) -> Option<Cell> {
@@ -2482,6 +2575,9 @@ impl Game {
             ActionDescriptor::ResolveGenesisToken { choice } => {
                 self.apply_resolve_genesis_token(action.seat, *choice, outcomes)
             }
+            ActionDescriptor::ShootProjectile { .. } => {
+                self.apply_ranged_projectile_action(action, outcomes)
+            }
             ActionDescriptor::ShootDamageProjectile { .. } => {
                 self.apply_damage_projectile_action(action, outcomes)
             }
@@ -2515,6 +2611,97 @@ impl Game {
                 self.apply_draw_action(action.seat, DeckZone::Spellbook, true, outcomes)
             }
         }
+    }
+
+    fn apply_ranged_projectile_action(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::ShootProjectile {
+            direction,
+            hit,
+            path,
+            shooter_instance_id,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        if !self
+            .ranged_projectile_descriptors(action.seat, shooter_instance_id)?
+            .iter()
+            .any(|candidate| candidate == &action.descriptor)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let shooter_index = self
+            .position
+            .units
+            .iter()
+            .position(|unit| {
+                unit.controller == action.seat && unit.card.instance_id == *shooter_instance_id
+            })
+            .ok_or(GameError::IllegalAction)?;
+        let (current_power, lethal) =
+            self.combatant_attack_and_lethal(UnitKind::Minion, action.seat, shooter_instance_id)?;
+        self.position.units[shooter_index].tapped = true;
+        outcomes.push("projectile-shot", || {
+            json!({
+                "direction": direction,
+                "hit": hit,
+                "path": path,
+                "seat": action.seat,
+                "shooterInstanceId": shooter_instance_id,
+            })
+        });
+        self.record_unit_interaction(UnitKind::Minion, action.seat, shooter_instance_id, outcomes)?;
+        let Some(target) = hit else {
+            self.position.state_version += 1;
+            return Ok(());
+        };
+        outcomes.push("strike-damage-allocated", || {
+            json!({
+                "amount": current_power,
+                "strikerInstanceId": shooter_instance_id,
+                "targetInstanceId": target.instance_id(),
+            })
+        });
+        let target_kind = match target {
+            UnitTarget::Avatar { .. } => UnitKind::Avatar,
+            UnitTarget::Minion { .. } => UnitKind::Minion,
+        };
+        let damage = self.apply_simple_damage(
+            target_kind,
+            target.seat(),
+            target.instance_id(),
+            current_power,
+            UnitDamageSource {
+                current_power,
+                lethal,
+            },
+            outcomes,
+        )?;
+        if damage.minion_died || damage.avatar_defeated {
+            let target_instance_id = target.instance_id().clone();
+            let target_seat = target.seat();
+            self.begin_minion_deaths(
+                if damage.minion_died {
+                    std::slice::from_ref(&target_instance_id)
+                } else {
+                    &[]
+                },
+                if damage.avatar_defeated {
+                    std::slice::from_ref(&target_seat)
+                } else {
+                    &[]
+                },
+                Phase::Main,
+                self.position.active_seat,
+                outcomes,
+            )?;
+        }
+        self.position.state_version += 1;
+        Ok(())
     }
 
     fn apply_damage_projectile_action(

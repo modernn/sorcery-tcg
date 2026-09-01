@@ -1616,7 +1616,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Ranged damage retains its attacking unit source classification.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "ranged"
       ],
@@ -1627,8 +1627,8 @@
         "damage"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Ranged damage retains its attacking unit source classification"
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "ranged_damage_should_keep_current_power_unit_source_without_return_strike"
       }
     },
     {
@@ -1739,7 +1739,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Ranged strikes without return damage and Ward prevents the first positive damage event.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "ward",
         "ranged"
@@ -1752,8 +1752,8 @@
         "strike"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Ranged strikes without return damage and Ward prevents the first positive damage event"
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "ranged_strikes_should_apply_ward_lethal_deathrites_and_terminal_results"
       }
     },
     {
