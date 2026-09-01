@@ -20,6 +20,8 @@ test('one and many workers produce byte-identical ordered game reports', async (
     manifests.map(({ manifestId }) => manifestId));
   assert.equal(oneWorker.every(({ report }) =>
     report.replayVerified && report.terminal.status === 'finished'), true);
+  assert.equal(oneWorker.every(({ report }) =>
+    report.classification === 'unranked_partial_rules_unverified_authority'), true);
 
   const source = manifests[1]!;
   const cardId = Object.keys(source.cards)[0]!;
@@ -39,9 +41,13 @@ test('one and many workers produce byte-identical ordered game reports', async (
     ...forgedBody,
     manifestId: identityHash(forgedBody as unknown as JsonValue),
   } as unknown as GameManifest;
-  await assert.rejects(
-    runGameBatch([manifests[0]!, invalid], 2),
-    /game batch manifest 1 is invalid/,
-  );
+  await assert.rejects(runGameBatch([manifests[0]!, invalid], 2), (error: unknown) => {
+    assert.equal(error instanceof Error, true);
+    if (!(error instanceof Error)) return false;
+    assert.equal(error.message, 'game batch failed in Rust');
+    assert.equal(error.message.includes(cardId), false);
+    assert.equal(error.message.includes('futureUnsupportedMechanic'), false);
+    return true;
+  });
   await assert.rejects(runGameBatch(manifests, 9), /requestedWorkers/);
 });

@@ -1,102 +1,138 @@
+import { spawn } from 'node:child_process';
 import { availableParallelism } from 'node:os';
-import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 
 import { canonicalJson, type JsonValue } from '../authority/canonical-json.ts';
+import { identityHash } from '../authority/hash.ts';
 import { deepFreeze } from '../engine/contract.ts';
-import { assertCanonicalGameManifest, type GameManifest } from '../engine/game.ts';
-import {
-  createSyntheticDemoManifest,
-  runDeterministicGame,
-  type DeterministicGameReport,
-} from './run-game-demo.ts';
+import type { GameDeckSpec, GameManifest } from '../engine/game.ts';
+import type { DeterministicGameReport } from './run-game-demo.ts';
 
-const PROTOCOL_VERSION = 1;
 const MAX_JOBS = 256;
 const MAX_WORKERS = 8;
 const MAX_BATCH_BYTES = 64 * 1024 * 1024;
+const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
+const REPOSITORY_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
-type BatchItem = Readonly<{ jobIndex: number; manifest: GameManifest }>;
-type WorkerInput = Readonly<{ chunk: readonly BatchItem[]; protocolVersion: 1 }>;
-type WorkerResponse =
-  | Readonly<{ ok: true; protocolVersion: 1; results: readonly GameBatchResult[] }>
-  | Readonly<{ failedJobIndex: number; ok: false; protocolVersion: 1 }>;
+type RustGameReport = Readonly<Omit<DeterministicGameReport, 'classification'> & {
+  classification: 'unranked_partial_rules_unverified_authority';
+}>;
 
 export type GameBatchResult = Readonly<{
   jobIndex: number;
   manifestId: GameManifest['manifestId'];
-  report: DeterministicGameReport;
+  report: RustGameReport;
 }>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function runWorker(): void {
-  let failedJobIndex = -1;
-  try {
-    if (!parentPort || !isRecord(workerData)
-      || workerData.protocolVersion !== PROTOCOL_VERSION
-      || !Array.isArray(workerData.chunk)) throw new Error('invalid worker input');
-    const input = workerData as WorkerInput;
-    const results = input.chunk.map(({ jobIndex, manifest }): GameBatchResult => {
-      failedJobIndex = jobIndex;
-      return {
-        jobIndex,
-        manifestId: manifest.manifestId,
-        report: runDeterministicGame(manifest),
-      };
-    });
-    parentPort.postMessage({ ok: true, protocolVersion: PROTOCOL_VERSION, results } satisfies WorkerResponse);
-  } catch {
-    parentPort?.postMessage({
-      failedJobIndex,
-      ok: false,
-      protocolVersion: PROTOCOL_VERSION,
-    } satisfies WorkerResponse);
-  }
+function countedRows(cardIds: readonly string[]): readonly Readonly<{
+  cardId: string;
+  copies: number;
+}>[] {
+  const counts = new Map<string, number>();
+  cardIds.forEach((cardId) => counts.set(cardId, (counts.get(cardId) ?? 0) + 1));
+  return [...counts]
+    .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+    .map(([cardId, copies]) => ({ cardId, copies }));
 }
 
-if (!isMainThread) runWorker();
+function deckId(deck: GameDeckSpec): ReturnType<typeof identityHash> {
+  return identityHash({
+    deck: {
+      atlas: countedRows(deck.atlas),
+      avatar: deck.avatar,
+      spellbook: countedRows(deck.spellbook),
+    },
+    formatId: 'format:modeled-constructed-v1',
+  } as JsonValue);
+}
 
-function startWorker(chunk: readonly BatchItem[]): Readonly<{
-  promise: Promise<readonly GameBatchResult[]>;
-  worker: Worker;
-}> {
-  const worker = new Worker(new URL(import.meta.url), {
-    execArgv: [],
-    workerData: { chunk, protocolVersion: PROTOCOL_VERSION } satisfies WorkerInput,
-  });
-  const promise = new Promise<readonly GameBatchResult[]>((resolvePromise, rejectPromise) => {
+function policy(manifest: GameManifest, boundDeckId: ReturnType<typeof identityHash>): JsonValue {
+  const body = {
+    authorityHash: manifest.authority.contentHash,
+    deckId: boundDeckId,
+    engineVersion: manifest.engineVersion,
+    generation: 0,
+    observationVersion: 'seat-observation-v1',
+    schemaVersion: 1,
+    selector: {
+      atlasReserve: 3,
+      featurePriority: [
+        'keep-mulligan', 'play-site', 'summon-minion', 'preferred-draw',
+        'powered-movement', 'beneficial-tactic', 'move-toward-enemy',
+        'end-turn', 'canonical-fallback',
+      ],
+    },
+    tieBreak: 'canonical-action-order-v1',
+  } as const;
+  return { ...body, policyId: identityHash(body as unknown as JsonValue) } as JsonValue;
+}
+
+function rustRequest(manifests: readonly GameManifest[], workers: number): string {
+  return canonicalJson({
+    jobs: manifests.map((manifest) => {
+      const northDeckId = deckId(manifest.decks.north);
+      const southDeckId = deckId(manifest.decks.south);
+      return {
+        manifestJson: canonicalJson(manifest as unknown as JsonValue),
+        northDeckId,
+        northPolicy: policy(manifest, northDeckId),
+        southDeckId,
+        southPolicy: policy(manifest, southDeckId),
+      };
+    }),
+    schemaVersion: 1,
+    workers,
+  } as JsonValue);
+}
+
+async function runRustBatch(request: string): Promise<unknown> {
+  const child = spawn('cargo', [
+    'run', '--release', '--locked', '--quiet', '-p', 'sorcery-engine',
+    '--bin', 'sorcery-engine', '--', 'batch-json',
+  ], { cwd: REPOSITORY_ROOT, stdio: ['pipe', 'pipe', 'pipe'] });
+  const stdout: Buffer[] = [];
+  let stdoutBytes = 0;
+  let stderrBytes = 0;
+  return new Promise((resolvePromise, rejectPromise) => {
     let settled = false;
     const fail = (message: string): void => {
       if (settled) return;
       settled = true;
+      child.kill();
       rejectPromise(new Error(message));
     };
-    worker.once('message', (message: unknown) => {
+    child.once('error', () => fail('game batch failed to start Rust'));
+    child.stdin.once('error', () => fail('game batch failed while sending Rust input'));
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > MAX_OUTPUT_BYTES) return fail('game batch Rust output exceeded its limit');
+      stdout.push(chunk);
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderrBytes += chunk.length;
+      if (stderrBytes > MAX_OUTPUT_BYTES) return fail('game batch Rust error output exceeded its limit');
+    });
+    child.once('close', (code) => {
       if (settled) return;
-      if (!isRecord(message) || message.protocolVersion !== PROTOCOL_VERSION) {
-        return fail('game batch worker returned an invalid response');
+      if (code !== 0) {
+        return fail('game batch failed in Rust');
       }
-      if (message.ok !== true) {
-        return fail(`game batch job ${String(message.failedJobIndex)} failed`);
+      try {
+        const text = Buffer.concat(stdout).toString('utf8').trim();
+        const parsed: unknown = JSON.parse(text);
+        if (canonicalJson(parsed as JsonValue) !== text) throw new Error('noncanonical output');
+        settled = true;
+        resolvePromise(parsed);
+      } catch {
+        fail('game batch Rust output was invalid');
       }
-      if (!Array.isArray(message.results)) {
-        return fail('game batch worker returned invalid results');
-      }
-      settled = true;
-      resolvePromise(message.results as readonly GameBatchResult[]);
     });
-    worker.once('error', () => fail('game batch worker failed'));
-    worker.once('exit', (code) => {
-      if (!settled) fail(code === 0
-        ? 'game batch worker exited before returning results'
-        : 'game batch worker exited unsuccessfully');
-    });
+    child.stdin.end(`${request}\n`);
   });
-  return { promise, worker };
 }
 
 export async function runGameBatch(
@@ -114,42 +150,15 @@ export async function runGameBatch(
   if (Buffer.byteLength(canonicalJson(manifests as unknown as JsonValue)) > MAX_BATCH_BYTES) {
     throw new RangeError(`game batch exceeds ${MAX_BATCH_BYTES} bytes`);
   }
-  manifests.forEach((manifest, jobIndex) => {
-    try {
-      assertCanonicalGameManifest(manifest);
-    } catch {
-      throw new RangeError(`game batch manifest ${jobIndex} is invalid`);
-    }
-  });
-  const workerCount = Math.min(requestedWorkers, manifests.length);
-  const chunks = Array.from({ length: workerCount }, () => [] as BatchItem[]);
-  manifests.forEach((manifest, jobIndex) => {
-    chunks[jobIndex % workerCount]!.push({ jobIndex, manifest });
-  });
-  const active = chunks.map(startWorker);
-  try {
-    const results = (await Promise.all(active.map(({ promise }) => promise)))
-      .flat()
-      .sort((left, right) => left.jobIndex - right.jobIndex);
-    if (results.length !== manifests.length || results.some((result, jobIndex) =>
-      result.jobIndex !== jobIndex
-        || result.manifestId !== manifests[jobIndex]?.manifestId
-        || result.report.replayVerified !== true)) {
-      throw new Error('game batch results do not match the declared jobs');
-    }
-    return deepFreeze(results);
-  } catch (error) {
-    // ponytail: abort the whole batch; add per-job failure accounting when scheduled gauntlets need partial results.
-    await Promise.allSettled(active.map(({ worker }) => worker.terminate()));
-    throw error;
+  const results = await runRustBatch(rustRequest(manifests, requestedWorkers));
+  if (!Array.isArray(results) || results.length !== manifests.length
+    || results.some((result, jobIndex) => !isRecord(result)
+      || result.jobIndex !== jobIndex
+      || result.manifestId !== manifests[jobIndex]?.manifestId
+      || !isRecord(result.report)
+      || result.report.classification !== 'unranked_partial_rules_unverified_authority'
+      || result.report.replayVerified !== true)) {
+    throw new Error('game batch results do not match the declared jobs');
   }
-}
-
-if (isMainThread && process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [workerText = String(Math.min(availableParallelism(), MAX_WORKERS)), ...seedTexts] =
-    process.argv.slice(2);
-  const workers = Number(workerText);
-  const seeds = (seedTexts.length > 0 ? seedTexts : ['1']).map(Number);
-  const manifests = seeds.map((seed) => createSyntheticDemoManifest(seed));
-  process.stdout.write(`${canonicalJson(await runGameBatch(manifests, workers) as unknown as JsonValue)}\n`);
+  return deepFreeze(results as unknown as readonly GameBatchResult[]);
 }

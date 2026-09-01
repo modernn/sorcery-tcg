@@ -53,7 +53,7 @@ test('two decks swap seats and aggregate identically across workers', async () =
   });
   assert.equal(oneWorker.averageTurns,
     oneWorker.games.reduce((sum, game) => sum + game.report.turnCount, 0) / 2);
-  assert.equal(oneWorker.classification, 'unranked_partial_rules');
+  assert.equal(oneWorker.classification, 'unranked_partial_rules_unverified_authority');
   await assert.rejects(runTwoDeckGauntlet({
     ...input,
     decks: [{ ...input.decks[0], id: 'same' }, { ...input.decks[1], id: 'same' }],

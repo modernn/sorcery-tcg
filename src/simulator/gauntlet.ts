@@ -35,7 +35,7 @@ export type TwoDeckGauntletReport = Readonly<{
     asSouth: OutcomeCounts;
   }>>>;
   bySeat: Readonly<Record<EngineSeat, OutcomeCounts>>;
-  classification: 'unranked_partial_rules';
+  classification: 'unranked_partial_rules_unverified_authority';
   gameCount: number;
   games: readonly GauntletGameResult[];
   seeds: readonly number[];
@@ -100,7 +100,7 @@ export async function runTwoDeckGauntlet(
     averageTurns: games.reduce((total, game) => total + game.report.turnCount, 0) / games.length,
     byDeck: Object.fromEntries(byDeck),
     bySeat,
-    classification: 'unranked_partial_rules' as const,
+    classification: 'unranked_partial_rules_unverified_authority' as const,
     gameCount: games.length,
     games,
     seeds: [...input.seeds],

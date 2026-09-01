@@ -20,7 +20,7 @@ use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
 const SYNTHETIC_DECK_ID: &str =
     "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-const MAX_BATCH_JSON_BYTES: usize = MAX_BATCH_BYTES + 1024 * 1024;
+const MAX_BATCH_JSON_BYTES: usize = MAX_BATCH_BYTES * 2 + 1024 * 1024;
 
 type CliResult<T> = Result<T, Box<dyn Error>>;
 
@@ -160,7 +160,7 @@ fn read_batch_json_stdin() -> CliResult<Vec<u8>> {
 
 fn validate_batch_json_size(bytes: usize) -> CliResult<()> {
     if bytes > MAX_BATCH_JSON_BYTES {
-        return Err(io::Error::other("batch-json input exceeds 65 MiB").into());
+        return Err(io::Error::other("batch-json input exceeds 129 MiB").into());
     }
     Ok(())
 }
