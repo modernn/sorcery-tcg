@@ -11,6 +11,7 @@
   "scripts": {
     "game:demo": "cargo run --release --locked --quiet -p sorcery-engine --bin sorcery-engine -- demo",
     "game:batch": "cargo run --release --locked --quiet -p sorcery-engine --bin sorcery-engine -- batch",
+    "game:selfplay-acceptance": "cargo test --release --locked -p sorcery-engine --test selfplay production_sized_campaign_should_promote_and_seal_reproducibly -- --ignored --exact --nocapture",
     "game:check-private": "node src/commands/run-private-game-check.ts",
     "game:verify-private": "node --test tests/private-authority/private-game-scenario.test.ts",
     "game:novelty-private": "node src/commands/run-private-novelty-gauntlet.ts",

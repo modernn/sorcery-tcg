@@ -16,6 +16,10 @@ use crate::simulator::{SimulatorError, replay_selected, run_game};
 pub const MAX_SELF_PLAY_PAIRS: usize = 128;
 /// Smallest heldout suite allowed to promote a policy.
 pub const MIN_PROMOTION_PAIRS: usize = 20;
+/// Largest precommitted number of promotion attempts in one campaign.
+pub const MAX_CAMPAIGN_PROMOTION_ATTEMPTS: u8 = 10;
+
+const CAMPAIGN_SIGNIFICANCE_DENOMINATOR: u128 = 100 * (MAX_CAMPAIGN_PROMOTION_ATTEMPTS as u128 + 1);
 
 /// One complete seat-swapped policy evaluation pair.
 #[derive(Clone, Copy, Debug)]
@@ -177,6 +181,8 @@ pub struct SelfPlayAudit {
     pub classification: BatchClassification,
     /// Policy evaluated by the fresh final audit.
     pub policy_id: IdentityHash,
+    /// Root policy score on the same fresh audit suite.
+    pub baseline_score: SelfPlayScore,
     /// Final replay-verified score.
     pub score: SelfPlayScore,
 }
@@ -188,11 +194,32 @@ pub struct SelfPlayAudit {
 #[derive(Debug)]
 pub struct SelfPlayCampaign {
     assigned_deck: DeckValidation,
-    final_audit_complete: bool,
+    final_audit_state: FinalAuditState,
     initial_policy: PolicySnapshot,
+    max_actions: usize,
     promotion_portfolio: Option<Portfolio>,
+    promotion_attempts: u8,
     promoted_policies: Vec<PolicySnapshot>,
     used_development_seeds: BTreeSet<u32>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FinalAuditState {
+    Open,
+    Failed,
+    Complete,
+}
+
+impl FinalAuditState {
+    fn begin(&mut self) -> Result<(), SelfPlayError> {
+        if *self != Self::Open {
+            return Err(SelfPlayError::Invalid(
+                "self-play campaign cannot repeat its final audit",
+            ));
+        }
+        *self = Self::Failed;
+        Ok(())
+    }
 }
 
 /// Self-play configuration, rollout, or replay verification failed.
@@ -262,7 +289,13 @@ impl SelfPlayCampaign {
     pub fn new(
         initial_policy: PolicySnapshot,
         assigned_deck: DeckValidation,
+        max_actions: usize,
     ) -> Result<Self, SelfPlayError> {
+        if max_actions == 0 {
+            return Err(SelfPlayError::Invalid(
+                "self-play action bound must be greater than zero",
+            ));
+        }
         if initial_policy.generation() != 0 || initial_policy.parent_policy_id().is_some() {
             return Err(SelfPlayError::Invalid(
                 "self-play campaigns must start from a generation-zero root policy",
@@ -271,9 +304,11 @@ impl SelfPlayCampaign {
         validate_assigned_policy(&initial_policy, &assigned_deck)?;
         Ok(Self {
             assigned_deck,
-            final_audit_complete: false,
+            final_audit_state: FinalAuditState::Open,
             initial_policy,
+            max_actions,
             promotion_portfolio: None,
+            promotion_attempts: 0,
             promoted_policies: Vec::new(),
             used_development_seeds: BTreeSet::new(),
         })
@@ -296,7 +331,19 @@ impl SelfPlayCampaign {
     /// Returns whether a successful fresh final audit sealed the campaign.
     #[must_use]
     pub const fn is_finalized(&self) -> bool {
-        self.final_audit_complete
+        matches!(self.final_audit_state, FinalAuditState::Complete)
+    }
+
+    /// Returns the immutable per-game action bound for this campaign.
+    #[must_use]
+    pub const fn max_actions(&self) -> usize {
+        self.max_actions
+    }
+
+    /// Returns the number of completed promotion comparisons.
+    #[must_use]
+    pub const fn promotion_attempts(&self) -> u8 {
+        self.promotion_attempts
     }
 
     /// Runs one fresh training and promotion generation.
@@ -308,11 +355,10 @@ impl SelfPlayCampaign {
         &mut self,
         training: &[SelfPlayPair<'_>],
         promotion: &[SelfPlayPair<'_>],
-        max_actions: usize,
     ) -> Result<PromotionResult, SelfPlayError> {
-        if self.final_audit_complete {
+        if self.final_audit_state != FinalAuditState::Open {
             return Err(SelfPlayError::Invalid(
-                "self-play campaign is sealed after final audit",
+                "self-play campaign cannot continue after its final audit attempt",
             ));
         }
         if training.is_empty() || training.len() > MAX_SELF_PLAY_PAIRS {
@@ -323,6 +369,11 @@ impl SelfPlayCampaign {
         if promotion.len() < MIN_PROMOTION_PAIRS || promotion.len() > MAX_SELF_PLAY_PAIRS {
             return Err(SelfPlayError::Invalid(
                 "self-play promotion suites must contain 20-128 unique-seed seat pairs",
+            ));
+        }
+        if self.promotion_attempts == MAX_CAMPAIGN_PROMOTION_ATTEMPTS {
+            return Err(SelfPlayError::Invalid(
+                "self-play campaign exhausted its promotion-attempt budget",
             ));
         }
         let generation_seeds = raw_seeds(training)
@@ -347,17 +398,19 @@ impl SelfPlayCampaign {
                 "self-play promotion portfolio changed across generations",
             ));
         }
-        let result = train_and_promote(
+        let result = train_and_promote_at_significance(
             self.champion(),
             &self.assigned_deck,
             training,
             promotion,
-            max_actions,
+            self.max_actions,
+            CAMPAIGN_SIGNIFICANCE_DENOMINATOR,
         )?;
         if self.promotion_portfolio.is_none() {
             self.promotion_portfolio = Some(promotion_portfolio);
         }
         self.used_development_seeds.extend(generation_seeds);
+        self.promotion_attempts += 1;
         if result.promoted {
             self.promoted_policies.push(result.policy.clone());
         }
@@ -372,11 +425,10 @@ impl SelfPlayCampaign {
     pub fn final_audit(
         &mut self,
         audit: &[SelfPlayPair<'_>],
-        max_actions: usize,
     ) -> Result<SelfPlayAudit, SelfPlayError> {
-        if self.final_audit_complete {
+        if self.final_audit_state != FinalAuditState::Open {
             return Err(SelfPlayError::Invalid(
-                "self-play campaign is sealed after final audit",
+                "self-play campaign cannot repeat its final audit",
             ));
         }
         if audit.is_empty() || audit.len() > MAX_SELF_PLAY_PAIRS {
@@ -405,19 +457,39 @@ impl SelfPlayCampaign {
             ));
         }
         let prepared = prepare_suite(audit, &self.assigned_deck, self.champion())?;
+        self.final_audit_state.begin()?;
+        let baseline_score = score_policy(
+            &self.initial_policy,
+            self.assigned_deck.deck_id(),
+            &prepared,
+            self.max_actions,
+            true,
+        )?;
         let score = score_policy(
             self.champion(),
             self.assigned_deck.deck_id(),
             &prepared,
-            max_actions,
+            self.max_actions,
             true,
         )?;
+        if !self.promoted_policies.is_empty()
+            && !improves_without_regression_at_significance(
+                &score,
+                &baseline_score,
+                CAMPAIGN_SIGNIFICANCE_DENOMINATOR,
+            )
+        {
+            return Err(SelfPlayError::Invalid(
+                "final audit did not reproduce a campaign-wide significant gain",
+            ));
+        }
         let audit = SelfPlayAudit {
             classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
             policy_id: self.champion().policy_id().clone(),
+            baseline_score,
             score,
         };
-        self.final_audit_complete = true;
+        self.final_audit_state = FinalAuditState::Complete;
         Ok(audit)
     }
 }
@@ -491,6 +563,17 @@ pub fn train_and_promote(
     heldout: &[SelfPlayPair<'_>],
     max_actions: usize,
 ) -> Result<PromotionResult, SelfPlayError> {
+    train_and_promote_at_significance(champion, assigned_deck, training, heldout, max_actions, 100)
+}
+
+fn train_and_promote_at_significance(
+    champion: &PolicySnapshot,
+    assigned_deck: &DeckValidation,
+    training: &[SelfPlayPair<'_>],
+    heldout: &[SelfPlayPair<'_>],
+    max_actions: usize,
+    significance_denominator: u128,
+) -> Result<PromotionResult, SelfPlayError> {
     validate_assigned_policy(champion, assigned_deck)?;
     let training = prepare_suite(training, assigned_deck, champion)?;
     let heldout = prepare_suite(heldout, assigned_deck, champion)?;
@@ -543,7 +626,11 @@ pub fn train_and_promote(
         max_actions,
         true,
     )?;
-    let promoted = improves_without_regression(&nominee_heldout, &champion_heldout);
+    let promoted = improves_without_regression_at_significance(
+        &nominee_heldout,
+        &champion_heldout,
+        significance_denominator,
+    );
     let nominee_policy_id = nominee.policy_id().clone();
     Ok(PromotionResult {
         classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
@@ -556,7 +643,16 @@ pub fn train_and_promote(
     })
 }
 
+#[cfg(test)]
 fn improves_without_regression(candidate: &SelfPlayScore, champion: &SelfPlayScore) -> bool {
+    improves_without_regression_at_significance(candidate, champion, 100)
+}
+
+fn improves_without_regression_at_significance(
+    candidate: &SelfPlayScore,
+    champion: &SelfPlayScore,
+    significance_denominator: u128,
+) -> bool {
     if candidate.pairs.len() < MIN_PROMOTION_PAIRS
         || candidate.pairs.len() > MAX_SELF_PLAY_PAIRS
         || candidate.pairs.len() != champion.pairs.len()
@@ -596,12 +692,17 @@ fn improves_without_regression(candidate: &SelfPlayScore, champion: &SelfPlaySco
             .all(|seats| seats[0] >= 0 && seats[1] >= 0)
         && 5 * i32::from(total_gain)
             >= i32::try_from(candidate.pairs.len()).expect("self-play pair bound fits i32")
-        && exact_sign_test_at_most_one_percent(wins, losses)
+        && exact_sign_test_at_most(wins, losses, significance_denominator)
 }
 
+#[cfg(test)]
 fn exact_sign_test_at_most_one_percent(wins: usize, losses: usize) -> bool {
+    exact_sign_test_at_most(wins, losses, 100)
+}
+
+fn exact_sign_test_at_most(wins: usize, losses: usize, denominator: u128) -> bool {
     let decisive = wins + losses;
-    if decisive == 0 || decisive > MAX_SELF_PLAY_PAIRS {
+    if decisive == 0 || decisive > MAX_SELF_PLAY_PAIRS || denominator == 0 {
         return false;
     }
 
@@ -616,12 +717,14 @@ fn exact_sign_test_at_most_one_percent(wins: usize, losses: usize) -> bool {
         .iter()
         .copied()
         .fold(0_u128, u128::saturating_add);
-    let one_percent = if decisive == u128::BITS as usize {
-        u128::MAX / 100
+    let threshold = if decisive == u128::BITS as usize {
+        let quotient = u128::MAX / denominator;
+        let remainder = u128::MAX % denominator;
+        quotient + u128::from(remainder == denominator - 1)
     } else {
-        (1_u128 << decisive) / 100
+        (1_u128 << decisive) / denominator
     };
-    upper_tail <= one_percent
+    upper_tail <= threshold
 }
 
 fn score_policy(
@@ -786,6 +889,8 @@ fn prepare_suite<'a>(
         let candidate_as_south = Game::from_manifest_json(pair.candidate_as_south_manifest_json)
             .map_err(SimulatorError::from)?;
         for game in [&candidate_as_north, &candidate_as_south] {
+            game.ensure_selfplay_supported()
+                .map_err(SimulatorError::from)?;
             champion.validate_binding(
                 game.rules().authority_hash(),
                 assigned_deck.deck_id(),
@@ -889,7 +994,7 @@ mod tests {
     use crate::canonical::IdentityHash;
 
     use super::{
-        SelfPlayPairScore, SelfPlayScore, exact_sign_test_at_most_one_percent,
+        FinalAuditState, SelfPlayPairScore, SelfPlayScore, exact_sign_test_at_most_one_percent,
         improves_without_regression,
     };
 
@@ -1001,5 +1106,15 @@ mod tests {
             &score(&boundary),
             &score(&boundary_champion)
         ));
+    }
+
+    #[test]
+    fn failed_final_audit_should_permanently_consume_the_reserved_attempt() {
+        let mut state = FinalAuditState::Open;
+
+        state.begin().expect("first audit attempt");
+
+        assert_eq!(state, FinalAuditState::Failed);
+        assert!(state.begin().is_err());
     }
 }

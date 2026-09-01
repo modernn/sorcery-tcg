@@ -16,9 +16,9 @@ use crate::board::{Cell, Location, Region};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{
-    BasicMovementRestriction, CardFacts, DamagePrevention, Element, EndTurnStealth, FactError,
-    MagicEffect, MinionFacts, MinionGenesis, RequiredCastRegion, SiteFacts, Thresholds,
-    parse_card_definition, validate_identifier,
+    AvatarFacts, BasicMovementRestriction, CardFacts, DamagePrevention, Element, EndTurnStealth,
+    FactError, MagicEffect, MagicFacts, MinionFacts, MinionGenesis, RequiredCastRegion, SiteFacts,
+    Thresholds, parse_card_definition, validate_identifier,
 };
 use crate::prng::PrngState;
 
@@ -36,7 +36,7 @@ pub struct RulesContext {
 }
 
 /// Cloneable dynamic game data used by speculative branches.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Position {
     active_seat: Seat,
     decision_seat: Seat,
@@ -287,7 +287,7 @@ impl CardSource {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct CardInstance {
     card_id: CardId,
     instance_id: IdentityHash,
@@ -295,7 +295,7 @@ struct CardInstance {
     source: CardSource,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct AvatarPosition {
     card: CardInstance,
     death_door_turn: Option<u64>,
@@ -305,7 +305,7 @@ struct AvatarPosition {
     tapped: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct PlayerPosition {
     air_thresholds_cast_this_turn: Option<u16>,
     atlas: Vec<CardInstance>,
@@ -319,13 +319,13 @@ struct PlayerPosition {
     spellbook: Vec<CardInstance>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct SitePosition {
     card: CardInstance,
     controller: Seat,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[expect(
     clippy::struct_excessive_bools,
     reason = "named dynamic flags preserve distinct authoritative unit state"
@@ -345,7 +345,7 @@ struct UnitPosition {
     warded: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct DisableEffect {
     expires_at_seat: Seat,
     source_instance_id: IdentityHash,
@@ -368,7 +368,7 @@ impl UnitKind {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct PendingCombat {
     allocations: Vec<StrikeAllocation>,
     attacker_instance_id: IdentityHash,
@@ -381,7 +381,7 @@ struct PendingCombat {
     target_removed: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct PendingDeathriteSource {
     controller: Seat,
     current_power: u16,
@@ -397,7 +397,7 @@ enum DeathriteStage {
     Resolve,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct PendingDeathriteBatch {
     active_order: Vec<PendingDeathriteSource>,
     active_remaining: Vec<PendingDeathriteSource>,
@@ -407,7 +407,7 @@ struct PendingDeathriteBatch {
     stage: DeathriteStage,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct PendingDeathrites {
     batches: Vec<PendingDeathriteBatch>,
     continuation: Option<DeathriteContinuation>,
@@ -418,52 +418,52 @@ struct PendingDeathrites {
     return_phase: Phase,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct EndTurnContinuation {
     remaining_instance_ids: Vec<IdentityHash>,
     seat: Seat,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum DeathriteContinuation {
     EndTurn(EndTurnContinuation),
     FirstStrike(FirstStrikeContinuation),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct FirstStrikeContinuation {
     attacker_struck: bool,
     first_combatant_instance_ids: Vec<IdentityHash>,
     pending: PendingCombat,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct StrikeAllocation {
     amount: u16,
     target_instance_id: IdentityHash,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct PendingGenesisToken {
     cell: Cell,
     seat: Seat,
     source_instance_id: IdentityHash,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct PendingGenesisSpell {
     seat: Seat,
     source_instance_id: IdentityHash,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct PendingGenesisSpellOrder {
     count: u8,
     seat: Seat,
     source_instance_id: IdentityHash,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum PendingField<T> {
     Absent,
     Pending(T),
@@ -523,7 +523,7 @@ pub enum GameEndReason {
     SimultaneousDefeat,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum TerminalResult {
     Draw {
         reason: DrawReason,
@@ -535,13 +535,13 @@ enum TerminalResult {
     },
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DrawReason {
     SimultaneousAvatarDefeat,
     SimultaneousDefeat,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum WinReason {
     AvatarDefeated,
     DeckEmpty,
@@ -638,13 +638,262 @@ fn token_reference(facts: &CardFacts) -> Option<&str> {
 }
 
 fn has_unsupported_site_genesis_after_rubble_replacement(facts: &SiteFacts) -> bool {
-    facts.genesis_discard_top_spells
-        || facts.genesis_draw_spell_per_adjacent_same_card
-        || facts.genesis_enemies_lose_stealth
-        || facts.genesis_gain_mana.is_some()
-        || facts.genesis_gain_mana_if_only_controlled_copy
-        || facts.genesis_heal_nearby_avatars
-        || facts.genesis_immobilize_nearby_until_next_turn
+    unsupported_site_genesis_after_rubble_replacement(facts).is_some()
+}
+
+fn unsupported_site_genesis_after_rubble_replacement(facts: &SiteFacts) -> Option<&'static str> {
+    if facts.genesis_discard_top_spells {
+        Some("genesisDiscardTopSpells")
+    } else if facts.genesis_draw_spell_per_adjacent_same_card {
+        Some("genesisDrawSpellPerAdjacentSameCard")
+    } else if facts.genesis_enemies_lose_stealth {
+        Some("genesisEnemiesLoseStealth")
+    } else if facts.genesis_gain_mana.is_some() {
+        Some("genesisGainMana")
+    } else if facts.genesis_gain_mana_if_only_controlled_copy {
+        Some("genesisGainManaIfOnlyControlledCopy")
+    } else if facts.genesis_heal_nearby_avatars {
+        Some("genesisHealNearbyAvatars")
+    } else if facts.genesis_immobilize_nearby_until_next_turn {
+        Some("genesisImmobilizeNearbyUntilNextTurn")
+    } else {
+        None
+    }
+}
+
+fn unsupported_selfplay_fact(facts: &CardFacts) -> Option<&'static str> {
+    match facts {
+        CardFacts::Avatar(facts) => {
+            account_for_selfplay_avatar_fields(*facts);
+            facts
+                .tap_damage_random_other_unit_at_nearby_location_per_air_threshold_cast_this_turn
+                .then_some("tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn")
+        }
+        CardFacts::Artifact(_) => Some("cardType:artifact"),
+        CardFacts::Aura(_) => Some("cardType:aura"),
+        CardFacts::Magic(facts) => unsupported_selfplay_magic(facts),
+        CardFacts::Minion(facts) => unsupported_selfplay_minion(facts),
+        CardFacts::Site(facts) => unsupported_selfplay_site(facts),
+    }
+}
+
+fn unsupported_selfplay_magic(facts: &MagicFacts) -> Option<&'static str> {
+    match facts.effect {
+        MagicEffect::HealController(_)
+        | MagicEffect::ReturnMinionFromOwnCemetery
+        | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
+        | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => None,
+        MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite => {
+            Some("burrowAllMinionsAndArtifactsAtTargetLandSite")
+        }
+        MagicEffect::BurrowTargetMinionOrArtifact => Some("burrowTargetMinionOrArtifact"),
+        MagicEffect::DamageChainNearbyUnits => Some("damageChainNearbyUnits"),
+        MagicEffect::DamageEachAbovegroundMinionOne => Some("damageEachAbovegroundMinionOne"),
+        MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_) => {
+            Some("damageEachUnitAtLocationWithinTwoSteps")
+        }
+        MagicEffect::DamageRandomUnitAtLocation(_) => Some("damageRandomUnitAtLocation"),
+        MagicEffect::DamageTargetUnit { .. } => Some("damageTargetUnit"),
+        MagicEffect::DestroyTargetSiteWithDamageGrid(_) => Some("destroyTargetSiteWithDamageGrid"),
+        MagicEffect::FightAllyWithAdjacentEnemy => Some("fightAllyWithAdjacentEnemy"),
+        MagicEffect::GainControlOfTargetNearbyMinion => Some("gainControlOfTargetNearbyMinion"),
+        MagicEffect::GrantChargeToAllyThisTurn => Some("grantChargeToAllyThisTurn"),
+        MagicEffect::GrantPowerTwoToAllyThisTurn => Some("grantPowerTwoToAllyThisTurn"),
+        MagicEffect::KillTargetWoundedMinion => Some("killTargetWoundedMinion"),
+        MagicEffect::LeapAttackAlly => Some("leapAttackAlly"),
+        MagicEffect::LureEnemyMinionOneStepCloser => Some("lureEnemyMinionOneStepCloser"),
+        MagicEffect::SubmergeTargetMinion => Some("submergeTargetMinion"),
+        MagicEffect::SummonRandomMinionFromAnyCemetery => Some("summonRandomMinionFromAnyCemetery"),
+        MagicEffect::TeleportAllyToTargetSite => Some("teleportAllyToTargetSite"),
+        MagicEffect::TeleportNearbyAllyThenDrawCard => Some("teleportNearbyAllyThenDrawCard"),
+    }
+}
+
+fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
+    account_for_selfplay_minion_fields(facts);
+    if facts.alternative_summon_payment.is_some() {
+        Some("alternativeSummonPayment")
+    } else if facts.at_start_of_controller_turn_teleport_to_random_site_or_void {
+        Some("atStartOfControllerTurnTeleportToRandomSiteOrVoid")
+    } else if facts.airborne {
+        Some("airborne")
+    } else if facts.burrowing {
+        Some("burrowing")
+    } else if facts
+        .discard_spell_to_damage_random_other_unit_here
+        .is_some()
+    {
+        Some("discardSpellToDamageRandomOtherUnitHere")
+    } else if facts.end_turn_stealth == Some(EndTurnStealth::IfNoEnemiesNearby) {
+        Some("gainStealthAtEndOfTurnIfNoEnemiesNearby")
+    } else if facts.gains_power_ranged_and_spellcaster_atop_tower {
+        Some("gainsPowerRangedAndSpellcasterAtopTower")
+    } else if let Some(field) = unsupported_selfplay_minion_genesis(facts.genesis) {
+        Some(field)
+    } else if facts.must_be_cast_to_outer_column {
+        Some("mustBeCastToOuterColumn")
+    } else if facts.nearby_enemies_permanently_lose_stealth {
+        Some("nearbyEnemiesPermanentlyLoseStealth")
+    } else if facts.shoots_drag_projectile {
+        Some("shootsDragProjectile")
+    } else if facts.site_provides_no_threshold {
+        Some("siteProvidesNoThreshold")
+    } else if facts.stealth {
+        Some("stealth")
+    } else if facts.submerge {
+        Some("submerge")
+    } else if facts.tap_to_damage_each_unit_at_adjacent_location {
+        Some("tapToDamageEachUnitAtAdjacentLocation")
+    } else if facts.voidwalk {
+        Some("voidwalk")
+    } else if facts.waterbound {
+        Some("waterbound")
+    } else {
+        None
+    }
+}
+
+fn unsupported_selfplay_site(facts: &SiteFacts) -> Option<&'static str> {
+    account_for_selfplay_site_fields(facts);
+    if facts.airborne_minions_atop_move_freely_away {
+        Some("airborneMinionsAtopMoveFreelyAway")
+    } else if facts.cannot_be_moved_destroyed_or_modified {
+        Some("cannotBeMovedDestroyedOrModified")
+    } else if facts.connects_burrowed_allies {
+        Some("connectsBurrowedAllies")
+    } else if facts.fly_to_nearby_void_once_per_turn_at_air_threshold {
+        Some("flyToNearbyVoidOncePerTurnAtAirThreshold")
+    } else if facts.genesis_immobilize_nearby_until_next_turn {
+        Some("genesisImmobilizeNearbyUntilNextTurn")
+    } else if facts.is_tower {
+        Some("isTower")
+    } else if facts.minions_here_gain_voidwalk_until_leaving_void {
+        Some("minionsHereGainVoidwalkUntilLeavingVoid")
+    } else if facts
+        .prevents_units_with_power_at_least_from_entering
+        .is_some()
+    {
+        Some("preventsUnitsWithPowerAtLeastFromEntering")
+    } else if facts.sacrifice_to_destroy_nearby_site {
+        Some("sacrificeToDestroyNearbySite")
+    } else {
+        None
+    }
+}
+
+fn unsupported_selfplay_minion_genesis(genesis: Option<MinionGenesis>) -> Option<&'static str> {
+    match genesis {
+        None
+        | Some(
+            MinionGenesis::DamageEachOtherUnitHereOne
+            | MinionGenesis::DisableSelfUntilDamaged
+            | MinionGenesis::DrawSite
+            | MinionGenesis::DrawSpells(_)
+            | MinionGenesis::HealControllerTwo
+            | MinionGenesis::LoseControllerLifeTwo
+            | MinionGenesis::MayDamageTargetAdjacentUnitTwo,
+        ) => None,
+        Some(MinionGenesis::StrikeEachEnemyHere) => Some("genesisStrikeEachEnemyHere"),
+    }
+}
+
+fn account_for_selfplay_avatar_fields(facts: AvatarFacts) {
+    let AvatarFacts {
+        attack: _,
+        defense: _,
+        draw_spell: _,
+        earth_site_play_creates_adjacent_rubble: _,
+        life: _,
+        replace_adjacent_rubble_with_top_atlas_site: _,
+        tap_damage_random_other_unit_at_nearby_location_per_air_threshold_cast_this_turn: _,
+    } = facts;
+}
+
+fn account_for_selfplay_site_fields(facts: &SiteFacts) {
+    let SiteFacts {
+        airborne_minions_atop_move_freely_away: _,
+        blocks_ground_minion_entry_while_minion_atop: _,
+        cannot_be_moved_destroyed_or_modified: _,
+        connects_burrowed_allies: _,
+        elements: _,
+        fly_to_nearby_void_once_per_turn_at_air_threshold: _,
+        genesis_discard_top_spells: _,
+        genesis_draw_spell_per_adjacent_same_card: _,
+        genesis_enemies_lose_stealth: _,
+        genesis_gain_mana: _,
+        genesis_gain_mana_if_only_controlled_copy: _,
+        genesis_heal_nearby_avatars: _,
+        genesis_immobilize_nearby_until_next_turn: _,
+        genesis_may_bottom_next_spell: _,
+        genesis_pay_one_mana_to_summon_token: _,
+        genesis_reorder_next_spells: _,
+        is_tower: _,
+        minions_here_gain_voidwalk_until_leaving_void: _,
+        ordinary_minion_mana_discount: _,
+        prevents_units_with_power_at_least_from_entering: _,
+        ranged_units_here_range_bonus: _,
+        sacrifice_to_destroy_nearby_site: _,
+    } = facts;
+}
+
+fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
+    let MinionFacts {
+        airborne: _,
+        alternative_summon_payment: _,
+        at_start_of_controller_turn_teleport_to_random_site_or_void: _,
+        attack: _,
+        burrowing: _,
+        cannot_attack_sites: _,
+        cannot_defend: _,
+        cannot_defend_or_intercept: _,
+        charge: _,
+        connects_top_bottom: _,
+        damage_prevention: _,
+        deathrite_damage_each_unit_here: _,
+        deathrite_draw_site: _,
+        deathrite_heal: _,
+        deathrite_lose_life_per_nearby_site_controlled: _,
+        defense: _,
+        dies_at_end_of_controller_turn: _,
+        discard_spell_to_damage_random_other_unit_here: _,
+        end_turn_stealth: _,
+        gains_power_ranged_and_spellcaster_atop_tower: _,
+        genesis: _,
+        immobile: _,
+        lance_count: _,
+        lethal: _,
+        mana_cost: _,
+        may_ranged_strike_once_during_basic_movement: _,
+        may_step_after_ranged_strike: _,
+        mortal: _,
+        movement_bonus: _,
+        movement_restriction: _,
+        must_be_cast_to_outer_column: _,
+        must_be_cast_to_water_site: _,
+        nearby_enemies_permanently_lose_stealth: _,
+        occupies_square_area_two: _,
+        ordinary: _,
+        other_controlled_mortals_power_bonus: _,
+        other_nearby_allies_power_bonus: _,
+        provides: _,
+        ranged: _,
+        required_cast_region: _,
+        shoots_drag_projectile: _,
+        site_provides_no_threshold: _,
+        spellcaster: _,
+        stealth: _,
+        strikes_first_while_attacking: _,
+        submerge: _,
+        summon_to_any_site: _,
+        tap_for_mana: _,
+        tap_to_damage_each_unit_at_adjacent_location: _,
+        tap_to_shoot_projectile_damage: _,
+        thresholds: _,
+        token: _,
+        untaps_at_end_of_controller_turn: _,
+        voidwalk: _,
+        waterbound: _,
+    } = facts;
 }
 
 fn validate_deck(deck: &Deck, cards: &BTreeMap<String, CardFacts>) -> Result<(), GameError> {
@@ -805,6 +1054,38 @@ impl Game {
     #[must_use]
     pub const fn position(&self) -> &Position {
         &self.position
+    }
+
+    pub(crate) fn into_position(self) -> Position {
+        self.position
+    }
+
+    pub(crate) fn ensure_selfplay_supported(&self) -> Result<(), GameError> {
+        for card in &self.rules.cards {
+            if let Some(field) = unsupported_selfplay_fact(&card.facts) {
+                return Err(GameError::UnsupportedManifestFact(field.to_owned()));
+            }
+        }
+        for player in &self.position.players {
+            let CardFacts::Avatar(avatar) =
+                &self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts
+            else {
+                return Err(invalid("player avatar lacks avatar facts"));
+            };
+            if !avatar.replace_adjacent_rubble_with_top_atlas_site {
+                continue;
+            }
+            for card in player.atlas.iter().chain(&player.hand_atlas) {
+                let CardFacts::Site(site) = &self.rules.cards[usize::from(card.card_id.0)].facts
+                else {
+                    return Err(invalid("player Atlas card lacks site facts"));
+                };
+                if let Some(field) = unsupported_site_genesis_after_rubble_replacement(site) {
+                    return Err(GameError::UnsupportedManifestFact(field.to_owned()));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Builds the compact public policy view for `seat` without exposing hidden identities.
@@ -7218,7 +7499,21 @@ fn resolve_mulligan_zone(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canonical::canonical_json;
     use crate::synthetic::synthetic_demo_manifest_json;
+
+    fn selfplay_manifest_with(seed: u32, mutate: impl FnOnce(&mut Value)) -> String {
+        let mut manifest: Value =
+            serde_json::from_str(&synthetic_demo_manifest_json(seed).expect("synthetic manifest"))
+                .expect("manifest JSON");
+        manifest
+            .as_object_mut()
+            .expect("manifest object")
+            .remove("manifestId");
+        mutate(&mut manifest);
+        manifest["manifestId"] = json!(identity_hash(&manifest).expect("manifest identity"));
+        canonical_json(&manifest).expect("canonical manifest")
+    }
 
     fn play_site_actions(game: &Game, card_instance_id: &IdentityHash) -> Vec<IssuedAction> {
         game.legal_actions()
@@ -7301,5 +7596,30 @@ mod tests {
         );
         assert!(game.position.rubble[c4.index()].is_none());
         assert!(game.position.sites[c4.index()].is_some());
+    }
+
+    #[test]
+    fn rubble_replacement_support_should_be_scoped_to_its_owners_atlas() {
+        let cross_deck = selfplay_manifest_with(31, |manifest| {
+            manifest["cards"]["north-avatar"]["replaceAdjacentRubbleWithTopAtlasSite"] =
+                json!(true);
+            manifest["cards"]["south-site-1"]["genesisGainMana"] = json!(1);
+        });
+        Game::from_manifest_json(&cross_deck)
+            .expect("valid cross-deck game")
+            .ensure_selfplay_supported()
+            .expect("unrelated Atlas Genesis is safe");
+
+        let same_deck = selfplay_manifest_with(31, |manifest| {
+            manifest["cards"]["north-avatar"]["replaceAdjacentRubbleWithTopAtlasSite"] =
+                json!(true);
+            manifest["cards"]["north-site-1"]["genesisGainMana"] = json!(1);
+        });
+        assert!(matches!(
+            Game::from_manifest_json(&same_deck)
+                .expect("valid same-deck game")
+                .ensure_selfplay_supported(),
+            Err(GameError::UnsupportedManifestFact(field)) if field == "genesisGainMana"
+        ));
     }
 }

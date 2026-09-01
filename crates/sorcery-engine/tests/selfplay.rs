@@ -273,17 +273,20 @@ fn suite_should_reject_non_swaps_wrong_bindings_and_reused_seeds() {
             .to_string(),
         "self-play suites must contain 1-128 seat-swapped pairs"
     );
+    assert!(SelfPlayCampaign::new(champion.clone(), candidate_deck.clone(), 0).is_err());
     let mut campaign =
-        SelfPlayCampaign::new(champion.clone(), candidate_deck.clone()).expect("campaign");
+        SelfPlayCampaign::new(champion.clone(), candidate_deck.clone(), 500).expect("campaign");
+    assert_eq!(campaign.max_actions(), 500);
+    assert_eq!(campaign.promotion_attempts(), 0);
     assert_eq!(
         campaign
-            .run_generation(&valid, &oversized, 500)
+            .run_generation(&valid, &oversized)
             .expect_err("oversized campaign suite")
             .to_string(),
         "self-play promotion suites must contain 20-128 unique-seed seat pairs"
     );
     let child = champion.neighbors().expect("neighbors").remove(0);
-    assert!(SelfPlayCampaign::new(child, candidate_deck).is_err());
+    assert!(SelfPlayCampaign::new(child, candidate_deck, 500).is_err());
 }
 
 #[test]
@@ -355,6 +358,28 @@ fn pair_should_reject_scenario_changes_composition_mismatch_and_unsupported_fact
         &opponent_deck,
     )];
     assert!(train_and_promote(&champion, &candidate_deck, &unsupported, &heldout, 500).is_err());
+
+    for field in ["siteProvidesNoThreshold", "stealth"] {
+        let unsupported_north = mutate_manifest(&north, |manifest| {
+            manifest["cards"]["north-spell-1"][field] = json!(true);
+        });
+        let unsupported_south = mutate_manifest(&south, |manifest| {
+            manifest["cards"]["north-spell-1"][field] = json!(true);
+        });
+        let unsupported = [pair(
+            &unsupported_north,
+            &unsupported_south,
+            30,
+            &opponent,
+            &opponent_deck,
+        )];
+        assert_eq!(
+            train_and_promote(&champion, &candidate_deck, &unsupported, &heldout, 500)
+                .expect_err("self-play must reject incomplete facts")
+                .to_string(),
+            format!("manifest fact is not yet supported by Rust: {field}")
+        );
+    }
 }
 
 #[test]
@@ -392,7 +417,7 @@ fn underpowered_gain_should_replay_but_not_promote_or_start_a_campaign() {
     let result = train_and_promote(&champion, &candidate_deck, &training, &heldout, 1_000)
         .expect("replay-gated comparison");
     let mut campaign =
-        SelfPlayCampaign::new(champion.clone(), candidate_deck.clone()).expect("campaign");
+        SelfPlayCampaign::new(champion.clone(), candidate_deck.clone(), 1_000).expect("campaign");
 
     assert!(!result.promoted, "{result:#?}");
     assert_eq!(
@@ -404,10 +429,81 @@ fn underpowered_gain_should_replay_but_not_promote_or_start_a_campaign() {
         result.nominee_heldout.half_points() > result.champion_heldout.half_points(),
         "{result:#?}"
     );
-    assert!(campaign.run_generation(&training, &heldout, 1_000).is_err());
-    assert!(campaign.run_generation(&training, &heldout, 1_000).is_err());
-    assert!(campaign.final_audit(&audit, 1_000).is_err());
+    assert!(campaign.run_generation(&training, &heldout).is_err());
+    assert!(campaign.run_generation(&training, &heldout).is_err());
+    assert!(campaign.final_audit(&audit).is_err());
     assert!(!campaign.is_finalized());
     assert_eq!(campaign.champion(), &champion);
     assert_eq!(campaign.lineage().collect::<Vec<_>>().len(), 1);
+}
+
+#[test]
+#[ignore = "release-only production-sized self-play acceptance gate"]
+fn production_sized_campaign_should_promote_and_seal_reproducibly() {
+    let training_manifests = paired_manifests(40, 1);
+    let promotion_manifests = (100..120)
+        .map(|seed| (seed, paired_manifests(seed, 1)))
+        .collect::<Vec<_>>();
+    let audit_manifests = (200..220)
+        .map(|seed| (seed, paired_manifests(seed, 1)))
+        .collect::<Vec<_>>();
+    let candidate_deck = validated_manifest_deck(&training_manifests.0, "north");
+    let opponent_deck = validated_manifest_deck(&training_manifests.0, "south");
+    let authority = authority_hash(&training_manifests.0);
+    let passive_features = [
+        "keep-mulligan",
+        "play-site",
+        "summon-minion",
+        "preferred-draw",
+        "powered-movement",
+        "beneficial-tactic",
+        "end-turn",
+        "move-toward-enemy",
+        "canonical-fallback",
+    ];
+    let champion = policy(
+        &authority,
+        candidate_deck.deck_id().as_str(),
+        passive_features,
+    );
+    let opponent = policy(
+        &authority,
+        opponent_deck.deck_id().as_str(),
+        passive_features,
+    );
+    let training = one_pair(&training_manifests, 40, &opponent, &opponent_deck);
+    let promotion = promotion_manifests
+        .iter()
+        .map(|(seed, manifests)| pair(&manifests.0, &manifests.1, *seed, &opponent, &opponent_deck))
+        .collect::<Vec<_>>();
+    let audit = audit_manifests
+        .iter()
+        .map(|(seed, manifests)| pair(&manifests.0, &manifests.1, *seed, &opponent, &opponent_deck))
+        .collect::<Vec<_>>();
+    let mut first = SelfPlayCampaign::new(champion.clone(), candidate_deck.clone(), 1_000)
+        .expect("first campaign");
+    let mut second = SelfPlayCampaign::new(champion.clone(), candidate_deck.clone(), 1_000)
+        .expect("second campaign");
+
+    let first_promotion = first
+        .run_generation(&training, &promotion)
+        .expect("first production-sized promotion");
+    let second_promotion = second
+        .run_generation(&training, &promotion)
+        .expect("repeated production-sized promotion");
+    assert!(first_promotion.promoted, "{first_promotion:#?}");
+    assert_eq!(first_promotion, second_promotion);
+
+    let first_audit = first.final_audit(&audit).expect("first fresh final audit");
+    let second_audit = second
+        .final_audit(&audit)
+        .expect("repeated fresh final audit");
+    assert_eq!(first_audit, second_audit);
+    assert!(first_audit.score.half_points() > first_audit.baseline_score.half_points());
+    assert_eq!(first.champion(), second.champion());
+    assert_eq!(first.lineage().collect::<Vec<_>>().len(), 2);
+    assert!(first.is_finalized());
+    assert!(second.is_finalized());
+    assert_eq!(first.promotion_attempts(), 1);
+    assert!(first.final_audit(&audit).is_err());
 }

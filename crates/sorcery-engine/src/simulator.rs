@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::canonical::IdentityHash;
 use crate::contract::{ActionRequest, Seat};
-use crate::game::{Game, GameError, GameOutcome};
+use crate::game::{Game, GameError, GameOutcome, Position};
 use crate::policy::{PolicyError, PolicySnapshot};
 use crate::session::{Session, SessionError};
 
@@ -13,6 +13,7 @@ use crate::session::{Session, SessionError};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Rollout {
     action_indices: Vec<usize>,
+    final_position: Position,
     manifest_id: IdentityHash,
     outcome: Option<GameOutcome>,
     terminal: bool,
@@ -246,7 +247,7 @@ fn apply_and_verify(mut session: Session, rollout: &Rollout) -> Result<Session, 
             return Err(SimulatorError::ReplayDiverged);
         }
     }
-    if !session.verify_replay()? {
+    if session.position() != &rollout.final_position || !session.verify_replay()? {
         return Err(SimulatorError::ReplayDiverged);
     }
     if session.outcome() != rollout.outcome {
@@ -277,11 +278,15 @@ fn continue_game(
         action_indices.push(selected_index);
         game.apply_action(selected)?;
     }
+    let manifest_id = game.rules().manifest_id().clone();
+    let outcome = game.outcome();
+    let terminal = game.is_terminal();
     Ok(Rollout {
         action_indices,
-        manifest_id: game.rules().manifest_id().clone(),
-        outcome: game.outcome(),
-        terminal: game.is_terminal(),
+        final_position: game.into_position(),
+        manifest_id,
+        outcome,
+        terminal,
     })
 }
 
@@ -293,5 +298,58 @@ const fn policy_for<'a>(
     match seat {
         Seat::North => north,
         Seat::South => south,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use crate::canonical::{canonical_json, identity_hash};
+    use crate::policy::parse_policy_snapshot;
+    use crate::synthetic::synthetic_demo_manifest_json;
+
+    use super::{Game, SimulatorError, replay_selected, run_game};
+
+    #[test]
+    fn replay_should_reject_a_same_outcome_with_a_different_final_position() {
+        let manifest = synthetic_demo_manifest_json(31).expect("synthetic manifest");
+        let raw: Value = serde_json::from_str(&manifest).expect("manifest JSON");
+        let mut body = json!({
+            "authorityHash": raw["authority"]["contentHash"],
+            "deckId": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "engineVersion": raw["engineVersion"],
+            "generation": 0,
+            "observationVersion": "seat-observation-v1",
+            "schemaVersion": 1,
+            "selector": {
+                "atlasReserve": 3,
+                "featurePriority": [
+                    "keep-mulligan", "play-site", "summon-minion", "preferred-draw",
+                    "powered-movement", "beneficial-tactic", "move-toward-enemy",
+                    "end-turn", "canonical-fallback"
+                ]
+            },
+            "tieBreak": "canonical-action-order-v1"
+        });
+        body["policyId"] = json!(identity_hash(&body).expect("policy identity"));
+        let policy = parse_policy_snapshot(&canonical_json(&body).expect("canonical policy"))
+            .expect("valid policy");
+        let mut rollout = run_game(
+            Game::from_manifest_json(&manifest).expect("game"),
+            &policy,
+            &policy,
+            500,
+        )
+        .expect("terminal rollout");
+        assert!(rollout.is_terminal());
+        rollout.final_position = Game::from_manifest_json(&manifest)
+            .expect("different position")
+            .into_position();
+
+        assert!(matches!(
+            replay_selected(&manifest, &rollout),
+            Err(SimulatorError::ReplayDiverged)
+        ));
     }
 }
