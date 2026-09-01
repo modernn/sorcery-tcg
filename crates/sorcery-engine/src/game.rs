@@ -602,6 +602,30 @@ enum OutcomeLog<'a> {
 }
 
 impl OutcomeLog<'_> {
+    fn len(&self) -> usize {
+        match self {
+            Self::Ignore => 0,
+            Self::Record(outcomes) => outcomes.len(),
+        }
+    }
+
+    fn move_tail_before_completion(&mut self, tail_start: usize) {
+        let Self::Record(outcomes) = self else {
+            return;
+        };
+        let completion = outcomes[..tail_start].iter().position(|(kind, _)| {
+            matches!(
+                kind.as_str(),
+                "game-ended" | "magic-resolved" | "turn-ended"
+            )
+        });
+        let Some(completion) = completion else {
+            return;
+        };
+        let tail = outcomes.drain(tail_start..).collect::<Vec<_>>();
+        outcomes.splice(completion..completion, tail);
+    }
+
     fn push(&mut self, kind: &'static str, payload: impl FnOnce() -> Value) {
         if let Self::Record(outcomes) = self {
             outcomes.push((kind.to_owned(), payload()));
@@ -730,8 +754,6 @@ fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
         Some(field)
     } else if facts.must_be_cast_to_outer_column {
         Some("mustBeCastToOuterColumn")
-    } else if facts.nearby_enemies_permanently_lose_stealth {
-        Some("nearbyEnemiesPermanentlyLoseStealth")
     } else if facts.shoots_drag_projectile {
         Some("shootsDragProjectile")
     } else if facts.submerge {
@@ -2301,6 +2323,75 @@ impl Game {
         unit.stealthed && !self.minion_is_disabled(unit)
     }
 
+    fn settle_nearby_enemy_stealth(&mut self, outcomes: &mut OutcomeLog<'_>) {
+        if self.position.terminal.is_some() {
+            return;
+        }
+        // ponytail: bounded O(units²) scan keeps speculative nodes allocation-free; index only
+        // if profiling shows dense Scent Hound positions are a bottleneck.
+        let mut previous_source: Option<usize> = None;
+        loop {
+            let source_index = self
+                .position
+                .units
+                .iter()
+                .enumerate()
+                .filter(|(_, source)| {
+                    if self.minion_is_disabled(source) {
+                        return false;
+                    }
+                    let CardFacts::Minion(facts) =
+                        &self.rules.cards[usize::from(source.card.card_id.0)].facts
+                    else {
+                        return false;
+                    };
+                    facts.nearby_enemies_permanently_lose_stealth
+                        && previous_source.is_none_or(|previous_index| {
+                            source.card.instance_id
+                                > self.position.units[previous_index].card.instance_id
+                        })
+                })
+                .min_by(|(_, left), (_, right)| left.card.instance_id.cmp(&right.card.instance_id))
+                .map(|(index, _)| index);
+            let Some(source_index) = source_index else {
+                break;
+            };
+            let source_controller = self.position.units[source_index].controller;
+            let source_location = self.position.units[source_index].location;
+            for target_index in 0..self.position.units.len() {
+                let target = &self.position.units[target_index];
+                if target.controller == source_controller
+                    || !target.stealthed
+                    || (target.location != source_location
+                        && !source_location
+                            .bordering(false)
+                            .chain(source_location.diagonals(false))
+                            .any(|cell| cell == target.location))
+                {
+                    continue;
+                }
+                let event = matches!(outcomes, OutcomeLog::Record(_)).then(|| {
+                    (
+                        target.card.instance_id.clone(),
+                        target.controller,
+                        self.position.units[source_index].card.instance_id.clone(),
+                    )
+                });
+                self.position.units[target_index].stealthed = false;
+                if let Some((instance_id, controller, source_instance_id)) = event {
+                    outcomes.push("stealth-lost", || {
+                        json!({
+                            "instanceId": instance_id,
+                            "seat": controller,
+                            "sourceInstanceId": source_instance_id,
+                        })
+                    });
+                }
+            }
+            previous_source = Some(source_index);
+        }
+    }
+
     fn minion_current_stats(&self, unit: &UnitPosition) -> Result<(u16, u16, bool), GameError> {
         let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
         else {
@@ -2844,7 +2935,7 @@ impl Game {
         {
             return Err(GameError::IllegalAction);
         }
-        match &action.descriptor {
+        let applied = match &action.descriptor {
             ActionDescriptor::AllocateStrike {
                 amount,
                 target_instance_id,
@@ -2942,7 +3033,12 @@ impl Game {
             ActionDescriptor::DrawSpell => {
                 self.apply_draw_action(action.seat, DeckZone::Spellbook, true, outcomes)
             }
-        }
+        };
+        applied?;
+        let settlement_start = outcomes.len();
+        self.settle_nearby_enemy_stealth(outcomes);
+        outcomes.move_tail_before_completion(settlement_start);
+        Ok(())
     }
 
     fn apply_ranged_projectile_action(
@@ -3224,6 +3320,16 @@ impl Game {
         {
             return Err(GameError::IllegalAction);
         }
+        outcomes.push("defender-joined", || {
+            json!({
+                "from": from,
+                "instanceId": unit_instance_id,
+                "path": path,
+                "seat": seat,
+                "steps": path.len() - 1,
+                "to": to,
+            })
+        });
         match kind {
             UnitKind::Avatar => {
                 let avatar = &mut self.position.players[seat_index(seat)].avatar;
@@ -3231,16 +3337,25 @@ impl Game {
                 avatar.tapped = true;
             }
             UnitKind::Minion => {
-                let unit = self
-                    .position
+                for location in path.iter().skip(1) {
+                    self.position
+                        .units
+                        .iter_mut()
+                        .find(|unit| {
+                            unit.card.instance_id == *unit_instance_id && unit.controller == seat
+                        })
+                        .ok_or(GameError::IllegalAction)?
+                        .location = location.cell;
+                    self.settle_nearby_enemy_stealth(outcomes);
+                }
+                self.position
                     .units
                     .iter_mut()
                     .find(|unit| {
                         unit.card.instance_id == *unit_instance_id && unit.controller == seat
                     })
-                    .ok_or(GameError::IllegalAction)?;
-                unit.location = to.cell;
-                unit.tapped = true;
+                    .ok_or(GameError::IllegalAction)?
+                    .tapped = true;
             }
         }
         let defender = match kind {
@@ -3278,16 +3393,6 @@ impl Game {
         pending.defenders.push(defender);
         pending.target_removed |= removes_site;
         self.position.state_version += 1;
-        outcomes.push("defender-joined", || {
-            json!({
-                "from": from,
-                "instanceId": unit_instance_id,
-                "path": path,
-                "seat": seat,
-                "steps": path.len() - 1,
-                "to": to,
-            })
-        });
         if let Some(instance_id) = removed_target {
             outcomes.push(
                 "original-target-removed",
@@ -5276,6 +5381,16 @@ impl Game {
         {
             return Err(GameError::IllegalAction);
         }
+        outcomes.push("move-and-attack-activated", || {
+            json!({
+                "from": from,
+                "path": path,
+                "seat": seat,
+                "steps": path.len() - 1,
+                "to": to,
+                "unitInstanceId": unit_instance_id,
+            })
+        });
         match attacker_kind {
             UnitKind::Avatar => {
                 let avatar = &mut self.position.players[seat_index(seat)].avatar;
@@ -5283,14 +5398,21 @@ impl Game {
                 avatar.tapped = true;
             }
             UnitKind::Minion => {
-                let unit = self
-                    .position
+                for location in path.iter().skip(1) {
+                    self.position
+                        .units
+                        .iter_mut()
+                        .find(|unit| unit.card.instance_id == *unit_instance_id)
+                        .ok_or(GameError::IllegalAction)?
+                        .location = location.cell;
+                    self.settle_nearby_enemy_stealth(outcomes);
+                }
+                self.position
                     .units
                     .iter_mut()
                     .find(|unit| unit.card.instance_id == *unit_instance_id)
-                    .ok_or(GameError::IllegalAction)?;
-                unit.location = to.cell;
-                unit.tapped = true;
+                    .ok_or(GameError::IllegalAction)?
+                    .tapped = true;
             }
         }
         self.position.pending_combat = Some(PendingCombat {
@@ -5306,16 +5428,6 @@ impl Game {
         });
         self.position.phase = Phase::Attack;
         self.position.state_version += 1;
-        outcomes.push("move-and-attack-activated", || {
-            json!({
-                "from": from,
-                "path": path,
-                "seat": seat,
-                "steps": path.len() - 1,
-                "to": to,
-                "unitInstanceId": unit_instance_id,
-            })
-        });
         Ok(())
     }
 
@@ -6824,6 +6936,9 @@ impl Game {
             } else if unit.controller == next_seat {
                 unit.tapped = false;
             }
+        }
+        self.settle_nearby_enemy_stealth(outcomes);
+        for unit in &mut self.position.units {
             unit.disable_effects
                 .retain(|effect| effect.expires_at_seat != next_seat);
         }
@@ -6845,6 +6960,7 @@ impl Game {
                 })
             });
         }
+        self.settle_nearby_enemy_stealth(outcomes);
         let turn_number = self.position.turn_number;
         outcomes.push("turn-started", || {
             json!({
@@ -7681,5 +7797,104 @@ mod tests {
                 .ensure_selfplay_supported(),
             Err(GameError::UnsupportedManifestFact(field)) if field == "genesisGainMana"
         ));
+    }
+
+    #[test]
+    fn scent_hound_events_should_follow_source_identity_before_target_order() {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            for card_id in ["north-spell-1", "north-spell-2"] {
+                manifest["cards"][card_id]["nearbyEnemiesPermanentlyLoseStealth"] = json!(true);
+            }
+            for card_id in ["south-spell-1", "south-spell-2"] {
+                manifest["cards"][card_id]["stealth"] = json!(true);
+            }
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid Scent Hound manifest");
+        let card_id = |id: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == id)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let unit =
+            |card_id, instance_id: &str, controller, location: &str, stealthed| UnitPosition {
+                card: CardInstance {
+                    card_id,
+                    instance_id: IdentityHash::parse(instance_id).expect("fixture identity"),
+                    owner: controller,
+                    source: CardSource::Spellbook,
+                },
+                carried_lance_count: 0,
+                controller,
+                damage: 0,
+                disable_effects: Vec::new(),
+                disabled_until_damaged: false,
+                last_interacted_turn: None,
+                location: Cell::parse(location).expect("fixture cell"),
+                stealthed,
+                summoning_sickness: false,
+                tapped: false,
+                warded: false,
+            };
+        game.position.units = vec![
+            unit(
+                card_id("south-spell-1"),
+                "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+                Seat::South,
+                "D3",
+                true,
+            ),
+            unit(
+                card_id("south-spell-2"),
+                "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+                Seat::South,
+                "A2",
+                true,
+            ),
+            unit(
+                card_id("north-spell-1"),
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                Seat::North,
+                "A1",
+                false,
+            ),
+            unit(
+                card_id("north-spell-2"),
+                "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+                Seat::North,
+                "D4",
+                false,
+            ),
+        ];
+        let mut outcomes = Vec::new();
+        game.settle_nearby_enemy_stealth(&mut OutcomeLog::Record(&mut outcomes));
+
+        assert_eq!(
+            outcomes,
+            vec![
+                (
+                    "stealth-lost".to_owned(),
+                    json!({
+                        "instanceId": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+                        "seat": "south",
+                        "sourceInstanceId": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                    }),
+                ),
+                (
+                    "stealth-lost".to_owned(),
+                    json!({
+                        "instanceId": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+                        "seat": "south",
+                        "sourceInstanceId": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+                    }),
+                ),
+            ]
+        );
     }
 }

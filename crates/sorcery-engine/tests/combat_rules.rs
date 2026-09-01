@@ -486,6 +486,224 @@ fn disabled_raw_stealth_should_not_hide_an_attack_target() {
     assert_exact_replay(&setup.session);
 }
 
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one direct proof preserves movement, source ordering, disable expiry, and replay timing"
+)]
+fn rule_catalog_0107_scent_hounds_permanently_remove_nearby_enemy_stealth() {
+    let manifest = (1..=512)
+        .map(|seed| {
+            let base = scenario_manifest(seed, 2, 2, false, 1, 20);
+            mutate_scenario_manifest(&base, |card_id, card| {
+                if card_id.starts_with("north-spell-") {
+                    card["nearbyEnemiesPermanentlyLoseStealth"] = json!(true);
+                } else if let Some(ordinal) = card_id
+                    .strip_prefix("south-spell-")
+                    .and_then(|ordinal| ordinal.parse::<u8>().ok())
+                {
+                    if ordinal % 2 == 0 {
+                        *card = json!({
+                            "cardType": "magic",
+                            "disableTargetNearbyMinionUntilNextTurn": true,
+                            "manaCost": 0,
+                            "thresholds": { "air": 0, "earth": 1, "fire": 0, "water": 0 },
+                        });
+                    } else {
+                        card["gainsStealthAtEndOfTurn"] = json!(true);
+                        card["spellcaster"] = json!(true);
+                        card["stealth"] = json!(true);
+                    }
+                }
+            })
+        })
+        .find(|manifest| {
+            let preview = Session::new(manifest).expect("candidate Scent Hounds session");
+            let preview_state = state(&preview);
+            let cards = preview_state["cards"].as_object().expect("manifest cards");
+            let hand = preview_state["players"]["south"]["hand"]["spellbook"]
+                .as_array()
+                .expect("south opening Spellbook hand");
+            hand.iter()
+                .any(|card| cards[card["cardId"].as_str().expect("card id")]["cardType"] == "magic")
+                && hand.iter().any(|card| {
+                    cards[card["cardId"].as_str().expect("card id")]["cardType"] == "minion"
+                })
+        })
+        .expect("seed with a South minion and Freeze in the opening hand");
+    let mut session = Session::new(&manifest).expect("valid Scent Hounds scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let (hound_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C4"
+    });
+    let hound_id = hound_summon["cardInstanceId"]
+        .as_str()
+        .expect("Scent Hound identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (target_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C1"
+    });
+    let target_id = target_summon["cardInstanceId"]
+        .as_str()
+        .expect("Stealth target identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    let branch = session.clone();
+
+    let mut ordered_sources = branch.clone();
+    let (second_summon, _) = accept_where(&mut ordered_sources, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C3"
+    });
+    let second_hound_id = second_summon["cardInstanceId"]
+        .as_str()
+        .expect("second Scent Hound identity")
+        .to_owned();
+    accept_where(&mut ordered_sources, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == hound_id
+            && descriptor["to"]["cell"] == "C3"
+    });
+    accept_where(&mut ordered_sources, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
+    accept_where(&mut ordered_sources, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(&mut ordered_sources, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut ordered_sources, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    let (_, ordered_loss) = accept_where(&mut ordered_sources, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == target_id
+            && descriptor["to"]["cell"] == "C2"
+    });
+    assert_eq!(
+        ordered_loss
+            .events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect::<Vec<_>>(),
+        ["move-and-attack-activated", "stealth-lost"]
+    );
+    let lowest_hound_id = if hound_id < second_hound_id {
+        &hound_id
+    } else {
+        &second_hound_id
+    };
+    assert_eq!(
+        ordered_loss.events[1].payload,
+        json!({
+            "instanceId": target_id,
+            "seat": "south",
+            "sourceInstanceId": lowest_hound_id,
+        })
+    );
+    assert_exact_replay(&ordered_sources);
+
+    session = branch;
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == hound_id
+            && descriptor["to"]["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    let (_, movement_loss) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == target_id
+            && descriptor["to"]["cell"] == "C2"
+    });
+    assert_eq!(
+        movement_loss
+            .events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect::<Vec<_>>(),
+        ["move-and-attack-activated", "stealth-lost"]
+    );
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["target"]["instanceId"] == hound_id
+    });
+    let (_, disabled_end) =
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert_eq!(
+        disabled_end
+            .events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect::<Vec<_>>(),
+        ["stealth-gained", "turn-ended", "turn-started"]
+    );
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let (_, expiry) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert_eq!(
+        expiry
+            .events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "turn-ended",
+            "minion-disable-expired",
+            "stealth-lost",
+            "turn-started",
+        ]
+    );
+    assert_eq!(
+        expiry.events[2].payload,
+        json!({
+            "instanceId": target_id,
+            "seat": "south",
+            "sourceInstanceId": hound_id,
+        })
+    );
+    assert_eq!(
+        state(&session)["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .find(|unit| unit["instanceId"] == target_id)
+            .expect("Stealth target")["stealthed"],
+        false
+    );
+    assert_exact_replay(&session);
+}
+
 fn replay_game(session: &Session) -> Game {
     let mut game = Game::from_manifest_json(session.manifest_json()).expect("valid replay game");
     for receipt in session.transcript() {
