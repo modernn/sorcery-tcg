@@ -6,11 +6,12 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::action::{ActionDescriptor, DeckZone};
+use crate::action::{ActionDescriptor, DeckZone, GenesisTokenChoice};
 use crate::board::Region;
 use crate::canonical::{
     CanonicalError, IdentityHash, canonical_json, identity_hash, parse_json_without_duplicate_keys,
 };
+use crate::contract::Seat;
 use crate::game::{IssuedAction, SeatObservation};
 
 /// Policy snapshot schema understood by this module.
@@ -373,12 +374,50 @@ fn select_feature(
                 matches!(action.descriptor(), ActionDescriptor::Draw { zone: candidate } if *candidate == zone)
             })
         }
-        PolicyFeature::PoweredMovement | PolicyFeature::BeneficialTactic => None,
+        PolicyFeature::PoweredMovement => None,
+        PolicyFeature::BeneficialTactic => beneficial_tactic_index(
+            observation.seat(),
+            actions.iter().map(IssuedAction::descriptor),
+        )
+        .and_then(|index| actions.get(index)),
         PolicyFeature::MoveTowardEnemy => select_movement(observation, actions),
         PolicyFeature::EndTurn => actions
             .iter()
             .find(|action| matches!(action.descriptor(), ActionDescriptor::EndTurn)),
         PolicyFeature::CanonicalFallback => actions.first(),
+    }
+}
+
+fn beneficial_tactic_index<'a>(
+    seat: Seat,
+    descriptors: impl Iterator<Item = &'a ActionDescriptor>,
+) -> Option<usize> {
+    descriptors
+        .enumerate()
+        .filter_map(|(index, descriptor)| {
+            beneficial_tactic_rank(seat, descriptor).map(|rank| (rank, index))
+        })
+        .min_by_key(|(rank, _)| *rank)
+        .map(|(_, index)| index)
+}
+
+fn beneficial_tactic_rank(seat: Seat, descriptor: &ActionDescriptor) -> Option<u8> {
+    match descriptor {
+        ActionDescriptor::ShootProjectile {
+            hit: Some(target), ..
+        }
+        | ActionDescriptor::ShootDamageProjectile {
+            hit: Some(target), ..
+        } if target.seat() != seat => Some(0),
+        ActionDescriptor::CastMagic {
+            cemetery_minion_instance_id: Some(_),
+            ..
+        } => Some(1),
+        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => Some(2),
+        ActionDescriptor::ResolveGenesisToken {
+            choice: GenesisTokenChoice::PayOneMana,
+        } => Some(3),
+        _ => None,
     }
 }
 
@@ -617,4 +656,104 @@ pub fn parse_policy_snapshot(text: &str) -> Result<PolicySnapshot, PolicyError> 
         ));
     }
     Ok(snapshot)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::action::{ActionDescriptor, GenesisTokenChoice, ProjectileDirection, UnitTarget};
+    use crate::board::Cell;
+    use crate::canonical::IdentityHash;
+    use crate::contract::Seat;
+
+    use super::beneficial_tactic_index;
+
+    fn identity(hex: char) -> IdentityHash {
+        IdentityHash::parse(&format!("sha256:{}", hex.to_string().repeat(64)))
+            .expect("test identity")
+    }
+
+    fn target(seat: Seat) -> UnitTarget {
+        UnitTarget::Minion {
+            instance_id: identity('a'),
+            seat,
+        }
+    }
+
+    fn projectile(fixed: bool, hit: Option<UnitTarget>) -> ActionDescriptor {
+        if fixed {
+            ActionDescriptor::ShootDamageProjectile {
+                direction: ProjectileDirection::North,
+                hit,
+                path: Vec::new(),
+                shooter_instance_id: identity('b'),
+            }
+        } else {
+            ActionDescriptor::ShootProjectile {
+                direction: ProjectileDirection::North,
+                hit,
+                path: Vec::new(),
+                shooter_instance_id: identity('b'),
+            }
+        }
+    }
+
+    #[test]
+    fn beneficial_tactics_should_be_card_independent_safe_and_canonical() {
+        let cemetery_magic = ActionDescriptor::CastMagic {
+            card_id: "synthetic-magic".to_owned(),
+            card_instance_id: identity('c'),
+            caster_instance_id: identity('d'),
+            cemetery_minion_instance_id: Some(identity('e')),
+            target: None,
+        };
+        let enemy_magic = ActionDescriptor::CastMagic {
+            card_id: "synthetic-unknown-effect".to_owned(),
+            card_instance_id: identity('f'),
+            caster_instance_id: identity('1'),
+            cemetery_minion_instance_id: None,
+            target: Some(target(Seat::South)),
+        };
+        let rubble = ActionDescriptor::ReplaceRubbleWithTopAtlasSite {
+            target_cell: Cell::parse("A1").expect("cell"),
+            target_rubble_instance_id: identity('2'),
+        };
+        let pay = ActionDescriptor::ResolveGenesisToken {
+            choice: GenesisTokenChoice::PayOneMana,
+        };
+        let decline = ActionDescriptor::ResolveGenesisToken {
+            choice: GenesisTokenChoice::Decline,
+        };
+        let actions = vec![
+            projectile(false, None),
+            projectile(true, Some(target(Seat::North))),
+            enemy_magic,
+            decline,
+            pay,
+            rubble,
+            cemetery_magic,
+            projectile(false, Some(target(Seat::South))),
+            projectile(true, Some(target(Seat::South))),
+        ];
+
+        assert_eq!(
+            beneficial_tactic_index(Seat::North, actions.iter()),
+            Some(7)
+        );
+        assert_eq!(
+            beneficial_tactic_index(Seat::North, actions[..7].iter()),
+            Some(6)
+        );
+        assert_eq!(
+            beneficial_tactic_index(Seat::North, actions[..6].iter()),
+            Some(5)
+        );
+        assert_eq!(
+            beneficial_tactic_index(Seat::North, actions[..5].iter()),
+            Some(4)
+        );
+        assert_eq!(
+            beneficial_tactic_index(Seat::North, actions[..4].iter()),
+            None
+        );
+    }
 }
