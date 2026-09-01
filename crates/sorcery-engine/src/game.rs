@@ -715,8 +715,6 @@ fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
         Some("alternativeSummonPayment")
     } else if facts.at_start_of_controller_turn_teleport_to_random_site_or_void {
         Some("atStartOfControllerTurnTeleportToRandomSiteOrVoid")
-    } else if facts.airborne {
-        Some("airborne")
     } else if facts.burrowing {
         Some("burrowing")
     } else if facts
@@ -1463,7 +1461,7 @@ impl Game {
         else {
             return Err(GameError::IllegalAction);
         };
-        Ok(facts.airborne)
+        Ok(facts.airborne && !self.minion_is_disabled(unit))
     }
 
     fn defender_candidates(
@@ -1550,6 +1548,11 @@ impl Game {
             .pending_combat
             .as_ref()
             .ok_or(GameError::IllegalAction)?;
+        let attacker_airborne = self.combatant_airborne(
+            pending.attacker_kind,
+            pending.attacking_seat,
+            &pending.attacker_instance_id,
+        )?;
         let opposing_seat = other_seat(pending.attacking_seat);
         let opposing_player = &self.position.players[seat_index(opposing_seat)];
         let mut targets = Vec::new();
@@ -1559,20 +1562,22 @@ impl Game {
                 seat: opposing_seat,
             });
         }
-        targets.extend(
-            self.position
-                .units
-                .iter()
-                .filter(|unit| {
-                    unit.controller == opposing_seat
-                        && unit.location == pending.cell
-                        && !unit.stealthed
-                })
-                .map(|unit| CombatTarget::Minion {
+        for unit in &self.position.units {
+            if unit.controller != opposing_seat || unit.location != pending.cell || unit.stealthed {
+                continue;
+            }
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return Err(invalid("realm minion lacks Minion facts"));
+            };
+            if !facts.airborne || self.minion_is_disabled(unit) || attacker_airborne {
+                targets.push(CombatTarget::Minion {
                     instance_id: unit.card.instance_id.clone(),
                     seat: opposing_seat,
-                }),
-        );
+                });
+            }
+        }
         if self.attacker_can_target_sites(pending)?
             && let Some(site) = &self.position.sites[pending.cell.index()]
             && site.controller == opposing_seat
@@ -2481,7 +2486,13 @@ impl Game {
             let mut next_frontier = Vec::new();
             for path in frontier {
                 let current = *path.last().expect("movement path starts nonempty");
-                for cell in current.cell.bordering(profile.connects_top_bottom) {
+                for cell in current.cell.bordering(profile.connects_top_bottom).chain(
+                    profile
+                        .airborne
+                        .then(|| current.cell.diagonals(profile.connects_top_bottom))
+                        .into_iter()
+                        .flatten(),
+                ) {
                     let candidate = Location {
                         cell,
                         region: Region::Surface,
