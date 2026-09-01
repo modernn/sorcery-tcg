@@ -2151,7 +2151,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Malakhim untaps at its controller End Phase unless Disabled.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "disabled"
       ],
@@ -2163,8 +2163,8 @@
         "disable"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Malakhim untaps at its controller End Phase unless Disabled"
+        "file": "crates/sorcery-engine/tests/end_turn_lifecycle_rules.rs",
+        "testName": "malakhim_should_untap_only_when_tapped_and_enabled"
       }
     },
     {
@@ -2173,7 +2173,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Ignited dies before turn cleanup unless it is Disabled.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "disabled"
       ],
@@ -2183,8 +2183,8 @@
         "disable"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Ignited dies before turn cleanup unless it is Disabled"
+        "file": "crates/sorcery-engine/tests/end_turn_lifecycle_rules.rs",
+        "testName": "ignited_should_die_before_turn_cleanup_unless_disabled"
       }
     },
     {

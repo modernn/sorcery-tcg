@@ -409,11 +409,18 @@ struct PendingDeathriteBatch {
 #[derive(Clone, Debug)]
 struct PendingDeathrites {
     batches: Vec<PendingDeathriteBatch>,
+    continuation: Option<EndTurnContinuation>,
     corpses: Vec<UnitPosition>,
     deck_losers: Vec<Seat>,
     defeated_avatars: Vec<Seat>,
     return_decision_seat: Seat,
     return_phase: Phase,
+}
+
+#[derive(Clone, Debug)]
+struct EndTurnContinuation {
+    remaining_instance_ids: Vec<IdentityHash>,
+    seat: Seat,
 }
 
 #[derive(Clone, Debug)]
@@ -3572,6 +3579,25 @@ impl Game {
         return_decision_seat: Seat,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        self.begin_minion_deaths_with_continuation(
+            instance_ids,
+            defeated_avatars,
+            return_phase,
+            return_decision_seat,
+            None,
+            outcomes,
+        )
+    }
+
+    fn begin_minion_deaths_with_continuation(
+        &mut self,
+        instance_ids: &[IdentityHash],
+        defeated_avatars: &[Seat],
+        return_phase: Phase,
+        return_decision_seat: Seat,
+        continuation: Option<EndTurnContinuation>,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
         let (sources, corpses) = self.collect_minion_deaths(instance_ids)?;
         let batch = self.make_deathrite_batch(sources);
         let mut unique_defeated = Vec::new();
@@ -3582,6 +3608,7 @@ impl Game {
         }
         let pending = PendingDeathrites {
             batches: batch.into_iter().collect(),
+            continuation,
             corpses,
             deck_losers: Vec::new(),
             defeated_avatars: unique_defeated,
@@ -3672,8 +3699,7 @@ impl Game {
     ) -> Result<(), GameError> {
         loop {
             let Some(batch) = pending.batches.first_mut() else {
-                self.finish_deathrites(pending, outcomes);
-                return Ok(());
+                return self.finish_deathrites(pending, outcomes);
             };
             if batch.stage != DeathriteStage::Resolve {
                 let sources = match batch.stage {
@@ -3909,7 +3935,11 @@ impl Game {
         )
     }
 
-    fn finish_deathrites(&mut self, pending: PendingDeathrites, outcomes: &mut OutcomeLog<'_>) {
+    fn finish_deathrites(
+        &mut self,
+        pending: PendingDeathrites,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
         for corpse in pending.corpses {
             let card_id = self.rules.cards[usize::from(corpse.card.card_id.0)]
                 .id
@@ -3981,9 +4011,17 @@ impl Game {
                 })
             });
         } else {
+            if let Some(continuation) = pending.continuation {
+                return self.continue_end_turn_deaths(
+                    continuation.seat,
+                    &continuation.remaining_instance_ids,
+                    outcomes,
+                );
+            }
             self.position.phase = pending.return_phase;
             self.position.decision_seat = pending.return_decision_seat;
         }
+        Ok(())
     }
 
     fn apply_draw_action(
@@ -5524,6 +5562,65 @@ impl Game {
         {
             return Err(GameError::IllegalAction);
         }
+        let triggered: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .filter_map(|unit| {
+                if unit.controller != seat || self.minion_is_disabled(unit) {
+                    return None;
+                }
+                matches!(
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
+                    CardFacts::Minion(facts) if facts.dies_at_end_of_controller_turn
+                )
+                .then(|| unit.card.instance_id.clone())
+            })
+            .collect();
+        self.continue_end_turn_deaths(seat, &triggered, outcomes)?;
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    fn continue_end_turn_deaths(
+        &mut self,
+        seat: Seat,
+        remaining_instance_ids: &[IdentityHash],
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        for (index, instance_id) in remaining_instance_ids.iter().enumerate() {
+            if !self
+                .position
+                .units
+                .iter()
+                .any(|unit| unit.card.instance_id == *instance_id)
+            {
+                continue;
+            }
+            return self.begin_minion_deaths_with_continuation(
+                std::slice::from_ref(instance_id),
+                &[],
+                Phase::Main,
+                seat,
+                Some(EndTurnContinuation {
+                    remaining_instance_ids: remaining_instance_ids[index + 1..].to_vec(),
+                    seat,
+                }),
+                outcomes,
+            );
+        }
+        self.finish_end_turn_cleanup(seat, outcomes)
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one cleanup transaction preserves exact end-phase state and event ordering"
+    )]
+    fn finish_end_turn_cleanup(
+        &mut self,
+        seat: Seat,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
         let next_seat = other_seat(seat);
         let next_mana = self
             .position
@@ -5533,6 +5630,11 @@ impl Game {
             .filter(|site| site.controller == next_seat)
             .count();
         let next_mana = u16::try_from(next_mana).map_err(|_| GameError::IllegalAction)?;
+        for player in &mut self.position.players {
+            if player.air_thresholds_cast_this_turn.is_some() {
+                player.air_thresholds_cast_this_turn = Some(0);
+            }
+        }
         self.position.players[seat_index(seat)].mana = 0;
         let next_player = &mut self.position.players[seat_index(next_seat)];
         next_player.avatar.tapped = false;
@@ -5542,6 +5644,22 @@ impl Game {
             .units
             .iter()
             .map(|unit| self.minion_is_disabled(unit))
+            .collect();
+        let end_phase_untapped: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .zip(&disabled_units)
+            .filter_map(|(unit, disabled)| {
+                if unit.controller != seat || !unit.tapped || *disabled {
+                    return None;
+                }
+                matches!(
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
+                    CardFacts::Minion(facts) if facts.untaps_at_end_of_controller_turn
+                )
+                .then(|| (unit.card.instance_id.clone(), unit.controller))
+            })
             .collect();
         let expired_disable_effects: Vec<_> = self
             .position
@@ -5560,6 +5678,22 @@ impl Game {
                     })
             })
             .collect();
+        for (instance_id, controller) in &end_phase_untapped {
+            let unit = self
+                .position
+                .units
+                .iter_mut()
+                .find(|unit| unit.card.instance_id == *instance_id)
+                .ok_or(GameError::IllegalAction)?;
+            unit.tapped = false;
+            outcomes.push("minion-untapped", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": controller,
+                    "sourceInstanceId": instance_id,
+                })
+            });
+        }
         for (unit, disabled) in self.position.units.iter_mut().zip(disabled_units) {
             unit.damage = 0;
             if unit.controller == seat {
@@ -5589,7 +5723,6 @@ impl Game {
         self.position.active_seat = next_seat;
         self.position.decision_seat = next_seat;
         self.position.phase = Phase::Draw;
-        self.position.state_version += 1;
         outcomes.push(
             "turn-ended",
             || json!({ "seat": seat, "turnNumber": ended_turn }),
@@ -5720,7 +5853,7 @@ impl Game {
                 })
             })
             .collect::<Vec<_>>();
-        json!({
+        let mut value = json!({
             "batches": batches,
             "corpses": pending
                 .corpses
@@ -5731,7 +5864,18 @@ impl Game {
             "defeatedAvatars": pending.defeated_avatars,
             "returnDecisionSeat": pending.return_decision_seat,
             "returnPhase": pending.return_phase.as_str(),
-        })
+        });
+        if let (Value::Object(object), Some(continuation)) = (&mut value, &pending.continuation) {
+            object.insert(
+                "continuation".to_owned(),
+                json!({
+                    "kind": "end-turn",
+                    "remainingInstanceIds": continuation.remaining_instance_ids,
+                    "seat": continuation.seat,
+                }),
+            );
+        }
+        value
     }
 
     fn insert_pending_genesis_state(&self, object: &mut Map<String, Value>) {
