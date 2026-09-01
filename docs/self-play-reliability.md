@@ -17,8 +17,8 @@ game when a manifest fact was accepted but ignored.
   regression. A campaign has at most ten promotion attempts.
 - The per-game action bound is immutable for the campaign. A promoted champion must significantly
   outperform the root policy again on a fresh replay-verified audit before the campaign is sealed.
-- An unattended campaign must persist an authenticated checkpoint before process-restart recovery
-  can be called reliable.
+- An unattended campaign must persist its canonical self-hashed checkpoint before process-restart
+  recovery can be called reliable. The checkpoint ID provides content integrity, not a signature.
 
 ## Gate cadence
 
@@ -53,7 +53,9 @@ ordinary debug suite because running the same workload there takes several minut
   or rejected at manifest admission before their games can affect training.
 - The selector neighborhood is intentionally small and `seat-observation-v1` does not expose enough
   state for strong tactical play; `powered-movement` is therefore inactive.
-- Campaign seed/lineage, fixed action bound, attempt budget, and audit state are currently in memory
-  only. Authenticated restart checkpoints are required before long-running unattended campaigns.
+- Completed-call campaign state now round-trips through a strict checkpoint with the seed set,
+  lineage, fixed action bound, attempt budget, portfolio, and audit state. The coarse process command
+  still needs to reserve an operation and publish that checkpoint atomically before long rollouts;
+  otherwise a process crash during the call can discard the attempt.
 - Deck mutation, opponent-league rotation, cost-aware objectives, and post-reboot all-core soak
   reports come after the authoritative rule boundary is complete.

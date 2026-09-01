@@ -8,7 +8,11 @@ use sorcery_engine::deck::{
     OfficialCardMapping, Rarity, validate_deck,
 };
 use sorcery_engine::policy::{PolicySnapshot, parse_policy_snapshot};
-use sorcery_engine::selfplay::{SelfPlayCampaign, SelfPlayPair, train_and_promote};
+use sorcery_engine::selfplay::{
+    SelfPlayCampaign, SelfPlayPair, create_selfplay_campaign_checkpoint,
+    parse_selfplay_campaign_checkpoint, resume_selfplay_campaign,
+    serialize_selfplay_campaign_checkpoint, train_and_promote,
+};
 use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
 const BASELINE_FEATURES: [&str; 9] = [
@@ -56,6 +60,16 @@ fn manifest_with_id(mut manifest: Value) -> String {
     let manifest_id = identity_hash(&manifest).expect("manifest identity");
     manifest["manifestId"] = json!(manifest_id);
     canonical_json(&manifest).expect("canonical manifest")
+}
+
+fn rehash_checkpoint(mut checkpoint: Value) -> String {
+    let object = checkpoint
+        .as_object_mut()
+        .expect("campaign checkpoint object");
+    object.remove("checkpointId");
+    let checkpoint_id = identity_hash(&Value::Object(object.clone())).expect("checkpoint identity");
+    checkpoint["checkpointId"] = json!(checkpoint_id);
+    canonical_json(&checkpoint).expect("canonical checkpoint")
 }
 
 fn mutate_manifest(manifest: &str, mutate: impl FnOnce(&mut Value)) -> String {
@@ -167,6 +181,77 @@ fn one_pair<'a>(
         opponent,
         opponent_deck,
     )]
+}
+
+#[test]
+fn campaign_checkpoint_should_round_trip_and_require_the_validated_deck() {
+    let manifests = paired_manifests(30, 20);
+    let candidate_deck = validated_manifest_deck(&manifests.0, "north");
+    let opponent_deck = validated_manifest_deck(&manifests.0, "south");
+    let champion = policy(
+        &authority_hash(&manifests.0),
+        candidate_deck.deck_id().as_str(),
+        BASELINE_FEATURES,
+    );
+    let campaign =
+        SelfPlayCampaign::new(champion.clone(), candidate_deck.clone(), 500).expect("campaign");
+    let checkpoint = create_selfplay_campaign_checkpoint(&campaign).expect("campaign checkpoint");
+    let serialized =
+        serialize_selfplay_campaign_checkpoint(&checkpoint).expect("canonical checkpoint");
+    let parsed = parse_selfplay_campaign_checkpoint(&serialized).expect("parsed checkpoint");
+    let resumed =
+        resume_selfplay_campaign(&parsed, candidate_deck.clone()).expect("resumed campaign");
+
+    assert_eq!(parsed.checkpoint_id(), checkpoint.checkpoint_id());
+    assert_eq!(resumed.champion(), &champion);
+    assert_eq!(resumed.max_actions(), 500);
+    assert_eq!(resumed.promotion_attempts(), 0);
+    assert!(!resumed.is_finalized());
+    assert!(resume_selfplay_campaign(&parsed, opponent_deck).is_err());
+    assert!(parse_selfplay_campaign_checkpoint(&format!(" {serialized}")).is_err());
+    assert!(
+        parse_selfplay_campaign_checkpoint(&serialized.replacen(
+            '{',
+            "{\"kind\":\"duplicate\",",
+            1
+        ))
+        .is_err()
+    );
+    assert!(
+        parse_selfplay_campaign_checkpoint(&serialized.replace(
+            "\"kind\":\"sorcery-self-play-campaign-checkpoint\"",
+            "\"kind\":\"changed\""
+        ))
+        .is_err()
+    );
+
+    let mut impossible: Value = serde_json::from_str(&serialized).expect("checkpoint JSON");
+    impossible["promotionAttempts"] = json!(1);
+    impossible["promotionPortfolio"] = json!([{
+        "cell": {
+            "subgroup": "mirror",
+            "opponentPolicyId": champion.policy_id(),
+            "opponentDeckId": candidate_deck.deck_id(),
+            "scenarioId": identity_hash(&json!("scenario")).expect("scenario identity"),
+        },
+        "count": 128,
+    }]);
+    impossible["usedDevelopmentSeeds"] = json!((0_u32..21).collect::<Vec<_>>());
+    assert!(parse_selfplay_campaign_checkpoint(&rehash_checkpoint(impossible)).is_err());
+
+    let mut blank_subgroup: Value = serde_json::from_str(&serialized).expect("checkpoint JSON");
+    blank_subgroup["promotionAttempts"] = json!(1);
+    blank_subgroup["promotionPortfolio"] = json!([{
+        "cell": {
+            "subgroup": " ",
+            "opponentPolicyId": champion.policy_id(),
+            "opponentDeckId": candidate_deck.deck_id(),
+            "scenarioId": identity_hash(&json!("scenario")).expect("scenario identity"),
+        },
+        "count": 20,
+    }]);
+    blank_subgroup["usedDevelopmentSeeds"] = json!((0_u32..21).collect::<Vec<_>>());
+    assert!(parse_selfplay_campaign_checkpoint(&rehash_checkpoint(blank_subgroup)).is_err());
 }
 
 #[test]
@@ -494,6 +579,24 @@ fn production_sized_campaign_should_promote_and_seal_reproducibly() {
     assert!(first_promotion.promoted, "{first_promotion:#?}");
     assert_eq!(first_promotion, second_promotion);
 
+    let first_checkpoint =
+        create_selfplay_campaign_checkpoint(&first).expect("first campaign checkpoint");
+    let second_checkpoint =
+        create_selfplay_campaign_checkpoint(&second).expect("second campaign checkpoint");
+    let first_serialized = serialize_selfplay_campaign_checkpoint(&first_checkpoint)
+        .expect("first serialized checkpoint");
+    assert_eq!(
+        first_serialized,
+        serialize_selfplay_campaign_checkpoint(&second_checkpoint)
+            .expect("second serialized checkpoint")
+    );
+    first = resume_selfplay_campaign(
+        &parse_selfplay_campaign_checkpoint(&first_serialized).expect("parsed campaign checkpoint"),
+        candidate_deck.clone(),
+    )
+    .expect("resumed first campaign");
+    assert!(first.run_generation(&training, &promotion).is_err());
+
     let first_audit = first.final_audit(&audit).expect("first fresh final audit");
     let second_audit = second
         .final_audit(&audit)
@@ -506,4 +609,8 @@ fn production_sized_campaign_should_promote_and_seal_reproducibly() {
     assert!(second.is_finalized());
     assert_eq!(first.promotion_attempts(), 1);
     assert!(first.final_audit(&audit).is_err());
+    let sealed = create_selfplay_campaign_checkpoint(&first).expect("sealed checkpoint");
+    let mut sealed = resume_selfplay_campaign(&sealed, candidate_deck).expect("sealed campaign");
+    assert!(sealed.is_finalized());
+    assert!(sealed.final_audit(&audit).is_err());
 }

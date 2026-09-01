@@ -4,12 +4,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 use crate::batch::BatchClassification;
-use crate::canonical::{IdentityHash, identity_hash};
+use crate::canonical::{
+    CanonicalError, IdentityHash, canonical_json, identity_hash, parse_json_without_duplicate_keys,
+};
 use crate::contract::Seat;
 use crate::deck::{CanonicalDeck, DeckValidation};
 use crate::game::{Game, GameOutcome};
-use crate::policy::{PolicyError, PolicySnapshot};
+use crate::policy::{
+    PolicyError, PolicySnapshot, parse_policy_snapshot, serialize_policy_snapshot,
+};
 use crate::simulator::{SimulatorError, replay_selected, run_game};
 
 /// Largest accepted self-play suite. This keeps exact paired statistics in `u128`.
@@ -18,6 +24,8 @@ pub const MAX_SELF_PLAY_PAIRS: usize = 128;
 pub const MIN_PROMOTION_PAIRS: usize = 20;
 /// Largest precommitted number of promotion attempts in one campaign.
 pub const MAX_CAMPAIGN_PROMOTION_ATTEMPTS: u8 = 10;
+/// Maximum accepted canonical campaign checkpoint length.
+pub const SELF_PLAY_CHECKPOINT_MAX_BYTES: usize = 1024 * 1024;
 
 const CAMPAIGN_SIGNIFICANCE_DENOMINATOR: u128 = 100 * (MAX_CAMPAIGN_PROMOTION_ATTEMPTS as u128 + 1);
 
@@ -49,7 +57,8 @@ struct PreparedPair<'a> {
     opponent: &'a PolicySnapshot,
 }
 
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PortfolioCell {
     subgroup: String,
     opponent_policy_id: IdentityHash,
@@ -58,6 +67,13 @@ struct PortfolioCell {
 }
 
 type Portfolio = BTreeMap<PortfolioCell, usize>;
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PortfolioEntry {
+    cell: PortfolioCell,
+    count: usize,
+}
 
 /// Integer policy score; a win is two half-points and a draw is one.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -187,10 +203,9 @@ pub struct SelfPlayAudit {
     pub score: SelfPlayScore,
 }
 
-/// In-memory coordinator that prevents evaluation-seed reuse across one live campaign.
+/// Coordinator that prevents evaluation-seed reuse across one campaign.
 ///
-/// Process-restart guarantees require a future authenticated campaign checkpoint; constructing a
-/// second instance intentionally starts a separate campaign.
+/// Use the campaign checkpoint functions to preserve completed-call state across process restarts.
 #[derive(Debug)]
 pub struct SelfPlayCampaign {
     assigned_deck: DeckValidation,
@@ -203,11 +218,55 @@ pub struct SelfPlayCampaign {
     used_development_seeds: BTreeSet<u32>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 enum FinalAuditState {
     Open,
     Failed,
     Complete,
+}
+
+/// Canonical, self-hashed private campaign control state.
+///
+/// The validated assigned deck is deliberately external and must be supplied again on resume.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelfPlayCampaignCheckpoint {
+    assigned_deck_id: IdentityHash,
+    checkpoint_id: IdentityHash,
+    final_audit_state: FinalAuditState,
+    initial_policy: PolicySnapshot,
+    kind: String,
+    max_actions: usize,
+    promotion_attempts: u8,
+    promotion_portfolio: Option<Vec<PortfolioEntry>>,
+    promoted_policies: Vec<PolicySnapshot>,
+    schema_version: u8,
+    used_development_seeds: Vec<u32>,
+}
+
+impl SelfPlayCampaignCheckpoint {
+    /// Returns the self-hash over the checkpoint body.
+    #[must_use]
+    pub const fn checkpoint_id(&self) -> &IdentityHash {
+        &self.checkpoint_id
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RawSelfPlayCampaignCheckpoint {
+    assigned_deck_id: IdentityHash,
+    checkpoint_id: IdentityHash,
+    final_audit_state: FinalAuditState,
+    initial_policy: serde_json::Value,
+    kind: String,
+    max_actions: usize,
+    promotion_attempts: u8,
+    promotion_portfolio: Option<Vec<PortfolioEntry>>,
+    promoted_policies: Vec<serde_json::Value>,
+    schema_version: u8,
+    used_development_seeds: Vec<u32>,
 }
 
 impl FinalAuditState {
@@ -225,6 +284,8 @@ impl FinalAuditState {
 /// Self-play configuration, rollout, or replay verification failed.
 #[derive(Debug)]
 pub enum SelfPlayError {
+    /// Canonical serialization or hashing failed.
+    Canonical(CanonicalError),
     /// A policy snapshot was invalid.
     Policy(PolicyError),
     /// A rollout or authoritative replay failed.
@@ -240,6 +301,7 @@ pub enum SelfPlayError {
 impl fmt::Display for SelfPlayError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Canonical(error) => error.fmt(formatter),
             Self::Policy(error) => error.fmt(formatter),
             Self::Simulator(error) => error.fmt(formatter),
             Self::Json(error) => error.fmt(formatter),
@@ -254,11 +316,18 @@ impl fmt::Display for SelfPlayError {
 impl Error for SelfPlayError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::Canonical(error) => Some(error),
             Self::Policy(error) => Some(error),
             Self::Simulator(error) => Some(error),
             Self::Json(error) => Some(error),
             Self::NonTerminal | Self::Invalid(_) => None,
         }
+    }
+}
+
+impl From<CanonicalError> for SelfPlayError {
+    fn from(error: CanonicalError) -> Self {
+        Self::Canonical(error)
     }
 }
 
@@ -492,6 +561,272 @@ impl SelfPlayCampaign {
         self.final_audit_state = FinalAuditState::Complete;
         Ok(audit)
     }
+}
+
+fn checkpoint_body_value(checkpoint: &SelfPlayCampaignCheckpoint) -> serde_json::Value {
+    serde_json::json!({
+        "assignedDeckId": checkpoint.assigned_deck_id,
+        "finalAuditState": checkpoint.final_audit_state,
+        "initialPolicy": checkpoint.initial_policy,
+        "kind": checkpoint.kind,
+        "maxActions": checkpoint.max_actions,
+        "promotionAttempts": checkpoint.promotion_attempts,
+        "promotionPortfolio": checkpoint.promotion_portfolio,
+        "promotedPolicies": checkpoint.promoted_policies,
+        "schemaVersion": checkpoint.schema_version,
+        "usedDevelopmentSeeds": checkpoint.used_development_seeds,
+    })
+}
+
+fn validate_checkpoint(checkpoint: &SelfPlayCampaignCheckpoint) -> Result<(), SelfPlayError> {
+    if checkpoint.kind != "sorcery-self-play-campaign-checkpoint"
+        || checkpoint.schema_version != 1
+        || checkpoint.max_actions == 0
+        || checkpoint.promotion_attempts > MAX_CAMPAIGN_PROMOTION_ATTEMPTS
+    {
+        return Err(SelfPlayError::Invalid(
+            "self-play checkpoint kind, version, or bounds are invalid",
+        ));
+    }
+    if identity_hash(&checkpoint_body_value(checkpoint))? != checkpoint.checkpoint_id {
+        return Err(SelfPlayError::Invalid(
+            "self-play checkpoint identity is invalid",
+        ));
+    }
+    if checkpoint.assigned_deck_id != *checkpoint.initial_policy.deck_id()
+        || checkpoint.initial_policy.generation() != 0
+        || checkpoint.initial_policy.parent_policy_id().is_some()
+    {
+        return Err(SelfPlayError::Invalid(
+            "self-play checkpoint root policy is invalid",
+        ));
+    }
+    serialize_policy_snapshot(&checkpoint.initial_policy)?;
+    validate_checkpoint_lineage(checkpoint)?;
+    validate_checkpoint_progress(checkpoint)?;
+    Ok(())
+}
+
+fn validate_checkpoint_lineage(
+    checkpoint: &SelfPlayCampaignCheckpoint,
+) -> Result<(), SelfPlayError> {
+    if checkpoint.promoted_policies.len() > usize::from(checkpoint.promotion_attempts) {
+        return Err(SelfPlayError::Invalid(
+            "self-play checkpoint has more promotions than attempts",
+        ));
+    }
+    let mut parent = &checkpoint.initial_policy;
+    for policy in &checkpoint.promoted_policies {
+        serialize_policy_snapshot(policy)?;
+        policy.validate_binding(
+            checkpoint.initial_policy.authority_hash(),
+            &checkpoint.assigned_deck_id,
+            checkpoint.initial_policy.engine_version(),
+        )?;
+        if policy.parent_policy_id() != Some(parent.policy_id())
+            || policy.generation() != parent.generation().saturating_add(1)
+            || !parent
+                .neighbors()?
+                .iter()
+                .any(|neighbor| neighbor == policy)
+        {
+            return Err(SelfPlayError::Invalid(
+                "self-play checkpoint policy lineage is invalid",
+            ));
+        }
+        parent = policy;
+    }
+    Ok(())
+}
+
+fn validate_checkpoint_progress(
+    checkpoint: &SelfPlayCampaignCheckpoint,
+) -> Result<(), SelfPlayError> {
+    let portfolio_size = match (
+        checkpoint.promotion_attempts,
+        checkpoint.promotion_portfolio.as_deref(),
+    ) {
+        (0, None) if checkpoint.used_development_seeds.is_empty() => 0,
+        (attempts, Some(entries)) if attempts > 0 => validate_checkpoint_portfolio(entries)?,
+        _ => {
+            return Err(SelfPlayError::Invalid(
+                "self-play checkpoint progress is inconsistent",
+            ));
+        }
+    };
+    let attempts = usize::from(checkpoint.promotion_attempts);
+    if checkpoint
+        .used_development_seeds
+        .windows(2)
+        .any(|pair| pair[0] >= pair[1])
+        || checkpoint.used_development_seeds.len() < attempts * (portfolio_size + 1)
+        || checkpoint.used_development_seeds.len()
+            > attempts * (portfolio_size + MAX_SELF_PLAY_PAIRS)
+    {
+        return Err(SelfPlayError::Invalid(
+            "self-play checkpoint development seeds are invalid",
+        ));
+    }
+    if checkpoint.promotion_attempts == 0 && checkpoint.final_audit_state != FinalAuditState::Open {
+        return Err(SelfPlayError::Invalid(
+            "self-play checkpoint audit state is inconsistent",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_checkpoint_portfolio(entries: &[PortfolioEntry]) -> Result<usize, SelfPlayError> {
+    if entries.windows(2).any(|pair| pair[0].cell >= pair[1].cell)
+        || entries
+            .iter()
+            .any(|entry| entry.cell.subgroup.trim().is_empty())
+    {
+        return Err(SelfPlayError::Invalid(
+            "self-play checkpoint portfolio is not canonical",
+        ));
+    }
+    let total = entries.iter().try_fold(0_usize, |total, entry| {
+        if entry.count == 0 || entry.count > MAX_SELF_PLAY_PAIRS {
+            return Err(SelfPlayError::Invalid(
+                "self-play checkpoint portfolio count is invalid",
+            ));
+        }
+        total.checked_add(entry.count).ok_or(SelfPlayError::Invalid(
+            "self-play checkpoint portfolio count overflowed",
+        ))
+    })?;
+    if !(MIN_PROMOTION_PAIRS..=MAX_SELF_PLAY_PAIRS).contains(&total) {
+        return Err(SelfPlayError::Invalid(
+            "self-play checkpoint portfolio size is invalid",
+        ));
+    }
+    Ok(total)
+}
+
+fn portfolio_entries(portfolio: &Portfolio) -> Vec<PortfolioEntry> {
+    portfolio
+        .iter()
+        .map(|(cell, &count)| PortfolioEntry {
+            cell: cell.clone(),
+            count,
+        })
+        .collect()
+}
+
+fn parse_checkpoint_policy(value: &serde_json::Value) -> Result<PolicySnapshot, SelfPlayError> {
+    Ok(parse_policy_snapshot(&canonical_json(value)?)?)
+}
+
+/// Captures restart-safe campaign control state without authority-private card data.
+///
+/// # Errors
+///
+/// Returns [`SelfPlayError`] when the campaign state cannot be validated or hashed.
+pub fn create_selfplay_campaign_checkpoint(
+    campaign: &SelfPlayCampaign,
+) -> Result<SelfPlayCampaignCheckpoint, SelfPlayError> {
+    let mut checkpoint = SelfPlayCampaignCheckpoint {
+        assigned_deck_id: campaign.assigned_deck.deck_id().clone(),
+        checkpoint_id: identity_hash(&serde_json::Value::Null)?,
+        final_audit_state: campaign.final_audit_state,
+        initial_policy: campaign.initial_policy.clone(),
+        kind: "sorcery-self-play-campaign-checkpoint".to_owned(),
+        max_actions: campaign.max_actions,
+        promotion_attempts: campaign.promotion_attempts,
+        promotion_portfolio: campaign.promotion_portfolio.as_ref().map(portfolio_entries),
+        promoted_policies: campaign.promoted_policies.clone(),
+        schema_version: 1,
+        used_development_seeds: campaign.used_development_seeds.iter().copied().collect(),
+    };
+    checkpoint.checkpoint_id = identity_hash(&checkpoint_body_value(&checkpoint))?;
+    validate_checkpoint(&checkpoint)?;
+    Ok(checkpoint)
+}
+
+/// Serializes a validated campaign checkpoint as its unique canonical JSON representation.
+///
+/// # Errors
+///
+/// Returns [`SelfPlayError`] when the checkpoint is inconsistent or cannot be serialized.
+pub fn serialize_selfplay_campaign_checkpoint(
+    checkpoint: &SelfPlayCampaignCheckpoint,
+) -> Result<String, SelfPlayError> {
+    validate_checkpoint(checkpoint)?;
+    Ok(canonical_json(&serde_json::to_value(checkpoint)?)?)
+}
+
+/// Parses strict canonical campaign state and verifies its self-hash and policy lineage.
+///
+/// # Errors
+///
+/// Returns [`SelfPlayError`] for oversized, noncanonical, malformed, or inconsistent input.
+pub fn parse_selfplay_campaign_checkpoint(
+    text: &str,
+) -> Result<SelfPlayCampaignCheckpoint, SelfPlayError> {
+    if text.len() > SELF_PLAY_CHECKPOINT_MAX_BYTES {
+        return Err(SelfPlayError::Invalid(
+            "self-play checkpoint exceeds the supported byte bound",
+        ));
+    }
+    let value = parse_json_without_duplicate_keys(text)?;
+    if canonical_json(&value)? != text {
+        return Err(SelfPlayError::Invalid(
+            "self-play checkpoint must use canonical JSON",
+        ));
+    }
+    let raw: RawSelfPlayCampaignCheckpoint = serde_json::from_value(value)?;
+    let checkpoint = SelfPlayCampaignCheckpoint {
+        assigned_deck_id: raw.assigned_deck_id,
+        checkpoint_id: raw.checkpoint_id,
+        final_audit_state: raw.final_audit_state,
+        initial_policy: parse_checkpoint_policy(&raw.initial_policy)?,
+        kind: raw.kind,
+        max_actions: raw.max_actions,
+        promotion_attempts: raw.promotion_attempts,
+        promotion_portfolio: raw.promotion_portfolio,
+        promoted_policies: raw
+            .promoted_policies
+            .iter()
+            .map(parse_checkpoint_policy)
+            .collect::<Result<_, _>>()?,
+        schema_version: raw.schema_version,
+        used_development_seeds: raw.used_development_seeds,
+    };
+    validate_checkpoint(&checkpoint)?;
+    Ok(checkpoint)
+}
+
+/// Restores a campaign only after revalidating its external assigned deck.
+///
+/// # Errors
+///
+/// Returns [`SelfPlayError`] when the checkpoint or supplied deck binding is invalid.
+pub fn resume_selfplay_campaign(
+    checkpoint: &SelfPlayCampaignCheckpoint,
+    assigned_deck: DeckValidation,
+) -> Result<SelfPlayCampaign, SelfPlayError> {
+    validate_checkpoint(checkpoint)?;
+    if assigned_deck.deck_id() != &checkpoint.assigned_deck_id {
+        return Err(SelfPlayError::Invalid(
+            "self-play checkpoint assigned deck does not match",
+        ));
+    }
+    validate_assigned_policy(&checkpoint.initial_policy, &assigned_deck)?;
+    Ok(SelfPlayCampaign {
+        assigned_deck,
+        final_audit_state: checkpoint.final_audit_state,
+        initial_policy: checkpoint.initial_policy.clone(),
+        max_actions: checkpoint.max_actions,
+        promotion_portfolio: checkpoint.promotion_portfolio.as_ref().map(|entries| {
+            entries
+                .iter()
+                .map(|entry| (entry.cell.clone(), entry.count))
+                .collect()
+        }),
+        promotion_attempts: checkpoint.promotion_attempts,
+        promoted_policies: checkpoint.promoted_policies.clone(),
+        used_development_seeds: checkpoint.used_development_seeds.iter().copied().collect(),
+    })
 }
 
 fn validate_assigned_policy(
