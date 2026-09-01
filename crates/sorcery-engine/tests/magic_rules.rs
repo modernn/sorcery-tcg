@@ -164,6 +164,475 @@ fn assert_exact_replay(session: &Session) {
 #[test]
 #[expect(
     clippy::too_many_lines,
+    reason = "the direct proof retains targeting, Deathrite, Death's Door, terminal, and replay"
+)]
+fn rule_catalog_0019_targeted_magic_is_a_non_unit_source_and_resolves_deathrites() {
+    let cards = json!({
+        "north-avatar": avatar(1),
+        "north-magic": magic(("damageTargetUnit", json!(1)), 1),
+        "north-site": site(false),
+        "south-avatar": avatar(1),
+        "south-minion": minion(json!({
+            "deathriteDrawSite": true,
+            "defense": 1,
+            "manaCost": 1,
+            "preventsDamageFromUnitsWithPowerAtLeast": 4,
+        })),
+        "south-site": site(false),
+    });
+    let manifest = manifest(148, &cards, &["north-magic"; 6], &["south-minion"; 6]);
+    let mut session = opening_main(&manifest);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C1"
+    });
+    let target_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("target identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+
+    let before = state(&session);
+    let spell_id = before["players"]["north"]["hand"]["spellbook"][0]["instanceId"]
+        .as_str()
+        .expect("targeted Magic identity")
+        .to_owned();
+    let target_descriptors: Vec<_> = session
+        .legal_actions()
+        .expect("targeted Magic actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardInstanceId"] == spell_id
+        })
+        .map(|action| action.descriptor)
+        .collect();
+    let canonical_targets: Vec<_> = target_descriptors
+        .iter()
+        .map(|descriptor| canonical_json(descriptor).expect("canonical target descriptor"))
+        .collect();
+    let mut sorted_targets = canonical_targets.clone();
+    sorted_targets.sort_unstable();
+    assert_eq!(canonical_targets, sorted_targets);
+    let mut target_keys: Vec<_> = target_descriptors
+        .iter()
+        .map(|descriptor| {
+            format!(
+                "{}:{}:{}",
+                descriptor["target"]["kind"].as_str().expect("target kind"),
+                descriptor["target"]["seat"].as_str().expect("target seat"),
+                descriptor["target"]["instanceId"]
+                    .as_str()
+                    .expect("target identity")
+            )
+        })
+        .collect();
+    target_keys.sort_unstable();
+    let mut expected_targets = vec![
+        format!(
+            "avatar:north:{}",
+            before["players"]["north"]["avatar"]["card"]["instanceId"]
+                .as_str()
+                .expect("North Avatar identity")
+        ),
+        format!(
+            "avatar:south:{}",
+            before["players"]["south"]["avatar"]["card"]["instanceId"]
+                .as_str()
+                .expect("South Avatar identity")
+        ),
+        format!("minion:south:{target_id}"),
+    ];
+    expected_targets.sort_unstable();
+    assert_eq!(target_keys, expected_targets);
+
+    let north_mana_before = before["players"]["north"]["mana"]
+        .as_u64()
+        .expect("North mana");
+    let north_hand_before = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North hand")
+        .len();
+    let south_atlas_before = before["players"]["south"]["atlas"]
+        .as_array()
+        .expect("South Atlas")
+        .len();
+    let south_atlas_hand_before = before["players"]["south"]["hand"]["atlas"]
+        .as_array()
+        .expect("South Atlas hand")
+        .len();
+    let (_, killed) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardInstanceId"] == spell_id
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    assert_eq!(
+        event_types(&killed),
+        [
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "site-drawn",
+            "minion-died",
+            "magic-resolved",
+        ]
+    );
+    assert_eq!(killed.events[1].payload["amount"], 1);
+    assert_eq!(killed.events[1].payload["sourceInstanceId"], spell_id);
+    assert_eq!(killed.events[1].payload["targetInstanceId"], target_id);
+    let after = state(&session);
+    assert_eq!(after["players"]["north"]["mana"], north_mana_before - 1);
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("North hand")
+            .len(),
+        north_hand_before - 1
+    );
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("North cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == spell_id)
+    );
+    assert!(
+        !after["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .any(|unit| unit["instanceId"] == target_id)
+    );
+    assert!(
+        after["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == target_id)
+    );
+    assert_eq!(
+        after["players"]["south"]["atlas"]
+            .as_array()
+            .expect("South Atlas")
+            .len(),
+        south_atlas_before - 1
+    );
+    assert_eq!(
+        after["players"]["south"]["hand"]["atlas"]
+            .as_array()
+            .expect("South Atlas hand")
+            .len(),
+        south_atlas_hand_before + 1
+    );
+    assert_eq!(after["phase"], "main");
+    assert_exact_replay(&session);
+
+    for _ in 0..2 {
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+    }
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+    });
+    assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 0);
+    assert_eq!(state(&session)["terminal"]["status"], "active");
+
+    for _ in 0..2 {
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+    }
+    let (_, death_blow) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+    });
+    let terminal = state(&session)["terminal"].clone();
+    assert_eq!(terminal["status"], "finished");
+    assert_eq!(terminal["winner"], "north");
+    assert_eq!(terminal["loser"], "south");
+    assert_eq!(terminal["reason"], "avatar_defeated");
+    assert_eq!(
+        event_types(&death_blow)
+            .into_iter()
+            .rev()
+            .take(2)
+            .collect::<Vec<_>>(),
+        ["game-ended", "magic-resolved"]
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn targeted_magic_allows_friendly_stealth_and_excludes_enemy_active_stealth() {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-magic": magic(("damageTargetUnit", json!(1)), 0),
+        "north-minion": minion(json!({ "stealth": true })),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({ "stealth": true })),
+        "south-site": site(false),
+    });
+    let north_spellbook = [
+        "north-magic",
+        "north-magic",
+        "north-magic",
+        "north-minion",
+        "north-minion",
+        "north-minion",
+    ];
+    let manifest = (1..=512)
+        .map(|seed| manifest(seed, &cards, &north_spellbook, &["south-minion"; 6]))
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("target visibility candidate");
+            let hand = state(&preview)["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("North opening hand")
+                .clone();
+            ["north-magic", "north-minion"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+        .expect("bounded seed with Magic and friendly Stealth");
+    let mut session = opening_main(&manifest);
+    let (friendly, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "north-minion"
+    });
+    let friendly_id = friendly["cardInstanceId"]
+        .as_str()
+        .expect("friendly Stealth identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (enemy, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "south-minion"
+    });
+    let enemy_id = enemy["cardInstanceId"]
+        .as_str()
+        .expect("enemy Stealth identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let target_ids: Vec<_> = session
+        .legal_actions()
+        .expect("Stealth target actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-magic"
+        })
+        .filter_map(|action| {
+            action.descriptor["target"]["instanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect();
+    assert!(target_ids.contains(&friendly_id));
+    assert!(!target_ids.contains(&enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn targeted_magic_breaks_ward_instead_of_damaging_the_minion() {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-magic": magic(("damageTargetUnit", json!(1)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({ "defense": 1, "ward": true })),
+        "south-site": site(false),
+    });
+    let manifest = manifest(149, &cards, &["north-magic"; 6], &["south-minion"; 6]);
+    let mut session = opening_main(&manifest);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C1"
+    });
+    let target_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("warded target identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["target"]["instanceId"] == target_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "ward-broken",
+            "magic-resolved",
+        ]
+    );
+    let target = state(&session)["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == target_id)
+        .expect("Ward survivor")
+        .clone();
+    assert_eq!(target["damage"], 0);
+    assert_eq!(target["warded"], false);
+    assert_exact_replay(&session);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the direct Lash proof retains nearby legality and both survivor and death branches"
+)]
+fn rule_catalog_0024_lash_damages_then_untaps_only_a_surviving_nearby_minion() {
+    let mut lash = magic(("damageTargetUnit", json!(1)), 0);
+    lash["targetNearby"] = json!(true);
+    lash["untapTargetMinionAfterDamage"] = json!(true);
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-lash": lash,
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({
+            "defense": 2,
+            "summonToAnySite": true,
+            "tapForMana": 1,
+        })),
+        "south-site": site(false),
+    });
+    let manifest = manifest(230, &cards, &["north-lash"; 6], &["south-minion"; 8]);
+    let mut session = opening_main(&manifest);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (nearby, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C4"
+    });
+    let nearby_id = nearby["cardInstanceId"]
+        .as_str()
+        .expect("nearby target identity")
+        .to_owned();
+    let (distant, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C1"
+    });
+    let distant_id = distant["cardInstanceId"]
+        .as_str()
+        .expect("distant target identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "activate-mana" && descriptor["unitInstanceId"] == nearby_id
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+
+    let lash_actions: Vec<_> = session
+        .legal_actions()
+        .expect("Lash actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-lash"
+        })
+        .collect();
+    assert!(!lash_actions.is_empty());
+    assert!(lash_actions.iter().all(|action| {
+        action.descriptor["target"]["kind"] == "minion"
+            && action.descriptor["target"]["instanceId"] == nearby_id
+            && action.descriptor["target"]["instanceId"] != distant_id
+    }));
+
+    let (_, survived) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["target"]["instanceId"] == nearby_id
+    });
+    assert_eq!(
+        event_types(&survived),
+        [
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "minion-untapped",
+            "magic-resolved",
+        ]
+    );
+    let survivor = state(&session)["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == nearby_id)
+        .expect("surviving target")
+        .clone();
+    assert_eq!(survivor["damage"], 1);
+    assert_eq!(survivor["tapped"], false);
+
+    let (_, died) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["target"]["instanceId"] == nearby_id
+    });
+    assert_eq!(
+        event_types(&died),
+        [
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "minion-died",
+            "magic-resolved",
+        ]
+    );
+    assert!(
+        !state(&session)["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .any(|unit| unit["instanceId"] == nearby_id)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
     reason = "the direct proof retains token creation, combat, banishment, and replay"
 )]
 fn token_magic_should_summon_in_cell_order_and_banish_a_dead_token() {

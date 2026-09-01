@@ -705,6 +705,7 @@ fn unsupported_selfplay_magic(facts: &MagicFacts) -> Option<&'static str> {
     match facts.effect {
         MagicEffect::HealController(_)
         | MagicEffect::ReturnMinionFromOwnCemetery
+        | MagicEffect::DamageTargetUnit { .. }
         | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
         | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => None,
         MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite => {
@@ -717,7 +718,6 @@ fn unsupported_selfplay_magic(facts: &MagicFacts) -> Option<&'static str> {
             Some("damageEachUnitAtLocationWithinTwoSteps")
         }
         MagicEffect::DamageRandomUnitAtLocation(_) => Some("damageRandomUnitAtLocation"),
-        MagicEffect::DamageTargetUnit { .. } => Some("damageTargetUnit"),
         MagicEffect::DestroyTargetSiteWithDamageGrid(_) => Some("destroyTargetSiteWithDamageGrid"),
         MagicEffect::FightAllyWithAdjacentEnemy => Some("fightAllyWithAdjacentEnemy"),
         MagicEffect::GainControlOfTargetNearbyMinion => Some("gainControlOfTargetNearbyMinion"),
@@ -2456,6 +2456,73 @@ impl Game {
         }
     }
 
+    fn spellcaster_location(
+        &self,
+        seat: Seat,
+        caster_instance_id: &IdentityHash,
+    ) -> Result<Cell, GameError> {
+        let player = &self.position.players[seat_index(seat)];
+        if player.avatar.card.instance_id == *caster_instance_id {
+            return Ok(player.avatar.location);
+        }
+        self.position
+            .units
+            .iter()
+            .find(|unit| unit.controller == seat && unit.card.instance_id == *caster_instance_id)
+            .map(|unit| unit.location)
+            .ok_or(GameError::IllegalAction)
+    }
+
+    fn targeted_magic_choices(
+        &self,
+        seat: Seat,
+        caster_instance_id: &IdentityHash,
+        target_nearby: bool,
+        minion_only: bool,
+    ) -> Result<Vec<MagicChoice>, GameError> {
+        let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
+        let nearby = |location: Cell| {
+            location == caster_location
+                || caster_location
+                    .bordering(false)
+                    .chain(caster_location.diagonals(false))
+                    .any(|cell| cell == location)
+        };
+        let mut targets = Vec::new();
+        for target_seat in [Seat::North, Seat::South] {
+            let player = &self.position.players[seat_index(target_seat)];
+            if !minion_only && (!target_nearby || nearby(player.avatar.location)) {
+                targets.push((
+                    None,
+                    Some(UnitTarget::Avatar {
+                        instance_id: player.avatar.card.instance_id.clone(),
+                        seat: target_seat,
+                    }),
+                ));
+            }
+            targets.extend(
+                self.position
+                    .units
+                    .iter()
+                    .filter(|unit| {
+                        unit.controller == target_seat
+                            && (target_seat == seat || !self.minion_has_active_stealth(unit))
+                            && (!target_nearby || nearby(unit.location))
+                    })
+                    .map(|unit| {
+                        (
+                            None,
+                            Some(UnitTarget::Minion {
+                                instance_id: unit.card.instance_id.clone(),
+                                seat: target_seat,
+                            }),
+                        )
+                    }),
+            );
+        }
+        Ok(targets)
+    }
+
     fn magic_choices(
         &self,
         seat: Seat,
@@ -2485,20 +2552,18 @@ impl Game {
                     choices
                 }
             }
+            MagicEffect::DamageTargetUnit {
+                target_nearby,
+                untap_target_minion_after_damage,
+                ..
+            } => self.targeted_magic_choices(
+                seat,
+                caster_instance_id,
+                *target_nearby,
+                *untap_target_minion_after_damage,
+            )?,
             MagicEffect::DisableTargetNearbyMinionUntilNextTurn => {
-                let player = &self.position.players[seat_index(seat)];
-                let caster_location = if player.avatar.card.instance_id == *caster_instance_id {
-                    player.avatar.location
-                } else {
-                    self.position
-                        .units
-                        .iter()
-                        .find(|unit| {
-                            unit.controller == seat && unit.card.instance_id == *caster_instance_id
-                        })
-                        .ok_or(GameError::IllegalAction)?
-                        .location
-                };
+                let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
                 let mut targets: Vec<_> = self
                     .position
                     .units
@@ -6361,8 +6426,81 @@ impl Game {
                     });
                 }
             }
+            MagicEffect::DamageTargetUnit {
+                amount,
+                untap_target_minion_after_damage,
+                ..
+            } => {
+                let target = target.as_ref().ok_or(GameError::IllegalAction)?;
+                let target_instance_id = target.instance_id().clone();
+                outcomes.push("magic-damage-allocated", || {
+                    json!({
+                        "amount": amount,
+                        "sourceInstanceId": card_instance_id,
+                        "targetInstanceId": target_instance_id,
+                    })
+                });
+                let target_kind = match target {
+                    UnitTarget::Avatar { .. } => UnitKind::Avatar,
+                    UnitTarget::Minion { .. } => UnitKind::Minion,
+                };
+                let damage = self.apply_simple_damage(
+                    target_kind,
+                    target.seat(),
+                    &target_instance_id,
+                    u16::from(amount),
+                    UnitDamageSource {
+                        current_power: 0,
+                        lethal: false,
+                    },
+                    outcomes,
+                )?;
+                if damage.minion_died || damage.avatar_defeated {
+                    let defeated_seat = target.seat();
+                    self.begin_minion_deaths(
+                        if damage.minion_died {
+                            std::slice::from_ref(&target_instance_id)
+                        } else {
+                            &[]
+                        },
+                        if damage.avatar_defeated {
+                            std::slice::from_ref(&defeated_seat)
+                        } else {
+                            &[]
+                        },
+                        Phase::Main,
+                        self.position.active_seat,
+                        outcomes,
+                    )?;
+                }
+                if untap_target_minion_after_damage && !damage.minion_died {
+                    let UnitTarget::Minion {
+                        seat: target_seat, ..
+                    } = target
+                    else {
+                        return Err(GameError::IllegalAction);
+                    };
+                    let unit = self
+                        .position
+                        .units
+                        .iter_mut()
+                        .find(|unit| unit.card.instance_id == target_instance_id)
+                        .ok_or(GameError::IllegalAction)?;
+                    if unit.tapped {
+                        unit.tapped = false;
+                        outcomes.push("minion-untapped", || {
+                            json!({
+                                "instanceId": target_instance_id,
+                                "seat": target_seat,
+                                "sourceInstanceId": card_instance_id,
+                            })
+                        });
+                    }
+                }
+            }
             _ => return Err(GameError::IllegalAction),
         }
+        let resolved_start = outcomes.len();
         outcomes.push("magic-resolved", || {
             json!({
                 "cardId": card_id,
@@ -6370,6 +6508,7 @@ impl Game {
                 "owner": owner,
             })
         });
+        outcomes.move_tail_before_completion(resolved_start);
         self.position.state_version += 1;
         Ok(())
     }
