@@ -82,7 +82,7 @@ fn worker_counts_should_produce_identical_ordered_authoritative_results() {
     assert_eq!(one_value[0]["report"]["replayVerified"], true);
     assert_eq!(
         one_value[0]["report"]["classification"],
-        "unranked_partial_rules"
+        "unranked_partial_rules_unverified_authority"
     );
     assert_eq!(one_value[0]["report"]["terminal"]["status"], "finished");
     assert!(one_value[0].get("acceptedActionCount").is_none());

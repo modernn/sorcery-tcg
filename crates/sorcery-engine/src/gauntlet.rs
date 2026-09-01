@@ -222,7 +222,7 @@ pub fn run_gauntlet(
         average_turns,
         by_deck,
         by_seat,
-        classification: BatchClassification::UnrankedPartialRules,
+        classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
         game_count: games.len(),
         games,
         seeds: pairs.iter().map(|pair| pair.seed).collect(),

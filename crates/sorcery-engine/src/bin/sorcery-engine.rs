@@ -1,24 +1,85 @@
+use std::collections::BTreeMap;
 use std::error::Error;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sorcery_engine::batch::{
-    BatchJob, GameBatchResult, MAX_BATCH_JOBS, MAX_BATCH_WORKERS, default_batch_workers,
-    run_game_batch,
+    BatchJob, GameBatchResult, MAX_BATCH_BYTES, MAX_BATCH_JOBS, MAX_BATCH_WORKERS,
+    default_batch_workers, run_game_batch,
 };
-use sorcery_engine::canonical::{canonical_json, identity_hash};
+use sorcery_engine::canonical::{
+    IdentityHash, canonical_json, identity_hash, parse_json_without_duplicate_keys,
+};
+use sorcery_engine::deck::{
+    CandidateDeck, CardCatalogEntry, CardCount, CardType, FormatContext, OfficialCardMapping,
+    validate_deck,
+};
 use sorcery_engine::policy::{PolicySnapshot, parse_policy_snapshot};
 use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
 const SYNTHETIC_DECK_ID: &str =
     "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const MAX_BATCH_JSON_BYTES: usize = MAX_BATCH_BYTES + 1024 * 1024;
 
 type CliResult<T> = Result<T, Box<dyn Error>>;
 
 enum Command {
     Demo { seed: u32 },
     Batch { workers: usize, seeds: Vec<u32> },
+    BatchJson,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BatchJsonRequest {
+    schema_version: u8,
+    workers: usize,
+    jobs: Vec<BatchJsonJob>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BatchJsonJob {
+    manifest_json: String,
+    north_deck_id: IdentityHash,
+    north_policy: Value,
+    south_deck_id: IdentityHash,
+    south_policy: Value,
+}
+
+struct ValidatedBatchJsonJob {
+    manifest_json: String,
+    north_deck_id: IdentityHash,
+    north_policy: PolicySnapshot,
+    south_deck_id: IdentityHash,
+    south_policy: PolicySnapshot,
+}
+
+#[derive(Deserialize)]
+struct ManifestDeckEnvelope {
+    cards: BTreeMap<String, ManifestCard>,
+    decks: ManifestDecks,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ManifestCard {
+    card_type: CardType,
+    token: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct ManifestDecks {
+    north: ManifestDeck,
+    south: ManifestDeck,
+}
+
+#[derive(Deserialize)]
+struct ManifestDeck {
+    atlas: Vec<String>,
+    avatar: String,
+    spellbook: Vec<String>,
 }
 
 fn main() {
@@ -40,6 +101,10 @@ fn run() -> CliResult<()> {
         }
         Command::Batch { workers, seeds } => {
             write_canonical_json(&run_synthetic_batch(&seeds, workers)?)
+        }
+        Command::BatchJson => {
+            let input = read_batch_json_stdin()?;
+            write_canonical_json(&run_batch_json(&input)?)
         }
     }
 }
@@ -70,11 +135,130 @@ fn parse_args(args: impl Iterator<Item = String>) -> CliResult<Command> {
             }
             Ok(Command::Batch { workers, seeds })
         }
+        Some("batch-json") => {
+            if args.next().is_some() {
+                return Err(io::Error::other("usage: sorcery-engine batch-json").into());
+            }
+            Ok(Command::BatchJson)
+        }
         _ => Err(io::Error::other(
-            "usage: sorcery-engine demo [seed] | batch [workers] [seeds...]",
+            "usage: sorcery-engine demo [seed] | batch [workers] [seeds...] | batch-json",
         )
         .into()),
     }
+}
+
+fn read_batch_json_stdin() -> CliResult<Vec<u8>> {
+    let mut input = Vec::new();
+    io::stdin()
+        .lock()
+        .take(u64::try_from(MAX_BATCH_JSON_BYTES)? + 1)
+        .read_to_end(&mut input)?;
+    validate_batch_json_size(input.len())?;
+    Ok(input)
+}
+
+fn validate_batch_json_size(bytes: usize) -> CliResult<()> {
+    if bytes > MAX_BATCH_JSON_BYTES {
+        return Err(io::Error::other("batch-json input exceeds 65 MiB").into());
+    }
+    Ok(())
+}
+
+fn run_batch_json(input: &[u8]) -> CliResult<Vec<GameBatchResult>> {
+    validate_batch_json_size(input.len())?;
+    let text = std::str::from_utf8(input)?;
+    let value = parse_json_without_duplicate_keys(text)?;
+    let request: BatchJsonRequest = serde_json::from_value(value)?;
+    if request.schema_version != 1 {
+        return Err(io::Error::other("batch-json schemaVersion must be 1").into());
+    }
+    if !(1..=MAX_BATCH_WORKERS).contains(&request.workers) {
+        return Err(io::Error::other("batch-json workers must be 1-8").into());
+    }
+    if request.jobs.is_empty() || request.jobs.len() > MAX_BATCH_JOBS {
+        return Err(io::Error::other("batch-json must contain 1-256 jobs").into());
+    }
+    let validated = request
+        .jobs
+        .into_iter()
+        .map(|job| {
+            let (north_manifest_deck_id, south_manifest_deck_id) =
+                manifest_deck_ids(&job.manifest_json)?;
+            if job.north_deck_id != north_manifest_deck_id
+                || job.south_deck_id != south_manifest_deck_id
+            {
+                return Err(io::Error::other(
+                    "batch-json deck IDs do not match manifest deck composition",
+                )
+                .into());
+            }
+            Ok(ValidatedBatchJsonJob {
+                manifest_json: job.manifest_json,
+                north_deck_id: job.north_deck_id,
+                north_policy: parse_policy_snapshot(&canonical_json(&job.north_policy)?)?,
+                south_deck_id: job.south_deck_id,
+                south_policy: parse_policy_snapshot(&canonical_json(&job.south_policy)?)?,
+            })
+        })
+        .collect::<CliResult<Vec<_>>>()?;
+    let jobs = validated
+        .iter()
+        .map(|job| BatchJob {
+            manifest_json: &job.manifest_json,
+            north_deck_id: &job.north_deck_id,
+            north_policy: &job.north_policy,
+            south_deck_id: &job.south_deck_id,
+            south_policy: &job.south_policy,
+        })
+        .collect::<Vec<_>>();
+    Ok(run_game_batch(&jobs, request.workers)?)
+}
+
+fn manifest_deck_ids(manifest_json: &str) -> CliResult<(IdentityHash, IdentityHash)> {
+    let manifest: ManifestDeckEnvelope = serde_json::from_str(manifest_json)?;
+    let catalog = manifest
+        .cards
+        .into_iter()
+        .map(|(stable_id, card)| CardCatalogEntry {
+            stable_id,
+            card_type: card.card_type,
+            rarity: None,
+            engine_supported: true,
+            official_mapping: OfficialCardMapping::Unavailable,
+            token: card.token.unwrap_or(false),
+        })
+        .collect::<Vec<_>>();
+    let north = manifest_deck_id(manifest.decks.north, &catalog)?;
+    let south = manifest_deck_id(manifest.decks.south, &catalog)?;
+    Ok((north, south))
+}
+
+fn manifest_deck_id(deck: ManifestDeck, catalog: &[CardCatalogEntry]) -> CliResult<IdentityHash> {
+    let validation = validate_deck(
+        CandidateDeck {
+            avatar: deck.avatar,
+            atlas: counted_cards(deck.atlas)?,
+            spellbook: counted_cards(deck.spellbook)?,
+        },
+        catalog,
+        FormatContext::constructed(),
+    )?;
+    Ok(validation.deck_id().clone())
+}
+
+fn counted_cards(card_ids: Vec<String>) -> CliResult<Vec<CardCount>> {
+    let mut counts = BTreeMap::<String, u32>::new();
+    for card_id in card_ids {
+        let copies = counts.entry(card_id).or_default();
+        *copies = copies
+            .checked_add(1)
+            .ok_or_else(|| io::Error::other("manifest deck copy count overflowed"))?;
+    }
+    Ok(counts
+        .into_iter()
+        .map(|(card_id, copies)| CardCount { card_id, copies })
+        .collect())
 }
 
 fn parse_seed(value: &str) -> CliResult<u32> {
@@ -113,10 +297,14 @@ fn run_synthetic_batch(seeds: &[u32], workers: usize) -> CliResult<Vec<GameBatch
 }
 
 fn baseline_policy(manifest_json: &str) -> CliResult<PolicySnapshot> {
+    policy_for_deck(manifest_json, SYNTHETIC_DECK_ID)
+}
+
+fn policy_for_deck(manifest_json: &str, deck_id: &str) -> CliResult<PolicySnapshot> {
     let manifest: Value = serde_json::from_str(manifest_json)?;
     let mut body = json!({
         "authorityHash": manifest["authority"]["contentHash"],
-        "deckId": SYNTHETIC_DECK_ID,
+        "deckId": deck_id,
         "engineVersion": manifest["engineVersion"],
         "generation": 0,
         "observationVersion": "seat-observation-v1",
@@ -145,7 +333,14 @@ fn write_canonical_json(value: &impl Serialize) -> CliResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Command, parse_args};
+    use serde_json::json;
+    use sorcery_engine::canonical::canonical_json;
+    use sorcery_engine::synthetic::synthetic_demo_manifest_json;
+
+    use super::{
+        Command, MAX_BATCH_JSON_BYTES, manifest_deck_ids, parse_args, policy_for_deck,
+        run_batch_json, validate_batch_json_size,
+    };
 
     #[test]
     fn parse_args_should_apply_batch_defaults() {
@@ -166,6 +361,93 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "workers must be an integer from 1 through 8"
+        );
+    }
+
+    fn batch_json_request(schema_version: u8) -> Vec<u8> {
+        let manifests = [
+            synthetic_demo_manifest_json(31).expect("seed-31 manifest"),
+            synthetic_demo_manifest_json(23).expect("seed-23 manifest"),
+        ];
+        serde_json::to_vec(&json!({
+            "jobs": manifests.map(|manifest_json| {
+                let (north_deck_id, south_deck_id) =
+                    manifest_deck_ids(&manifest_json).expect("manifest deck identities");
+                let north_policy =
+                    policy_for_deck(&manifest_json, north_deck_id.as_str()).expect("north policy");
+                let south_policy =
+                    policy_for_deck(&manifest_json, south_deck_id.as_str()).expect("south policy");
+                json!({
+                    "manifestJson": manifest_json,
+                    "northDeckId": north_deck_id,
+                    "northPolicy": north_policy,
+                    "southDeckId": south_deck_id,
+                    "southPolicy": south_policy,
+                })
+            }),
+            "schemaVersion": schema_version,
+            "workers": 2,
+        }))
+        .expect("batch-json request")
+    }
+
+    #[test]
+    fn batch_json_should_repeat_deterministically_and_preserve_order() {
+        let request = batch_json_request(1);
+        let first = run_batch_json(&request).expect("first batch");
+        let second = run_batch_json(&request).expect("second batch");
+
+        assert_eq!(first, second);
+        assert_eq!(
+            first
+                .iter()
+                .map(|result| result.job_index)
+                .collect::<Vec<_>>(),
+            [0, 1]
+        );
+        assert_eq!(
+            canonical_json(&serde_json::to_value(first).expect("result JSON"))
+                .expect("canonical result"),
+            canonical_json(&serde_json::to_value(second).expect("result JSON"))
+                .expect("canonical result")
+        );
+    }
+
+    #[test]
+    fn batch_json_should_reject_malformed_and_unknown_input() {
+        assert!(run_batch_json(b"{").is_err());
+        assert!(run_batch_json(br#"{"jobs":[],"jobs":[],"schemaVersion":1,"workers":1}"#).is_err());
+        assert!(
+            run_batch_json(br#"{"jobs":[],"schemaVersion":1,"unknown":true,"workers":1}"#).is_err()
+        );
+    }
+
+    #[test]
+    fn batch_json_should_reject_oversized_input_before_parsing() {
+        assert!(validate_batch_json_size(MAX_BATCH_JSON_BYTES + 1).is_err());
+    }
+
+    #[test]
+    fn batch_json_should_reject_unsupported_schema() {
+        assert_eq!(
+            run_batch_json(&batch_json_request(2))
+                .expect_err("unsupported schema")
+                .to_string(),
+            "batch-json schemaVersion must be 1"
+        );
+    }
+
+    #[test]
+    fn batch_json_should_reject_wrong_deck_binding() {
+        let request = batch_json_request(1);
+        let mut value: serde_json::Value = serde_json::from_slice(&request).expect("request value");
+        let south_deck_id = value["jobs"][0]["southDeckId"].clone();
+        let south_policy = value["jobs"][0]["southPolicy"].clone();
+        value["jobs"][0]["northDeckId"] = south_deck_id;
+        value["jobs"][0]["northPolicy"] = south_policy;
+
+        assert!(
+            run_batch_json(&serde_json::to_vec(&value).expect("wrong binding request")).is_err()
         );
     }
 }

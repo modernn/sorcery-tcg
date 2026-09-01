@@ -173,7 +173,10 @@ fn assert_report_contract(report: &GauntletReport, value: &Value) {
         / 2.0;
     assert!((report.average_turns - expected_average).abs() < f64::EPSILON);
     assert_eq!(value["gameCount"], 2);
-    assert_eq!(value["classification"], "unranked_partial_rules");
+    assert_eq!(
+        value["classification"],
+        "unranked_partial_rules_unverified_authority"
+    );
     assert_eq!(value["games"][0]["jobIndex"], 0);
     assert_eq!(value["games"][1]["jobIndex"], 1);
     assert!(value["games"][0].get("result").is_none());

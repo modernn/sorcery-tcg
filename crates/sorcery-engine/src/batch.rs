@@ -26,8 +26,6 @@ pub const MAX_GAME_ACTIONS: usize = 500;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BatchClassification {
-    /// The game was exact for exercised mechanics but is not ranked-eligible.
-    UnrankedPartialRules,
     /// Rules are partial and raw manifests lack independently verified authority binding.
     UnrankedPartialRulesUnverifiedAuthority,
 }
@@ -387,7 +385,7 @@ fn run_job(job_index: usize, job: &BatchJob<'_>) -> Result<BatchResult, BatchErr
         job_index,
         manifest_id: session.manifest_id().clone(),
         accepted_action_count: session.transcript().len(),
-        classification: BatchClassification::UnrankedPartialRules,
+        classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
         final_state_hash: session
             .state_hash()
             .map_err(SessionError::from)
