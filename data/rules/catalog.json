@@ -2079,7 +2079,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Stealth blocks attacks, Defend, Intercept, and projectiles until interaction.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "stealth"
       ],
@@ -2092,8 +2092,8 @@
         "stealth-change"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Stealth blocks attacks, Defend, Intercept, and projectiles until interaction"
+        "file": "crates/sorcery-engine/tests/combat_rules.rs",
+        "testName": "rule_catalog_0104_stealth_hides_until_the_attacker_interacts"
       }
     },
     {

@@ -621,6 +621,7 @@ pub struct PrintingPrice {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PriceSnapshot {
     snapshot_id: String,
+    content_id: IdentityHash,
     prices: BTreeMap<PriceKey, u64>,
 }
 
@@ -638,7 +639,7 @@ pub struct PriceScope {
 }
 
 /// A price snapshot is malformed or arithmetic overflowed.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum PriceError {
     /// Snapshot identity is blank.
     EmptySnapshotId,
@@ -650,6 +651,8 @@ pub enum PriceError {
     CostOverflow,
     /// Authority supplied the same catalog card identity more than once.
     DuplicateCatalogCard(String),
+    /// Snapshot content could not be assigned a canonical identity.
+    Canonical(CanonicalError),
 }
 
 impl fmt::Display for PriceError {
@@ -668,11 +671,29 @@ impl fmt::Display for PriceError {
             Self::DuplicateCatalogCard(card_id) => {
                 write!(formatter, "duplicate catalog card identity: {card_id}")
             }
+            Self::Canonical(error) => error.fmt(formatter),
         }
     }
 }
 
-impl Error for PriceError {}
+impl Error for PriceError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Canonical(error) => Some(error),
+            Self::EmptySnapshotId
+            | Self::EmptyKeyField(_)
+            | Self::DuplicatePriceKey(_)
+            | Self::CostOverflow
+            | Self::DuplicateCatalogCard(_) => None,
+        }
+    }
+}
+
+impl From<CanonicalError> for PriceError {
+    fn from(error: CanonicalError) -> Self {
+        Self::Canonical(error)
+    }
+}
 
 impl PriceSnapshot {
     /// Validates and indexes one local snapshot without coalescing market dimensions.
@@ -705,8 +726,19 @@ impl PriceSnapshot {
                 return Err(PriceError::DuplicatePriceKey(Box::new(price.key)));
             }
         }
+        let content_id = identity_hash(&json!({
+            "prices": indexed
+                .iter()
+                .map(|(key, unit_price_cents)| json!({
+                    "key": key,
+                    "unitPriceCents": unit_price_cents,
+                }))
+                .collect::<Vec<_>>(),
+            "snapshotId": snapshot_id.as_str(),
+        }))?;
         Ok(Self {
             snapshot_id,
+            content_id,
             prices: indexed,
         })
     }
@@ -715,6 +747,12 @@ impl PriceSnapshot {
     #[must_use]
     pub fn snapshot_id(&self) -> &str {
         &self.snapshot_id
+    }
+
+    /// Returns the content-bound identity of the label and every qualified price.
+    #[must_use]
+    pub const fn content_id(&self) -> &IdentityHash {
+        &self.content_id
     }
 
     fn cheapest<'a>(
@@ -786,15 +824,55 @@ pub struct DeckCostLine {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeckCost {
     /// Canonical deck identity.
-    pub deck_id: IdentityHash,
+    deck_id: IdentityHash,
     /// Price snapshot identity.
-    pub snapshot_id: String,
-    /// Exact currency requested by the caller.
-    pub currency: String,
+    snapshot_id: String,
+    /// Content-bound price snapshot identity.
+    snapshot_content_id: IdentityHash,
+    /// Exact market scope requested by the caller.
+    scope: PriceScope,
     /// Canonically ordered lines.
-    pub lines: Vec<DeckCostLine>,
+    lines: Vec<DeckCostLine>,
     /// Full deck total, absent when any line is unavailable or ambiguous.
-    pub total_cents: Option<u64>,
+    total_cents: Option<u64>,
+}
+
+impl DeckCost {
+    /// Returns the canonical deck identity bound to this calculation.
+    #[must_use]
+    pub const fn deck_id(&self) -> &IdentityHash {
+        &self.deck_id
+    }
+
+    /// Returns the immutable price snapshot identity.
+    #[must_use]
+    pub fn snapshot_id(&self) -> &str {
+        &self.snapshot_id
+    }
+
+    /// Returns the content-bound price snapshot identity.
+    #[must_use]
+    pub const fn snapshot_content_id(&self) -> &IdentityHash {
+        &self.snapshot_content_id
+    }
+
+    /// Returns the exact requested market scope.
+    #[must_use]
+    pub const fn scope(&self) -> &PriceScope {
+        &self.scope
+    }
+
+    /// Returns canonically ordered price lines.
+    #[must_use]
+    pub fn lines(&self) -> &[DeckCostLine] {
+        &self.lines
+    }
+
+    /// Returns the exact total, or `None` when any line was not priced.
+    #[must_use]
+    pub const fn total_cents(&self) -> Option<u64> {
+        self.total_cents
+    }
 }
 
 fn cost_line(
@@ -928,7 +1006,8 @@ pub fn price_deck(
     Ok(DeckCost {
         deck_id: validation.deck_id.clone(),
         snapshot_id: snapshot.snapshot_id().to_owned(),
-        currency: scope.currency.clone(),
+        snapshot_content_id: snapshot.content_id().clone(),
+        scope: scope.clone(),
         lines,
         total_cents,
     })

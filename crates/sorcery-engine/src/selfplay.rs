@@ -11,7 +11,7 @@ use crate::canonical::{
     CanonicalError, IdentityHash, canonical_json, identity_hash, parse_json_without_duplicate_keys,
 };
 use crate::contract::Seat;
-use crate::deck::{CanonicalDeck, DeckValidation};
+use crate::deck::{CanonicalDeck, DeckCost, DeckValidation};
 use crate::game::{Game, GameOutcome};
 use crate::policy::{
     PolicyError, PolicySnapshot, parse_policy_snapshot, serialize_policy_snapshot,
@@ -44,6 +44,19 @@ pub struct SelfPlayPair<'a> {
     pub opponent: &'a PolicySnapshot,
     /// Validated deck bound to the opposing policy.
     pub opponent_deck: &'a DeckValidation,
+}
+
+/// One validated, exactly priced deck and its fixed seat-swapped evaluation suite.
+#[derive(Clone, Copy, Debug)]
+pub struct DeckComparisonCandidate<'a> {
+    /// Exact immutable deck cost from one shared price snapshot and currency.
+    pub cost: &'a DeckCost,
+    /// Ranked-eligible candidate deck.
+    pub deck: &'a DeckValidation,
+    /// Fixed paired evaluation suite.
+    pub pairs: &'a [SelfPlayPair<'a>],
+    /// Deterministic policy bound to `deck`.
+    pub policy: &'a PolicySnapshot,
 }
 
 #[derive(Debug)]
@@ -94,6 +107,28 @@ pub struct SelfPlayPairScore {
     south_manifest_id: IdentityHash,
     candidate_as_north_half_points: u8,
     candidate_as_south_half_points: u8,
+}
+
+/// One deterministic deck-comparison standing.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeckComparisonStanding {
+    /// Exact integer-cent deck cost.
+    pub cost_cents: u64,
+    /// Stable canonical deck identity.
+    pub deck_id: IdentityHash,
+    /// Lightweight paired rollout score.
+    pub score: SelfPlayScore,
+}
+
+/// Budget-constrained standings with authoritative replay restricted to the winner.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeckComparisonResult {
+    /// Raw-manifest results remain unranked until independent authority verification exists.
+    pub classification: BatchClassification,
+    /// Replay-verified score for the selected deck.
+    pub selected_score: SelfPlayScore,
+    /// Strongest-first standings, then cheaper, then canonical deck identity.
+    pub standings: Vec<DeckComparisonStanding>,
 }
 
 impl SelfPlayScore {
@@ -1073,6 +1108,230 @@ fn portfolio_covers(candidate: &Portfolio, expected: &Portfolio) -> bool {
             .all(|(cell, count)| candidate.get(cell).is_some_and(|seen| seen >= count))
 }
 
+fn same_comparison_suite(
+    left: &[SelfPlayPair<'_>],
+    right: &[SelfPlayPair<'_>],
+) -> Result<bool, SelfPlayError> {
+    if left.len() != right.len() {
+        return Ok(false);
+    }
+    for (left, right) in left.iter().zip(right) {
+        let left_manifest =
+            parse_json_without_duplicate_keys(left.candidate_as_north_manifest_json)?;
+        let right_manifest =
+            parse_json_without_duplicate_keys(right.candidate_as_north_manifest_json)?;
+        if left.seed != right.seed
+            || left.subgroup != right.subgroup
+            || left.opponent.policy_id() != right.opponent.policy_id()
+            || left.opponent_deck.deck_id() != right.opponent_deck.deck_id()
+            || !same_comparison_manifest(&left_manifest, &right_manifest)
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn same_comparison_manifest(left: &serde_json::Value, right: &serde_json::Value) -> bool {
+    let (Some(mut left_body), Some(mut right_body)) =
+        (shared_manifest_body(left), shared_manifest_body(right))
+    else {
+        return false;
+    };
+    if left_body
+        .as_object_mut()
+        .and_then(|body| body.remove("cards"))
+        .is_none()
+    {
+        return false;
+    }
+    if right_body
+        .as_object_mut()
+        .and_then(|body| body.remove("cards"))
+        .is_none()
+    {
+        return false;
+    }
+    left_body == right_body
+}
+
+fn merge_comparison_card_definitions(
+    seen: &mut BTreeMap<String, serde_json::Value>,
+    manifest: &serde_json::Value,
+) -> bool {
+    let Some(cards) = manifest.get("cards").and_then(serde_json::Value::as_object) else {
+        return false;
+    };
+    for (card_id, definition) in cards {
+        if seen.get(card_id).is_some_and(|known| known != definition) {
+            return false;
+        }
+        seen.insert(card_id.clone(), definition.clone());
+    }
+    true
+}
+
+fn merge_comparison_suite_cards(
+    seen: &mut BTreeMap<String, serde_json::Value>,
+    pairs: &[SelfPlayPair<'_>],
+) -> Result<bool, SelfPlayError> {
+    for pair in pairs {
+        let manifest = parse_json_without_duplicate_keys(pair.candidate_as_north_manifest_json)?;
+        if !merge_comparison_card_definitions(seen, &manifest) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn same_comparison_policy(left: &PolicySnapshot, right: &PolicySnapshot) -> bool {
+    left.observation_version() == right.observation_version()
+        && left.schema_version() == right.schema_version()
+        && left.selector() == right.selector()
+        && left.tie_break() == right.tie_break()
+}
+
+fn exact_candidate_cost(candidate: &DeckComparisonCandidate<'_>) -> Result<u64, SelfPlayError> {
+    if candidate.cost.deck_id() != candidate.deck.deck_id() {
+        return Err(SelfPlayError::Invalid(
+            "deck comparison cost is bound to a different deck",
+        ));
+    }
+    candidate.cost.total_cents().ok_or(SelfPlayError::Invalid(
+        "deck comparison requires an exact complete deck price",
+    ))
+}
+
+fn score_deck_candidate(
+    candidate: &DeckComparisonCandidate<'_>,
+    max_actions: usize,
+    verify_replays: bool,
+) -> Result<SelfPlayScore, SelfPlayError> {
+    let prepared = prepare_suite(candidate.pairs, candidate.deck, candidate.policy)?;
+    score_policy(
+        candidate.policy,
+        candidate.deck.deck_id(),
+        &prepared,
+        max_actions,
+        verify_replays,
+    )
+}
+
+/// Compares exactly priced decks on the same ordered, seat-swapped seed suite.
+///
+/// Speculative scoring stays on the compact engine path. Only the strongest affordable deck is
+/// rerun through authoritative replay before the result is returned. Ties prefer lower exact cost,
+/// then canonical deck identity.
+///
+/// # Errors
+///
+/// Returns [`SelfPlayError`] for missing or inconsistent prices, invalid deck bindings, differing
+/// seed/opponent suites, malformed manifests, nonterminal games, or replay divergence.
+pub fn compare_decks(
+    candidates: &[DeckComparisonCandidate<'_>],
+    max_budget_cents: u64,
+    max_actions: usize,
+) -> Result<DeckComparisonResult, SelfPlayError> {
+    if candidates.is_empty() {
+        return Err(SelfPlayError::Invalid(
+            "deck comparison requires at least one candidate",
+        ));
+    }
+    if max_actions == 0 {
+        return Err(SelfPlayError::Invalid(
+            "deck comparison action bound must be greater than zero",
+        ));
+    }
+
+    let mut deck_ids = BTreeSet::new();
+    let mut price_context = None;
+    let mut reference_policy = None;
+    let mut reference_pairs: Option<&[SelfPlayPair<'_>]> = None;
+    let mut card_definitions = BTreeMap::new();
+    let mut ranked = Vec::new();
+    for (candidate_index, candidate) in candidates.iter().enumerate() {
+        validate_assigned_policy(candidate.policy, candidate.deck)?;
+        if !deck_ids.insert(candidate.deck.deck_id()) {
+            return Err(SelfPlayError::Invalid(
+                "deck comparison repeats a candidate deck",
+            ));
+        }
+        let context = (candidate.cost.snapshot_content_id(), candidate.cost.scope());
+        if price_context.is_some_and(|reference| reference != context) {
+            return Err(SelfPlayError::Invalid(
+                "deck comparison requires one price snapshot and market scope",
+            ));
+        }
+        price_context = Some(context);
+
+        let cost_cents = exact_candidate_cost(candidate)?;
+        if cost_cents > max_budget_cents {
+            continue;
+        }
+
+        if reference_policy
+            .is_some_and(|reference| !same_comparison_policy(reference, candidate.policy))
+        {
+            return Err(SelfPlayError::Invalid(
+                "deck comparison requires one fixed policy strategy",
+            ));
+        }
+        reference_policy = Some(candidate.policy);
+
+        if let Some(reference) = reference_pairs {
+            if !same_comparison_suite(reference, candidate.pairs)? {
+                return Err(SelfPlayError::Invalid(
+                    "deck comparison requires the same ordered scenario, seed, and opponent suite",
+                ));
+            }
+        } else {
+            reference_pairs = Some(candidate.pairs);
+        }
+        if !merge_comparison_suite_cards(&mut card_definitions, candidate.pairs)? {
+            return Err(SelfPlayError::Invalid(
+                "deck comparison requires the same ordered scenario, seed, and opponent suite",
+            ));
+        }
+
+        let score = score_deck_candidate(candidate, max_actions, false)?;
+        ranked.push((
+            candidate_index,
+            DeckComparisonStanding {
+                cost_cents,
+                deck_id: candidate.deck.deck_id().clone(),
+                score,
+            },
+        ));
+    }
+    if ranked.is_empty() {
+        return Err(SelfPlayError::Invalid(
+            "deck comparison has no candidate within budget",
+        ));
+    }
+    ranked.sort_unstable_by(|(_, left), (_, right)| {
+        right
+            .score
+            .half_points
+            .cmp(&left.score.half_points)
+            .then_with(|| left.cost_cents.cmp(&right.cost_cents))
+            .then_with(|| left.deck_id.cmp(&right.deck_id))
+    });
+
+    let selected = candidates[ranked[0].0];
+    let selected_score = score_deck_candidate(&selected, max_actions, true)?;
+    if selected_score != ranked[0].1.score {
+        return Err(SelfPlayError::Invalid(
+            "authoritative replay changed the selected deck score",
+        ));
+    }
+
+    Ok(DeckComparisonResult {
+        classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
+        selected_score,
+        standings: ranked.into_iter().map(|(_, standing)| standing).collect(),
+    })
+}
+
 /// Nominates one deterministic neighbor and promotes it only after replay-gated heldout gains.
 ///
 /// # Errors
@@ -1515,10 +1774,11 @@ mod tests {
     use std::collections::BTreeMap;
 
     use crate::canonical::IdentityHash;
+    use serde_json::json;
 
     use super::{
         FinalAuditState, SelfPlayPairScore, SelfPlayScore, exact_sign_test_at_most_one_percent,
-        improves_without_regression,
+        improves_without_regression, merge_comparison_card_definitions,
     };
 
     fn identity(seed: u32, offset: u32) -> IdentityHash {
@@ -1639,5 +1899,22 @@ mod tests {
 
         assert_eq!(state, FinalAuditState::Failed);
         assert!(state.begin().is_err());
+    }
+
+    #[test]
+    fn comparison_card_registry_should_detect_drift_absent_from_the_first_candidate() {
+        let mut seen = BTreeMap::new();
+        assert!(merge_comparison_card_definitions(
+            &mut seen,
+            &json!({"cards": {"card:a": {"cost": 1}}}),
+        ));
+        assert!(merge_comparison_card_definitions(
+            &mut seen,
+            &json!({"cards": {"card:x": {"cost": 2}}}),
+        ));
+        assert!(!merge_comparison_card_definitions(
+            &mut seen,
+            &json!({"cards": {"card:x": {"cost": 3}}}),
+        ));
     }
 }

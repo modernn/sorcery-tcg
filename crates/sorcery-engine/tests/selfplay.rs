@@ -4,14 +4,15 @@ use serde_json::{Value, json};
 use sorcery_engine::batch::BatchClassification;
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::deck::{
-    CandidateDeck, CardCatalogEntry, CardCount, CardType, DeckValidation, FormatContext,
-    OfficialCardMapping, Rarity, validate_deck,
+    CandidateDeck, CardCatalogEntry, CardCount, CardType, DeckCost, DeckValidation, FormatContext,
+    OfficialCardMapping, PriceKey, PriceScope, PriceSnapshot, PrintingPrice, Rarity, price_deck,
+    validate_deck,
 };
 use sorcery_engine::policy::{PolicySnapshot, parse_policy_snapshot};
 use sorcery_engine::selfplay::{
-    SelfPlayCampaign, SelfPlayPair, create_selfplay_campaign_checkpoint,
-    parse_selfplay_campaign_checkpoint, resume_selfplay_campaign,
-    serialize_selfplay_campaign_checkpoint, train_and_promote,
+    DeckComparisonCandidate, SelfPlayCampaign, SelfPlayPair, compare_decks,
+    create_selfplay_campaign_checkpoint, parse_selfplay_campaign_checkpoint,
+    resume_selfplay_campaign, serialize_selfplay_campaign_checkpoint, train_and_promote,
 };
 use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
@@ -103,6 +104,24 @@ fn paired_manifests(seed: u32, avatar_life: u8) -> (String, String) {
     (north, manifest_with_id(south))
 }
 
+fn equivalent_candidate_variant(manifests: &(String, String)) -> (String, String) {
+    let north = mutate_manifest(&manifests.0, |manifest| {
+        let original_id = manifest["decks"]["north"]["spellbook"][0]
+            .as_str()
+            .expect("first North spell")
+            .to_owned();
+        let variant_id = format!("{original_id}-variant");
+        manifest["cards"][&variant_id] = manifest["cards"][&original_id].clone();
+        manifest["decks"]["north"]["spellbook"][0] = json!(variant_id);
+    });
+    let south = mutate_manifest(&north, |manifest| {
+        let north_deck = manifest["decks"]["north"].clone();
+        manifest["decks"]["north"] = manifest["decks"]["south"].clone();
+        manifest["decks"]["south"] = north_deck;
+    });
+    (north, south)
+}
+
 fn counted(ids: &[Value]) -> Vec<CardCount> {
     let mut counts = BTreeMap::<String, u32>::new();
     for id in ids {
@@ -181,6 +200,200 @@ fn one_pair<'a>(
         opponent,
         opponent_deck,
     )]
+}
+
+fn comparison_costs(
+    baseline: &DeckValidation,
+    variant: &DeckValidation,
+) -> (DeckCost, DeckCost, DeckCost) {
+    let mut definitions = BTreeMap::new();
+    for deck in [baseline.deck(), variant.deck()] {
+        definitions.insert(deck.avatar.clone(), (CardType::Avatar, None));
+        definitions.extend(deck.atlas.iter().map(|row| {
+            (
+                row.card_id.clone(),
+                (CardType::Site, Some(Rarity::Ordinary)),
+            )
+        }));
+        definitions.extend(deck.spellbook.iter().map(|row| {
+            (
+                row.card_id.clone(),
+                (CardType::Minion, Some(Rarity::Ordinary)),
+            )
+        }));
+    }
+    let mut cards = Vec::with_capacity(definitions.len());
+    let mut prices = Vec::with_capacity(definitions.len() * 2);
+    for (stable_id, (card_type, rarity)) in definitions {
+        let official_card_id = format!("official:{stable_id}");
+        cards.push(CardCatalogEntry {
+            stable_id: stable_id.clone(),
+            card_type,
+            rarity,
+            engine_supported: true,
+            official_mapping: OfficialCardMapping::Exact(official_card_id.clone()),
+            token: false,
+        });
+        for source in ["market:test", "market:other"] {
+            prices.push(PrintingPrice {
+                key: PriceKey {
+                    official_card_id: official_card_id.clone(),
+                    printing_id: format!("printing:{stable_id}:{source}"),
+                    variant: "standard".to_owned(),
+                    condition: "near-mint".to_owned(),
+                    currency: "USD".to_owned(),
+                    source: source.to_owned(),
+                },
+                unit_price_cents: u64::from(!stable_id.ends_with("-variant")) * 100,
+            });
+        }
+    }
+    let snapshot = PriceSnapshot::new("snapshot:test".to_owned(), prices)
+        .expect("valid shared price snapshot");
+    let scope = |source: &str| PriceScope {
+        variant: "standard".to_owned(),
+        condition: "near-mint".to_owned(),
+        currency: "USD".to_owned(),
+        source: source.to_owned(),
+    };
+    (
+        price_deck(baseline, &cards, &snapshot, &scope("market:test"))
+            .expect("baseline exact cost"),
+        price_deck(variant, &cards, &snapshot, &scope("market:test")).expect("variant exact cost"),
+        price_deck(variant, &cards, &snapshot, &scope("market:other"))
+            .expect("alternate-scope exact cost"),
+    )
+}
+
+fn assert_comparison_error(candidates: &[DeckComparisonCandidate<'_>], expected: &str) {
+    assert_eq!(
+        compare_decks(candidates, 10_000, 1_000)
+            .expect_err("invalid comparison must fail")
+            .to_string(),
+        expected
+    );
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one end-to-end deck comparison proof keeps its shared fixtures explicit"
+)]
+fn deck_comparison_should_use_fixed_seat_pairs_budget_and_cost_tie_break() {
+    let manifests = paired_manifests(44, 1);
+    let original_id = serde_json::from_str::<Value>(&manifests.0).expect("manifest JSON")["decks"]
+        ["north"]["spellbook"][0]
+        .as_str()
+        .expect("first North spell")
+        .to_owned();
+    let variant_manifests = equivalent_candidate_variant(&manifests);
+    let baseline_deck = validated_manifest_deck(&manifests.0, "north");
+    let variant_deck = validated_manifest_deck(&variant_manifests.0, "north");
+    let opponent_deck = validated_manifest_deck(&manifests.0, "south");
+    let authority = authority_hash(&manifests.0);
+    let baseline_policy = policy(
+        &authority,
+        baseline_deck.deck_id().as_str(),
+        BASELINE_FEATURES,
+    );
+    let variant_policy = policy(
+        &authority,
+        variant_deck.deck_id().as_str(),
+        BASELINE_FEATURES,
+    );
+    let opponent = policy(
+        &authority,
+        opponent_deck.deck_id().as_str(),
+        BASELINE_FEATURES,
+    );
+    let baseline_pairs = one_pair(&manifests, 44, &opponent, &opponent_deck);
+    let variant_pairs = one_pair(&variant_manifests, 44, &opponent, &opponent_deck);
+    let (baseline_cost, variant_cost, alternate_scope_cost) =
+        comparison_costs(&baseline_deck, &variant_deck);
+    let baseline = DeckComparisonCandidate {
+        cost: &baseline_cost,
+        deck: &baseline_deck,
+        pairs: &baseline_pairs,
+        policy: &baseline_policy,
+    };
+    let variant = DeckComparisonCandidate {
+        cost: &variant_cost,
+        deck: &variant_deck,
+        pairs: &variant_pairs,
+        policy: &variant_policy,
+    };
+
+    let forward =
+        compare_decks(&[baseline, variant], 10_000, 1_000).expect("budgeted deck comparison");
+    let reversed = compare_decks(&[variant, baseline], 10_000, 1_000)
+        .expect("input-order-independent deck comparison");
+
+    assert_eq!(forward, reversed);
+    assert_eq!(forward.standings.len(), 2);
+    assert_eq!(forward.standings[0].deck_id, *variant_deck.deck_id());
+    assert_eq!(forward.standings[0].cost_cents, 9_000);
+    assert_eq!(forward.selected_score, forward.standings[0].score);
+
+    let changed_variant_manifests = (
+        mutate_manifest(&variant_manifests.0, |manifest| {
+            manifest["firstSeat"] = json!("south");
+        }),
+        mutate_manifest(&variant_manifests.1, |manifest| {
+            manifest["firstSeat"] = json!("south");
+        }),
+    );
+    let changed_pairs = one_pair(&changed_variant_manifests, 44, &opponent, &opponent_deck);
+    let changed = DeckComparisonCandidate {
+        pairs: &changed_pairs,
+        ..variant
+    };
+    assert_comparison_error(
+        &[baseline, changed],
+        "deck comparison requires the same ordered scenario, seed, and opponent suite",
+    );
+
+    let mut changed_features = BASELINE_FEATURES;
+    changed_features.swap(0, 1);
+    let changed_policy = policy(
+        &authority,
+        variant_deck.deck_id().as_str(),
+        changed_features,
+    );
+    let changed = DeckComparisonCandidate {
+        policy: &changed_policy,
+        ..variant
+    };
+    assert_comparison_error(
+        &[baseline, changed],
+        "deck comparison requires one fixed policy strategy",
+    );
+
+    let changed_card_manifests = (
+        mutate_manifest(&variant_manifests.0, |manifest| {
+            manifest["cards"][&original_id]["cost"] = json!(9);
+        }),
+        mutate_manifest(&variant_manifests.1, |manifest| {
+            manifest["cards"][&original_id]["cost"] = json!(9);
+        }),
+    );
+    let changed_card_pairs = one_pair(&changed_card_manifests, 44, &opponent, &opponent_deck);
+    let changed_card = DeckComparisonCandidate {
+        pairs: &changed_card_pairs,
+        ..variant
+    };
+    assert_comparison_error(
+        &[baseline, changed_card],
+        "deck comparison requires the same ordered scenario, seed, and opponent suite",
+    );
+
+    let alternate_scope = DeckComparisonCandidate {
+        cost: &alternate_scope_cost,
+        ..variant
+    };
+    assert_comparison_error(
+        &[baseline, alternate_scope],
+        "deck comparison requires one price snapshot and market scope",
+    );
 }
 
 #[test]
@@ -495,27 +708,40 @@ fn pair_should_reject_scenario_changes_composition_mismatch_and_unsupported_fact
     )];
     assert!(train_and_promote(&champion, &candidate_deck, &unsupported, &heldout, 500).is_err());
 
-    for field in ["siteProvidesNoThreshold", "stealth"] {
-        let unsupported_north = mutate_manifest(&north, |manifest| {
-            manifest["cards"]["north-spell-1"][field] = json!(true);
-        });
-        let unsupported_south = mutate_manifest(&south, |manifest| {
-            manifest["cards"]["north-spell-1"][field] = json!(true);
-        });
-        let unsupported = [pair(
-            &unsupported_north,
-            &unsupported_south,
-            30,
-            &opponent,
-            &opponent_deck,
-        )];
-        assert_eq!(
-            train_and_promote(&champion, &candidate_deck, &unsupported, &heldout, 500)
-                .expect_err("self-play must reject incomplete facts")
-                .to_string(),
-            format!("manifest fact is not yet supported by Rust: {field}")
-        );
-    }
+    let unsupported_north = mutate_manifest(&north, |manifest| {
+        manifest["cards"]["north-spell-1"]["siteProvidesNoThreshold"] = json!(true);
+    });
+    let unsupported_south = mutate_manifest(&south, |manifest| {
+        manifest["cards"]["north-spell-1"]["siteProvidesNoThreshold"] = json!(true);
+    });
+    let unsupported = [pair(
+        &unsupported_north,
+        &unsupported_south,
+        30,
+        &opponent,
+        &opponent_deck,
+    )];
+    assert_eq!(
+        train_and_promote(&champion, &candidate_deck, &unsupported, &heldout, 500)
+            .expect_err("self-play must reject incomplete facts")
+            .to_string(),
+        "manifest fact is not yet supported by Rust: siteProvidesNoThreshold"
+    );
+
+    let stealth_north = mutate_manifest(&north, |manifest| {
+        manifest["cards"]["north-spell-1"]["stealth"] = json!(true);
+    });
+    let stealth_south = mutate_manifest(&south, |manifest| {
+        manifest["cards"]["north-spell-1"]["stealth"] = json!(true);
+    });
+    let stealth = [pair(
+        &stealth_north,
+        &stealth_south,
+        30,
+        &opponent,
+        &opponent_deck,
+    )];
+    assert!(train_and_promote(&champion, &candidate_deck, &stealth, &heldout, 500).is_ok());
 }
 
 #[test]

@@ -295,6 +295,197 @@ fn assert_exact_replay(session: &Session) {
     assert!(session.verify_replay().expect("verified replay"));
 }
 
+fn mutate_scenario_manifest(
+    manifest: &str,
+    mut mutate_card: impl FnMut(&str, &mut Value),
+) -> String {
+    let mut value: Value = serde_json::from_str(manifest).expect("scenario manifest value");
+    value
+        .as_object_mut()
+        .expect("manifest object")
+        .remove("manifestId")
+        .expect("manifest identity");
+    for (card_id, card) in value["cards"].as_object_mut().expect("manifest cards") {
+        mutate_card(card_id, card);
+    }
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    canonical_json(&value).expect("canonical scenario manifest")
+}
+
+fn minion_is_attack_target(session: &Session, instance_id: &str) -> bool {
+    session
+        .legal_actions()
+        .expect("attack actions")
+        .iter()
+        .any(|action| {
+            action.descriptor["kind"] == "declare-attack"
+                && action.descriptor["target"]["kind"] == "minion"
+                && action.descriptor["target"]["instanceId"] == instance_id
+        })
+}
+
+#[test]
+fn rule_catalog_0104_stealth_hides_until_the_attacker_interacts() {
+    let base = scenario_manifest(123, 3, 5, false, 1, 20);
+    let manifest = mutate_scenario_manifest(&base, |card_id, card| {
+        if card_id.starts_with("north-spell-") {
+            card["stealth"] = json!(true);
+        }
+    });
+    let mut setup = north_attacks_with_manifest(&manifest);
+
+    assert!(minion_is_attack_target(
+        &setup.session,
+        &setup.target_instance_id
+    ));
+    let (_, declined) = accept_where(&mut setup.session, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
+    assert_eq!(declined.events[0].payload["interceptWindowOpened"], false);
+    assert_eq!(state(&setup.session)["phase"], "main");
+    assert_eq!(
+        state(&setup.session)["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .find(|unit| unit["instanceId"] == setup.attacker_instance_id)
+            .expect("Stealth attacker")["stealthed"],
+        true
+    );
+
+    accept_where(&mut setup.session, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(&mut setup.session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut setup.session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == setup.target_instance_id
+            && descriptor["path"] == json!([{ "cell": "C2", "region": "surface" }])
+    });
+    assert!(!minion_is_attack_target(
+        &setup.session,
+        &setup.attacker_instance_id
+    ));
+    accept_where(&mut setup.session, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
+    accept_where(&mut setup.session, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+
+    accept_where(&mut setup.session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut setup.session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == setup.attacker_instance_id
+            && descriptor["path"] == json!([{ "cell": "C2", "region": "surface" }])
+    });
+    let (_, fought) = accept_where(&mut setup.session, |descriptor| {
+        descriptor["kind"] == "declare-attack"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == setup.target_instance_id
+    });
+    let event_types: Vec<_> = fought
+        .events
+        .iter()
+        .map(|event| event.event_type.as_str())
+        .collect();
+    assert_eq!(state(&setup.session)["phase"], "main");
+    assert!(!event_types.contains(&"defend-window-closed"));
+    assert_eq!(
+        event_types
+            .iter()
+            .filter(|event_type| **event_type == "stealth-lost")
+            .count(),
+        1
+    );
+    assert_eq!(
+        state(&setup.session)["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .find(|unit| unit["instanceId"] == setup.attacker_instance_id)
+            .expect("revealed attacker")["stealthed"],
+        false
+    );
+
+    accept_where(&mut setup.session, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(&mut setup.session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut setup.session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == setup.target_instance_id
+            && descriptor["path"] == json!([{ "cell": "C2", "region": "surface" }])
+    });
+    assert!(minion_is_attack_target(
+        &setup.session,
+        &setup.attacker_instance_id
+    ));
+    assert_exact_replay(&setup.session);
+}
+
+#[test]
+fn stealth_site_attack_should_reveal_after_strike_events() {
+    let base = scenario_manifest(124, 3, 5, false, 1, 20);
+    let manifest = mutate_scenario_manifest(&base, |card_id, card| {
+        if card_id.starts_with("north-spell-") {
+            card["stealth"] = json!(true);
+        }
+    });
+    let mut setup = north_attacks_with_manifest(&manifest);
+    let (_, receipt) = accept_where(&mut setup.session, |descriptor| {
+        descriptor["kind"] == "declare-attack" && descriptor["target"]["kind"] == "site"
+    });
+
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "attack-declared",
+            "undefended-site-struck",
+            "avatar-life-lost",
+            "stealth-lost",
+        ]
+    );
+    assert_eq!(state(&setup.session)["phase"], "main");
+    assert_exact_replay(&setup.session);
+}
+
+#[test]
+fn disabled_raw_stealth_should_not_hide_an_attack_target() {
+    let base = scenario_manifest(125, 3, 5, false, 1, 20);
+    let manifest = mutate_scenario_manifest(&base, |card_id, card| {
+        if card_id.starts_with("south-spell-") {
+            card["stealth"] = json!(true);
+            card["waterbound"] = json!(true);
+        }
+    });
+    let setup = north_attacks_with_manifest(&manifest);
+    let target = state(&setup.session)["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == setup.target_instance_id)
+        .expect("disabled raw-Stealth target")
+        .clone();
+
+    assert_eq!(target["stealthed"], true);
+    assert!(minion_is_attack_target(
+        &setup.session,
+        &setup.target_instance_id
+    ));
+    assert_exact_replay(&setup.session);
+}
+
 fn replay_game(session: &Session) -> Game {
     let mut game = Game::from_manifest_json(session.manifest_json()).expect("valid replay game");
     for receipt in session.transcript() {

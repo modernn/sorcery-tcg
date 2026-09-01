@@ -222,15 +222,21 @@ fn pricing_selects_the_deterministic_minimum_printing_and_totals_exact_cents() {
     prices.push(excluded);
     let snapshot = PriceSnapshot::new("snapshot:2026-08-31".to_owned(), prices)
         .expect("qualified price snapshot");
+    let changed_snapshot = PriceSnapshot::new(
+        "snapshot:2026-08-31".to_owned(),
+        vec![price("card:avatar", "printing:avatar-expensive", 301)],
+    )
+    .expect("changed price snapshot");
+    assert_ne!(snapshot.content_id(), changed_snapshot.content_id());
 
     let cost = price_deck(&validation, &cards, &snapshot, &scope()).expect("exact deck cost");
 
-    let selected_printing = match &cost.lines[0].status {
+    let selected_printing = match &cost.lines()[0].status {
         DeckCostStatus::Priced { key, .. } => Some(key.printing_id.as_str()),
         DeckCostStatus::AmbiguousMapping { .. } | DeckCostStatus::Unavailable { .. } => None,
     };
     assert_eq!(
-        (cost.total_cents, selected_printing),
+        (cost.total_cents(), selected_printing),
         (Some(1_770), Some("printing:avatar-minimum-a"))
     );
 }
@@ -260,14 +266,14 @@ fn pricing_reports_unavailable_and_ambiguous_official_mappings_without_a_total()
     let cost = price_deck(&validation, &cards, &snapshot, &scope()).expect("explicit gaps");
 
     assert!(
-        cost.total_cents.is_none()
+        cost.total_cents().is_none()
             && matches!(
-                cost.lines[0].status,
+                cost.lines()[0].status,
                 DeckCostStatus::AmbiguousMapping { ref official_card_ids }
                     if official_card_ids == &["official:a", "official:z"]
             )
-            && matches!(cost.lines[1].status, DeckCostStatus::Unavailable { .. }),
+            && matches!(cost.lines()[1].status, DeckCostStatus::Unavailable { .. }),
         "{:#?}",
-        cost.lines
+        cost.lines()
     );
 }

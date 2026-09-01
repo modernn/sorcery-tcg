@@ -736,8 +736,6 @@ fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
         Some("shootsDragProjectile")
     } else if facts.site_provides_no_threshold {
         Some("siteProvidesNoThreshold")
-    } else if facts.stealth {
-        Some("stealth")
     } else if facts.submerge {
         Some("submerge")
     } else if facts.tap_to_damage_each_unit_at_adjacent_location {
@@ -1437,7 +1435,7 @@ impl Game {
                 .units
                 .iter()
                 .find(|unit| unit.controller == seat && unit.card.instance_id == *instance_id)
-                .map(|unit| unit.stealthed)
+                .map(|unit| self.minion_has_active_stealth(unit))
                 .ok_or(GameError::IllegalAction),
         }
     }
@@ -1563,7 +1561,10 @@ impl Game {
             });
         }
         for unit in &self.position.units {
-            if unit.controller != opposing_seat || unit.location != pending.cell || unit.stealthed {
+            if unit.controller != opposing_seat
+                || unit.location != pending.cell
+                || self.minion_has_active_stealth(unit)
+            {
                 continue;
             }
             let CardFacts::Minion(facts) =
@@ -2177,7 +2178,7 @@ impl Game {
                         .filter(|unit| {
                             unit.card.instance_id != *shooter_instance_id
                                 && unit.location == location.cell
-                                && (!unit.stealthed || self.minion_is_disabled(unit))
+                                && !self.minion_has_active_stealth(unit)
                                 && (path.len() > 1 || unit.controller != seat)
                         })
                         .map(|unit| UnitTarget::Minion {
@@ -2298,6 +2299,10 @@ impl Game {
                 .unwrap_or(false)
     }
 
+    fn minion_has_active_stealth(&self, unit: &UnitPosition) -> bool {
+        unit.stealthed && !self.minion_is_disabled(unit)
+    }
+
     fn minion_current_stats(&self, unit: &UnitPosition) -> Result<(u16, u16, bool), GameError> {
         let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
         else {
@@ -2412,7 +2417,7 @@ impl Game {
                     .units
                     .iter()
                     .filter(|unit| {
-                        (unit.controller == seat || !unit.stealthed)
+                        (unit.controller == seat || !self.minion_has_active_stealth(unit))
                             && (unit.location == caster_location
                                 || caster_location
                                     .bordering(false)
@@ -2710,7 +2715,7 @@ impl Game {
                     .filter(|unit| {
                         unit.controller == target_seat
                             && nearby(unit.location)
-                            && (target_seat == seat || !unit.stealthed)
+                            && (target_seat == seat || !self.minion_has_active_stealth(unit))
                     })
                     .map(|unit| UnitTarget::Minion {
                         instance_id: unit.card.instance_id.clone(),
@@ -3446,16 +3451,15 @@ impl Game {
             return Err(GameError::IllegalAction);
         }
         let attacker_instance_id = pending.attacker_instance_id.clone();
+        let attacker_kind = pending.attacker_kind;
+        let attacker_stealthed =
+            self.combatant_stealthed(attacker_kind, pending.attacking_seat, &attacker_instance_id)?;
         let cell = pending.cell;
-        let defending_seat = target.seat();
         self.position
             .pending_combat
             .as_mut()
             .ok_or(GameError::IllegalAction)?
             .original_target = Some(target.clone());
-        self.position.decision_seat = defending_seat;
-        self.position.phase = Phase::Defend;
-        self.position.state_version += 1;
         outcomes.push("attack-declared", || {
             json!({
                 "attackerInstanceId": attacker_instance_id,
@@ -3464,6 +3468,29 @@ impl Game {
                 "target": target,
             })
         });
+        if attacker_stealthed {
+            match target {
+                CombatTarget::Avatar { instance_id, seat } => self.begin_fight(
+                    vec![UnitTarget::Avatar {
+                        instance_id: instance_id.clone(),
+                        seat: *seat,
+                    }],
+                    outcomes,
+                )?,
+                CombatTarget::Minion { instance_id, seat } => self.begin_fight(
+                    vec![UnitTarget::Minion {
+                        instance_id: instance_id.clone(),
+                        seat: *seat,
+                    }],
+                    outcomes,
+                )?,
+                CombatTarget::Site { .. } => self.resolve_undefended_site_strike(outcomes)?,
+            }
+        } else {
+            self.position.decision_seat = target.seat();
+            self.position.phase = Phase::Defend;
+        }
+        self.position.state_version += 1;
         Ok(())
     }
 
@@ -3588,7 +3615,8 @@ impl Game {
         }
         let (attack, _) =
             self.combatant_attack_and_lethal(attacker_kind, attacking_seat, &attacker_id)?;
-        self.record_unit_interaction(attacker_kind, attacking_seat, &attacker_id, outcomes)?;
+        let lost_stealth =
+            self.mark_unit_interaction(attacker_kind, attacking_seat, &attacker_id)?;
 
         let avatar = &mut self.position.players[seat_index(target_seat)].avatar;
         let old_life = avatar.life;
@@ -3622,6 +3650,12 @@ impl Game {
             outcomes.push(
                 "avatar-reached-deaths-door",
                 || json!({ "seat": target_seat, "turnNumber": turn_number }),
+            );
+        }
+        if lost_stealth {
+            outcomes.push(
+                "stealth-lost",
+                || json!({ "instanceId": attacker_id, "seat": attacking_seat }),
             );
         }
         Ok(())
