@@ -482,13 +482,20 @@
         "RULE-03"
       ],
       "plainLanguage": "Freeze disables a nearby minion until the caster next Start Phase.",
-      "implementationStatus": "typescript-supported",
-      "genericFactHints": [],
-      "actionHints": [],
-      "eventHints": [],
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "disabled"
+      ],
+      "actionHints": [
+        "cast",
+        "choose-target"
+      ],
+      "eventHints": [
+        "disable"
+      ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Freeze disables a nearby minion until the caster next Start Phase"
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "freeze_should_disable_nearby_minion_until_caster_next_start_phase"
       }
     },
     {
@@ -2055,13 +2062,13 @@
         "RULE-04"
       ],
       "plainLanguage": "Mountain Pass blocks only occupied ground-minion entry.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Mountain Pass blocks only occupied ground-minion entry"
+        "file": "crates/sorcery-engine/tests/mountain_pass_rules.rs",
+        "testName": "mountain_pass_should_block_only_occupied_ground_minion_entry"
       }
     },
     {

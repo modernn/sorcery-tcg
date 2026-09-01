@@ -1,5 +1,9 @@
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
+use sorcery_engine::checkpoint::{
+    create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+    serialize_game_checkpoint,
+};
 use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
 use sorcery_engine::session::{Session, StepResult};
 
@@ -860,4 +864,257 @@ fn printed_spellcaster_should_cast_and_summon_while_sick_or_tapped() {
             .is_null()
     );
     assert_exact_replay(&tapped_cast);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one direct catalog proof retains Freeze legality, suppression, expiry, checkpoint, and replay"
+)]
+fn freeze_should_disable_nearby_minion_until_caster_next_start_phase() {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-freeze": magic(("disableTargetNearbyMinionUntilNextTurn", json!(true)), 0),
+        "north-site": site(false),
+        "south-air-magic": {
+            "cardType": "magic",
+            "healController": 1,
+            "manaCost": 0,
+            "thresholds": { "air": 1, "earth": 0, "fire": 0, "water": 0 },
+        },
+        "south-avatar": avatar(20),
+        "south-far": minion(json!({})),
+        "south-site": site(false),
+        "south-target": minion(json!({
+            "movementBonus": 1,
+            "provides": "air",
+            "tapForMana": 1,
+        })),
+    });
+    let south_spellbook = [
+        "south-far",
+        "south-target",
+        "south-far",
+        "south-air-magic",
+        "south-target",
+        "south-far",
+        "south-air-magic",
+        "south-target",
+    ];
+    let manifest = (1..=512)
+        .map(|seed| manifest(seed, &cards, &["north-freeze"; 8], &south_spellbook))
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("candidate Freeze session");
+            let hand = state(&preview)["players"]["south"]["hand"]["spellbook"]
+                .as_array()
+                .expect("south opening Spellbook hand")
+                .clone();
+            ["south-air-magic", "south-far", "south-target"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+        .expect("seed with both South minions in the opening hand");
+    let mut session = opening_main(&manifest);
+
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (far_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-far"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    let (target_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-target"
+            && descriptor["cell"] == "C2"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let avatar_instance_id = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == avatar_instance_id
+            && descriptor["from"]["cell"] == "C4"
+            && descriptor["to"]["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
+
+    let far_instance_id = far_summon["cardInstanceId"]
+        .as_str()
+        .expect("far minion identity");
+    let target_instance_id = target_summon["cardInstanceId"]
+        .as_str()
+        .expect("Freeze target identity");
+    let actions = session.legal_actions().expect("North Freeze actions");
+    let freeze = actions
+        .iter()
+        .find(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-freeze"
+                && action.descriptor["target"]["instanceId"] == target_instance_id
+        })
+        .expect("nearby target Freeze action")
+        .clone();
+    assert!(!actions.iter().any(|action| {
+        action.descriptor["kind"] == "cast-magic"
+            && action.descriptor["target"]["instanceId"] == far_instance_id
+    }));
+    assert_eq!(freeze.descriptor["casterInstanceId"], avatar_instance_id);
+    assert_eq!(
+        freeze.label,
+        format!("Cast north-freeze on minion {}…", &target_instance_id[..15])
+    );
+
+    let mut enabled_branch = session.clone();
+    accept_where(&mut enabled_branch, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(&mut enabled_branch, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let enabled_actions = enabled_branch
+        .legal_actions()
+        .expect("enabled target actions");
+    assert!(enabled_actions.iter().any(|action| {
+        action.descriptor["kind"] == "move-and-attack"
+            && action.descriptor["unitInstanceId"] == target_instance_id
+    }));
+    assert!(enabled_actions.iter().any(|action| {
+        action.descriptor["kind"] == "activate-mana"
+            && action.descriptor["unitInstanceId"] == target_instance_id
+    }));
+    assert!(enabled_actions.iter().any(|action| {
+        action.descriptor["kind"] == "cast-magic"
+            && action.descriptor["cardId"] == "south-air-magic"
+    }));
+
+    let cast_state_version = freeze.state_version;
+    let freeze_source_id = freeze.descriptor["cardInstanceId"]
+        .as_str()
+        .expect("Freeze source identity")
+        .to_owned();
+    let StepResult::Accepted(cast_receipt) = session
+        .step(ActionRequest {
+            action_id: freeze.action_id.to_string(),
+            seat: freeze.seat,
+            state_version: freeze.state_version,
+        })
+        .expect("authoritative Freeze step")
+    else {
+        panic!("engine-issued Freeze action must be accepted");
+    };
+    assert_eq!(cast_receipt.state_version, cast_state_version);
+    assert_eq!(cast_receipt.next_state_version, cast_state_version + 1);
+    assert_eq!(
+        state(&session)["stateVersion"],
+        cast_receipt.next_state_version
+    );
+    assert_eq!(
+        event_types(&cast_receipt),
+        ["magic-cast", "minion-disabled", "magic-resolved"]
+    );
+    assert_eq!(
+        cast_receipt.events[1].payload,
+        json!({
+            "expiresAtSeat": "north",
+            "instanceId": target_instance_id,
+            "seat": "south",
+            "sourceInstanceId": freeze_source_id,
+            "stealthRemoved": false,
+            "wardRemoved": false,
+        })
+    );
+
+    let (_, south_started) =
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert_eq!(event_types(&south_started), ["turn-ended", "turn-started"]);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let disabled_actions = session.legal_actions().expect("disabled target actions");
+    assert!(
+        !disabled_actions
+            .iter()
+            .any(|action| { action.descriptor["unitInstanceId"] == target_instance_id })
+    );
+    assert!(!disabled_actions.iter().any(|action| {
+        action.descriptor["kind"] == "cast-magic"
+            && action.descriptor["cardId"] == "south-air-magic"
+    }));
+    assert_eq!(
+        state(&session)["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .find(|unit| unit["instanceId"] == target_instance_id)
+            .expect("disabled target")["disableEffects"],
+        json!([{
+            "expiresAtSeat": "north",
+            "sourceInstanceId": freeze_source_id,
+        }])
+    );
+
+    let checkpoint = create_game_checkpoint(&session).expect("captured Freeze checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized Freeze checkpoint");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed Freeze checkpoint");
+    let restored = resume_game_checkpoint(&parsed).expect("restored Freeze checkpoint");
+    assert_eq!(
+        restored.replay_value().expect("restored Freeze state"),
+        session.replay_value().expect("source Freeze state")
+    );
+    assert_eq!(
+        restored.legal_actions().expect("restored Freeze actions"),
+        disabled_actions
+    );
+
+    let (_, expiration) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert_eq!(
+        event_types(&expiration),
+        ["turn-ended", "minion-disable-expired", "turn-started"]
+    );
+    assert_eq!(
+        expiration.events[1].payload,
+        json!({
+            "instanceId": target_instance_id,
+            "seat": "south",
+            "sourceInstanceId": freeze_source_id,
+        })
+    );
+    let expired = state(&session);
+    assert!(
+        expired["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .find(|unit| unit["instanceId"] == target_instance_id)
+            .expect("expired target")["disableEffects"]
+            .is_null()
+    );
+    assert_exact_replay(&session);
 }

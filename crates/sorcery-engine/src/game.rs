@@ -560,8 +560,10 @@ struct SummonDestination {
 
 #[derive(Clone, Copy)]
 struct MovementProfile {
+    airborne: bool,
     connects_top_bottom: bool,
     maximum_steps: usize,
+    moving_minion: bool,
     restriction: Option<BasicMovementRestriction>,
     seat: Seat,
 }
@@ -673,6 +675,13 @@ impl Game {
         }
         let manifest: Manifest = serde_json::from_value(raw.clone())?;
         let mut parsed_facts = validate_manifest(&raw, &manifest)?;
+        if parsed_facts.values().any(
+            |facts| matches!(facts, CardFacts::Minion(facts) if facts.occupies_square_area_two),
+        ) {
+            return Err(GameError::UnsupportedManifestFact(
+                "occupiesSquareArea".to_owned(),
+            ));
+        }
 
         let mut cards = Vec::with_capacity(manifest.cards.len());
         let mut card_ids = BTreeMap::new();
@@ -1159,8 +1168,10 @@ impl Game {
                 player.avatar.card.instance_id.clone(),
                 player.avatar.location,
                 MovementProfile {
+                    airborne: false,
                     connects_top_bottom: false,
                     maximum_steps: 1,
+                    moving_minion: false,
                     restriction: None,
                     seat,
                 },
@@ -1190,12 +1201,14 @@ impl Game {
                 unit.card.instance_id.clone(),
                 unit.location,
                 MovementProfile {
+                    airborne: facts.airborne,
                     connects_top_bottom: facts.connects_top_bottom,
                     maximum_steps: if facts.cannot_defend || facts.immobile {
                         0
                     } else {
                         1 + usize::from(facts.movement_bonus.unwrap_or(0))
                     },
+                    moving_minion: true,
                     restriction: facts.movement_restriction,
                     seat,
                 },
@@ -1603,8 +1616,10 @@ impl Game {
                 &player.avatar.card.instance_id,
                 player.avatar.location,
                 MovementProfile {
+                    airborne: false,
                     connects_top_bottom: false,
                     maximum_steps: 1,
+                    moving_minion: false,
                     restriction: None,
                     seat,
                 },
@@ -1626,12 +1641,14 @@ impl Game {
                 &unit.card.instance_id,
                 unit.location,
                 MovementProfile {
+                    airborne: facts.airborne,
                     connects_top_bottom: facts.connects_top_bottom,
                     maximum_steps: if facts.immobile {
                         0
                     } else {
                         1 + usize::from(facts.movement_bonus.unwrap_or(0))
                     },
+                    moving_minion: true,
                     restriction: facts.movement_restriction,
                     seat,
                 },
@@ -1930,6 +1947,7 @@ impl Game {
                         region: Region::Surface,
                     };
                     if !self.surface_location_exists(cell)
+                        || !self.surface_entry_allowed(current.cell, cell, profile)
                         || !Self::movement_restriction_allows(profile, current.cell, cell)
                         || path
                             .windows(2)
@@ -1946,6 +1964,30 @@ impl Game {
             paths.extend(frontier.iter().cloned());
         }
         paths
+    }
+
+    fn surface_entry_allowed(
+        &self,
+        current: Cell,
+        candidate: Cell,
+        profile: MovementProfile,
+    ) -> bool {
+        if !profile.moving_minion || profile.airborne || current == candidate {
+            return true;
+        }
+        let Some(site) = &self.position.sites[candidate.index()] else {
+            return true;
+        };
+        let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
+        else {
+            return true;
+        };
+        !facts.blocks_ground_minion_entry_while_minion_atop
+            || !self
+                .position
+                .units
+                .iter()
+                .any(|unit| unit.location == candidate)
     }
 
     fn movement_restriction_allows(profile: MovementProfile, from: Cell, to: Cell) -> bool {
@@ -4135,8 +4177,10 @@ impl Game {
                     player.avatar.location,
                     !player.avatar.tapped,
                     MovementProfile {
+                        airborne: false,
                         connects_top_bottom: false,
                         maximum_steps: 1,
+                        moving_minion: false,
                         restriction: None,
                         seat,
                     },
@@ -4158,12 +4202,14 @@ impl Game {
                     unit.location,
                     self.minion_can_move_and_attack(unit, seat),
                     MovementProfile {
+                        airborne: facts.airborne,
                         connects_top_bottom: facts.connects_top_bottom,
                         maximum_steps: if facts.immobile {
                             0
                         } else {
                             1 + usize::from(facts.movement_bonus.unwrap_or(0))
                         },
+                        moving_minion: true,
                         restriction: facts.movement_restriction,
                         seat,
                     },
