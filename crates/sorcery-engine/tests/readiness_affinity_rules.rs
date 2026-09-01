@@ -634,6 +634,102 @@ fn provider_affinity_should_stop_immediately_when_provider_dies() {
 }
 
 #[test]
+fn rule_catalog_0094_granary_rats_suppress_site_threshold_while_enabled() {
+    let threshold_summon_is_legal = |session: &Session| {
+        session
+            .legal_actions()
+            .expect("threshold actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "summon-minion"
+                    && action.descriptor["cardId"] == "north-threshold"
+            })
+    };
+    let prepare = |seed, rat_disabled, site_protected| {
+        let mut threshold_minion = minion(1, 2);
+        threshold_minion["thresholds"]["earth"] = json!(1);
+        let mut granary_rats = minion(0, 1);
+        granary_rats["siteProvidesNoThreshold"] = json!(true);
+        granary_rats["summonToAnySite"] = json!(true);
+        if rat_disabled {
+            granary_rats["genesisDisableSelfUntilDamaged"] = json!(true);
+        }
+        let mut extra_cards = json!({
+            "north-threshold": threshold_minion,
+            "south-granary-rats": granary_rats,
+        });
+        if site_protected {
+            extra_cards["north-site"] = json!({
+                "cardType": "site",
+                "cannotBeMovedDestroyedOrModified": true,
+                "elements": ["earth"],
+            });
+        }
+        let manifest = scenario_manifest(
+            seed,
+            &extra_cards,
+            &["north-threshold"; 4],
+            &["south-granary-rats"; 4],
+        );
+        let mut session = Session::new(&manifest).expect("valid Granary Rats scenario");
+        keep(&mut session);
+        keep(&mut session);
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+        });
+        assert!(
+            threshold_summon_is_legal(&session),
+            "the site should provide its threshold before Granary Rats arrives"
+        );
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+        });
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+        });
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == "south-granary-rats"
+                && descriptor["cell"] == "C4"
+        });
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+        });
+        session
+    };
+
+    let active = prepare(94, false, false);
+    let active_rat = &state(&active)["realm"]["units"][0];
+    assert_eq!(active_rat["controller"], "south");
+    assert_eq!(active_rat["location"], "C4");
+    assert!(
+        !threshold_summon_is_legal(&active),
+        "an enabled opposing Granary Rats should suppress the occupied site"
+    );
+    assert_exact_replay(&active);
+
+    let disabled = prepare(940, true, false);
+    assert_eq!(
+        state(&disabled)["realm"]["units"][0]["disabledUntilDamaged"],
+        true
+    );
+    assert!(
+        threshold_summon_is_legal(&disabled),
+        "a disabled Granary Rats should not suppress the occupied site"
+    );
+    assert_exact_replay(&disabled);
+
+    let protected = prepare(941, false, true);
+    assert!(
+        threshold_summon_is_legal(&protected),
+        "a protected site should retain its threshold"
+    );
+    assert_exact_replay(&protected);
+}
+
+#[test]
 #[expect(
     clippy::too_many_lines,
     reason = "direct scenario proof keeps the readiness and expiration sequence visible"

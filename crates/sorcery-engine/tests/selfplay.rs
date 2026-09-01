@@ -709,10 +709,10 @@ fn pair_should_reject_scenario_changes_composition_mismatch_and_unsupported_fact
     assert!(train_and_promote(&champion, &candidate_deck, &unsupported, &heldout, 500).is_err());
 
     let unsupported_north = mutate_manifest(&north, |manifest| {
-        manifest["cards"]["north-spell-1"]["siteProvidesNoThreshold"] = json!(true);
+        manifest["cards"]["north-spell-1"]["nearbyEnemiesPermanentlyLoseStealth"] = json!(true);
     });
     let unsupported_south = mutate_manifest(&south, |manifest| {
-        manifest["cards"]["north-spell-1"]["siteProvidesNoThreshold"] = json!(true);
+        manifest["cards"]["north-spell-1"]["nearbyEnemiesPermanentlyLoseStealth"] = json!(true);
     });
     let unsupported = [pair(
         &unsupported_north,
@@ -725,7 +725,7 @@ fn pair_should_reject_scenario_changes_composition_mismatch_and_unsupported_fact
         train_and_promote(&champion, &candidate_deck, &unsupported, &heldout, 500)
             .expect_err("self-play must reject incomplete facts")
             .to_string(),
-        "manifest fact is not yet supported by Rust: siteProvidesNoThreshold"
+        "manifest fact is not yet supported by Rust: nearbyEnemiesPermanentlyLoseStealth"
     );
 
     let stealth_north = mutate_manifest(&north, |manifest| {

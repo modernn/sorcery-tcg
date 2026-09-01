@@ -734,8 +734,6 @@ fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
         Some("nearbyEnemiesPermanentlyLoseStealth")
     } else if facts.shoots_drag_projectile {
         Some("shootsDragProjectile")
-    } else if facts.site_provides_no_threshold {
-        Some("siteProvidesNoThreshold")
     } else if facts.submerge {
         Some("submerge")
     } else if facts.tap_to_damage_each_unit_at_adjacent_location {
@@ -2614,18 +2612,35 @@ impl Game {
     }
 
     fn elemental_affinities(&self, seat: Seat) -> [u64; 4] {
-        let site_elements = self
+        let mut suppressed_sites = [false; Cell::ALL.len()];
+        for unit in self
             .position
-            .sites
+            .units
             .iter()
-            .flatten()
-            .filter(|site| site.controller == seat)
-            .filter_map(|site| {
+            .filter(|unit| !self.minion_is_disabled(unit))
+        {
+            if matches!(
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
+                CardFacts::Minion(minion) if minion.site_provides_no_threshold
+            ) {
+                suppressed_sites[unit.location.index()] = true;
+            }
+        }
+        let site_elements = Cell::ALL
+            .into_iter()
+            .filter_map(|cell| {
+                let site = self.position.sites[cell.index()].as_ref()?;
+                if site.controller != seat {
+                    return None;
+                }
                 let CardFacts::Site(facts) =
                     &self.rules.cards[usize::from(site.card.card_id.0)].facts
                 else {
                     return None;
                 };
+                if suppressed_sites[cell.index()] && !facts.cannot_be_moved_destroyed_or_modified {
+                    return None;
+                }
                 Some(facts.elements)
             })
             .flat_map(crate::facts::ElementSet::iter);

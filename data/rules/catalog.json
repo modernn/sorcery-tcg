@@ -1885,15 +1885,15 @@
         "RULE-03"
       ],
       "plainLanguage": "Granary Rats suppresses its site threshold while enabled.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "elemental-threshold"
       ],
       "actionHints": [],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Granary Rats suppresses its site threshold while enabled"
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "rule_catalog_0094_granary_rats_suppress_site_threshold_while_enabled"
       }
     },
     {
