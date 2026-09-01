@@ -28,6 +28,8 @@ pub const MAX_GAME_ACTIONS: usize = 500;
 pub enum BatchClassification {
     /// The game was exact for exercised mechanics but is not ranked-eligible.
     UnrankedPartialRules,
+    /// Rules are partial and raw manifests lack independently verified authority binding.
+    UnrankedPartialRulesUnverifiedAuthority,
 }
 
 /// One complete native rollout job.

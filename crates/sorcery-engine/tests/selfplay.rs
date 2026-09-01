@@ -1,13 +1,14 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
+use sorcery_engine::batch::BatchClassification;
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::deck::{
     CandidateDeck, CardCatalogEntry, CardCount, CardType, DeckValidation, FormatContext,
     OfficialCardMapping, Rarity, validate_deck,
 };
 use sorcery_engine::policy::{PolicySnapshot, parse_policy_snapshot};
-use sorcery_engine::selfplay::{SelfPlayPair, train_and_promote};
+use sorcery_engine::selfplay::{SelfPlayCampaign, SelfPlayPair, train_and_promote};
 use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
 const BASELINE_FEATURES: [&str; 9] = [
@@ -61,6 +62,12 @@ fn mutate_manifest(manifest: &str, mutate: impl FnOnce(&mut Value)) -> String {
     let mut manifest: Value = serde_json::from_str(manifest).expect("manifest JSON");
     mutate(&mut manifest);
     manifest_with_id(manifest)
+}
+
+fn claim_private_local(manifest: &str) -> String {
+    mutate_manifest(manifest, |manifest| {
+        manifest["authority"]["mode"] = json!("private-local");
+    })
 }
 
 fn paired_manifests(seed: u32, avatar_life: u8) -> (String, String) {
@@ -151,6 +158,10 @@ fn pair<'a>(
 fn heldout_tie_should_keep_the_replay_verified_champion_deterministically() {
     let (training_north, training_south) = paired_manifests(30, 20);
     let (heldout_north, heldout_south) = paired_manifests(31, 20);
+    let training_north = claim_private_local(&training_north);
+    let training_south = claim_private_local(&training_south);
+    let heldout_north = claim_private_local(&heldout_north);
+    let heldout_south = claim_private_local(&heldout_south);
     let candidate_deck = validated_manifest_deck(&training_north, "north");
     let opponent_deck = validated_manifest_deck(&training_north, "south");
     let authority = authority_hash(&heldout_north);
@@ -185,6 +196,14 @@ fn heldout_tie_should_keep_the_replay_verified_champion_deterministically() {
         .expect("repeat promotion cycle");
 
     assert_eq!(first, second);
+    assert_eq!(
+        first.classification,
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
+    );
+    assert_eq!(
+        serde_json::to_value(first.classification).expect("classification JSON"),
+        "unranked_partial_rules_unverified_authority"
+    );
     assert!(!first.promoted);
     assert_eq!(first.policy, champion);
     assert_eq!(first.champion_heldout.games(), 2);
@@ -298,6 +317,8 @@ fn pair_should_reject_scenario_changes_composition_mismatch_and_unsupported_fact
 fn adjacent_priority_gain_should_promote_and_replay_from_both_seats() {
     let (training_north, training_south) = paired_manifests(40, 1);
     let (heldout_north, heldout_south) = paired_manifests(41, 1);
+    let (audit_north, audit_south) = paired_manifests(42, 1);
+    let (invalid_north, invalid_south) = paired_manifests(39, 1);
     let candidate_deck = validated_manifest_deck(&training_north, "north");
     let opponent_deck = validated_manifest_deck(&training_north, "south");
     let authority = authority_hash(&training_north);
@@ -336,14 +357,57 @@ fn adjacent_priority_gain_should_promote_and_replay_from_both_seats() {
         &opponent,
         &opponent_deck,
     )];
+    let audit = [pair(
+        &audit_north,
+        &audit_south,
+        42,
+        &opponent,
+        &opponent_deck,
+    )];
+    let invalid_training = [pair(
+        &invalid_north,
+        &invalid_south,
+        40,
+        &opponent,
+        &opponent_deck,
+    )];
+    let mut campaign =
+        SelfPlayCampaign::new(champion.clone(), candidate_deck.clone()).expect("campaign");
 
-    let result = train_and_promote(&champion, &candidate_deck, &training, &heldout, 1_000)
+    assert!(
+        campaign
+            .run_generation(&invalid_training, &heldout, 1_000)
+            .is_err()
+    );
+    let result = campaign
+        .run_generation(&training, &heldout, 1_000)
         .expect("positive promotion cycle");
 
     assert!(result.promoted, "{result:#?}");
+    assert_eq!(
+        result.classification,
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
+    );
     assert_eq!(result.policy.parent_policy_id(), Some(champion.policy_id()));
+    assert_eq!(campaign.champion(), &result.policy);
+    assert_eq!(campaign.lineage().collect::<Vec<_>>().len(), 2);
     assert!(
         result.nominee_heldout.half_points() > result.champion_heldout.half_points(),
         "{result:#?}"
     );
+    assert!(campaign.run_generation(&training, &heldout, 1_000).is_err());
+    assert!(campaign.final_audit(&training, 1_000).is_err());
+
+    let final_audit = campaign
+        .final_audit(&audit, 1_000)
+        .expect("fresh replayed final audit");
+    assert_eq!(
+        final_audit.classification,
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
+    );
+    assert_eq!(final_audit.policy_id, *campaign.champion().policy_id());
+    assert_eq!(final_audit.score.games(), 2);
+    assert!(campaign.is_finalized());
+    assert!(campaign.run_generation(&training, &heldout, 1_000).is_err());
+    assert!(campaign.final_audit(&audit, 1_000).is_err());
 }

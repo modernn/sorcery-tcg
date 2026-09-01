@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 
+use crate::batch::BatchClassification;
 use crate::canonical::IdentityHash;
 use crate::contract::Seat;
 use crate::deck::{CanonicalDeck, DeckValidation};
@@ -70,7 +71,9 @@ impl SelfPlayScore {
 /// Result of one train/heldout promotion cycle.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PromotionResult {
-    /// Champion retained or immutable child promoted.
+    /// Public result classification for the raw-manifest evaluation boundary.
+    pub classification: BatchClassification,
+    /// Champion retained or immutable child selected for the next generation.
     pub policy: PolicySnapshot,
     /// Whether `policy` is the selected child.
     pub promoted: bool,
@@ -82,6 +85,27 @@ pub struct PromotionResult {
     pub champion_heldout: SelfPlayScore,
     /// Nominee score on the heldout suite.
     pub nominee_heldout: SelfPlayScore,
+}
+
+/// Replay-verified final score for a sealed self-play campaign.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SelfPlayAudit {
+    /// Public result classification for the raw-manifest evaluation boundary.
+    pub classification: BatchClassification,
+    /// Policy evaluated by the fresh final audit.
+    pub policy_id: IdentityHash,
+    /// Final replay-verified score.
+    pub score: SelfPlayScore,
+}
+
+/// In-memory coordinator that prevents evaluation-seed reuse across generations.
+#[derive(Debug)]
+pub struct SelfPlayCampaign {
+    assigned_deck: DeckValidation,
+    final_audit_complete: bool,
+    initial_policy: PolicySnapshot,
+    promoted_policies: Vec<PolicySnapshot>,
+    used_development_seeds: BTreeSet<u32>,
 }
 
 /// Self-play configuration, rollout, or replay verification failed.
@@ -142,6 +166,145 @@ impl From<serde_json::Error> for SelfPlayError {
     }
 }
 
+impl SelfPlayCampaign {
+    /// Starts a campaign for one immutable policy and validated deck.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SelfPlayError`] when the policy is not bound to the assigned deck.
+    pub fn new(
+        initial_policy: PolicySnapshot,
+        assigned_deck: DeckValidation,
+    ) -> Result<Self, SelfPlayError> {
+        validate_assigned_policy(&initial_policy, &assigned_deck)?;
+        Ok(Self {
+            assigned_deck,
+            final_audit_complete: false,
+            initial_policy,
+            promoted_policies: Vec::new(),
+            used_development_seeds: BTreeSet::new(),
+        })
+    }
+
+    /// Returns the current immutable champion.
+    #[must_use]
+    pub fn champion(&self) -> &PolicySnapshot {
+        self.promoted_policies
+            .last()
+            .unwrap_or(&self.initial_policy)
+    }
+
+    /// Returns the root and every actually promoted child in order.
+    #[must_use]
+    pub fn lineage(&self) -> impl DoubleEndedIterator<Item = &PolicySnapshot> {
+        std::iter::once(&self.initial_policy).chain(self.promoted_policies.iter())
+    }
+
+    /// Returns whether a successful fresh final audit sealed the campaign.
+    #[must_use]
+    pub const fn is_finalized(&self) -> bool {
+        self.final_audit_complete
+    }
+
+    /// Runs one fresh training and promotion generation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SelfPlayError`] for seed reuse, a sealed campaign, or any promotion failure.
+    pub fn run_generation(
+        &mut self,
+        training: &[SelfPlayPair<'_>],
+        promotion: &[SelfPlayPair<'_>],
+        max_actions: usize,
+    ) -> Result<PromotionResult, SelfPlayError> {
+        if self.final_audit_complete {
+            return Err(SelfPlayError::Invalid(
+                "self-play campaign is sealed after final audit",
+            ));
+        }
+        let generation_seeds = raw_seeds(training)
+            .union(&raw_seeds(promotion))
+            .copied()
+            .collect::<BTreeSet<_>>();
+        if generation_seeds
+            .iter()
+            .any(|seed| self.used_development_seeds.contains(seed))
+        {
+            return Err(SelfPlayError::Invalid(
+                "self-play campaign cannot reuse a development seed",
+            ));
+        }
+        let result = train_and_promote(
+            self.champion(),
+            &self.assigned_deck,
+            training,
+            promotion,
+            max_actions,
+        )?;
+        self.used_development_seeds.extend(generation_seeds);
+        if result.promoted {
+            self.promoted_policies.push(result.policy.clone());
+        }
+        Ok(result)
+    }
+
+    /// Replays a fresh audit suite against the champion, then permanently seals the campaign.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SelfPlayError`] for prior seed use, a sealed campaign, or any replay failure.
+    pub fn final_audit(
+        &mut self,
+        audit: &[SelfPlayPair<'_>],
+        max_actions: usize,
+    ) -> Result<SelfPlayAudit, SelfPlayError> {
+        if self.final_audit_complete {
+            return Err(SelfPlayError::Invalid(
+                "self-play campaign is sealed after final audit",
+            ));
+        }
+        if raw_seeds(audit)
+            .iter()
+            .any(|seed| self.used_development_seeds.contains(seed))
+        {
+            return Err(SelfPlayError::Invalid(
+                "final audit seeds must be fresh from campaign development",
+            ));
+        }
+        let prepared = prepare_suite(audit, &self.assigned_deck, self.champion())?;
+        let score = score_policy(
+            self.champion(),
+            self.assigned_deck.deck_id(),
+            &prepared,
+            max_actions,
+            true,
+        )?;
+        let audit = SelfPlayAudit {
+            classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
+            policy_id: self.champion().policy_id().clone(),
+            score,
+        };
+        self.final_audit_complete = true;
+        Ok(audit)
+    }
+}
+
+fn validate_assigned_policy(
+    policy: &PolicySnapshot,
+    assigned_deck: &DeckValidation,
+) -> Result<(), SelfPlayError> {
+    if !assigned_deck.ranked_eligible() || policy.deck_id() != assigned_deck.deck_id() {
+        return Err(SelfPlayError::Invalid(
+            "self-play requires the policy's format-legal, engine-supported assigned deck",
+        ));
+    }
+    Ok(())
+}
+
+fn raw_seeds(pairs: &[SelfPlayPair<'_>]) -> BTreeSet<u32> {
+    pairs.iter().map(|pair| pair.seed).collect()
+}
+
 /// Nominates one deterministic neighbor and promotes it only after replay-gated heldout gains.
 ///
 /// # Errors
@@ -155,11 +318,7 @@ pub fn train_and_promote(
     heldout: &[SelfPlayPair<'_>],
     max_actions: usize,
 ) -> Result<PromotionResult, SelfPlayError> {
-    if !assigned_deck.ranked_eligible() || champion.deck_id() != assigned_deck.deck_id() {
-        return Err(SelfPlayError::Invalid(
-            "self-play requires the champion's ranked-eligible assigned deck",
-        ));
-    }
+    validate_assigned_policy(champion, assigned_deck)?;
     let training = prepare_suite(training, assigned_deck, champion)?;
     let heldout = prepare_suite(heldout, assigned_deck, champion)?;
     let training_seeds = seeds(&training);
@@ -214,6 +373,7 @@ pub fn train_and_promote(
     let promoted = improves_without_regression(&nominee_heldout, &champion_heldout);
     let nominee_policy_id = nominee.policy_id().clone();
     Ok(PromotionResult {
+        classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
         policy: if promoted { nominee } else { champion.clone() },
         promoted,
         nominee_policy_id,
