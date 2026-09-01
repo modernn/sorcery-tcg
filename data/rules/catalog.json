@@ -1673,7 +1673,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Attacking-only first strike resolves deaths before normal strikes and is inactive while defending.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "first-strike"
       ],
@@ -1687,8 +1687,8 @@
         "strike"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 attacking-only first strike resolves deaths before normal strikes and is inactive while defending"
+        "file": "crates/sorcery-engine/tests/first_strike_rules.rs",
+        "testName": "attacking_only_first_strike_should_kill_before_return_and_be_inactive_defending"
       }
     },
     {
@@ -1698,7 +1698,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Genesis sleep ends on real damage without retroactive strikes.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "genesis"
       ],
@@ -1710,8 +1710,8 @@
         "strike"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03/04 Genesis sleep ends on real damage without retroactive strikes"
+        "file": "crates/sorcery-engine/tests/first_strike_rules.rs",
+        "testName": "genesis_sleep_should_require_real_damage_and_not_strike_retroactively"
       }
     },
     {
@@ -1720,8 +1720,10 @@
         "RULE-04"
       ],
       "plainLanguage": "Lance buffs and breaks on the next unit strike but not a site strike.",
-      "implementationStatus": "typescript-supported",
-      "genericFactHints": [],
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lance"
+      ],
       "actionHints": [
         "strike"
       ],
@@ -1729,8 +1731,8 @@
         "strike"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Lance buffs and breaks on the next unit strike but not a site strike"
+        "file": "crates/sorcery-engine/tests/lance_rules.rs",
+        "testName": "lance_should_buff_and_break_on_next_unit_strike_but_not_site_strike"
       }
     },
     {

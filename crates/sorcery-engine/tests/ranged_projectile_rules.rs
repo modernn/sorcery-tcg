@@ -629,11 +629,6 @@ fn ranged_strikes_should_apply_ward_lethal_deathrites_and_terminal_results() {
 fn unsupported_ranged_extensions_should_fail_closed() {
     for (seed, field, extra) in [
         (
-            191,
-            "lanceCount",
-            json!({ "lanceCount": 1, "ranged": true }),
-        ),
-        (
             192,
             "mayStepAfterRangedStrike",
             json!({ "mayStepAfterRangedStrike": true, "ranged": true }),
