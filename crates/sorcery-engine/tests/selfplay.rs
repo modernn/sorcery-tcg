@@ -154,6 +154,21 @@ fn pair<'a>(
     }
 }
 
+fn one_pair<'a>(
+    manifests: &'a (String, String),
+    seed: u32,
+    opponent: &'a PolicySnapshot,
+    opponent_deck: &'a DeckValidation,
+) -> [SelfPlayPair<'a>; 1] {
+    [pair(
+        &manifests.0,
+        &manifests.1,
+        seed,
+        opponent,
+        opponent_deck,
+    )]
+}
+
 #[test]
 fn heldout_tie_should_keep_the_replay_verified_champion_deterministically() {
     let (training_north, training_south) = paired_manifests(30, 20);
@@ -231,15 +246,44 @@ fn suite_should_reject_non_swaps_wrong_bindings_and_reused_seeds() {
         BASELINE_FEATURES,
     );
     let valid = [pair(&north, &south, 30, &opponent, &opponent_deck)];
+    let mut relabeled = valid[0];
+    relabeled.subgroup = "relabeled";
+    let duplicate_matchup = [valid[0], relabeled];
     let not_swapped = [pair(&north, &north, 30, &opponent, &opponent_deck)];
     let wrong_deck = [pair(&north, &south, 30, &opponent, &candidate_deck)];
     let wrong_seed = [pair(&north, &south, 31, &opponent, &opponent_deck)];
+    let malformed = SelfPlayPair {
+        candidate_as_north_manifest_json: "{",
+        candidate_as_south_manifest_json: "{",
+        ..valid[0]
+    };
+    let oversized = vec![malformed; 129];
 
     assert!(train_and_promote(&champion, &candidate_deck, &[], &valid, 500).is_err());
     assert!(train_and_promote(&champion, &candidate_deck, &not_swapped, &valid, 500).is_err());
     assert!(train_and_promote(&champion, &candidate_deck, &wrong_deck, &valid, 500).is_err());
     assert!(train_and_promote(&champion, &candidate_deck, &wrong_seed, &valid, 500).is_err());
     assert!(train_and_promote(&champion, &candidate_deck, &valid, &valid, 500).is_err());
+    assert!(
+        train_and_promote(&champion, &candidate_deck, &duplicate_matchup, &valid, 500).is_err()
+    );
+    assert_eq!(
+        train_and_promote(&champion, &candidate_deck, &valid, &oversized, 500)
+            .expect_err("oversized suite")
+            .to_string(),
+        "self-play suites must contain 1-128 seat-swapped pairs"
+    );
+    let mut campaign =
+        SelfPlayCampaign::new(champion.clone(), candidate_deck.clone()).expect("campaign");
+    assert_eq!(
+        campaign
+            .run_generation(&valid, &oversized, 500)
+            .expect_err("oversized campaign suite")
+            .to_string(),
+        "self-play promotion suites must contain 20-128 unique-seed seat pairs"
+    );
+    let child = champion.neighbors().expect("neighbors").remove(0);
+    assert!(SelfPlayCampaign::new(child, candidate_deck).is_err());
 }
 
 #[test]
@@ -314,14 +358,13 @@ fn pair_should_reject_scenario_changes_composition_mismatch_and_unsupported_fact
 }
 
 #[test]
-fn adjacent_priority_gain_should_promote_and_replay_from_both_seats() {
-    let (training_north, training_south) = paired_manifests(40, 1);
-    let (heldout_north, heldout_south) = paired_manifests(41, 1);
-    let (audit_north, audit_south) = paired_manifests(42, 1);
-    let (invalid_north, invalid_south) = paired_manifests(39, 1);
-    let candidate_deck = validated_manifest_deck(&training_north, "north");
-    let opponent_deck = validated_manifest_deck(&training_north, "south");
-    let authority = authority_hash(&training_north);
+fn underpowered_gain_should_replay_but_not_promote_or_start_a_campaign() {
+    let training_manifests = paired_manifests(40, 1);
+    let heldout_manifests = paired_manifests(41, 1);
+    let audit_manifests = paired_manifests(42, 1);
+    let candidate_deck = validated_manifest_deck(&training_manifests.0, "north");
+    let opponent_deck = validated_manifest_deck(&training_manifests.0, "south");
+    let authority = authority_hash(&training_manifests.0);
     let passive_features = [
         "keep-mulligan",
         "play-site",
@@ -343,71 +386,28 @@ fn adjacent_priority_gain_should_promote_and_replay_from_both_seats() {
         opponent_deck.deck_id().as_str(),
         passive_features,
     );
-    let training = [pair(
-        &training_north,
-        &training_south,
-        40,
-        &opponent,
-        &opponent_deck,
-    )];
-    let heldout = [pair(
-        &heldout_north,
-        &heldout_south,
-        41,
-        &opponent,
-        &opponent_deck,
-    )];
-    let audit = [pair(
-        &audit_north,
-        &audit_south,
-        42,
-        &opponent,
-        &opponent_deck,
-    )];
-    let invalid_training = [pair(
-        &invalid_north,
-        &invalid_south,
-        40,
-        &opponent,
-        &opponent_deck,
-    )];
+    let training = one_pair(&training_manifests, 40, &opponent, &opponent_deck);
+    let heldout = one_pair(&heldout_manifests, 41, &opponent, &opponent_deck);
+    let audit = one_pair(&audit_manifests, 42, &opponent, &opponent_deck);
+    let result = train_and_promote(&champion, &candidate_deck, &training, &heldout, 1_000)
+        .expect("replay-gated comparison");
     let mut campaign =
         SelfPlayCampaign::new(champion.clone(), candidate_deck.clone()).expect("campaign");
 
-    assert!(
-        campaign
-            .run_generation(&invalid_training, &heldout, 1_000)
-            .is_err()
-    );
-    let result = campaign
-        .run_generation(&training, &heldout, 1_000)
-        .expect("positive promotion cycle");
-
-    assert!(result.promoted, "{result:#?}");
+    assert!(!result.promoted, "{result:#?}");
     assert_eq!(
         result.classification,
         BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
-    assert_eq!(result.policy.parent_policy_id(), Some(champion.policy_id()));
-    assert_eq!(campaign.champion(), &result.policy);
-    assert_eq!(campaign.lineage().collect::<Vec<_>>().len(), 2);
+    assert_eq!(result.policy, champion);
     assert!(
         result.nominee_heldout.half_points() > result.champion_heldout.half_points(),
         "{result:#?}"
     );
     assert!(campaign.run_generation(&training, &heldout, 1_000).is_err());
-    assert!(campaign.final_audit(&training, 1_000).is_err());
-
-    let final_audit = campaign
-        .final_audit(&audit, 1_000)
-        .expect("fresh replayed final audit");
-    assert_eq!(
-        final_audit.classification,
-        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
-    );
-    assert_eq!(final_audit.policy_id, *campaign.champion().policy_id());
-    assert_eq!(final_audit.score.games(), 2);
-    assert!(campaign.is_finalized());
     assert!(campaign.run_generation(&training, &heldout, 1_000).is_err());
     assert!(campaign.final_audit(&audit, 1_000).is_err());
+    assert!(!campaign.is_finalized());
+    assert_eq!(campaign.champion(), &champion);
+    assert_eq!(campaign.lineage().collect::<Vec<_>>().len(), 1);
 }

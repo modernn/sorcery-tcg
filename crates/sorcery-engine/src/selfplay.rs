@@ -5,12 +5,17 @@ use std::error::Error;
 use std::fmt;
 
 use crate::batch::BatchClassification;
-use crate::canonical::IdentityHash;
+use crate::canonical::{IdentityHash, identity_hash};
 use crate::contract::Seat;
 use crate::deck::{CanonicalDeck, DeckValidation};
 use crate::game::{Game, GameOutcome};
 use crate::policy::{PolicyError, PolicySnapshot};
 use crate::simulator::{SimulatorError, replay_selected, run_game};
+
+/// Largest accepted self-play suite. This keeps exact paired statistics in `u128`.
+pub const MAX_SELF_PLAY_PAIRS: usize = 128;
+/// Smallest heldout suite allowed to promote a policy.
+pub const MIN_PROMOTION_PAIRS: usize = 20;
 
 /// One complete seat-swapped policy evaluation pair.
 #[derive(Clone, Copy, Debug)]
@@ -40,12 +45,35 @@ struct PreparedPair<'a> {
     opponent: &'a PolicySnapshot,
 }
 
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct PortfolioCell {
+    subgroup: String,
+    opponent_policy_id: IdentityHash,
+    opponent_deck_id: IdentityHash,
+    scenario_id: IdentityHash,
+}
+
+type Portfolio = BTreeMap<PortfolioCell, usize>;
+
 /// Integer policy score; a win is two half-points and a draw is one.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SelfPlayScore {
     games: u64,
     half_points: u64,
     subgroup_half_points: BTreeMap<String, u64>,
+    pairs: Vec<SelfPlayPairScore>,
+}
+
+/// One paired evaluation observation spanning both physical seats and one unique suite seed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SelfPlayPairScore {
+    seed: u32,
+    subgroup: String,
+    opponent_policy_id: IdentityHash,
+    north_manifest_id: IdentityHash,
+    south_manifest_id: IdentityHash,
+    candidate_as_north_half_points: u8,
+    candidate_as_south_half_points: u8,
 }
 
 impl SelfPlayScore {
@@ -65,6 +93,61 @@ impl SelfPlayScore {
     #[must_use]
     pub const fn subgroup_half_points(&self) -> &BTreeMap<String, u64> {
         &self.subgroup_half_points
+    }
+
+    /// Returns ordered independent seat-pair observations.
+    #[must_use]
+    pub fn pairs(&self) -> &[SelfPlayPairScore] {
+        &self.pairs
+    }
+}
+
+impl SelfPlayPairScore {
+    /// Returns the unique suite seed.
+    #[must_use]
+    pub const fn seed(&self) -> u32 {
+        self.seed
+    }
+
+    /// Returns the predeclared matchup subgroup.
+    #[must_use]
+    pub fn subgroup(&self) -> &str {
+        &self.subgroup
+    }
+
+    /// Returns the bound opposing policy identity.
+    #[must_use]
+    pub const fn opponent_policy_id(&self) -> &IdentityHash {
+        &self.opponent_policy_id
+    }
+
+    /// Returns manifest identities in candidate-North, candidate-South order.
+    #[must_use]
+    pub const fn manifest_ids(&self) -> [&IdentityHash; 2] {
+        [&self.north_manifest_id, &self.south_manifest_id]
+    }
+
+    /// Returns candidate half-points in North, South order.
+    #[must_use]
+    pub const fn seat_half_points(&self) -> [u8; 2] {
+        [
+            self.candidate_as_north_half_points,
+            self.candidate_as_south_half_points,
+        ]
+    }
+
+    /// Returns the two-seat score in integer half-points.
+    #[must_use]
+    pub const fn half_points(&self) -> u8 {
+        self.candidate_as_north_half_points + self.candidate_as_south_half_points
+    }
+
+    fn same_case(&self, other: &Self) -> bool {
+        self.seed == other.seed
+            && self.subgroup == other.subgroup
+            && self.opponent_policy_id == other.opponent_policy_id
+            && self.north_manifest_id == other.north_manifest_id
+            && self.south_manifest_id == other.south_manifest_id
     }
 }
 
@@ -98,12 +181,16 @@ pub struct SelfPlayAudit {
     pub score: SelfPlayScore,
 }
 
-/// In-memory coordinator that prevents evaluation-seed reuse across generations.
+/// In-memory coordinator that prevents evaluation-seed reuse across one live campaign.
+///
+/// Process-restart guarantees require a future authenticated campaign checkpoint; constructing a
+/// second instance intentionally starts a separate campaign.
 #[derive(Debug)]
 pub struct SelfPlayCampaign {
     assigned_deck: DeckValidation,
     final_audit_complete: bool,
     initial_policy: PolicySnapshot,
+    promotion_portfolio: Option<Portfolio>,
     promoted_policies: Vec<PolicySnapshot>,
     used_development_seeds: BTreeSet<u32>,
 }
@@ -176,11 +263,17 @@ impl SelfPlayCampaign {
         initial_policy: PolicySnapshot,
         assigned_deck: DeckValidation,
     ) -> Result<Self, SelfPlayError> {
+        if initial_policy.generation() != 0 || initial_policy.parent_policy_id().is_some() {
+            return Err(SelfPlayError::Invalid(
+                "self-play campaigns must start from a generation-zero root policy",
+            ));
+        }
         validate_assigned_policy(&initial_policy, &assigned_deck)?;
         Ok(Self {
             assigned_deck,
             final_audit_complete: false,
             initial_policy,
+            promotion_portfolio: None,
             promoted_policies: Vec::new(),
             used_development_seeds: BTreeSet::new(),
         })
@@ -222,6 +315,16 @@ impl SelfPlayCampaign {
                 "self-play campaign is sealed after final audit",
             ));
         }
+        if training.is_empty() || training.len() > MAX_SELF_PLAY_PAIRS {
+            return Err(SelfPlayError::Invalid(
+                "self-play training suites must contain 1-128 seat pairs",
+            ));
+        }
+        if promotion.len() < MIN_PROMOTION_PAIRS || promotion.len() > MAX_SELF_PLAY_PAIRS {
+            return Err(SelfPlayError::Invalid(
+                "self-play promotion suites must contain 20-128 unique-seed seat pairs",
+            ));
+        }
         let generation_seeds = raw_seeds(training)
             .union(&raw_seeds(promotion))
             .copied()
@@ -234,6 +337,16 @@ impl SelfPlayCampaign {
                 "self-play campaign cannot reuse a development seed",
             ));
         }
+        let promotion_portfolio = portfolio(promotion)?;
+        if self
+            .promotion_portfolio
+            .as_ref()
+            .is_some_and(|expected| expected != &promotion_portfolio)
+        {
+            return Err(SelfPlayError::Invalid(
+                "self-play promotion portfolio changed across generations",
+            ));
+        }
         let result = train_and_promote(
             self.champion(),
             &self.assigned_deck,
@@ -241,6 +354,9 @@ impl SelfPlayCampaign {
             promotion,
             max_actions,
         )?;
+        if self.promotion_portfolio.is_none() {
+            self.promotion_portfolio = Some(promotion_portfolio);
+        }
         self.used_development_seeds.extend(generation_seeds);
         if result.promoted {
             self.promoted_policies.push(result.policy.clone());
@@ -263,12 +379,29 @@ impl SelfPlayCampaign {
                 "self-play campaign is sealed after final audit",
             ));
         }
+        if audit.is_empty() || audit.len() > MAX_SELF_PLAY_PAIRS {
+            return Err(SelfPlayError::Invalid(
+                "self-play audit suites must contain 1-128 seat pairs",
+            ));
+        }
         if raw_seeds(audit)
             .iter()
             .any(|seed| self.used_development_seeds.contains(seed))
         {
             return Err(SelfPlayError::Invalid(
                 "final audit seeds must be fresh from campaign development",
+            ));
+        }
+        let expected_portfolio =
+            self.promotion_portfolio
+                .as_ref()
+                .ok_or(SelfPlayError::Invalid(
+                    "final audit requires a completed self-play generation",
+                ))?;
+        let audit_portfolio = portfolio(audit)?;
+        if !portfolio_covers(&audit_portfolio, expected_portfolio) {
+            return Err(SelfPlayError::Invalid(
+                "final audit must cover the locked promotion portfolio",
             ));
         }
         let prepared = prepare_suite(audit, &self.assigned_deck, self.champion())?;
@@ -303,6 +436,46 @@ fn validate_assigned_policy(
 
 fn raw_seeds(pairs: &[SelfPlayPair<'_>]) -> BTreeSet<u32> {
     pairs.iter().map(|pair| pair.seed).collect()
+}
+
+fn portfolio(pairs: &[SelfPlayPair<'_>]) -> Result<Portfolio, SelfPlayError> {
+    let mut portfolio = Portfolio::new();
+    for pair in pairs {
+        let manifest: serde_json::Value =
+            serde_json::from_str(pair.candidate_as_north_manifest_json)?;
+        let mut scenario = shared_manifest_body(&manifest).ok_or(SelfPlayError::Invalid(
+            "self-play manifest lacks a complete shared scenario body",
+        ))?;
+        scenario
+            .as_object_mut()
+            .expect("shared manifest body is an object")
+            .remove("seed")
+            .ok_or(SelfPlayError::Invalid(
+                "self-play manifest lacks a scenario seed",
+            ))?;
+        let scenario_id = identity_hash(&scenario).map_err(|_| {
+            SelfPlayError::Invalid("self-play scenario identity could not be canonicalized")
+        })?;
+        let count = portfolio
+            .entry(PortfolioCell {
+                subgroup: pair.subgroup.to_owned(),
+                opponent_policy_id: pair.opponent.policy_id().clone(),
+                opponent_deck_id: pair.opponent_deck.deck_id().clone(),
+                scenario_id,
+            })
+            .or_default();
+        *count = count.checked_add(1).ok_or(SelfPlayError::Invalid(
+            "self-play portfolio count overflowed",
+        ))?;
+    }
+    Ok(portfolio)
+}
+
+fn portfolio_covers(candidate: &Portfolio, expected: &Portfolio) -> bool {
+    candidate.len() == expected.len()
+        && expected
+            .iter()
+            .all(|(cell, count)| candidate.get(cell).is_some_and(|seen| seen >= count))
 }
 
 /// Nominates one deterministic neighbor and promotes it only after replay-gated heldout gains.
@@ -384,11 +557,71 @@ pub fn train_and_promote(
 }
 
 fn improves_without_regression(candidate: &SelfPlayScore, champion: &SelfPlayScore) -> bool {
-    candidate.half_points > champion.half_points
-        && champion
-            .subgroup_half_points
+    if candidate.pairs.len() < MIN_PROMOTION_PAIRS
+        || candidate.pairs.len() > MAX_SELF_PLAY_PAIRS
+        || candidate.pairs.len() != champion.pairs.len()
+        || candidate
+            .pairs
             .iter()
-            .all(|(subgroup, score)| candidate.subgroup_half_points.get(subgroup) >= Some(score))
+            .zip(&champion.pairs)
+            .any(|(candidate, champion)| !candidate.same_case(champion))
+        || candidate.half_points <= champion.half_points
+    {
+        return false;
+    }
+
+    let mut total_gain = 0_i16;
+    let mut wins = 0;
+    let mut losses = 0;
+    let mut subgroup_seat_deltas = BTreeMap::<&str, [i16; 2]>::new();
+    for (candidate, champion) in candidate.pairs.iter().zip(&champion.pairs) {
+        let north = i16::from(candidate.candidate_as_north_half_points)
+            - i16::from(champion.candidate_as_north_half_points);
+        let south = i16::from(candidate.candidate_as_south_half_points)
+            - i16::from(champion.candidate_as_south_half_points);
+        let difference = north + south;
+        total_gain += difference;
+        wins += usize::from(difference > 0);
+        losses += usize::from(difference < 0);
+        let subgroup = subgroup_seat_deltas
+            .entry(candidate.subgroup.as_str())
+            .or_default();
+        subgroup[0] += north;
+        subgroup[1] += south;
+    }
+
+    total_gain > 0
+        && subgroup_seat_deltas
+            .values()
+            .all(|seats| seats[0] >= 0 && seats[1] >= 0)
+        && 5 * i32::from(total_gain)
+            >= i32::try_from(candidate.pairs.len()).expect("self-play pair bound fits i32")
+        && exact_sign_test_at_most_one_percent(wins, losses)
+}
+
+fn exact_sign_test_at_most_one_percent(wins: usize, losses: usize) -> bool {
+    let decisive = wins + losses;
+    if decisive == 0 || decisive > MAX_SELF_PLAY_PAIRS {
+        return false;
+    }
+
+    let mut row = vec![0_u128; decisive + 1];
+    row[0] = 1;
+    for n in 1..=decisive {
+        for k in (1..=n).rev() {
+            row[k] = row[k].saturating_add(row[k - 1]);
+        }
+    }
+    let upper_tail = row[wins..]
+        .iter()
+        .copied()
+        .fold(0_u128, u128::saturating_add);
+    let one_percent = if decisive == u128::BITS as usize {
+        u128::MAX / 100
+    } else {
+        (1_u128 << decisive) / 100
+    };
+    upper_tail <= one_percent
 }
 
 fn score_policy(
@@ -407,9 +640,11 @@ fn score_policy(
         games: 0,
         half_points: 0,
         subgroup_half_points: BTreeMap::new(),
+        pairs: Vec::with_capacity(pairs.len()),
     };
     for pair in pairs {
-        for (candidate_seat, manifest_json, game) in [
+        let mut seat_half_points = [0_u8; 2];
+        for (seat_index, (candidate_seat, manifest_json, game)) in [
             (
                 Seat::North,
                 pair.candidate_as_north_manifest_json,
@@ -420,7 +655,10 @@ fn score_policy(
                 pair.candidate_as_south_manifest_json,
                 &pair.candidate_as_south,
             ),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             candidate.validate_binding(
                 game.rules().authority_hash(),
                 assigned_deck_id,
@@ -445,27 +683,37 @@ fn score_policy(
                 GameOutcome::Win { winner, .. } if winner == candidate_seat => 2,
                 GameOutcome::Win { .. } => 0,
             };
+            seat_half_points[seat_index] = half_points;
             score.games = score
                 .games
                 .checked_add(1)
                 .ok_or(SelfPlayError::Invalid("self-play game count overflowed"))?;
-            score.half_points =
-                score
-                    .half_points
-                    .checked_add(half_points)
-                    .ok_or(SelfPlayError::Invalid(
-                        "self-play half-point total overflowed",
-                    ))?;
+            score.half_points = score
+                .half_points
+                .checked_add(u64::from(half_points))
+                .ok_or(SelfPlayError::Invalid(
+                    "self-play half-point total overflowed",
+                ))?;
             let subgroup = score
                 .subgroup_half_points
                 .entry(pair.subgroup.to_owned())
                 .or_default();
-            *subgroup = subgroup
-                .checked_add(half_points)
-                .ok_or(SelfPlayError::Invalid(
-                    "self-play subgroup score overflowed",
-                ))?;
+            *subgroup =
+                subgroup
+                    .checked_add(u64::from(half_points))
+                    .ok_or(SelfPlayError::Invalid(
+                        "self-play subgroup score overflowed",
+                    ))?;
         }
+        score.pairs.push(SelfPlayPairScore {
+            seed: pair.seed,
+            subgroup: pair.subgroup.to_owned(),
+            opponent_policy_id: pair.opponent.policy_id().clone(),
+            north_manifest_id: pair.candidate_as_north.rules().manifest_id().clone(),
+            south_manifest_id: pair.candidate_as_south.rules().manifest_id().clone(),
+            candidate_as_north_half_points: seat_half_points[0],
+            candidate_as_south_half_points: seat_half_points[1],
+        });
     }
     Ok(score)
 }
@@ -479,12 +727,13 @@ fn prepare_suite<'a>(
     assigned_deck: &DeckValidation,
     champion: &PolicySnapshot,
 ) -> Result<Vec<PreparedPair<'a>>, SelfPlayError> {
-    if pairs.is_empty() {
+    if pairs.is_empty() || pairs.len() > MAX_SELF_PLAY_PAIRS {
         return Err(SelfPlayError::Invalid(
-            "self-play suites must contain at least one seat-swapped pair",
+            "self-play suites must contain 1-128 seat-swapped pairs",
         ));
     }
-    let mut seen = BTreeSet::new();
+    let mut seen_seeds = BTreeSet::new();
+    let mut seen_pair_identities = BTreeSet::new();
     let mut prepared = Vec::with_capacity(pairs.len());
     for pair in pairs {
         if pair.subgroup.trim().is_empty() {
@@ -492,10 +741,8 @@ fn prepare_suite<'a>(
                 "self-play subgroup must be nonempty",
             ));
         }
-        if !seen.insert((pair.seed, pair.subgroup)) {
-            return Err(SelfPlayError::Invalid(
-                "self-play suite repeats a seed and subgroup pair",
-            ));
+        if !seen_seeds.insert(pair.seed) {
+            return Err(SelfPlayError::Invalid("self-play suite repeats a seed"));
         }
         if !pair.opponent_deck.ranked_eligible()
             || pair.opponent.deck_id() != pair.opponent_deck.deck_id()
@@ -549,6 +796,16 @@ fn prepare_suite<'a>(
                 pair.opponent_deck.deck_id(),
                 game.rules().engine_version(),
             )?;
+        }
+        if !seen_pair_identities.insert((
+            pair.seed,
+            candidate_as_north.rules().manifest_id().clone(),
+            candidate_as_south.rules().manifest_id().clone(),
+            pair.opponent.policy_id().clone(),
+        )) {
+            return Err(SelfPlayError::Invalid(
+                "self-play suite repeats a matchup under another subgroup",
+            ));
         }
         prepared.push(PreparedPair {
             seed: pair.seed,
@@ -629,25 +886,120 @@ fn manifest_deck_matches(manifest: &serde_json::Value, expected: &CanonicalDeck)
 mod tests {
     use std::collections::BTreeMap;
 
-    use super::{SelfPlayScore, improves_without_regression};
+    use crate::canonical::IdentityHash;
 
-    fn score(total: u64, control: u64, aggro: u64) -> SelfPlayScore {
-        SelfPlayScore {
-            games: 4,
-            half_points: total,
-            subgroup_half_points: BTreeMap::from([
-                ("aggro".to_owned(), aggro),
-                ("control".to_owned(), control),
-            ]),
+    use super::{
+        SelfPlayPairScore, SelfPlayScore, exact_sign_test_at_most_one_percent,
+        improves_without_regression,
+    };
+
+    fn identity(seed: u32, offset: u32) -> IdentityHash {
+        IdentityHash::parse(&format!("sha256:{:064x}", seed + offset)).expect("test identity")
+    }
+
+    fn score(rows: &[(u8, u8, &str)]) -> SelfPlayScore {
+        let mut score = SelfPlayScore {
+            games: 0,
+            half_points: 0,
+            subgroup_half_points: BTreeMap::new(),
+            pairs: Vec::new(),
+        };
+        for (index, &(north, south, subgroup)) in rows.iter().enumerate() {
+            let seed = u32::try_from(index).expect("test seed");
+            score.games += 2;
+            score.half_points += u64::from(north + south);
+            *score
+                .subgroup_half_points
+                .entry(subgroup.to_owned())
+                .or_default() += u64::from(north + south);
+            score.pairs.push(SelfPlayPairScore {
+                seed,
+                subgroup: subgroup.to_owned(),
+                opponent_policy_id: identity(0, 1_000),
+                north_manifest_id: identity(seed, 2_000),
+                south_manifest_id: identity(seed, 3_000),
+                candidate_as_north_half_points: north,
+                candidate_as_south_half_points: south,
+            });
         }
+        score
     }
 
     #[test]
-    fn promotion_requires_strict_total_gain_without_subgroup_regression() {
-        let champion = score(4, 2, 2);
+    fn promotion_requires_paired_evidence_and_no_seat_or_subgroup_regression() {
+        let champion = score(&vec![(1, 1, "mirror"); 20]);
 
-        assert!(!improves_without_regression(&score(4, 2, 2), &champion));
-        assert!(!improves_without_regression(&score(5, 1, 4), &champion));
-        assert!(improves_without_regression(&score(5, 2, 3), &champion));
+        assert!(!improves_without_regression(
+            &score(&vec![(2, 1, "mirror"); 19]),
+            &score(&vec![(1, 1, "mirror"); 19])
+        ));
+
+        let mut noisy_gain = Vec::new();
+        noisy_gain.extend((0..11).map(|_| (2, 2, "mirror")));
+        noisy_gain.extend((0..5).map(|_| (0, 1, "mirror")));
+        noisy_gain.extend((0..4).map(|_| (1, 0, "mirror")));
+        assert!(!improves_without_regression(&score(&noisy_gain), &champion));
+
+        let mut reliable_gain = vec![(2, 1, "mirror"); 17];
+        reliable_gain.extend(vec![(0, 1, "mirror"); 3]);
+        assert!(improves_without_regression(
+            &score(&reliable_gain),
+            &champion
+        ));
+
+        let mut seat_regression = vec![(2, 1, "mirror"); 20];
+        seat_regression[0] = (2, 0, "mirror");
+        let seat_champion = score(&vec![(0, 2, "mirror"); 20]);
+        assert!(!improves_without_regression(
+            &score(&seat_regression),
+            &seat_champion
+        ));
+
+        let mut changed_case = score(&reliable_gain);
+        changed_case.pairs[0].seed = 999;
+        assert!(!improves_without_regression(&changed_case, &champion));
+
+        let mut subgroup_regression = vec![(2, 1, "aggro"); 17];
+        subgroup_regression.extend(vec![(0, 1, "control"); 3]);
+        let mut subgroup_champion = vec![(1, 1, "aggro"); 17];
+        subgroup_champion.extend(vec![(1, 1, "control"); 3]);
+        assert!(!improves_without_regression(
+            &score(&subgroup_regression),
+            &score(&subgroup_champion)
+        ));
+
+        assert!(!exact_sign_test_at_most_one_percent(6, 0));
+        assert!(exact_sign_test_at_most_one_percent(7, 0));
+        assert!(!exact_sign_test_at_most_one_percent(77, 51));
+        assert!(exact_sign_test_at_most_one_percent(78, 50));
+    }
+
+    #[test]
+    fn promotion_effect_boundary_should_be_exact() {
+        let mut below_champion = vec![(1, 1, "mirror"); 15];
+        below_champion.extend(vec![(2, 2, "mirror"); 3]);
+        below_champion.extend(vec![(1, 1, "mirror"); 2]);
+        let mut below = Vec::new();
+        below.extend((0..8).map(|_| (2, 1, "mirror")));
+        below.extend((0..7).map(|_| (1, 2, "mirror")));
+        below.extend(vec![(0, 0, "mirror"); 3]);
+        below.extend(vec![(1, 1, "mirror"); 2]);
+        assert!(!improves_without_regression(
+            &score(&below),
+            &score(&below_champion)
+        ));
+
+        let mut boundary_champion = vec![(1, 1, "mirror"); 16];
+        boundary_champion.extend(vec![(2, 2, "mirror"); 3]);
+        boundary_champion.push((1, 1, "mirror"));
+        let mut boundary = Vec::new();
+        boundary.extend(vec![(2, 1, "mirror"); 8]);
+        boundary.extend(vec![(1, 2, "mirror"); 8]);
+        boundary.extend(vec![(0, 0, "mirror"); 3]);
+        boundary.push((1, 1, "mirror"));
+        assert!(improves_without_regression(
+            &score(&boundary),
+            &score(&boundary_champion)
+        ));
     }
 }
