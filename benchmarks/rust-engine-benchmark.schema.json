@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://sorcery.local/schemas/rust-engine-benchmark-v1.json",
-  "title": "Sorcery Rust engine benchmark v1",
+  "$id": "https://sorcery.local/schemas/rust-engine-benchmark-v2.json",
+  "title": "Sorcery Rust engine benchmark v2",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -11,6 +11,7 @@
     "environment",
     "gameReplay",
     "measuredAtUnixMs",
+    "pairedRollout",
     "searchNodes",
     "transitions"
   ],
@@ -19,14 +20,21 @@
       "$ref": "#/$defs/aggregate"
     },
     "benchmarkVersion": {
-      "const": 1
+      "const": 2
     },
     "configuration": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["gamesPerSample", "sampleCount", "searchHorizon", "seeds"],
+      "required": [
+        "gamesPerSample",
+        "pairedRolloutRepetitionsPerSample",
+        "sampleCount",
+        "searchHorizon",
+        "seeds"
+      ],
       "properties": {
         "gamesPerSample": { "$ref": "#/$defs/positiveInteger" },
+        "pairedRolloutRepetitionsPerSample": { "$ref": "#/$defs/positiveInteger" },
         "sampleCount": { "$ref": "#/$defs/positiveInteger" },
         "searchHorizon": { "type": "integer", "minimum": 1, "maximum": 32 },
         "seeds": {
@@ -63,6 +71,7 @@
     },
     "gameReplay": { "$ref": "#/$defs/summary" },
     "measuredAtUnixMs": { "type": "integer", "minimum": 0 },
+    "pairedRollout": { "$ref": "#/$defs/pairedRollout" },
     "searchNodes": { "$ref": "#/$defs/summary" },
     "transitions": { "$ref": "#/$defs/summary" }
   },
@@ -113,6 +122,84 @@
         "throughputPerSecond": { "$ref": "#/$defs/percentiles" }
       }
     },
+    "pairedRollout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "aggregate",
+        "estimated60SecondCapacity",
+        "pairLatencyMs",
+        "replayPreflightOrientations",
+        "samples",
+        "seed",
+        "throughputPerSecond",
+        "uniqueSeeds"
+      ],
+      "properties": {
+        "aggregate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["durationMs", "games", "pairs", "transitions"],
+          "properties": {
+            "durationMs": { "$ref": "#/$defs/nonnegativeNumber" },
+            "games": { "$ref": "#/$defs/positiveInteger" },
+            "pairs": { "$ref": "#/$defs/positiveInteger" },
+            "transitions": { "$ref": "#/$defs/positiveInteger" }
+          }
+        },
+        "estimated60SecondCapacity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["games", "method", "pairs", "transitions", "workload"],
+          "properties": {
+            "games": { "$ref": "#/$defs/positiveInteger" },
+            "method": { "const": "singleThreadShortSampleEstimate" },
+            "pairs": { "$ref": "#/$defs/positiveInteger" },
+            "transitions": { "$ref": "#/$defs/positiveInteger" },
+            "workload": { "const": "twoSeatSpeculativeRolloutOnly" }
+          }
+        },
+        "pairLatencyMs": { "$ref": "#/$defs/percentiles" },
+        "replayPreflightOrientations": { "const": 2 },
+        "samples": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["durationMs", "games", "pairs", "transitions"],
+            "properties": {
+              "durationMs": { "$ref": "#/$defs/nonnegativeNumber" },
+              "games": { "$ref": "#/$defs/positiveInteger" },
+              "pairs": { "$ref": "#/$defs/positiveInteger" },
+              "transitions": { "$ref": "#/$defs/positiveInteger" }
+            }
+          }
+        },
+        "seed": { "$ref": "#/$defs/seed" },
+        "throughputPerSecond": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "gamesMedian",
+            "gamesP95",
+            "pairsMedian",
+            "pairsP95",
+            "transitionsMedian",
+            "transitionsP95"
+          ],
+          "properties": {
+            "gamesMedian": { "$ref": "#/$defs/nonnegativeNumber" },
+            "gamesP95": { "$ref": "#/$defs/nonnegativeNumber" },
+            "pairsMedian": { "$ref": "#/$defs/nonnegativeNumber" },
+            "pairsP95": { "$ref": "#/$defs/nonnegativeNumber" },
+            "transitionsMedian": { "$ref": "#/$defs/nonnegativeNumber" },
+            "transitionsP95": { "$ref": "#/$defs/nonnegativeNumber" }
+          }
+        },
+        "uniqueSeeds": { "$ref": "#/$defs/positiveInteger" }
+      }
+    },
     "percentiles": {
       "type": "object",
       "additionalProperties": false,
@@ -123,6 +210,7 @@
       }
     },
     "positiveInteger": { "type": "integer", "minimum": 1 },
+    "seed": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
     "nonnegativeNumber": { "type": "number", "minimum": 0 }
   }
 }
