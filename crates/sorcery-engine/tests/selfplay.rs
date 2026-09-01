@@ -207,6 +207,7 @@ fn campaign_checkpoint_should_round_trip_and_require_the_validated_deck() {
     assert_eq!(resumed.max_actions(), 500);
     assert_eq!(resumed.promotion_attempts(), 0);
     assert!(!resumed.is_finalized());
+    assert!(!serialized.contains("pendingOperation"));
     assert!(resume_selfplay_campaign(&parsed, opponent_deck).is_err());
     assert!(parse_selfplay_campaign_checkpoint(&format!(" {serialized}")).is_err());
     assert!(
@@ -252,6 +253,56 @@ fn campaign_checkpoint_should_round_trip_and_require_the_validated_deck() {
     }]);
     blank_subgroup["usedDevelopmentSeeds"] = json!((0_u32..21).collect::<Vec<_>>());
     assert!(parse_selfplay_campaign_checkpoint(&rehash_checkpoint(blank_subgroup)).is_err());
+}
+
+#[test]
+fn pending_generation_checkpoint_should_require_the_exact_ordered_suite() {
+    let training_manifests = paired_manifests(40, 1);
+    let promotion_manifests = (100..120)
+        .map(|seed| (seed, paired_manifests(seed, 1)))
+        .collect::<Vec<_>>();
+    let candidate_deck = validated_manifest_deck(&training_manifests.0, "north");
+    let opponent_deck = validated_manifest_deck(&training_manifests.0, "south");
+    let authority = authority_hash(&training_manifests.0);
+    let champion = policy(
+        &authority,
+        candidate_deck.deck_id().as_str(),
+        BASELINE_FEATURES,
+    );
+    let opponent = policy(
+        &authority,
+        opponent_deck.deck_id().as_str(),
+        BASELINE_FEATURES,
+    );
+    let training = one_pair(&training_manifests, 40, &opponent, &opponent_deck);
+    let promotion = promotion_manifests
+        .iter()
+        .map(|(seed, manifests)| pair(&manifests.0, &manifests.1, *seed, &opponent, &opponent_deck))
+        .collect::<Vec<_>>();
+    let mut campaign =
+        SelfPlayCampaign::new(champion, candidate_deck.clone(), 1_000).expect("campaign");
+    campaign
+        .reserve_generation(&training, &promotion)
+        .expect("reserved generation");
+    let checkpoint = create_selfplay_campaign_checkpoint(&campaign).expect("pending checkpoint");
+    let serialized =
+        serialize_selfplay_campaign_checkpoint(&checkpoint).expect("serialized checkpoint");
+    let mut resumed = resume_selfplay_campaign(
+        &parse_selfplay_campaign_checkpoint(&serialized).expect("parsed pending checkpoint"),
+        candidate_deck,
+    )
+    .expect("resumed pending generation");
+    let mut reordered = promotion.clone();
+    reordered.swap(0, 1);
+
+    assert!(resumed.complete_generation(&training, &reordered).is_err());
+    assert_eq!(
+        serialize_selfplay_campaign_checkpoint(
+            &create_selfplay_campaign_checkpoint(&resumed).expect("retained pending checkpoint")
+        )
+        .expect("serialized retained checkpoint"),
+        serialized
+    );
 }
 
 #[test]
@@ -524,6 +575,10 @@ fn underpowered_gain_should_replay_but_not_promote_or_start_a_campaign() {
 
 #[test]
 #[ignore = "release-only production-sized self-play acceptance gate"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one acceptance proof covers generation and audit reservation across restart"
+)]
 fn production_sized_campaign_should_promote_and_seal_reproducibly() {
     let training_manifests = paired_manifests(40, 1);
     let promotion_manifests = (100..120)
@@ -570,9 +625,23 @@ fn production_sized_campaign_should_promote_and_seal_reproducibly() {
     let mut second = SelfPlayCampaign::new(champion.clone(), candidate_deck.clone(), 1_000)
         .expect("second campaign");
 
+    first
+        .reserve_generation(&training, &promotion)
+        .expect("reserved first production-sized promotion");
+    let pending_generation =
+        create_selfplay_campaign_checkpoint(&first).expect("pending generation checkpoint");
+    first = resume_selfplay_campaign(&pending_generation, candidate_deck.clone())
+        .expect("resumed pending generation");
+    let mut wrong_promotion = promotion.clone();
+    wrong_promotion.swap(0, 1);
+    assert!(
+        first
+            .complete_generation(&training, &wrong_promotion)
+            .is_err()
+    );
     let first_promotion = first
-        .run_generation(&training, &promotion)
-        .expect("first production-sized promotion");
+        .complete_generation(&training, &promotion)
+        .expect("completed first production-sized promotion");
     let second_promotion = second
         .run_generation(&training, &promotion)
         .expect("repeated production-sized promotion");
@@ -597,7 +666,16 @@ fn production_sized_campaign_should_promote_and_seal_reproducibly() {
     .expect("resumed first campaign");
     assert!(first.run_generation(&training, &promotion).is_err());
 
-    let first_audit = first.final_audit(&audit).expect("first fresh final audit");
+    first
+        .reserve_final_audit(&audit)
+        .expect("reserved first fresh final audit");
+    let pending_audit =
+        create_selfplay_campaign_checkpoint(&first).expect("pending final-audit checkpoint");
+    first = resume_selfplay_campaign(&pending_audit, candidate_deck.clone())
+        .expect("resumed pending final audit");
+    let first_audit = first
+        .complete_final_audit(&audit)
+        .expect("completed first fresh final audit");
     let second_audit = second
         .final_audit(&audit)
         .expect("repeated fresh final audit");

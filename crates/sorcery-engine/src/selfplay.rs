@@ -212,6 +212,7 @@ pub struct SelfPlayCampaign {
     final_audit_state: FinalAuditState,
     initial_policy: PolicySnapshot,
     max_actions: usize,
+    pending_operation: Option<PendingOperation>,
     promotion_portfolio: Option<Portfolio>,
     promotion_attempts: u8,
     promoted_policies: Vec<PolicySnapshot>,
@@ -226,6 +227,13 @@ enum FinalAuditState {
     Complete,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+enum PendingOperation {
+    Generation { suite_id: IdentityHash },
+    FinalAudit { suite_id: IdentityHash },
+}
+
 /// Canonical, self-hashed private campaign control state.
 ///
 /// The validated assigned deck is deliberately external and must be supplied again on resume.
@@ -238,6 +246,8 @@ pub struct SelfPlayCampaignCheckpoint {
     initial_policy: PolicySnapshot,
     kind: String,
     max_actions: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pending_operation: Option<PendingOperation>,
     promotion_attempts: u8,
     promotion_portfolio: Option<Vec<PortfolioEntry>>,
     promoted_policies: Vec<PolicySnapshot>,
@@ -262,6 +272,8 @@ struct RawSelfPlayCampaignCheckpoint {
     initial_policy: serde_json::Value,
     kind: String,
     max_actions: usize,
+    #[serde(default)]
+    pending_operation: Option<PendingOperation>,
     promotion_attempts: u8,
     promotion_portfolio: Option<Vec<PortfolioEntry>>,
     promoted_policies: Vec<serde_json::Value>,
@@ -376,6 +388,7 @@ impl SelfPlayCampaign {
             final_audit_state: FinalAuditState::Open,
             initial_policy,
             max_actions,
+            pending_operation: None,
             promotion_portfolio: None,
             promotion_attempts: 0,
             promoted_policies: Vec::new(),
@@ -415,16 +428,21 @@ impl SelfPlayCampaign {
         self.promotion_attempts
     }
 
-    /// Runs one fresh training and promotion generation.
+    /// Reserves one exact training and promotion suite before evaluation.
     ///
     /// # Errors
     ///
-    /// Returns [`SelfPlayError`] for seed reuse, a sealed campaign, or any promotion failure.
-    pub fn run_generation(
+    /// Returns [`SelfPlayError`] for invalid input, seed reuse, or another pending operation.
+    pub fn reserve_generation(
         &mut self,
         training: &[SelfPlayPair<'_>],
         promotion: &[SelfPlayPair<'_>],
-    ) -> Result<PromotionResult, SelfPlayError> {
+    ) -> Result<(), SelfPlayError> {
+        if self.pending_operation.is_some() {
+            return Err(SelfPlayError::Invalid(
+                "self-play campaign already has a pending operation",
+            ));
+        }
         if self.final_audit_state != FinalAuditState::Open {
             return Err(SelfPlayError::Invalid(
                 "self-play campaign cannot continue after its final audit attempt",
@@ -467,6 +485,49 @@ impl SelfPlayCampaign {
                 "self-play promotion portfolio changed across generations",
             ));
         }
+        let prepared_training = prepare_suite(training, &self.assigned_deck, self.champion())?;
+        let prepared_promotion = prepare_suite(promotion, &self.assigned_deck, self.champion())?;
+        let training_seeds = seeds(&prepared_training);
+        if prepared_promotion
+            .iter()
+            .any(|case| training_seeds.contains(&case.seed))
+        {
+            return Err(SelfPlayError::Invalid(
+                "training and heldout seeds must be disjoint",
+            ));
+        }
+        self.pending_operation = Some(PendingOperation::Generation {
+            suite_id: generation_suite_id(training, promotion)?,
+        });
+        Ok(())
+    }
+
+    /// Completes the exact generation previously reserved by [`Self::reserve_generation`].
+    ///
+    /// Failures retain the reservation so the same deterministic suite can resume after restart.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SelfPlayError`] when the suite differs or evaluation fails.
+    pub fn complete_generation(
+        &mut self,
+        training: &[SelfPlayPair<'_>],
+        promotion: &[SelfPlayPair<'_>],
+    ) -> Result<PromotionResult, SelfPlayError> {
+        let suite_id = generation_suite_id(training, promotion)?;
+        if !matches!(
+            &self.pending_operation,
+            Some(PendingOperation::Generation { suite_id: expected }) if expected == &suite_id
+        ) {
+            return Err(SelfPlayError::Invalid(
+                "self-play generation does not match the pending suite",
+            ));
+        }
+        let generation_seeds = raw_seeds(training)
+            .union(&raw_seeds(promotion))
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let promotion_portfolio = portfolio(promotion)?;
         let result = train_and_promote_at_significance(
             self.champion(),
             &self.assigned_deck,
@@ -483,18 +544,40 @@ impl SelfPlayCampaign {
         if result.promoted {
             self.promoted_policies.push(result.policy.clone());
         }
+        self.pending_operation = None;
         Ok(result)
     }
 
-    /// Replays a fresh audit suite against the champion, then permanently seals the campaign.
+    /// Runs one generation, reserving its exact suites before evaluation.
+    ///
+    /// Use [`Self::reserve_generation`], persist a checkpoint, then call
+    /// [`Self::complete_generation`] when crash-discard protection is required.
     ///
     /// # Errors
     ///
-    /// Returns [`SelfPlayError`] for prior seed use, a sealed campaign, or any replay failure.
-    pub fn final_audit(
+    /// Returns [`SelfPlayError`] for reservation or evaluation failure.
+    pub fn run_generation(
         &mut self,
-        audit: &[SelfPlayPair<'_>],
-    ) -> Result<SelfPlayAudit, SelfPlayError> {
+        training: &[SelfPlayPair<'_>],
+        promotion: &[SelfPlayPair<'_>],
+    ) -> Result<PromotionResult, SelfPlayError> {
+        if self.pending_operation.is_none() {
+            self.reserve_generation(training, promotion)?;
+        }
+        self.complete_generation(training, promotion)
+    }
+
+    /// Reserves one exact final-audit suite before replay evaluation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SelfPlayError`] for prior seed use, invalid coverage, or another operation.
+    pub fn reserve_final_audit(&mut self, audit: &[SelfPlayPair<'_>]) -> Result<(), SelfPlayError> {
+        if self.pending_operation.is_some() {
+            return Err(SelfPlayError::Invalid(
+                "self-play campaign already has a pending operation",
+            ));
+        }
         if self.final_audit_state != FinalAuditState::Open {
             return Err(SelfPlayError::Invalid(
                 "self-play campaign cannot repeat its final audit",
@@ -525,8 +608,37 @@ impl SelfPlayCampaign {
                 "final audit must cover the locked promotion portfolio",
             ));
         }
-        let prepared = prepare_suite(audit, &self.assigned_deck, self.champion())?;
+        prepare_suite(audit, &self.assigned_deck, self.champion())?;
+        self.pending_operation = Some(PendingOperation::FinalAudit {
+            suite_id: final_audit_suite_id(audit)?,
+        });
+        Ok(())
+    }
+
+    /// Completes the exact final audit previously reserved by [`Self::reserve_final_audit`].
+    ///
+    /// Once the exact reservation is consumed, every returned evaluation failure leaves the
+    /// campaign permanently failed and clears the pending operation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SelfPlayError`] when the suite differs or replay evaluation fails.
+    pub fn complete_final_audit(
+        &mut self,
+        audit: &[SelfPlayPair<'_>],
+    ) -> Result<SelfPlayAudit, SelfPlayError> {
+        let suite_id = final_audit_suite_id(audit)?;
+        if !matches!(
+            &self.pending_operation,
+            Some(PendingOperation::FinalAudit { suite_id: expected }) if expected == &suite_id
+        ) {
+            return Err(SelfPlayError::Invalid(
+                "self-play final audit does not match the pending suite",
+            ));
+        }
         self.final_audit_state.begin()?;
+        self.pending_operation = None;
+        let prepared = prepare_suite(audit, &self.assigned_deck, self.champion())?;
         let baseline_score = score_policy(
             &self.initial_policy,
             self.assigned_deck.deck_id(),
@@ -561,10 +673,28 @@ impl SelfPlayCampaign {
         self.final_audit_state = FinalAuditState::Complete;
         Ok(audit)
     }
+
+    /// Replays a fresh audit suite against the champion, then permanently seals the campaign.
+    ///
+    /// Use [`Self::reserve_final_audit`], persist a checkpoint, then call
+    /// [`Self::complete_final_audit`] when crash-discard protection is required.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SelfPlayError`] for reservation or replay failure.
+    pub fn final_audit(
+        &mut self,
+        audit: &[SelfPlayPair<'_>],
+    ) -> Result<SelfPlayAudit, SelfPlayError> {
+        if self.pending_operation.is_none() {
+            self.reserve_final_audit(audit)?;
+        }
+        self.complete_final_audit(audit)
+    }
 }
 
 fn checkpoint_body_value(checkpoint: &SelfPlayCampaignCheckpoint) -> serde_json::Value {
-    serde_json::json!({
+    let mut body = serde_json::json!({
         "assignedDeckId": checkpoint.assigned_deck_id,
         "finalAuditState": checkpoint.final_audit_state,
         "initialPolicy": checkpoint.initial_policy,
@@ -575,7 +705,11 @@ fn checkpoint_body_value(checkpoint: &SelfPlayCampaignCheckpoint) -> serde_json:
         "promotedPolicies": checkpoint.promoted_policies,
         "schemaVersion": checkpoint.schema_version,
         "usedDevelopmentSeeds": checkpoint.used_development_seeds,
-    })
+    });
+    if let Some(pending) = &checkpoint.pending_operation {
+        body["pendingOperation"] = serde_json::json!(pending);
+    }
+    body
 }
 
 fn validate_checkpoint(checkpoint: &SelfPlayCampaignCheckpoint) -> Result<(), SelfPlayError> {
@@ -672,6 +806,18 @@ fn validate_checkpoint_progress(
             "self-play checkpoint audit state is inconsistent",
         ));
     }
+    match (&checkpoint.pending_operation, checkpoint.final_audit_state) {
+        (None, _) => {}
+        (Some(PendingOperation::Generation { .. }), FinalAuditState::Open)
+            if checkpoint.promotion_attempts < MAX_CAMPAIGN_PROMOTION_ATTEMPTS => {}
+        (Some(PendingOperation::FinalAudit { .. }), FinalAuditState::Open)
+            if checkpoint.promotion_attempts > 0 => {}
+        _ => {
+            return Err(SelfPlayError::Invalid(
+                "self-play checkpoint pending operation is inconsistent",
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -732,6 +878,7 @@ pub fn create_selfplay_campaign_checkpoint(
         initial_policy: campaign.initial_policy.clone(),
         kind: "sorcery-self-play-campaign-checkpoint".to_owned(),
         max_actions: campaign.max_actions,
+        pending_operation: campaign.pending_operation.clone(),
         promotion_attempts: campaign.promotion_attempts,
         promotion_portfolio: campaign.promotion_portfolio.as_ref().map(portfolio_entries),
         promoted_policies: campaign.promoted_policies.clone(),
@@ -782,6 +929,7 @@ pub fn parse_selfplay_campaign_checkpoint(
         initial_policy: parse_checkpoint_policy(&raw.initial_policy)?,
         kind: raw.kind,
         max_actions: raw.max_actions,
+        pending_operation: raw.pending_operation,
         promotion_attempts: raw.promotion_attempts,
         promotion_portfolio: raw.promotion_portfolio,
         promoted_policies: raw
@@ -817,6 +965,7 @@ pub fn resume_selfplay_campaign(
         final_audit_state: checkpoint.final_audit_state,
         initial_policy: checkpoint.initial_policy.clone(),
         max_actions: checkpoint.max_actions,
+        pending_operation: checkpoint.pending_operation.clone(),
         promotion_portfolio: checkpoint.promotion_portfolio.as_ref().map(|entries| {
             entries
                 .iter()
@@ -843,6 +992,45 @@ fn validate_assigned_policy(
 
 fn raw_seeds(pairs: &[SelfPlayPair<'_>]) -> BTreeSet<u32> {
     pairs.iter().map(|pair| pair.seed).collect()
+}
+
+fn suite_value(pairs: &[SelfPlayPair<'_>]) -> Result<serde_json::Value, SelfPlayError> {
+    pairs
+        .iter()
+        .map(|pair| {
+            Ok(serde_json::json!({
+                "candidateAsNorthManifest": parse_json_without_duplicate_keys(
+                    pair.candidate_as_north_manifest_json,
+                )?,
+                "candidateAsSouthManifest": parse_json_without_duplicate_keys(
+                    pair.candidate_as_south_manifest_json,
+                )?,
+                "opponentDeckId": pair.opponent_deck.deck_id(),
+                "opponentPolicyId": pair.opponent.policy_id(),
+                "seed": pair.seed,
+                "subgroup": pair.subgroup,
+            }))
+        })
+        .collect::<Result<Vec<_>, SelfPlayError>>()
+        .map(serde_json::Value::Array)
+}
+
+fn generation_suite_id(
+    training: &[SelfPlayPair<'_>],
+    promotion: &[SelfPlayPair<'_>],
+) -> Result<IdentityHash, SelfPlayError> {
+    Ok(identity_hash(&serde_json::json!({
+        "kind": "self-play-generation",
+        "promotion": suite_value(promotion)?,
+        "training": suite_value(training)?,
+    }))?)
+}
+
+fn final_audit_suite_id(audit: &[SelfPlayPair<'_>]) -> Result<IdentityHash, SelfPlayError> {
+    Ok(identity_hash(&serde_json::json!({
+        "audit": suite_value(audit)?,
+        "kind": "self-play-final-audit",
+    }))?)
 }
 
 fn portfolio(pairs: &[SelfPlayPair<'_>]) -> Result<Portfolio, SelfPlayError> {

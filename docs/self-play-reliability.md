@@ -53,9 +53,9 @@ ordinary debug suite because running the same workload there takes several minut
   or rejected at manifest admission before their games can affect training.
 - The selector neighborhood is intentionally small and `seat-observation-v1` does not expose enough
   state for strong tactical play; `powered-movement` is therefore inactive.
-- Completed-call campaign state now round-trips through a strict checkpoint with the seed set,
-  lineage, fixed action bound, attempt budget, portfolio, and audit state. The coarse process command
-  still needs to reserve an operation and publish that checkpoint atomically before long rollouts;
-  otherwise a process crash during the call can discard the attempt.
+- Campaign state round-trips through a strict checkpoint with the seed set, lineage, fixed action
+  bound, attempt budget, portfolio, audit state, and exact pending-suite commitment. An unattended
+  caller must use `reserve_generation` or `reserve_final_audit`, publish that checkpoint atomically,
+  then use the matching `complete_` method. The one-call wrappers are for supervised execution.
 - Deck mutation, opponent-league rotation, cost-aware objectives, and post-reboot all-core soak
   reports come after the authoritative rule boundary is complete.
