@@ -3754,3 +3754,395 @@ fn rule_catalog_0032_charge_magic_grants_an_ally_charge_only_for_the_current_tur
     assert_eq!(cards["north-printed"]["charge"], true);
     assert_exact_replay(&session);
 }
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one direct Overpower proof retains ally legality, combat prevention, stacking, expiry, and replay"
+)]
+fn rule_catalog_0033_overpower_changes_current_power_until_the_current_end_phase() {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-fighter": minion(json!({
+            "attack": 2,
+            "defense": 2,
+        })),
+        "north-filler": minion(json!({})),
+        "north-overpower": magic(("grantPowerToAllyThisTurn", json!(2)), 1),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-enemy": minion(json!({
+            "attack": 2,
+            "defense": 2,
+            "preventsDamageFromUnitsWithPowerAtLeast": 4,
+            "summonToAnySite": true,
+        })),
+        "south-site": site(false),
+    });
+    let north_spellbook = [
+        "north-overpower",
+        "north-overpower",
+        "north-fighter",
+        "north-filler",
+        "north-filler",
+        "north-filler",
+    ];
+    let manifest = (1..=512)
+        .map(|seed| manifest(seed, &cards, &north_spellbook, &["south-enemy"; 6]))
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("candidate Overpower session");
+            let hand = state(&preview)["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("North opening Spellbook hand")
+                .clone();
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-overpower")
+                .count()
+                == 2
+                && hand.iter().any(|card| card["cardId"] == "north-fighter")
+        })
+        .expect("seed with the fighter and two Overpower Magics");
+    let mut session = opening_main(&manifest);
+
+    let (fighter_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-fighter"
+            && descriptor["cell"] == "C4"
+    });
+    let fighter_id = fighter_summon["cardInstanceId"]
+        .as_str()
+        .expect("fighter identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (enemy_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-enemy"
+            && descriptor["cell"] == "C4"
+    });
+    let enemy_id = enemy_summon["cardInstanceId"]
+        .as_str()
+        .expect("enemy identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+
+    let checkpoint = session.clone();
+    let checkpoint_state = state(&checkpoint);
+    let avatar_id = checkpoint_state["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let overpower_ids: Vec<_> = checkpoint_state["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North Spellbook hand")
+        .iter()
+        .filter(|card| card["cardId"] == "north-overpower")
+        .map(|card| {
+            card["instanceId"]
+                .as_str()
+                .expect("Overpower identity")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(overpower_ids.len(), 2);
+    let checkpoint_version = checkpoint_state["stateVersion"]
+        .as_u64()
+        .expect("checkpoint state version");
+    let checkpoint_mana = checkpoint_state["players"]["north"]["mana"]
+        .as_u64()
+        .expect("checkpoint mana");
+
+    let checkpoint_actions = checkpoint.legal_actions().expect("Overpower actions");
+    let canonical_actions: Vec<_> = checkpoint_actions
+        .iter()
+        .map(|action| canonical_json(&action.descriptor).expect("canonical action descriptor"))
+        .collect();
+    let mut sorted_actions = canonical_actions.clone();
+    sorted_actions.sort_unstable();
+    assert_eq!(canonical_actions, sorted_actions);
+    let casts: Vec<_> = checkpoint_actions
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardInstanceId"] == overpower_ids[0]
+        })
+        .collect();
+    let mut ally_ids: Vec<_> = casts
+        .iter()
+        .map(|action| {
+            assert!(action.descriptor["target"].is_null());
+            assert!(action.descriptor["targetLocation"].is_null());
+            action.descriptor["ally"]["instanceId"]
+                .as_str()
+                .expect("engine-issued Overpower ally")
+                .to_owned()
+        })
+        .collect();
+    ally_ids.sort_unstable();
+    let mut expected_ally_ids = vec![avatar_id.clone(), fighter_id.clone()];
+    expected_ally_ids.sort_unstable();
+    assert_eq!(ally_ids, expected_ally_ids);
+    assert!(!ally_ids.contains(&enemy_id));
+    assert_eq!(
+        casts
+            .iter()
+            .find(|action| action.descriptor["ally"]["instanceId"] == fighter_id)
+            .expect("fighter Overpower action")
+            .label,
+        format!(
+            "Cast north-overpower to grant +2 power to minion {}…",
+            &fighter_id[..15]
+        )
+    );
+
+    let mut avatar_branch = checkpoint.clone();
+    let (_, avatar_grant) = accept_where(&mut avatar_branch, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardInstanceId"] == overpower_ids[0]
+            && descriptor["ally"]["kind"] == "avatar"
+    });
+    assert_eq!(
+        event_types(&avatar_grant),
+        ["magic-cast", "power-granted", "magic-resolved"]
+    );
+    assert_eq!(
+        avatar_grant.events[1].payload,
+        json!({
+            "amount": 2,
+            "instanceId": avatar_id,
+            "seat": "north",
+            "sourceInstanceId": overpower_ids[0],
+        })
+    );
+    assert_eq!(
+        state(&avatar_branch)["players"]["north"]["avatar"]["temporaryPowerSources"],
+        json!([overpower_ids[0]])
+    );
+    assert!(avatar_grant.random_draws.is_empty());
+    let (_, avatar_ended) = accept_where(&mut avatar_branch, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    let avatar_expiry = avatar_ended
+        .events
+        .iter()
+        .position(|event| event.event_type == "power-expired")
+        .expect("Avatar power expiry");
+    let avatar_turn_ended = avatar_ended
+        .events
+        .iter()
+        .position(|event| event.event_type == "turn-ended")
+        .expect("Avatar turn ended");
+    assert!(avatar_expiry < avatar_turn_ended);
+    assert_eq!(
+        avatar_ended.events[avatar_expiry].payload,
+        json!({
+            "amount": 2,
+            "instanceId": avatar_id,
+            "seat": "north",
+            "sourceInstanceId": overpower_ids[0],
+        })
+    );
+    assert!(state(&avatar_branch)["players"]["north"]["avatar"]["temporaryPowerSources"].is_null());
+    assert_exact_replay(&avatar_branch);
+
+    session = checkpoint;
+    let (_, first) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardInstanceId"] == overpower_ids[0]
+            && descriptor["ally"]["instanceId"] == fighter_id
+    });
+    assert_eq!(
+        event_types(&first),
+        ["magic-cast", "power-granted", "magic-resolved"]
+    );
+    assert_eq!(
+        first.events[0].payload,
+        json!({
+            "allyInstanceId": fighter_id,
+            "allySeat": "north",
+            "cardId": "north-overpower",
+            "casterInstanceId": avatar_id,
+            "instanceId": overpower_ids[0],
+            "manaPaid": 1,
+            "seat": "north",
+        })
+    );
+    assert_eq!(
+        first.events[1].payload,
+        json!({
+            "amount": 2,
+            "instanceId": fighter_id,
+            "seat": "north",
+            "sourceInstanceId": overpower_ids[0],
+        })
+    );
+    assert_eq!(
+        state(&session)["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .find(|unit| unit["instanceId"] == fighter_id)
+            .expect("powered fighter")["temporaryPowerSources"],
+        json!([overpower_ids[0]])
+    );
+    assert!(first.random_draws.is_empty());
+
+    let powered_state = state(&session);
+    let powered_actions = session.legal_actions().expect("powered legal actions");
+    let powered_checkpoint = create_game_checkpoint(&session).expect("captured power checkpoint");
+    let powered_bytes =
+        serialize_game_checkpoint(&powered_checkpoint).expect("serialized power checkpoint");
+    session = resume_game_checkpoint(
+        &parse_game_checkpoint(&powered_bytes).expect("parsed power checkpoint"),
+    )
+    .expect("restored power checkpoint");
+    assert_eq!(state(&session), powered_state);
+    assert_eq!(
+        session.legal_actions().expect("restored powered actions"),
+        powered_actions
+    );
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == fighter_id
+            && descriptor["path"]
+                .as_array()
+                .is_some_and(|path| path.len() == 1)
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "declare-attack"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == enemy_id
+    });
+    let (_, fight) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "close-defend" && descriptor["originalTargetParticipates"] == true
+    });
+    let prevented = fight
+        .events
+        .iter()
+        .find(|event| event.event_type == "damage-dealt" && event.payload["instanceId"] == enemy_id)
+        .expect("source-aware prevention event");
+    assert_eq!(
+        prevented.payload,
+        json!({
+            "accumulated": 0,
+            "amount": 0,
+            "attemptedAmount": 4,
+            "direct": true,
+            "instanceId": enemy_id,
+            "prevented": true,
+            "seat": "south",
+        })
+    );
+    assert_eq!(
+        fight
+            .events
+            .iter()
+            .find(|event| event.event_type == "strike-damage-allocated")
+            .expect("powered strike allocation")
+            .payload["amount"],
+        4
+    );
+    assert_eq!(
+        state(&session)["realm"]["units"]
+            .as_array()
+            .expect("post-fight units")
+            .iter()
+            .find(|unit| unit["instanceId"] == fighter_id)
+            .expect("powered fighter survived")["damage"],
+        2
+    );
+    assert!(fight.random_draws.is_empty());
+
+    let (_, second) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardInstanceId"] == overpower_ids[1]
+            && descriptor["ally"]["instanceId"] == fighter_id
+    });
+    assert_eq!(
+        event_types(&second),
+        ["magic-cast", "power-granted", "magic-resolved"]
+    );
+    assert!(second.random_draws.is_empty());
+    let stacked = state(&session);
+    assert_eq!(
+        stacked["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .find(|unit| unit["instanceId"] == fighter_id)
+            .expect("stacked fighter")["temporaryPowerSources"],
+        json!(overpower_ids)
+    );
+    assert_eq!(stacked["players"]["north"]["mana"], checkpoint_mana - 2);
+    assert_eq!(stacked["stateVersion"], checkpoint_version + 5);
+    assert_eq!(
+        stacked["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("North cemetery")
+            .iter()
+            .filter(|card| overpower_ids.iter().any(|id| card["instanceId"] == *id))
+            .count(),
+        2
+    );
+
+    let (_, ended) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    let expiry: Vec<_> = ended
+        .events
+        .iter()
+        .filter(|event| event.event_type == "power-expired")
+        .map(|event| event.payload.clone())
+        .collect();
+    assert_eq!(
+        expiry,
+        overpower_ids
+            .iter()
+            .map(|source_id| json!({
+                "amount": 2,
+                "instanceId": fighter_id,
+                "seat": "north",
+                "sourceInstanceId": source_id,
+            }))
+            .collect::<Vec<_>>()
+    );
+    let expiry_end = ended
+        .events
+        .iter()
+        .rposition(|event| event.event_type == "power-expired")
+        .expect("power expiry");
+    let turn_ended = ended
+        .events
+        .iter()
+        .position(|event| event.event_type == "turn-ended")
+        .expect("turn ended");
+    assert!(expiry_end < turn_ended);
+    assert!(ended.random_draws.is_empty());
+    let expired = state(&session);
+    let expired_fighter = expired["realm"]["units"]
+        .as_array()
+        .expect("expired units")
+        .iter()
+        .find(|unit| unit["instanceId"] == fighter_id)
+        .expect("fighter survived expiry");
+    assert!(expired_fighter["temporaryPowerSources"].is_null());
+    assert_eq!(expired_fighter["damage"], 0);
+    assert!(
+        expired["realm"]["units"]
+            .as_array()
+            .expect("expired units")
+            .iter()
+            .any(|unit| unit["instanceId"] == enemy_id)
+    );
+    assert_exact_replay(&session);
+}

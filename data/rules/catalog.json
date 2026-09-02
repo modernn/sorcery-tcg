@@ -632,15 +632,17 @@
         "RULE-03"
       ],
       "plainLanguage": "Overpower changes current power for source-aware prevention until the current End Phase.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "derived-power"
       ],
       "actionHints": [],
-      "eventHints": [],
+      "eventHints": [
+        "power"
+      ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Overpower changes current power for source-aware prevention until the current End Phase"
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0033_overpower_changes_current_power_until_the_current_end_phase"
       }
     },
     {

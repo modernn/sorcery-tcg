@@ -308,6 +308,7 @@ struct AvatarPosition {
     life: u16,
     location: Cell,
     tapped: bool,
+    temporary_power_sources: Vec<IdentityHash>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -350,6 +351,7 @@ struct UnitPosition {
     summoning_sickness: bool,
     tapped: bool,
     temporary_charge_sources: Vec<IdentityHash>,
+    temporary_power_sources: Vec<IdentityHash>,
     warded: bool,
 }
 
@@ -840,12 +842,12 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::DamageTargetUnit { .. }
         | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
         | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_)
-        | MagicEffect::GrantChargeToAllyThisTurn => None,
+        | MagicEffect::GrantChargeToAllyThisTurn
+        | MagicEffect::GrantPowerTwoToAllyThisTurn => None,
         MagicEffect::DamageRandomUnitAtLocation(_) => Some("damageRandomUnitAtLocation"),
         MagicEffect::DestroyTargetSiteWithDamageGrid(_) => Some("destroyTargetSiteWithDamageGrid"),
         MagicEffect::FightAllyWithAdjacentEnemy => Some("fightAllyWithAdjacentEnemy"),
         MagicEffect::GainControlOfTargetNearbyMinion => Some("gainControlOfTargetNearbyMinion"),
-        MagicEffect::GrantPowerTwoToAllyThisTurn => Some("grantPowerTwoToAllyThisTurn"),
         MagicEffect::KillTargetWoundedMinion => Some("killTargetWoundedMinion"),
         MagicEffect::LeapAttackAlly => Some("leapAttackAlly"),
         MagicEffect::LureEnemyMinionOneStepCloser => Some("lureEnemyMinionOneStepCloser"),
@@ -2263,10 +2265,25 @@ impl Game {
                         target_location: choice.target_location,
                         target_site_instance_id: choice.target_site_instance_id,
                     };
-                    let label = descriptor
-                        .state_independent_label()
-                        .ok_or_else(|| invalid("cast-magic action requires a label"))?
-                        + &self.minion_caster_suffix(seat, caster_instance_id);
+                    let label = (if matches!(facts.effect, MagicEffect::GrantPowerTwoToAllyThisTurn)
+                    {
+                        let ActionDescriptor::CastMagic {
+                            ally: Some(ally), ..
+                        } = &descriptor
+                        else {
+                            return Err(invalid("Overpower action requires an ally"));
+                        };
+                        format!(
+                            "Cast {} to grant +2 power to {} {}…",
+                            definition.id,
+                            ally.kind(),
+                            &ally.instance_id().as_str()[..15]
+                        )
+                    } else {
+                        descriptor
+                            .state_independent_label()
+                            .ok_or_else(|| invalid("cast-magic action requires a label"))?
+                    }) + &self.minion_caster_suffix(seat, caster_instance_id);
                     self.push_action(actions, descriptor, label);
                 }
             }
@@ -2945,7 +2962,7 @@ impl Game {
                     Self::unit_occupied_cells(unit),
                 )
         };
-        let mut bonus = 0_u16;
+        let mut bonus = Self::temporary_power_bonus(&unit.temporary_power_sources)?;
         for source in &self.position.units {
             if source.card.instance_id == unit.card.instance_id
                 || source.controller != unit.controller
@@ -2990,6 +3007,13 @@ impl Game {
                 .ok_or(GameError::IllegalAction)?,
             !disabled && facts.lethal,
         ))
+    }
+
+    fn temporary_power_bonus(sources: &[IdentityHash]) -> Result<u16, GameError> {
+        u16::try_from(sources.len())
+            .map_err(|_| GameError::IllegalAction)?
+            .checked_mul(2)
+            .ok_or(GameError::IllegalAction)
     }
 
     fn minion_caster_suffix(&self, seat: Seat, instance_id: &IdentityHash) -> String {
@@ -3093,7 +3117,7 @@ impl Game {
             | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => {
                 vec![MagicChoice::default()]
             }
-            MagicEffect::GrantChargeToAllyThisTurn => {
+            MagicEffect::GrantChargeToAllyThisTurn | MagicEffect::GrantPowerTwoToAllyThisTurn => {
                 let player = &self.position.players[seat_index(seat)];
                 let mut choices = vec![MagicChoice {
                     ally: Some(UnitTarget::Avatar {
@@ -5210,7 +5234,14 @@ impl Game {
                 else {
                     return Err(GameError::IllegalAction);
                 };
-                Ok((u16::from(facts.attack), false))
+                Ok((
+                    u16::from(facts.attack)
+                        .checked_add(Self::temporary_power_bonus(
+                            &avatar.temporary_power_sources,
+                        )?)
+                        .ok_or(GameError::IllegalAction)?,
+                    false,
+                ))
             }
             UnitKind::Minion => {
                 let unit = self
@@ -7437,6 +7468,7 @@ impl Game {
             summoning_sickness: true,
             tapped: false,
             temporary_charge_sources: Vec::new(),
+            temporary_power_sources: Vec::new(),
             warded: matches!(facts.damage_prevention, Some(DamagePrevention::Ward)),
         })
     }
@@ -8317,6 +8349,44 @@ impl Game {
                     })
                 });
             }
+            MagicEffect::GrantPowerTwoToAllyThisTurn => {
+                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
+                match ally {
+                    UnitTarget::Avatar {
+                        instance_id,
+                        seat: ally_seat,
+                    } => {
+                        let avatar = &mut self.position.players[seat_index(*ally_seat)].avatar;
+                        if avatar.card.instance_id != *instance_id {
+                            return Err(GameError::IllegalAction);
+                        }
+                        avatar
+                            .temporary_power_sources
+                            .push(card_instance_id.clone());
+                    }
+                    UnitTarget::Minion {
+                        instance_id,
+                        seat: ally_seat,
+                    } => self
+                        .position
+                        .units
+                        .iter_mut()
+                        .find(|unit| {
+                            unit.card.instance_id == *instance_id && unit.controller == *ally_seat
+                        })
+                        .ok_or(GameError::IllegalAction)?
+                        .temporary_power_sources
+                        .push(card_instance_id.clone()),
+                }
+                outcomes.push("power-granted", || {
+                    json!({
+                        "amount": 2,
+                        "instanceId": ally.instance_id(),
+                        "seat": ally.seat(),
+                        "sourceInstanceId": card_instance_id,
+                    })
+                });
+            }
             MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => {
                 for token in token_units {
                     let token_card_id = self.rules.cards[usize::from(token.card.card_id.0)]
@@ -8796,6 +8866,7 @@ impl Game {
             summoning_sickness: true,
             tapped: false,
             temporary_charge_sources: Vec::new(),
+            temporary_power_sources: Vec::new(),
             warded: starts_warded,
         });
         self.position.state_version += 1;
@@ -9277,6 +9348,25 @@ impl Game {
                 })
             })
             .collect();
+        let ending_avatar = &self.position.players[seat_index(seat)].avatar;
+        let mut expired_power_sources: Vec<_> = ending_avatar
+            .temporary_power_sources
+            .iter()
+            .map(|source| (ending_avatar.card.instance_id.clone(), seat, source.clone()))
+            .collect();
+        expired_power_sources.extend(self.position.units.iter().flat_map(|unit| {
+            unit.temporary_power_sources.iter().map(|source| {
+                (
+                    unit.card.instance_id.clone(),
+                    unit.controller,
+                    source.clone(),
+                )
+            })
+        }));
+        self.position.players[seat_index(seat)]
+            .avatar
+            .temporary_power_sources
+            .clear();
         for (instance_id, controller) in &end_phase_untapped {
             let unit = self
                 .position
@@ -9296,6 +9386,7 @@ impl Game {
         for (unit, disabled) in self.position.units.iter_mut().zip(disabled_units) {
             unit.damage = 0;
             unit.temporary_charge_sources.clear();
+            unit.temporary_power_sources.clear();
             if unit.controller == seat {
                 let gains_stealth = matches!(
                     &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
@@ -9329,6 +9420,16 @@ impl Game {
         for (instance_id, controller, source_instance_id) in expired_charge_sources {
             outcomes.push("charge-expired", || {
                 json!({
+                    "instanceId": instance_id,
+                    "seat": controller,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        for (instance_id, controller, source_instance_id) in expired_power_sources {
+            outcomes.push("power-expired", || {
+                json!({
+                    "amount": 2,
                     "instanceId": instance_id,
                     "seat": controller,
                     "sourceInstanceId": source_instance_id,
@@ -9702,6 +9803,9 @@ impl Game {
         ) {
             avatar.insert("lastInteractedTurn".to_owned(), json!(turn));
         }
+        if !player.avatar.temporary_power_sources.is_empty() {
+            value["avatar"]["temporaryPowerSources"] = json!(player.avatar.temporary_power_sources);
+        }
         value
     }
 
@@ -9775,6 +9879,12 @@ impl Game {
             object.insert(
                 "temporaryChargeSources".to_owned(),
                 json!(unit.temporary_charge_sources),
+            );
+        }
+        if !unit.temporary_power_sources.is_empty() {
+            object.insert(
+                "temporaryPowerSources".to_owned(),
+                json!(unit.temporary_power_sources),
             );
         }
         value
@@ -10023,6 +10133,7 @@ fn create_player(
         location: Cell::parse(if seat == Seat::North { "C4" } else { "C1" })
             .map_err(|_| invalid("avatar start cell must be valid"))?,
         tapped: false,
+        temporary_power_sources: Vec::new(),
     };
     let remaining_atlas = atlas.split_off(3);
     let remaining_spellbook = spellbook.split_off(3);
@@ -10653,6 +10764,7 @@ mod tests {
             summoning_sickness: false,
             tapped: false,
             temporary_charge_sources: Vec::new(),
+            temporary_power_sources: Vec::new(),
             warded: false,
         });
         game.position.active_seat = Seat::North;
@@ -10723,8 +10835,87 @@ mod tests {
             summoning_sickness: false,
             tapped: true,
             temporary_charge_sources: Vec::new(),
+            temporary_power_sources: Vec::new(),
             warded: false,
         }
+    }
+
+    #[test]
+    fn temporary_power_should_apply_to_avatar_and_disabled_minion_stats() {
+        let manifest = synthetic_demo_manifest_json(31).expect("synthetic manifest");
+        let mut game = Game::from_manifest_json(&manifest).expect("valid game");
+        let source =
+            identity_hash(&json!({ "fixture": "temporary-power" })).expect("power source identity");
+        let north = seat_index(Seat::North);
+        let avatar_card_id = game.position.players[north].avatar.card.card_id;
+        let CardFacts::Avatar(avatar_facts) =
+            &game.rules.cards[usize::from(avatar_card_id.0)].facts
+        else {
+            panic!("North Avatar facts");
+        };
+        let printed_avatar_attack = u16::from(avatar_facts.attack);
+        let avatar_id = game.position.players[north].avatar.card.instance_id.clone();
+        game.position.players[north]
+            .avatar
+            .temporary_power_sources
+            .push(source.clone());
+        assert_eq!(
+            game.combatant_attack_and_lethal(UnitKind::Avatar, Seat::North, &avatar_id)
+                .expect("powered Avatar stats"),
+            (printed_avatar_attack + 2, false)
+        );
+
+        let card_id = game.position.players[north]
+            .hand_spellbook
+            .iter()
+            .find_map(|card| {
+                matches!(
+                    game.rules.cards[usize::from(card.card_id.0)].facts,
+                    CardFacts::Minion(_)
+                )
+                .then_some(card.card_id)
+            })
+            .expect("North minion card");
+        let CardFacts::Minion(facts) = &game.rules.cards[usize::from(card_id.0)].facts else {
+            unreachable!("selected minion facts");
+        };
+        let printed = (u16::from(facts.attack), u16::from(facts.defense));
+        let mut unit = test_minion(
+            card_id,
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            Seat::North,
+            Cell::parse("C4").expect("C4"),
+            None,
+        );
+        unit.disabled_until_damaged = true;
+        unit.temporary_power_sources.push(source);
+        assert!(game.minion_is_disabled(&unit));
+        assert_eq!(
+            game.minion_current_stats(&unit)
+                .expect("powered disabled minion stats"),
+            (printed.0 + 2, printed.1 + 2, false)
+        );
+        unit.region = Region::Underground;
+        unit.stealthed = true;
+        unit.warded = true;
+        let unit_id = unit.card.instance_id.clone();
+        game.position.units.push(unit);
+        assert!(
+            game.magic_choices(
+                Seat::North,
+                &avatar_id,
+                &MagicEffect::GrantPowerTwoToAllyThisTurn,
+            )
+            .expect("Overpower ally choices")
+            .iter()
+            .any(|choice| matches!(
+                &choice.ally,
+                Some(UnitTarget::Minion {
+                    instance_id,
+                    seat: Seat::North,
+                }) if *instance_id == unit_id
+            ))
+        );
     }
 
     #[test]
@@ -11218,6 +11409,7 @@ mod tests {
                 summoning_sickness: false,
                 tapped: false,
                 temporary_charge_sources: Vec::new(),
+                temporary_power_sources: Vec::new(),
                 warded: false,
             };
         game.position.units = vec![
