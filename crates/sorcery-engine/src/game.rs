@@ -377,6 +377,7 @@ struct MagicChoice {
     ally_destination: Option<Location>,
     ally_strike_location: Option<Location>,
     cemetery_minion_instance_id: Option<IdentityHash>,
+    draw_zone: Option<DeckZone>,
     target: Option<UnitTarget>,
     target_location: Option<Location>,
     target_site_instance_id: Option<IdentityHash>,
@@ -531,12 +532,23 @@ struct PaidSummonContinuation {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum DeathriteContinuation {
+    Blink(BlinkContinuation),
     DragProjectile(DragProjectileContinuation),
     EndTurn(EndTurnContinuation),
     FirstStrike(FirstStrikeContinuation),
     LeapAttack(LeapAttackContinuation),
     PaidSummon(PaidSummonContinuation),
     SiteGenesis(SiteGenesisContinuation),
+}
+
+/// The private draw Blink still owes its caster once interrupting Deathrites finish.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct BlinkContinuation {
+    card_id: String,
+    instance_id: IdentityHash,
+    owner: Seat,
+    seat: Seat,
+    zone: DeckZone,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -964,10 +976,10 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::KillTargetWoundedMinion
         | MagicEffect::LureEnemyMinionOneStepCloser
         | MagicEffect::SubmergeTargetMinion
-        | MagicEffect::TeleportAllyToTargetSite => None,
+        | MagicEffect::TeleportAllyToTargetSite
+        | MagicEffect::TeleportNearbyAllyThenDrawCard => None,
         MagicEffect::DestroyTargetSiteWithDamageGrid(_) => Some("destroyTargetSiteWithDamageGrid"),
         MagicEffect::SummonRandomMinionFromAnyCemetery => Some("summonRandomMinionFromAnyCemetery"),
-        MagicEffect::TeleportNearbyAllyThenDrawCard => Some("teleportNearbyAllyThenDrawCard"),
     }
 }
 
@@ -2397,6 +2409,7 @@ impl Game {
                         card_instance_id: card.instance_id.clone(),
                         caster_instance_id: caster_instance_id.clone(),
                         cemetery_minion_instance_id: choice.cemetery_minion_instance_id,
+                        draw_zone: choice.draw_zone,
                         target: choice.target,
                         target_location: choice.target_location,
                         target_site_instance_id: choice.target_site_instance_id,
@@ -3532,6 +3545,42 @@ impl Game {
                             target_site_instance_id: Some(target_site_instance_id.clone()),
                             ..MagicChoice::default()
                         });
+                    }
+                }
+                choices
+            }
+            MagicEffect::TeleportNearbyAllyThenDrawCard => {
+                let mut choices = Vec::new();
+                for ally in self.controlled_allies(seat) {
+                    if self.unit_target_occupied_cells(&ally)?.len() > 1 {
+                        return Err(GameError::UnsupportedManifestFact(
+                            "teleportNearbyAllyThenDrawCard:occupiesSquareArea".to_owned(),
+                        ));
+                    }
+                    let from = self.unit_target_location(&ally)?;
+                    // Blink relocates without a deliberate step, so only the layer must exist.
+                    let destinations = std::iter::once(from.cell)
+                        .chain(from.cell.bordering(false))
+                        .chain(from.cell.diagonals(false))
+                        .collect::<BTreeSet<_>>()
+                        .into_iter()
+                        .filter(|cell| self.location_exists_in_region(*cell, from.region));
+                    for cell in destinations {
+                        for zone in [DeckZone::Atlas, DeckZone::Spellbook] {
+                            choices.push(MagicChoice {
+                                ally: Some(ally.clone()),
+                                draw_zone: Some(zone),
+                                target_location: Some(Location {
+                                    cell,
+                                    region: from.region,
+                                }),
+                                target_site_instance_id: self.position.sites[cell.index()]
+                                    .as_ref()
+                                    .map(|site| site.card.instance_id.clone())
+                                    .or_else(|| self.position.rubble[cell.index()].clone()),
+                                ..MagicChoice::default()
+                            });
+                        }
                     }
                 }
                 choices
@@ -4765,20 +4814,24 @@ impl Game {
             self.queue_ranged_step(action.seat, shooter_instance_id)?;
         }
         outcomes.move_tail_before_completion(settlement_start);
-        let leap_cast = matches!(
+        // Magic that owns its own resolution event resumes through its continuation instead.
+        let continuing_cast = matches!(
             action.descriptor,
             ActionDescriptor::CastMagic {
                 ally_destination: Some(_),
+                ..
+            } | ActionDescriptor::CastMagic {
+                draw_zone: Some(_),
                 ..
             }
         );
         if let (Some(completion), Some(pending)) =
             (magic_completion, &mut self.position.pending_deathrites)
             && pending.deferred_magic_resolved.is_none()
-            && !leap_cast
+            && !continuing_cast
             && !matches!(
                 pending.continuation,
-                Some(DeathriteContinuation::LeapAttack(_))
+                Some(DeathriteContinuation::Blink(_) | DeathriteContinuation::LeapAttack(_))
             )
         {
             pending.deferred_magic_resolved = Some(completion);
@@ -7798,6 +7851,11 @@ impl Game {
             self.position.decision_seat = return_decision_seat;
         };
         match continuation {
+            DeathriteContinuation::Blink(continuation) => {
+                restore();
+                self.finish_blink(&continuation, outcomes);
+                Ok(())
+            }
             DeathriteContinuation::DragProjectile(continuation) => {
                 restore();
                 self.continue_drag_projectile(&continuation, false, outcomes)
@@ -7843,9 +7901,7 @@ impl Game {
             .filter(|seat| defeated.contains(seat) || deck_losers.contains(seat))
             .collect();
         if losers.len() == 2 {
-            if let Some(DeathriteContinuation::LeapAttack(leap)) = &continuation {
-                Self::emit_leap_magic_resolved(leap, outcomes);
-            }
+            Self::emit_interrupted_magic_resolved(continuation.as_ref(), outcomes);
             let reason = if defeated.len() == 2 && deck_losers.is_empty() {
                 DrawReason::SimultaneousAvatarDefeat
             } else {
@@ -7863,9 +7919,7 @@ impl Game {
                 })
             });
         } else if let Some(&loser) = losers.first() {
-            if let Some(DeathriteContinuation::LeapAttack(leap)) = &continuation {
-                Self::emit_leap_magic_resolved(leap, outcomes);
-            }
+            Self::emit_interrupted_magic_resolved(continuation.as_ref(), outcomes);
             let winner = other_seat(loser);
             let reason = if defeated.contains(&loser) {
                 WinReason::AvatarDefeated
@@ -9580,6 +9634,7 @@ impl Game {
             card_instance_id,
             caster_instance_id,
             cemetery_minion_instance_id,
+            draw_zone,
             target,
             target_location,
             target_site_instance_id,
@@ -9619,6 +9674,7 @@ impl Game {
                     ally_destination: *ally_destination,
                     ally_strike_location: *ally_strike_location,
                     cemetery_minion_instance_id: cemetery_minion_instance_id.clone(),
+                    draw_zone: *draw_zone,
                     target: target.clone(),
                     target_location: *target_location,
                     target_site_instance_id: target_site_instance_id.clone(),
@@ -9788,6 +9844,7 @@ impl Game {
             outcomes,
         )?;
         let leap_attack = effect == MagicEffect::LeapAttackAlly;
+        let blink = effect == MagicEffect::TeleportNearbyAllyThenDrawCard;
         match effect {
             MagicEffect::HealController(amount) => {
                 self.heal_avatar(seat, u16::from(amount), card_instance_id, outcomes)?;
@@ -9918,6 +9975,48 @@ impl Game {
                     });
                     self.settle_lower_region_minion_deaths(outcomes)?;
                     self.settle_static_power_deaths(outcomes)?;
+                }
+            }
+            MagicEffect::TeleportNearbyAllyThenDrawCard => {
+                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
+                let destination = target_location.ok_or(GameError::IllegalAction)?;
+                let zone = draw_zone.ok_or(GameError::IllegalAction)?;
+                let from = self.unit_target_location(ally)?;
+                let to = self.move_unit_target_to(ally, destination)?;
+                if to != from {
+                    let instance_id = ally.instance_id().clone();
+                    let ally_seat = ally.seat();
+                    let source_instance_id = card_instance_id.clone();
+                    let site_instance_id = target_site_instance_id.clone();
+                    outcomes.push("unit-teleported", || {
+                        let mut payload = json!({
+                            "from": from,
+                            "seat": ally_seat,
+                            "sourceInstanceId": source_instance_id,
+                            "targetInstanceId": instance_id,
+                            "to": to,
+                        });
+                        if let Some(site_instance_id) = site_instance_id {
+                            payload["targetSiteInstanceId"] = json!(site_instance_id);
+                        }
+                        payload
+                    });
+                    self.settle_lower_region_minion_deaths(outcomes)?;
+                    self.settle_static_power_deaths(outcomes)?;
+                }
+                let continuation = BlinkContinuation {
+                    card_id: card_id.clone(),
+                    instance_id: card_instance_id.clone(),
+                    owner,
+                    seat,
+                    zone,
+                };
+                if let Some(pending) = &mut self.position.pending_deathrites {
+                    pending.continuation = Some(DeathriteContinuation::Blink(continuation));
+                    pending.return_decision_seat = seat;
+                    pending.return_phase = Phase::Main;
+                } else {
+                    self.finish_blink(&continuation, outcomes);
                 }
             }
             MagicEffect::LureEnemyMinionOneStepCloser => {
@@ -10447,7 +10546,7 @@ impl Game {
             }
             _ => return Err(GameError::IllegalAction),
         }
-        if !leap_attack {
+        if !leap_attack && !blink {
             if let Some(pending) = &mut self.position.pending_deathrites {
                 pending.deferred_magic_resolved = Some(DeferredMagicResolved {
                     card_id: compact_card_id,
@@ -10681,19 +10780,70 @@ impl Game {
         enemies
     }
 
-    fn emit_leap_magic_resolved(
-        continuation: &LeapAttackContinuation,
+    /// Pays Blink's private draw once the teleport and any interrupting Deathrites are settled.
+    fn finish_blink(&mut self, continuation: &BlinkContinuation, outcomes: &mut OutcomeLog<'_>) {
+        if self.position.terminal.is_none() {
+            self.apply_genesis_draws(
+                continuation.seat,
+                &continuation.instance_id,
+                continuation.zone,
+                1,
+                outcomes,
+            );
+        }
+        Self::emit_continuation_magic_resolved(
+            &continuation.card_id,
+            &continuation.instance_id,
+            continuation.owner,
+            outcomes,
+        );
+    }
+
+    /// Completes a Magic whose own effect, not the shared cast tail, owns its resolution event.
+    fn emit_continuation_magic_resolved(
+        card_id: &str,
+        instance_id: &IdentityHash,
+        owner: Seat,
         outcomes: &mut OutcomeLog<'_>,
     ) {
         let resolved_start = outcomes.len();
         outcomes.push("magic-resolved", || {
             json!({
-                "cardId": continuation.card_id,
-                "instanceId": continuation.instance_id,
-                "owner": continuation.owner,
+                "cardId": card_id,
+                "instanceId": instance_id,
+                "owner": owner,
             })
         });
         outcomes.move_tail_before_completion(resolved_start);
+    }
+
+    fn emit_leap_magic_resolved(
+        continuation: &LeapAttackContinuation,
+        outcomes: &mut OutcomeLog<'_>,
+    ) {
+        Self::emit_continuation_magic_resolved(
+            &continuation.card_id,
+            &continuation.instance_id,
+            continuation.owner,
+            outcomes,
+        );
+    }
+
+    /// Resolves an interrupted Magic that the terminal result denied its own continuation.
+    fn emit_interrupted_magic_resolved(
+        continuation: Option<&DeathriteContinuation>,
+        outcomes: &mut OutcomeLog<'_>,
+    ) {
+        let resolution = match continuation {
+            Some(DeathriteContinuation::Blink(blink)) => {
+                (&blink.card_id, &blink.instance_id, blink.owner)
+            }
+            Some(DeathriteContinuation::LeapAttack(leap)) => {
+                (&leap.card_id, &leap.instance_id, leap.owner)
+            }
+            _ => return,
+        };
+        Self::emit_continuation_magic_resolved(resolution.0, resolution.1, resolution.2, outcomes);
     }
 
     #[expect(
@@ -11858,44 +12008,56 @@ impl Game {
         if let (Value::Object(object), Some(continuation)) = (&mut value, &pending.continuation) {
             object.insert(
                 "continuation".to_owned(),
-                match continuation {
-                    DeathriteContinuation::DragProjectile(continuation) => json!({
-                        "fightOnArrival": continuation.fight_on_arrival,
-                        "kind": "drag-projectile",
-                        "path": continuation.path,
-                        "pathIndex": continuation.path_index,
-                        "shooter": continuation.shooter,
-                        "target": continuation.target,
-                    }),
-                    DeathriteContinuation::EndTurn(continuation) => json!({
-                        "kind": "end-turn",
-                        "remainingInstanceIds": continuation.remaining_instance_ids,
-                        "seat": continuation.seat,
-                    }),
-                    DeathriteContinuation::FirstStrike(continuation) => json!({
-                        "attackerStrikesFirst": continuation.attacker_struck,
-                        "firstCombatantInstanceIds": continuation.first_combatant_instance_ids,
-                        "kind": "first-strike",
-                        "pending": Self::pending_combat_value(&continuation.pending),
-                    }),
-                    DeathriteContinuation::LeapAttack(continuation) => json!({
-                        "ally": continuation.ally,
-                        "cardId": continuation.card_id,
-                        "instanceId": continuation.instance_id,
-                        "kind": "leap-attack",
-                        "owner": continuation.owner,
-                        "strikeLocation": continuation.strike_location,
-                    }),
-                    DeathriteContinuation::PaidSummon(continuation) => {
-                        self.paid_summon_continuation_value(continuation)
-                    }
-                    DeathriteContinuation::SiteGenesis(continuation) => {
-                        self.site_genesis_continuation_value(continuation)
-                    }
-                },
+                self.deathrite_continuation_value(continuation),
             );
         }
         value
+    }
+
+    fn deathrite_continuation_value(&self, continuation: &DeathriteContinuation) -> Value {
+        match continuation {
+            DeathriteContinuation::Blink(continuation) => json!({
+                "cardId": continuation.card_id,
+                "instanceId": continuation.instance_id,
+                "kind": "blink",
+                "owner": continuation.owner,
+                "seat": continuation.seat,
+                "zone": continuation.zone.as_str(),
+            }),
+            DeathriteContinuation::DragProjectile(continuation) => json!({
+                "fightOnArrival": continuation.fight_on_arrival,
+                "kind": "drag-projectile",
+                "path": continuation.path,
+                "pathIndex": continuation.path_index,
+                "shooter": continuation.shooter,
+                "target": continuation.target,
+            }),
+            DeathriteContinuation::EndTurn(continuation) => json!({
+                "kind": "end-turn",
+                "remainingInstanceIds": continuation.remaining_instance_ids,
+                "seat": continuation.seat,
+            }),
+            DeathriteContinuation::FirstStrike(continuation) => json!({
+                "attackerStrikesFirst": continuation.attacker_struck,
+                "firstCombatantInstanceIds": continuation.first_combatant_instance_ids,
+                "kind": "first-strike",
+                "pending": Self::pending_combat_value(&continuation.pending),
+            }),
+            DeathriteContinuation::LeapAttack(continuation) => json!({
+                "ally": continuation.ally,
+                "cardId": continuation.card_id,
+                "instanceId": continuation.instance_id,
+                "kind": "leap-attack",
+                "owner": continuation.owner,
+                "strikeLocation": continuation.strike_location,
+            }),
+            DeathriteContinuation::PaidSummon(continuation) => {
+                self.paid_summon_continuation_value(continuation)
+            }
+            DeathriteContinuation::SiteGenesis(continuation) => {
+                self.site_genesis_continuation_value(continuation)
+            }
+        }
     }
 
     fn paid_summon_continuation_value(&self, continuation: &PaidSummonContinuation) -> Value {

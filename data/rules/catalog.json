@@ -769,7 +769,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Blink teleports a nearby ally before deaths and a private chosen-deck draw.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "draw",
@@ -780,8 +780,8 @@
         "card-draw"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Blink teleports a nearby ally before deaths and a private chosen-deck draw"
+        "file": "crates/sorcery-engine/tests/blink_rules.rs",
+        "testName": "rule_catalog_0040_blink_should_resolve_deaths_before_a_private_spellbook_draw"
       }
     },
     {

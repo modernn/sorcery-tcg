@@ -89,7 +89,7 @@ where
 }
 
 impl DeckZone {
-    const fn as_str(self) -> &'static str {
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Atlas => "atlas",
             Self::Spellbook => "spellbook",
@@ -341,6 +341,9 @@ pub enum ActionDescriptor {
         /// Exact own cemetery minion selected by Rescue.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cemetery_minion_instance_id: Option<IdentityHash>,
+        /// Deck the caster draws from after a Blink teleport.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        draw_zone: Option<DeckZone>,
         /// Exact engine-issued unit target.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target: Option<UnitTarget>,
@@ -535,13 +538,23 @@ impl ActionDescriptor {
                 ally_strike_location,
                 card_id,
                 cemetery_minion_instance_id,
+                draw_zone,
                 target,
                 target_location,
                 tempted_destination,
                 tempted_enemy,
                 ..
             } => Some(
-                if let (Some(ally), Some(enemy), Some(destination)) =
+                if let (Some(ally), Some(location), Some(zone)) = (ally, target_location, draw_zone)
+                {
+                    format!(
+                        "Cast {card_id} to blink {} {}… to {} and draw from {}",
+                        ally.kind(),
+                        short_identity(ally.instance_id()),
+                        location.cell,
+                        zone.as_str()
+                    )
+                } else if let (Some(ally), Some(enemy), Some(destination)) =
                     (ally, tempted_enemy, tempted_destination)
                 {
                     format!(
@@ -838,6 +851,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     card_instance_id: left_instance,
                     caster_instance_id: left_caster,
                     cemetery_minion_instance_id: left_cemetery,
+                    draw_zone: left_draw_zone,
                     target: left_target,
                     target_location: left_location,
                     target_site_instance_id: left_site,
@@ -852,6 +866,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     card_instance_id: right_instance,
                     caster_instance_id: right_caster,
                     cemetery_minion_instance_id: right_cemetery,
+                    draw_zone: right_draw_zone,
                     target: right_target,
                     target_location: right_location,
                     target_site_instance_id: right_site,
@@ -867,6 +882,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 .then_with(|| {
                     compare_optional_identities(left_cemetery.as_ref(), right_cemetery.as_ref())
                 })
+                .then_with(|| compare_optional_deck_zones(*left_draw_zone, *right_draw_zone))
                 .then_with(|| {
                     compare_optional_unit_targets(left_target.as_ref(), right_target.as_ref())
                 })
@@ -1315,6 +1331,15 @@ fn compare_optional_identity_arrays(
 fn compare_optional_cells(left: Option<Cell>, right: Option<Cell>) -> Ordering {
     match (left, right) {
         (Some(left), Some(right)) => left.cmp(&right),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+fn compare_optional_deck_zones(left: Option<DeckZone>, right: Option<DeckZone>) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => deck_zone_order(left).cmp(&deck_zone_order(right)),
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (None, None) => Ordering::Equal,
