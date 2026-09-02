@@ -1068,7 +1068,7 @@ const fn unsupported_artifact_effect(effect: ArtifactEffect) -> Option<&'static 
         | ArtifactEffect::GrantsBearerPowerTwo
         | ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
         | ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree
-        |         ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour => None,
+        | ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour => None,
         ArtifactEffect::BearerControllerChoosesExtraRandomOutcome => {
             Some("bearerControllerChoosesExtraRandomOutcome")
         }

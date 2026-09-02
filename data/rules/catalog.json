@@ -3110,7 +3110,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Artifacts make their current site controller lose life at each turn end.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "artifact"
       ],
@@ -3119,8 +3119,8 @@
         "loss"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Artifacts make their current site controller lose life at each turn end"
+        "file": "crates/sorcery-engine/tests/artifact_life_loss_rules.rs",
+        "testName": "end_turn_artifacts_should_cost_their_current_site_controller_life"
       }
     },
     {
@@ -3129,7 +3129,7 @@
         "RULE-03"
       ],
       "plainLanguage": "End-turn Artifact life loss uses its carried cell and survives bearer Disable.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "disabled",
         "artifact"
@@ -3140,8 +3140,8 @@
         "disable"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 end-turn Artifact life loss uses its carried cell and survives bearer Disable"
+        "file": "crates/sorcery-engine/tests/artifact_life_loss_rules.rs",
+        "testName": "end_turn_artifact_life_loss_should_use_its_carried_cell_and_survive_bearer_disable"
       }
     },
     {
@@ -3150,7 +3150,7 @@
         "RULE-03"
       ],
       "plainLanguage": "End-turn Artifact life loss respects regions, Rubble, stacking, and Death's Door.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "artifact",
         "deaths-door",
@@ -3163,8 +3163,8 @@
         "loss"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 end-turn Artifact life loss respects regions, Rubble, stacking, and Death's Door"
+        "file": "crates/sorcery-engine/tests/artifact_life_loss_rules.rs",
+        "testName": "end_turn_artifact_life_loss_should_respect_regions_rubble_stacking_and_deaths_door"
       }
     },
     {
