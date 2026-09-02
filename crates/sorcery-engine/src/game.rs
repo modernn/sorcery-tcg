@@ -954,9 +954,9 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::GainControlOfTargetNearbyMinion
         | MagicEffect::KillTargetWoundedMinion
         | MagicEffect::LureEnemyMinionOneStepCloser
+        | MagicEffect::SubmergeTargetMinion
         | MagicEffect::TeleportAllyToTargetSite => None,
         MagicEffect::DestroyTargetSiteWithDamageGrid(_) => Some("destroyTargetSiteWithDamageGrid"),
-        MagicEffect::SubmergeTargetMinion => Some("submergeTargetMinion"),
         MagicEffect::SummonRandomMinionFromAnyCemetery => Some("summonRandomMinionFromAnyCemetery"),
         MagicEffect::TeleportNearbyAllyThenDrawCard => Some("teleportNearbyAllyThenDrawCard"),
     }
@@ -3710,7 +3710,7 @@ impl Game {
                 *target_nearby,
                 *untap_target_minion_after_damage,
             )?,
-            MagicEffect::BurrowTargetMinionOrArtifact => {
+            MagicEffect::BurrowTargetMinionOrArtifact | MagicEffect::SubmergeTargetMinion => {
                 self.targeted_magic_choices(seat, caster_instance_id, false, true)?
             }
             MagicEffect::GainControlOfTargetNearbyMinion => {
@@ -9984,7 +9984,8 @@ impl Game {
                     });
                 }
             }
-            MagicEffect::BurrowTargetMinionOrArtifact => {
+            MagicEffect::BurrowTargetMinionOrArtifact | MagicEffect::SubmergeTargetMinion => {
+                let submerged = matches!(effect, MagicEffect::SubmergeTargetMinion);
                 let Some(UnitTarget::Minion {
                     instance_id,
                     seat: target_seat,
@@ -10007,21 +10008,33 @@ impl Game {
                         || json!({ "instanceId": instance_id, "seat": target_seat }),
                     );
                 } else {
+                    let destination = if submerged {
+                        Region::Underwater
+                    } else {
+                        Region::Underground
+                    };
                     let can_move = self.position.units[target_index].region == Region::Surface
                         && Self::unit_occupied_cells(&self.position.units[target_index])
                             .iter()
-                            .all(|cell| self.underground_location_exists(*cell));
+                            .all(|cell| self.location_exists_in_region(*cell, destination));
                     if can_move {
-                        self.position.units[target_index].region = Region::Underground;
+                        self.position.units[target_index].region = destination;
                         let cell = self.position.units[target_index].location;
-                        outcomes.push("minion-burrowed", || {
-                            json!({
-                                "cell": cell,
-                                "instanceId": instance_id,
-                                "seat": target_seat,
-                                "sourceInstanceId": card_instance_id,
-                            })
-                        });
+                        outcomes.push(
+                            if submerged {
+                                "minion-submerged"
+                            } else {
+                                "minion-burrowed"
+                            },
+                            || {
+                                json!({
+                                    "cell": cell,
+                                    "instanceId": instance_id,
+                                    "seat": target_seat,
+                                    "sourceInstanceId": card_instance_id,
+                                })
+                            },
+                        );
                     }
                 }
             }

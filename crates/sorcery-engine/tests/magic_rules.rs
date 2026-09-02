@@ -1480,6 +1480,103 @@ fn rule_catalog_0031_rain_of_arrows_simultaneously_damages_every_surface_minion(
     assert_exact_replay(&session);
 }
 
+#[test]
+fn rule_catalog_0045_drown_should_submerge_a_target_minion_only_when_able() {
+    let (mut swimmer, swimmer_id, swimmer_spell) =
+        drown_checkpoint(450, json!({ "submerge": true }), true);
+    let drown_actions: Vec<Value> = swimmer
+        .legal_actions()
+        .expect("Drown actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardInstanceId"] == swimmer_spell
+        })
+        .map(|action| action.descriptor)
+        .collect();
+    assert_eq!(drown_actions.len(), 1);
+    assert_eq!(drown_actions[0]["target"]["kind"], "minion");
+    assert_eq!(drown_actions[0]["target"]["instanceId"], swimmer_id);
+
+    let submerged = cast_drown(&mut swimmer, &swimmer_id, &swimmer_spell);
+    assert_eq!(
+        event_types(&submerged),
+        ["magic-cast", "minion-submerged", "magic-resolved"]
+    );
+    assert!(submerged.random_draws.is_empty());
+    assert_eq!(
+        submerged.events[1].payload,
+        json!({
+            "cell": "C1",
+            "instanceId": swimmer_id,
+            "seat": "south",
+            "sourceInstanceId": swimmer_spell,
+        })
+    );
+    assert_eq!(
+        realm_unit(&state(&swimmer), &swimmer_id).expect("submerged swimmer")["region"],
+        "underwater"
+    );
+    assert!(
+        !swimmer
+            .legal_actions()
+            .expect("post-Drown actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "cast-magic"
+                    && action.descriptor["target"]["instanceId"] == swimmer_id
+            })
+    );
+    assert_exact_replay(&swimmer);
+
+    let (mut lander, lander_id, lander_spell) = drown_checkpoint(451, json!({}), true);
+    let drowned = cast_drown(&mut lander, &lander_id, &lander_spell);
+    assert_eq!(
+        event_types(&drowned),
+        [
+            "magic-cast",
+            "minion-submerged",
+            "minion-died",
+            "magic-resolved",
+        ]
+    );
+    let lander_state = state(&lander);
+    assert!(realm_unit(&lander_state, &lander_id).is_none());
+    assert!(
+        lander_state["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == lander_id)
+    );
+    assert_exact_replay(&lander);
+
+    let (mut warded, warded_id, warded_spell) =
+        drown_checkpoint(452, json!({ "submerge": true, "ward": true }), true);
+    let ward = cast_drown(&mut warded, &warded_id, &warded_spell);
+    assert_eq!(
+        event_types(&ward),
+        ["magic-cast", "ward-broken", "magic-resolved"]
+    );
+    let warded_state = state(&warded);
+    let warded_unit = realm_unit(&warded_state, &warded_id).expect("Ward survivor");
+    assert_eq!(warded_unit["region"], "surface");
+    assert_eq!(warded_unit["warded"], false);
+    assert_exact_replay(&warded);
+
+    let (mut dry, dry_id, dry_spell) = drown_checkpoint(453, json!({ "submerge": true }), false);
+    let dry_before = realm_unit(&state(&dry), &dry_id)
+        .expect("dry-land target")
+        .clone();
+    let blocked = cast_drown(&mut dry, &dry_id, &dry_spell);
+    assert_eq!(event_types(&blocked), ["magic-cast", "magic-resolved"]);
+    assert_eq!(
+        realm_unit(&state(&dry), &dry_id).expect("unmoved target"),
+        &dry_before
+    );
+    assert_exact_replay(&dry);
+}
+
 fn bury_checkpoint(seed: u32, target_extra: Value, water: bool) -> (Session, String, String) {
     let mut cards = json!({
         "north-avatar": avatar(20),
@@ -1522,6 +1619,59 @@ fn bury_checkpoint(seed: u32, target_extra: Value, water: bool) -> (Session, Str
         .expect("Bury identity")
         .to_owned();
     (session, target_id, spell_id)
+}
+
+fn drown_checkpoint(seed: u32, target_extra: Value, water: bool) -> (Session, String, String) {
+    let mut cards = json!({
+        "north-avatar": avatar(20),
+        "north-drown": magic(("submergeTargetMinion", json!(true)), 1),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(target_extra),
+        "south-site": site(false),
+    });
+    if water {
+        cards["south-site"]["elements"] = json!(["earth", "water"]);
+    }
+    let manifest = manifest(seed, &cards, &["north-drown"; 6], &["south-minion"; 6]);
+    let mut session = opening_main(&manifest);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C1"
+    });
+    let target_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("Drown target identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let spell_id = state(&session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North hand")
+        .iter()
+        .find(|card| card["cardId"] == "north-drown")
+        .expect("Drown in hand")["instanceId"]
+        .as_str()
+        .expect("Drown identity")
+        .to_owned();
+    (session, target_id, spell_id)
+}
+
+fn cast_drown(session: &mut Session, target_id: &str, spell_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardInstanceId"] == spell_id
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    receipt
 }
 
 fn cast_bury(session: &mut Session, target_id: &str, spell_id: &str) -> Receipt {

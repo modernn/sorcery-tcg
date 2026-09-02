@@ -49,7 +49,7 @@ ordinary debug suite because running the same workload there takes several minut
 
 ## Current blockers to strong unattended self-play
 
-- Rust has direct proofs for 122 of 161 cataloged scenarios. The remaining mechanics must be ported
+- Rust has direct proofs for 123 of 161 cataloged scenarios. The remaining mechanics must be ported
   or rejected at manifest admission before their games can affect training.
 - The selector neighborhood is intentionally small and `seat-observation-v1` does not expose enough
   state for strong tactical play; `powered-movement` is therefore inactive.
