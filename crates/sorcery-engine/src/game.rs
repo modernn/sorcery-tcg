@@ -1208,9 +1208,7 @@ fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
 
 fn unsupported_selfplay_site(facts: &SiteFacts) -> Option<&'static str> {
     account_for_selfplay_site_fields(facts);
-    if facts.connects_burrowed_allies {
-        Some("connectsBurrowedAllies")
-    } else if facts.fly_to_nearby_void_once_per_turn_at_air_threshold {
+    if facts.fly_to_nearby_void_once_per_turn_at_air_threshold {
         Some("flyToNearbyVoidOncePerTurnAtAirThreshold")
     } else if facts.minions_here_gain_voidwalk_until_leaving_void {
         Some("minionsHereGainVoidwalkUntilLeavingVoid")
@@ -4986,7 +4984,10 @@ impl Game {
                 if self.footprint_is_immobilized(profile.occupied_cells, start.cell, current.cell) {
                     continue;
                 }
+                let tunnel_hops = self.burrowed_connection_locations(profile, current.cell);
                 for candidate in self.movement_step_candidates(current, profile) {
+                    let tunnel_hop =
+                        current.region == Region::Underground && tunnel_hops.contains(&candidate);
                     let footprint_allowed = profile.occupied_cells.map_or_else(
                         || {
                             self.location_exists_in_region(candidate.cell, candidate.region)
@@ -5018,7 +5019,8 @@ impl Game {
                         },
                     );
                     if !footprint_allowed
-                        || !Self::movement_restriction_allows(profile, current, candidate)
+                        || !(tunnel_hop
+                            || Self::movement_restriction_allows(profile, current, candidate))
                         || path
                             .windows(2)
                             .any(|edge| edge[0] == current && edge[1] == candidate)
@@ -5086,6 +5088,7 @@ impl Game {
                     region: Region::Surface,
                 });
                 candidates.extend(bordering(Region::Underground));
+                candidates.extend(self.burrowed_connection_locations(profile, current.cell));
                 if profile.regions.submerge {
                     candidates.extend(bordering(Region::Underwater));
                 }
@@ -5254,6 +5257,50 @@ impl Game {
 
     fn surface_location_exists(&self, cell: Cell) -> bool {
         self.position.sites[cell.index()].is_some() || self.position.rubble[cell.index()].is_some()
+    }
+
+    /// Whether a played site connects the burrowed allies of its controller.
+    fn is_tunnel_site(&self, cell: Cell) -> bool {
+        self.position.sites[cell.index()]
+            .as_ref()
+            .is_some_and(|site| {
+                matches!(
+                    &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                    CardFacts::Site(facts) if facts.connects_burrowed_allies
+                )
+            })
+    }
+
+    /// Every lower location a burrowed ally reaches in one tunnel hop from `cell`.
+    ///
+    /// A tunnel reaches every other controlled site; any other controlled site reaches only the
+    /// tunnels themselves. Bordering cells are excluded because an ordinary step already covers
+    /// them.
+    fn burrowed_connection_locations(&self, profile: MovementProfile, cell: Cell) -> Vec<Location> {
+        if !profile.regions.burrowing
+            || !self
+                .controlled_site_cells(profile.seat)
+                .any(|controlled| controlled == cell)
+        {
+            return Vec::new();
+        }
+        let at_tunnel = self.is_tunnel_site(cell);
+        let adjacent: Vec<Cell> = cell.bordering(profile.connects_top_bottom).collect();
+        self.controlled_site_cells(profile.seat)
+            .filter(|candidate| *candidate != cell && !adjacent.contains(candidate))
+            .filter(|candidate| at_tunnel || self.is_tunnel_site(*candidate))
+            .filter_map(|candidate| {
+                let region = if self.is_water_site(candidate) {
+                    profile.regions.submerge.then_some(Region::Underwater)?
+                } else {
+                    Region::Underground
+                };
+                Some(Location {
+                    cell: candidate,
+                    region,
+                })
+            })
+            .collect()
     }
 
     /// Whether a played Water site currently stands at one cell.
