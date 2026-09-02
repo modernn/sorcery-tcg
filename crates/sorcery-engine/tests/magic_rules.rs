@@ -575,6 +575,280 @@ fn rule_catalog_0042_bury_moves_and_immediately_settles_a_minion() {
 #[test]
 #[expect(
     clippy::too_many_lines,
+    reason = "one Cave-In proof retains canonical terrain choices, simultaneous burrowing, ordered Deathrites, and replay"
+)]
+fn rule_catalog_0044_cave_in_minion_slice_should_burrow_in_canonical_order() {
+    let mut north_water = site(false);
+    north_water["elements"] = json!(["earth", "water"]);
+    let mut south_geomancer = avatar(20);
+    south_geomancer["earthSitePlayCreatesAdjacentRubble"] = json!(true);
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-cave-in": magic(("burrowAllMinionsAndArtifactsAtTargetLandSite", json!(true)), 0),
+        "north-site": north_water,
+        "south-avatar": south_geomancer,
+        "south-cave-in": magic(("burrowAllMinionsAndArtifactsAtTargetLandSite", json!(true)), 0),
+        "south-site": site(false),
+        "south-survivor": minion(json!({
+            "burrowing": true,
+            "spellcaster": true,
+            "stealth": true,
+            "ward": true,
+        })),
+        "south-victim": minion(json!({ "deathriteDrawSite": true })),
+    });
+    let south_spellbook = [
+        "south-survivor",
+        "south-victim",
+        "south-victim",
+        "south-cave-in",
+        "south-cave-in",
+        "south-cave-in",
+    ];
+    let manifest = (1..=512)
+        .map(|seed| manifest(seed, &cards, &["north-cave-in"; 6], &south_spellbook))
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("Cave-In candidate");
+            let preview_state = state(&preview);
+            let hand = preview_state["players"]["south"]["hand"]["spellbook"]
+                .as_array()
+                .expect("South opening hand");
+            hand.iter()
+                .filter(|card| card["cardId"] == "south-survivor")
+                .count()
+                >= 1
+                && hand
+                    .iter()
+                    .filter(|card| card["cardId"] == "south-victim")
+                    .count()
+                    >= 2
+        })
+        .expect("bounded seed with one survivor and two victims");
+
+    let mut session = opening_main(&manifest);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C1"
+            && descriptor["createRubbleAt"] == "B1"
+    });
+    let south_avatar_id = state(&session)["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    let (survivor, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-survivor"
+            && descriptor["cell"] == "C1"
+            && descriptor["casterInstanceId"] == south_avatar_id
+    });
+    let survivor_id = survivor["cardInstanceId"]
+        .as_str()
+        .expect("Cave-In survivor identity")
+        .to_owned();
+    let mut victim_ids = Vec::new();
+    for _ in 0..2 {
+        let (victim, _) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == "south-victim"
+                && descriptor["cell"] == "C1"
+                && descriptor["casterInstanceId"] == south_avatar_id
+        });
+        victim_ids.push(
+            victim["cardInstanceId"]
+                .as_str()
+                .expect("Cave-In victim identity")
+                .to_owned(),
+        );
+    }
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+
+    let before = state(&session);
+    let spell_id = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North hand")
+        .iter()
+        .find(|card| card["cardId"] == "north-cave-in")
+        .expect("Cave-In in hand")["instanceId"]
+        .as_str()
+        .expect("Cave-In identity")
+        .to_owned();
+    let caster_id = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("surface Avatar identity");
+    let rubble_id = before["realm"]["sites"]["B1"]["instanceId"]
+        .as_str()
+        .expect("Rubble identity");
+    let land_site_id = before["realm"]["sites"]["C1"]["instanceId"]
+        .as_str()
+        .expect("Land Site identity");
+    let cave_in_actions: Vec<_> = session
+        .legal_actions()
+        .expect("Cave-In actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardInstanceId"] == spell_id
+        })
+        .collect();
+    assert_eq!(cave_in_actions.len(), 2);
+    assert_eq!(
+        cave_in_actions
+            .iter()
+            .map(|action| {
+                (
+                    action.descriptor["targetLocation"]["cell"]
+                        .as_str()
+                        .expect("Cave-In target cell"),
+                    action.descriptor["targetSiteInstanceId"]
+                        .as_str()
+                        .expect("Cave-In target Site identity"),
+                )
+            })
+            .collect::<Vec<_>>(),
+        [("B1", rubble_id), ("C1", land_site_id)]
+    );
+    assert!(cave_in_actions.iter().all(|action| {
+        action.descriptor["casterInstanceId"] == caster_id
+            && action.descriptor["targetLocation"]["region"] == "surface"
+            && action.descriptor["targetLocation"]["cell"] != "C4"
+    }));
+
+    let (_, cast) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardInstanceId"] == spell_id
+            && descriptor["targetLocation"]["cell"] == "C1"
+            && descriptor["targetSiteInstanceId"] == land_site_id
+    });
+    let mut burrowed_ids = vec![survivor_id.clone()];
+    burrowed_ids.extend(victim_ids.iter().cloned());
+    burrowed_ids.sort();
+    assert_eq!(
+        event_types(&cast),
+        [
+            "magic-cast",
+            "minion-burrowed",
+            "minion-burrowed",
+            "minion-burrowed",
+        ]
+    );
+    assert_eq!(
+        cast.events[0].payload["targetLocation"],
+        json!({
+            "cell": "C1",
+            "region": "surface",
+        })
+    );
+    assert_eq!(cast.events[0].payload["targetSiteInstanceId"], land_site_id);
+    assert_eq!(
+        cast.events
+            .iter()
+            .filter(|event| event.event_type == "minion-burrowed")
+            .map(|event| {
+                assert_eq!(event.payload["cell"], "C1");
+                assert_eq!(event.payload["seat"], "south");
+                assert_eq!(event.payload["sourceInstanceId"], spell_id);
+                event.payload["instanceId"]
+                    .as_str()
+                    .expect("burrowed identity")
+                    .to_owned()
+            })
+            .collect::<Vec<_>>(),
+        burrowed_ids
+    );
+    assert!(cast.random_draws.is_empty());
+    let pending = state(&session);
+    let survivor = realm_unit(&pending, &survivor_id).expect("Burrowing survivor");
+    assert_eq!(survivor["region"], "underground");
+    assert_eq!(survivor["stealthed"], true);
+    assert_eq!(survivor["warded"], true);
+    assert!(
+        victim_ids
+            .iter()
+            .all(|instance_id| realm_unit(&pending, instance_id).is_none())
+    );
+    assert_eq!(pending["phase"], "deathrite-order");
+    assert_eq!(
+        pending["pendingDeathrites"]["deferredOutcomes"],
+        json!([{
+            "payload": {
+                "cardId": "north-cave-in",
+                "instanceId": spell_id,
+                "owner": "north",
+            },
+            "type": "magic-resolved",
+        }])
+    );
+
+    victim_ids.sort();
+    let (_, ordered) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == victim_ids[0]
+    });
+    assert_eq!(
+        event_types(&ordered),
+        [
+            "deathrite-order-committed",
+            "site-drawn",
+            "site-drawn",
+            "minion-died",
+            "minion-died",
+            "magic-resolved",
+        ]
+    );
+    assert!(ordered.random_draws.is_empty());
+    let completed = state(&session);
+    assert_eq!(completed["phase"], "main");
+    assert!(victim_ids.iter().all(|instance_id| {
+        completed["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == instance_id.as_str())
+    }));
+
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let south_turn = state(&session);
+    let south_spell_id = south_turn["players"]["south"]["hand"]["spellbook"]
+        .as_array()
+        .expect("South hand")
+        .iter()
+        .find(|card| card["cardId"] == "south-cave-in")
+        .expect("South Cave-In in hand")["instanceId"]
+        .as_str()
+        .expect("South Cave-In identity");
+    let south_avatar_id = south_turn["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity");
+    let south_cave_actions: Vec<_> = session
+        .legal_actions()
+        .expect("South Cave-In actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardInstanceId"] == south_spell_id
+        })
+        .collect();
+    assert!(!south_cave_actions.is_empty());
+    assert!(south_cave_actions.iter().all(|action| {
+        action.descriptor["casterInstanceId"] == south_avatar_id
+            && action.descriptor["casterInstanceId"] != survivor_id
+            && action.descriptor["targetLocation"]["region"] == "surface"
+    }));
+    assert_exact_replay(&session);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
     reason = "one ordered Bury proof retains setup, deferred state, checkpoint, completion, and replay"
 )]
 fn bury_should_defer_completion_until_ordered_static_deathrites_finish() {

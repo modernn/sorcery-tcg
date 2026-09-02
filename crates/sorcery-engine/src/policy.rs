@@ -705,6 +705,8 @@ mod tests {
             caster_instance_id: identity('d'),
             cemetery_minion_instance_id: Some(identity('e')),
             target: None,
+            target_location: None,
+            target_site_instance_id: None,
         };
         let enemy_magic = ActionDescriptor::CastMagic {
             card_id: "synthetic-unknown-effect".to_owned(),
@@ -712,6 +714,8 @@ mod tests {
             caster_instance_id: identity('1'),
             cemetery_minion_instance_id: None,
             target: Some(target(Seat::South)),
+            target_location: None,
+            target_site_instance_id: None,
         };
         let rubble = ActionDescriptor::ReplaceRubbleWithTopAtlasSite {
             target_cell: Cell::parse("A1").expect("cell"),

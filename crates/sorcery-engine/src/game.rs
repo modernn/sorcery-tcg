@@ -355,7 +355,13 @@ struct DisableEffect {
     source_instance_id: IdentityHash,
 }
 
-type MagicChoice = (Option<IdentityHash>, Option<UnitTarget>);
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct MagicChoice {
+    cemetery_minion_instance_id: Option<IdentityHash>,
+    target: Option<UnitTarget>,
+    target_location: Option<Location>,
+    target_site_instance_id: Option<IdentityHash>,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum UnitKind {
@@ -809,14 +815,12 @@ fn unsupported_selfplay_magic(facts: &MagicFacts) -> Option<&'static str> {
 fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
     match effect {
         MagicEffect::HealController(_)
+        | MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite
         | MagicEffect::BurrowTargetMinionOrArtifact
         | MagicEffect::ReturnMinionFromOwnCemetery
         | MagicEffect::DamageTargetUnit { .. }
         | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
         | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => None,
-        MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite => {
-            Some("burrowAllMinionsAndArtifactsAtTargetLandSite")
-        }
         MagicEffect::DamageChainNearbyUnits => Some("damageChainNearbyUnits"),
         MagicEffect::DamageEachAbovegroundMinionOne => Some("damageEachAbovegroundMinionOne"),
         MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_) => {
@@ -2134,15 +2138,15 @@ impl Game {
                 continue;
             }
             for (_, caster_instance_id) in &spellcasters {
-                for (cemetery_minion_instance_id, target) in
-                    self.magic_choices(seat, caster_instance_id, &facts.effect)?
-                {
+                for choice in self.magic_choices(seat, caster_instance_id, &facts.effect)? {
                     let descriptor = ActionDescriptor::CastMagic {
                         card_id: definition.id.clone(),
                         card_instance_id: card.instance_id.clone(),
                         caster_instance_id: caster_instance_id.clone(),
-                        cemetery_minion_instance_id,
-                        target,
+                        cemetery_minion_instance_id: choice.cemetery_minion_instance_id,
+                        target: choice.target,
+                        target_location: choice.target_location,
+                        target_site_instance_id: choice.target_site_instance_id,
                     };
                     let label = descriptor
                         .state_independent_label()
@@ -2856,13 +2860,13 @@ impl Game {
                         std::slice::from_ref(&player.avatar.location),
                     ))
             {
-                targets.push((
-                    None,
-                    Some(UnitTarget::Avatar {
+                targets.push(MagicChoice {
+                    target: Some(UnitTarget::Avatar {
                         instance_id: player.avatar.card.instance_id.clone(),
                         seat: target_seat,
                     }),
-                ));
+                    ..MagicChoice::default()
+                });
             }
             targets.extend(
                 self.position
@@ -2878,20 +2882,22 @@ impl Game {
                                     Self::unit_occupied_cells(unit),
                                 ))
                     })
-                    .map(|unit| {
-                        (
-                            None,
-                            Some(UnitTarget::Minion {
-                                instance_id: unit.card.instance_id.clone(),
-                                seat: target_seat,
-                            }),
-                        )
+                    .map(|unit| MagicChoice {
+                        target: Some(UnitTarget::Minion {
+                            instance_id: unit.card.instance_id.clone(),
+                            seat: target_seat,
+                        }),
+                        ..MagicChoice::default()
                     }),
             );
         }
         Ok(targets)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one closed match keeps every supported Magic choice shape explicit"
+    )]
     fn magic_choices(
         &self,
         seat: Seat,
@@ -2901,7 +2907,7 @@ impl Game {
         Ok(match effect {
             MagicEffect::HealController(_)
             | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => {
-                vec![(None, None)]
+                vec![MagicChoice::default()]
             }
             MagicEffect::ReturnMinionFromOwnCemetery => {
                 let choices: Vec<_> = self.position.players[seat_index(seat)]
@@ -2913,10 +2919,13 @@ impl Game {
                             CardFacts::Minion(_)
                         )
                     })
-                    .map(|card| (Some(card.instance_id.clone()), None))
+                    .map(|card| MagicChoice {
+                        cemetery_minion_instance_id: Some(card.instance_id.clone()),
+                        ..MagicChoice::default()
+                    })
                     .collect();
                 if choices.is_empty() {
-                    vec![(None, None)]
+                    vec![MagicChoice::default()]
                 } else {
                     choices
                 }
@@ -2934,6 +2943,31 @@ impl Game {
             MagicEffect::BurrowTargetMinionOrArtifact => {
                 self.targeted_magic_choices(seat, caster_instance_id, false, true)?
             }
+            MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite => {
+                if self.spellcaster_location(seat, caster_instance_id)?.region == Region::Surface {
+                    Cell::ALL
+                        .into_iter()
+                        .filter(|cell| self.underground_location_exists(*cell))
+                        .filter_map(|cell| {
+                            let instance_id = self.position.sites[cell.index()]
+                                .as_ref()
+                                .map(|site| &site.card.instance_id)
+                                .or(self.position.rubble[cell.index()].as_ref())?
+                                .clone();
+                            Some(MagicChoice {
+                                target_location: Some(Location {
+                                    cell,
+                                    region: Region::Surface,
+                                }),
+                                target_site_instance_id: Some(instance_id),
+                                ..MagicChoice::default()
+                            })
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                }
+            }
             MagicEffect::DisableTargetNearbyMinionUntilNextTurn => {
                 let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
                 let caster_cells = [caster_location.cell];
@@ -2949,22 +2983,20 @@ impl Game {
                                 Self::unit_occupied_cells(unit),
                             )
                     })
-                    .map(|unit| {
-                        (
-                            None,
-                            Some(UnitTarget::Minion {
-                                instance_id: unit.card.instance_id.clone(),
-                                seat: unit.controller,
-                            }),
-                        )
+                    .map(|unit| MagicChoice {
+                        target: Some(UnitTarget::Minion {
+                            instance_id: unit.card.instance_id.clone(),
+                            seat: unit.controller,
+                        }),
+                        ..MagicChoice::default()
                     })
                     .collect();
                 targets.sort_unstable_by(|left, right| {
-                    left.1
+                    left.target
                         .as_ref()
                         .expect("Freeze target")
                         .instance_id()
-                        .cmp(right.1.as_ref().expect("Freeze target").instance_id())
+                        .cmp(right.target.as_ref().expect("Freeze target").instance_id())
                 });
                 targets
             }
@@ -7605,6 +7637,8 @@ impl Game {
             caster_instance_id,
             cemetery_minion_instance_id,
             target,
+            target_location,
+            target_site_instance_id,
         } = &action.descriptor
         else {
             return Err(GameError::IllegalAction);
@@ -7634,7 +7668,12 @@ impl Game {
             || !self.thresholds_met(seat, facts.thresholds)
             || !self
                 .magic_choices(seat, caster_instance_id, &facts.effect)?
-                .contains(&(cemetery_minion_instance_id.clone(), target.clone()))
+                .contains(&MagicChoice {
+                    cemetery_minion_instance_id: cemetery_minion_instance_id.clone(),
+                    target: target.clone(),
+                    target_location: *target_location,
+                    target_site_instance_id: target_site_instance_id.clone(),
+                })
         {
             return Err(GameError::IllegalAction);
         }
@@ -7699,6 +7738,12 @@ impl Game {
                 payload["targetInstanceId"] = json!(target.instance_id());
                 payload["targetSeat"] = json!(target.seat());
             }
+            if let Some(target_location) = target_location {
+                payload["targetLocation"] = json!(target_location);
+            }
+            if let Some(target_site_instance_id) = target_site_instance_id {
+                payload["targetSiteInstanceId"] = json!(target_site_instance_id);
+            }
             payload
         });
         self.record_unit_interaction(
@@ -7753,6 +7798,45 @@ impl Game {
                             "seat": seat,
                             "sourceInstanceId": card_instance_id,
                             "token": true,
+                        })
+                    });
+                }
+            }
+            MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite => {
+                let Some(Location {
+                    cell,
+                    region: Region::Surface,
+                }) = target_location
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                let mut moved = self
+                    .position
+                    .units
+                    .iter()
+                    .filter(|unit| {
+                        unit.region == Region::Surface
+                            && Self::unit_occupies_cell(unit, *cell)
+                            && Self::unit_occupied_cells(unit)
+                                .iter()
+                                .all(|occupied| self.underground_location_exists(*occupied))
+                    })
+                    .map(|unit| (unit.card.instance_id.clone(), unit.controller))
+                    .collect::<Vec<_>>();
+                moved.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+                for (instance_id, target_seat) in moved {
+                    self.position
+                        .units
+                        .iter_mut()
+                        .find(|unit| unit.card.instance_id == instance_id)
+                        .ok_or(GameError::IllegalAction)?
+                        .region = Region::Underground;
+                    outcomes.push("minion-burrowed", || {
+                        json!({
+                            "cell": cell,
+                            "instanceId": instance_id,
+                            "seat": target_seat,
+                            "sourceInstanceId": card_instance_id,
                         })
                     });
                 }
@@ -9527,7 +9611,7 @@ mod tests {
     }
 
     #[test]
-    fn bury_selfplay_should_admit_the_minion_slice_and_reject_unmodeled_cards() {
+    fn forceful_burrow_magic_should_admit_minion_slices_and_reject_unmodeled_cards() {
         let bury_manifest = |extra: Option<(&str, Value)>| {
             selfplay_manifest_with(31, |manifest| {
                 for ordinal in 1..=50 {
@@ -9553,6 +9637,21 @@ mod tests {
                 .ensure_selfplay_supported(),
             Err(GameError::UnsupportedManifestFact(field)) if field == "burrowing"
         ));
+
+        let cave_in = selfplay_manifest_with(31, |manifest| {
+            for ordinal in 1..=50 {
+                manifest["cards"][format!("north-spell-{ordinal}")] = json!({
+                    "burrowAllMinionsAndArtifactsAtTargetLandSite": true,
+                    "cardType": "magic",
+                    "manaCost": 0,
+                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                });
+            }
+        });
+        Game::from_manifest_json(&cave_in)
+            .expect("valid Cave-In manifest")
+            .ensure_selfplay_supported()
+            .expect("artifact-free Cave-In is self-play safe");
 
         let artifacts = selfplay_manifest_with(31, |manifest| {
             manifest["cards"]["south-spell-1"] = json!({

@@ -845,19 +845,18 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Cave-In burrows every surface minion and Artifact at one Land Site together.",
-      "implementationStatus": "typescript-supported",
+      "plainLanguage": "Cave-In burrows every eligible surface minion at one Land Site together.",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
-        "burrowing",
-        "artifact"
+        "burrowing"
       ],
       "actionHints": [
         "burrow"
       ],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03/04 Cave-In burrows every surface minion and Artifact at one Land Site together"
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0044_cave_in_minion_slice_should_burrow_in_canonical_order"
       }
     },
     {
@@ -3216,6 +3215,27 @@
       "scenarioProof": {
         "file": "tests/engine/game-setup.test.ts",
         "testName": "RULE-03 Craterize discards a site, destroys its target, and applies the printed damage grid"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0161",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Cave-In detaches or carries eligible Artifacts underground and merges their outcomes with minions in canonical identity order.",
+      "implementationStatus": "typescript-supported",
+      "genericFactHints": [
+        "artifact",
+        "burrowing"
+      ],
+      "actionHints": [
+        "burrow"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "tests/engine/game-setup.test.ts",
+        "testName": "RULE-03/04 Cave-In burrows every surface minion and Artifact at one Land Site together"
       }
     }
   ]

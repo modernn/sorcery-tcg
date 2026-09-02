@@ -305,6 +305,12 @@ pub enum ActionDescriptor {
         /// Exact engine-issued unit target.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target: Option<UnitTarget>,
+        /// Exact engine-issued realm location targeted by the Magic.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_location: Option<Location>,
+        /// Exact site or Rubble instance that made the location target legal.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_site_instance_id: Option<IdentityHash>,
     },
     /// Tap a unit and follow an issued movement path before choosing an attack.
     MoveAndAttack {
@@ -449,6 +455,7 @@ impl ActionDescriptor {
                 card_id,
                 cemetery_minion_instance_id,
                 target,
+                target_location,
                 ..
             } => Some(if let Some(instance_id) = cemetery_minion_instance_id {
                 format!(
@@ -460,6 +467,12 @@ impl ActionDescriptor {
                     "Cast {card_id} on {} {}…",
                     target.kind(),
                     short_identity(target.instance_id())
+                )
+            } else if let Some(location) = target_location {
+                format!(
+                    "Cast {card_id} at {} {}",
+                    location.cell,
+                    region_name(location.region)
                 )
             } else {
                 format!("Cast {card_id}")
@@ -667,6 +680,8 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     caster_instance_id: left_caster,
                     cemetery_minion_instance_id: left_cemetery,
                     target: left_target,
+                    target_location: left_location,
+                    target_site_instance_id: left_site,
                 },
                 ActionDescriptor::CastMagic {
                     card_id: right_card,
@@ -674,6 +689,8 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     caster_instance_id: right_caster,
                     cemetery_minion_instance_id: right_cemetery,
                     target: right_target,
+                    target_location: right_location,
+                    target_site_instance_id: right_site,
                 },
             ) => compare_json_strings(left_card, right_card)
                 .then_with(|| left_instance.cmp(right_instance))
@@ -683,7 +700,9 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 })
                 .then_with(|| {
                     compare_optional_unit_targets(left_target.as_ref(), right_target.as_ref())
-                }),
+                })
+                .then_with(|| compare_optional_locations(*left_location, *right_location))
+                .then_with(|| compare_optional_identities(left_site.as_ref(), right_site.as_ref())),
             (
                 ActionDescriptor::SummonMinion {
                     card_id: left_card,
@@ -1019,6 +1038,15 @@ fn compare_optional_cells(left: Option<Cell>, right: Option<Cell>) -> Ordering {
     }
 }
 
+fn compare_optional_locations(left: Option<Location>, right: Option<Location>) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => left.cmp(&right),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
 fn compare_optional_square_areas(left: Option<SquareArea>, right: Option<SquareArea>) -> Ordering {
     match (left, right) {
         (Some(left), Some(right)) => compare_json_array(&left, &right, Cell::cmp),
@@ -1269,6 +1297,7 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{ActionDescriptor, compare_canonical, compare_json_integers, compare_json_strings};
+    use crate::canonical::canonical_json;
 
     const COMBAT_RESPONSE_FIXTURE: &str =
         include_str!("../../../tests/engine/fixtures/combat-response-action-v1.json");
@@ -1304,6 +1333,63 @@ mod tests {
                 .map(|action_id| action_id.as_str().expect("action ID").to_owned())
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn cave_in_cast_magic_boundary_should_match_canonical_typescript_shape() {
+        const CARD_INSTANCE_ID: &str =
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+        const CASTER_INSTANCE_ID: &str =
+            "sha256:2222222222222222222222222222222222222222222222222222222222222222";
+        const FIRST_SITE_ID: &str =
+            "sha256:3333333333333333333333333333333333333333333333333333333333333333";
+        const SECOND_SITE_ID: &str =
+            "sha256:4444444444444444444444444444444444444444444444444444444444444444";
+        let descriptor = |cell: Option<&str>, site_id: &str| {
+            let mut value = json!({
+                "cardId": "cave-in",
+                "cardInstanceId": CARD_INSTANCE_ID,
+                "casterInstanceId": CASTER_INSTANCE_ID,
+                "kind": "cast-magic",
+            });
+            if let Some(cell) = cell {
+                value["targetLocation"] = json!({ "cell": cell, "region": "surface" });
+                value["targetSiteInstanceId"] = json!(site_id);
+            }
+            serde_json::from_value::<ActionDescriptor>(value).expect("typed Cast Magic descriptor")
+        };
+        let cave_in = descriptor(Some("A1"), FIRST_SITE_ID);
+
+        assert_eq!(
+            serde_json::to_value(&cave_in).expect("serialized Cave-In descriptor"),
+            json!({
+                "cardId": "cave-in",
+                "cardInstanceId": CARD_INSTANCE_ID,
+                "casterInstanceId": CASTER_INSTANCE_ID,
+                "kind": "cast-magic",
+                "targetLocation": { "cell": "A1", "region": "surface" },
+                "targetSiteInstanceId": FIRST_SITE_ID,
+            })
+        );
+        assert_eq!(
+            cave_in.state_independent_label().as_deref(),
+            Some("Cast cave-in at A1 surface")
+        );
+
+        let mut descriptors = [
+            cave_in,
+            descriptor(Some("A1"), SECOND_SITE_ID),
+            descriptor(Some("B1"), FIRST_SITE_ID),
+            descriptor(None, FIRST_SITE_ID),
+        ];
+        let mut canonical = descriptors.clone();
+        descriptors.sort_unstable_by(compare_canonical);
+        canonical.sort_unstable_by_key(|candidate| {
+            canonical_json(&serde_json::to_value(candidate).expect("serialized ordering candidate"))
+                .expect("canonical ordering candidate")
+        });
+
+        assert_eq!(descriptors, canonical);
     }
 
     #[test]
