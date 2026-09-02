@@ -233,6 +233,21 @@ pub enum ActionDescriptor {
         /// Engine-issued unit within two measured steps of the Artifact, in the bearer's region.
         target: UnitTarget,
     },
+    /// Tap a carried Artifact's bearer and one ally beside it and discard one card in hand to
+    /// damage every unit at a measured location.
+    ActivateArtifactDiscardAreaDamage {
+        /// Authoritative carried Artifact identity granting the ability.
+        artifact_instance_id: IdentityHash,
+        /// Exact Atlas or Spellbook card in hand discarded to pay for the ability.
+        discard_card_instance_id: IdentityHash,
+        /// Hand the discarded card is taken from.
+        discard_zone: DeckZone,
+        /// Second ready ally tapped alongside the bearer to pay for the ability.
+        helper: UnitTarget,
+        /// Engine-issued location within three measured steps of the Artifact, in the bearer's
+        /// region, whose occupants all take the damage.
+        target_location: Location,
+    },
     /// Discard one Spellbook card to damage a hidden random other unit at the source's location.
     ActivateDiscardRandomDamage {
         /// Exact Spellbook card discarded to pay for the ability.
@@ -861,6 +876,17 @@ impl ActionDescriptor {
                 target.kind(),
                 short_identity(target.instance_id())
             )),
+            Self::ActivateArtifactDiscardAreaDamage {
+                artifact_instance_id,
+                discard_card_instance_id,
+                target_location,
+                ..
+            } => Some(format!(
+                "Tap bearer and ally, discard {}…, and activate artifact {}… at {}",
+                short_identity(discard_card_instance_id),
+                short_identity(artifact_instance_id),
+                target_location.cell
+            )),
             Self::ActivateDiscardRandomDamage { .. }
             | Self::ActivateSparkmage { .. }
             | Self::PlaySite { .. }
@@ -1245,6 +1271,28 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     from: right_from, ..
                 },
             ) => left_from.cmp(right_from).then(Ordering::Greater),
+            // Both Artifact activations lead with the same Artifact identity key, and the discard
+            // cost key that follows it in one sorts ahead of the helper key they share.
+            (
+                ActionDescriptor::ActivateArtifactDiscardAreaDamage {
+                    artifact_instance_id: left_artifact,
+                    ..
+                },
+                ActionDescriptor::ActivateArtifactDamage {
+                    artifact_instance_id: right_artifact,
+                    ..
+                },
+            ) => left_artifact.cmp(right_artifact).then(Ordering::Less),
+            (
+                ActionDescriptor::ActivateArtifactDamage {
+                    artifact_instance_id: left_artifact,
+                    ..
+                },
+                ActionDescriptor::ActivateArtifactDiscardAreaDamage {
+                    artifact_instance_id: right_artifact,
+                    ..
+                },
+            ) => left_artifact.cmp(right_artifact).then(Ordering::Greater),
             _ => action_kind(left)
                 .cmp(&action_kind(right))
                 .then_with(|| match (left, right) {
@@ -1290,6 +1338,29 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                         .cmp(right_artifact)
                         .then_with(|| compare_unit_targets(left_helper, right_helper))
                         .then_with(|| compare_unit_targets(left_target, right_target)),
+                    (
+                        ActionDescriptor::ActivateArtifactDiscardAreaDamage {
+                            artifact_instance_id: left_artifact,
+                            discard_card_instance_id: left_discard,
+                            discard_zone: left_zone,
+                            helper: left_helper,
+                            target_location: left_location,
+                        },
+                        ActionDescriptor::ActivateArtifactDiscardAreaDamage {
+                            artifact_instance_id: right_artifact,
+                            discard_card_instance_id: right_discard,
+                            discard_zone: right_zone,
+                            helper: right_helper,
+                            target_location: right_location,
+                        },
+                    ) => left_artifact
+                        .cmp(right_artifact)
+                        .then_with(|| left_discard.cmp(right_discard))
+                        .then_with(|| {
+                            deck_zone_order(*left_zone).cmp(&deck_zone_order(*right_zone))
+                        })
+                        .then_with(|| compare_unit_targets(left_helper, right_helper))
+                        .then_with(|| left_location.cmp(right_location)),
                     (
                         ActionDescriptor::ActivateAreaDamage {
                             source_instance_id: left_source,
@@ -1619,7 +1690,8 @@ const fn descriptor_group(action: &ActionDescriptor) -> u8 {
     match action {
         ActionDescriptor::CastMagic { ally: Some(_), .. } => 0,
         ActionDescriptor::ActivateMana { .. } | ActionDescriptor::AllocateStrike { .. } => 1,
-        ActionDescriptor::ActivateArtifactDamage { .. } => 2,
+        ActionDescriptor::ActivateArtifactDamage { .. }
+        | ActionDescriptor::ActivateArtifactDiscardAreaDamage { .. } => 2,
         ActionDescriptor::DropArtifacts { .. } | ActionDescriptor::PickUpArtifacts { .. } => 3,
         ActionDescriptor::Mulligan { .. } => 4,
         ActionDescriptor::CastArtifact {
@@ -1748,41 +1820,42 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
     match action {
         ActionDescriptor::ActivateAreaDamage { .. } => 0,
         ActionDescriptor::ActivateArtifactDamage { .. } => 1,
-        ActionDescriptor::ActivateDiscardRandomDamage { .. } => 2,
-        ActionDescriptor::ActivateMana { .. } => 3,
-        ActionDescriptor::ActivateSiteDestruction { .. } => 4,
-        ActionDescriptor::ActivateSparkmage { .. } => 5,
-        ActionDescriptor::AllocateStrike { .. } => 6,
-        ActionDescriptor::BeginChainMagic { .. } => 7,
-        ActionDescriptor::CastArtifact { .. } => 8,
-        ActionDescriptor::CastMagic { .. } => 9,
-        ActionDescriptor::CloseDefend { .. } => 10,
-        ActionDescriptor::CloseIntercept {} => 11,
-        ActionDescriptor::ContinueBasicMovement { .. } => 12,
-        ActionDescriptor::DeclareAttack { .. } => 13,
-        ActionDescriptor::DeclineAttack => 14,
-        ActionDescriptor::Defend { .. } => 15,
-        ActionDescriptor::Draw { .. } => 16,
-        ActionDescriptor::DrawSite => 17,
-        ActionDescriptor::DrawSpell => 18,
-        ActionDescriptor::DropArtifacts { .. } => 19,
-        ActionDescriptor::EndTurn => 20,
-        ActionDescriptor::ExtendChainMagic { .. } => 21,
-        ActionDescriptor::Intercept { .. } => 22,
-        ActionDescriptor::OrderDeathrites { .. } => 23,
-        ActionDescriptor::PickUpArtifacts { .. } => 24,
-        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 25,
-        ActionDescriptor::ResolveChainMagic => 26,
-        ActionDescriptor::ResolveGenesisSpell { .. } => 27,
-        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 28,
-        ActionDescriptor::ResolveGenesisToken { .. } => 29,
-        ActionDescriptor::ResolveRangedStep { .. } => 30,
-        ActionDescriptor::Mulligan { .. } => 31,
-        ActionDescriptor::PlaySite { .. } => 32,
-        ActionDescriptor::ShootDamageProjectile { .. } => 33,
-        ActionDescriptor::ShootDragProjectile { .. } => 34,
-        ActionDescriptor::ShootProjectile { .. } => 35,
-        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 36,
+        ActionDescriptor::ActivateArtifactDiscardAreaDamage { .. } => 2,
+        ActionDescriptor::ActivateDiscardRandomDamage { .. } => 3,
+        ActionDescriptor::ActivateMana { .. } => 4,
+        ActionDescriptor::ActivateSiteDestruction { .. } => 5,
+        ActionDescriptor::ActivateSparkmage { .. } => 6,
+        ActionDescriptor::AllocateStrike { .. } => 7,
+        ActionDescriptor::BeginChainMagic { .. } => 8,
+        ActionDescriptor::CastArtifact { .. } => 9,
+        ActionDescriptor::CastMagic { .. } => 10,
+        ActionDescriptor::CloseDefend { .. } => 11,
+        ActionDescriptor::CloseIntercept {} => 12,
+        ActionDescriptor::ContinueBasicMovement { .. } => 13,
+        ActionDescriptor::DeclareAttack { .. } => 14,
+        ActionDescriptor::DeclineAttack => 15,
+        ActionDescriptor::Defend { .. } => 16,
+        ActionDescriptor::Draw { .. } => 17,
+        ActionDescriptor::DrawSite => 18,
+        ActionDescriptor::DrawSpell => 19,
+        ActionDescriptor::DropArtifacts { .. } => 20,
+        ActionDescriptor::EndTurn => 21,
+        ActionDescriptor::ExtendChainMagic { .. } => 22,
+        ActionDescriptor::Intercept { .. } => 23,
+        ActionDescriptor::OrderDeathrites { .. } => 24,
+        ActionDescriptor::PickUpArtifacts { .. } => 25,
+        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 26,
+        ActionDescriptor::ResolveChainMagic => 27,
+        ActionDescriptor::ResolveGenesisSpell { .. } => 28,
+        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 29,
+        ActionDescriptor::ResolveGenesisToken { .. } => 30,
+        ActionDescriptor::ResolveRangedStep { .. } => 31,
+        ActionDescriptor::Mulligan { .. } => 32,
+        ActionDescriptor::PlaySite { .. } => 33,
+        ActionDescriptor::ShootDamageProjectile { .. } => 34,
+        ActionDescriptor::ShootDragProjectile { .. } => 35,
+        ActionDescriptor::ShootProjectile { .. } => 36,
+        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 37,
     }
 }
 
@@ -2299,6 +2372,58 @@ mod tests {
         .to_vec()
     }
 
+    /// The discard-funded Artifact activation shapes, whose Artifact identity key ties with the
+    /// plain Artifact activation before their differing second keys separate them.
+    fn artifact_discard_area_order_descriptors() -> Vec<ActionDescriptor> {
+        let descriptor = typed_descriptor;
+        let bearer = json!({ "instanceId": CASTER_B, "kind": "minion", "seat": "north" });
+        let avatar = json!({ "instanceId": CASTER_A, "kind": "avatar", "seat": "north" });
+        [
+            json!({
+                "artifactInstanceId": ARTIFACT_A,
+                "discardCardInstanceId": CARD_A,
+                "discardZone": "atlas",
+                "helper": bearer,
+                "kind": "activate-artifact-discard-area-damage",
+                "targetLocation": { "cell": "C3", "region": "surface" },
+            }),
+            json!({
+                "artifactInstanceId": ARTIFACT_A,
+                "discardCardInstanceId": CARD_A,
+                "discardZone": "atlas",
+                "helper": bearer,
+                "kind": "activate-artifact-discard-area-damage",
+                "targetLocation": { "cell": "C3", "region": "underground" },
+            }),
+            json!({
+                "artifactInstanceId": ARTIFACT_A,
+                "discardCardInstanceId": CARD_A,
+                "discardZone": "spellbook",
+                "helper": avatar,
+                "kind": "activate-artifact-discard-area-damage",
+                "targetLocation": { "cell": "C4", "region": "surface" },
+            }),
+            json!({
+                "artifactInstanceId": ARTIFACT_A,
+                "discardCardInstanceId": CARD_B,
+                "discardZone": "atlas",
+                "helper": bearer,
+                "kind": "activate-artifact-discard-area-damage",
+                "targetLocation": { "cell": "C3", "region": "surface" },
+            }),
+            json!({
+                "artifactInstanceId": ARTIFACT_B,
+                "discardCardInstanceId": CARD_B,
+                "discardZone": "atlas",
+                "helper": bearer,
+                "kind": "activate-artifact-discard-area-damage",
+                "targetLocation": { "cell": "C3", "region": "surface" },
+            }),
+        ]
+        .map(descriptor)
+        .to_vec()
+    }
+
     /// Neighbouring non-Artifact actions whose canonical keys interleave with the Artifact ones.
     fn artifact_neighbour_descriptors() -> Vec<ActionDescriptor> {
         let descriptor = typed_descriptor;
@@ -2345,6 +2470,7 @@ mod tests {
     #[test]
     fn artifact_action_order_should_match_canonical_json_for_every_pair() {
         let mut descriptors = artifact_order_descriptors();
+        descriptors.extend(artifact_discard_area_order_descriptors());
         descriptors.extend(artifact_neighbour_descriptors());
         let canonical = |candidate: &ActionDescriptor| {
             canonical_json(&serde_json::to_value(candidate).expect("serialized descriptor"))

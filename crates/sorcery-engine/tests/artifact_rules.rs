@@ -1,8 +1,9 @@
 //! Direct proofs for local carried Artifacts (RULE-CATALOG-0140), the power an Artifact
 //! carries away from a lethally wounded bearer when it is dropped (RULE-CATALOG-0141), the
-//! Lethal a carried Artifact grants its bearer until the bearer falls (RULE-CATALOG-0142), and the
+//! Lethal a carried Artifact grants its bearer until the bearer falls (RULE-CATALOG-0142), the
 //! measured damage a Siege Ballista shoots for its bearer's tap plus another ally's
-//! (RULE-CATALOG-0143).
+//! (RULE-CATALOG-0143), and the measured location a Payload Trebuchet blankets for those same two
+//! taps plus a discarded card (RULE-CATALOG-0144).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -999,4 +1000,483 @@ fn a_siege_ballista_should_require_both_its_bearer_and_a_second_ready_ally() {
         "a lone ready bearer cannot pay the Ballista's second tap by itself"
     );
     assert_exact_replay(&spent_allies);
+}
+
+/// North's Spellbook is four cards, so the one card its opening hand leaves behind is the payload
+/// it draws next turn, and every later hand card is an Atlas site.
+fn trebuchet_scenario() -> String {
+    let cards = json!({
+        "trebuchet-avatar": avatar(),
+        // Lethal, Stealth, and a Lance on the bearer prove the Trebuchet fires on its own account:
+        // the blanket borrows none of them and spends none of them.
+        "trebuchet-bearer": minion(json!({
+            "attack": 4,
+            "defense": 5,
+            "lanceCount": 1,
+            "lethal": true,
+            "stealth": true,
+        })),
+        // Four is exactly the bearer's power, so only a source that is not a unit gets through.
+        "trebuchet-guarded-target": minion(json!({
+            "defense": 5,
+            "preventsDamageFromUnitsWithPowerAtLeast": 4,
+        })),
+        "trebuchet-helper": minion(json!({ "defense": 5 })),
+        "trebuchet-north-site": { "cardType": "site", "elements": ["earth"] },
+        // North holds no Water site, so the payload is never castable and stays in hand as the
+        // four-mana card the Trebuchet throws.
+        "trebuchet-payload": minion(json!({
+            "attack": 4,
+            "defense": 4,
+            "manaCost": 4,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 1 },
+        })),
+        "trebuchet-south-site": { "cardType": "site", "elements": ["earth", "water"] },
+        "trebuchet-sunken-target": minion(json!({
+            "defense": 5,
+            "submerge": true,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 1 },
+        })),
+        "trebuchet-target": minion(json!({ "defense": 4 })),
+        "trebuchet-warded-target": minion(json!({
+            "defense": 5,
+            "stealth": true,
+            "ward": true,
+        })),
+        "payload-trebuchet": {
+            "cardType": "artifact",
+            "manaCost": 0,
+            "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps": true,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        },
+        "whelm": {
+            "cardType": "magic",
+            "manaCost": 0,
+            "submergeTargetMinion": true,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 1 },
+        },
+    });
+    let decks = json!({
+        "north": {
+            "atlas": vec!["trebuchet-north-site"; 6],
+            "avatar": "trebuchet-avatar",
+            "spellbook": [
+                "payload-trebuchet",
+                "trebuchet-bearer",
+                "trebuchet-helper",
+                "trebuchet-payload",
+            ],
+        },
+        "south": {
+            "atlas": vec!["trebuchet-south-site"; 6],
+            "avatar": "trebuchet-avatar",
+            "spellbook": [
+                "trebuchet-guarded-target",
+                "trebuchet-sunken-target",
+                "trebuchet-target",
+                "trebuchet-warded-target",
+                "whelm",
+            ],
+        },
+    });
+    (1..=4096)
+        .map(|seed| manifest("synthetic-payload-trebuchet-v1", &cards, &decks, seed))
+        .find(|candidate| {
+            let opening = state(&Session::new(candidate).expect("Trebuchet candidate"));
+            opening["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("opening spellbook hand")
+                .iter()
+                .all(|card| card["cardId"] != "trebuchet-payload")
+        })
+        .expect("bounded seed opening that leaves the payload on top of North's Spellbook")
+}
+
+/// Every identity the Trebuchet at C4 either blankets or deliberately leaves alone.
+struct Trebuchet {
+    bearer: String,
+    carried: String,
+    guarded: String,
+    helper: String,
+    sunken: String,
+    target: String,
+    warded: String,
+}
+
+/// Walks both seats up to North's ready Trebuchet bearer and its ready ally on C4, with South's
+/// crowd on C1 exactly three measured steps away and South's last site on B1 a fourth step past it.
+fn trebuchet_position(session: &mut Session) -> Trebuchet {
+    keep(session);
+    keep(session);
+
+    play_site(session, "trebuchet-north-site", "C4");
+    let bearer = summon(session, "trebuchet-bearer", "C4");
+    let helper = summon(session, "trebuchet-helper", "C4");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "payload-trebuchet"
+            && descriptor["bearer"]["instanceId"] == bearer.as_str()
+    });
+    // A summoning-sick bearer cannot pay the Trebuchet's first tap yet.
+    assert!(descriptors_of_kind(session, "activate-artifact-discard-area-damage").is_empty());
+    end_and_draw(session, "spellbook");
+
+    play_site(session, "trebuchet-south-site", "C1");
+    end_and_draw(session, "spellbook");
+
+    play_site(session, "trebuchet-north-site", "C3");
+    end_and_draw(session, "spellbook");
+
+    play_site(session, "trebuchet-south-site", "C2");
+    end_and_draw(session, "atlas");
+
+    // North idles one turn so South can lay the site a fourth measured step from the Trebuchet.
+    end_and_draw(session, "atlas");
+
+    play_site(session, "trebuchet-south-site", "B1");
+    let guarded = summon(session, "trebuchet-guarded-target", "C1");
+    let sunken = summon(session, "trebuchet-sunken-target", "C1");
+    let target = summon(session, "trebuchet-target", "C1");
+    let warded = summon(session, "trebuchet-warded-target", "C1");
+    // South pulls one minion under its Water site so C1 exposes only its surface layer.
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "whelm"
+            && descriptor["target"]["instanceId"] == sunken.as_str()
+    });
+    let opposed = state(session);
+    assert_eq!(
+        realm_unit(&opposed, &sunken).expect("sunken target")["region"],
+        "underwater"
+    );
+    assert_eq!(
+        realm_unit(&opposed, &warded).expect("warded target")["stealthed"],
+        true
+    );
+    end_and_draw(session, "atlas");
+
+    let artifacts = realm_artifacts(&state(session));
+    assert_eq!(artifacts.len(), 1);
+    Trebuchet {
+        carried: artifacts[0]["instanceId"]
+            .as_str()
+            .expect("Trebuchet identity")
+            .to_owned(),
+        bearer,
+        guarded,
+        helper,
+        sunken,
+        target,
+        warded,
+    }
+}
+
+/// The (helper, discard zone, discarded card, target cell) tuples one Trebuchet currently offers.
+fn trebuchet_offers(
+    session: &Session,
+    artifact_instance_id: &str,
+) -> Vec<(String, String, String, String)> {
+    let field = |descriptor: &Value, path: [&str; 2]| {
+        descriptor[path[0]][path[1]]
+            .as_str()
+            .expect("offered field")
+            .to_owned()
+    };
+    let mut offers: Vec<_> = descriptors_of_kind(session, "activate-artifact-discard-area-damage")
+        .iter()
+        .filter(|descriptor| descriptor["artifactInstanceId"] == artifact_instance_id)
+        .map(|descriptor| {
+            (
+                field(descriptor, ["helper", "instanceId"]),
+                descriptor["discardZone"]
+                    .as_str()
+                    .expect("discard zone")
+                    .to_owned(),
+                descriptor["discardCardInstanceId"]
+                    .as_str()
+                    .expect("discarded identity")
+                    .to_owned(),
+                field(descriptor, ["targetLocation", "region"])
+                    + ":"
+                    + &field(descriptor, ["targetLocation", "cell"]),
+            )
+        })
+        .collect();
+    offers.sort();
+    offers
+}
+
+/// Each card North still holds, paired with the hand it would be discarded from.
+fn north_hand(current: &Value) -> Vec<(String, String)> {
+    ["atlas", "spellbook"]
+        .into_iter()
+        .flat_map(|zone| {
+            current["players"]["north"]["hand"][zone]
+                .as_array()
+                .expect("North hand")
+                .iter()
+                .map(move |card| {
+                    (
+                        zone.to_owned(),
+                        card["instanceId"].as_str().expect("identity").to_owned(),
+                    )
+                })
+        })
+        .collect()
+}
+
+/// Either ready ally on C4 may pay the second tap, any card in either hand may pay the discard, and
+/// the payload lands on any surface location within three measured steps of C4: C4 itself, C3, C2,
+/// and South's C1. South's site on B1 is one measured step too far.
+fn assert_offered_payloads(
+    session: &Session,
+    trebuchet: &Trebuchet,
+    north_avatar: &str,
+    hand: &[(String, String)],
+) {
+    let mut expected = Vec::new();
+    for helper in [north_avatar, trebuchet.helper.as_str()] {
+        for (zone, card) in hand {
+            for cell in ["C1", "C2", "C3", "C4"] {
+                expected.push((
+                    helper.to_owned(),
+                    zone.clone(),
+                    card.clone(),
+                    format!("surface:{cell}"),
+                ));
+            }
+        }
+    }
+    expected.sort();
+    assert_eq!(hand.len(), 4);
+    assert_eq!(trebuchet_offers(session, &trebuchet.carried), expected);
+}
+
+/// Checks the causal receipt of the payload thrown at South's crowd on C1.
+fn assert_payload_receipt(fired: &Receipt, trebuchet: &Trebuchet, discard_card_instance_id: &str) {
+    assert_eq!(
+        &event_types(fired)[..2],
+        ["card-discarded", "artifact-discard-area-damage-activated"],
+        "the discard is a cost, so it is paid before the payload is announced"
+    );
+    assert_eq!(
+        fired.events[1].payload,
+        json!({
+            "bearerInstanceId": trebuchet.bearer,
+            "discardCardInstanceId": discard_card_instance_id,
+            "helperInstanceId": trebuchet.helper,
+            "seat": "north",
+            "sourceInstanceId": trebuchet.carried,
+            "targetCell": "C1",
+            "targetRegion": "surface",
+        })
+    );
+    // South's Avatar and its three surface minions on C1 are all announced before any of them is
+    // damaged, so an early death cannot shield a later target.
+    let allocations: Vec<_> = fired
+        .events
+        .iter()
+        .filter(|event| event.event_type == "artifact-discard-area-damage-allocated")
+        .map(|event| event.payload.clone())
+        .collect();
+    assert_eq!(allocations.len(), 4);
+    assert!(allocations.iter().all(|payload| {
+        payload["amount"] == json!(4) && payload["sourceInstanceId"] == trebuchet.carried.as_str()
+    }));
+    assert!(
+        !event_types(fired)
+            .iter()
+            .any(|event_type| matches!(*event_type, "fight-started" | "lance-broken")),
+        "the Trebuchet throws without opening a strike exchange"
+    );
+    assert!(fired.random_draws.is_empty());
+}
+
+/// Accepts one Trebuchet activation paying the named helper, discard, and target cell.
+fn fire_trebuchet(
+    session: &mut Session,
+    helper: &str,
+    discard_card_instance_id: &str,
+    cell: &str,
+) -> Receipt {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "activate-artifact-discard-area-damage"
+            && descriptor["helper"]["instanceId"] == helper
+            && descriptor["discardCardInstanceId"] == discard_card_instance_id
+            && descriptor["targetLocation"]["cell"] == cell
+    })
+    .1
+}
+
+#[test]
+fn rule_catalog_0144_payload_trebuchet_should_discard_a_card_for_measured_location_damage() {
+    let mut session =
+        Session::new(&trebuchet_scenario()).expect("valid Payload Trebuchet scenario");
+    let trebuchet = trebuchet_position(&mut session);
+    let opened = state(&session);
+    let north_avatar = opened["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let hand = north_hand(&opened);
+    let payload = opened["players"]["north"]["hand"]["spellbook"][0].clone();
+    assert_eq!(payload["cardId"], "trebuchet-payload");
+    let site_card = opened["players"]["north"]["hand"]["atlas"][0]["instanceId"]
+        .as_str()
+        .expect("Atlas discard identity")
+        .to_owned();
+    assert_offered_payloads(&session, &trebuchet, &north_avatar, &hand);
+
+    let payload_instance_id = payload["instanceId"].as_str().expect("payload identity");
+    let fired = fire_trebuchet(&mut session, &trebuchet.helper, payload_instance_id, "C1");
+    assert_payload_receipt(&fired, &trebuchet, payload_instance_id);
+
+    let settled = state(&session);
+    let bearer = realm_unit(&settled, &trebuchet.bearer).expect("bearer");
+    assert_eq!(
+        (
+            &bearer["carriedLanceCount"],
+            &bearer["damage"],
+            &bearer["stealthed"],
+            &bearer["tapped"]
+        ),
+        (&json!(1), &json!(0), &json!(true), &json!(true)),
+        "the bearer pays a tap, keeps its Lance and Stealth, and stands outside the blanket"
+    );
+    assert_eq!(
+        realm_unit(&settled, &trebuchet.helper).expect("helper")["tapped"],
+        true
+    );
+    let warded = realm_unit(&settled, &trebuchet.warded).expect("warded target");
+    assert_eq!(
+        (&warded["damage"], &warded["stealthed"], &warded["warded"]),
+        (&json!(0), &json!(true), &json!(false)),
+        "Ward absorbs the payload without costing the target its Stealth"
+    );
+    // The location is targeted, not its occupants, so Stealth hides nobody; the Artifact is the
+    // source, so prevention keyed to unit power lets the payload through and no Lethal rides it.
+    assert_eq!(
+        realm_unit(&settled, &trebuchet.guarded).expect("guarded target")["damage"],
+        4
+    );
+    assert_eq!(
+        realm_unit(&settled, &trebuchet.sunken).expect("sunken target")["damage"],
+        0,
+        "the surface layer of C1 is one location, and the layer below it is another"
+    );
+    assert_eq!(settled["players"]["south"]["avatar"]["life"], 16);
+    assert!(realm_unit(&settled, &trebuchet.target).is_none());
+    assert!(
+        settled["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == trebuchet.target.as_str())
+    );
+    assert!(
+        settled["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("North cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == payload_instance_id)
+    );
+    let remaining: Vec<_> = hand
+        .iter()
+        .filter(|(_, card)| card != payload_instance_id)
+        .cloned()
+        .collect();
+    assert_eq!(north_hand(&settled), remaining);
+    assert!(remaining.contains(&("atlas".to_owned(), site_card)));
+    assert!(
+        descriptors_of_kind(&session, "activate-artifact-discard-area-damage").is_empty(),
+        "a spent bearer cannot throw its Trebuchet twice in one turn"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn a_discarded_site_should_pay_the_trebuchet_for_a_harmless_zero_damage_payload() {
+    let mut session =
+        Session::new(&trebuchet_scenario()).expect("valid Payload Trebuchet scenario");
+    let trebuchet = trebuchet_position(&mut session);
+    let opened = state(&session);
+    let site_card = opened["players"]["north"]["hand"]["atlas"][0]["instanceId"]
+        .as_str()
+        .expect("Atlas discard identity")
+        .to_owned();
+
+    let fired = fire_trebuchet(&mut session, &trebuchet.helper, &site_card, "C1");
+    assert!(
+        fired
+            .events
+            .iter()
+            .filter(|event| event.event_type == "artifact-discard-area-damage-allocated")
+            .all(|event| event.payload["amount"] == json!(0)),
+        "a site has no mana cost to throw"
+    );
+
+    let settled = state(&session);
+    assert!(
+        settled["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("North cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == site_card.as_str())
+    );
+    assert_eq!(
+        realm_unit(&settled, &trebuchet.warded).expect("warded target")["warded"],
+        true,
+        "a zero-damage payload does not break Ward"
+    );
+    assert_eq!(
+        realm_unit(&settled, &trebuchet.target).expect("surviving target")["damage"],
+        0
+    );
+    assert_eq!(settled["players"]["south"]["avatar"]["life"], 20);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn a_payload_trebuchet_should_blanket_the_cell_its_own_cost_units_stand_on() {
+    let mut session =
+        Session::new(&trebuchet_scenario()).expect("valid Payload Trebuchet scenario");
+    let trebuchet = trebuchet_position(&mut session);
+    let opened = state(&session);
+    let payload_instance_id = opened["players"]["north"]["hand"]["spellbook"][0]["instanceId"]
+        .as_str()
+        .expect("payload identity")
+        .to_owned();
+
+    let fired = fire_trebuchet(&mut session, &trebuchet.helper, &payload_instance_id, "C4");
+    assert_eq!(
+        fired
+            .events
+            .iter()
+            .filter(|event| event.event_type == "artifact-discard-area-damage-allocated")
+            .count(),
+        3,
+        "North's Avatar, the bearer, and the helper all stand on C4"
+    );
+
+    // Both tap costs are already spent when the payload lands, and five defense survives four.
+    let settled = state(&session);
+    let bearer = realm_unit(&settled, &trebuchet.bearer).expect("bearer");
+    assert_eq!(
+        (
+            &bearer["carriedLanceCount"],
+            &bearer["damage"],
+            &bearer["stealthed"]
+        ),
+        (&json!(1), &json!(4), &json!(true))
+    );
+    assert_eq!(
+        realm_unit(&settled, &trebuchet.helper).expect("helper")["damage"],
+        4
+    );
+    assert_eq!(settled["players"]["north"]["avatar"]["life"], 16);
+    assert_eq!(
+        realm_unit(&settled, &trebuchet.target).expect("untouched target")["damage"],
+        0
+    );
+    assert_exact_replay(&session);
 }

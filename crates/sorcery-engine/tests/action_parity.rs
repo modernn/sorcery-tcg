@@ -37,6 +37,9 @@ fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
     match descriptor {
         ActionDescriptor::ActivateAreaDamage { .. } => "activate-area-damage",
         ActionDescriptor::ActivateArtifactDamage { .. } => "activate-artifact-damage",
+        ActionDescriptor::ActivateArtifactDiscardAreaDamage { .. } => {
+            "activate-artifact-discard-area-damage"
+        }
         ActionDescriptor::ActivateDiscardRandomDamage { .. } => "activate-discard-random-damage",
         ActionDescriptor::ActivateMana { .. } => "activate-mana",
         ActionDescriptor::ActivateSparkmage { .. } => "activate-sparkmage",

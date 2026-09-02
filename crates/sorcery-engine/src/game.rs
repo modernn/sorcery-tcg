@@ -423,6 +423,22 @@ const fn unit_target_kind(target: &UnitTarget) -> UnitKind {
     }
 }
 
+/// The damage a card discarded as payload deals: its printed mana cost, and nothing for a site.
+///
+/// Authority mana costs are far below the damage width, and a cost that did reach it would already
+/// exceed every printed defense, so the saturating conversion cannot change an outcome.
+fn payload_damage_amount(card: &CardDefinition) -> Result<u16, GameError> {
+    let mana_cost = match &card.facts {
+        CardFacts::Artifact(facts) => facts.mana_cost,
+        CardFacts::Aura(facts) => facts.mana_cost,
+        CardFacts::Magic(facts) => facts.mana_cost,
+        CardFacts::Minion(facts) => facts.mana_cost,
+        CardFacts::Site(_) => 0,
+        CardFacts::Avatar(_) => return Err(GameError::IllegalAction),
+    };
+    Ok(u16::try_from(mana_cost).unwrap_or(u16::MAX))
+}
+
 /// A realm area whose occupants cannot depart until the recorded seat's next turn.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ImmobileArea {
@@ -1046,17 +1062,16 @@ fn unsupported_selfplay_artifact(facts: &ArtifactFacts) -> Option<&'static str> 
 /// The Artifact effects the realm cannot yet honor, named by their authoring field.
 const fn unsupported_artifact_effect(effect: ArtifactEffect) -> Option<&'static str> {
     match effect {
-        ArtifactEffect::GrantsBearerLethal
+        ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(_)
+        | ArtifactEffect::GrantsBearerLethal
         | ArtifactEffect::GrantsBearerPowerTwo
+        | ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
         | ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree => None,
         ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(_) => {
             Some("atEndOfEachTurnSiteControllerLosesLife")
         }
         ArtifactEffect::BearerControllerChoosesExtraRandomOutcome => {
             Some("bearerControllerChoosesExtraRandomOutcome")
-        }
-        ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps => {
-            Some("tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps")
         }
         ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour => {
             Some("tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath")
@@ -1070,6 +1085,7 @@ const fn artifact_effect_supported(effect: ArtifactEffect) -> bool {
         effect,
         ArtifactEffect::GrantsBearerLethal
             | ArtifactEffect::GrantsBearerPowerTwo
+            | ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
             | ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree
     )
 }
@@ -3332,7 +3348,8 @@ impl Game {
             .into_iter()
             .chain(self.pick_up_artifact_descriptors(seat)?)
             .chain(self.drop_artifact_descriptors(seat)?)
-            .chain(self.artifact_damage_descriptors(seat)?);
+            .chain(self.artifact_damage_descriptors(seat)?)
+            .chain(self.artifact_discard_area_damage_descriptors(seat)?);
         for descriptor in descriptors {
             let label = descriptor
                 .state_independent_label()
@@ -3434,33 +3451,69 @@ impl Game {
         Ok(descriptors)
     }
 
-    /// Offers each measured Artifact damage activation the seat can pay for right now.
+    /// Whether the seat may activate a carried Artifact ability at all right now.
+    fn artifact_activation_window(&self, seat: Seat) -> bool {
+        self.position.phase == Phase::Main
+            && self.position.active_seat == seat
+            && self.position.decision_seat == seat
+    }
+
+    /// The cell one carried Artifact fires from and every other ready ally standing there that can
+    /// pay the second tap alongside its ready bearer.
     ///
-    /// The Artifact fires from the cell its bearer stands on, so a loose Artifact offers nothing and
-    /// a bearer who cannot pay the tap costs alongside a second ally beside it offers nothing.
-    fn artifact_damage_descriptors(&self, seat: Seat) -> Result<Vec<ActionDescriptor>, GameError> {
-        if self.position.phase != Phase::Main
-            || self.position.active_seat != seat
-            || self.position.decision_seat != seat
+    /// A loose Artifact has no bearer to tap, a spent bearer cannot pay the first tap, and a lone
+    /// bearer has nobody to pay the second, so each of those yields nothing.
+    fn artifact_tap_pair_helpers(
+        &self,
+        artifact: &ArtifactPosition,
+        seat: Seat,
+        effect: ArtifactEffect,
+        allies: &[UnitTarget],
+    ) -> Result<Option<(UnitTarget, Location, Vec<UnitTarget>)>, GameError> {
+        let Some(bearer) = artifact.bearer() else {
+            return Ok(None);
+        };
+        if bearer.seat() != seat
+            || self.artifact_facts(artifact)?.effect != effect
+            || !self.unit_target_is_ready(bearer)?
         {
+            return Ok(None);
+        }
+        let carried_at = self.unit_target_location(bearer)?;
+        let mut helpers = Vec::new();
+        for helper in allies {
+            if helper.instance_id() != bearer.instance_id()
+                && self.unit_target_is_ready(helper)?
+                && self.unit_target_region(helper)? == carried_at.region
+                && self
+                    .unit_target_occupied_cells(helper)?
+                    .contains(&carried_at.cell)
+            {
+                helpers.push(helper.clone());
+            }
+        }
+        Ok((!helpers.is_empty()).then(|| (bearer.clone(), carried_at, helpers)))
+    }
+
+    /// Offers each measured Artifact damage activation the seat can pay for right now.
+    fn artifact_damage_descriptors(&self, seat: Seat) -> Result<Vec<ActionDescriptor>, GameError> {
+        if !self.artifact_activation_window(seat) {
             return Ok(Vec::new());
         }
         let allies = self.seat_unit_targets(seat);
         let mut descriptors = Vec::new();
         for artifact in &self.position.artifacts {
-            let Some(bearer) = artifact.bearer() else {
+            let Some((_, carried_at, helpers)) = self.artifact_tap_pair_helpers(
+                artifact,
+                seat,
+                ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree,
+                &allies,
+            )?
+            else {
                 continue;
             };
-            if bearer.seat() != seat
-                || self.artifact_facts(artifact)?.effect
-                    != ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree
-                || !self.unit_target_is_ready(bearer)?
-            {
-                continue;
-            }
-            let carried_at = self.unit_target_location(bearer)?;
             let reachable: BTreeSet<_> = self
-                .locations_within_two_measured_steps(carried_at)
+                .locations_within_measured_steps(carried_at, 2)
                 .into_iter()
                 .map(|location| location.cell)
                 .collect();
@@ -3486,16 +3539,7 @@ impl Game {
                 }
                 targets.push(target);
             }
-            for helper in &allies {
-                if helper.instance_id() == bearer.instance_id()
-                    || !self.unit_target_is_ready(helper)?
-                    || self.unit_target_region(helper)? != carried_at.region
-                    || !self
-                        .unit_target_occupied_cells(helper)?
-                        .contains(&carried_at.cell)
-                {
-                    continue;
-                }
+            for helper in &helpers {
                 descriptors.extend(targets.iter().map(|target| {
                     ActionDescriptor::ActivateArtifactDamage {
                         artifact_instance_id: artifact.card.instance_id.clone(),
@@ -3503,6 +3547,61 @@ impl Game {
                         target: target.clone(),
                     }
                 }));
+            }
+        }
+        Ok(descriptors)
+    }
+
+    /// Offers each measured Artifact area activation whose discard cost the seat can still pay.
+    ///
+    /// The chosen location is targeted, not the units on it, so the offer does not depend on who
+    /// stands there and never skips a Stealthed occupant.
+    fn artifact_discard_area_damage_descriptors(
+        &self,
+        seat: Seat,
+    ) -> Result<Vec<ActionDescriptor>, GameError> {
+        if !self.artifact_activation_window(seat) {
+            return Ok(Vec::new());
+        }
+        let player = &self.position.players[seat_index(seat)];
+        let discards: Vec<_> = [
+            (DeckZone::Atlas, &player.hand_atlas),
+            (DeckZone::Spellbook, &player.hand_spellbook),
+        ]
+        .into_iter()
+        .flat_map(|(zone, hand)| {
+            hand.iter()
+                .map(move |card| (card.instance_id.clone(), zone))
+        })
+        .collect();
+        if discards.is_empty() {
+            return Ok(Vec::new());
+        }
+        let allies = self.seat_unit_targets(seat);
+        let mut descriptors = Vec::new();
+        for artifact in &self.position.artifacts {
+            let Some((_, carried_at, helpers)) = self.artifact_tap_pair_helpers(
+                artifact,
+                seat,
+                ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps,
+                &allies,
+            )?
+            else {
+                continue;
+            };
+            let target_locations = self.locations_within_measured_steps(carried_at, 3);
+            for helper in &helpers {
+                for (discard_card_instance_id, discard_zone) in &discards {
+                    descriptors.extend(target_locations.iter().map(|target_location| {
+                        ActionDescriptor::ActivateArtifactDiscardAreaDamage {
+                            artifact_instance_id: artifact.card.instance_id.clone(),
+                            discard_card_instance_id: discard_card_instance_id.clone(),
+                            discard_zone: *discard_zone,
+                            helper: helper.clone(),
+                            target_location: *target_location,
+                        }
+                    }));
+                }
             }
         }
         Ok(descriptors)
@@ -4342,8 +4441,9 @@ impl Game {
                 choices
             }
             MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_) => self
-                .locations_within_two_measured_steps(
+                .locations_within_measured_steps(
                     self.spellcaster_location(seat, caster_instance_id)?,
+                    2,
                 )
                 .into_iter()
                 .map(|target_location| MagicChoice {
@@ -5014,13 +5114,15 @@ impl Game {
         }
     }
 
-    fn locations_within_two_measured_steps(&self, start: Location) -> Vec<Location> {
+    /// Every location a measured walk of at most `steps` cardinal steps reaches without leaving the
+    /// starting region.
+    fn locations_within_measured_steps(&self, start: Location, steps: u8) -> Vec<Location> {
         if !self.location_exists_in_region(start.cell, start.region) {
             return Vec::new();
         }
         let mut distances = [u8::MAX; Cell::ALL.len()];
         distances[start.cell.index()] = 0;
-        for distance in 0..2 {
+        for distance in 0..steps {
             for cell in Cell::ALL {
                 if distances[cell.index()] != distance {
                     continue;
@@ -5462,6 +5564,9 @@ impl Game {
             }
             ActionDescriptor::ActivateArtifactDamage { .. } => {
                 self.apply_artifact_damage_action(action, outcomes)
+            }
+            ActionDescriptor::ActivateArtifactDiscardAreaDamage { .. } => {
+                self.apply_artifact_discard_area_damage_action(action, outcomes)
             }
             ActionDescriptor::ActivateDiscardRandomDamage { .. } => {
                 self.apply_discard_random_damage_action(action, outcomes, random_draws)
@@ -10071,9 +10176,31 @@ impl Game {
             })
         });
         self.record_unit_interaction(UnitKind::Minion, seat, source_instance_id, outcomes)?;
+        self.damage_each_unit_at_location(
+            target_location,
+            amount,
+            UnitDamageSource {
+                current_power,
+                lethal,
+            },
+            ("area-damage-allocated", source_instance_id),
+            outcomes,
+        )
+    }
 
-        // Every occupant is announced and then damaged against one snapshot, so the blanket lands
-        // simultaneously instead of letting an early death shield a later target.
+    /// Damages every unit standing at one location and settles the deaths it caused.
+    ///
+    /// Every occupant is announced under `allocated`, then damaged against one snapshot, so the
+    /// blanket lands simultaneously instead of letting an early death shield a later target.
+    fn damage_each_unit_at_location(
+        &mut self,
+        target_location: Location,
+        amount: u16,
+        source: UnitDamageSource,
+        allocated: (&'static str, &IdentityHash),
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let (allocated_event, source_instance_id) = allocated;
         let targets = self
             .units_at_location(target_location)
             .into_iter()
@@ -10086,7 +10213,7 @@ impl Game {
             })
             .collect::<Result<Vec<_>, GameError>>()?;
         for (target_instance_id, _, _, _) in &targets {
-            outcomes.push("area-damage-allocated", || {
+            outcomes.push(allocated_event, || {
                 json!({
                     "amount": amount,
                     "sourceInstanceId": source_instance_id,
@@ -10102,10 +10229,7 @@ impl Game {
                 target_seat,
                 &target_instance_id,
                 amount,
-                UnitDamageSource {
-                    current_power,
-                    lethal,
-                },
+                source,
                 status,
                 outcomes,
             )?;
@@ -10196,6 +10320,95 @@ impl Game {
         )?;
         self.position.state_version += 1;
         Ok(())
+    }
+
+    /// Taps a carried Artifact's bearer and one other ally beside it and discards one card in hand
+    /// so the Artifact damages every unit at one measured location for the discarded card's mana
+    /// cost. The Artifact is the source, so the blanket lends no unit power or Lethal, and the
+    /// location is targeted rather than its occupants, so a Stealthed occupant is not skipped.
+    fn apply_artifact_discard_area_damage_action(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::ActivateArtifactDiscardAreaDamage {
+            artifact_instance_id,
+            discard_card_instance_id,
+            discard_zone,
+            helper,
+            target_location,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let seat = action.seat;
+        if !self
+            .artifact_discard_area_damage_descriptors(seat)?
+            .contains(&action.descriptor)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let bearer = self
+            .position
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.card.instance_id == *artifact_instance_id)
+            .and_then(ArtifactPosition::bearer)
+            .ok_or(GameError::IllegalAction)?
+            .clone();
+        let target_location = *target_location;
+
+        // The discard is a cost, so it is paid, and its mana cost read, before the shot lands.
+        let player = &mut self.position.players[seat_index(seat)];
+        let hand = match discard_zone {
+            DeckZone::Atlas => &mut player.hand_atlas,
+            DeckZone::Spellbook => &mut player.hand_spellbook,
+        };
+        let hand_index = hand
+            .iter()
+            .position(|card| card.instance_id == *discard_card_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        let discarded = hand.remove(hand_index);
+        let amount = payload_damage_amount(&self.rules.cards[usize::from(discarded.card_id.0)])?;
+        outcomes.push("card-discarded", || {
+            json!({
+                "cardId": self.rules.cards[usize::from(discarded.card_id.0)].id,
+                "instanceId": discarded.instance_id,
+                "owner": discarded.owner,
+                "seat": seat,
+                "sourceInstanceId": artifact_instance_id,
+                "zone": discard_zone.as_str(),
+            })
+        });
+        self.position.players[seat_index(seat)]
+            .cemetery
+            .push(discarded);
+        self.tap_unit_target(&bearer)?;
+        self.tap_unit_target(helper)?;
+        outcomes.push("artifact-discard-area-damage-activated", || {
+            json!({
+                "bearerInstanceId": bearer.instance_id(),
+                "discardCardInstanceId": discard_card_instance_id,
+                "helperInstanceId": helper.instance_id(),
+                "seat": seat,
+                "sourceInstanceId": artifact_instance_id,
+                "targetCell": target_location.cell,
+                "targetRegion": target_location.region,
+            })
+        });
+        self.damage_each_unit_at_location(
+            target_location,
+            amount,
+            UnitDamageSource {
+                current_power: 0,
+                lethal: false,
+            },
+            (
+                "artifact-discard-area-damage-allocated",
+                artifact_instance_id,
+            ),
+            outcomes,
+        )
     }
 
     /// Discards one Spellbook card so a minion damages a hidden random other unit at its location.
@@ -14870,7 +15083,7 @@ mod tests {
             cell: cells[4],
             region: Region::Surface,
         };
-        assert_eq!(game.locations_within_two_measured_steps(start), [start]);
+        assert_eq!(game.locations_within_measured_steps(start, 2), [start]);
 
         for (cell, card) in [cells[0], cells[3]].into_iter().zip(site_cards) {
             game.position.sites[cell.index()] = Some(SitePosition {
@@ -14879,7 +15092,7 @@ mod tests {
             });
         }
         assert_eq!(
-            game.locations_within_two_measured_steps(start),
+            game.locations_within_measured_steps(start, 2),
             [cells[1], cells[2], cells[3], cells[4]].map(|cell| Location {
                 cell,
                 region: Region::Surface,

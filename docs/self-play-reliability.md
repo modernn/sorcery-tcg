@@ -49,15 +49,20 @@ ordinary debug suite because running the same workload there takes several minut
 
 ## Current blockers to strong unattended self-play
 
-- Rust has direct proofs for 134 of 161 cataloged scenarios. The remaining mechanics must be ported
+- Rust has direct proofs for 136 of 161 cataloged scenarios. The remaining mechanics must be ported
   or rejected at manifest admission before their games can affect training.
-- Realm Artifacts are admitted only as power Artifacts, Lethal Artifacts, and the Siege Ballista.
-  The remaining ability and life-loss Artifacts, plus any manifest that pairs an Artifact with
-  burrow Magic or an oversized minion, still fail closed at admission.
+- Realm Artifacts are admitted only as power Artifacts, Lethal Artifacts, the Siege Ballista, and
+  the Payload Trebuchet. The remaining ability and life-loss Artifacts, plus any manifest that pairs
+  an Artifact with burrow Magic or an oversized minion, still fail closed at admission.
 - A Siege Ballista shoots three damage at one unit within two measured steps of the cell its bearer
   stands on, paid for by tapping that bearer and one other ready ally standing with it. The
   Artifact is the source, so the shot carries neither the bearer's power nor its Lethal, is not
   stopped by prevention keyed to unit power, and costs the bearer no Stealth.
+- A Payload Trebuchet pays those same two taps plus one Atlas or Spellbook card discarded from hand,
+  then deals that card's mana cost to every unit at one location within three measured steps of its
+  bearer's cell; a discarded site throws nothing. The location is targeted rather than its
+  occupants, so a Stealthed occupant is included and a layer below the target is not, and the
+  Artifact is again the source, so no bearer power or Lethal rides along.
 - A tapped area-damage minion blankets one adjacent location in its own region with its current
   power and its carried Lethal. The blanket is not a strike, so it never draws a return strike.
 - The selector neighborhood is intentionally small and `seat-observation-v1` does not expose enough
