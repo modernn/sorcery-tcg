@@ -2126,7 +2126,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Conditional end-turn Stealth requires no nearby enemy in the same region.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "stealth",
         "region"
@@ -2136,8 +2136,8 @@
         "stealth-change"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 conditional end-turn Stealth requires no nearby enemy in the same region"
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "rule_catalog_0106_conditional_end_turn_stealth_should_require_no_nearby_enemy_minion"
       }
     },
     {

@@ -19,6 +19,16 @@ fn scenario_manifest(
     north_spellbook: &[&str],
     south_spellbook: &[&str],
 ) -> String {
+    scenario_manifest_with_atlas(seed, extra_cards, north_spellbook, south_spellbook, 4)
+}
+
+fn scenario_manifest_with_atlas(
+    seed: u32,
+    extra_cards: &Value,
+    north_spellbook: &[&str],
+    south_spellbook: &[&str],
+    atlas_len: usize,
+) -> String {
     let avatar = json!({
         "attack": 1,
         "cardType": "avatar",
@@ -49,12 +59,12 @@ fn scenario_manifest(
         "cards": cards,
         "decks": {
             "north": {
-                "atlas": vec!["north-site"; 4],
+                "atlas": vec!["north-site"; atlas_len],
                 "avatar": "north-avatar",
                 "spellbook": north_spellbook,
             },
             "south": {
-                "atlas": vec!["south-site"; 4],
+                "atlas": vec!["south-site"; atlas_len],
                 "avatar": "south-avatar",
                 "spellbook": south_spellbook,
             },
@@ -934,6 +944,118 @@ fn unconditional_end_turn_stealth_should_gain_before_turn_events_without_duplica
             .any(|event| event.event_type == "stealth-gained")
     );
     assert_eq!(state(&session)["realm"]["units"][0]["stealthed"], true);
+    assert_exact_replay(&session);
+}
+
+fn gained_stealth(receipt: &Receipt) -> bool {
+    receipt
+        .events
+        .iter()
+        .any(|event| event.event_type == "stealth-gained")
+}
+
+#[test]
+fn rule_catalog_0106_conditional_end_turn_stealth_should_require_no_nearby_enemy_minion() {
+    let mut lurker = minion(1, 3);
+    lurker["gainsStealthAtEndOfTurnIfNoEnemiesNearby"] = json!(true);
+    lurker["tapForMana"] = json!(1);
+    let mut hunter = minion(1, 1);
+    hunter["summonToAnySite"] = json!(true);
+    let manifest = scenario_manifest_with_atlas(
+        126,
+        &json!({
+            "north-lurker": lurker,
+            "south-hunter": hunter,
+        }),
+        &["north-lurker"; 10],
+        &["south-hunter"; 10],
+        10,
+    );
+    let mut session = Session::new(&manifest).expect("valid conditional Stealth scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "north-lurker"
+    });
+    let lurker_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("lurker identity")
+        .to_owned();
+
+    // An empty board leaves nothing nearby, so the conditional Stealth arrives at end of turn.
+    let (_, alone) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(gained_stealth(&alone));
+    assert_eq!(
+        alone.events[0].payload,
+        json!({ "instanceId": lurker_id, "seat": "north" })
+    );
+
+    // South parks an enemy minion in the lurker's own cell.
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-hunter"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+
+    // Tapping for mana strips the Stealth, and the nearby enemy now blocks its return.
+    let (_, activation) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "activate-mana" && descriptor["unitInstanceId"] == lurker_id.as_str()
+    });
+    assert!(
+        activation
+            .events
+            .iter()
+            .any(|event| event.event_type == "stealth-lost")
+    );
+    let (_, watched) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(!gained_stealth(&watched));
+    let exposed = state(&session);
+    assert_eq!(
+        exposed["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .find(|unit| unit["instanceId"] == lurker_id.as_str())
+            .expect("exposed lurker")["stealthed"],
+        false
+    );
+
+    // Removing the watcher restores the condition without any new card or ability.
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    let avatar_id = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == avatar_id.as_str()
+            && descriptor["to"]["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "declare-attack" && descriptor["target"]["kind"] == "minion"
+    });
+    let (_, fight) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "close-defend"
+    });
+    assert!(
+        fight
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-died")
+    );
+    let (_, cleared) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(gained_stealth(&cleared));
     assert_exact_replay(&session);
 }
 

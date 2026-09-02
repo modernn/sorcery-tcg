@@ -973,8 +973,6 @@ fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
         .is_some()
     {
         Some("discardSpellToDamageRandomOtherUnitHere")
-    } else if facts.end_turn_stealth == Some(EndTurnStealth::IfNoEnemiesNearby) {
-        Some("gainStealthAtEndOfTurnIfNoEnemiesNearby")
     } else if facts.gains_power_ranged_and_spellcaster_atop_tower {
         Some("gainsPowerRangedAndSpellcasterAtopTower")
     } else if let Some(field) = unsupported_selfplay_minion_genesis(facts.genesis) {
@@ -3041,6 +3039,17 @@ impl Game {
 
     fn minion_has_active_stealth(&self, unit: &UnitPosition) -> bool {
         unit.stealthed && !self.minion_is_disabled(unit)
+    }
+
+    fn has_nearby_enemy_minion(&self, unit: &UnitPosition) -> bool {
+        self.position.units.iter().any(|enemy| {
+            enemy.controller != unit.controller
+                && enemy.region == unit.region
+                && Self::footprints_nearby(
+                    Self::unit_occupied_cells(unit),
+                    Self::unit_occupied_cells(enemy),
+                )
+        })
     }
 
     fn unit_occupied_cells(unit: &UnitPosition) -> &[Cell] {
@@ -11224,6 +11233,27 @@ impl Game {
             .iter()
             .map(|unit| self.minion_is_disabled(unit))
             .collect();
+        let end_turn_stealth_gained: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .zip(&disabled_units)
+            .map(|(unit, disabled)| {
+                if unit.controller != seat || *disabled || unit.stealthed {
+                    return false;
+                }
+                let CardFacts::Minion(facts) =
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                else {
+                    return false;
+                };
+                match facts.end_turn_stealth {
+                    Some(EndTurnStealth::Always) => true,
+                    Some(EndTurnStealth::IfNoEnemiesNearby) => !self.has_nearby_enemy_minion(unit),
+                    None => false,
+                }
+            })
+            .collect();
         let end_phase_untapped: Vec<_> = self
             .position
             .units
@@ -11306,18 +11336,12 @@ impl Game {
                 })
             });
         }
-        for (unit, disabled) in self.position.units.iter_mut().zip(disabled_units) {
+        for (unit, gains_stealth) in self.position.units.iter_mut().zip(end_turn_stealth_gained) {
             unit.damage = 0;
             unit.temporary_charge_sources.clear();
             unit.temporary_power_sources.clear();
             if unit.controller == seat {
-                let gains_stealth = matches!(
-                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
-                    CardFacts::Minion(facts)
-                        if !disabled
-                            && facts.end_turn_stealth == Some(EndTurnStealth::Always)
-                );
-                if gains_stealth && !unit.stealthed {
+                if gains_stealth {
                     unit.stealthed = true;
                     let instance_id = unit.card.instance_id.clone();
                     outcomes.push(
