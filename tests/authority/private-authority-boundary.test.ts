@@ -305,6 +305,19 @@ test('pure detector allows project-owned HTML embedded in TypeScript', async () 
   }));
 });
 
+test('clean-content memoization retains path-sensitive corpus rejection', () => {
+  const inspect = createPrivateCandidateInspectorForTest([
+    { bytes: Buffer.from('private-boundary-sentinel-'.repeat(4)), kind: 'binary' },
+  ]);
+  const candidate = Buffer.concat([
+    Buffer.from('{"sourceCardId":"synthetic"', 'utf8'),
+    Buffer.alloc(500_000, 0x20),
+    Buffer.from('}', 'utf8'),
+  ]);
+  assert.doesNotThrow(() => inspect({ path: 'candidate.txt', bytes: candidate }));
+  assertViolation(inspect, 'candidate.json', candidate, /full-card-corpus/i);
+});
+
 test('sampled raw fingerprints detect every 32-byte source alignment', () => {
   const source = Buffer.from(Array.from({ length: 64 }, (_, index) => index));
   const inspect = createPrivateCandidateInspectorForTest([{ bytes: source, kind: 'binary' }], []);
@@ -473,6 +486,7 @@ async function cleanupFixture(fixture: Fixture): Promise<void> {
 async function runGate(
   fixture: Fixture,
   lockPaths: readonly string[] = [fixture.lockPath],
+  environment: NodeJS.ProcessEnv = process.env,
 ): Promise<Readonly<{ code: number | null; stdout: string; stderr: string }>> {
   return runBounded(
     'node',
@@ -483,6 +497,7 @@ async function runGate(
       ...lockPaths.flatMap((lockPath) => ['--lock', lockPath]),
     ],
     fixture.repositoryRoot,
+    { environment },
   );
 }
 
@@ -506,6 +521,29 @@ test('safe relative metadata and hashes pass the Git index and package boundary'
     const result = await runGate(fixture);
     assert.equal(result.code, 0, result.stderr);
     assert.match(result.stdout, /private authority boundary verified/i);
+  } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
+test('global Git excludes cannot hide an untracked private candidate', async () => {
+  const fixture = await createFixture();
+  try {
+    const excludedName = 'globally-ignored-leak.tmp';
+    const excludesPath = join(fixture.sandbox, 'global-excludes');
+    const globalConfigPath = join(fixture.sandbox, 'global.gitconfig');
+    await writeFile(excludesPath, excludedName + '\n');
+    await git(fixture, 'config', '--file', globalConfigPath, 'core.excludesFile', excludesPath);
+    await writeFile(
+      join(fixture.repositoryRoot, excludedName),
+      fixture.sourceBytes.get(PRIVATE_AUTHORITY_SOURCE_PATHS[0])!,
+    );
+    const result = await runGate(fixture, [fixture.lockPath], {
+      ...process.env,
+      GIT_CONFIG_GLOBAL: globalConfigPath,
+    });
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /exact-private-bytes|source-derived/i);
   } finally {
     await cleanupFixture(fixture);
   }

@@ -42,6 +42,7 @@ type RawFingerprintIndex = Readonly<{
 }>;
 type InspectionState = {
   candidateBytes: number;
+  cleanContentHashes: Set<string>;
   collisionComparisons: number;
   decodedBytes: number;
   decodedStrings: number;
@@ -80,6 +81,7 @@ const MAX_DECODED_BYTES = 64_000_000;
 const MAX_DECODED_STRINGS = 100_000;
 // The fail-closed cap retains 4.6x headroom over the 21,713-comparison production baseline.
 const MAX_COLLISION_COMPARISONS = 100_000;
+const MAX_CLEAN_CONTENT_HASHES = 200_000;
 const MAX_DECODE_DEPTH = 4;
 const MAX_SEMANTIC_SUBTREES = 200_000;
 const MAX_COMMAND_BUFFER = 268_435_456;
@@ -101,6 +103,7 @@ const EMBEDDED_PUBLIC_PROVENANCE_VALUES = [
   Buffer.from('Sorcery: Contested Realm December 2025 Rulebook Update', 'utf8'),
   Buffer.from('Sorcery: Contested Realm Card Updates 2025', 'utf8'),
 ] as const;
+const HTTPS_PREFIX = Buffer.from('https://', 'ascii');
 const MAX_PUBLIC_PROVENANCE_LITERAL_BYTES = 256;
 
 class BoundaryViolation extends Error {}
@@ -144,7 +147,10 @@ function commandBytes(
   input?: string | Uint8Array,
 ): Buffer {
   try {
-    return execFileSync(command, arguments_, {
+    const effectiveArguments = command === 'git'
+      ? ['-c', 'core.excludesFile=/dev/null', ...arguments_]
+      : arguments_;
+    return execFileSync(command, effectiveArguments, {
       cwd,
       encoding: null,
       input,
@@ -657,6 +663,7 @@ function publicProvenanceFreeSegments(bytes: Buffer): readonly Buffer[] {
       byte === 0x5f);
   for (let index = 0; index < bytes.length; index += 1) {
     const embedded = EMBEDDED_PUBLIC_PROVENANCE_VALUES.find((value) =>
+      bytes[index] === value[0] &&
       !isAsciiWord(bytes[index - 1]) &&
       bytes.subarray(index, index + value.length).equals(value) &&
       !isAsciiWord(bytes[index + value.length]),
@@ -667,7 +674,10 @@ function publicProvenanceFreeSegments(bytes: Buffer): readonly Buffer[] {
       index = segmentStart - 1;
       continue;
     }
-    if (bytes.subarray(index, index + 8).toString('ascii') === 'https://') {
+    if (
+      bytes[index] === HTTPS_PREFIX[0] &&
+      bytes.subarray(index, index + HTTPS_PREFIX.length).equals(HTTPS_PREFIX)
+    ) {
       const searchLimit = Math.min(bytes.length, index + MAX_PUBLIC_PROVENANCE_LITERAL_BYTES);
       let closing = index + 8;
       while (
@@ -960,15 +970,21 @@ function inspectContent(
 ): void {
   const byteHash = sha256Hex(bytes);
   if (privateHashes.some((hashes) => hashes.has(byteHash))) fail('exact-private-bytes', candidate);
-  const normalized = normalizedVisibleText(bytes);
-  if (normalized !== null && containsProtectedWindow(normalized, normalizedIndexes, candidate, state)) {
-    fail('source-derived-normalized-text', candidate);
+  if (!state.cleanContentHashes.has(byteHash)) {
+    const normalized = normalizedVisibleText(bytes);
+    if (normalized !== null && containsProtectedWindow(normalized, normalizedIndexes, candidate, state)) {
+      fail('source-derived-normalized-text', candidate);
+    }
+    if (containsProtectedContent(bytes, rawIndexes, candidate, state)) fail('source-derived-content', candidate);
+    if (semanticIndexes.some((index) => inspectJsonSemantics(bytes, index))) {
+      fail('semantic-private-content', candidate);
+    }
+    if (matchesLocator(bytes, locators)) fail('private-locator', candidate);
+    // ponytail: bound the optimization; correctness falls back to rescanning after this ceiling.
+    if (state.cleanContentHashes.size < MAX_CLEAN_CONTENT_HASHES) {
+      state.cleanContentHashes.add(byteHash);
+    }
   }
-  if (containsProtectedContent(bytes, rawIndexes, candidate, state)) fail('source-derived-content', candidate);
-  if (semanticIndexes.some((index) => inspectJsonSemantics(bytes, index))) {
-    fail('semantic-private-content', candidate);
-  }
-  if (matchesLocator(bytes, locators)) fail('private-locator', candidate);
 
   const prefix = bytes.subarray(0, 512).toString('utf8');
   if (depth === 0
@@ -1100,6 +1116,13 @@ export function createPrivateCandidateInspectorForTest(
   );
   const normalizedIndex = buildRawFingerprintIndex([...normalizedTextBuffers.values()], MIN_NORMALIZED_TEXT_BYTES);
   const locators = buildLocators(locatorTexts);
+  const state: InspectionState = {
+    candidateBytes: 0,
+    cleanContentHashes: new Set(),
+    collisionComparisons: 0,
+    decodedBytes: 0,
+    decodedStrings: 0,
+  };
   return ({ path, bytes }): void => {
     inspectCandidate(
       { path, bytes: typeof bytes === 'string' ? Buffer.from(bytes, 'utf8') : Buffer.from(bytes), surface: 'worktree' },
@@ -1108,7 +1131,7 @@ export function createPrivateCandidateInspectorForTest(
       [normalizedIndex],
       [semanticIndex],
       locators,
-      { candidateBytes: 0, collisionComparisons: 0, decodedBytes: 0, decodedStrings: 0 },
+      state,
     );
   };
 }
@@ -1329,7 +1352,13 @@ async function preparePrivateEvidence(repositoryRoot: string, lockPath: string):
     normalizedIndex: buildRawFingerprintIndex([...normalizedTextBuffers.values()], MIN_NORMALIZED_TEXT_BYTES),
     semanticIndex,
     locators: buildLocators(locatorTexts),
-    state: { candidateBytes: 0, collisionComparisons: 0, decodedBytes: 0, decodedStrings: 0 },
+    state: {
+      candidateBytes: 0,
+      cleanContentHashes: new Set(),
+      collisionComparisons: 0,
+      decodedBytes: 0,
+      decodedStrings: 0,
+    },
   };
 }
 
