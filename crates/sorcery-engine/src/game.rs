@@ -1026,9 +1026,9 @@ fn unsupported_selfplay_minion_genesis(genesis: Option<MinionGenesis>) -> Option
             | MinionGenesis::DrawSpells(_)
             | MinionGenesis::HealControllerTwo
             | MinionGenesis::LoseControllerLifeTwo
-            | MinionGenesis::MayDamageTargetAdjacentUnitTwo,
+            | MinionGenesis::MayDamageTargetAdjacentUnitTwo
+            | MinionGenesis::StrikeEachEnemyHere,
         ) => None,
-        Some(MinionGenesis::StrikeEachEnemyHere) => Some("genesisStrikeEachEnemyHere"),
     }
 }
 
@@ -10502,11 +10502,6 @@ impl Game {
         let lance_count = facts.lance_count;
         let starts_stealthed = facts.stealth;
         let starts_warded = facts.damage_prevention == Some(DamagePrevention::Ward);
-        if genesis == Some(MinionGenesis::StrikeEachEnemyHere) {
-            return Err(GameError::UnsupportedManifestFact(
-                "minion Genesis effect".to_owned(),
-            ));
-        }
         let Some(destination) = self
             .summon_destinations(seat, facts)
             .into_iter()
@@ -10880,39 +10875,30 @@ impl Game {
                 }
             }
             Some(MinionGenesis::DamageEachOtherUnitHereOne) => {
-                self.apply_genesis_area_damage(source_instance_id, outcomes)?;
+                self.apply_genesis_here_damage(source_instance_id, false, outcomes)?;
             }
             Some(MinionGenesis::StrikeEachEnemyHere) => {
-                return Err(GameError::UnsupportedManifestFact(
-                    "minion Genesis effect".to_owned(),
-                ));
+                self.apply_genesis_here_damage(source_instance_id, true, outcomes)?;
             }
         }
         Ok(())
     }
 
-    fn apply_genesis_area_damage(
-        &mut self,
-        source_instance_id: &IdentityHash,
-        outcomes: &mut OutcomeLog<'_>,
-    ) -> Result<(), GameError> {
-        let source = self
-            .position
-            .units
-            .iter()
-            .find(|unit| unit.card.instance_id == *source_instance_id)
-            .cloned()
-            .ok_or(GameError::IllegalAction)?;
-        let (current_power, lethal) = self.combatant_attack_and_lethal(
-            UnitKind::Minion,
-            source.controller,
-            source_instance_id,
-        )?;
+    /// Other units standing anywhere under `source`, in canonical identity order.
+    fn units_sharing_footprint(
+        &self,
+        source: &UnitPosition,
+        enemies_only: bool,
+    ) -> Vec<(IdentityHash, UnitKind, Seat)> {
+        let seats: &[Seat] = if enemies_only {
+            &[other_seat(source.controller)]
+        } else {
+            &[Seat::North, Seat::South]
+        };
         let mut targets = Vec::new();
-        for seat in [Seat::North, Seat::South] {
+        for seat in seats.iter().copied() {
             let avatar = &self.position.players[seat_index(seat)].avatar;
-            if source.region == Region::Surface
-                && Self::unit_occupies_cell(&source, avatar.location)
+            if source.region == Region::Surface && Self::unit_occupies_cell(source, avatar.location)
             {
                 targets.push((avatar.card.instance_id.clone(), UnitKind::Avatar, seat));
             }
@@ -10922,11 +10908,12 @@ impl Game {
                 .units
                 .iter()
                 .filter(|unit| {
-                    unit.region == source.region
+                    seats.contains(&unit.controller)
+                        && unit.region == source.region
+                        && unit.card.instance_id != source.card.instance_id
                         && Self::unit_occupied_cells(unit)
                             .iter()
-                            .any(|cell| Self::unit_occupies_cell(&source, *cell))
-                        && unit.card.instance_id != *source_instance_id
+                            .any(|cell| Self::unit_occupies_cell(source, *cell))
                 })
                 .map(|unit| {
                     (
@@ -10937,7 +10924,37 @@ impl Game {
                 }),
         );
         targets.sort_unstable_by(|left, right| left.0.cmp(&right.0));
-        let targets = targets
+        targets
+    }
+
+    /// Genesis damage that hits everything sharing the newcomer's own location.
+    ///
+    /// A strike Genesis only reaches enemies and uses the newcomer's current power, while plain
+    /// area damage reaches both seats for a flat point.
+    fn apply_genesis_here_damage(
+        &mut self,
+        source_instance_id: &IdentityHash,
+        strike: bool,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let source = self
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == *source_instance_id)
+            .cloned()
+            .ok_or(GameError::IllegalAction)?;
+        if self.minion_is_disabled(&source) {
+            return Ok(());
+        }
+        let (current_power, lethal) = self.combatant_attack_and_lethal(
+            UnitKind::Minion,
+            source.controller,
+            source_instance_id,
+        )?;
+        let amount = if strike { current_power } else { 1 };
+        let targets = self
+            .units_sharing_footprint(&source, strike)
             .into_iter()
             .map(|(instance_id, kind, seat)| {
                 let status = if kind == UnitKind::Minion {
@@ -10949,13 +10966,25 @@ impl Game {
             })
             .collect::<Result<Vec<_>, GameError>>()?;
         for (target_instance_id, _, _, _) in &targets {
-            outcomes.push("genesis-damage-allocated", || {
-                json!({
-                    "amount": 1,
-                    "sourceInstanceId": source_instance_id,
-                    "targetInstanceId": target_instance_id,
-                })
-            });
+            outcomes.push(
+                if strike {
+                    "strike-damage-allocated"
+                } else {
+                    "genesis-damage-allocated"
+                },
+                || {
+                    let mut payload = json!({
+                        "amount": amount,
+                        "targetInstanceId": target_instance_id,
+                    });
+                    payload[if strike {
+                        "strikerInstanceId"
+                    } else {
+                        "sourceInstanceId"
+                    }] = json!(source_instance_id);
+                    payload
+                },
+            );
         }
         let mut dead_minions = Vec::new();
         let mut defeated_avatars = Vec::new();
@@ -10964,7 +10993,7 @@ impl Game {
                 kind,
                 seat,
                 &target_instance_id,
-                1,
+                amount,
                 UnitDamageSource {
                     current_power,
                     lethal,

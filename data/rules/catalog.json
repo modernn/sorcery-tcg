@@ -1134,7 +1134,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Genesis resolves simultaneous area damage and enemy strikes.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "genesis"
       ],
@@ -1147,8 +1147,8 @@
         "strike"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes"
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0057_genesis_strike_should_hit_every_enemy_sharing_the_newcomers_cell"
       }
     },
     {

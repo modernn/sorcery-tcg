@@ -5698,6 +5698,178 @@ fn fatality_manifest() -> String {
         .expect("bounded seed with both North Magic cards in hand")
 }
 
+fn genesis_strike_manifest() -> String {
+    let cards = json!({
+        "north-ally": minion(json!({ "defense": 3, "summonToAnySite": true })),
+        "north-avatar": avatar(20),
+        "north-site": site(false),
+        "north-titan": minion(json!({
+            "attack": 3,
+            "defense": 3,
+            "genesisStrikeEachEnemyHere": true,
+            "summonToAnySite": true,
+        })),
+        "south-avatar": avatar(20),
+        "south-plain": minion(json!({ "defense": 5 })),
+        "south-site": site(false),
+        "south-warded": minion(json!({ "defense": 5, "ward": true })),
+    });
+    let north_spellbook = [
+        "north-ally",
+        "north-titan",
+        "north-ally",
+        "north-titan",
+        "north-ally",
+        "north-titan",
+    ];
+    let south_spellbook = [
+        "south-plain",
+        "south-warded",
+        "south-plain",
+        "south-warded",
+        "south-plain",
+        "south-warded",
+    ];
+    (1..=512)
+        .map(|seed| manifest(seed, &cards, &north_spellbook, &south_spellbook))
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("Genesis strike seed candidate");
+            let opening = state(&preview);
+            let has = |seat: &str, wanted: [&str; 2]| {
+                let hand = opening["players"][seat]["hand"]["spellbook"]
+                    .as_array()
+                    .expect("opening hand")
+                    .clone();
+                wanted
+                    .into_iter()
+                    .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+            };
+            has("north", ["north-ally", "north-titan"])
+                && has("south", ["south-plain", "south-warded"])
+        })
+        .expect("bounded seed with every Genesis strike participant in hand")
+}
+
+/// Walks South into two minions on its own opening site at C1.
+fn enemies_at_c1(session: &mut Session) -> Vec<String> {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let mut enemy_ids = Vec::new();
+    for card_id in ["south-plain", "south-warded"] {
+        let (summoned, _) = accept_where(session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == card_id
+                && descriptor["cell"] == "C1"
+        });
+        enemy_ids.push(
+            summoned["cardInstanceId"]
+                .as_str()
+                .expect("enemy identity")
+                .to_owned(),
+        );
+    }
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    enemy_ids
+}
+
+#[test]
+fn rule_catalog_0057_genesis_strike_should_hit_every_enemy_sharing_the_newcomers_cell() {
+    let manifest = genesis_strike_manifest();
+    let mut session = opening_main(&manifest);
+    let enemy_ids = enemies_at_c1(&mut session);
+    let (ally, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C1"
+    });
+    let ally_id = ally["cardInstanceId"]
+        .as_str()
+        .expect("ally identity")
+        .to_owned();
+    let (titan, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-titan"
+            && descriptor["cell"] == "C1"
+    });
+    let titan_id = titan["cardInstanceId"]
+        .as_str()
+        .expect("titan identity")
+        .to_owned();
+
+    let mut struck: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "strike-damage-allocated")
+        .map(|event| {
+            assert_eq!(event.payload["amount"], 3);
+            assert_eq!(event.payload["strikerInstanceId"], titan_id.as_str());
+            event.payload["targetInstanceId"]
+                .as_str()
+                .expect("struck identity")
+                .to_owned()
+        })
+        .collect();
+    let enemy_avatar_id = state(&session)["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    let mut expected = enemy_ids.clone();
+    expected.push(enemy_avatar_id.clone());
+    struck.sort_unstable();
+    expected.sort_unstable();
+    // Every enemy sharing the cell is struck, including the Avatar standing on its own site,
+    // while the co-located ally and the striker itself are skipped.
+    assert_eq!(struck, expected);
+    assert!(!struck.contains(&ally_id));
+    assert!(!struck.contains(&titan_id));
+    assert!(
+        receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "ward-broken")
+    );
+
+    let resolved = state(&session);
+    let plain_id = enemy_ids
+        .iter()
+        .find(|instance_id| {
+            realm_unit(&resolved, instance_id).expect("enemy")["cardId"] == "south-plain"
+        })
+        .expect("plain enemy")
+        .clone();
+    let warded_id = enemy_ids
+        .iter()
+        .find(|instance_id| **instance_id != plain_id)
+        .expect("warded enemy")
+        .clone();
+    assert_eq!(
+        realm_unit(&resolved, &plain_id).expect("struck enemy")["damage"],
+        3
+    );
+    let warded = realm_unit(&resolved, &warded_id).expect("warded enemy");
+    assert_eq!(warded["damage"], 0);
+    assert_eq!(warded["warded"], false);
+    assert_eq!(
+        realm_unit(&resolved, &ally_id).expect("spared ally")["damage"],
+        0
+    );
+    assert_eq!(
+        realm_unit(&resolved, &titan_id).expect("striker")["damage"],
+        0
+    );
+    assert_eq!(resolved["players"]["south"]["avatar"]["life"], 17);
+    assert_eq!(resolved["players"]["north"]["avatar"]["life"], 20);
+    assert_exact_replay(&session);
+}
+
 /// Walks South into a second site at C2 holding two identical minions.
 fn two_minions_at_c2(session: &mut Session) -> Vec<String> {
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
