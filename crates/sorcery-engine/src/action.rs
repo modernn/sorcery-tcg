@@ -217,6 +217,13 @@ pub enum ActionDescriptor {
         /// Authoritative source minion identity.
         unit_instance_id: IdentityHash,
     },
+    /// Tap one ready minion to damage every unit at one adjacent location.
+    ActivateAreaDamage {
+        /// Authoritative source minion identity.
+        source_instance_id: IdentityHash,
+        /// Engine-issued adjacent location whose occupants all take the damage.
+        target_location: Location,
+    },
     /// Discard one Spellbook card to damage a hidden random other unit at the source's location.
     ActivateDiscardRandomDamage {
         /// Exact Spellbook card discarded to pay for the ability.
@@ -827,6 +834,14 @@ impl ActionDescriptor {
             Self::ActivateSiteDestruction { target_cell, .. } => {
                 Some(format!("Sacrifice site to destroy {target_cell}"))
             }
+            Self::ActivateAreaDamage {
+                source_instance_id,
+                target_location,
+            } => Some(format!(
+                "Tap {}… to damage every unit at {}",
+                short_identity(source_instance_id),
+                target_location.cell
+            )),
             Self::ActivateDiscardRandomDamage { .. }
             | Self::ActivateSparkmage { .. }
             | Self::PlaySite { .. }
@@ -1242,11 +1257,19 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                         .cmp(right_discard)
                         .then_with(|| left_source.cmp(right_source)),
                     (
-                        ActionDescriptor::ActivateSparkmage {
+                        ActionDescriptor::ActivateAreaDamage {
+                            source_instance_id: left_source,
+                            target_location: left_location,
+                        }
+                        | ActionDescriptor::ActivateSparkmage {
                             source_instance_id: left_source,
                             target_location: left_location,
                         },
-                        ActionDescriptor::ActivateSparkmage {
+                        ActionDescriptor::ActivateAreaDamage {
+                            source_instance_id: right_source,
+                            target_location: right_location,
+                        }
+                        | ActionDescriptor::ActivateSparkmage {
                             source_instance_id: right_source,
                             target_location: right_location,
                         },
@@ -1688,41 +1711,42 @@ fn card_prefix(action: &ActionDescriptor) -> (&str, &IdentityHash) {
 
 const fn action_kind(action: &ActionDescriptor) -> u8 {
     match action {
-        ActionDescriptor::ActivateDiscardRandomDamage { .. } => 0,
-        ActionDescriptor::ActivateMana { .. } => 1,
-        ActionDescriptor::ActivateSiteDestruction { .. } => 2,
-        ActionDescriptor::ActivateSparkmage { .. } => 3,
-        ActionDescriptor::AllocateStrike { .. } => 4,
-        ActionDescriptor::BeginChainMagic { .. } => 5,
-        ActionDescriptor::CastArtifact { .. } => 6,
-        ActionDescriptor::CastMagic { .. } => 7,
-        ActionDescriptor::CloseDefend { .. } => 8,
-        ActionDescriptor::CloseIntercept {} => 9,
-        ActionDescriptor::ContinueBasicMovement { .. } => 10,
-        ActionDescriptor::DeclareAttack { .. } => 11,
-        ActionDescriptor::DeclineAttack => 12,
-        ActionDescriptor::Defend { .. } => 13,
-        ActionDescriptor::Draw { .. } => 14,
-        ActionDescriptor::DrawSite => 15,
-        ActionDescriptor::DrawSpell => 16,
-        ActionDescriptor::DropArtifacts { .. } => 17,
-        ActionDescriptor::EndTurn => 18,
-        ActionDescriptor::ExtendChainMagic { .. } => 19,
-        ActionDescriptor::Intercept { .. } => 20,
-        ActionDescriptor::OrderDeathrites { .. } => 21,
-        ActionDescriptor::PickUpArtifacts { .. } => 22,
-        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 23,
-        ActionDescriptor::ResolveChainMagic => 24,
-        ActionDescriptor::ResolveGenesisSpell { .. } => 25,
-        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 26,
-        ActionDescriptor::ResolveGenesisToken { .. } => 27,
-        ActionDescriptor::ResolveRangedStep { .. } => 28,
-        ActionDescriptor::Mulligan { .. } => 29,
-        ActionDescriptor::PlaySite { .. } => 30,
-        ActionDescriptor::ShootDamageProjectile { .. } => 31,
-        ActionDescriptor::ShootDragProjectile { .. } => 32,
-        ActionDescriptor::ShootProjectile { .. } => 33,
-        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 34,
+        ActionDescriptor::ActivateAreaDamage { .. } => 0,
+        ActionDescriptor::ActivateDiscardRandomDamage { .. } => 1,
+        ActionDescriptor::ActivateMana { .. } => 2,
+        ActionDescriptor::ActivateSiteDestruction { .. } => 3,
+        ActionDescriptor::ActivateSparkmage { .. } => 4,
+        ActionDescriptor::AllocateStrike { .. } => 5,
+        ActionDescriptor::BeginChainMagic { .. } => 6,
+        ActionDescriptor::CastArtifact { .. } => 7,
+        ActionDescriptor::CastMagic { .. } => 8,
+        ActionDescriptor::CloseDefend { .. } => 9,
+        ActionDescriptor::CloseIntercept {} => 10,
+        ActionDescriptor::ContinueBasicMovement { .. } => 11,
+        ActionDescriptor::DeclareAttack { .. } => 12,
+        ActionDescriptor::DeclineAttack => 13,
+        ActionDescriptor::Defend { .. } => 14,
+        ActionDescriptor::Draw { .. } => 15,
+        ActionDescriptor::DrawSite => 16,
+        ActionDescriptor::DrawSpell => 17,
+        ActionDescriptor::DropArtifacts { .. } => 18,
+        ActionDescriptor::EndTurn => 19,
+        ActionDescriptor::ExtendChainMagic { .. } => 20,
+        ActionDescriptor::Intercept { .. } => 21,
+        ActionDescriptor::OrderDeathrites { .. } => 22,
+        ActionDescriptor::PickUpArtifacts { .. } => 23,
+        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 24,
+        ActionDescriptor::ResolveChainMagic => 25,
+        ActionDescriptor::ResolveGenesisSpell { .. } => 26,
+        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 27,
+        ActionDescriptor::ResolveGenesisToken { .. } => 28,
+        ActionDescriptor::ResolveRangedStep { .. } => 29,
+        ActionDescriptor::Mulligan { .. } => 30,
+        ActionDescriptor::PlaySite { .. } => 31,
+        ActionDescriptor::ShootDamageProjectile { .. } => 32,
+        ActionDescriptor::ShootDragProjectile { .. } => 33,
+        ActionDescriptor::ShootProjectile { .. } => 34,
+        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 35,
     }
 }
 

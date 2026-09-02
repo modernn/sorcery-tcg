@@ -1520,20 +1520,20 @@
         "RULE-04"
       ],
       "plainLanguage": "Vikings area damage uses bearer Lethal without becoming a strike.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
+        "artifact",
         "lethal"
       ],
       "actionHints": [
-        "strike"
+        "tap"
       ],
       "eventHints": [
-        "damage",
-        "strike"
+        "damage"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03/04 Vikings area damage uses bearer Lethal without becoming a strike"
+        "file": "crates/sorcery-engine/tests/area_damage_rules.rs",
+        "testName": "rule_catalog_0076_area_damage_should_use_bearer_lethal_without_becoming_a_strike"
       }
     },
     {

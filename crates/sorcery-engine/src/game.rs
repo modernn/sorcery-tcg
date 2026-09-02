@@ -28,6 +28,8 @@ const ENGINE_VERSION: &str = "sorcery-core-v1";
 const MAX_DECK_CARDS: usize = 200;
 const CHAIN_MAGIC_DAMAGE: u16 = 2;
 const CHAIN_MAGIC_EXTRA_TARGET_MANA: u64 = 2;
+/// The one damage amount `tapToDamageEachUnitAtAdjacentLocation` is admitted with.
+const AREA_DAMAGE_AMOUNT: u8 = 2;
 
 /// Immutable manifest facts shared by cloned game positions.
 #[derive(Debug)]
@@ -1127,8 +1129,6 @@ fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
         Some("mustBeCastToOuterColumn")
     } else if facts.submerge {
         Some("submerge")
-    } else if facts.tap_to_damage_each_unit_at_adjacent_location {
-        Some("tapToDamageEachUnitAtAdjacentLocation")
     } else if facts.voidwalk {
         Some("voidwalk")
     } else if facts.waterbound {
@@ -2826,6 +2826,7 @@ impl Game {
                 self.push_action(actions, descriptor, label);
             }
         }
+        self.append_area_damage_actions(actions, seat);
         self.append_discard_random_damage_actions(actions, seat);
         if !player.avatar.tapped {
             self.append_unit_move_actions(
@@ -2915,6 +2916,57 @@ impl Game {
             return None;
         };
         facts.tap_for_mana
+    }
+
+    /// Offers each adjacent location a ready area-damage minion can currently blanket.
+    fn append_area_damage_actions(&self, actions: &mut Vec<IssuedAction>, seat: Seat) {
+        if self.position.phase != Phase::Main
+            || self.position.active_seat != seat
+            || self.position.decision_seat != seat
+        {
+            return;
+        }
+        for unit in &self.position.units {
+            if unit.controller != seat
+                || unit.tapped
+                || unit.summoning_sickness
+                || self.minion_is_disabled(unit)
+            {
+                continue;
+            }
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                continue;
+            };
+            if !facts.tap_to_damage_each_unit_at_adjacent_location {
+                continue;
+            }
+            let occupied = Self::unit_occupied_cells(unit);
+            let adjacent: BTreeSet<_> = occupied
+                .iter()
+                .flat_map(|cell| cell.bordering(false))
+                .filter(|cell| {
+                    !occupied.contains(cell) && self.location_exists_in_region(*cell, unit.region)
+                })
+                .collect();
+            for cell in adjacent {
+                self.push_action(
+                    actions,
+                    ActionDescriptor::ActivateAreaDamage {
+                        source_instance_id: unit.card.instance_id.clone(),
+                        target_location: Location {
+                            cell,
+                            region: unit.region,
+                        },
+                    },
+                    format!(
+                        "Tap {}… to damage every unit at {cell}",
+                        &unit.card.instance_id.as_str()[..15]
+                    ),
+                );
+            }
+        }
     }
 
     /// Offers each discard-funded random damage activation the controller can currently pay for.
@@ -5282,6 +5334,9 @@ impl Game {
             _ => None,
         };
         let applied = match &action.descriptor {
+            ActionDescriptor::ActivateAreaDamage { .. } => {
+                self.apply_area_damage_action(action, outcomes)
+            }
             ActionDescriptor::ActivateDiscardRandomDamage { .. } => {
                 self.apply_discard_random_damage_action(action, outcomes, random_draws)
             }
@@ -9846,6 +9901,106 @@ impl Game {
             })
         });
         self.record_unit_interaction(UnitKind::Minion, seat, unit_instance_id, outcomes)
+    }
+
+    /// Taps one minion to damage every unit at an adjacent location, carrying the source's own
+    /// power and Lethal without opening a strike exchange or a return strike.
+    fn apply_area_damage_action(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::ActivateAreaDamage {
+            source_instance_id,
+            target_location,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let seat = action.seat;
+        let mut offered = Vec::new();
+        self.append_area_damage_actions(&mut offered, seat);
+        if !offered
+            .iter()
+            .any(|issued| issued.descriptor == action.descriptor)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let amount = u16::from(AREA_DAMAGE_AMOUNT);
+        let target_location = *target_location;
+        self.position
+            .units
+            .iter_mut()
+            .find(|unit| unit.controller == seat && unit.card.instance_id == *source_instance_id)
+            .ok_or(GameError::IllegalAction)?
+            .tapped = true;
+        let (current_power, lethal) =
+            self.combatant_attack_and_lethal(UnitKind::Minion, seat, source_instance_id)?;
+        outcomes.push("area-damage-activated", || {
+            json!({
+                "cell": target_location.cell,
+                "region": target_location.region,
+                "seat": seat,
+                "sourceInstanceId": source_instance_id,
+            })
+        });
+        self.record_unit_interaction(UnitKind::Minion, seat, source_instance_id, outcomes)?;
+
+        // Every occupant is announced and then damaged against one snapshot, so the blanket lands
+        // simultaneously instead of letting an early death shield a later target.
+        let targets = self
+            .units_at_location(target_location)
+            .into_iter()
+            .map(|(instance_id, kind, target_seat)| {
+                let status = match kind {
+                    UnitKind::Avatar => None,
+                    UnitKind::Minion => Some(self.minion_damage_status(&instance_id)?),
+                };
+                Ok((instance_id, kind, target_seat, status))
+            })
+            .collect::<Result<Vec<_>, GameError>>()?;
+        for (target_instance_id, _, _, _) in &targets {
+            outcomes.push("area-damage-allocated", || {
+                json!({
+                    "amount": amount,
+                    "sourceInstanceId": source_instance_id,
+                    "targetInstanceId": target_instance_id,
+                })
+            });
+        }
+        let mut dead_minions = Vec::new();
+        let mut defeated_avatars = Vec::new();
+        for (target_instance_id, kind, target_seat, status) in targets {
+            let result = self.apply_simple_damage_with_status(
+                kind,
+                target_seat,
+                &target_instance_id,
+                amount,
+                UnitDamageSource {
+                    current_power,
+                    lethal,
+                },
+                status,
+                outcomes,
+            )?;
+            if result.minion_died {
+                dead_minions.push(target_instance_id);
+            }
+            if result.avatar_defeated && !defeated_avatars.contains(&target_seat) {
+                defeated_avatars.push(target_seat);
+            }
+        }
+        self.position.state_version += 1;
+        if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
+            self.begin_minion_deaths(
+                &dead_minions,
+                &defeated_avatars,
+                Phase::Main,
+                self.position.active_seat,
+                outcomes,
+            )?;
+        }
+        Ok(())
     }
 
     /// Discards one Spellbook card so a minion damages a hidden random other unit at its location.
