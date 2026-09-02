@@ -231,6 +231,7 @@ fn summon(session: &mut Session, card_id: &str, cell: &str) -> String {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == card_id
             && descriptor["cell"] == cell
+            && descriptor["region"].is_null()
     });
     summoned["cardInstanceId"]
         .as_str()

@@ -1199,8 +1199,6 @@ fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
         Some(field)
     } else if facts.must_be_cast_to_outer_column {
         Some("mustBeCastToOuterColumn")
-    } else if facts.submerge {
-        Some("submerge")
     } else if facts.voidwalk {
         Some("voidwalk")
     } else if facts.waterbound {
@@ -4145,12 +4143,15 @@ impl Game {
         }
     }
 
-    fn move_minion_to(unit: &mut UnitPosition, cell: Cell) -> Result<(), GameError> {
+    fn move_minion_to(unit: &mut UnitPosition, location: Location) -> Result<(), GameError> {
         if let Some(area) = unit.occupied_cells {
-            unit.occupied_cells =
-                Some(translated_square(area, unit.location, cell).ok_or(GameError::IllegalAction)?);
+            unit.occupied_cells = Some(
+                translated_square(area, unit.location, location.cell)
+                    .ok_or(GameError::IllegalAction)?,
+            );
         }
-        unit.location = cell;
+        unit.location = location.cell;
+        unit.region = location.region;
         Ok(())
     }
 
@@ -5613,6 +5614,14 @@ impl Game {
                 region: Some(LowerRegion::Underground),
             });
         }
+        if minion.submerge && self.is_water_site(cell) {
+            destinations.push(SummonDestination {
+                cell,
+                cells: None,
+                mana_cost,
+                region: Some(LowerRegion::Underwater),
+            });
+        }
         destinations
     }
 
@@ -6770,7 +6779,7 @@ impl Game {
             else {
                 break;
             };
-            Self::move_minion_to(unit, next.cell)?;
+            Self::move_minion_to(unit, next)?;
             reached += 1;
             self.settle_nearby_enemy_stealth(outcomes);
             if reached + 1 >= path.len() {
@@ -6860,10 +6869,7 @@ impl Game {
             cell: unit.location,
             region: unit.region,
         };
-        if next.region != unit.region {
-            return Err(GameError::IllegalAction);
-        }
-        Self::move_minion_to(unit, next.cell)?;
+        Self::move_minion_to(unit, next)?;
         self.position
             .pending_basic_movement
             .as_pending_mut()
@@ -7037,7 +7043,7 @@ impl Game {
                 unit.controller == action.seat && unit.card.instance_id == *unit_instance_id
             })
             .ok_or(GameError::IllegalAction)?;
-        Self::move_minion_to(unit, to.cell)?;
+        Self::move_minion_to(unit, *to)?;
         self.position.state_version += 1;
         outcomes.push("unit-stepped", || {
             json!({
@@ -9474,7 +9480,7 @@ impl Game {
                         .iter_mut()
                         .find(|unit| unit.card.instance_id == *unit_instance_id)
                         .ok_or(GameError::IllegalAction)?;
-                    Self::move_minion_to(unit, location.cell)?;
+                    Self::move_minion_to(unit, *location)?;
                     self.settle_nearby_enemy_stealth(outcomes);
                 }
                 self.position
@@ -12898,8 +12904,7 @@ impl Game {
                     .iter_mut()
                     .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
                     .ok_or(GameError::IllegalAction)?;
-                Self::move_minion_to(unit, destination.cell)?;
-                unit.region = destination.region;
+                Self::move_minion_to(unit, destination)?;
             }
         }
         Ok(destination)
@@ -15779,11 +15784,15 @@ mod tests {
             .expect("valid Burrowing manifest")
             .ensure_selfplay_supported()
             .expect("Burrowing minion Bury is self-play safe");
+        Game::from_manifest_json(&bury_manifest(Some(("submerge", json!(true)))))
+            .expect("valid Submerge manifest")
+            .ensure_selfplay_supported()
+            .expect("Submerge minion Bury is self-play safe");
         assert!(matches!(
-            Game::from_manifest_json(&bury_manifest(Some(("submerge", json!(true)))))
-                .expect("valid Submerge manifest")
+            Game::from_manifest_json(&bury_manifest(Some(("waterbound", json!(true)))))
+                .expect("valid Waterbound manifest")
                 .ensure_selfplay_supported(),
-            Err(GameError::UnsupportedManifestFact(field)) if field == "submerge"
+            Err(GameError::UnsupportedManifestFact(field)) if field == "waterbound"
         ));
 
         let cave_in = selfplay_manifest_with(31, |manifest| {

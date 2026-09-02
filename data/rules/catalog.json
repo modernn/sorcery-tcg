@@ -2265,7 +2265,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Submerge uses underwater summons, movement, and region-isolated combat.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "submerge",
         "region"
@@ -2278,8 +2278,8 @@
         "summon"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Submerge uses underwater summons, movement, and region-isolated combat"
+        "file": "crates/sorcery-engine/tests/submerge_rules.rs",
+        "testName": "rule_catalog_0113_submerge_should_summon_move_and_fight_inside_the_water_region"
       }
     },
     {
