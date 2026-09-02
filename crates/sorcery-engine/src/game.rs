@@ -1062,8 +1062,7 @@ fn unsupported_selfplay_artifact(facts: &ArtifactFacts) -> Option<&'static str> 
 /// The Artifact effects the realm cannot yet honor, named by their authoring field.
 const fn unsupported_artifact_effect(effect: ArtifactEffect) -> Option<&'static str> {
     match effect {
-        ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(_)
-        | ArtifactEffect::GrantsBearerLethal
+        ArtifactEffect::GrantsBearerLethal
         | ArtifactEffect::GrantsBearerPowerTwo
         | ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
         | ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree => None,
