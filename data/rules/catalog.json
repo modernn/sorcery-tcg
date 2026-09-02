@@ -653,7 +653,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Nearby-allies power is derived and settles deaths when its source dies.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "derived-power"
       ],
@@ -662,8 +662,8 @@
         "death"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 nearby-allies power is derived and settles deaths when its source dies"
+        "file": "crates/sorcery-engine/tests/static_power_rules.rs",
+        "testName": "rule_catalog_0034_nearby_allies_power_is_derived_and_settles_deaths_when_its_source_dies"
       }
     },
     {
@@ -672,7 +672,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Controlled Mortal power follows current control and settles deaths.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "mortal-subtype",
         "derived-power"
@@ -682,8 +682,8 @@
         "death"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 controlled Mortal power follows current control and settles deaths"
+        "file": "crates/sorcery-engine/tests/static_power_rules.rs",
+        "testName": "rule_catalog_0035_controlled_mortal_power_should_follow_current_control_and_settle_deaths"
       }
     },
     {
