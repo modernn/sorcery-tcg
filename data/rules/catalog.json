@@ -979,7 +979,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Region settlement kills inhospitable minions and banishes them from the void.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "region"
       ],
@@ -988,8 +988,8 @@
         "banishment"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-02/04 region settlement kills inhospitable minions and banishes them from the void"
+        "file": "crates/sorcery-engine/tests/voidwalk_rules.rs",
+        "testName": "rule_catalog_0050_region_settlement_should_kill_inhospitable_minions_and_banish_void_ones"
       }
     },
     {
@@ -999,7 +999,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Playing a site surfaces uncarried Artifacts from the covered void.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "artifact"
       ],
@@ -1008,8 +1008,8 @@
       ],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-02/04 playing a site surfaces uncarried Artifacts from the covered void"
+        "file": "crates/sorcery-engine/tests/voidwalk_rules.rs",
+        "testName": "rule_catalog_0051_playing_a_site_should_surface_the_artifacts_its_void_held"
       }
     },
     {
@@ -2386,7 +2386,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Voidwalk summons to any void and moves between adjacent void and surface locations.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "voidwalk"
       ],
@@ -2399,8 +2399,8 @@
         "movement"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Voidwalk summons to any void and moves between adjacent void and surface locations"
+        "file": "crates/sorcery-engine/tests/voidwalk_rules.rs",
+        "testName": "rule_catalog_0119_voidwalk_should_summon_to_any_void_and_step_between_void_and_surface"
       }
     },
     {
@@ -2426,7 +2426,7 @@
         "RULE-03"
       ],
       "plainLanguage": "An outer-column cast restriction filters surface and Voidwalk summons, not movement.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "voidwalk"
       ],
@@ -2438,8 +2438,8 @@
         "summon"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 an outer-column cast restriction filters surface and Voidwalk summons, not movement"
+        "file": "crates/sorcery-engine/tests/voidwalk_rules.rs",
+        "testName": "rule_catalog_0121_an_outer_column_restriction_should_filter_summons_but_not_movement"
       }
     },
     {

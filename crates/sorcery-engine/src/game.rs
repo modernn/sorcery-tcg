@@ -945,6 +945,14 @@ enum MovementCause {
     CardEffect,
 }
 
+/// What settling realm occupancy does to a unit that its own region stopped holding.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RegionDisposition {
+    Banished,
+    Dies,
+    Survives,
+}
+
 /// The lower realm layers a mover may enter and cross under its own power.
 #[derive(Clone, Copy, Default)]
 struct RegionAbilities {
@@ -1040,6 +1048,18 @@ impl OutcomeLog<'_> {
         if let Self::Record(outcomes) = self {
             outcomes.insert(index, (kind.to_owned(), payload()));
         }
+    }
+
+    /// Appends recorded outcomes, keeping a terminal outcome logged since `from` last.
+    fn splice_before_game_end(&mut self, from: usize, tail: Vec<(String, Value)>) {
+        let Self::Record(outcomes) = self else {
+            return;
+        };
+        let index = outcomes[from..]
+            .iter()
+            .position(|(kind, _)| kind == "game-ended")
+            .map_or(outcomes.len(), |offset| from + offset);
+        outcomes.splice(index..index, tail);
     }
 }
 
@@ -1197,10 +1217,6 @@ fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
         Some("atStartOfControllerTurnTeleportToRandomSiteOrVoid")
     } else if let Some(field) = unsupported_selfplay_minion_genesis(facts.genesis) {
         Some(field)
-    } else if facts.must_be_cast_to_outer_column {
-        Some("mustBeCastToOuterColumn")
-    } else if facts.voidwalk {
-        Some("voidwalk")
     } else {
         None
     }
@@ -5441,10 +5457,26 @@ impl Game {
             .collect()
     }
 
-    fn move_underground_units_to_underwater(&mut self, cell: Cell) {
+    /// Relayers whatever a freshly played site now covers at its own cell.
+    ///
+    /// The new site fills the void, so its occupants and the Artifacts lying loose there surface
+    /// instead of being stranded. Replacing rubble with water floods the layer beneath it.
+    fn settle_covered_layers(&mut self, cell: Cell, floods_underground: bool) {
+        let relayer = |region: &mut Region| match *region {
+            Region::Void => *region = Region::Surface,
+            Region::Underground if floods_underground => *region = Region::Underwater,
+            _ => {}
+        };
         for unit in &mut self.position.units {
-            if unit.location == cell && unit.region == Region::Underground {
-                unit.region = Region::Underwater;
+            if unit.location == cell {
+                relayer(&mut unit.region);
+            }
+        }
+        for artifact in &mut self.position.artifacts {
+            if let ArtifactPlacement::Loose { location, region } = &mut artifact.placement
+                && *location == cell
+            {
+                relayer(region);
             }
         }
     }
@@ -5571,6 +5603,9 @@ impl Game {
 
     fn summon_destinations(&self, seat: Seat, minion: &MinionFacts) -> Vec<SummonDestination> {
         let summon_cell = |cell: Cell| {
+            if minion.must_be_cast_to_outer_column && !cell.in_outer_file() {
+                return None;
+            }
             let site = self.position.sites[cell.index()].as_ref()?;
             if !minion.summon_to_any_site && site.controller != seat {
                 return None;
@@ -5603,15 +5638,45 @@ impl Game {
                 })
                 .collect()
         } else {
-            Cell::ALL
+            let mut destinations = Cell::ALL
                 .into_iter()
                 .flat_map(|cell| {
                     summon_cell(cell)
                         .map(|mana_cost| self.summon_regions(minion, cell, mana_cost, false))
                         .unwrap_or_default()
                 })
-                .collect()
+                .collect::<Vec<_>>();
+            destinations.extend(self.void_summon_destinations(minion, minion.mana_cost, false));
+            destinations
         }
+    }
+
+    /// The void beside every cell no site or rubble covers, offered only to a Voidwalk minion.
+    ///
+    /// The void belongs to no site, so it charges the printed cost and ignores site control. A
+    /// free placement ignores the printed casting restrictions, so `anywhere` keeps every void.
+    fn void_summon_destinations(
+        &self,
+        minion: &MinionFacts,
+        mana_cost: u64,
+        anywhere: bool,
+    ) -> Vec<SummonDestination> {
+        let restricted_elsewhere =
+            minion.required_cast_region.is_some() || minion.must_be_cast_to_water_site;
+        if !minion.voidwalk || (!anywhere && restricted_elsewhere) {
+            return Vec::new();
+        }
+        Cell::ALL
+            .into_iter()
+            .filter(|cell| !self.surface_location_exists(*cell))
+            .filter(|cell| anywhere || !minion.must_be_cast_to_outer_column || cell.in_outer_file())
+            .map(|cell| SummonDestination {
+                cell,
+                cells: None,
+                mana_cost,
+                region: Some(LowerRegion::Void),
+            })
+            .collect()
     }
 
     /// Names a summon destination, qualifying the cell only when it leaves the surface.
@@ -5679,11 +5744,13 @@ impl Game {
                 })
                 .collect()
         } else {
-            Cell::ALL
+            let mut destinations = Cell::ALL
                 .into_iter()
                 .filter(|cell| self.surface_location_exists(*cell))
                 .flat_map(|cell| self.summon_regions(minion, cell, 0, true))
-                .collect()
+                .collect::<Vec<_>>();
+            destinations.extend(self.void_summon_destinations(minion, 0, true));
+            destinations
         }
     }
 
@@ -6070,9 +6137,10 @@ impl Game {
         };
         applied?;
         let settlement_start = outcomes.len();
-        self.settle_lower_region_minion_deaths(outcomes)?;
+        self.settle_region_occupancy(outcomes)?;
         self.settle_nearby_enemy_stealth(outcomes);
         self.settle_static_power_deaths(outcomes)?;
+        self.reconcile_attack_window();
         if let Some(shooter_instance_id) = post_ranged_step {
             self.queue_ranged_step(action.seat, shooter_instance_id)?;
         }
@@ -6100,6 +6168,9 @@ impl Game {
         {
             pending.deferred_magic_resolved = Some(completion);
             outcomes.remove_first("magic-resolved");
+        }
+        if self.position.pending_deathrites.is_none() {
+            self.reconcile_projectile_continuations()?;
         }
         Ok(())
     }
@@ -6266,6 +6337,7 @@ impl Game {
             return Ok(());
         }
         self.reconcile_pending_combat();
+        self.reconcile_attack_window();
         if let Some(pending) = self.position.pending_basic_movement.as_pending().cloned() {
             let source_remains = self.position.units.iter().any(|unit| {
                 unit.controller == pending.seat
@@ -6310,6 +6382,26 @@ impl Game {
             }
         }
         Ok(())
+    }
+
+    /// Closes a combat window whose attacker settlement removed before it could be answered.
+    ///
+    /// A mover that dies or is banished on arrival never reaches its target, so the turn returns
+    /// to its main phase instead of waiting on a combatant that is no longer in the realm.
+    fn reconcile_attack_window(&mut self) {
+        if self.position.terminal.is_some()
+            || !matches!(
+                self.position.phase,
+                Phase::Attack | Phase::Defend | Phase::Intercept
+            )
+        {
+            return;
+        }
+        self.reconcile_pending_combat();
+        if self.position.pending_combat.is_none() {
+            self.position.phase = Phase::Main;
+            self.position.decision_seat = self.position.active_seat;
+        }
     }
 
     fn reconcile_pending_combat(&mut self) {
@@ -6649,7 +6741,7 @@ impl Game {
             self.move_unit_target_to(&continuation.target, next)?;
             path_index += 1;
             walked.push(next);
-            self.settle_lower_region_minion_deaths(outcomes)?;
+            self.settle_region_occupancy(outcomes)?;
             self.settle_nearby_enemy_stealth(outcomes);
             self.settle_static_power_deaths(outcomes)?;
             if self.position.pending_deathrites.is_some()
@@ -8709,50 +8801,120 @@ impl Game {
         )
     }
 
-    fn settle_lower_region_minion_deaths(
-        &mut self,
-        outcomes: &mut OutcomeLog<'_>,
-    ) -> Result<(), GameError> {
+    /// Settles every unit whose own region stopped holding it, killing or banishing it.
+    ///
+    /// Banished units leave before the deaths resolve, but their outcomes follow the death
+    /// outcomes so a lethal settlement still reports the deaths first.
+    fn settle_region_occupancy(&mut self, outcomes: &mut OutcomeLog<'_>) -> Result<(), GameError> {
         if self.position.terminal.is_some() || self.position.pending_deathrites.is_some() {
             return Ok(());
         }
-        let deaths = self.lower_region_minion_deaths();
-        if deaths.is_empty() {
+        let (deaths, banishments) = self.region_settlement_removals();
+        if deaths.is_empty() && banishments.is_empty() {
             return Ok(());
         }
-        self.begin_minion_deaths(
-            &deaths,
-            &[],
-            self.position.phase,
-            self.position.decision_seat,
-            outcomes,
-        )
+        let mut banished = Vec::new();
+        self.banish_units(&banishments, &mut OutcomeLog::Record(&mut banished));
+        let deaths_start = outcomes.len();
+        if !deaths.is_empty() {
+            self.begin_minion_deaths(
+                &deaths,
+                &[],
+                self.position.phase,
+                self.position.decision_seat,
+                outcomes,
+            )?;
+        }
+        outcomes.splice_before_game_end(deaths_start, banished);
+        Ok(())
     }
 
-    /// Every minion whose current region can no longer keep it alive.
-    fn lower_region_minion_deaths(&self) -> Vec<IdentityHash> {
-        self.position
-            .units
+    /// Splits every unit its region no longer holds into deaths and void banishments.
+    fn region_settlement_removals(&self) -> (Vec<IdentityHash>, Vec<IdentityHash>) {
+        let mut deaths = Vec::new();
+        let mut banishments = Vec::new();
+        for unit in &self.position.units {
+            match self.region_disposition(unit) {
+                RegionDisposition::Survives => {}
+                RegionDisposition::Dies => deaths.push(unit.card.instance_id.clone()),
+                RegionDisposition::Banished => banishments.push(unit.card.instance_id.clone()),
+            }
+        }
+        (deaths, banishments)
+    }
+
+    /// Whether a unit's own region still sustains it, kills it, or banishes it from the void.
+    ///
+    /// A void occupant is never killed: losing the void or the ability to walk it banishes the
+    /// unit outright, exactly as a lost lower location kills a burrowed or submerged one.
+    fn region_disposition(&self, unit: &UnitPosition) -> RegionDisposition {
+        let banishes = unit.region == Region::Void;
+        let stranded = Self::unit_occupied_cells(unit)
             .iter()
-            .filter(|unit| matches!(unit.region, Region::Underground | Region::Underwater))
-            .filter(|unit| {
-                let CardFacts::Minion(facts) =
-                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts
-                else {
-                    return true;
-                };
-                self.minion_is_disabled(unit)
-                    || match unit.region {
-                        Region::Underground => !facts.burrowing,
-                        Region::Underwater => !facts.submerge,
-                        Region::Surface | Region::Void => false,
-                    }
-                    || Self::unit_occupied_cells(unit)
-                        .iter()
-                        .any(|cell| !self.location_exists_in_region(*cell, unit.region))
-            })
-            .map(|unit| unit.card.instance_id.clone())
-            .collect()
+            .any(|cell| !self.location_exists_in_region(*cell, unit.region));
+        if stranded {
+            return if banishes {
+                RegionDisposition::Banished
+            } else {
+                RegionDisposition::Dies
+            };
+        }
+        if unit.region == Region::Surface {
+            return RegionDisposition::Survives;
+        }
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return RegionDisposition::Dies;
+        };
+        let sustained = !self.minion_is_disabled(unit)
+            && match unit.region {
+                Region::Surface => true,
+                Region::Underground => facts.burrowing,
+                Region::Underwater => facts.submerge,
+                Region::Void => facts.voidwalk,
+            };
+        if sustained {
+            RegionDisposition::Survives
+        } else if banishes {
+            RegionDisposition::Banished
+        } else {
+            RegionDisposition::Dies
+        }
+    }
+
+    /// Removes units from the game without a death, dropping whatever they carried where they were.
+    fn banish_units(&mut self, instance_ids: &[IdentityHash], outcomes: &mut OutcomeLog<'_>) {
+        for instance_id in instance_ids {
+            let Some(index) = self
+                .position
+                .units
+                .iter()
+                .position(|unit| unit.card.instance_id == *instance_id)
+            else {
+                continue;
+            };
+            let unit = self.position.units.remove(index);
+            let card_id = self.rules.cards[usize::from(unit.card.card_id.0)]
+                .id
+                .clone();
+            self.release_carried_artifacts(
+                UnitKind::Minion,
+                unit.controller,
+                instance_id,
+                Location {
+                    cell: unit.location,
+                    region: unit.region,
+                },
+                outcomes,
+            );
+            outcomes.push("minion-banished", || {
+                json!({
+                    "cardId": card_id,
+                    "instanceId": unit.card.instance_id,
+                    "owner": unit.card.owner,
+                })
+            });
+        }
     }
 
     fn begin_minion_deaths(
@@ -9295,6 +9457,7 @@ impl Game {
         } else {
             self.position.phase = pending.return_phase;
             self.position.decision_seat = pending.return_decision_seat;
+            self.reconcile_attack_window();
         }
         if self.position.terminal.is_some() && ordered_resolution {
             self.clear_ordered_terminal_continuations();
@@ -9707,9 +9870,7 @@ impl Game {
             card,
             controller: seat,
         });
-        if replacing_rubble_with_water {
-            self.move_underground_units_to_underwater(cell);
-        }
+        self.settle_covered_layers(cell, replacing_rubble_with_water);
         self.position.state_version += 1;
         if let Some(rubble_instance_id) = replaced_rubble {
             outcomes.push("rubble-replaced", || {
@@ -9741,7 +9902,7 @@ impl Game {
             origin_state_version,
             seat,
         };
-        self.settle_lower_region_minion_deaths(outcomes)?;
+        self.settle_region_occupancy(outcomes)?;
         if let Some(pending) = &mut self.position.pending_deathrites {
             pending.continuation = Some(DeathriteContinuation::SiteGenesis(continuation));
             return Ok(());
@@ -10069,9 +10230,7 @@ impl Game {
             card,
             controller: seat,
         });
-        if replacing_with_water {
-            self.move_underground_units_to_underwater(target_cell);
-        }
+        self.settle_covered_layers(target_cell, replacing_with_water);
         self.position.state_version += 1;
         outcomes.push("rubble-replaced", || {
             json!({
@@ -10101,7 +10260,7 @@ impl Game {
             origin_state_version,
             seat,
         };
-        self.settle_lower_region_minion_deaths(outcomes)?;
+        self.settle_region_occupancy(outcomes)?;
         if let Some(pending) = &mut self.position.pending_deathrites {
             pending.continuation = Some(DeathriteContinuation::SiteGenesis(continuation));
             return Ok(());
@@ -10212,7 +10371,7 @@ impl Game {
         }
         let (destroyed_cards, rubble) =
             self.destroy_sites_into_rubble(destroyed, source_site_instance_id)?;
-        self.settle_lower_region_minion_deaths(outcomes)?;
+        self.settle_region_occupancy(outcomes)?;
         for card in destroyed_cards {
             self.position.players[seat_index(card.owner)]
                 .cemetery
@@ -12153,7 +12312,7 @@ impl Game {
                             "to": to,
                         })
                     });
-                    self.settle_lower_region_minion_deaths(outcomes)?;
+                    self.settle_region_occupancy(outcomes)?;
                     self.settle_static_power_deaths(outcomes)?;
                 }
             }
@@ -12181,7 +12340,7 @@ impl Game {
                         }
                         payload
                     });
-                    self.settle_lower_region_minion_deaths(outcomes)?;
+                    self.settle_region_occupancy(outcomes)?;
                     self.settle_static_power_deaths(outcomes)?;
                 }
                 let continuation = BlinkContinuation {
@@ -12226,7 +12385,7 @@ impl Game {
                             "to": to,
                         })
                     });
-                    self.settle_lower_region_minion_deaths(outcomes)?;
+                    self.settle_region_occupancy(outcomes)?;
                     self.settle_nearby_enemy_stealth(outcomes);
                     self.settle_static_power_deaths(outcomes)?;
                 }
@@ -12823,11 +12982,15 @@ impl Game {
                 };
                 // The crater and its damage settle together, so drained minions die alongside
                 // the ones the grid killed outright.
-                for instance_id in self.lower_region_minion_deaths() {
+                let (region_deaths, banishments) = self.region_settlement_removals();
+                for instance_id in region_deaths {
                     if !dead_minions.contains(&instance_id) {
                         dead_minions.push(instance_id);
                     }
                 }
+                let mut banished = Vec::new();
+                self.banish_units(&banishments, &mut OutcomeLog::Record(&mut banished));
+                let deaths_start = outcomes.len();
                 if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
                     self.begin_minion_deaths(
                         &dead_minions,
@@ -12837,6 +13000,7 @@ impl Game {
                         outcomes,
                     )?;
                 }
+                outcomes.splice_before_game_end(deaths_start, banished);
                 for card in destroyed_cards {
                     self.position.players[seat_index(card.owner)]
                         .cemetery
@@ -12900,7 +13064,7 @@ impl Game {
                 })
             });
         }
-        self.settle_lower_region_minion_deaths(outcomes)?;
+        self.settle_region_occupancy(outcomes)?;
         self.settle_nearby_enemy_stealth(outcomes);
         self.settle_static_power_deaths(outcomes)?;
         let continuation = LeapAttackContinuation {
@@ -15798,10 +15962,15 @@ mod tests {
         );
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one admission matrix keeps every burrow slice and fail-closed case visible"
+    )]
     #[test]
     fn forceful_burrow_magic_should_admit_minion_slices_and_reject_unmodeled_cards() {
-        let bury_manifest = |extra: Option<(&str, Value)>| {
-            selfplay_manifest_with(31, |manifest| {
+        let bury_manifest = |extra: &[(&str, Value)]| {
+            let extra = extra.to_vec();
+            selfplay_manifest_with(31, move |manifest| {
                 for ordinal in 1..=50 {
                     manifest["cards"][format!("north-spell-{ordinal}")] = json!({
                         "burrowTargetMinionOrArtifact": true,
@@ -15810,32 +15979,40 @@ mod tests {
                         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
                     });
                 }
-                if let Some((field, value)) = extra {
-                    manifest["cards"]["south-spell-1"][field] = value;
+                for (field, value) in &extra {
+                    manifest["cards"]["south-spell-1"][*field] = value.clone();
                 }
             })
         };
-        Game::from_manifest_json(&bury_manifest(None))
+        Game::from_manifest_json(&bury_manifest(&[]))
             .expect("valid Bury manifest")
             .ensure_selfplay_supported()
             .expect("ordinary minion Bury is self-play safe");
-        Game::from_manifest_json(&bury_manifest(Some(("burrowing", json!(true)))))
+        Game::from_manifest_json(&bury_manifest(&[("burrowing", json!(true))]))
             .expect("valid Burrowing manifest")
             .ensure_selfplay_supported()
             .expect("Burrowing minion Bury is self-play safe");
-        Game::from_manifest_json(&bury_manifest(Some(("submerge", json!(true)))))
+        Game::from_manifest_json(&bury_manifest(&[("submerge", json!(true))]))
             .expect("valid Submerge manifest")
             .ensure_selfplay_supported()
             .expect("Submerge minion Bury is self-play safe");
-        Game::from_manifest_json(&bury_manifest(Some(("waterbound", json!(true)))))
+        Game::from_manifest_json(&bury_manifest(&[("waterbound", json!(true))]))
             .expect("valid Waterbound manifest")
             .ensure_selfplay_supported()
             .expect("Waterbound minion Bury is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[("voidwalk", json!(true))]))
+            .expect("valid Voidwalk manifest")
+            .ensure_selfplay_supported()
+            .expect("Voidwalk minion Bury is self-play safe");
         assert!(matches!(
-            Game::from_manifest_json(&bury_manifest(Some(("voidwalk", json!(true)))))
-                .expect("valid Voidwalk manifest")
-                .ensure_selfplay_supported(),
-            Err(GameError::UnsupportedManifestFact(field)) if field == "voidwalk"
+            Game::from_manifest_json(&bury_manifest(&[
+                ("atStartOfControllerTurnTeleportToRandomSiteOrVoid", json!(true)),
+                ("voidwalk", json!(true)),
+            ]))
+            .expect("valid random teleport manifest")
+            .ensure_selfplay_supported(),
+            Err(GameError::UnsupportedManifestFact(field))
+                if field == "atStartOfControllerTurnTeleportToRandomSiteOrVoid"
         ));
 
         let cave_in = selfplay_manifest_with(31, |manifest| {
@@ -16601,9 +16778,9 @@ mod tests {
         target.region = Region::Underground;
         game.position.units = vec![source, target];
 
-        game.move_underground_units_to_underwater(cell);
+        game.settle_covered_layers(cell, true);
         let mut events = Vec::new();
-        game.settle_lower_region_minion_deaths(&mut OutcomeLog::Record(&mut events))
+        game.settle_region_occupancy(&mut OutcomeLog::Record(&mut events))
             .expect("underwater settlement");
 
         assert!(game.position.units.iter().all(|unit| {

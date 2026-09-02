@@ -141,6 +141,11 @@ impl Cell {
         .flatten()
     }
 
+    /// Whether this cell sits in the westmost or eastmost file.
+    pub(crate) const fn in_outer_file(self) -> bool {
+        self.file() == 0 || self.file() == LAST_FILE
+    }
+
     /// Returns the non-wrapping Manhattan distance between two cells.
     #[must_use]
     pub const fn manhattan_distance(self, other: Self) -> u8 {

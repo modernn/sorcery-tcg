@@ -638,6 +638,10 @@ fn suite_should_reject_non_swaps_wrong_bindings_and_reused_seeds() {
     assert!(SelfPlayCampaign::new(child, candidate_deck, 500).is_err());
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one matrix keeps composition mismatch and unsupported-fact rejections together"
+)]
 #[test]
 fn pair_should_reject_scenario_changes_composition_mismatch_and_unsupported_facts() {
     let (north, south) = paired_manifests(30, 20);
@@ -694,10 +698,10 @@ fn pair_should_reject_scenario_changes_composition_mismatch_and_unsupported_fact
     assert!(train_and_promote(&champion, &candidate_deck, &mismatched, &heldout, 500).is_err());
 
     let unsupported_north = mutate_manifest(&north, |manifest| {
-        manifest["cards"]["north-spell-1"]["voidwalk"] = json!(true);
+        manifest["cards"]["north-site-1"]["minionsHereGainVoidwalkUntilLeavingVoid"] = json!(true);
     });
     let unsupported_south = mutate_manifest(&south, |manifest| {
-        manifest["cards"]["north-spell-1"]["voidwalk"] = json!(true);
+        manifest["cards"]["north-site-1"]["minionsHereGainVoidwalkUntilLeavingVoid"] = json!(true);
     });
     let unsupported = [pair(
         &unsupported_north,
@@ -709,10 +713,14 @@ fn pair_should_reject_scenario_changes_composition_mismatch_and_unsupported_fact
     assert!(train_and_promote(&champion, &candidate_deck, &unsupported, &heldout, 500).is_err());
 
     let unsupported_north = mutate_manifest(&north, |manifest| {
-        manifest["cards"]["north-spell-1"]["mustBeCastToOuterColumn"] = json!(true);
+        manifest["cards"]["north-spell-1"]["atStartOfControllerTurnTeleportToRandomSiteOrVoid"] =
+            json!(true);
+        manifest["cards"]["north-spell-1"]["voidwalk"] = json!(true);
     });
     let unsupported_south = mutate_manifest(&south, |manifest| {
-        manifest["cards"]["north-spell-1"]["mustBeCastToOuterColumn"] = json!(true);
+        manifest["cards"]["north-spell-1"]["atStartOfControllerTurnTeleportToRandomSiteOrVoid"] =
+            json!(true);
+        manifest["cards"]["north-spell-1"]["voidwalk"] = json!(true);
     });
     let unsupported = [pair(
         &unsupported_north,
@@ -725,8 +733,23 @@ fn pair_should_reject_scenario_changes_composition_mismatch_and_unsupported_fact
         train_and_promote(&champion, &candidate_deck, &unsupported, &heldout, 500)
             .expect_err("self-play must reject incomplete facts")
             .to_string(),
-        "manifest fact is not yet supported by Rust: mustBeCastToOuterColumn"
+        "manifest fact is not yet supported by Rust: atStartOfControllerTurnTeleportToRandomSiteOrVoid"
     );
+
+    let voidwalk_north = mutate_manifest(&north, |manifest| {
+        manifest["cards"]["north-spell-1"]["voidwalk"] = json!(true);
+    });
+    let voidwalk_south = mutate_manifest(&south, |manifest| {
+        manifest["cards"]["north-spell-1"]["voidwalk"] = json!(true);
+    });
+    let voidwalk = [pair(
+        &voidwalk_north,
+        &voidwalk_south,
+        30,
+        &opponent,
+        &opponent_deck,
+    )];
+    assert!(train_and_promote(&champion, &candidate_deck, &voidwalk, &heldout, 500).is_ok());
 
     let stealth_north = mutate_manifest(&north, |manifest| {
         manifest["cards"]["north-spell-1"]["stealth"] = json!(true);
