@@ -295,7 +295,7 @@ fn roll_paths(session: &Session, boulder: &str, pusher: &str) -> Vec<(String, Ve
 }
 
 #[test]
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "one scenario proof keeps setup, forged path, and replay together"
 )]

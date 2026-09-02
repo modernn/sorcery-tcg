@@ -65,10 +65,13 @@ ordinary debug suite because running the same workload there takes several minut
   bearer's cell; a discarded site throws nothing. The location is targeted rather than its
   occupants, so a Stealthed occupant is included and a layer below the target is not, and the
   Artifact is again the source, so no bearer power or Lethal rides along.
-- A Rolling Boulder lets any ready co-located unit tap to push it maximally in one cardinal
-  direction; the pusher is excluded while every other surface unit along a non-empty path takes
-  simultaneous fixed Artifact damage. Zero-step outward pushes remain legal and harmless, and a
-  carried Boulder detaches and finishes loose at the endpoint.
+- A Rolling Boulder is pushed by tapping any one ready unit standing with it, needs no bearer, and
+  rolls as far as one cardinal direction reaches without leaving its own region. Every other unit in
+  that region takes four damage per passed cell it stands on, all at once, so no early death shields
+  a later target; the pusher is spent rather than run over. The Artifact is the source, so no pusher
+  power or Lethal rides along and prevention keyed to unit power does not stop it. A roll the realm
+  blocks passes no cell, so it spends the pusher and damages nobody, and a carried Boulder leaves
+  its bearer to finish loose at the endpoint.
 - A tapped area-damage minion blankets one adjacent location in its own region with its current
   power and its carried Lethal. The blanket is not a strike, so it never draws a return strike.
 - The selector neighborhood is intentionally small and `seat-observation-v1` does not expose enough

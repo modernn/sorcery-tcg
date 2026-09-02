@@ -2924,8 +2924,12 @@
       ],
       "plainLanguage": "Rolling Boulder rolls maximally and damages other units along its path.",
       "implementationStatus": "rust-supported",
-      "genericFactHints": [],
-      "actionHints": [],
+      "genericFactHints": [
+        "artifact"
+      ],
+      "actionHints": [
+        "tap"
+      ],
       "eventHints": [
         "damage"
       ],
