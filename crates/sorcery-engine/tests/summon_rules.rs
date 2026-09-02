@@ -249,6 +249,7 @@ fn wendigo_main(manifest: &str, bury_burrower: bool) -> Session {
             descriptor["kind"] == "summon-minion"
                 && descriptor["cardId"] == card_id
                 && descriptor["cell"] == "C4"
+                && descriptor["region"].is_null()
         });
     }
     accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");

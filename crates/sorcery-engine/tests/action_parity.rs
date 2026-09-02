@@ -1277,6 +1277,7 @@ fn duel_descriptors_order_and_transitions_should_match_typescript() {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == "synthetic-underground-duelist"
             && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
     });
     accept_underground_setup(&mut underground_session, &end_turn);
     accept_underground_setup(&mut underground_session, &|descriptor| {
@@ -1294,6 +1295,7 @@ fn duel_descriptors_order_and_transitions_should_match_typescript() {
             descriptor["kind"] == "summon-minion"
                 && descriptor["cardId"] == card_id
                 && descriptor["cell"] == "C4"
+                && descriptor["region"].is_null()
         });
     }
     accept_underground_setup(&mut underground_session, &end_turn);

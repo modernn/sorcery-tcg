@@ -239,6 +239,28 @@ pub enum Region {
     Void,
 }
 
+/// A realm layer a minion can reach only through a region ability.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LowerRegion {
+    /// The burrowed layer.
+    Underground,
+    /// The submerged layer.
+    Underwater,
+    /// The Void layer.
+    Void,
+}
+
+impl From<LowerRegion> for Region {
+    fn from(region: LowerRegion) -> Self {
+        match region {
+            LowerRegion::Underground => Self::Underground,
+            LowerRegion::Underwater => Self::Underwater,
+            LowerRegion::Void => Self::Void,
+        }
+    }
+}
+
 /// A cell and occupancy layer at the JSON boundary.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "camelCase")]

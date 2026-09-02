@@ -5,7 +5,7 @@ use std::str::Bytes;
 
 use serde::{Deserialize, Serialize};
 
-use crate::board::{Cell, Location, Region, SquareArea};
+use crate::board::{Cell, Location, LowerRegion, Region, SquareArea};
 use crate::canonical::IdentityHash;
 use crate::contract::Seat;
 
@@ -360,6 +360,9 @@ pub enum ActionDescriptor {
         /// Optional non-mana payment selected by the engine.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         payment_mode: Option<SummonPaymentMode>,
+        /// Lower realm layer receiving the minion, omitted for an ordinary surface summon.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        region: Option<LowerRegion>,
         /// Exact local minions sacrificed for the engine-issued mana discount.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sacrificed_minion_instance_ids: Option<Vec<IdentityHash>>,
@@ -1189,6 +1192,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     genesis_damage_target: left_target,
                     mana_cost: left_mana,
                     payment_mode: left_payment,
+                    region: left_region,
                     sacrificed_minion_instance_ids: left_sacrifices,
                 },
                 ActionDescriptor::SummonMinion {
@@ -1201,6 +1205,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     genesis_damage_target: right_target,
                     mana_cost: right_mana,
                     payment_mode: right_payment,
+                    region: right_region,
                     sacrificed_minion_instance_ids: right_sacrifices,
                 },
             ) => compare_json_strings(left_card, right_card)
@@ -1214,6 +1219,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 })
                 .then_with(|| compare_json_integers(*left_mana, *right_mana))
                 .then_with(|| compare_optional_summon_payments(*left_payment, *right_payment))
+                .then_with(|| compare_optional_lower_regions(*left_region, *right_region))
                 .then_with(|| {
                     compare_optional_identity_arrays(
                         left_sacrifices.as_deref(),
@@ -1561,6 +1567,18 @@ fn compare_optional_genesis_damage_choices(
 fn compare_optional_summon_payments(
     left: Option<SummonPaymentMode>,
     right: Option<SummonPaymentMode>,
+) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => left.cmp(&right),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+fn compare_optional_lower_regions(
+    left: Option<LowerRegion>,
+    right: Option<LowerRegion>,
 ) -> Ordering {
     match (left, right) {
         (Some(left), Some(right)) => left.cmp(&right),
@@ -2091,7 +2109,7 @@ fn projectile_target_label(hit: Option<&UnitTarget>) -> String {
     )
 }
 
-fn location_label(location: Location) -> String {
+pub(crate) fn location_label(location: Location) -> String {
     if location.region == Region::Surface {
         location.cell.to_string()
     } else {

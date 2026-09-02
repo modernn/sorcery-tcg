@@ -190,7 +190,9 @@ fn rule_catalog_0019_targeted_magic_is_a_non_unit_source_and_resolves_deathrites
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
     });
     let (summoned, _) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C1"
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
     });
     let target_id = summoned["cardInstanceId"]
         .as_str()
@@ -474,16 +476,19 @@ fn rule_catalog_0029_minor_explosion_damages_every_unit_at_one_nearby_location()
     });
     let (deathrite_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "south-deathrite"
             && descriptor["cell"] == "C2"
     });
     let (warded_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "south-warded"
             && descriptor["cell"] == "C2"
     });
     let (stealth_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "south-stealth"
             && descriptor["cell"] == "C2"
     });
@@ -516,6 +521,7 @@ fn rule_catalog_0029_minor_explosion_damages_every_unit_at_one_nearby_location()
     });
     let (ally_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "north-ally"
             && descriptor["cell"] == "C2"
     });
@@ -832,6 +838,7 @@ fn rule_catalog_0030_chain_magic_stages_distinct_nearby_hops_and_resolves_simult
     });
     let (deathrite_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "north-deathrite"
             && descriptor["cell"] == "C3"
     });
@@ -851,6 +858,7 @@ fn rule_catalog_0030_chain_magic_stages_distinct_nearby_hops_and_resolves_simult
     });
     let (warded_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "north-warded"
             && descriptor["cell"] == "C2"
     });
@@ -863,6 +871,7 @@ fn rule_catalog_0030_chain_magic_stages_distinct_nearby_hops_and_resolves_simult
     });
     let (stealthed_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "south-stealthed"
             && descriptor["cell"] == "B2"
     });
@@ -1247,11 +1256,13 @@ fn rule_catalog_0031_rain_of_arrows_simultaneously_damages_every_surface_minion(
     let mut session = opening_main(&manifest);
     let (deathrite_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "north-deathrite"
             && descriptor["cell"] == "C4"
     });
     let (burrower_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "north-burrower"
             && descriptor["cell"] == "C4"
     });
@@ -1287,6 +1298,7 @@ fn rule_catalog_0031_rain_of_arrows_simultaneously_damages_every_surface_minion(
     });
     let (stealth_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "south-stealth"
             && descriptor["cell"] == "C1"
     });
@@ -1296,6 +1308,7 @@ fn rule_catalog_0031_rain_of_arrows_simultaneously_damages_every_surface_minion(
         .to_owned();
     let (warded_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "south-warded"
             && descriptor["cell"] == "C1"
     });
@@ -1599,7 +1612,9 @@ fn bury_checkpoint(seed: u32, target_extra: Value, water: bool) -> (Session, Str
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
     });
     let (summoned, _) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C1"
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
     });
     let target_id = summoned["cardInstanceId"]
         .as_str()
@@ -1643,7 +1658,9 @@ fn drown_checkpoint(seed: u32, target_extra: Value, water: bool) -> (Session, St
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
     });
     let (summoned, _) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C1"
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
     });
     let target_id = summoned["cardInstanceId"]
         .as_str()
@@ -1894,6 +1911,7 @@ fn rule_catalog_0044_cave_in_minion_slice_should_burrow_in_canonical_order() {
         .to_owned();
     let (survivor, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "south-survivor"
             && descriptor["cell"] == "C1"
             && descriptor["casterInstanceId"] == south_avatar_id
@@ -1906,6 +1924,7 @@ fn rule_catalog_0044_cave_in_minion_slice_should_burrow_in_canonical_order() {
     for _ in 0..2 {
         let (victim, _) = accept_where(&mut session, |descriptor| {
             descriptor["kind"] == "summon-minion"
+                && descriptor["region"].is_null()
                 && descriptor["cardId"] == "south-victim"
                 && descriptor["cell"] == "C1"
                 && descriptor["casterInstanceId"] == south_avatar_id
@@ -2154,6 +2173,7 @@ fn bury_should_defer_completion_until_ordered_static_deathrites_finish() {
     for _ in 0..2 {
         let (summoned, _) = accept_where(&mut session, |descriptor| {
             descriptor["kind"] == "summon-minion"
+                && descriptor["region"].is_null()
                 && descriptor["cardId"] == "south-buff"
                 && descriptor["cell"] == "C1"
         });
@@ -2170,6 +2190,7 @@ fn bury_should_defer_completion_until_ordered_static_deathrites_finish() {
     });
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "north-pinger"
             && descriptor["cell"] == "C1"
     });
@@ -2271,6 +2292,7 @@ fn disable_magic_should_kill_its_underground_burrowing_target() {
     });
     let (summoned, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "south-minion"
             && descriptor["cell"] == "C1"
     });
@@ -2396,7 +2418,9 @@ fn rule_catalog_0023_magic_targets_should_stay_in_the_caster_region_and_exclude_
         .expect("bounded seed with Bury, targeted Magic, and friendly Stealth");
     let mut session = opening_main(&manifest);
     let (friendly, _) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "north-minion"
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-minion"
+            && descriptor["region"].is_null()
     });
     let friendly_id = friendly["cardInstanceId"]
         .as_str()
@@ -2411,14 +2435,18 @@ fn rule_catalog_0023_magic_targets_should_stay_in_the_caster_region_and_exclude_
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
     });
     let (stealth, _) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "south-stealth"
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-stealth"
+            && descriptor["region"].is_null()
     });
     let stealth_id = stealth["cardInstanceId"]
         .as_str()
         .expect("enemy Stealth identity")
         .to_owned();
     let (plain, _) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "south-plain"
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-plain"
+            && descriptor["region"].is_null()
     });
     let plain_id = plain["cardInstanceId"]
         .as_str()
@@ -2494,7 +2522,9 @@ fn targeted_magic_breaks_ward_instead_of_damaging_the_minion() {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
     });
     let (summoned, _) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C1"
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
     });
     let target_id = summoned["cardInstanceId"]
         .as_str()
@@ -2560,14 +2590,18 @@ fn rule_catalog_0024_lash_damages_then_untaps_only_a_surviving_nearby_minion() {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
     });
     let (nearby, _) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C4"
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
     });
     let nearby_id = nearby["cardInstanceId"]
         .as_str()
         .expect("nearby target identity")
         .to_owned();
     let (distant, _) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C1"
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
     });
     let distant_id = distant["cardInstanceId"]
         .as_str()
@@ -2699,6 +2733,7 @@ fn token_magic_should_summon_in_cell_order_and_banish_a_dead_token() {
     }
     let (summoned_attacker, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "south-minion"
             && descriptor["cell"] == "B2"
     });
@@ -3027,7 +3062,9 @@ fn healing_session(life: u8, seed: u32) -> (Session, String) {
     );
     let mut session = opening_main(&manifest);
     accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "north-loss"
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-loss"
+            && descriptor["region"].is_null()
     });
     let heal = session
         .legal_actions()
@@ -3129,6 +3166,7 @@ fn printed_spellcaster_should_cast_and_summon_while_sick_or_tapped() {
     let mut session = opening_main(&manifest);
     let (caster_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "north-caster"
             && descriptor["cell"] == "C4"
     });
@@ -3182,6 +3220,7 @@ fn printed_spellcaster_should_cast_and_summon_while_sick_or_tapped() {
     let mut sick_summon = checkpoint.clone();
     let (summon_descriptor, summon_receipt) = accept_where(&mut sick_summon, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "north-disabled-caster"
             && descriptor["casterInstanceId"] == caster_instance_id
             && descriptor["cell"] == "C4"
@@ -3263,6 +3302,7 @@ fn printed_spellcaster_should_cast_and_summon_while_sick_or_tapped() {
     });
     let (target_summon, _) = accept_where(&mut tapped_cast, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "south-minion"
             && descriptor["cell"] == "B2"
     });
@@ -3414,6 +3454,7 @@ fn freeze_should_disable_nearby_minion_until_caster_next_start_phase() {
     });
     let (far_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "south-far"
             && descriptor["cell"] == "C1"
     });
@@ -3433,6 +3474,7 @@ fn freeze_should_disable_nearby_minion_until_caster_next_start_phase() {
     });
     let (target_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "south-target"
             && descriptor["cell"] == "C2"
     });
@@ -3660,6 +3702,7 @@ fn rule_catalog_0032_charge_magic_grants_an_ally_charge_only_for_the_current_tur
 
     let (printed_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "north-printed"
             && descriptor["cell"] == "C4"
     });
@@ -3703,6 +3746,7 @@ fn rule_catalog_0032_charge_magic_grants_an_ally_charge_only_for_the_current_tur
     });
     let (enemy_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "south-enemy"
             && descriptor["cell"] == "C1"
     });
@@ -3719,6 +3763,7 @@ fn rule_catalog_0032_charge_magic_grants_an_ally_charge_only_for_the_current_tur
     });
     let (ally_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "north-ally"
             && descriptor["cell"] == "C4"
     });
@@ -4028,6 +4073,7 @@ fn rule_catalog_0033_overpower_changes_current_power_until_the_current_end_phase
 
     let (fighter_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "north-fighter"
             && descriptor["cell"] == "C4"
     });
@@ -4044,6 +4090,7 @@ fn rule_catalog_0033_overpower_changes_current_power_until_the_current_end_phase
     });
     let (enemy_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "south-enemy"
             && descriptor["cell"] == "C4"
     });
@@ -5985,6 +6032,7 @@ fn enemies_at_c1(session: &mut Session) -> Vec<String> {
     for card_id in ["south-plain", "south-warded"] {
         let (summoned, _) = accept_where(session, |descriptor| {
             descriptor["kind"] == "summon-minion"
+                && descriptor["region"].is_null()
                 && descriptor["cardId"] == card_id
                 && descriptor["cell"] == "C1"
         });
@@ -6009,6 +6057,7 @@ fn rule_catalog_0057_genesis_strike_should_hit_every_enemy_sharing_the_newcomers
     let enemy_ids = enemies_at_c1(&mut session);
     let (ally, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "north-ally"
             && descriptor["cell"] == "C1"
     });
@@ -6018,6 +6067,7 @@ fn rule_catalog_0057_genesis_strike_should_hit_every_enemy_sharing_the_newcomers
         .to_owned();
     let (titan, receipt) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "north-titan"
             && descriptor["cell"] == "C1"
     });
@@ -6115,7 +6165,9 @@ fn two_minions_at_c2(session: &mut Session) -> Vec<String> {
     let mut candidates = Vec::new();
     for _ in 0..2 {
         let (summoned, _) = accept_where(session, |descriptor| {
-            descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C2"
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cell"] == "C2"
+                && descriptor["region"].is_null()
         });
         candidates.push(
             summoned["cardInstanceId"]
@@ -6284,6 +6336,7 @@ fn mesmerism_opening(session: &mut Session) -> (String, String) {
     });
     let (far, _) = accept_where(session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "south-far"
             && descriptor["cell"] == "C1"
     });
@@ -6303,6 +6356,7 @@ fn mesmerism_opening(session: &mut Session) -> (String, String) {
     });
     let (near, _) = accept_where(session, |descriptor| {
         descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
             && descriptor["cardId"] == "south-target"
             && descriptor["cell"] == "C2"
     });
@@ -6453,7 +6507,9 @@ fn rule_catalog_0147_fatality_should_kill_only_a_wounded_minion_in_the_caster_re
     let mut enemy_ids = Vec::new();
     for _ in 0..2 {
         let (summoned, _) = accept_where(&mut session, |descriptor| {
-            descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C1"
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cell"] == "C1"
+                && descriptor["region"].is_null()
         });
         enemy_ids.push(
             summoned["cardInstanceId"]

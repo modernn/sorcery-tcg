@@ -11,9 +11,9 @@ use serde_json::{Map, Value, json};
 use crate::action::{
     ActionDescriptor, CombatTarget, DeckZone, GenesisDamageChoice, GenesisSpellChoice,
     GenesisTokenChoice, ProjectileDirection, RangedStepChoice, SummonPaymentMode, UnitTarget,
-    compare_canonical,
+    compare_canonical, location_label,
 };
-use crate::board::{Cell, Location, Region, SquareArea, translated_square};
+use crate::board::{Cell, Location, LowerRegion, Region, SquareArea, translated_square};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{
@@ -367,6 +367,43 @@ struct UnitPosition {
     temporary_charge_sources: Vec<IdentityHash>,
     temporary_power_sources: Vec<IdentityHash>,
     warded: bool,
+}
+
+/// The card-derived facts a freshly summoned minion needs before it becomes a realm unit.
+struct SummonPlacement {
+    card: CardInstance,
+    controller: Seat,
+    lance_count: u8,
+    location: Cell,
+    occupied_cells: Option<SquareArea>,
+    region: Region,
+    stealthed: bool,
+    warded: bool,
+}
+
+impl SummonPlacement {
+    fn into_unit(self) -> UnitPosition {
+        UnitPosition {
+            card: self.card,
+            carried_lance_count: self.lance_count,
+            controller: self.controller,
+            damage: 0,
+            disable_effects: Vec::new(),
+            disabled_until_damaged: false,
+            last_dropped_artifacts_turn: None,
+            last_interacted_turn: None,
+            last_picked_up_artifacts_turn: None,
+            location: self.location,
+            occupied_cells: self.occupied_cells,
+            region: self.region,
+            stealthed: self.stealthed,
+            summoning_sickness: true,
+            tapped: false,
+            temporary_charge_sources: Vec::new(),
+            temporary_power_sources: Vec::new(),
+            warded: self.warded,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -847,6 +884,7 @@ struct SummonDestination {
     cell: Cell,
     cells: Option<SquareArea>,
     mana_cost: u64,
+    region: Option<LowerRegion>,
 }
 
 #[derive(Clone, Copy)]
@@ -1157,8 +1195,6 @@ fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
     account_for_selfplay_minion_fields(facts);
     if facts.at_start_of_controller_turn_teleport_to_random_site_or_void {
         Some("atStartOfControllerTurnTeleportToRandomSiteOrVoid")
-    } else if facts.burrowing {
-        Some("burrowing")
     } else if let Some(field) = unsupported_selfplay_minion_genesis(facts.genesis) {
         Some(field)
     } else if facts.must_be_cast_to_outer_column {
@@ -2205,8 +2241,16 @@ impl Game {
             pending.attacking_seat,
             &pending.attacker_instance_id,
         )?;
+        // A fight only reaches the layer the attacker itself stands in.
+        let attacker_region = self.combatant_region(
+            pending.attacker_kind,
+            pending.attacking_seat,
+            &pending.attacker_instance_id,
+        )?;
         let mut targets = Vec::new();
-        if attacker_cells.contains(&opposing_player.avatar.location) {
+        if attacker_region == Region::Surface
+            && attacker_cells.contains(&opposing_player.avatar.location)
+        {
             targets.push(CombatTarget::Avatar {
                 instance_id: opposing_player.avatar.card.instance_id.clone(),
                 seat: opposing_seat,
@@ -2214,7 +2258,7 @@ impl Game {
         }
         for unit in &self.position.units {
             if unit.controller != opposing_seat
-                || unit.region != Region::Surface
+                || unit.region != attacker_region
                 || !Self::unit_occupied_cells(unit)
                     .iter()
                     .any(|cell| attacker_cells.contains(cell))
@@ -2234,7 +2278,7 @@ impl Game {
                 });
             }
         }
-        if self.attacker_can_target_sites(pending)? {
+        if attacker_region == Region::Surface && self.attacker_can_target_sites(pending)? {
             for cell in attacker_cells {
                 if let Some(site) = &self.position.sites[cell.index()]
                     && site.controller == opposing_seat
@@ -2306,11 +2350,13 @@ impl Game {
                         genesis_damage_target,
                         mana_cost: 0,
                         payment_mode: None,
+                        region: destination.region,
                         sacrificed_minion_instance_ids: None,
                     },
                     format!(
                         "Raise {} at {} (free){genesis_suffix}",
-                        definition.id, destination.cell
+                        definition.id,
+                        Self::summon_destination_label(&destination)
                     ),
                 );
             }
@@ -2823,12 +2869,14 @@ impl Game {
                                     genesis_damage_target: genesis_damage_target.clone(),
                                     mana_cost,
                                     payment_mode,
+                                    region: destination.region,
                                     sacrificed_minion_instance_ids: sacrificed_minion_instance_ids
                                         .clone(),
                                 },
                                 format!(
                                     "Summon {} at {} ({payment}){genesis_suffix}{caster_suffix}",
-                                    definition.id, destination.cell
+                                    definition.id,
+                                    Self::summon_destination_label(&destination)
                                 ),
                             );
                         }
@@ -2877,7 +2925,10 @@ impl Game {
             self.append_unit_move_actions(
                 actions,
                 &player.avatar.card.instance_id,
-                player.avatar.location,
+                Location {
+                    cell: player.avatar.location,
+                    region: Region::Surface,
+                },
                 MovementProfile {
                     airborne: false,
                     cause: MovementCause::BasicMovement,
@@ -2905,7 +2956,10 @@ impl Game {
             self.append_unit_move_actions(
                 actions,
                 &unit.card.instance_id,
-                unit.location,
+                Location {
+                    cell: unit.location,
+                    region: unit.region,
+                },
                 MovementProfile {
                     airborne: facts.airborne,
                     cause: MovementCause::BasicMovement,
@@ -4908,16 +4962,10 @@ impl Game {
         &self,
         actions: &mut Vec<IssuedAction>,
         instance_id: &IdentityHash,
-        start: Cell,
+        start: Location,
         profile: MovementProfile,
     ) -> Result<(), GameError> {
-        for path in self.movement_paths(
-            Location {
-                cell: start,
-                region: Region::Surface,
-            },
-            profile,
-        ) {
+        for path in self.movement_paths(start, profile) {
             let from = path[0];
             let to = *path
                 .last()
@@ -5370,7 +5418,6 @@ impl Game {
 
     fn minion_can_move_and_attack(&self, unit: &UnitPosition, seat: Seat) -> bool {
         unit.controller == seat
-            && unit.region == Region::Surface
             && !self.minion_is_disabled(unit)
             && !unit.tapped
             && (!unit.summoning_sickness || self.minion_has_active_charge(unit))
@@ -5383,6 +5430,25 @@ impl Game {
         };
         !self.minion_is_disabled(unit)
             && (facts.charge || !unit.temporary_charge_sources.is_empty())
+    }
+
+    /// The realm layer one combatant currently occupies.
+    fn combatant_region(
+        &self,
+        kind: UnitKind,
+        seat: Seat,
+        instance_id: &IdentityHash,
+    ) -> Result<Region, GameError> {
+        match kind {
+            UnitKind::Avatar => Ok(Region::Surface),
+            UnitKind::Minion => self
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.controller == seat && unit.card.instance_id == *instance_id)
+                .map(|unit| unit.region)
+                .ok_or(GameError::IllegalAction),
+        }
     }
 
     fn attacker_can_target_sites(&self, pending: &PendingCombat) -> Result<bool, GameError> {
@@ -5499,21 +5565,55 @@ impl Game {
                             cell: cells[0],
                             cells: Some(cells),
                             mana_cost,
+                            region: None,
                         })
                 })
                 .collect()
         } else {
             Cell::ALL
                 .into_iter()
-                .filter_map(|cell| {
-                    summon_cell(cell).map(|mana_cost| SummonDestination {
-                        cell,
-                        cells: None,
-                        mana_cost,
-                    })
+                .flat_map(|cell| {
+                    summon_cell(cell)
+                        .map(|mana_cost| self.summon_regions(minion, cell, mana_cost))
+                        .unwrap_or_default()
                 })
                 .collect()
         }
+    }
+
+    /// Names a summon destination, qualifying the cell only when it leaves the surface.
+    fn summon_destination_label(destination: &SummonDestination) -> String {
+        match destination.region {
+            None => destination.cell.to_string(),
+            Some(region) => location_label(Location {
+                cell: destination.cell,
+                region: region.into(),
+            }),
+        }
+    }
+
+    /// The surface placement plus every lower layer the minion's own region abilities reach.
+    fn summon_regions(
+        &self,
+        minion: &MinionFacts,
+        cell: Cell,
+        mana_cost: u64,
+    ) -> Vec<SummonDestination> {
+        let mut destinations = vec![SummonDestination {
+            cell,
+            cells: None,
+            mana_cost,
+            region: None,
+        }];
+        if minion.burrowing && self.underground_location_exists(cell) {
+            destinations.push(SummonDestination {
+                cell,
+                cells: None,
+                mana_cost,
+                region: Some(LowerRegion::Underground),
+            });
+        }
+        destinations
     }
 
     /// Enumerates the placements a free summon grants: any existing surface location, ignoring
@@ -5527,17 +5627,14 @@ impl Game {
                     cell: cells[0],
                     cells: Some(cells),
                     mana_cost: 0,
+                    region: None,
                 })
                 .collect()
         } else {
             Cell::ALL
                 .into_iter()
                 .filter(|cell| self.surface_location_exists(*cell))
-                .map(|cell| SummonDestination {
-                    cell,
-                    cells: None,
-                    mana_cost: 0,
-                })
+                .flat_map(|cell| self.summon_regions(minion, cell, 0))
                 .collect()
         }
     }
@@ -9269,9 +9366,6 @@ impl Game {
         if self.position.phase != Phase::Main
             || seat != self.position.active_seat
             || path.is_empty()
-            || path
-                .iter()
-                .any(|location| location.region != Region::Surface)
             || path.first() != Some(&from)
             || path.last() != Some(&to)
         {
@@ -9282,7 +9376,10 @@ impl Game {
             if player.avatar.card.instance_id == *unit_instance_id {
                 (
                     UnitKind::Avatar,
-                    player.avatar.location,
+                    Location {
+                        cell: player.avatar.location,
+                        region: Region::Surface,
+                    },
                     !player.avatar.tapped,
                     MovementProfile {
                         airborne: false,
@@ -9311,7 +9408,10 @@ impl Game {
                 };
                 (
                     UnitKind::Minion,
-                    unit.location,
+                    Location {
+                        cell: unit.location,
+                        region: unit.region,
+                    },
                     self.minion_can_move_and_attack(unit, seat),
                     MovementProfile {
                         airborne: facts.airborne,
@@ -9333,15 +9433,9 @@ impl Game {
             }
         };
         if !ready
-            || current_location != from.cell
+            || current_location != from
             || !self
-                .movement_paths(
-                    Location {
-                        cell: current_location,
-                        region: Region::Surface,
-                    },
-                    profile,
-                )
+                .movement_paths(current_location, profile)
                 .iter()
                 .any(|candidate| candidate == path)
         {
@@ -13027,6 +13121,7 @@ impl Game {
             genesis_damage_target,
             mana_cost,
             payment_mode,
+            region,
             sacrificed_minion_instance_ids,
         } = &action.descriptor
         else {
@@ -13060,10 +13155,14 @@ impl Game {
         let lance_count = facts.lance_count;
         let starts_stealthed = facts.stealth;
         let starts_warded = facts.damage_prevention == Some(DamagePrevention::Ward);
-        let Some(destination) = self
-            .summon_destinations(seat, facts)
-            .into_iter()
-            .find(|destination| destination.cell == *cell && destination.cells == *cells)
+        let Some(destination) =
+            self.summon_destinations(seat, facts)
+                .into_iter()
+                .find(|destination| {
+                    destination.cell == *cell
+                        && destination.cells == *cells
+                        && destination.region == *region
+                })
         else {
             return Err(GameError::IllegalAction);
         };
@@ -13224,26 +13323,17 @@ impl Game {
                 seat,
             },
         };
-        let unit = UnitPosition {
+        let unit = SummonPlacement {
             card,
-            carried_lance_count: lance_count.unwrap_or(0),
             controller: seat,
-            damage: 0,
-            disable_effects: Vec::new(),
-            disabled_until_damaged: false,
-            last_dropped_artifacts_turn: None,
-            last_interacted_turn: None,
-            last_picked_up_artifacts_turn: None,
+            lance_count: lance_count.unwrap_or(0),
             location: *cell,
             occupied_cells: *cells,
-            region: Region::Surface,
+            region: region.map_or(Region::Surface, Region::from),
             stealthed: starts_stealthed,
-            summoning_sickness: true,
-            tapped: false,
-            temporary_charge_sources: Vec::new(),
-            temporary_power_sources: Vec::new(),
             warded: starts_warded,
-        };
+        }
+        .into_unit();
         let continuation = PaidSummonContinuation {
             caster,
             genesis_damage_choice: *genesis_damage_choice,
@@ -13430,6 +13520,7 @@ impl Game {
             genesis_damage_target,
             mana_cost,
             payment_mode,
+            region,
             sacrificed_minion_instance_ids,
         } = &action.descriptor
         else {
@@ -13471,7 +13562,11 @@ impl Game {
         let placeable = self
             .free_summon_destinations(facts)
             .into_iter()
-            .any(|destination| destination.cell == *cell && destination.cells == *cells);
+            .any(|destination| {
+                destination.cell == *cell
+                    && destination.cells == *cells
+                    && destination.region == *region
+            });
         if !placeable
             || !self.valid_genesis_damage_choice(
                 seat,
@@ -13487,26 +13582,17 @@ impl Game {
         let card = self.position.players[owner_index]
             .cemetery
             .remove(cemetery_index);
-        let unit = UnitPosition {
+        let unit = SummonPlacement {
             card,
-            carried_lance_count: lance_count,
             controller: seat,
-            damage: 0,
-            disable_effects: Vec::new(),
-            disabled_until_damaged: false,
-            last_dropped_artifacts_turn: None,
-            last_interacted_turn: None,
-            last_picked_up_artifacts_turn: None,
+            lance_count,
             location: *cell,
             occupied_cells: *cells,
-            region: Region::Surface,
+            region: region.map_or(Region::Surface, Region::from),
             stealthed: starts_stealthed,
-            summoning_sickness: true,
-            tapped: false,
-            temporary_charge_sources: Vec::new(),
-            temporary_power_sources: Vec::new(),
             warded: starts_warded,
-        };
+        }
+        .into_unit();
         let continuation = PaidSummonContinuation {
             caster: self.recorded_caster(seat, caster_instance_id),
             genesis_damage_choice: *genesis_damage_choice,
@@ -15689,11 +15775,15 @@ mod tests {
             .expect("valid Bury manifest")
             .ensure_selfplay_supported()
             .expect("ordinary minion Bury is self-play safe");
+        Game::from_manifest_json(&bury_manifest(Some(("burrowing", json!(true)))))
+            .expect("valid Burrowing manifest")
+            .ensure_selfplay_supported()
+            .expect("Burrowing minion Bury is self-play safe");
         assert!(matches!(
-            Game::from_manifest_json(&bury_manifest(Some(("burrowing", json!(true)))))
-                .expect("valid Burrowing manifest")
+            Game::from_manifest_json(&bury_manifest(Some(("submerge", json!(true)))))
+                .expect("valid Submerge manifest")
                 .ensure_selfplay_supported(),
-            Err(GameError::UnsupportedManifestFact(field)) if field == "burrowing"
+            Err(GameError::UnsupportedManifestFact(field)) if field == "submerge"
         ));
 
         let cave_in = selfplay_manifest_with(31, |manifest| {
