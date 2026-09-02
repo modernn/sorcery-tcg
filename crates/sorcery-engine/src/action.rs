@@ -5,7 +5,7 @@ use std::str::Bytes;
 
 use serde::{Deserialize, Serialize};
 
-use crate::board::{Cell, Location, Region};
+use crate::board::{Cell, Location, Region, SquareArea};
 use crate::canonical::IdentityHash;
 use crate::contract::Seat;
 
@@ -262,6 +262,9 @@ pub enum ActionDescriptor {
         caster_instance_id: IdentityHash,
         /// Realm cell receiving the minion.
         cell: Cell,
+        /// Exact canonical two-by-two footprint, when the minion is oversized.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cells: Option<SquareArea>,
         /// Decline or select the accompanying optional Genesis damage.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         genesis_damage_choice: Option<GenesisDamageChoice>,
@@ -633,6 +636,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     card_instance_id: left_instance,
                     caster_instance_id: left_caster,
                     cell: left_cell,
+                    cells: left_cells,
                     genesis_damage_choice: left_choice,
                     genesis_damage_target: left_target,
                     mana_cost: left_mana,
@@ -642,6 +646,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     card_instance_id: right_instance,
                     caster_instance_id: right_caster,
                     cell: right_cell,
+                    cells: right_cells,
                     genesis_damage_choice: right_choice,
                     genesis_damage_target: right_target,
                     mana_cost: right_mana,
@@ -650,6 +655,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 .then_with(|| left_instance.cmp(right_instance))
                 .then_with(|| left_caster.cmp(right_caster))
                 .then_with(|| left_cell.cmp(right_cell))
+                .then_with(|| compare_optional_square_areas(*left_cells, *right_cells))
                 .then_with(|| compare_optional_genesis_damage_choices(*left_choice, *right_choice))
                 .then_with(|| {
                     compare_optional_unit_targets(left_target.as_ref(), right_target.as_ref())
@@ -909,6 +915,15 @@ fn compare_optional_identities(
 fn compare_optional_cells(left: Option<Cell>, right: Option<Cell>) -> Ordering {
     match (left, right) {
         (Some(left), Some(right)) => left.cmp(&right),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+fn compare_optional_square_areas(left: Option<SquareArea>, right: Option<SquareArea>) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => compare_json_array(&left, &right, Cell::cmp),
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (None, None) => Ordering::Equal,

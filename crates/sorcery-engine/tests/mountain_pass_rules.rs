@@ -5,8 +5,7 @@ use sorcery_engine::checkpoint::{
     serialize_game_checkpoint,
 };
 use sorcery_engine::contract::{ActionRequest, Receipt};
-use sorcery_engine::game::GameError;
-use sorcery_engine::session::{Session, SessionError, StepResult};
+use sorcery_engine::session::{Session, StepResult};
 
 struct MountainPassSetup {
     north_airborne_id: String,
@@ -395,7 +394,7 @@ fn mountain_pass_should_block_only_occupied_ground_minion_entry() {
 }
 
 #[test]
-fn oversized_mountain_pass_manifest_should_fail_closed() {
+fn oversized_mountain_pass_manifest_should_be_admitted() {
     let mut oversized: Value = serde_json::from_str(&manifest()).expect("synthetic manifest value");
     oversized["cards"]["north-ground"]["occupiesSquareArea"] = json!(2);
     oversized
@@ -405,13 +404,7 @@ fn oversized_mountain_pass_manifest_should_fail_closed() {
     oversized["manifestId"] =
         json!(identity_hash(&oversized).expect("oversized manifest identity"));
     let encoded = canonical_json(&oversized).expect("canonical oversized manifest");
-    let error = Session::new(&encoded).expect_err("oversized units remain unsupported");
-    match error {
-        SessionError::Game(GameError::UnsupportedManifestFact(field)) => {
-            assert_eq!(field, "occupiesSquareArea");
-        }
-        other => panic!("expected unsupported oversized fact, received {other}"),
-    }
+    Session::new(&encoded).expect("oversized ground minion uses the supported footprint core");
 }
 
 #[test]

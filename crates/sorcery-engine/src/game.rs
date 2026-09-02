@@ -12,7 +12,7 @@ use crate::action::{
     ActionDescriptor, CombatTarget, DeckZone, GenesisDamageChoice, GenesisSpellChoice,
     GenesisTokenChoice, ProjectileDirection, UnitTarget, compare_canonical,
 };
-use crate::board::{Cell, Location, Region};
+use crate::board::{Cell, Location, Region, SquareArea, translated_square};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{
@@ -339,6 +339,7 @@ struct UnitPosition {
     disabled_until_damaged: bool,
     last_interacted_turn: Option<u64>,
     location: Cell,
+    occupied_cells: Option<SquareArea>,
     stealthed: bool,
     summoning_sickness: bool,
     tapped: bool,
@@ -577,6 +578,7 @@ struct StrikeStats {
 #[derive(Clone, Copy)]
 struct SummonDestination {
     cell: Cell,
+    cells: Option<SquareArea>,
     mana_cost: u64,
 }
 
@@ -586,6 +588,7 @@ struct MovementProfile {
     connects_top_bottom: bool,
     maximum_cost: Option<usize>,
     moving_minion: bool,
+    occupied_cells: Option<SquareArea>,
     restriction: Option<BasicMovementRestriction>,
     seat: Seat,
 }
@@ -966,13 +969,6 @@ impl Game {
         }
         let manifest: Manifest = serde_json::from_value(raw.clone())?;
         let mut parsed_facts = validate_manifest(&raw, &manifest)?;
-        if parsed_facts.values().any(
-            |facts| matches!(facts, CardFacts::Minion(facts) if facts.occupies_square_area_two),
-        ) {
-            return Err(GameError::UnsupportedManifestFact(
-                "occupiesSquareArea".to_owned(),
-            ));
-        }
         if let Some(field) = parsed_facts.values().find_map(|facts| {
             let CardFacts::Minion(facts) = facts else {
                 return None;
@@ -1325,7 +1321,15 @@ impl Game {
             for path in self
                 .surface_movement_paths(start, profile)
                 .into_iter()
-                .filter(|path| path.last() == Some(&destination))
+                .filter(|path| {
+                    let Some(end) = path.last() else {
+                        return false;
+                    };
+                    profile.occupied_cells.map_or(end == &destination, |area| {
+                        translated_square(area, start, end.cell)
+                            .is_some_and(|cells| cells.contains(&destination.cell))
+                    })
+                })
             {
                 let descriptor = ActionDescriptor::Defend {
                     from: path[0],
@@ -1414,7 +1418,7 @@ impl Game {
         }
         for unit in &self.position.units {
             if unit.controller != seat
-                || unit.location != pending.cell
+                || !Self::unit_occupies_cell(unit, pending.cell)
                 || unit.tapped
                 || self.minion_is_disabled(unit)
                 || unavailable.contains(&unit.card.instance_id)
@@ -1513,6 +1517,7 @@ impl Game {
                     connects_top_bottom: false,
                     maximum_cost: Some(1),
                     moving_minion: false,
+                    occupied_cells: None,
                     restriction: None,
                     seat,
                 },
@@ -1550,6 +1555,7 @@ impl Game {
                         Some(1 + usize::from(facts.movement_bonus.unwrap_or(0)))
                     },
                     moving_minion: true,
+                    occupied_cells: unit.occupied_cells,
                     restriction: facts.movement_restriction,
                     seat,
                 },
@@ -1571,8 +1577,13 @@ impl Game {
         )?;
         let opposing_seat = other_seat(pending.attacking_seat);
         let opposing_player = &self.position.players[seat_index(opposing_seat)];
+        let attacker_cells = self.combatant_occupied_cells(
+            pending.attacker_kind,
+            pending.attacking_seat,
+            &pending.attacker_instance_id,
+        )?;
         let mut targets = Vec::new();
-        if opposing_player.avatar.location == pending.cell {
+        if attacker_cells.contains(&opposing_player.avatar.location) {
             targets.push(CombatTarget::Avatar {
                 instance_id: opposing_player.avatar.card.instance_id.clone(),
                 seat: opposing_seat,
@@ -1580,7 +1591,9 @@ impl Game {
         }
         for unit in &self.position.units {
             if unit.controller != opposing_seat
-                || unit.location != pending.cell
+                || !Self::unit_occupied_cells(unit)
+                    .iter()
+                    .any(|cell| attacker_cells.contains(cell))
                 || self.minion_has_active_stealth(unit)
             {
                 continue;
@@ -1597,14 +1610,17 @@ impl Game {
                 });
             }
         }
-        if self.attacker_can_target_sites(pending)?
-            && let Some(site) = &self.position.sites[pending.cell.index()]
-            && site.controller == opposing_seat
-        {
-            targets.push(CombatTarget::Site {
-                instance_id: site.card.instance_id.clone(),
-                seat: opposing_seat,
-            });
+        if self.attacker_can_target_sites(pending)? {
+            for cell in attacker_cells {
+                if let Some(site) = &self.position.sites[cell.index()]
+                    && site.controller == opposing_seat
+                {
+                    targets.push(CombatTarget::Site {
+                        instance_id: site.card.instance_id.clone(),
+                        seat: opposing_seat,
+                    });
+                }
+            }
         }
         Ok(targets)
     }
@@ -1895,6 +1911,7 @@ impl Game {
             }
             for destination in self
                 .summon_destinations(seat, facts)
+                .into_iter()
                 .filter(|destination| destination.mana_cost <= u64::from(player.mana))
             {
                 let genesis_choices = if facts.genesis
@@ -1935,6 +1952,7 @@ impl Game {
                                 card_instance_id: card.instance_id.clone(),
                                 caster_instance_id: caster_instance_id.clone(),
                                 cell: destination.cell,
+                                cells: destination.cells,
                                 genesis_damage_choice: *genesis_damage_choice,
                                 genesis_damage_target: genesis_damage_target.clone(),
                                 mana_cost: destination.mana_cost,
@@ -1985,6 +2003,7 @@ impl Game {
                     connects_top_bottom: false,
                     maximum_cost: Some(1),
                     moving_minion: false,
+                    occupied_cells: None,
                     restriction: None,
                     seat,
                 },
@@ -2014,6 +2033,7 @@ impl Game {
                         Some(1 + usize::from(facts.movement_bonus.unwrap_or(0)))
                     },
                     moving_minion: true,
+                    occupied_cells: unit.occupied_cells,
                     restriction: facts.movement_restriction,
                     seat,
                 },
@@ -2195,7 +2215,7 @@ impl Game {
                         .iter()
                         .filter(|unit| {
                             unit.card.instance_id != *shooter_instance_id
-                                && unit.location == location.cell
+                                && Self::unit_occupies_cell(unit, location.cell)
                                 && !self.minion_has_active_stealth(unit)
                                 && (path.len() > 1 || unit.controller != seat)
                         })
@@ -2321,6 +2341,69 @@ impl Game {
         unit.stealthed && !self.minion_is_disabled(unit)
     }
 
+    fn unit_occupied_cells(unit: &UnitPosition) -> &[Cell] {
+        unit.occupied_cells.as_ref().map_or_else(
+            || std::slice::from_ref(&unit.location),
+            |area| area.as_slice(),
+        )
+    }
+
+    fn unit_occupies_cell(unit: &UnitPosition, cell: Cell) -> bool {
+        Self::unit_occupied_cells(unit).contains(&cell)
+    }
+
+    fn footprints_nearby(source: &[Cell], target: &[Cell]) -> bool {
+        source.iter().any(|source_cell| {
+            target.contains(source_cell)
+                || source_cell
+                    .bordering(false)
+                    .chain(source_cell.diagonals(false))
+                    .any(|cell| target.contains(&cell))
+        })
+    }
+
+    fn footprints_here_or_bordering(source: &[Cell], target: &[Cell]) -> bool {
+        source.iter().any(|source_cell| {
+            target.contains(source_cell)
+                || source_cell
+                    .bordering(false)
+                    .any(|cell| target.contains(&cell))
+        })
+    }
+
+    fn combatant_occupied_cells(
+        &self,
+        kind: UnitKind,
+        seat: Seat,
+        instance_id: &IdentityHash,
+    ) -> Result<&[Cell], GameError> {
+        match kind {
+            UnitKind::Avatar => {
+                let avatar = &self.position.players[seat_index(seat)].avatar;
+                if avatar.card.instance_id != *instance_id {
+                    return Err(GameError::IllegalAction);
+                }
+                Ok(std::slice::from_ref(&avatar.location))
+            }
+            UnitKind::Minion => self
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.controller == seat && unit.card.instance_id == *instance_id)
+                .map(Self::unit_occupied_cells)
+                .ok_or(GameError::IllegalAction),
+        }
+    }
+
+    fn move_minion_to(unit: &mut UnitPosition, cell: Cell) -> Result<(), GameError> {
+        if let Some(area) = unit.occupied_cells {
+            unit.occupied_cells =
+                Some(translated_square(area, unit.location, cell).ok_or(GameError::IllegalAction)?);
+        }
+        unit.location = cell;
+        Ok(())
+    }
+
     fn settle_nearby_enemy_stealth(&mut self, outcomes: &mut OutcomeLog<'_>) {
         if self.position.terminal.is_some() {
             return;
@@ -2356,15 +2439,16 @@ impl Game {
             };
             let source_controller = self.position.units[source_index].controller;
             let source_location = self.position.units[source_index].location;
+            let source_area = self.position.units[source_index].occupied_cells;
+            let source_singleton = [source_location];
+            let source_cells = source_area
+                .as_ref()
+                .map_or(source_singleton.as_slice(), |area| area.as_slice());
             for target_index in 0..self.position.units.len() {
                 let target = &self.position.units[target_index];
                 if target.controller == source_controller
                     || !target.stealthed
-                    || (target.location != source_location
-                        && !source_location
-                            .bordering(false)
-                            .chain(source_location.diagonals(false))
-                            .any(|cell| cell == target.location))
+                    || !Self::footprints_nearby(source_cells, Self::unit_occupied_cells(target))
                 {
                     continue;
                 }
@@ -2397,12 +2481,10 @@ impl Game {
         };
         let disabled = self.minion_is_disabled(unit);
         let nearby = |source: &UnitPosition| {
-            source.location == unit.location
-                || source
-                    .location
-                    .bordering(false)
-                    .chain(source.location.diagonals(false))
-                    .any(|cell| cell == unit.location)
+            Self::footprints_nearby(
+                Self::unit_occupied_cells(source),
+                Self::unit_occupied_cells(unit),
+            )
         };
         let mut bonus = 0_u16;
         for source in &self.position.units {
@@ -2481,17 +2563,17 @@ impl Game {
         minion_only: bool,
     ) -> Result<Vec<MagicChoice>, GameError> {
         let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
-        let nearby = |location: Cell| {
-            location == caster_location
-                || caster_location
-                    .bordering(false)
-                    .chain(caster_location.diagonals(false))
-                    .any(|cell| cell == location)
-        };
+        let caster_cells = [caster_location];
         let mut targets = Vec::new();
         for target_seat in [Seat::North, Seat::South] {
             let player = &self.position.players[seat_index(target_seat)];
-            if !minion_only && (!target_nearby || nearby(player.avatar.location)) {
+            if !minion_only
+                && (!target_nearby
+                    || Self::footprints_nearby(
+                        &caster_cells,
+                        std::slice::from_ref(&player.avatar.location),
+                    ))
+            {
                 targets.push((
                     None,
                     Some(UnitTarget::Avatar {
@@ -2507,7 +2589,11 @@ impl Game {
                     .filter(|unit| {
                         unit.controller == target_seat
                             && (target_seat == seat || !self.minion_has_active_stealth(unit))
-                            && (!target_nearby || nearby(unit.location))
+                            && (!target_nearby
+                                || Self::footprints_nearby(
+                                    &caster_cells,
+                                    Self::unit_occupied_cells(unit),
+                                ))
                     })
                     .map(|unit| {
                         (
@@ -2564,17 +2650,17 @@ impl Game {
             )?,
             MagicEffect::DisableTargetNearbyMinionUntilNextTurn => {
                 let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
+                let caster_cells = [caster_location];
                 let mut targets: Vec<_> = self
                     .position
                     .units
                     .iter()
                     .filter(|unit| {
                         (unit.controller == seat || !self.minion_has_active_stealth(unit))
-                            && (unit.location == caster_location
-                                || caster_location
-                                    .bordering(false)
-                                    .chain(caster_location.diagonals(false))
-                                    .any(|cell| cell == unit.location))
+                            && Self::footprints_nearby(
+                                &caster_cells,
+                                Self::unit_occupied_cells(unit),
+                            )
                     })
                     .map(|unit| {
                         (
@@ -2630,7 +2716,14 @@ impl Game {
     }
 
     fn surface_movement_paths(&self, start: Cell, profile: MovementProfile) -> Vec<Vec<Location>> {
-        if !self.surface_location_exists(start) {
+        let starting_footprint_exists = profile.occupied_cells.map_or_else(
+            || self.surface_location_exists(start),
+            |area| {
+                area.into_iter()
+                    .all(|cell| self.surface_location_exists(cell))
+            },
+        );
+        if !starting_footprint_exists {
             return Vec::new();
         }
         let start = Location {
@@ -2661,8 +2754,34 @@ impl Game {
                         cell,
                         region: Region::Surface,
                     };
-                    if !self.surface_location_exists(cell)
-                        || !self.surface_entry_allowed(current.cell, cell, profile)
+                    let footprint_allowed = profile.occupied_cells.map_or_else(
+                        || {
+                            self.surface_location_exists(cell)
+                                && self.surface_entry_allowed(current.cell, cell, profile)
+                        },
+                        |area| {
+                            let Some(current_area) =
+                                translated_square(area, start.cell, current.cell)
+                            else {
+                                return false;
+                            };
+                            let Some(candidate_area) =
+                                translated_square(area, start.cell, candidate.cell)
+                            else {
+                                return false;
+                            };
+                            candidate_area.into_iter().all(|entered| {
+                                self.surface_location_exists(entered)
+                                    && (current_area.contains(&entered)
+                                        || self.surface_entry_allowed(
+                                            current.cell,
+                                            entered,
+                                            profile,
+                                        ))
+                            })
+                        },
+                    );
+                    if !footprint_allowed
                         || !Self::movement_restriction_allows(profile, current.cell, cell)
                         || path
                             .windows(2)
@@ -2720,7 +2839,7 @@ impl Game {
                 .position
                 .units
                 .iter()
-                .any(|unit| unit.location == candidate)
+                .any(|unit| Self::unit_occupies_cell(unit, candidate))
     }
 
     fn movement_restriction_allows(profile: MovementProfile, from: Cell, to: Cell) -> bool {
@@ -2855,12 +2974,8 @@ impl Game {
             .all(|(available, required)| available >= required)
     }
 
-    fn summon_destinations<'a>(
-        &'a self,
-        seat: Seat,
-        minion: &'a MinionFacts,
-    ) -> impl Iterator<Item = SummonDestination> + 'a {
-        Cell::ALL.into_iter().filter_map(move |cell| {
+    fn summon_destinations(&self, seat: Seat, minion: &MinionFacts) -> Vec<SummonDestination> {
+        let summon_cell = |cell: Cell| {
             let site = self.position.sites[cell.index()].as_ref()?;
             if !minion.summon_to_any_site && site.controller != seat {
                 return None;
@@ -2874,11 +2989,35 @@ impl Game {
                 return None;
             }
             let discount = u64::from(minion.ordinary && site_facts.ordinary_minion_mana_discount);
-            Some(SummonDestination {
-                cell,
-                mana_cost: minion.mana_cost.saturating_sub(discount),
-            })
-        })
+            Some(minion.mana_cost.saturating_sub(discount))
+        };
+        if minion.occupies_square_area_two {
+            Cell::SQUARE_AREAS
+                .into_iter()
+                .filter_map(|cells| {
+                    let mana_cost = cells.into_iter().find_map(summon_cell)?;
+                    cells
+                        .into_iter()
+                        .all(|cell| self.surface_location_exists(cell))
+                        .then_some(SummonDestination {
+                            cell: cells[0],
+                            cells: Some(cells),
+                            mana_cost,
+                        })
+                })
+                .collect()
+        } else {
+            Cell::ALL
+                .into_iter()
+                .filter_map(|cell| {
+                    summon_cell(cell).map(|mana_cost| SummonDestination {
+                        cell,
+                        cells: None,
+                        mana_cost,
+                    })
+                })
+                .collect()
+        }
     }
 
     fn genesis_damage_targets(
@@ -2887,16 +3026,17 @@ impl Game {
         source_instance_id: &IdentityHash,
         cell: Cell,
     ) -> Vec<UnitTarget> {
-        let nearby = |target: Cell| {
-            target == cell || cell.bordering(false).any(|candidate| candidate == target)
-        };
+        let source_cells = [cell];
         let mut targets = vec![UnitTarget::Minion {
             instance_id: source_instance_id.clone(),
             seat,
         }];
         for target_seat in [Seat::North, Seat::South] {
             let player = &self.position.players[seat_index(target_seat)];
-            if nearby(player.avatar.location) {
+            if Self::footprints_here_or_bordering(
+                &source_cells,
+                std::slice::from_ref(&player.avatar.location),
+            ) {
                 targets.push(UnitTarget::Avatar {
                     instance_id: player.avatar.card.instance_id.clone(),
                     seat: target_seat,
@@ -2908,7 +3048,10 @@ impl Game {
                     .iter()
                     .filter(|unit| {
                         unit.controller == target_seat
-                            && nearby(unit.location)
+                            && Self::footprints_here_or_bordering(
+                                &source_cells,
+                                Self::unit_occupied_cells(unit),
+                            )
                             && (target_seat == seat || !self.minion_has_active_stealth(unit))
                     })
                     .map(|unit| UnitTarget::Minion {
@@ -3374,7 +3517,6 @@ impl Game {
         if self.position.phase != Phase::Defend
             || path.is_empty()
             || path.first() != Some(&from)
-            || path.last() != Some(&to)
             || path
                 .iter()
                 .any(|location| location.region != Region::Surface)
@@ -3395,6 +3537,7 @@ impl Game {
         {
             return Err(GameError::IllegalAction);
         }
+        let final_anchor = *path.last().ok_or(GameError::IllegalAction)?;
         let (kind, _, start, profile) = self
             .defender_candidates()?
             .into_iter()
@@ -3405,6 +3548,12 @@ impl Game {
                 .surface_movement_paths(start, profile)
                 .iter()
                 .any(|candidate| candidate == path)
+            || profile
+                .occupied_cells
+                .map_or(final_anchor.cell != pending_cell, |area| {
+                    translated_square(area, start, final_anchor.cell)
+                        .is_none_or(|cells| !cells.contains(&pending_cell))
+                })
         {
             return Err(GameError::IllegalAction);
         }
@@ -3415,25 +3564,26 @@ impl Game {
                 "path": path,
                 "seat": seat,
                 "steps": path.len() - 1,
-                "to": to,
+                "to": final_anchor,
             })
         });
         match kind {
             UnitKind::Avatar => {
                 let avatar = &mut self.position.players[seat_index(seat)].avatar;
-                avatar.location = to.cell;
+                avatar.location = final_anchor.cell;
                 avatar.tapped = true;
             }
             UnitKind::Minion => {
                 for location in path.iter().skip(1) {
-                    self.position
+                    let unit = self
+                        .position
                         .units
                         .iter_mut()
                         .find(|unit| {
                             unit.card.instance_id == *unit_instance_id && unit.controller == seat
                         })
-                        .ok_or(GameError::IllegalAction)?
-                        .location = location.cell;
+                        .ok_or(GameError::IllegalAction)?;
+                    Self::move_minion_to(unit, location.cell)?;
                     self.settle_nearby_enemy_stealth(outcomes);
                 }
                 self.position
@@ -3660,14 +3810,42 @@ impl Game {
         }
         let attacker_instance_id = pending.attacker_instance_id.clone();
         let attacker_kind = pending.attacker_kind;
+        let attacking_seat = pending.attacking_seat;
         let attacker_stealthed =
-            self.combatant_stealthed(attacker_kind, pending.attacking_seat, &attacker_instance_id)?;
-        let cell = pending.cell;
-        self.position
+            self.combatant_stealthed(attacker_kind, attacking_seat, &attacker_instance_id)?;
+        let attacker_cells =
+            self.combatant_occupied_cells(attacker_kind, attacking_seat, &attacker_instance_id)?;
+        let cell = match target {
+            CombatTarget::Site { instance_id, .. } => Cell::ALL.into_iter().find(|cell| {
+                attacker_cells.contains(cell)
+                    && self.position.sites[cell.index()]
+                        .as_ref()
+                        .is_some_and(|site| site.card.instance_id == *instance_id)
+            }),
+            CombatTarget::Avatar { instance_id, seat }
+            | CombatTarget::Minion { instance_id, seat } => self
+                .combatant_occupied_cells(
+                    if matches!(target, CombatTarget::Avatar { .. }) {
+                        UnitKind::Avatar
+                    } else {
+                        UnitKind::Minion
+                    },
+                    *seat,
+                    instance_id,
+                )?
+                .iter()
+                .copied()
+                .filter(|cell| attacker_cells.contains(cell))
+                .min(),
+        }
+        .ok_or(GameError::IllegalAction)?;
+        let pending = self
+            .position
             .pending_combat
             .as_mut()
-            .ok_or(GameError::IllegalAction)?
-            .original_target = Some(target.clone());
+            .ok_or(GameError::IllegalAction)?;
+        pending.cell = cell;
+        pending.original_target = Some(target.clone());
         outcomes.push("attack-declared", || {
             json!({
                 "attackerInstanceId": attacker_instance_id,
@@ -5024,10 +5202,11 @@ impl Game {
         };
         let mut triggered_deaths = Vec::new();
         if let Some(amount) = facts.deathrite_damage_each_unit_here {
+            let source_cells = Self::unit_occupied_cells(&source.unit);
             let mut targets = Vec::new();
             for seat in [Seat::North, Seat::South] {
                 let avatar = &self.position.players[seat_index(seat)].avatar;
-                if avatar.location == source.unit.location {
+                if source_cells.contains(&avatar.location) {
                     targets.push((avatar.card.instance_id.clone(), UnitKind::Avatar, seat));
                 }
             }
@@ -5035,7 +5214,11 @@ impl Game {
                 self.position
                     .units
                     .iter()
-                    .filter(|unit| unit.location == source.unit.location)
+                    .filter(|unit| {
+                        Self::unit_occupied_cells(unit)
+                            .iter()
+                            .any(|cell| source_cells.contains(cell))
+                    })
                     .map(|unit| {
                         (
                             unit.card.instance_id.clone(),
@@ -5095,9 +5278,12 @@ impl Game {
             )?;
         }
         if facts.deathrite_lose_life_per_nearby_site_controlled {
-            let mut nearby = BTreeSet::from([source.unit.location]);
-            nearby.extend(source.unit.location.bordering(false));
-            nearby.extend(source.unit.location.diagonals(false));
+            let mut nearby = BTreeSet::new();
+            for cell in Self::unit_occupied_cells(&source.unit) {
+                nearby.insert(*cell);
+                nearby.extend(cell.bordering(false));
+                nearby.extend(cell.diagonals(false));
+            }
             for seat in [Seat::North, Seat::South] {
                 let attempted = Cell::ALL
                     .into_iter()
@@ -5425,6 +5611,7 @@ impl Game {
                         connects_top_bottom: false,
                         maximum_cost: Some(1),
                         moving_minion: false,
+                        occupied_cells: None,
                         restriction: None,
                         seat,
                     },
@@ -5454,6 +5641,7 @@ impl Game {
                             Some(1 + usize::from(facts.movement_bonus.unwrap_or(0)))
                         },
                         moving_minion: true,
+                        occupied_cells: unit.occupied_cells,
                         restriction: facts.movement_restriction,
                         seat,
                     },
@@ -5487,12 +5675,13 @@ impl Game {
             }
             UnitKind::Minion => {
                 for location in path.iter().skip(1) {
-                    self.position
+                    let unit = self
+                        .position
                         .units
                         .iter_mut()
                         .find(|unit| unit.card.instance_id == *unit_instance_id)
-                        .ok_or(GameError::IllegalAction)?
-                        .location = location.cell;
+                        .ok_or(GameError::IllegalAction)?;
+                    Self::move_minion_to(unit, location.cell)?;
                     self.settle_nearby_enemy_stealth(outcomes);
                 }
                 self.position
@@ -5898,6 +6087,7 @@ impl Game {
             disabled_until_damaged: false,
             last_interacted_turn: None,
             location: cell,
+            occupied_cells: None,
             stealthed: facts.stealth,
             summoning_sickness: true,
             tapped: false,
@@ -6527,6 +6717,7 @@ impl Game {
             card_instance_id,
             caster_instance_id,
             cell,
+            cells,
             genesis_damage_choice,
             genesis_damage_target,
             mana_cost,
@@ -6566,7 +6757,12 @@ impl Game {
         }
         if !self
             .summon_destinations(seat, facts)
-            .any(|destination| destination.cell == *cell && destination.mana_cost == *mana_cost)
+            .into_iter()
+            .any(|destination| {
+                destination.cell == *cell
+                    && destination.cells == *cells
+                    && destination.mana_cost == *mana_cost
+            })
             || *mana_cost > u64::from(player.mana)
             || !self.thresholds_met(seat, facts.thresholds)
             || !self.valid_genesis_damage_choice(
@@ -6601,6 +6797,7 @@ impl Game {
             disabled_until_damaged: false,
             last_interacted_turn: None,
             location: *cell,
+            occupied_cells: *cells,
             stealthed: starts_stealthed,
             summoning_sickness: true,
             tapped: false,
@@ -6608,14 +6805,18 @@ impl Game {
         });
         self.position.state_version += 1;
         outcomes.push("minion-summoned", || {
-            json!({
+            let mut payload = json!({
                 "cardId": card_id,
                 "casterInstanceId": caster_instance_id,
                 "cell": cell,
                 "instanceId": card_instance_id,
                 "manaPaid": mana_cost,
                 "seat": seat,
-            })
+            });
+            if let Some(cells) = cells {
+                payload["cells"] = json!(cells);
+            }
+            payload
         });
         if let Some(count) = lance_count {
             outcomes.push("lance-gained", || {
@@ -6750,7 +6951,7 @@ impl Game {
         let mut targets = Vec::new();
         for seat in [Seat::North, Seat::South] {
             let avatar = &self.position.players[seat_index(seat)].avatar;
-            if avatar.location == source.location {
+            if Self::unit_occupies_cell(&source, avatar.location) {
                 targets.push((avatar.card.instance_id.clone(), UnitKind::Avatar, seat));
             }
         }
@@ -6759,7 +6960,10 @@ impl Game {
                 .units
                 .iter()
                 .filter(|unit| {
-                    unit.location == source.location && unit.card.instance_id != *source_instance_id
+                    Self::unit_occupied_cells(unit)
+                        .iter()
+                        .any(|cell| Self::unit_occupies_cell(&source, *cell))
+                        && unit.card.instance_id != *source_instance_id
                 })
                 .map(|unit| {
                     (
@@ -7407,6 +7611,9 @@ impl Game {
         if let Some(turn) = unit.last_interacted_turn {
             object.insert("lastInteractedTurn".to_owned(), json!(turn));
         }
+        if let Some(cells) = unit.occupied_cells {
+            object.insert("occupiedCells".to_owned(), json!(cells));
+        }
         if !unit.disable_effects.is_empty() {
             object.insert(
                 "disableEffects".to_owned(),
@@ -7961,6 +8168,125 @@ mod tests {
         ));
     }
 
+    fn oversized_test_minion(
+        card_id: CardId,
+        instance_id: &str,
+        controller: Seat,
+        area: SquareArea,
+    ) -> UnitPosition {
+        UnitPosition {
+            card: CardInstance {
+                card_id,
+                instance_id: IdentityHash::parse(instance_id).expect("fixture identity"),
+                owner: controller,
+                source: CardSource::Spellbook,
+            },
+            carried_lance_count: 0,
+            controller,
+            damage: 0,
+            disable_effects: Vec::new(),
+            disabled_until_damaged: false,
+            last_interacted_turn: None,
+            location: area[0],
+            occupied_cells: Some(area),
+            stealthed: false,
+            summoning_sickness: false,
+            tapped: true,
+            warded: false,
+        }
+    }
+
+    #[test]
+    fn oversized_attack_should_choose_the_lowest_shared_contested_cell() {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            for card_id in ["north-spell-1", "south-spell-1"] {
+                manifest["cards"][card_id] = json!({
+                    "attack": 2,
+                    "cardType": "minion",
+                    "defense": 4,
+                    "manaCost": 0,
+                    "occupiesSquareArea": 2,
+                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                });
+            }
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid oversized manifest");
+        let card_id = |id: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == id)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let attacker_id = IdentityHash::parse(
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        )
+        .expect("attacker identity");
+        let target_id = IdentityHash::parse(
+            "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        )
+        .expect("target identity");
+        game.position.units = vec![
+            oversized_test_minion(
+                card_id("north-spell-1"),
+                attacker_id.as_str(),
+                Seat::North,
+                Cell::SQUARE_AREAS[4],
+            ),
+            oversized_test_minion(
+                card_id("south-spell-1"),
+                target_id.as_str(),
+                Seat::South,
+                Cell::SQUARE_AREAS[5],
+            ),
+        ];
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Attack;
+        game.position.pending_combat = Some(PendingCombat {
+            allocations: Vec::new(),
+            attacker_instance_id: attacker_id,
+            attacker_kind: UnitKind::Minion,
+            attacking_seat: Seat::North,
+            cell: Cell::parse("B2").expect("anchor"),
+            combatants: Vec::new(),
+            defenders: Vec::new(),
+            original_target: None,
+            target_removed: false,
+        });
+        let target = CombatTarget::Minion {
+            instance_id: target_id,
+            seat: Seat::South,
+        };
+        assert_eq!(
+            game.attack_targets().expect("attack targets"),
+            std::slice::from_ref(&target)
+        );
+
+        let mut outcomes = Vec::new();
+        game.apply_declare_attack_action(
+            Seat::North,
+            &target,
+            &mut OutcomeLog::Record(&mut outcomes),
+        )
+        .expect("declare oversized attack");
+        let contested = Cell::parse("B3").expect("lowest shared cell");
+        assert_eq!(
+            game.position
+                .pending_combat
+                .as_ref()
+                .expect("pending combat")
+                .cell,
+            contested
+        );
+        assert_eq!(outcomes[0].1["cell"], json!(contested));
+    }
+
     #[test]
     fn scent_hound_events_should_follow_source_identity_before_target_order() {
         let manifest = selfplay_manifest_with(31, |manifest| {
@@ -7999,6 +8325,7 @@ mod tests {
                 disabled_until_damaged: false,
                 last_interacted_turn: None,
                 location: Cell::parse(location).expect("fixture cell"),
+                occupied_cells: None,
                 stealthed,
                 summoning_sickness: false,
                 tapped: false,

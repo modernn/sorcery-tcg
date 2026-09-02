@@ -10,6 +10,9 @@ const RANK_COUNT: u8 = 4;
 const LAST_FILE: i8 = 4;
 const LAST_RANK: i8 = 3;
 
+/// One canonical two-by-two surface footprint in file-major cell order.
+pub type SquareArea = [Cell; 4];
+
 /// One of the realm's 20 cells, stored in file-major canonical order.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Cell(u8);
@@ -39,6 +42,22 @@ impl Cell {
         Self(19),
     ];
 
+    /// Every in-bounds two-by-two area, ordered by its file-major anchor.
+    pub const SQUARE_AREAS: [SquareArea; 12] = [
+        [Self(0), Self(1), Self(4), Self(5)],
+        [Self(1), Self(2), Self(5), Self(6)],
+        [Self(2), Self(3), Self(6), Self(7)],
+        [Self(4), Self(5), Self(8), Self(9)],
+        [Self(5), Self(6), Self(9), Self(10)],
+        [Self(6), Self(7), Self(10), Self(11)],
+        [Self(8), Self(9), Self(12), Self(13)],
+        [Self(9), Self(10), Self(13), Self(14)],
+        [Self(10), Self(11), Self(14), Self(15)],
+        [Self(12), Self(13), Self(16), Self(17)],
+        [Self(13), Self(14), Self(17), Self(18)],
+        [Self(14), Self(15), Self(18), Self(19)],
+    ];
+
     /// Parses an exact uppercase cell name from A1 through E4.
     ///
     /// # Errors
@@ -63,6 +82,15 @@ impl Cell {
 
     pub(crate) const fn rank_index(self) -> i8 {
         self.rank()
+    }
+
+    /// Translates this cell by the displacement between two anchors.
+    #[must_use]
+    pub(crate) fn translated(self, from: Self, to: Self) -> Option<Self> {
+        Self::from_coordinates(
+            self.file() + to.file() - from.file(),
+            self.rank() + to.rank() - from.rank(),
+        )
     }
 
     /// Returns bordering cells in west, south, east, north order.
@@ -138,6 +166,17 @@ impl Cell {
     }
 }
 
+/// Translates a complete square footprint without allocating.
+#[must_use]
+pub(crate) fn translated_square(area: SquareArea, from: Cell, to: Cell) -> Option<SquareArea> {
+    Some([
+        area[0].translated(from, to)?,
+        area[1].translated(from, to)?,
+        area[2].translated(from, to)?,
+        area[3].translated(from, to)?,
+    ])
+}
+
 impl fmt::Display for Cell {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let file = char::from(b'A' + self.0 / RANK_COUNT);
@@ -208,4 +247,44 @@ pub struct Location {
     pub cell: Cell,
     /// Occupancy layer.
     pub region: Region,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Cell, translated_square};
+
+    #[test]
+    fn square_areas_are_the_twelve_canonical_file_major_footprints() {
+        let values = Cell::SQUARE_AREAS.map(|area| area.map(|cell| cell.to_string()));
+        assert_eq!(
+            values,
+            [
+                ["A1", "A2", "B1", "B2"],
+                ["A2", "A3", "B2", "B3"],
+                ["A3", "A4", "B3", "B4"],
+                ["B1", "B2", "C1", "C2"],
+                ["B2", "B3", "C2", "C3"],
+                ["B3", "B4", "C3", "C4"],
+                ["C1", "C2", "D1", "D2"],
+                ["C2", "C3", "D2", "D3"],
+                ["C3", "C4", "D3", "D4"],
+                ["D1", "D2", "E1", "E2"],
+                ["D2", "D3", "E2", "E3"],
+                ["D3", "D4", "E3", "E4"],
+            ]
+        );
+    }
+
+    #[test]
+    fn square_translation_preserves_order_and_rejects_off_board_destinations() {
+        let area = Cell::SQUARE_AREAS[5];
+        assert_eq!(
+            translated_square(area, area[0], Cell::parse("B2").expect("cell")),
+            Some(Cell::SQUARE_AREAS[4])
+        );
+        assert_eq!(
+            translated_square(area, area[0], Cell::parse("A4").expect("cell")),
+            None
+        );
+    }
 }

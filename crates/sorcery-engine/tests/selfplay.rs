@@ -694,10 +694,10 @@ fn pair_should_reject_scenario_changes_composition_mismatch_and_unsupported_fact
     assert!(train_and_promote(&champion, &candidate_deck, &mismatched, &heldout, 500).is_err());
 
     let unsupported_north = mutate_manifest(&north, |manifest| {
-        manifest["cards"]["north-spell-1"]["occupiesSquareArea"] = json!(2);
+        manifest["cards"]["north-spell-1"]["waterbound"] = json!(true);
     });
     let unsupported_south = mutate_manifest(&south, |manifest| {
-        manifest["cards"]["north-spell-1"]["occupiesSquareArea"] = json!(2);
+        manifest["cards"]["north-spell-1"]["waterbound"] = json!(true);
     });
     let unsupported = [pair(
         &unsupported_north,
