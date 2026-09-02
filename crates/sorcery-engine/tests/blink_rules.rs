@@ -92,6 +92,86 @@ fn manifest(deathrite: bool) -> String {
     canonical_json(&value).expect("canonical synthetic manifest")
 }
 
+/// A second wounded ally so one departing aura owes two simultaneous Deathrites.
+fn ordered_manifest() -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "blink-ordered-rules" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-blink-ordered-rules-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-blink": {
+                "cardType": "magic",
+                "manaCost": 0,
+                "teleportNearbyAllyThenDrawCard": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
+            "north-fragile": {
+                "attack": 1,
+                "cardType": "minion",
+                "deathriteDamageEachUnitHere": 1,
+                "defense": 1,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
+            "north-sparkmage": {
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 4,
+                "manaCost": 0,
+                "otherNearbyAlliesPowerBonus": 1,
+                "tapToShootProjectileDamage": 2,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
+            "north-site": site(),
+            "north-storm": {
+                "cardType": "magic",
+                "damageEachAbovegroundMinion": 1,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
+            "south-avatar": avatar(),
+            "south-minion": {
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 1,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                // Six draws empty the Spellbook, so every part reaches hand whatever the shuffle.
+                "spellbook": [
+                    "north-blink",
+                    "north-blink",
+                    "north-fragile",
+                    "north-fragile",
+                    "north-sparkmage",
+                    "north-storm",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": 411,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("synthetic manifest identity"));
+    canonical_json(&value).expect("canonical synthetic manifest")
+}
+
 fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
     let action = session
         .legal_actions()
@@ -250,11 +330,10 @@ fn blink_scenario(drain_spellbook: bool, deathrite: bool) -> Blink {
     }
 }
 
-fn cast_blink(checkpoint: &mut Blink, ally: &str, cell: &str, zone: &str) -> Receipt {
-    let spell = checkpoint.spell.clone();
-    let (_, receipt) = accept_where(&mut checkpoint.session, |descriptor| {
+fn cast_blink(session: &mut Session, spell: &str, ally: &str, cell: &str, zone: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
         descriptor["kind"] == "cast-magic"
-            && descriptor["cardInstanceId"] == spell.as_str()
+            && descriptor["cardInstanceId"] == spell
             && descriptor["ally"]["instanceId"] == ally
             && descriptor["targetLocation"]["cell"] == cell
             && descriptor["drawZone"] == zone
@@ -333,8 +412,15 @@ fn rule_catalog_0040_blink_should_resolve_deaths_before_a_private_spellbook_draw
         .to_owned();
     let before = hand_count(&checkpoint.session, "spellbook");
 
+    let spell = checkpoint.spell.clone();
     let sparkmage = checkpoint.sparkmage.clone();
-    let receipt = cast_blink(&mut checkpoint, &sparkmage, "E4", "spellbook");
+    let receipt = cast_blink(
+        &mut checkpoint.session,
+        &spell,
+        &sparkmage,
+        "E4",
+        "spellbook",
+    );
 
     assert_eq!(
         event_types(&receipt),
@@ -396,8 +482,9 @@ fn rule_catalog_0040_blink_should_draw_a_site_when_the_caster_chooses_its_atlas(
         .to_owned();
     let before = hand_count(&checkpoint.session, "atlas");
 
+    let spell = checkpoint.spell.clone();
     let sparkmage = checkpoint.sparkmage.clone();
-    let receipt = cast_blink(&mut checkpoint, &sparkmage, "E4", "atlas");
+    let receipt = cast_blink(&mut checkpoint.session, &spell, &sparkmage, "E4", "atlas");
 
     assert_eq!(
         event_types(&receipt),
@@ -434,8 +521,15 @@ fn rule_catalog_0040_blink_should_draw_a_site_when_the_caster_chooses_its_atlas(
 #[test]
 fn rule_catalog_0040_blink_should_keep_an_aura_that_never_leaves_its_neighbour() {
     let mut checkpoint = blink_checkpoint(false);
+    let spell = checkpoint.spell.clone();
     let sparkmage = checkpoint.sparkmage.clone();
-    let receipt = cast_blink(&mut checkpoint, &sparkmage, "C4", "spellbook");
+    let receipt = cast_blink(
+        &mut checkpoint.session,
+        &spell,
+        &sparkmage,
+        "C4",
+        "spellbook",
+    );
 
     assert_eq!(
         event_types(&receipt),
@@ -471,8 +565,15 @@ fn rule_catalog_0040_blink_should_settle_interrupting_deathrites_before_its_draw
         .to_owned();
     let life = state(&checkpoint.session)["players"]["north"]["avatar"]["life"].clone();
 
+    let spell = checkpoint.spell.clone();
     let sparkmage = checkpoint.sparkmage.clone();
-    let receipt = cast_blink(&mut checkpoint, &sparkmage, "E4", "spellbook");
+    let receipt = cast_blink(
+        &mut checkpoint.session,
+        &spell,
+        &sparkmage,
+        "E4",
+        "spellbook",
+    );
 
     assert_eq!(
         event_types(&receipt),
@@ -513,6 +614,155 @@ fn rule_catalog_0040_blink_should_settle_interrupting_deathrites_before_its_draw
     );
 }
 
+/// Wounds two fragile allies that share the one aura Blink is about to carry away.
+struct OrderedBlink {
+    fragile: [String; 2],
+    session: Session,
+    sparkmage: String,
+    spell: String,
+}
+
+fn ordered_blink_scenario() -> OrderedBlink {
+    let mut session = Session::new(&ordered_manifest()).expect("valid ordered Blink scenario");
+    keep(&mut session);
+    keep(&mut session);
+    play_site(&mut session, "C4");
+    end_turn(&mut session);
+
+    draw(&mut session, "atlas");
+    play_site(&mut session, "C1");
+    end_turn(&mut session);
+
+    draw(&mut session, "spellbook");
+    play_site(&mut session, "D4");
+    end_turn(&mut session);
+
+    draw(&mut session, "atlas");
+    end_turn(&mut session);
+
+    draw(&mut session, "spellbook");
+    play_site(&mut session, "E4");
+    end_turn(&mut session);
+
+    draw(&mut session, "atlas");
+    end_turn(&mut session);
+
+    // The last Spellbook draw empties the deck, so every part is in hand whatever the shuffle.
+    draw(&mut session, "spellbook");
+    let fragile = [
+        summon(&mut session, "north-fragile", "C4"),
+        summon(&mut session, "north-fragile", "C4"),
+    ];
+    let sparkmage = summon(&mut session, "north-sparkmage", "D4");
+    let storm = hand_in(&session, "spellbook", "north-storm");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardInstanceId"] == storm.as_str()
+    });
+    let spell = hand_in(&session, "spellbook", "north-blink");
+    OrderedBlink {
+        fragile,
+        session,
+        sparkmage,
+        spell,
+    }
+}
+
+#[test]
+fn rule_catalog_0040_blink_should_owe_its_draw_until_ordered_deathrites_are_chosen() {
+    let mut checkpoint = ordered_blink_scenario();
+    assert!(
+        checkpoint.fragile.iter().all(|instance_id| {
+            realm_unit(&checkpoint.session, instance_id)
+                .is_some_and(|unit| unit["damage"] == json!(1))
+        }),
+        "the shared aura must be all that keeps both wounded allies standing"
+    );
+    let atlas_before = hand_count(&checkpoint.session, "atlas");
+
+    let spell = checkpoint.spell.clone();
+    let sparkmage = checkpoint.sparkmage.clone();
+    let interrupted = cast_blink(&mut checkpoint.session, &spell, &sparkmage, "E4", "atlas");
+
+    assert_eq!(
+        event_types(&interrupted),
+        ["magic-cast", "unit-teleported"],
+        "Blink may not resolve while the deaths it caused still owe an order"
+    );
+    let pending = state(&checkpoint.session);
+    assert_eq!(pending["phase"], "deathrite-order");
+    assert_eq!(pending["decisionSeat"], "north");
+    assert_eq!(
+        pending["pendingDeathrites"]["continuation"],
+        json!({
+            "cardId": "north-blink",
+            "instanceId": checkpoint.spell,
+            "kind": "blink",
+            "owner": "north",
+            "seat": "north",
+            "zone": "atlas",
+        }),
+        "the undecided state must carry the draw Blink still owes"
+    );
+    assert_eq!(hand_count(&checkpoint.session, "atlas"), atlas_before);
+
+    let orders: Vec<_> = checkpoint
+        .session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .collect();
+    assert_eq!(orders.len(), 2, "either corpse may strike first");
+
+    for order in orders {
+        let mut branch = checkpoint.session.clone();
+        let StepResult::Accepted(ordered) = branch
+            .step(ActionRequest {
+                action_id: order.action_id.to_string(),
+                seat: order.seat,
+                state_version: order.state_version,
+            })
+            .expect("ordered Blink completion")
+        else {
+            panic!("engine-issued Deathrite order must be accepted");
+        };
+        let types = event_types(&ordered);
+        assert_eq!(types.first(), Some(&"deathrite-order-committed"));
+        assert_eq!(
+            types.last(),
+            Some(&"magic-resolved"),
+            "Blink resolves only once its resumed draw is paid"
+        );
+        let drawn = types
+            .iter()
+            .position(|event_type| *event_type == "site-drawn")
+            .expect("resumed Blink draw");
+        assert!(
+            drawn
+                > types
+                    .iter()
+                    .rposition(|event_type| *event_type == "minion-died")
+                    .expect("both Deathrite deaths"),
+            "every death the Deathrites owe must land before the draw"
+        );
+        let completed = state(&branch);
+        assert_eq!(completed["phase"], "main");
+        assert_eq!(completed["pendingDeathrites"], Value::Null);
+        assert_eq!(hand_count(&branch, "atlas"), atlas_before + 1);
+        assert!(
+            checkpoint
+                .fragile
+                .iter()
+                .all(|instance_id| realm_unit(&branch, instance_id).is_none())
+        );
+        assert_eq!(
+            realm_unit(&branch, &sparkmage).expect("blinked ally")["location"],
+            "E4"
+        );
+        assert!(branch.verify_replay().expect("verified exact replay"));
+    }
+}
+
 #[test]
 fn rule_catalog_0040_blink_should_lose_the_game_when_its_chosen_deck_is_empty() {
     let mut checkpoint = blink_checkpoint(true);
@@ -521,8 +771,15 @@ fn rule_catalog_0040_blink_should_lose_the_game_when_its_chosen_deck_is_empty() 
         json!([])
     );
 
+    let spell = checkpoint.spell.clone();
     let sparkmage = checkpoint.sparkmage.clone();
-    let receipt = cast_blink(&mut checkpoint, &sparkmage, "E4", "spellbook");
+    let receipt = cast_blink(
+        &mut checkpoint.session,
+        &spell,
+        &sparkmage,
+        "E4",
+        "spellbook",
+    );
 
     assert_eq!(
         event_types(&receipt),
