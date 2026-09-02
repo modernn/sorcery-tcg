@@ -1764,7 +1764,7 @@
         "RULE-04"
       ],
       "plainLanguage": "A surviving enabled minion may take one legal step after its Ranged strike.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "ranged"
       ],
@@ -1775,8 +1775,8 @@
         "strike"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 a surviving enabled minion may take one legal step after its Ranged strike"
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "ranged_hit_should_offer_one_replayable_optional_step"
       }
     },
     {
@@ -1785,7 +1785,7 @@
         "RULE-04"
       ],
       "plainLanguage": "An empty Ranged projectile does not offer the post-strike step.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "ranged"
       ],
@@ -1796,8 +1796,8 @@
         "strike"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 an empty Ranged projectile does not offer the post-strike step"
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "empty_ranged_projectile_should_not_offer_a_step"
       }
     },
     {
@@ -1806,7 +1806,7 @@
         "RULE-04"
       ],
       "plainLanguage": "A Ranged striker that dies during the hit cannot leave a pending step.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "ranged"
       ],
@@ -1815,8 +1815,8 @@
         "death"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 a Ranged striker that dies during the hit cannot leave a pending step"
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "ranged_deathrites_should_clear_a_dead_shooters_pending_step"
       }
     },
     {
@@ -1825,7 +1825,7 @@
         "RULE-04"
       ],
       "plainLanguage": "A Ranged unit may strike once during Move and Attack or Defend.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "ranged"
       ],
@@ -1840,8 +1840,8 @@
         "strike"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 a Ranged unit may strike once during Move and Attack or Defend"
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "ranged_minion_should_pause_basic_movement_for_one_strike"
       }
     },
     {

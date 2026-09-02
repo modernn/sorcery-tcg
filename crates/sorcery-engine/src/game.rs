@@ -10,7 +10,7 @@ use serde_json::{Map, Value, json};
 
 use crate::action::{
     ActionDescriptor, CombatTarget, DeckZone, GenesisDamageChoice, GenesisSpellChoice,
-    GenesisTokenChoice, ProjectileDirection, UnitTarget, compare_canonical,
+    GenesisTokenChoice, ProjectileDirection, RangedStepChoice, UnitTarget, compare_canonical,
 };
 use crate::board::{Cell, Location, Region, SquareArea, translated_square};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
@@ -40,11 +40,13 @@ pub struct RulesContext {
 pub struct Position {
     active_seat: Seat,
     decision_seat: Seat,
+    pending_basic_movement: PendingField<PendingBasicMovement>,
     pending_combat: Option<PendingCombat>,
     pending_deathrites: Option<PendingDeathrites>,
     pending_genesis_spell: PendingField<PendingGenesisSpell>,
     pending_genesis_spell_order: PendingField<PendingGenesisSpellOrder>,
     pending_genesis_token: PendingField<PendingGenesisToken>,
+    pending_ranged_step: PendingField<PendingRangedStep>,
     phase: Phase,
     players: [PlayerPosition; 2],
     prng: PrngState,
@@ -382,6 +384,37 @@ struct PendingCombat {
     target_removed: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BasicMovementPurpose {
+    Defend,
+    MoveAndAttack,
+}
+
+impl BasicMovementPurpose {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Defend => "defend",
+            Self::MoveAndAttack => "move-and-attack",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PendingBasicMovement {
+    path: Vec<Location>,
+    path_index: usize,
+    purpose: BasicMovementPurpose,
+    ranged_strike_used: bool,
+    seat: Seat,
+    source_instance_id: IdentityHash,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PendingRangedStep {
+    seat: Seat,
+    source_instance_id: IdentityHash,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PendingDeathriteSource {
     controller: Seat,
@@ -471,6 +504,26 @@ enum PendingField<T> {
     Resolved,
 }
 
+impl<T> PendingField<T> {
+    const fn as_pending(&self) -> Option<&T> {
+        match self {
+            Self::Pending(value) => Some(value),
+            Self::Absent | Self::Resolved => None,
+        }
+    }
+
+    fn as_pending_mut(&mut self) -> Option<&mut T> {
+        match self {
+            Self::Pending(value) => Some(value),
+            Self::Absent | Self::Resolved => None,
+        }
+    }
+
+    const fn is_pending(&self) -> bool {
+        matches!(self, Self::Pending(_))
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Phase {
     Allocate,
@@ -481,7 +534,9 @@ enum Phase {
     Genesis,
     Intercept,
     Main,
+    Movement,
     Mulligan,
+    RangedStep,
     Terminal,
 }
 
@@ -496,7 +551,9 @@ impl Phase {
             Self::Genesis => "genesis",
             Self::Intercept => "intercept",
             Self::Main => "main",
+            Self::Movement => "movement",
             Self::Mulligan => "mulligan",
+            Self::RangedStep => "ranged-step",
             Self::Terminal => "terminal",
         }
     }
@@ -973,16 +1030,10 @@ impl Game {
             let CardFacts::Minion(facts) = facts else {
                 return None;
             };
-            if facts.may_step_after_ranged_strike {
-                Some("mayStepAfterRangedStrike")
-            } else if facts.may_ranged_strike_once_during_basic_movement {
-                Some("mayRangedStrikeOnceDuringBasicMovement")
-            } else {
-                match facts.required_cast_region {
-                    Some(RequiredCastRegion::Underground) => Some("mustBeCastBurrowed"),
-                    Some(RequiredCastRegion::Underwater) => Some("mustBeCastSubmerged"),
-                    None => None,
-                }
+            match facts.required_cast_region {
+                Some(RequiredCastRegion::Underground) => Some("mustBeCastBurrowed"),
+                Some(RequiredCastRegion::Underwater) => Some("mustBeCastSubmerged"),
+                None => None,
             }
         }) {
             return Err(GameError::UnsupportedManifestFact(field.to_owned()));
@@ -1036,11 +1087,13 @@ impl Game {
             position: Position {
                 active_seat: Seat::North,
                 decision_seat: Seat::North,
+                pending_basic_movement: PendingField::Absent,
                 pending_combat: None,
                 pending_deathrites: None,
                 pending_genesis_spell: PendingField::Absent,
                 pending_genesis_spell_order: PendingField::Absent,
                 pending_genesis_token: PendingField::Absent,
+                pending_ranged_step: PendingField::Absent,
                 phase: Phase::Mulligan,
                 players: [north, south],
                 prng,
@@ -1194,11 +1247,136 @@ impl Game {
             Phase::Intercept => self.append_intercept_actions(&mut actions)?,
             Phase::Mulligan => self.append_mulligan_actions(&mut actions)?,
             Phase::Main => self.append_main_actions(&mut actions)?,
+            Phase::Movement => self.append_basic_movement_actions(&mut actions)?,
+            Phase::RangedStep => self.append_ranged_step_actions(&mut actions)?,
             Phase::Terminal => {}
         }
         actions
             .sort_unstable_by(|left, right| compare_canonical(&left.descriptor, &right.descriptor));
         Ok(actions)
+    }
+
+    fn append_basic_movement_actions(
+        &self,
+        actions: &mut Vec<IssuedAction>,
+    ) -> Result<(), GameError> {
+        let pending = self
+            .position
+            .pending_basic_movement
+            .as_pending()
+            .ok_or(GameError::IllegalAction)?;
+        if pending.seat != self.position.decision_seat {
+            return Err(GameError::IllegalAction);
+        }
+        let label = pending.path.get(pending.path_index + 1).map_or_else(
+            || {
+                format!(
+                    "Finish {}",
+                    match pending.purpose {
+                        BasicMovementPurpose::Defend => "Defend",
+                        BasicMovementPurpose::MoveAndAttack => "Move and Attack",
+                    }
+                )
+            },
+            |destination| {
+                format!(
+                    "Continue {}… to {}",
+                    &pending.source_instance_id.as_str()[..15],
+                    destination.cell
+                )
+            },
+        );
+        self.push_action(
+            actions,
+            ActionDescriptor::ContinueBasicMovement {
+                unit_instance_id: pending.source_instance_id.clone(),
+            },
+            label,
+        );
+        if !pending.ranged_strike_used {
+            for descriptor in
+                self.ranged_projectile_descriptors(pending.seat, &pending.source_instance_id, true)?
+            {
+                let label = descriptor
+                    .state_independent_label()
+                    .ok_or_else(|| invalid("movement Ranged action requires a label"))?;
+                self.push_action(actions, descriptor, label);
+            }
+        }
+        Ok(())
+    }
+
+    fn append_ranged_step_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
+        let pending = self
+            .position
+            .pending_ranged_step
+            .as_pending()
+            .ok_or(GameError::IllegalAction)?;
+        if pending.seat != self.position.decision_seat {
+            return Err(GameError::IllegalAction);
+        }
+        for descriptor in self.ranged_step_descriptors(pending)? {
+            let label = descriptor
+                .state_independent_label()
+                .ok_or(GameError::IllegalAction)?;
+            self.push_action(actions, descriptor, label);
+        }
+        Ok(())
+    }
+
+    fn ranged_step_descriptors(
+        &self,
+        pending: &PendingRangedStep,
+    ) -> Result<Vec<ActionDescriptor>, GameError> {
+        let mut descriptors = vec![ActionDescriptor::ResolveRangedStep {
+            choice: RangedStepChoice::Decline,
+            from: None,
+            path: None,
+            to: None,
+            unit_instance_id: pending.source_instance_id.clone(),
+        }];
+        let Some(unit) = self.position.units.iter().find(|unit| {
+            unit.controller == pending.seat
+                && unit.card.instance_id == pending.source_instance_id
+                && !self.minion_is_disabled(unit)
+        }) else {
+            return Ok(descriptors);
+        };
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        if !facts.may_step_after_ranged_strike {
+            return Ok(descriptors);
+        }
+        let from = Location {
+            cell: unit.location,
+            region: Region::Surface,
+        };
+        let profile = MovementProfile {
+            airborne: facts.airborne,
+            connects_top_bottom: facts.connects_top_bottom,
+            maximum_cost: (!facts.immobile).then_some(1),
+            moving_minion: true,
+            occupied_cells: unit.occupied_cells,
+            restriction: facts.movement_restriction,
+            seat: pending.seat,
+        };
+        for path in self
+            .surface_movement_paths(unit.location, profile)
+            .into_iter()
+            .filter(|path| path.len() == 2)
+        {
+            let to = *path.last().ok_or(GameError::IllegalAction)?;
+            descriptors.push(ActionDescriptor::ResolveRangedStep {
+                choice: RangedStepChoice::Step,
+                from: Some(from),
+                path: Some(path),
+                to: Some(to),
+                unit_instance_id: pending.source_instance_id.clone(),
+            });
+        }
+        Ok(descriptors)
     }
 
     fn append_allocate_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
@@ -1980,7 +2158,9 @@ impl Game {
             self.push_action(actions, descriptor, label);
         }
         for unit in &self.position.units {
-            for descriptor in self.ranged_projectile_descriptors(seat, &unit.card.instance_id)? {
+            for descriptor in
+                self.ranged_projectile_descriptors(seat, &unit.card.instance_id, false)?
+            {
                 let label = descriptor
                     .state_independent_label()
                     .ok_or_else(|| invalid("shoot-projectile action requires a label"))?;
@@ -2126,11 +2306,23 @@ impl Game {
         &self,
         seat: Seat,
         shooter_instance_id: &IdentityHash,
+        allow_tapped: bool,
     ) -> Result<Vec<ActionDescriptor>, GameError> {
-        if self.position.phase != Phase::Main
-            || self.position.active_seat != seat
-            || self.position.decision_seat != seat
-        {
+        let main = self.position.phase == Phase::Main
+            && self.position.active_seat == seat
+            && self.position.decision_seat == seat;
+        let movement = allow_tapped
+            && self.position.phase == Phase::Movement
+            && self
+                .position
+                .pending_basic_movement
+                .as_pending()
+                .is_some_and(|pending| {
+                    pending.seat == seat
+                        && pending.source_instance_id == *shooter_instance_id
+                        && !pending.ranged_strike_used
+                });
+        if !main && !movement {
             return Ok(Vec::new());
         }
         let Some(shooter) =
@@ -2145,8 +2337,9 @@ impl Game {
             return Err(GameError::IllegalAction);
         };
         if !facts.ranged
+            || movement && !facts.may_ranged_strike_once_during_basic_movement
             || self.minion_is_disabled(shooter)
-            || shooter.tapped
+            || shooter.tapped && !allow_tapped
             || shooter.summoning_sickness
         {
             return Ok(Vec::new());
@@ -3166,6 +3359,14 @@ impl Game {
         {
             return Err(GameError::IllegalAction);
         }
+        let post_ranged_step = match &action.descriptor {
+            ActionDescriptor::ShootProjectile {
+                hit: Some(_),
+                shooter_instance_id,
+                ..
+            } if self.position.phase != Phase::Movement => Some(shooter_instance_id),
+            _ => None,
+        };
         let applied = match &action.descriptor {
             ActionDescriptor::AllocateStrike {
                 amount,
@@ -3188,6 +3389,9 @@ impl Game {
             }
             ActionDescriptor::CloseIntercept {} => {
                 self.apply_close_intercept_action(action.seat, outcomes)
+            }
+            ActionDescriptor::ContinueBasicMovement { unit_instance_id } => {
+                self.apply_continue_basic_movement(action.seat, unit_instance_id, outcomes)
             }
             ActionDescriptor::DeclareAttack { target } => {
                 self.apply_declare_attack_action(action.seat, target, outcomes)
@@ -3229,6 +3433,9 @@ impl Game {
             ActionDescriptor::ResolveGenesisToken { choice } => {
                 self.apply_resolve_genesis_token(action.seat, *choice, outcomes)
             }
+            ActionDescriptor::ResolveRangedStep { .. } => {
+                self.apply_resolve_ranged_step(action, outcomes)
+            }
             ActionDescriptor::ShootProjectile { .. } => {
                 self.apply_ranged_projectile_action(action, outcomes)
             }
@@ -3268,10 +3475,18 @@ impl Game {
         applied?;
         let settlement_start = outcomes.len();
         self.settle_nearby_enemy_stealth(outcomes);
+        self.settle_static_power_deaths(outcomes)?;
+        if let Some(shooter_instance_id) = post_ranged_step {
+            self.queue_ranged_step(action.seat, shooter_instance_id)?;
+        }
         outcomes.move_tail_before_completion(settlement_start);
         Ok(())
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one Ranged transaction keeps strike, death, and continuation ordering explicit"
+    )]
     fn apply_ranged_projectile_action(
         &mut self,
         action: &IssuedAction,
@@ -3286,8 +3501,13 @@ impl Game {
         else {
             return Err(GameError::IllegalAction);
         };
+        let movement = self.position.pending_basic_movement.as_pending().cloned();
         if !self
-            .ranged_projectile_descriptors(action.seat, shooter_instance_id)?
+            .ranged_projectile_descriptors(
+                action.seat,
+                shooter_instance_id,
+                self.position.phase == Phase::Movement,
+            )?
             .iter()
             .any(|candidate| candidate == &action.descriptor)
         {
@@ -3304,6 +3524,9 @@ impl Game {
         let strike =
             self.combatant_strike_stats(UnitKind::Minion, action.seat, shooter_instance_id)?;
         self.position.units[shooter_index].tapped = true;
+        if let Some(pending) = self.position.pending_basic_movement.as_pending_mut() {
+            pending.ranged_strike_used = true;
+        }
         outcomes.push("projectile-shot", || {
             json!({
                 "direction": direction,
@@ -3357,13 +3580,176 @@ impl Game {
                 } else {
                     &[]
                 },
-                Phase::Main,
-                self.position.active_seat,
+                if movement.is_some() {
+                    Phase::Movement
+                } else {
+                    Phase::Main
+                },
+                action.seat,
                 outcomes,
             )?;
         }
+        if self.position.pending_deathrites.is_none() {
+            self.reconcile_projectile_continuations()?;
+        }
         self.position.state_version += 1;
         Ok(())
+    }
+
+    fn queue_ranged_step(
+        &mut self,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+    ) -> Result<(), GameError> {
+        if self.position.terminal.is_some() {
+            return Ok(());
+        }
+        let pending = PendingRangedStep {
+            seat,
+            source_instance_id: source_instance_id.clone(),
+        };
+        if !self
+            .ranged_step_descriptors(&pending)?
+            .iter()
+            .any(|descriptor| {
+                matches!(
+                    descriptor,
+                    ActionDescriptor::ResolveRangedStep {
+                        choice: RangedStepChoice::Step,
+                        ..
+                    }
+                )
+            })
+        {
+            return Ok(());
+        }
+        self.position.pending_ranged_step = PendingField::Pending(pending);
+        if let Some(deathrites) = self.position.pending_deathrites.as_mut() {
+            deathrites.return_phase = Phase::RangedStep;
+            deathrites.return_decision_seat = seat;
+        } else {
+            self.position.phase = Phase::RangedStep;
+            self.position.decision_seat = seat;
+        }
+        Ok(())
+    }
+
+    fn reconcile_projectile_continuations(&mut self) -> Result<(), GameError> {
+        if self.position.terminal.is_some() {
+            if !matches!(self.position.pending_basic_movement, PendingField::Absent) {
+                self.position.pending_basic_movement = PendingField::Resolved;
+            }
+            self.position.pending_ranged_step = PendingField::Absent;
+            self.position.pending_combat = None;
+            self.position.phase = Phase::Terminal;
+            return Ok(());
+        }
+        self.reconcile_pending_combat();
+        if let Some(pending) = self.position.pending_basic_movement.as_pending().cloned() {
+            let source_remains = self.position.units.iter().any(|unit| {
+                unit.controller == pending.seat
+                    && unit.card.instance_id == pending.source_instance_id
+            });
+            let combat_remains = pending.purpose == BasicMovementPurpose::MoveAndAttack
+                || self.position.pending_combat.is_some();
+            if source_remains && combat_remains {
+                self.position.phase = Phase::Movement;
+                self.position.decision_seat = pending.seat;
+            } else {
+                self.position.pending_basic_movement = PendingField::Resolved;
+                if pending.purpose == BasicMovementPurpose::Defend
+                    && self.position.pending_combat.is_some()
+                {
+                    self.position.phase = Phase::Defend;
+                    self.position.decision_seat = pending.seat;
+                } else {
+                    self.position.phase = Phase::Main;
+                    self.position.decision_seat = self.position.active_seat;
+                }
+            }
+            return Ok(());
+        }
+        if self.position.pending_ranged_step.is_pending() {
+            let pending = self
+                .position
+                .pending_ranged_step
+                .as_pending()
+                .ok_or(GameError::IllegalAction)?;
+            let source_exists = self.position.units.iter().any(|unit| {
+                unit.controller == pending.seat
+                    && unit.card.instance_id == pending.source_instance_id
+            });
+            if source_exists {
+                self.position.phase = Phase::RangedStep;
+                self.position.decision_seat = pending.seat;
+            } else {
+                self.position.pending_ranged_step = PendingField::Resolved;
+                self.position.phase = Phase::Main;
+                self.position.decision_seat = self.position.active_seat;
+            }
+        }
+        Ok(())
+    }
+
+    fn reconcile_pending_combat(&mut self) {
+        let Some(mut pending) = self.position.pending_combat.take() else {
+            return;
+        };
+        let attacker_exists = match pending.attacker_kind {
+            UnitKind::Avatar => {
+                self.position.players[seat_index(pending.attacking_seat)]
+                    .avatar
+                    .card
+                    .instance_id
+                    == pending.attacker_instance_id
+            }
+            UnitKind::Minion => self.position.units.iter().any(|unit| {
+                unit.controller == pending.attacking_seat
+                    && unit.card.instance_id == pending.attacker_instance_id
+            }),
+        };
+        let target_exists = pending
+            .original_target
+            .as_ref()
+            .is_none_or(|target| match target {
+                CombatTarget::Avatar { instance_id, seat } => {
+                    self.position.players[seat_index(*seat)]
+                        .avatar
+                        .card
+                        .instance_id
+                        == *instance_id
+                }
+                CombatTarget::Minion { instance_id, seat } => {
+                    self.position.units.iter().any(|unit| {
+                        unit.controller == *seat && unit.card.instance_id == *instance_id
+                    })
+                }
+                CombatTarget::Site { instance_id, seat } => {
+                    self.position.sites.iter().any(|site| {
+                        site.as_ref().is_some_and(|site| {
+                            site.controller == *seat && site.card.instance_id == *instance_id
+                        })
+                    })
+                }
+            });
+        if !attacker_exists || !target_exists {
+            return;
+        }
+        pending.defenders.retain(|target| match target {
+            UnitTarget::Avatar { instance_id, seat } => {
+                self.position.players[seat_index(*seat)]
+                    .avatar
+                    .card
+                    .instance_id
+                    == *instance_id
+            }
+            UnitTarget::Minion { instance_id, seat } => self
+                .position
+                .units
+                .iter()
+                .any(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id),
+        });
+        self.position.pending_combat = Some(pending);
     }
 
     fn apply_damage_projectile_action(
@@ -3501,6 +3887,268 @@ impl Game {
         Ok(())
     }
 
+    fn begin_basic_movement(
+        &mut self,
+        seat: Seat,
+        path: &[Location],
+        unit_instance_id: &IdentityHash,
+        purpose: BasicMovementPurpose,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let unit = self
+            .position
+            .units
+            .iter_mut()
+            .find(|unit| unit.controller == seat && unit.card.instance_id == *unit_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        if path.first().is_none_or(|from| from.cell != unit.location) {
+            return Err(GameError::IllegalAction);
+        }
+        unit.tapped = true;
+        self.position.pending_basic_movement = PendingField::Pending(PendingBasicMovement {
+            path: path.to_vec(),
+            path_index: 0,
+            purpose,
+            ranged_strike_used: false,
+            seat,
+            source_instance_id: unit_instance_id.clone(),
+        });
+        self.position.phase = Phase::Movement;
+        self.position.decision_seat = seat;
+        self.position.state_version += 1;
+        outcomes.push("basic-movement-started", || {
+            json!({
+                "from": path[0],
+                "path": path,
+                "purpose": purpose.as_str(),
+                "seat": seat,
+                "sourceInstanceId": unit_instance_id,
+                "to": path[path.len() - 1],
+            })
+        });
+        Ok(())
+    }
+
+    fn apply_continue_basic_movement(
+        &mut self,
+        seat: Seat,
+        unit_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let pending = self
+            .position
+            .pending_basic_movement
+            .as_pending()
+            .cloned()
+            .ok_or(GameError::IllegalAction)?;
+        if self.position.phase != Phase::Movement
+            || pending.seat != seat
+            || pending.source_instance_id != *unit_instance_id
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let Some(next) = pending.path.get(pending.path_index + 1).copied() else {
+            return self.finish_basic_movement(&pending, outcomes);
+        };
+        let unit = self
+            .position
+            .units
+            .iter_mut()
+            .find(|unit| unit.controller == seat && unit.card.instance_id == *unit_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        let from = Location {
+            cell: unit.location,
+            region: Region::Surface,
+        };
+        Self::move_minion_to(unit, next.cell)?;
+        self.position
+            .pending_basic_movement
+            .as_pending_mut()
+            .ok_or(GameError::IllegalAction)?
+            .path_index += 1;
+        self.position.state_version += 1;
+        outcomes.push("basic-movement-continued", || {
+            json!({
+                "from": from,
+                "purpose": pending.purpose.as_str(),
+                "seat": seat,
+                "sourceInstanceId": unit_instance_id,
+                "to": next,
+            })
+        });
+        self.settle_nearby_enemy_stealth(outcomes);
+        Ok(())
+    }
+
+    fn finish_basic_movement(
+        &mut self,
+        pending: &PendingBasicMovement,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let unit = self
+            .position
+            .units
+            .iter()
+            .find(|unit| {
+                unit.controller == pending.seat
+                    && unit.card.instance_id == pending.source_instance_id
+            })
+            .ok_or(GameError::IllegalAction)?;
+        let from = *pending.path.first().ok_or(GameError::IllegalAction)?;
+        let to = Location {
+            cell: unit.location,
+            region: Region::Surface,
+        };
+        self.position.pending_basic_movement = PendingField::Resolved;
+        match pending.purpose {
+            BasicMovementPurpose::MoveAndAttack => {
+                if pending.path.last() != Some(&to) {
+                    return Err(GameError::IllegalAction);
+                }
+                self.position.pending_combat = Some(PendingCombat {
+                    allocations: Vec::new(),
+                    attacker_instance_id: pending.source_instance_id.clone(),
+                    attacker_kind: UnitKind::Minion,
+                    attacking_seat: pending.seat,
+                    cell: to.cell,
+                    combatants: Vec::new(),
+                    defenders: Vec::new(),
+                    original_target: None,
+                    target_removed: false,
+                });
+                self.position.phase = Phase::Attack;
+                outcomes.push("move-and-attack-activated", || {
+                    json!({
+                        "from": from,
+                        "path": pending.path,
+                        "seat": pending.seat,
+                        "steps": pending.path.len() - 1,
+                        "to": to,
+                        "unitInstanceId": pending.source_instance_id,
+                    })
+                });
+            }
+            BasicMovementPurpose::Defend => {
+                let fight_cell = self
+                    .position
+                    .pending_combat
+                    .as_ref()
+                    .ok_or(GameError::IllegalAction)?
+                    .cell;
+                if !Self::unit_occupies_cell(unit, fight_cell) {
+                    return Err(GameError::IllegalAction);
+                }
+                let defender = UnitTarget::Minion {
+                    instance_id: pending.source_instance_id.clone(),
+                    seat: pending.seat,
+                };
+                let removes_site = self.position.pending_combat.as_ref().is_some_and(|combat| {
+                    !combat.target_removed
+                        && matches!(combat.original_target, Some(CombatTarget::Site { .. }))
+                });
+                let removed_target = removes_site.then(|| {
+                    self.position
+                        .pending_combat
+                        .as_ref()
+                        .and_then(|combat| combat.original_target.as_ref())
+                        .map(|target| target.instance_id().clone())
+                });
+                let combat = self
+                    .position
+                    .pending_combat
+                    .as_mut()
+                    .ok_or(GameError::IllegalAction)?;
+                combat.defenders.push(defender);
+                combat.target_removed |= removes_site;
+                self.position.phase = Phase::Defend;
+                outcomes.push("defender-joined", || {
+                    json!({
+                        "from": from,
+                        "instanceId": pending.source_instance_id,
+                        "path": pending.path,
+                        "seat": pending.seat,
+                        "steps": pending.path.len() - 1,
+                        "to": to,
+                    })
+                });
+                if let Some(Some(instance_id)) = removed_target {
+                    outcomes.push(
+                        "original-target-removed",
+                        || json!({ "instanceId": instance_id, "kind": "site" }),
+                    );
+                }
+            }
+        }
+        self.position.decision_seat = pending.seat;
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    fn apply_resolve_ranged_step(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let pending = self
+            .position
+            .pending_ranged_step
+            .as_pending()
+            .cloned()
+            .ok_or(GameError::IllegalAction)?;
+        if self.position.phase != Phase::RangedStep || pending.seat != action.seat {
+            return Err(GameError::IllegalAction);
+        }
+        let legal = self
+            .legal_actions()?
+            .into_iter()
+            .any(|candidate| candidate.descriptor == action.descriptor);
+        if !legal {
+            return Err(GameError::IllegalAction);
+        }
+        let ActionDescriptor::ResolveRangedStep {
+            choice,
+            from,
+            path,
+            to,
+            unit_instance_id,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        self.position.pending_ranged_step = PendingField::Resolved;
+        self.position.phase = Phase::Main;
+        self.position.decision_seat = self.position.active_seat;
+        if *choice == RangedStepChoice::Decline {
+            self.position.state_version += 1;
+            return Ok(());
+        }
+        let (Some(from), Some(path), Some(to)) = (from, path, to) else {
+            return Err(GameError::IllegalAction);
+        };
+        let unit = self
+            .position
+            .units
+            .iter_mut()
+            .find(|unit| {
+                unit.controller == action.seat && unit.card.instance_id == *unit_instance_id
+            })
+            .ok_or(GameError::IllegalAction)?;
+        Self::move_minion_to(unit, to.cell)?;
+        self.position.state_version += 1;
+        outcomes.push("unit-stepped", || {
+            json!({
+                "from": from,
+                "instanceId": unit_instance_id,
+                "seat": action.seat,
+                "sourceInstanceId": unit_instance_id,
+                "steps": path.len() - 1,
+                "to": to,
+            })
+        });
+        self.settle_nearby_enemy_stealth(outcomes);
+        Ok(())
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "one closed Defend transaction keeps validation, movement, and response state atomic"
@@ -3556,6 +4204,28 @@ impl Game {
                 })
         {
             return Err(GameError::IllegalAction);
+        }
+        let incremental = kind == UnitKind::Minion
+            && self
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.controller == seat && unit.card.instance_id == *unit_instance_id)
+                .is_some_and(|unit| {
+                    matches!(
+                        &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
+                        CardFacts::Minion(facts)
+                            if facts.may_ranged_strike_once_during_basic_movement
+                    )
+                });
+        if incremental {
+            return self.begin_basic_movement(
+                seat,
+                path,
+                unit_instance_id,
+                BasicMovementPurpose::Defend,
+                outcomes,
+            );
         }
         outcomes.push("defender-joined", || {
             json!({
@@ -5030,6 +5700,39 @@ impl Game {
         Ok((sources, corpses))
     }
 
+    fn settle_static_power_deaths(
+        &mut self,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        if self.position.terminal.is_some() || self.position.pending_deathrites.is_some() {
+            return Ok(());
+        }
+        let deaths = self
+            .position
+            .units
+            .iter()
+            .map(|unit| {
+                self.minion_current_stats(unit).map(|(_, defense, _)| {
+                    (unit.damage > 0 && unit.damage >= defense)
+                        .then(|| unit.card.instance_id.clone())
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        if deaths.is_empty() {
+            return Ok(());
+        }
+        self.begin_minion_deaths(
+            &deaths,
+            &[],
+            self.position.phase,
+            self.position.decision_seat,
+            outcomes,
+        )
+    }
+
     fn begin_minion_deaths(
         &mut self,
         instance_ids: &[IdentityHash],
@@ -5407,6 +6110,7 @@ impl Game {
         pending: PendingDeathrites,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        let ordered_resolution = self.position.phase == Phase::DeathriteOrder;
         for corpse in pending.corpses {
             let card_id = self.rules.cards[usize::from(corpse.card.card_id.0)]
                 .id
@@ -5492,6 +6196,17 @@ impl Game {
             }
             self.position.phase = pending.return_phase;
             self.position.decision_seat = pending.return_decision_seat;
+        }
+        if self.position.terminal.is_some() && ordered_resolution {
+            self.position.pending_basic_movement = PendingField::Absent;
+            self.position.pending_ranged_step = PendingField::Absent;
+            self.position.pending_combat = None;
+            self.position.phase = Phase::Terminal;
+        } else if self.position.terminal.is_some()
+            || self.position.pending_basic_movement.is_pending()
+            || self.position.pending_ranged_step.is_pending()
+        {
+            self.reconcile_projectile_continuations()?;
         }
         Ok(())
     }
@@ -5599,7 +6314,7 @@ impl Game {
         {
             return Err(GameError::IllegalAction);
         }
-        let (attacker_kind, current_location, ready, profile) = {
+        let (attacker_kind, current_location, ready, profile, incremental) = {
             let player = &self.position.players[seat_index(seat)];
             if player.avatar.card.instance_id == *unit_instance_id {
                 (
@@ -5615,6 +6330,7 @@ impl Game {
                         restriction: None,
                         seat,
                     },
+                    false,
                 )
             } else {
                 let unit = self
@@ -5645,6 +6361,7 @@ impl Game {
                         restriction: facts.movement_restriction,
                         seat,
                     },
+                    facts.may_ranged_strike_once_during_basic_movement,
                 )
             }
         };
@@ -5656,6 +6373,15 @@ impl Game {
                 .any(|candidate| candidate == path)
         {
             return Err(GameError::IllegalAction);
+        }
+        if incremental {
+            return self.begin_basic_movement(
+                seat,
+                path,
+                unit_instance_id,
+                BasicMovementPurpose::MoveAndAttack,
+                outcomes,
+            );
         }
         outcomes.push("move-and-attack-activated", || {
             json!({
@@ -7409,8 +8135,46 @@ impl Game {
                     self.pending_deathrites_value(pending),
                 );
             }
+            self.insert_pending_movement_state(object);
         }
         value
+    }
+
+    fn insert_pending_movement_state(&self, object: &mut Map<String, Value>) {
+        match &self.position.pending_basic_movement {
+            PendingField::Absent => {}
+            PendingField::Pending(pending) => {
+                object.insert(
+                    "pendingBasicMovement".to_owned(),
+                    json!({
+                        "path": pending.path,
+                        "pathIndex": pending.path_index,
+                        "purpose": pending.purpose.as_str(),
+                        "rangedStrikeUsed": pending.ranged_strike_used,
+                        "seat": pending.seat,
+                        "sourceInstanceId": pending.source_instance_id,
+                    }),
+                );
+            }
+            PendingField::Resolved => {
+                object.insert("pendingBasicMovement".to_owned(), Value::Null);
+            }
+        }
+        match &self.position.pending_ranged_step {
+            PendingField::Absent => {}
+            PendingField::Pending(pending) => {
+                object.insert(
+                    "pendingRangedStep".to_owned(),
+                    json!({
+                        "seat": pending.seat,
+                        "sourceInstanceId": pending.source_instance_id,
+                    }),
+                );
+            }
+            PendingField::Resolved => {
+                object.insert("pendingRangedStep".to_owned(), Value::Null);
+            }
+        }
     }
 
     fn pending_deathrites_value(&self, pending: &PendingDeathrites) -> Value {

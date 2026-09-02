@@ -49,6 +49,16 @@ pub enum GenesisDamageChoice {
     Target,
 }
 
+/// An engine-issued resolution of the optional step after a Ranged strike.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RangedStepChoice {
+    /// Remain at the shooter's current location.
+    Decline,
+    /// Follow the accompanying one-step path.
+    Step,
+}
+
 /// A cardinal projectile ray direction in canonical string order.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -300,6 +310,11 @@ pub enum ActionDescriptor {
         /// Authoritative moving unit identity.
         unit_instance_id: IdentityHash,
     },
+    /// Advance one edge, or finish, an already committed basic movement path.
+    ContinueBasicMovement {
+        /// Authoritative moving minion identity.
+        unit_instance_id: IdentityHash,
+    },
     /// Tap a ready Ranged unit to strike the first visible unit along one issued ray.
     ShootProjectile {
         /// Cardinal direction of travel.
@@ -323,6 +338,22 @@ pub enum ActionDescriptor {
         path: Vec<Location>,
         /// Authoritative source minion identity.
         shooter_instance_id: IdentityHash,
+    },
+    /// Decline or take the engine-issued optional step after a Ranged strike.
+    ResolveRangedStep {
+        /// Decline or take the accompanying path.
+        choice: RangedStepChoice,
+        /// Location before the optional step.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<Location>,
+        /// Complete one-step path, including the starting location.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<Vec<Location>>,
+        /// Location after the optional step.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to: Option<Location>,
+        /// Authoritative Ranged minion identity.
+        unit_instance_id: IdentityHash,
     },
     /// Decline to attack after moving or tapping in place.
     DeclineAttack,
@@ -471,6 +502,20 @@ impl ActionDescriptor {
                 Some(format!("Shoot {direction} at {target}"))
             }
             Self::DeclineAttack => Some("Decline attack".to_owned()),
+            Self::ResolveRangedStep {
+                choice,
+                to,
+                unit_instance_id,
+                ..
+            } => Some(match (choice, to) {
+                (RangedStepChoice::Decline, None) => {
+                    "Decline the optional step after the Ranged strike".to_owned()
+                }
+                (RangedStepChoice::Step, Some(to)) => {
+                    format!("Step {}… to {}", short_identity(unit_instance_id), to.cell)
+                }
+                _ => return None,
+            }),
             Self::DeclareAttack { target } => Some(format!(
                 "Attack {} {}…",
                 target.kind(),
@@ -516,6 +561,7 @@ impl ActionDescriptor {
                 "Replace Rubble at {target_cell} with the top site of your Atlas"
             )),
             Self::PlaySite { .. }
+            | Self::ContinueBasicMovement { .. }
             | Self::OrderDeathrites { .. }
             | Self::ResolveGenesisSpell { .. }
             | Self::ResolveGenesisSpellOrder { .. }
@@ -755,6 +801,14 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                         ActionDescriptor::OrderDeathrites {
                             source_instance_id: right,
                         },
+                    )
+                    | (
+                        ActionDescriptor::ContinueBasicMovement {
+                            unit_instance_id: left,
+                        },
+                        ActionDescriptor::ContinueBasicMovement {
+                            unit_instance_id: right,
+                        },
                     ) => left.cmp(right),
                     (
                         ActionDescriptor::DeclareAttack { target: left },
@@ -788,6 +842,30 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                         ActionDescriptor::ResolveGenesisToken { choice: left },
                         ActionDescriptor::ResolveGenesisToken { choice: right },
                     ) => left.cmp(right),
+                    (
+                        ActionDescriptor::ResolveRangedStep {
+                            choice: left_choice,
+                            path: left_path,
+                            unit_instance_id: left_unit,
+                            ..
+                        },
+                        ActionDescriptor::ResolveRangedStep {
+                            choice: right_choice,
+                            path: right_path,
+                            unit_instance_id: right_unit,
+                            ..
+                        },
+                    ) => left_choice
+                        .cmp(right_choice)
+                        .then_with(|| match (left_path, right_path) {
+                            (Some(left), Some(right)) => {
+                                compare_json_array(left, right, Location::cmp)
+                            }
+                            (Some(_), None) => Ordering::Less,
+                            (None, Some(_)) => Ordering::Greater,
+                            (None, None) => Ordering::Equal,
+                        })
+                        .then_with(|| left_unit.cmp(right_unit)),
                     _ => Ordering::Equal,
                 }),
         })
@@ -978,24 +1056,26 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::CastMagic { .. } => 2,
         ActionDescriptor::CloseDefend { .. } => 3,
         ActionDescriptor::CloseIntercept {} => 4,
-        ActionDescriptor::DeclareAttack { .. } => 5,
-        ActionDescriptor::DeclineAttack => 6,
-        ActionDescriptor::Defend { .. } => 7,
-        ActionDescriptor::Draw { .. } => 8,
-        ActionDescriptor::DrawSite => 9,
-        ActionDescriptor::DrawSpell => 10,
-        ActionDescriptor::EndTurn => 11,
-        ActionDescriptor::Intercept { .. } => 12,
-        ActionDescriptor::OrderDeathrites { .. } => 13,
-        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 14,
-        ActionDescriptor::ResolveGenesisSpell { .. } => 15,
-        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 16,
-        ActionDescriptor::ResolveGenesisToken { .. } => 17,
-        ActionDescriptor::Mulligan { .. } => 18,
-        ActionDescriptor::PlaySite { .. } => 19,
-        ActionDescriptor::ShootDamageProjectile { .. } => 20,
-        ActionDescriptor::ShootProjectile { .. } => 21,
-        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 22,
+        ActionDescriptor::ContinueBasicMovement { .. } => 5,
+        ActionDescriptor::DeclareAttack { .. } => 6,
+        ActionDescriptor::DeclineAttack => 7,
+        ActionDescriptor::Defend { .. } => 8,
+        ActionDescriptor::Draw { .. } => 9,
+        ActionDescriptor::DrawSite => 10,
+        ActionDescriptor::DrawSpell => 11,
+        ActionDescriptor::EndTurn => 12,
+        ActionDescriptor::Intercept { .. } => 13,
+        ActionDescriptor::OrderDeathrites { .. } => 14,
+        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 15,
+        ActionDescriptor::ResolveGenesisSpell { .. } => 16,
+        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 17,
+        ActionDescriptor::ResolveGenesisToken { .. } => 18,
+        ActionDescriptor::ResolveRangedStep { .. } => 19,
+        ActionDescriptor::Mulligan { .. } => 20,
+        ActionDescriptor::PlaySite { .. } => 21,
+        ActionDescriptor::ShootDamageProjectile { .. } => 22,
+        ActionDescriptor::ShootProjectile { .. } => 23,
+        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 24,
     }
 }
 
