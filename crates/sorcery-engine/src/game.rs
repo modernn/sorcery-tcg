@@ -973,8 +973,6 @@ fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
         .is_some()
     {
         Some("discardSpellToDamageRandomOtherUnitHere")
-    } else if facts.gains_power_ranged_and_spellcaster_atop_tower {
-        Some("gainsPowerRangedAndSpellcasterAtopTower")
     } else if let Some(field) = unsupported_selfplay_minion_genesis(facts.genesis) {
         Some(field)
     } else if facts.must_be_cast_to_outer_column {
@@ -1000,8 +998,6 @@ fn unsupported_selfplay_site(facts: &SiteFacts) -> Option<&'static str> {
         Some("flyToNearbyVoidOncePerTurnAtAirThreshold")
     } else if facts.genesis_immobilize_nearby_until_next_turn {
         Some("genesisImmobilizeNearbyUntilNextTurn")
-    } else if facts.is_tower {
-        Some("isTower")
     } else if facts.minions_here_gain_voidwalk_until_leaving_void {
         Some("minionsHereGainVoidwalkUntilLeavingVoid")
     } else if facts
@@ -1847,7 +1843,7 @@ impl Game {
             };
             if facts.cannot_defend_or_intercept
                 || unit.summoning_sickness && !self.minion_has_active_charge(unit)
-                || attacker_airborne && !facts.airborne && !facts.ranged
+                || attacker_airborne && !facts.airborne && !self.minion_is_ranged(unit, facts)
             {
                 continue;
             }
@@ -2841,7 +2837,7 @@ impl Game {
         else {
             return Err(GameError::IllegalAction);
         };
-        if !facts.ranged
+        if !self.minion_is_ranged(shooter, facts)
             || shooter.region != Region::Surface
             || movement && !facts.may_ranged_strike_once_during_basic_movement
             || self.minion_is_disabled(shooter)
@@ -2991,8 +2987,7 @@ impl Game {
                 else {
                     return None;
                 };
-                facts
-                    .spellcaster
+                (facts.spellcaster || self.minion_atop_tower(unit))
                     .then(|| (UnitKind::Minion, unit.card.instance_id.clone()))
             }))
             .collect()
@@ -3012,7 +3007,7 @@ impl Game {
         else {
             return None;
         };
-        facts.spellcaster.then_some(UnitKind::Minion)
+        (facts.spellcaster || self.minion_atop_tower(unit)).then_some(UnitKind::Minion)
     }
 
     fn minion_is_disabled(&self, unit: &UnitPosition) -> bool {
@@ -3039,6 +3034,29 @@ impl Game {
 
     fn minion_has_active_stealth(&self, unit: &UnitPosition) -> bool {
         unit.stealthed && !self.minion_is_disabled(unit)
+    }
+
+    /// Reports whether an active surface minion stands on a Tower it can draw from.
+    fn minion_atop_tower(&self, unit: &UnitPosition) -> bool {
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return false;
+        };
+        facts.gains_power_ranged_and_spellcaster_atop_tower
+            && unit.region == Region::Surface
+            && !self.minion_is_disabled(unit)
+            && self.position.sites[unit.location.index()]
+                .as_ref()
+                .is_some_and(|site| {
+                    matches!(
+                        &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                        CardFacts::Site(site_facts) if site_facts.is_tower
+                    )
+                })
+    }
+
+    fn minion_is_ranged(&self, unit: &UnitPosition, facts: &MinionFacts) -> bool {
+        facts.ranged || self.minion_atop_tower(unit)
     }
 
     fn has_nearby_enemy_minion(&self, unit: &UnitPosition) -> bool {
@@ -3296,21 +3314,8 @@ impl Game {
                 bonus = bonus.checked_add(1).ok_or(GameError::IllegalAction)?;
             }
         }
-        if !disabled
-            && unit.region == Region::Surface
-            && facts.gains_power_ranged_and_spellcaster_atop_tower
-        {
-            let atop_tower = self.position.sites[unit.location.index()]
-                .as_ref()
-                .is_some_and(|site| {
-                    matches!(
-                        &self.rules.cards[usize::from(site.card.card_id.0)].facts,
-                        CardFacts::Site(site_facts) if site_facts.is_tower
-                    )
-                });
-            if atop_tower {
-                bonus = bonus.checked_add(2).ok_or(GameError::IllegalAction)?;
-            }
+        if self.minion_atop_tower(unit) {
+            bonus = bonus.checked_add(2).ok_or(GameError::IllegalAction)?;
         }
         Ok((
             u16::from(facts.attack)

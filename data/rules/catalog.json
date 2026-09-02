@@ -3026,7 +3026,7 @@
         "RULE-04"
       ],
       "plainLanguage": "An active surface minion derives power, Ranged, and Spellcaster atop a Tower.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "ranged",
         "spellcaster",
@@ -3035,8 +3035,8 @@
       "actionHints": [],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 an active surface minion derives power, Ranged, and Spellcaster atop a Tower"
+        "file": "crates/sorcery-engine/tests/tower_rules.rs",
+        "testName": "rule_catalog_0151_a_tower_should_grant_power_ranged_and_spellcaster_to_its_occupant"
       }
     },
     {
