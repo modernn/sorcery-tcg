@@ -507,7 +507,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Disabling a subsurface minion immediately settles its region.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "disabled",
         "region"
@@ -517,8 +517,8 @@
         "disable"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03/04 disabling a subsurface minion immediately settles its region"
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "disable_magic_should_kill_its_underground_burrowing_target"
       }
     },
     {
@@ -2992,7 +2992,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Sparkmage counts every player-cast spell source, resets, and damages one other unit.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "cast"
@@ -3001,8 +3001,8 @@
         "damage"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Sparkmage counts every player-cast spell source, resets, and damages one other unit"
+        "file": "crates/sorcery-engine/tests/sparkmage_rules.rs",
+        "testName": "air_thresholds_should_select_a_hidden_candidate_deterministically_damage_it_and_reset"
       }
     },
     {
