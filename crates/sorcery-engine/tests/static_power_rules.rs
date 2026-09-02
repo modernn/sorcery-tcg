@@ -2,6 +2,10 @@
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
+use sorcery_engine::checkpoint::{
+    create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+    serialize_game_checkpoint,
+};
 use sorcery_engine::contract::{ActionRequest, Receipt};
 use sorcery_engine::session::{Session, StepResult};
 
@@ -177,6 +181,18 @@ fn died_order(receipt: &Receipt) -> Vec<String> {
         .collect()
 }
 
+fn assert_checkpoint_round_trip(session: &Session) {
+    let checkpoint = create_game_checkpoint(session).expect("captured static power checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized checkpoint");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed checkpoint");
+    let restored = resume_game_checkpoint(&parsed).expect("restored checkpoint");
+    assert_eq!(state(&restored), state(session));
+    assert_eq!(
+        restored.legal_actions().expect("restored actions"),
+        session.legal_actions().expect("source actions")
+    );
+}
+
 fn assert_exact_replay(session: &Session) {
     let action_ids: Vec<IdentityHash> = session
         .transcript()
@@ -191,6 +207,22 @@ fn assert_exact_replay(session: &Session) {
     assert!(session.verify_replay().expect("verified replay"));
 }
 
+fn seeded_where(
+    cards: &Value,
+    north: &[&str],
+    south: &[&str],
+    north_atlas: usize,
+    accept: impl Fn(&Value) -> bool,
+) -> String {
+    (1..=4096)
+        .map(|seed| manifest(seed, cards, north, south, north_atlas))
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("static power candidate");
+            accept(&state(&preview))
+        })
+        .expect("bounded seed with the required static power opening hands")
+}
+
 fn seeded(
     cards: &Value,
     north: &[&str],
@@ -198,21 +230,16 @@ fn seeded(
     wanted: &[&str],
     north_atlas: usize,
 ) -> String {
-    (1..=4096)
-        .map(|seed| manifest(seed, cards, north, south, north_atlas))
-        .find(|candidate| {
-            let preview = Session::new(candidate).expect("static power candidate");
-            let current = state(&preview);
-            wanted.iter().all(|entry| {
-                let (seat, card_id) = entry.split_once(':').expect("seat-qualified card");
-                current["players"][seat]["hand"]["spellbook"]
-                    .as_array()
-                    .expect("opening hand")
-                    .iter()
-                    .any(|card| card["cardId"] == card_id)
-            })
+    seeded_where(cards, north, south, north_atlas, |current| {
+        wanted.iter().all(|entry| {
+            let (seat, card_id) = entry.split_once(':').expect("seat-qualified card");
+            current["players"][seat]["hand"]["spellbook"]
+                .as_array()
+                .expect("opening hand")
+                .iter()
+                .any(|card| card["cardId"] == card_id)
         })
-        .expect("bounded seed with the required static power opening hands")
+    })
 }
 
 #[test]
@@ -429,6 +456,256 @@ fn rule_catalog_0035_controlled_mortal_power_should_follow_current_control_and_s
     let second = rain(&mut session);
     assert!(died_order(&second).is_empty());
     assert_eq!(damage_of(&session, &north_mortal), 2);
+    assert_exact_replay(&session);
+}
+
+fn event_types(receipt: &Receipt) -> Vec<&str> {
+    receipt
+        .events
+        .iter()
+        .map(|event| event.event_type.as_str())
+        .collect()
+}
+
+fn defender_ids(current: &Value) -> Vec<&str> {
+    current["pendingCombat"]["defenders"]
+        .as_array()
+        .expect("pending combat defenders")
+        .iter()
+        .map(|defender| defender["instanceId"].as_str().expect("defender identity"))
+        .collect()
+}
+
+/// Walks both seats into a declared attack on a wounded North target at C4, with two fragile
+/// allies that only survive because the aura source stands next door at B4.
+fn stale_combat_defend_position(session: &mut Session) -> (String, String, Vec<String>) {
+    play_site(session, "C4");
+    let target_id = summon(session, "north-target", "C4");
+    let mut fragile_ids = vec![summon(session, "north-fragile", "C4")];
+    let source_id = summon(session, "north-source", "C4");
+    end_and_draw(session);
+    play_site(session, "C1");
+    end_and_draw(session);
+
+    play_site(session, "B4");
+    fragile_ids.push(summon(session, "north-fragile", "C4"));
+    // Stepping the aura source next door keeps both fragile allies on two effective defense.
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == source_id.as_str()
+            && descriptor["path"]
+                == json!([
+                    { "cell": "C4", "region": "surface" },
+                    { "cell": "B4", "region": "surface" },
+                ])
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    end_and_draw(session);
+
+    play_site(session, "B1");
+    let attacker_id = summon(session, "south-attacker", "C4");
+    end_and_draw(session);
+    play_site(session, "A4");
+    end_and_draw(session);
+    play_site(session, "A1");
+
+    // One point of Rain leaves every fragile ally exactly one aura point from death.
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "south-rain"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == attacker_id.as_str()
+            && descriptor["path"] == json!([{ "cell": "C4", "region": "surface" }])
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "declare-attack"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == target_id.as_str()
+    });
+    (source_id, target_id, fragile_ids)
+}
+
+#[test]
+fn rule_catalog_0037_aura_loss_deaths_cannot_restore_stale_combat_during_a_defender_path() {
+    let cards = json!({
+        "north-avatar": avatar(),
+        "north-fragile": minion(json!({ "deathriteHeal": 3 })),
+        "north-site": site(),
+        "north-source": minion(json!({
+            "defense": 2,
+            "movementBonus": 2,
+            "otherNearbyAlliesPowerBonus": 1,
+        })),
+        "north-target": minion(json!({ "defense": 3 })),
+        "south-attacker": minion(json!({
+            "charge": true,
+            "defense": 10,
+            "summonToAnySite": true,
+        })),
+        "south-avatar": avatar(),
+        "south-rain": magic(("damageEachAbovegroundMinion", json!(1))),
+        "south-site": site(),
+    });
+    let north = [
+        "north-target",
+        "north-fragile",
+        "north-source",
+        "north-fragile",
+        "north-target",
+        "north-source",
+    ];
+    let south = [
+        "south-attacker",
+        "south-rain",
+        "south-attacker",
+        "south-rain",
+        "south-attacker",
+        "south-rain",
+    ];
+    // North opens on all three roles and draws the second fragile ally next.
+    let encoded = seeded_where(&cards, &north, &south, 3, |current| {
+        let opening = |seat: &str| -> Vec<&str> {
+            current["players"][seat]["hand"]["spellbook"]
+                .as_array()
+                .expect("opening hand")
+                .iter()
+                .map(|card| card["cardId"].as_str().expect("opening card"))
+                .collect()
+        };
+        let north_opening = opening("north");
+        let south_opening = opening("south");
+        ["north-target", "north-fragile", "north-source"]
+            .iter()
+            .all(|card_id| north_opening.contains(card_id))
+            && current["players"]["north"]["spellbook"][0]["cardId"] == "north-fragile"
+            && south_opening.contains(&"south-attacker")
+            && south_opening.contains(&"south-rain")
+    });
+    let mut session = Session::new(&encoded).expect("valid stale combat defend scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let (source_id, _target_id, fragile_ids) = stale_combat_defend_position(&mut session);
+
+    let wounded = state(&session);
+    assert_eq!(fragile_ids.len(), 2);
+    for fragile_id in &fragile_ids {
+        assert_eq!(
+            realm_unit(&wounded, fragile_id).expect("wounded fragile ally")["damage"],
+            1
+        );
+    }
+
+    // One fragile ally joins the defence while the aura still holds it up, so the combat it
+    // leaves behind when it dies is the stale combat this rule must not restore.
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "defend"
+            && descriptor["unitInstanceId"] == fragile_ids[0].as_str()
+            && descriptor["path"].as_array().expect("defend path").len() == 1
+    });
+    assert_eq!(
+        defender_ids(&state(&session)),
+        [fragile_ids[0].as_str()],
+        "the doomed ally must hold the combat that its own death later abandons"
+    );
+
+    // The aura source defends along a path that abandons its allies and returns to them.
+    let (_, defended) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "defend"
+            && descriptor["unitInstanceId"] == source_id.as_str()
+            && descriptor["path"]
+                == json!([
+                    { "cell": "B4", "region": "surface" },
+                    { "cell": "A4", "region": "surface" },
+                    { "cell": "B4", "region": "surface" },
+                    { "cell": "C4", "region": "surface" },
+                ])
+    });
+    let paused = state(&session);
+    assert_eq!(
+        (
+            event_types(&defended),
+            paused["phase"].clone(),
+            paused["decisionSeat"].clone()
+        ),
+        (
+            vec!["basic-movement-started"],
+            json!("deathrite-order"),
+            json!("north")
+        ),
+        "leaving the aura mid-path must kill both allies and owe an ordered Deathrite"
+    );
+
+    // Both allies are off the board but stay out of the cemetery until North orders them.
+    let paused_cemetery = cemetery_order(&paused, "north");
+    for fragile_id in &fragile_ids {
+        assert!(realm_unit(&paused, fragile_id).is_none());
+        assert!(!paused_cemetery.contains(fragile_id));
+    }
+    let mut owed: Vec<String> = session
+        .legal_actions()
+        .expect("Deathrite ordering actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("owed Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    owed.sort_unstable();
+    let mut expected_owed = fragile_ids.clone();
+    expected_owed.sort_unstable();
+    assert_eq!(owed, expected_owed);
+    assert_checkpoint_round_trip(&session);
+
+    // Ordering the owed Deathrites settles both corpses and hands the path back to North.
+    let (_, ordered) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == owed[0].as_str()
+    });
+    let settled = state(&session);
+    let settled_cemetery = cemetery_order(&settled, "north");
+    assert_eq!(settled["phase"], "movement");
+    assert_eq!(died_order(&ordered).len(), 2);
+    for fragile_id in &fragile_ids {
+        assert!(settled_cemetery.contains(fragile_id));
+    }
+
+    // The abandoned path still owes every remaining step before anyone joins combat.
+    let mut receipts = vec![defended, ordered];
+    for _ in 0..8 {
+        if state(&session)["phase"] != "movement" {
+            break;
+        }
+        let (_, continued) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "continue-basic-movement"
+        });
+        receipts.push(continued);
+    }
+    let joined = state(&session);
+    let events: Vec<&str> = receipts.iter().flat_map(event_types).collect();
+    let count = |wanted: &str| events.iter().filter(|event| **event == wanted).count();
+    assert_eq!(joined["phase"], "defend");
+    assert_eq!(
+        defender_ids(&joined),
+        [source_id.as_str()],
+        "the dead ally's stale defence must not return alongside the surviving defender"
+    );
+    assert_eq!(
+        (
+            count("basic-movement-started"),
+            count("basic-movement-continued"),
+            count("defender-joined"),
+        ),
+        (1, 2, 1)
+    );
+    assert!(
+        events.iter().position(|event| *event == "defender-joined")
+            > events.iter().rposition(|event| *event == "minion-died"),
+        "the surviving defender may only join combat after every aura-loss death has settled"
+    );
     assert_exact_replay(&session);
 }
 
