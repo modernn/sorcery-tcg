@@ -3045,7 +3045,7 @@
         "RULE-03"
       ],
       "plainLanguage": "A minion discards a chosen Spellbook card to damage a random other unit here.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "discard"
@@ -3055,8 +3055,8 @@
         "card-discard"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 a minion discards a chosen Spellbook card to damage a random other unit here"
+        "file": "crates/sorcery-engine/tests/discard_random_damage_rules.rs",
+        "testName": "rule_catalog_0152_discarding_a_chosen_spell_should_damage_a_random_other_unit_here"
       }
     },
     {
@@ -3065,7 +3065,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Random other-unit damage includes allied, enemy, Avatar, and Stealth candidates.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "stealth"
       ],
@@ -3075,8 +3075,8 @@
         "stealth-change"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 random other-unit damage includes allied, enemy, Avatar, and Stealth candidates"
+        "file": "crates/sorcery-engine/tests/discard_random_damage_rules.rs",
+        "testName": "rule_catalog_0153_random_other_unit_candidates_should_include_allies_avatars_and_stealth"
       }
     },
     {
@@ -3085,7 +3085,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Discard damage snapshots derived unit power and uses Ward and prevention.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "ward",
         "derived-power"
@@ -3098,8 +3098,8 @@
         "card-discard"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 discard damage snapshots derived unit power and uses Ward and prevention"
+        "file": "crates/sorcery-engine/tests/discard_random_damage_rules.rs",
+        "testName": "rule_catalog_0154_discard_damage_should_snapshot_derived_power_and_use_ward_and_prevention"
       }
     },
     {

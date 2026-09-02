@@ -968,11 +968,6 @@ fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
         Some("atStartOfControllerTurnTeleportToRandomSiteOrVoid")
     } else if facts.burrowing {
         Some("burrowing")
-    } else if facts
-        .discard_spell_to_damage_random_other_unit_here
-        .is_some()
-    {
-        Some("discardSpellToDamageRandomOtherUnitHere")
     } else if let Some(field) = unsupported_selfplay_minion_genesis(facts.genesis) {
         Some(field)
     } else if facts.must_be_cast_to_outer_column {
@@ -2617,6 +2612,7 @@ impl Game {
                 self.push_action(actions, descriptor, label);
             }
         }
+        self.append_discard_random_damage_actions(actions, seat);
         if !player.avatar.tapped {
             self.append_unit_move_actions(
                 actions,
@@ -2704,6 +2700,52 @@ impl Game {
             return None;
         };
         facts.tap_for_mana
+    }
+
+    /// Offers each discard-funded random damage activation the controller can currently pay for.
+    fn append_discard_random_damage_actions(&self, actions: &mut Vec<IssuedAction>, seat: Seat) {
+        if self.position.phase != Phase::Main
+            || self.position.active_seat != seat
+            || self.position.decision_seat != seat
+        {
+            return;
+        }
+        let player = &self.position.players[seat_index(seat)];
+        let mut discards: Vec<_> = player.hand_spellbook.iter().collect();
+        discards.sort_unstable_by(|left, right| left.instance_id.cmp(&right.instance_id));
+        if discards.is_empty() {
+            return;
+        }
+        for unit in &self.position.units {
+            if unit.controller != seat || self.minion_is_disabled(unit) {
+                continue;
+            }
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                continue;
+            };
+            if facts
+                .discard_spell_to_damage_random_other_unit_here
+                .is_none()
+            {
+                continue;
+            }
+            for discard in &discards {
+                let card_id = &self.rules.cards[usize::from(discard.card_id.0)].id;
+                self.push_action(
+                    actions,
+                    ActionDescriptor::ActivateDiscardRandomDamage {
+                        discard_card_instance_id: discard.instance_id.clone(),
+                        source_instance_id: unit.card.instance_id.clone(),
+                    },
+                    format!(
+                        "Discard {card_id} to activate {}…",
+                        &unit.card.instance_id.as_str()[..15]
+                    ),
+                );
+            }
+        }
     }
 
     fn damage_projectile_descriptors(
@@ -4549,6 +4591,9 @@ impl Game {
             _ => None,
         };
         let applied = match &action.descriptor {
+            ActionDescriptor::ActivateDiscardRandomDamage { .. } => {
+                self.apply_discard_random_damage_action(action, outcomes, random_draws)
+            }
             ActionDescriptor::ActivateSparkmage { .. } => {
                 self.apply_sparkmage_action(action, outcomes, random_draws)
             }
@@ -8992,6 +9037,177 @@ impl Game {
         self.record_unit_interaction(UnitKind::Minion, seat, unit_instance_id, outcomes)
     }
 
+    /// Discards one Spellbook card so a minion damages a hidden random other unit at its location.
+    fn apply_discard_random_damage_action(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::ActivateDiscardRandomDamage {
+            discard_card_instance_id,
+            source_instance_id,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let seat = action.seat;
+        if self.position.phase != Phase::Main
+            || self.position.active_seat != seat
+            || self.position.decision_seat != seat
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let source = self
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.controller == seat && unit.card.instance_id == *source_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(source.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let amount = u16::from(
+            facts
+                .discard_spell_to_damage_random_other_unit_here
+                .ok_or(GameError::IllegalAction)?,
+        );
+        if self.minion_is_disabled(source) {
+            return Err(GameError::IllegalAction);
+        }
+        let source_location = Location {
+            cell: source.location,
+            region: source.region,
+        };
+        let player = &mut self.position.players[seat_index(seat)];
+        let hand_index = player
+            .hand_spellbook
+            .iter()
+            .position(|card| card.instance_id == *discard_card_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        let discarded = player.hand_spellbook.remove(hand_index);
+        outcomes.push("card-discarded", || {
+            json!({
+                "cardId": self.rules.cards[usize::from(discarded.card_id.0)].id,
+                "instanceId": discarded.instance_id,
+                "owner": discarded.owner,
+                "seat": seat,
+                "sourceInstanceId": source_instance_id,
+                "zone": "spellbook",
+            })
+        });
+        self.position.players[seat_index(seat)]
+            .cemetery
+            .push(discarded);
+
+        let (current_power, lethal) =
+            self.combatant_attack_and_lethal(UnitKind::Minion, seat, source_instance_id)?;
+        let selected = self.draw_random_other_unit_here(
+            source_location,
+            source_instance_id,
+            "discard_spell_random_other_unit_here",
+            random_draws,
+        )?;
+        outcomes.push("discard-random-damage-activated", || {
+            let mut payload = json!({
+                "amount": amount,
+                "discardCardInstanceId": discard_card_instance_id,
+                "seat": seat,
+                "sourceInstanceId": source_instance_id,
+                "sourceLocation": source_location,
+            });
+            if let Some((target_instance_id, target_kind, target_seat)) = &selected {
+                payload["targetInstanceId"] = json!(target_instance_id);
+                payload["targetKind"] = json!(target_kind.as_str());
+                payload["targetSeat"] = json!(target_seat);
+            }
+            payload
+        });
+        self.record_unit_interaction(UnitKind::Minion, seat, source_instance_id, outcomes)?;
+
+        if let Some(target) = selected {
+            outcomes.push("discard-random-damage-allocated", || {
+                json!({
+                    "amount": amount,
+                    "sourceInstanceId": source_instance_id,
+                    "targetInstanceId": target.0,
+                })
+            });
+            self.damage_unit_and_settle_deaths(
+                &target,
+                amount,
+                UnitDamageSource {
+                    current_power,
+                    lethal,
+                },
+                outcomes,
+            )?;
+        }
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    /// Draws one hidden random unit sharing a location with an activated source, excluding it.
+    fn draw_random_other_unit_here(
+        &mut self,
+        location: Location,
+        source_instance_id: &IdentityHash,
+        purpose: &str,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
+    ) -> Result<Option<(IdentityHash, UnitKind, Seat)>, GameError> {
+        let mut candidates = self.units_at_location(location);
+        candidates.retain(|(instance_id, _, _)| instance_id != source_instance_id);
+        if candidates.is_empty() {
+            return Ok(None);
+        }
+        let index = draw_index(
+            &mut self.position.prng,
+            candidates.len(),
+            purpose,
+            "unit_index_candidate",
+            random_draws,
+        )?;
+        Ok(Some(candidates[index].clone()))
+    }
+
+    /// Applies one activated ability's damage to a resolved unit and settles the deaths it caused.
+    fn damage_unit_and_settle_deaths(
+        &mut self,
+        target: &(IdentityHash, UnitKind, Seat),
+        amount: u16,
+        source: UnitDamageSource,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let (target_instance_id, target_kind, target_seat) = target;
+        let result = self.apply_simple_damage(
+            *target_kind,
+            *target_seat,
+            target_instance_id,
+            amount,
+            source,
+            outcomes,
+        )?;
+        if result.minion_died || result.avatar_defeated {
+            self.begin_minion_deaths(
+                if result.minion_died {
+                    std::slice::from_ref(target_instance_id)
+                } else {
+                    &[]
+                },
+                if result.avatar_defeated {
+                    std::slice::from_ref(target_seat)
+                } else {
+                    &[]
+                },
+                Phase::Main,
+                self.position.active_seat,
+                outcomes,
+            )?;
+        }
+        Ok(())
+    }
+
     fn apply_sparkmage_action(
         &mut self,
         action: &IssuedAction,
@@ -9034,21 +9250,12 @@ impl Game {
             self.combatant_attack_and_lethal(UnitKind::Avatar, seat, source_instance_id)?;
         self.position.players[seat_index(seat)].avatar.tapped = true;
 
-        let mut candidates = self.units_at_location(*target_location);
-        candidates.retain(|(instance_id, _, _)| instance_id != source_instance_id);
-
-        let selected = if candidates.is_empty() {
-            None
-        } else {
-            let index = draw_index(
-                &mut self.position.prng,
-                candidates.len(),
-                "sparkmage_random_other_unit_at_nearby_location",
-                "unit_index_candidate",
-                random_draws,
-            )?;
-            Some(candidates[index].clone())
-        };
+        let selected = self.draw_random_other_unit_here(
+            *target_location,
+            source_instance_id,
+            "sparkmage_random_other_unit_at_nearby_location",
+            random_draws,
+        )?;
         outcomes.push("sparkmage-activated", || {
             let mut payload = json!({
                 "amount": amount,
@@ -9065,13 +9272,11 @@ impl Game {
         });
         self.record_unit_interaction(UnitKind::Avatar, seat, source_instance_id, outcomes)?;
 
-        if let Some((target_instance_id, target_kind, target_seat)) = selected
+        if let Some(target) = selected
             && amount > 0
         {
-            let result = self.apply_simple_damage(
-                target_kind,
-                target_seat,
-                &target_instance_id,
+            self.damage_unit_and_settle_deaths(
+                &target,
                 amount,
                 UnitDamageSource {
                     current_power,
@@ -9079,23 +9284,6 @@ impl Game {
                 },
                 outcomes,
             )?;
-            if result.minion_died || result.avatar_defeated {
-                self.begin_minion_deaths(
-                    if result.minion_died {
-                        std::slice::from_ref(&target_instance_id)
-                    } else {
-                        &[]
-                    },
-                    if result.avatar_defeated {
-                        std::slice::from_ref(&target_seat)
-                    } else {
-                        &[]
-                    },
-                    Phase::Main,
-                    self.position.active_seat,
-                    outcomes,
-                )?;
-            }
         }
         self.position.state_version += 1;
         Ok(())
@@ -9857,10 +10045,8 @@ impl Game {
                             "targetInstanceId": target_instance_id,
                         })
                     });
-                    let damage = self.apply_simple_damage(
-                        target_kind,
-                        target_seat,
-                        &target_instance_id,
+                    self.damage_unit_and_settle_deaths(
+                        &(target_instance_id, target_kind, target_seat),
                         allocated,
                         UnitDamageSource {
                             current_power: 0,
@@ -9868,23 +10054,6 @@ impl Game {
                         },
                         outcomes,
                     )?;
-                    if damage.minion_died || damage.avatar_defeated {
-                        self.begin_minion_deaths(
-                            if damage.minion_died {
-                                std::slice::from_ref(&target_instance_id)
-                            } else {
-                                &[]
-                            },
-                            if damage.avatar_defeated {
-                                std::slice::from_ref(&target_seat)
-                            } else {
-                                &[]
-                            },
-                            Phase::Main,
-                            self.position.active_seat,
-                            outcomes,
-                        )?;
-                    }
                 }
             }
             MagicEffect::GainControlOfTargetNearbyMinion => {

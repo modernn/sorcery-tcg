@@ -35,6 +35,7 @@ const NORTH_AVATAR: &str =
 
 fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
     match descriptor {
+        ActionDescriptor::ActivateDiscardRandomDamage { .. } => "activate-discard-random-damage",
         ActionDescriptor::ActivateMana { .. } => "activate-mana",
         ActionDescriptor::ActivateSparkmage { .. } => "activate-sparkmage",
         ActionDescriptor::AllocateStrike { .. } => "allocate-strike",
