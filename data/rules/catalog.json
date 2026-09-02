@@ -748,7 +748,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Teleport forcefully moves a chosen ally to a target site surface.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "choose-target",
@@ -759,8 +759,8 @@
         "movement"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Teleport forcefully moves a chosen ally to a target site surface"
+        "file": "crates/sorcery-engine/tests/targeted_relocation_magic_rules.rs",
+        "testName": "rule_catalog_0039_teleport_should_move_ally_to_any_target_site_surface"
       }
     },
     {

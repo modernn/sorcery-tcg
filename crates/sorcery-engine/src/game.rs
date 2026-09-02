@@ -918,7 +918,8 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::LeapAttackAlly
         | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_)
         | MagicEffect::GrantChargeToAllyThisTurn
-        | MagicEffect::GrantPowerTwoToAllyThisTurn => None,
+        | MagicEffect::GrantPowerTwoToAllyThisTurn
+        | MagicEffect::TeleportAllyToTargetSite => None,
         MagicEffect::DamageRandomUnitAtLocation(_) => Some("damageRandomUnitAtLocation"),
         MagicEffect::DestroyTargetSiteWithDamageGrid(_) => Some("destroyTargetSiteWithDamageGrid"),
         MagicEffect::GainControlOfTargetNearbyMinion => Some("gainControlOfTargetNearbyMinion"),
@@ -926,7 +927,6 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         MagicEffect::LureEnemyMinionOneStepCloser => Some("lureEnemyMinionOneStepCloser"),
         MagicEffect::SubmergeTargetMinion => Some("submergeTargetMinion"),
         MagicEffect::SummonRandomMinionFromAnyCemetery => Some("summonRandomMinionFromAnyCemetery"),
-        MagicEffect::TeleportAllyToTargetSite => Some("teleportAllyToTargetSite"),
         MagicEffect::TeleportNearbyAllyThenDrawCard => Some("teleportNearbyAllyThenDrawCard"),
     }
 }
@@ -3050,6 +3050,33 @@ impl Game {
         }
     }
 
+    fn controlled_unit_targets(&self, seat: Seat) -> Vec<UnitTarget> {
+        let player = &self.position.players[seat_index(seat)];
+        std::iter::once(UnitTarget::Avatar {
+            instance_id: player.avatar.card.instance_id.clone(),
+            seat,
+        })
+        .chain(
+            self.position
+                .units
+                .iter()
+                .filter(|unit| unit.controller == seat)
+                .map(|unit| UnitTarget::Minion {
+                    instance_id: unit.card.instance_id.clone(),
+                    seat,
+                }),
+        )
+        .collect()
+    }
+
+    fn unit_target_occupied_cells(&self, target: &UnitTarget) -> Result<&[Cell], GameError> {
+        let kind = match target {
+            UnitTarget::Avatar { .. } => UnitKind::Avatar,
+            UnitTarget::Minion { .. } => UnitKind::Minion,
+        };
+        self.combatant_occupied_cells(kind, target.seat(), target.instance_id())
+    }
+
     fn combatant_occupied_cells(
         &self,
         kind: UnitKind,
@@ -3324,30 +3351,55 @@ impl Game {
                 vec![MagicChoice::default()]
             }
             MagicEffect::GrantChargeToAllyThisTurn | MagicEffect::GrantPowerTwoToAllyThisTurn => {
-                let player = &self.position.players[seat_index(seat)];
-                let mut choices = vec![MagicChoice {
-                    ally: Some(UnitTarget::Avatar {
-                        instance_id: player.avatar.card.instance_id.clone(),
-                        seat,
-                    }),
-                    ..MagicChoice::default()
-                }];
-                choices.extend(
-                    self.position
-                        .units
-                        .iter()
-                        .filter(|unit| unit.controller == seat)
-                        .map(|unit| MagicChoice {
-                            ally: Some(UnitTarget::Minion {
-                                instance_id: unit.card.instance_id.clone(),
-                                seat,
-                            }),
-                            ..MagicChoice::default()
-                        }),
-                );
-                choices
+                self.controlled_unit_targets(seat)
+                    .into_iter()
+                    .map(|ally| MagicChoice {
+                        ally: Some(ally),
+                        ..MagicChoice::default()
+                    })
+                    .collect()
             }
             MagicEffect::LeapAttackAlly => self.leap_attack_choices(seat)?,
+            MagicEffect::TeleportAllyToTargetSite => {
+                if self.spellcaster_location(seat, caster_instance_id)?.region != Region::Surface {
+                    return Ok(Vec::new());
+                }
+                // Teleport bypasses the entry gates that only restrict deliberate movement.
+                let destinations: Vec<(Location, IdentityHash)> = Cell::ALL
+                    .into_iter()
+                    .filter_map(|cell| {
+                        let instance_id = self.position.sites[cell.index()]
+                            .as_ref()
+                            .map(|site| &site.card.instance_id)
+                            .or(self.position.rubble[cell.index()].as_ref())?
+                            .clone();
+                        Some((
+                            Location {
+                                cell,
+                                region: Region::Surface,
+                            },
+                            instance_id,
+                        ))
+                    })
+                    .collect();
+                let mut choices = Vec::with_capacity(destinations.len());
+                for ally in self.controlled_unit_targets(seat) {
+                    if self.unit_target_occupied_cells(&ally)?.len() > 1 {
+                        return Err(GameError::UnsupportedManifestFact(
+                            "teleportAllyToTargetSite:occupiesSquareArea".to_owned(),
+                        ));
+                    }
+                    for (target_location, target_site_instance_id) in &destinations {
+                        choices.push(MagicChoice {
+                            ally: Some(ally.clone()),
+                            target_location: Some(*target_location),
+                            target_site_instance_id: Some(target_site_instance_id.clone()),
+                            ..MagicChoice::default()
+                        });
+                    }
+                }
+                choices
+            }
             MagicEffect::FightAllyWithAdjacentEnemy => {
                 let unit_targets = |target_seat| {
                     let player = &self.position.players[seat_index(target_seat)];
@@ -9123,6 +9175,33 @@ impl Game {
                     },
                     outcomes,
                 )?;
+            }
+            MagicEffect::TeleportAllyToTargetSite => {
+                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
+                let destination = target_location.ok_or(GameError::IllegalAction)?;
+                let target_site_instance_id = target_site_instance_id
+                    .as_ref()
+                    .ok_or(GameError::IllegalAction)?
+                    .clone();
+                let from = self.unit_target_location(ally)?;
+                let to = self.move_unit_target_to(ally, destination)?;
+                if to != from {
+                    let instance_id = ally.instance_id().clone();
+                    let ally_seat = ally.seat();
+                    let source_instance_id = card_instance_id.clone();
+                    outcomes.push("unit-teleported", || {
+                        json!({
+                            "from": from,
+                            "seat": ally_seat,
+                            "sourceInstanceId": source_instance_id,
+                            "targetInstanceId": instance_id,
+                            "targetSiteInstanceId": target_site_instance_id,
+                            "to": to,
+                        })
+                    });
+                    self.settle_lower_region_minion_deaths(outcomes)?;
+                    self.settle_static_power_deaths(outcomes)?;
+                }
             }
             MagicEffect::FightAllyWithAdjacentEnemy => {
                 let Some((pending, warded_target_index)) = duel else {

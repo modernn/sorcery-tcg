@@ -527,6 +527,13 @@ impl ActionDescriptor {
                     destination.cell,
                     strike.cell
                 )
+            } else if let (Some(ally), Some(location)) = (ally, target_location) {
+                format!(
+                    "Cast {card_id} to teleport {} {}… to {}",
+                    ally.kind(),
+                    short_identity(ally.instance_id()),
+                    location.cell
+                )
             } else if let Some(ally) = ally {
                 format!(
                     "Cast {card_id} to grant Charge to {} {}…",
