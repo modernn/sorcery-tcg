@@ -596,15 +596,15 @@
         "RULE-04"
       ],
       "plainLanguage": "Rain of Arrows simultaneously damages every aboveground minion.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [],
       "eventHints": [
         "damage"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03/04 Rain of Arrows simultaneously damages every aboveground minion"
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0031_rain_of_arrows_simultaneously_damages_every_surface_minion"
       }
     },
     {

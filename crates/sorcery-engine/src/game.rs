@@ -832,11 +832,11 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite
         | MagicEffect::BurrowTargetMinionOrArtifact
         | MagicEffect::DamageChainNearbyUnits
+        | MagicEffect::DamageEachAbovegroundMinionOne
         | MagicEffect::ReturnMinionFromOwnCemetery
         | MagicEffect::DamageTargetUnit { .. }
         | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
         | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => None,
-        MagicEffect::DamageEachAbovegroundMinionOne => Some("damageEachAbovegroundMinionOne"),
         MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_) => {
             Some("damageEachUnitAtLocationWithinTwoSteps")
         }
@@ -3088,6 +3088,7 @@ impl Game {
     ) -> Result<Vec<MagicChoice>, GameError> {
         Ok(match effect {
             MagicEffect::HealController(_)
+            | MagicEffect::DamageEachAbovegroundMinionOne
             | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => {
                 vec![MagicChoice::default()]
             }
@@ -8431,6 +8432,60 @@ impl Game {
                     }
                 }
             }
+            MagicEffect::DamageEachAbovegroundMinionOne => {
+                let mut targets = self
+                    .position
+                    .units
+                    .iter()
+                    .filter(|unit| unit.region == Region::Surface)
+                    .map(|unit| {
+                        Ok((
+                            unit.card.instance_id.clone(),
+                            unit.controller,
+                            self.minion_damage_status(&unit.card.instance_id)?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, GameError>>()?;
+                targets.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+                for (instance_id, _, _) in &targets {
+                    outcomes.push("magic-damage-allocated", || {
+                        json!({
+                            "amount": 1,
+                            "sourceInstanceId": card_instance_id,
+                            "targetInstanceId": instance_id,
+                        })
+                    });
+                }
+                let mut dead_minions = Vec::new();
+                for (instance_id, target_seat, status) in targets {
+                    if self
+                        .apply_simple_damage_with_status(
+                            UnitKind::Minion,
+                            target_seat,
+                            &instance_id,
+                            1,
+                            UnitDamageSource {
+                                current_power: 0,
+                                lethal: false,
+                            },
+                            Some(status),
+                            outcomes,
+                        )?
+                        .minion_died
+                    {
+                        dead_minions.push(instance_id);
+                    }
+                }
+                if !dead_minions.is_empty() {
+                    self.begin_minion_deaths(
+                        &dead_minions,
+                        &[],
+                        Phase::Main,
+                        self.position.active_seat,
+                        outcomes,
+                    )?;
+                }
+            }
             _ => return Err(GameError::IllegalAction),
         }
         if let Some(pending) = &mut self.position.pending_deathrites {
@@ -10060,25 +10115,35 @@ mod tests {
     }
 
     #[test]
-    fn chain_magic_should_be_selfplay_supported() {
-        assert_eq!(
-            unsupported_magic_effect(&MagicEffect::DamageChainNearbyUnits),
-            None
-        );
-        let manifest = selfplay_manifest_with(31, |manifest| {
-            for ordinal in 1..=50 {
-                manifest["cards"][format!("north-spell-{ordinal}")] = json!({
-                    "cardType": "magic",
-                    "damageChainNearbyUnits": true,
-                    "manaCost": 0,
-                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-                });
-            }
-        });
-        Game::from_manifest_json(&manifest)
-            .expect("valid Chain Magic manifest")
-            .ensure_selfplay_supported()
-            .expect("Chain Magic is self-play safe");
+    fn simultaneous_magic_should_be_selfplay_supported() {
+        for (effect, field, value) in [
+            (
+                MagicEffect::DamageChainNearbyUnits,
+                "damageChainNearbyUnits",
+                json!(true),
+            ),
+            (
+                MagicEffect::DamageEachAbovegroundMinionOne,
+                "damageEachAbovegroundMinion",
+                json!(1),
+            ),
+        ] {
+            assert_eq!(unsupported_magic_effect(&effect), None);
+            let manifest = selfplay_manifest_with(31, |manifest| {
+                for ordinal in 1..=50 {
+                    manifest["cards"][format!("north-spell-{ordinal}")] = json!({
+                        "cardType": "magic",
+                        (field): value.clone(),
+                        "manaCost": 0,
+                        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                    });
+                }
+            });
+            Game::from_manifest_json(&manifest)
+                .expect("valid simultaneous Magic manifest")
+                .ensure_selfplay_supported()
+                .expect("simultaneous Magic is self-play safe");
+        }
     }
 
     #[test]
