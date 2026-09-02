@@ -254,6 +254,15 @@ pub enum ActionDescriptor {
         /// Exact public Rubble identity that made the action legal.
         target_rubble_instance_id: IdentityHash,
     },
+    /// Sacrifice one controlled site to destroy a nearby site or Rubble.
+    ActivateSiteDestruction {
+        /// Exact controlled source site being sacrificed.
+        source_site_instance_id: IdentityHash,
+        /// Nearby realm cell selected for destruction.
+        target_cell: Cell,
+        /// Exact site or Rubble identity that made the action legal.
+        target_site_instance_id: IdentityHash,
+    },
     /// Resolve a deferred paid-token Genesis after a hidden site is revealed.
     ResolveGenesisToken {
         /// Decline or pay for the revealed site's token.
@@ -620,6 +629,9 @@ impl ActionDescriptor {
             Self::ReplaceRubbleWithTopAtlasSite { target_cell, .. } => Some(format!(
                 "Replace Rubble at {target_cell} with the top site of your Atlas"
             )),
+            Self::ActivateSiteDestruction { target_cell, .. } => {
+                Some(format!("Sacrifice site to destroy {target_cell}"))
+            }
             Self::ActivateSparkmage { .. }
             | Self::PlaySite { .. }
             | Self::ContinueBasicMovement { .. }
@@ -872,6 +884,21 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
             _ => action_kind(left)
                 .cmp(&action_kind(right))
                 .then_with(|| match (left, right) {
+                    (
+                        ActionDescriptor::ActivateSiteDestruction {
+                            source_site_instance_id: left_source,
+                            target_cell: left_cell,
+                            target_site_instance_id: left_target,
+                        },
+                        ActionDescriptor::ActivateSiteDestruction {
+                            source_site_instance_id: right_source,
+                            target_cell: right_cell,
+                            target_site_instance_id: right_target,
+                        },
+                    ) => left_source
+                        .cmp(right_source)
+                        .then_with(|| left_cell.cmp(right_cell))
+                        .then_with(|| left_target.cmp(right_target)),
                     (
                         ActionDescriptor::ActivateSparkmage {
                             source_instance_id: left_source,
@@ -1178,34 +1205,35 @@ fn card_prefix(action: &ActionDescriptor) -> (&str, &IdentityHash) {
 const fn action_kind(action: &ActionDescriptor) -> u8 {
     match action {
         ActionDescriptor::ActivateMana { .. } => 0,
-        ActionDescriptor::ActivateSparkmage { .. } => 1,
-        ActionDescriptor::AllocateStrike { .. } => 2,
-        ActionDescriptor::BeginChainMagic { .. } => 3,
-        ActionDescriptor::CastMagic { .. } => 4,
-        ActionDescriptor::CloseDefend { .. } => 5,
-        ActionDescriptor::CloseIntercept {} => 6,
-        ActionDescriptor::ContinueBasicMovement { .. } => 7,
-        ActionDescriptor::DeclareAttack { .. } => 8,
-        ActionDescriptor::DeclineAttack => 9,
-        ActionDescriptor::Defend { .. } => 10,
-        ActionDescriptor::Draw { .. } => 11,
-        ActionDescriptor::DrawSite => 12,
-        ActionDescriptor::DrawSpell => 13,
-        ActionDescriptor::EndTurn => 14,
-        ActionDescriptor::ExtendChainMagic { .. } => 15,
-        ActionDescriptor::Intercept { .. } => 16,
-        ActionDescriptor::OrderDeathrites { .. } => 17,
-        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 18,
-        ActionDescriptor::ResolveChainMagic => 19,
-        ActionDescriptor::ResolveGenesisSpell { .. } => 20,
-        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 21,
-        ActionDescriptor::ResolveGenesisToken { .. } => 22,
-        ActionDescriptor::ResolveRangedStep { .. } => 23,
-        ActionDescriptor::Mulligan { .. } => 24,
-        ActionDescriptor::PlaySite { .. } => 25,
-        ActionDescriptor::ShootDamageProjectile { .. } => 26,
-        ActionDescriptor::ShootProjectile { .. } => 27,
-        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 28,
+        ActionDescriptor::ActivateSiteDestruction { .. } => 1,
+        ActionDescriptor::ActivateSparkmage { .. } => 2,
+        ActionDescriptor::AllocateStrike { .. } => 3,
+        ActionDescriptor::BeginChainMagic { .. } => 4,
+        ActionDescriptor::CastMagic { .. } => 5,
+        ActionDescriptor::CloseDefend { .. } => 6,
+        ActionDescriptor::CloseIntercept {} => 7,
+        ActionDescriptor::ContinueBasicMovement { .. } => 8,
+        ActionDescriptor::DeclareAttack { .. } => 9,
+        ActionDescriptor::DeclineAttack => 10,
+        ActionDescriptor::Defend { .. } => 11,
+        ActionDescriptor::Draw { .. } => 12,
+        ActionDescriptor::DrawSite => 13,
+        ActionDescriptor::DrawSpell => 14,
+        ActionDescriptor::EndTurn => 15,
+        ActionDescriptor::ExtendChainMagic { .. } => 16,
+        ActionDescriptor::Intercept { .. } => 17,
+        ActionDescriptor::OrderDeathrites { .. } => 18,
+        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 19,
+        ActionDescriptor::ResolveChainMagic => 20,
+        ActionDescriptor::ResolveGenesisSpell { .. } => 21,
+        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 22,
+        ActionDescriptor::ResolveGenesisToken { .. } => 23,
+        ActionDescriptor::ResolveRangedStep { .. } => 24,
+        ActionDescriptor::Mulligan { .. } => 25,
+        ActionDescriptor::PlaySite { .. } => 26,
+        ActionDescriptor::ShootDamageProjectile { .. } => 27,
+        ActionDescriptor::ShootProjectile { .. } => 28,
+        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 29,
     }
 }
 
@@ -1382,6 +1410,41 @@ mod tests {
 
     const COMBAT_RESPONSE_FIXTURE: &str =
         include_str!("../../../tests/engine/fixtures/combat-response-action-v1.json");
+    const SITE_DESTRUCTION_FIXTURE: &str =
+        include_str!("../../../tests/engine/fixtures/site-destruction-action-v1.json");
+
+    #[test]
+    fn native_site_destruction_order_should_match_typescript() {
+        let fixture: Value =
+            serde_json::from_str(SITE_DESTRUCTION_FIXTURE).expect("valid parity fixture");
+        let mut actions = fixture["actions"]
+            .as_array()
+            .expect("fixture actions")
+            .iter()
+            .map(|action| {
+                (
+                    serde_json::from_value::<ActionDescriptor>(action["descriptor"].clone())
+                        .expect("typed descriptor"),
+                    action["actionId"].as_str().expect("action ID").to_owned(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        actions.sort_unstable_by(|(left, _), (right, _)| compare_canonical(left, right));
+
+        assert_eq!(
+            actions
+                .into_iter()
+                .map(|(_, action_id)| action_id)
+                .collect::<Vec<_>>(),
+            fixture["canonicalActionIds"]
+                .as_array()
+                .expect("canonical action IDs")
+                .iter()
+                .map(|action_id| action_id.as_str().expect("action ID").to_owned())
+                .collect::<Vec<_>>()
+        );
+    }
 
     #[test]
     fn native_combat_response_order_should_match_typescript() {

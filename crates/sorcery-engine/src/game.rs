@@ -896,9 +896,7 @@ fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
 
 fn unsupported_selfplay_site(facts: &SiteFacts) -> Option<&'static str> {
     account_for_selfplay_site_fields(facts);
-    if facts.cannot_be_moved_destroyed_or_modified {
-        Some("cannotBeMovedDestroyedOrModified")
-    } else if facts.connects_burrowed_allies {
+    if facts.connects_burrowed_allies {
         Some("connectsBurrowedAllies")
     } else if facts.fly_to_nearby_void_once_per_turn_at_air_threshold {
         Some("flyToNearbyVoidOncePerTurnAtAirThreshold")
@@ -913,8 +911,6 @@ fn unsupported_selfplay_site(facts: &SiteFacts) -> Option<&'static str> {
         .is_some()
     {
         Some("preventsUnitsWithPowerAtLeastFromEntering")
-    } else if facts.sacrifice_to_destroy_nearby_site {
-        Some("sacrificeToDestroyNearbySite")
     } else {
         None
     }
@@ -2216,6 +2212,44 @@ impl Game {
         }
         if !player.domain_established {
             return Ok(());
+        }
+        for source_cell in Cell::ALL {
+            let Some(source) = self.position.sites[source_cell.index()].as_ref() else {
+                continue;
+            };
+            let CardFacts::Site(source_facts) =
+                &self.rules.cards[usize::from(source.card.card_id.0)].facts
+            else {
+                return Err(invalid("realm site lacks Site facts"));
+            };
+            if source.controller != seat || !source_facts.sacrifice_to_destroy_nearby_site {
+                continue;
+            }
+            let nearby = std::iter::once(source_cell)
+                .chain(source_cell.bordering(false))
+                .chain(source_cell.diagonals(false))
+                .collect::<BTreeSet<_>>();
+            for target_cell in Cell::ALL {
+                if !nearby.contains(&target_cell) {
+                    continue;
+                }
+                let target_site_instance_id = self.position.sites[target_cell.index()]
+                    .as_ref()
+                    .map(|site| site.card.instance_id.clone())
+                    .or_else(|| self.position.rubble[target_cell.index()].clone());
+                let Some(target_site_instance_id) = target_site_instance_id else {
+                    continue;
+                };
+                let descriptor = ActionDescriptor::ActivateSiteDestruction {
+                    source_site_instance_id: source.card.instance_id.clone(),
+                    target_cell,
+                    target_site_instance_id,
+                };
+                let label = descriptor
+                    .state_independent_label()
+                    .ok_or_else(|| invalid("site destruction action requires a label"))?;
+                self.push_action(actions, descriptor, label);
+            }
         }
         let spellcasters = self.spellcasters(seat);
         for card in &player.hand_spellbook {
@@ -3906,6 +3940,17 @@ impl Game {
                 action.seat,
                 *target_cell,
                 target_rubble_instance_id,
+                outcomes,
+            ),
+            ActionDescriptor::ActivateSiteDestruction {
+                source_site_instance_id,
+                target_cell,
+                target_site_instance_id,
+            } => self.apply_site_destruction_action(
+                action.seat,
+                source_site_instance_id,
+                *target_cell,
+                target_site_instance_id,
                 outcomes,
             ),
             ActionDescriptor::ResolveGenesisSpell { choice } => {
@@ -7569,6 +7614,160 @@ impl Game {
         self.finish_site_genesis(continuation, outcomes)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one site-destruction transaction keeps validation, terrain, cemetery, and event order atomic"
+    )]
+    fn apply_site_destruction_action(
+        &mut self,
+        seat: Seat,
+        source_site_instance_id: &IdentityHash,
+        target_cell: Cell,
+        target_site_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        if self.position.phase != Phase::Main
+            || self.position.active_seat != seat
+            || self.position.decision_seat != seat
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let (source_cell, source) = Cell::ALL
+            .into_iter()
+            .find_map(|cell| {
+                self.position.sites[cell.index()]
+                    .as_ref()
+                    .filter(|site| site.card.instance_id == *source_site_instance_id)
+                    .cloned()
+                    .map(|site| (cell, site))
+            })
+            .ok_or(GameError::IllegalAction)?;
+        let CardFacts::Site(source_facts) =
+            &self.rules.cards[usize::from(source.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let target_site = self.position.sites[target_cell.index()].clone();
+        let target_rubble = self.position.rubble[target_cell.index()].clone();
+        let target_matches = target_site
+            .as_ref()
+            .is_some_and(|site| site.card.instance_id == *target_site_instance_id)
+            || target_rubble.as_ref() == Some(target_site_instance_id);
+        let nearby = source_cell == target_cell
+            || source_cell
+                .bordering(false)
+                .chain(source_cell.diagonals(false))
+                .any(|cell| cell == target_cell);
+        if source.controller != seat
+            || !source_facts.sacrifice_to_destroy_nearby_site
+            || !target_matches
+            || !nearby
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let target_protected = if let Some(target) = &target_site {
+            let CardFacts::Site(facts) =
+                &self.rules.cards[usize::from(target.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            facts.cannot_be_moved_destroyed_or_modified
+        } else {
+            false
+        };
+        let source_owner = source.card.owner;
+        outcomes.push("site-sacrificed", || {
+            json!({
+                "cell": source_cell,
+                "instanceId": source_site_instance_id,
+                "owner": source_owner,
+                "sourceInstanceId": source_site_instance_id,
+            })
+        });
+        outcomes.push(
+            if target_protected {
+                "site-destruction-prevented"
+            } else {
+                "site-destroyed"
+            },
+            || {
+                let mut payload = json!({
+                    "cell": target_cell,
+                    "instanceId": target_site_instance_id,
+                    "sourceInstanceId": source_site_instance_id,
+                });
+                if let Some(target) = &target_site {
+                    payload["owner"] = json!(target.card.owner);
+                }
+                payload
+            },
+        );
+
+        let mut destroyed = vec![(source_cell, source)];
+        if !target_protected
+            && let Some(target) = target_site
+            && !destroyed
+                .iter()
+                .any(|(_, site)| site.card.instance_id == target.card.instance_id)
+        {
+            destroyed.push((target_cell, target));
+        }
+        destroyed.sort_unstable_by_key(|(cell, _)| *cell);
+        let flooded = destroyed
+            .iter()
+            .filter_map(|(cell, site)| {
+                let CardFacts::Site(facts) =
+                    &self.rules.cards[usize::from(site.card.card_id.0)].facts
+                else {
+                    return None;
+                };
+                facts.elements.contains(Element::Water).then_some(*cell)
+            })
+            .collect::<BTreeSet<_>>();
+        for unit in &mut self.position.units {
+            if unit.region == Region::Underwater
+                && Self::unit_occupied_cells(unit)
+                    .iter()
+                    .any(|cell| flooded.contains(cell))
+            {
+                unit.region = Region::Underground;
+            }
+        }
+        let mut rubble = Vec::with_capacity(destroyed.len());
+        let mut destroyed_cards = Vec::with_capacity(destroyed.len());
+        for (cell, site) in destroyed {
+            self.position.sites[cell.index()] = None;
+            let rubble_instance_id = identity_hash(&json!({
+                "cell": cell,
+                "destroyedSiteInstanceId": site.card.instance_id,
+                "kind": "rubble",
+                "sourceInstanceId": source_site_instance_id,
+            }))?;
+            self.position.rubble[cell.index()] = Some(rubble_instance_id.clone());
+            destroyed_cards.push(site.card);
+            rubble.push((cell, rubble_instance_id));
+        }
+        self.settle_lower_region_minion_deaths(outcomes)?;
+        for card in destroyed_cards {
+            self.position.players[seat_index(card.owner)]
+                .cemetery
+                .push(card);
+        }
+        let rubble_start = outcomes.len();
+        for (cell, instance_id) in rubble {
+            outcomes.push("rubble-created", || {
+                json!({
+                    "cell": cell,
+                    "instanceId": instance_id,
+                    "sourceInstanceId": source_site_instance_id,
+                })
+            });
+        }
+        outcomes.move_tail_before_completion(rubble_start);
+        self.position.state_version += 1;
+        Ok(())
+    }
+
     fn begin_hidden_spell_genesis(
         &mut self,
         seat: Seat,
@@ -10838,6 +11037,271 @@ mod tests {
             temporary_power_sources: Vec::new(),
             warded: false,
         }
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one direct terrain proof keeps protected, Rubble, and subsurface Sinkhole branches together"
+    )]
+    fn site_destruction_should_preserve_protected_rubble_and_relative_subsurface() {
+        let admitted = selfplay_manifest_with(244, |manifest| {
+            manifest["cards"]["north-site-1"]["sacrificeToDestroyNearbySite"] = json!(true);
+            manifest["cards"]["north-site-2"]["cannotBeMovedDestroyedOrModified"] = json!(true);
+        });
+        Game::from_manifest_json(&admitted)
+            .expect("valid Sinkhole manifest")
+            .ensure_selfplay_supported()
+            .expect("Sinkhole source and protection facts are self-play safe");
+
+        let manifest = selfplay_manifest_with(244, |manifest| {
+            manifest["cards"]["north-site-1"]["sacrificeToDestroyNearbySite"] = json!(true);
+            manifest["cards"]["north-site-2"]["cannotBeMovedDestroyedOrModified"] = json!(true);
+            manifest["cards"]["south-site-1"]["elements"] = json!(["water"]);
+            for ordinal in [1, 2] {
+                manifest["cards"][format!("south-spell-{ordinal}")]["manaCost"] = json!(0);
+                manifest["cards"][format!("south-spell-{ordinal}")]["submerge"] = json!(true);
+                manifest["cards"][format!("south-spell-{ordinal}")]["thresholds"] =
+                    json!({ "air": 0, "earth": 0, "fire": 0, "water": 0 });
+            }
+            manifest["cards"]["south-spell-2"]["burrowing"] = json!(true);
+            manifest["cards"]["south-spell-1"]["deathriteDrawSite"] = json!(true);
+        });
+        let mut base = Game::from_manifest_json(&manifest).expect("valid terrain fixture");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    base.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let source_id =
+            identity_hash(&json!({ "fixture": "sinkhole-source" })).expect("source identity");
+        let protected_id =
+            identity_hash(&json!({ "fixture": "sinkhole-protected" })).expect("protected identity");
+        let water_id =
+            identity_hash(&json!({ "fixture": "sinkhole-water" })).expect("water identity");
+        let source = SitePosition {
+            card: CardInstance {
+                card_id: card_id("north-site-1"),
+                instance_id: source_id.clone(),
+                owner: Seat::North,
+                source: CardSource::Atlas,
+            },
+            controller: Seat::North,
+        };
+        let protected = SitePosition {
+            card: CardInstance {
+                card_id: card_id("north-site-2"),
+                instance_id: protected_id.clone(),
+                owner: Seat::North,
+                source: CardSource::Atlas,
+            },
+            controller: Seat::North,
+        };
+        let water = SitePosition {
+            card: CardInstance {
+                card_id: card_id("south-site-1"),
+                instance_id: water_id.clone(),
+                owner: Seat::South,
+                source: CardSource::Atlas,
+            },
+            controller: Seat::South,
+        };
+        let c2 = Cell::parse("C2").expect("C2");
+        let c3 = Cell::parse("C3").expect("C3");
+        let c4 = Cell::parse("C4").expect("C4");
+        base.position.sites = std::array::from_fn(|_| None);
+        base.position.rubble = std::array::from_fn(|_| None);
+        base.position.sites[c2.index()] = Some(water);
+        base.position.sites[c3.index()] = Some(source);
+        base.position.sites[c4.index()] = Some(protected.clone());
+        let drowned_id = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let survivor_id = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let mut drowned = test_minion(card_id("south-spell-1"), drowned_id, Seat::South, c2, None);
+        drowned.region = Region::Underwater;
+        let mut survivor =
+            test_minion(card_id("south-spell-2"), survivor_id, Seat::South, c2, None);
+        survivor.region = Region::Underwater;
+        base.position.units = vec![drowned, survivor];
+        base.position.active_seat = Seat::North;
+        base.position.decision_seat = Seat::North;
+        base.position.phase = Phase::Main;
+        base.position.players[seat_index(Seat::North)].domain_established = true;
+
+        let source_actions = base
+            .legal_actions()
+            .expect("site destruction actions")
+            .into_iter()
+            .filter(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::ActivateSiteDestruction {
+                        source_site_instance_id,
+                        ..
+                    } if *source_site_instance_id == source_id
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            source_actions
+                .iter()
+                .map(|action| match action.descriptor {
+                    ActionDescriptor::ActivateSiteDestruction { target_cell, .. } => target_cell,
+                    _ => unreachable!("filtered site destruction"),
+                })
+                .collect::<Vec<_>>(),
+            [c2, c3, c4]
+        );
+
+        let mut protected_branch = base.clone();
+        let protected_action = source_actions
+            .iter()
+            .find(|action| {
+                matches!(
+                    action.descriptor,
+                    ActionDescriptor::ActivateSiteDestruction { target_cell, .. } if target_cell == c4
+                )
+            })
+            .expect("protected target action");
+        let (protected_events, protected_random) = protected_branch
+            .apply_action_recorded(protected_action)
+            .expect("protected target activation");
+        assert!(protected_random.is_empty());
+        assert_eq!(
+            protected_events
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "site-sacrificed",
+                "site-destruction-prevented",
+                "rubble-created",
+            ]
+        );
+        assert_eq!(
+            protected_branch.position.sites[c4.index()],
+            Some(protected.clone())
+        );
+        assert!(protected_branch.position.sites[c3.index()].is_none());
+
+        let mut rubble_branch = base.clone();
+        rubble_branch.position.units.clear();
+        rubble_branch.position.sites[c2.index()] = None;
+        let existing_rubble =
+            identity_hash(&json!({ "fixture": "existing-rubble" })).expect("Rubble identity");
+        rubble_branch.position.rubble[c2.index()] = Some(existing_rubble.clone());
+        let rubble_action = rubble_branch
+            .legal_actions()
+            .expect("Rubble target actions")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::ActivateSiteDestruction {
+                        source_site_instance_id,
+                        target_cell,
+                        ..
+                    } if *source_site_instance_id == source_id && *target_cell == c2
+                )
+            })
+            .expect("existing Rubble target");
+        let (rubble_events, _) = rubble_branch
+            .apply_action_recorded(&rubble_action)
+            .expect("Rubble target activation");
+        assert_eq!(
+            rubble_branch.position.rubble[c2.index()],
+            Some(existing_rubble)
+        );
+        assert_eq!(
+            rubble_events
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            ["site-sacrificed", "site-destroyed", "rubble-created"]
+        );
+        assert!(rubble_events[1].1.get("owner").is_none());
+
+        let mut terminal_branch = base.clone();
+        terminal_branch.position.players[seat_index(Seat::South)]
+            .atlas
+            .clear();
+        let terminal_action = source_actions
+            .iter()
+            .find(|action| {
+                matches!(
+                    action.descriptor,
+                    ActionDescriptor::ActivateSiteDestruction { target_cell, .. } if target_cell == c2
+                )
+            })
+            .expect("terminal Water target action");
+        let (terminal_events, _) = terminal_branch
+            .apply_action_recorded(terminal_action)
+            .expect("terminal Water target activation");
+        let terminal_types = terminal_events
+            .iter()
+            .map(|(event_type, _)| event_type.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            terminal_types
+                .iter()
+                .rposition(|event_type| *event_type == "rubble-created")
+                < terminal_types
+                    .iter()
+                    .position(|event_type| *event_type == "game-ended")
+        );
+
+        let mut destroyed = base;
+        let normal_action = source_actions
+            .iter()
+            .find(|action| {
+                matches!(
+                    action.descriptor,
+                    ActionDescriptor::ActivateSiteDestruction { target_cell, .. } if target_cell == c2
+                )
+            })
+            .expect("Water target action");
+        let (events, random_draws) = destroyed
+            .apply_action_recorded(normal_action)
+            .expect("Water target activation");
+        assert!(random_draws.is_empty());
+        let event_types = events
+            .iter()
+            .map(|(event_type, _)| event_type.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(&event_types[..2], ["site-sacrificed", "site-destroyed"]);
+        assert_eq!(
+            &event_types[event_types.len() - 2..],
+            ["rubble-created", "rubble-created"]
+        );
+        assert!(
+            !destroyed
+                .position
+                .units
+                .iter()
+                .any(|unit| unit.card.instance_id.as_str() == drowned_id)
+        );
+        assert_eq!(
+            destroyed
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id.as_str() == survivor_id)
+                .expect("Burrowing survivor")
+                .region,
+            Region::Underground
+        );
+        let south_cemetery = &destroyed.position.players[seat_index(Seat::South)].cemetery;
+        assert_eq!(south_cemetery[0].instance_id.as_str(), drowned_id);
+        assert_eq!(south_cemetery[1].instance_id, water_id);
+        assert!(destroyed.position.sites[c2.index()].is_none());
+        assert!(destroyed.position.sites[c3.index()].is_none());
+        assert_eq!(destroyed.position.sites[c4.index()], Some(protected));
     }
 
     #[test]

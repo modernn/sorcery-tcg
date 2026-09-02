@@ -1,0 +1,62 @@
+{
+  "actions": [
+    {
+      "actionId": "sha256:45248e0c0b9a47e020fdc399dbb3c0ad27fa6aba2bcab7a00c6b9f9d14eed311",
+      "descriptor": {
+        "kind": "activate-site-destruction",
+        "sourceSiteInstanceId": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "targetCell": "C4",
+        "targetSiteInstanceId": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+      }
+    },
+    {
+      "actionId": "sha256:e0ef03b00561781adc841adad3d41c07d8646dfacdb24bf8ec8bdf02d5f29df1",
+      "descriptor": {
+        "kind": "activate-sparkmage",
+        "sourceInstanceId": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "targetLocation": {
+          "cell": "C3",
+          "region": "surface"
+        }
+      }
+    },
+    {
+      "actionId": "sha256:30a744b6a6e0a90d4277151e941e8c383932d894b5e453ab89cb305579e5d8b4",
+      "descriptor": {
+        "kind": "activate-site-destruction",
+        "sourceSiteInstanceId": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "targetCell": "C3",
+        "targetSiteInstanceId": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "actionId": "sha256:33750df300e2a662bd7463b265f2c24c525a9cc3271a542a66e3a4b890a01462",
+      "descriptor": {
+        "amount": 1,
+        "kind": "activate-mana",
+        "unitInstanceId": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      }
+    },
+    {
+      "actionId": "sha256:35b8a95363d201b799b9a151707e0b976d60c339a3ac9e17f63dbbdc8467586e",
+      "descriptor": {
+        "kind": "activate-site-destruction",
+        "sourceSiteInstanceId": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "targetCell": "C2",
+        "targetSiteInstanceId": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+      }
+    }
+  ],
+  "canonicalActionIds": [
+    "sha256:33750df300e2a662bd7463b265f2c24c525a9cc3271a542a66e3a4b890a01462",
+    "sha256:35b8a95363d201b799b9a151707e0b976d60c339a3ac9e17f63dbbdc8467586e",
+    "sha256:30a744b6a6e0a90d4277151e941e8c383932d894b5e453ab89cb305579e5d8b4",
+    "sha256:45248e0c0b9a47e020fdc399dbb3c0ad27fa6aba2bcab7a00c6b9f9d14eed311",
+    "sha256:e0ef03b00561781adc841adad3d41c07d8646dfacdb24bf8ec8bdf02d5f29df1"
+  ],
+  "contract": "sorcery-core-v1",
+  "schemaVersion": 1,
+  "seat": "north",
+  "source": "typescript-legality-engine",
+  "stateVersion": 23
+}

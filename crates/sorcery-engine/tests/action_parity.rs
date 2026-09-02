@@ -18,6 +18,8 @@ const SHOOT_DAMAGE_PROJECTILE_FIXTURE: &str =
     include_str!("../../../tests/engine/fixtures/shoot-damage-projectile-action-v1.json");
 const SPARKMAGE_FIXTURE: &str =
     include_str!("../../../tests/engine/fixtures/sparkmage-action-v1.json");
+const SITE_DESTRUCTION_FIXTURE: &str =
+    include_str!("../../../tests/engine/fixtures/site-destruction-action-v1.json");
 const NORTH_AVATAR: &str =
     "sha256:310a489a62739a8b1a6a13bf949daa8dc42ab0995619e5288691a0ac86a2472e";
 
@@ -36,6 +38,7 @@ fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
         ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => {
             "replace-rubble-with-top-atlas-site"
         }
+        ActionDescriptor::ActivateSiteDestruction { .. } => "activate-site-destruction",
         ActionDescriptor::ResolveGenesisSpell { .. } => "resolve-genesis-spell",
         ActionDescriptor::ResolveGenesisSpellOrder { .. } => "resolve-genesis-spell-order",
         ActionDescriptor::ResolveGenesisToken { .. } => "resolve-genesis-token",
@@ -56,6 +59,69 @@ fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
         ActionDescriptor::ExtendChainMagic { .. } => "extend-chain-magic",
         ActionDescriptor::ResolveChainMagic => "resolve-chain-magic",
     }
+}
+
+#[test]
+fn site_destruction_descriptors_labels_order_and_ids_should_match_typescript() {
+    let fixture: Value =
+        serde_json::from_str(SITE_DESTRUCTION_FIXTURE).expect("valid site destruction fixture");
+    assert_eq!(fixture["schemaVersion"], 1);
+    assert_eq!(fixture["source"], "typescript-legality-engine");
+    let contract = fixture["contract"].as_str().expect("action contract");
+    let seat: Seat = serde_json::from_value(fixture["seat"].clone()).expect("fixture seat");
+    let state_version = fixture["stateVersion"]
+        .as_u64()
+        .expect("fixture state version");
+    let mut ordered = Vec::new();
+    let mut labels = Vec::new();
+
+    for action in fixture["actions"].as_array().expect("fixture actions") {
+        let descriptor: ActionDescriptor = serde_json::from_value(action["descriptor"].clone())
+            .expect("typed site destruction fixture descriptor");
+        let serialized = serde_json::to_value(&descriptor).expect("serialized descriptor");
+        assert_eq!(serialized, action["descriptor"]);
+        let expected_id =
+            IdentityHash::parse(action["actionId"].as_str().expect("TypeScript action ID"))
+                .expect("valid TypeScript action ID");
+        assert_eq!(
+            opaque_action_id(contract, seat, state_version, &serialized)
+                .expect("Rust action identity"),
+            expected_id
+        );
+        if matches!(descriptor, ActionDescriptor::ActivateSiteDestruction { .. }) {
+            labels.push(
+                descriptor
+                    .state_independent_label()
+                    .expect("site destruction label"),
+            );
+        }
+        ordered.push((
+            canonical_json(&serialized).expect("canonical descriptor"),
+            expected_id,
+        ));
+    }
+
+    ordered.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+    assert_eq!(
+        ordered
+            .into_iter()
+            .map(|(_, action_id)| action_id.to_string())
+            .collect::<Vec<_>>(),
+        fixture["canonicalActionIds"]
+            .as_array()
+            .expect("canonical TypeScript order")
+            .iter()
+            .map(|action_id| action_id.as_str().expect("action ID").to_owned())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        labels,
+        [
+            "Sacrifice site to destroy C4",
+            "Sacrifice site to destroy C3",
+            "Sacrifice site to destroy C2",
+        ]
+    );
 }
 
 #[test]
