@@ -2369,15 +2369,15 @@
         "RULE-04"
       ],
       "plainLanguage": "Combined region abilities permit eligible cross-region adjacency steps.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "region"
       ],
       "actionHints": [],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 combined region abilities permit eligible cross-region adjacency steps"
+        "file": "crates/sorcery-engine/tests/cross_region_rules.rs",
+        "testName": "rule_catalog_0118_combined_region_abilities_should_permit_cross_region_adjacency_steps"
       }
     },
     {
