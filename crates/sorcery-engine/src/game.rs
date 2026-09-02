@@ -907,6 +907,24 @@ enum MovementCause {
     CardEffect,
 }
 
+/// The lower realm layers a mover may enter and cross under its own power.
+#[derive(Clone, Copy, Default)]
+struct RegionAbilities {
+    burrowing: bool,
+    submerge: bool,
+    voidwalk: bool,
+}
+
+impl RegionAbilities {
+    const fn of_minion(minion: &MinionFacts) -> Self {
+        Self {
+            burrowing: minion.burrowing,
+            submerge: minion.submerge,
+            voidwalk: minion.voidwalk,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct MovementProfile {
     airborne: bool,
@@ -915,6 +933,7 @@ struct MovementProfile {
     maximum_cost: Option<usize>,
     moving_minion: bool,
     occupied_cells: Option<SquareArea>,
+    regions: RegionAbilities,
     restriction: Option<BasicMovementRestriction>,
     seat: Seat,
 }
@@ -1772,11 +1791,12 @@ impl Game {
             maximum_cost: (!facts.immobile).then_some(1),
             moving_minion: true,
             occupied_cells: unit.occupied_cells,
+            regions: RegionAbilities::of_minion(facts),
             restriction: facts.movement_restriction,
             seat: pending.seat,
         };
         for path in self
-            .surface_movement_paths(unit.location, profile)
+            .movement_paths(from, profile)
             .into_iter()
             .filter(|path| path.len() == 2)
         {
@@ -1910,7 +1930,13 @@ impl Game {
         };
         for (_kind, instance_id, start, profile) in self.defender_candidates()? {
             for path in self
-                .surface_movement_paths(start, profile)
+                .movement_paths(
+                    Location {
+                        cell: start,
+                        region: Region::Surface,
+                    },
+                    profile,
+                )
                 .into_iter()
                 .filter(|path| {
                     let Some(end) = path.last() else {
@@ -2111,6 +2137,7 @@ impl Game {
                     maximum_cost: Some(1),
                     moving_minion: false,
                     occupied_cells: None,
+                    regions: RegionAbilities::default(),
                     restriction: None,
                     seat,
                 },
@@ -2151,6 +2178,7 @@ impl Game {
                     },
                     moving_minion: true,
                     occupied_cells: unit.occupied_cells,
+                    regions: RegionAbilities::of_minion(facts),
                     restriction: facts.movement_restriction,
                     seat,
                 },
@@ -2857,6 +2885,7 @@ impl Game {
                     maximum_cost: Some(1),
                     moving_minion: false,
                     occupied_cells: None,
+                    regions: RegionAbilities::default(),
                     restriction: None,
                     seat,
                 },
@@ -2888,6 +2917,7 @@ impl Game {
                     },
                     moving_minion: true,
                     occupied_cells: unit.occupied_cells,
+                    regions: RegionAbilities::of_minion(facts),
                     restriction: facts.movement_restriction,
                     seat,
                 },
@@ -4794,6 +4824,7 @@ impl Game {
                         maximum_cost: Some(1),
                         moving_minion: false,
                         occupied_cells: None,
+                        regions: RegionAbilities::default(),
                         restriction: None,
                         seat: *seat,
                     },
@@ -4822,18 +4853,19 @@ impl Game {
                         maximum_cost: Some(1),
                         moving_minion: true,
                         occupied_cells: unit.occupied_cells,
+                        regions: RegionAbilities::of_minion(facts),
                         restriction: facts.movement_restriction,
                         seat: *seat,
                     },
                 )
             }
         };
-        if disabled || immobile || from.region != Region::Surface {
+        if disabled || immobile {
             return Ok(vec![from]);
         }
         let mut destinations = Vec::new();
         let mut seen = BTreeSet::new();
-        for path in self.surface_movement_paths(from.cell, profile) {
+        for path in self.movement_paths(from, profile) {
             let Some(&destination) = path.last() else {
                 continue;
             };
@@ -4879,7 +4911,13 @@ impl Game {
         start: Cell,
         profile: MovementProfile,
     ) -> Result<(), GameError> {
-        for path in self.surface_movement_paths(start, profile) {
+        for path in self.movement_paths(
+            Location {
+                cell: start,
+                region: Region::Surface,
+            },
+            profile,
+        ) {
             let from = path[0];
             let to = *path
                 .last()
@@ -4898,21 +4936,10 @@ impl Game {
         Ok(())
     }
 
-    fn surface_movement_paths(&self, start: Cell, profile: MovementProfile) -> Vec<Vec<Location>> {
-        let starting_footprint_exists = profile.occupied_cells.map_or_else(
-            || self.surface_location_exists(start),
-            |area| {
-                area.into_iter()
-                    .all(|cell| self.surface_location_exists(cell))
-            },
-        );
-        if !starting_footprint_exists {
+    fn movement_paths(&self, start: Location, profile: MovementProfile) -> Vec<Vec<Location>> {
+        if !self.footprint_location_exists(profile.occupied_cells, start.cell, start) {
             return Vec::new();
         }
-        let start = Location {
-            cell: start,
-            region: Region::Surface,
-        };
         let mut paths = vec![vec![start]];
         let Some(maximum_cost) = profile.maximum_cost else {
             return paths;
@@ -4922,28 +4949,14 @@ impl Game {
             let mut next_frontier = Vec::new();
             for (cost, path) in frontier {
                 let current = *path.last().expect("movement path starts nonempty");
-                let step_cost = self.surface_movement_step_cost(current.cell, profile);
-                if cost == maximum_cost && step_cost != 0 {
-                    continue;
-                }
                 if self.footprint_is_immobilized(profile.occupied_cells, start.cell, current.cell) {
                     continue;
                 }
-                for cell in current.cell.bordering(profile.connects_top_bottom).chain(
-                    profile
-                        .airborne
-                        .then(|| current.cell.diagonals(profile.connects_top_bottom))
-                        .into_iter()
-                        .flatten(),
-                ) {
-                    let candidate = Location {
-                        cell,
-                        region: Region::Surface,
-                    };
+                for candidate in self.movement_step_candidates(current, profile) {
                     let footprint_allowed = profile.occupied_cells.map_or_else(
                         || {
-                            self.surface_location_exists(cell)
-                                && self.surface_entry_allowed(current.cell, cell, profile)
+                            self.location_exists_in_region(candidate.cell, candidate.region)
+                                && self.unit_entry_allowed(current, candidate, profile)
                         },
                         |area| {
                             let Some(current_area) =
@@ -4957,25 +4970,28 @@ impl Game {
                                 return false;
                             };
                             candidate_area.into_iter().all(|entered| {
-                                self.surface_location_exists(entered)
+                                self.location_exists_in_region(entered, candidate.region)
                                     && (current_area.contains(&entered)
-                                        || self.surface_entry_allowed(
-                                            current.cell,
-                                            entered,
+                                        || self.unit_entry_allowed(
+                                            current,
+                                            Location {
+                                                cell: entered,
+                                                region: candidate.region,
+                                            },
                                             profile,
                                         ))
                             })
                         },
                     );
                     if !footprint_allowed
-                        || !Self::movement_restriction_allows(profile, current.cell, cell)
+                        || !Self::movement_restriction_allows(profile, current, candidate)
                         || path
                             .windows(2)
                             .any(|edge| edge[0] == current && edge[1] == candidate)
                     {
                         continue;
                     }
-                    let next_cost = cost + step_cost;
+                    let next_cost = cost + self.movement_step_cost(current, candidate, profile);
                     if next_cost > maximum_cost {
                         continue;
                     }
@@ -4988,6 +5004,106 @@ impl Game {
             paths.extend(frontier.iter().map(|(_, path)| path.clone()));
         }
         paths
+    }
+
+    /// Every location one step reaches from `current`, honoring the mover's region abilities.
+    fn movement_step_candidates(
+        &self,
+        current: Location,
+        profile: MovementProfile,
+    ) -> Vec<Location> {
+        let bordering = |region: Region| {
+            current
+                .cell
+                .bordering(profile.connects_top_bottom)
+                .map(move |cell| Location { cell, region })
+        };
+        let mut candidates = Vec::new();
+        match current.region {
+            Region::Surface => {
+                candidates.extend(bordering(Region::Surface));
+                if profile.airborne {
+                    candidates.extend(current.cell.diagonals(profile.connects_top_bottom).map(
+                        |cell| Location {
+                            cell,
+                            region: Region::Surface,
+                        },
+                    ));
+                }
+                if profile.regions.burrowing && !self.is_water_site(current.cell) {
+                    candidates.push(Location {
+                        cell: current.cell,
+                        region: Region::Underground,
+                    });
+                }
+                if profile.regions.submerge && self.is_water_site(current.cell) {
+                    candidates.push(Location {
+                        cell: current.cell,
+                        region: Region::Underwater,
+                    });
+                }
+                if profile.regions.voidwalk {
+                    candidates.extend(bordering(Region::Void));
+                }
+            }
+            Region::Underground if profile.regions.burrowing => {
+                candidates.push(Location {
+                    cell: current.cell,
+                    region: Region::Surface,
+                });
+                candidates.extend(bordering(Region::Underground));
+                if profile.regions.submerge {
+                    candidates.extend(bordering(Region::Underwater));
+                }
+                if profile.regions.voidwalk {
+                    candidates.extend(bordering(Region::Void));
+                }
+            }
+            Region::Underwater if profile.regions.submerge => {
+                candidates.push(Location {
+                    cell: current.cell,
+                    region: Region::Surface,
+                });
+                candidates.extend(bordering(Region::Underwater));
+                if profile.regions.burrowing {
+                    candidates.extend(bordering(Region::Underground));
+                }
+                if profile.regions.voidwalk {
+                    candidates.extend(bordering(Region::Void));
+                }
+            }
+            Region::Void if profile.regions.voidwalk => {
+                candidates.extend(bordering(Region::Void));
+                candidates.extend(bordering(Region::Surface));
+                if profile.regions.burrowing {
+                    candidates.extend(bordering(Region::Underground));
+                }
+                if profile.regions.submerge {
+                    candidates.extend(bordering(Region::Underwater));
+                }
+            }
+            Region::Underground | Region::Underwater | Region::Void => {}
+        }
+        candidates
+    }
+
+    /// Whether the whole footprint translated onto `location` exists in that region.
+    fn footprint_location_exists(
+        &self,
+        occupied_cells: Option<SquareArea>,
+        start: Cell,
+        location: Location,
+    ) -> bool {
+        occupied_cells.map_or_else(
+            || self.location_exists_in_region(location.cell, location.region),
+            |area| {
+                translated_square(area, start, location.cell).is_some_and(|translated| {
+                    translated
+                        .into_iter()
+                        .all(|cell| self.location_exists_in_region(cell, location.region))
+                })
+            },
+        )
     }
 
     fn cell_is_immobilized(&self, cell: Cell) -> bool {
@@ -5015,12 +5131,21 @@ impl Game {
         )
     }
 
-    fn surface_movement_step_cost(&self, current: Cell, profile: MovementProfile) -> usize {
-        if profile.cause == MovementCause::CardEffect || !profile.airborne || !profile.moving_minion
+    fn movement_step_cost(
+        &self,
+        current: Location,
+        candidate: Location,
+        profile: MovementProfile,
+    ) -> usize {
+        if profile.cause == MovementCause::CardEffect
+            || !profile.airborne
+            || !profile.moving_minion
+            || current.region != Region::Surface
+            || current.cell == candidate.cell
         {
             return 1;
         }
-        let Some(site) = &self.position.sites[current.index()] else {
+        let Some(site) = &self.position.sites[current.cell.index()] else {
             return 1;
         };
         let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
@@ -5030,16 +5155,21 @@ impl Game {
         usize::from(!facts.airborne_minions_atop_move_freely_away)
     }
 
-    fn surface_entry_allowed(
+    fn unit_entry_allowed(
         &self,
-        current: Cell,
-        candidate: Cell,
+        current: Location,
+        candidate: Location,
         profile: MovementProfile,
     ) -> bool {
-        if !profile.moving_minion || profile.airborne || current == candidate {
+        if !profile.moving_minion
+            || profile.airborne
+            || current.region != Region::Surface
+            || candidate.region != Region::Surface
+            || current.cell == candidate.cell
+        {
             return true;
         }
-        let Some(site) = &self.position.sites[candidate.index()] else {
+        let Some(site) = &self.position.sites[candidate.cell.index()] else {
             return true;
         };
         let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
@@ -5048,11 +5178,15 @@ impl Game {
         };
         !facts.blocks_ground_minion_entry_while_minion_atop
             || !self.position.units.iter().any(|unit| {
-                unit.region == Region::Surface && Self::unit_occupies_cell(unit, candidate)
+                unit.region == Region::Surface && Self::unit_occupies_cell(unit, candidate.cell)
             })
     }
 
-    fn movement_restriction_allows(profile: MovementProfile, from: Cell, to: Cell) -> bool {
+    fn movement_restriction_allows(profile: MovementProfile, from: Location, to: Location) -> bool {
+        if profile.restriction.is_some() && from.region != to.region {
+            return false;
+        }
+        let (from, to) = (from.cell, to.cell);
         match profile.restriction {
             None => true,
             Some(BasicMovementRestriction::SidewaysOnly) => from.rank_index() == to.rank_index(),
@@ -5088,16 +5222,20 @@ impl Game {
         self.position.sites[cell.index()].is_some() || self.position.rubble[cell.index()].is_some()
     }
 
+    /// Whether a played Water site currently stands at one cell.
+    fn is_water_site(&self, cell: Cell) -> bool {
+        self.position.sites[cell.index()]
+            .as_ref()
+            .is_some_and(|site| {
+                matches!(
+                    &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                    CardFacts::Site(facts) if facts.elements.contains(Element::Water)
+                )
+            })
+    }
+
     fn underground_location_exists(&self, cell: Cell) -> bool {
-        self.surface_location_exists(cell)
-            && !self.position.sites[cell.index()]
-                .as_ref()
-                .is_some_and(|site| {
-                    matches!(
-                        &self.rules.cards[usize::from(site.card.card_id.0)].facts,
-                        CardFacts::Site(facts) if facts.elements.contains(Element::Water)
-                    )
-                })
+        self.surface_location_exists(cell) && !self.is_water_site(cell)
     }
 
     /// Every unit standing at one location in canonical identity order, for random selection.
@@ -5185,14 +5323,7 @@ impl Game {
         match region {
             Region::Surface => self.surface_location_exists(cell),
             Region::Underground => self.underground_location_exists(cell),
-            Region::Underwater => self.position.sites[cell.index()]
-                .as_ref()
-                .is_some_and(|site| {
-                    matches!(
-                        &self.rules.cards[usize::from(site.card.card_id.0)].facts,
-                        CardFacts::Site(facts) if facts.elements.contains(Element::Water)
-                    )
-                }),
+            Region::Underwater => self.is_water_site(cell),
             Region::Void => !self.surface_location_exists(cell),
         }
     }
@@ -6438,7 +6569,14 @@ impl Game {
         Ok(entered.into_iter().all(|cell| {
             self.surface_location_exists(cell)
                 && (occupied.contains(&cell)
-                    || self.surface_entry_allowed(from.cell, cell, profile))
+                    || self.unit_entry_allowed(
+                        from,
+                        Location {
+                            cell,
+                            region: Region::Surface,
+                        },
+                        profile,
+                    ))
         }))
     }
 
@@ -6467,6 +6605,7 @@ impl Game {
             maximum_cost: None,
             moving_minion,
             occupied_cells: None,
+            regions: RegionAbilities::default(),
             restriction: None,
             seat: target.seat(),
         })
@@ -6861,7 +7000,7 @@ impl Game {
             .ok_or(GameError::IllegalAction)?;
         if start != from.cell
             || !self
-                .surface_movement_paths(start, profile)
+                .movement_paths(from, profile)
                 .iter()
                 .any(|candidate| candidate == path)
             || profile
@@ -9152,6 +9291,7 @@ impl Game {
                         maximum_cost: Some(1),
                         moving_minion: false,
                         occupied_cells: None,
+                        regions: RegionAbilities::default(),
                         restriction: None,
                         seat,
                     },
@@ -9184,6 +9324,7 @@ impl Game {
                         },
                         moving_minion: true,
                         occupied_cells: unit.occupied_cells,
+                        regions: RegionAbilities::of_minion(facts),
                         restriction: facts.movement_restriction,
                         seat,
                     },
@@ -9194,7 +9335,13 @@ impl Game {
         if !ready
             || current_location != from.cell
             || !self
-                .surface_movement_paths(current_location, profile)
+                .movement_paths(
+                    Location {
+                        cell: current_location,
+                        region: Region::Surface,
+                    },
+                    profile,
+                )
                 .iter()
                 .any(|candidate| candidate == path)
         {
