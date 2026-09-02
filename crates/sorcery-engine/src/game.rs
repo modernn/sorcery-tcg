@@ -3050,25 +3050,6 @@ impl Game {
         }
     }
 
-    fn controlled_unit_targets(&self, seat: Seat) -> Vec<UnitTarget> {
-        let player = &self.position.players[seat_index(seat)];
-        std::iter::once(UnitTarget::Avatar {
-            instance_id: player.avatar.card.instance_id.clone(),
-            seat,
-        })
-        .chain(
-            self.position
-                .units
-                .iter()
-                .filter(|unit| unit.controller == seat)
-                .map(|unit| UnitTarget::Minion {
-                    instance_id: unit.card.instance_id.clone(),
-                    seat,
-                }),
-        )
-        .collect()
-    }
-
     fn unit_target_occupied_cells(&self, target: &UnitTarget) -> Result<&[Cell], GameError> {
         let kind = match target {
             UnitTarget::Avatar { .. } => UnitKind::Avatar,
@@ -3351,7 +3332,7 @@ impl Game {
                 vec![MagicChoice::default()]
             }
             MagicEffect::GrantChargeToAllyThisTurn | MagicEffect::GrantPowerTwoToAllyThisTurn => {
-                self.controlled_unit_targets(seat)
+                self.controlled_allies(seat)
                     .into_iter()
                     .map(|ally| MagicChoice {
                         ally: Some(ally),
@@ -3383,7 +3364,7 @@ impl Game {
                     })
                     .collect();
                 let mut choices = Vec::with_capacity(destinations.len());
-                for ally in self.controlled_unit_targets(seat) {
+                for ally in self.controlled_allies(seat) {
                     if self.unit_target_occupied_cells(&ally)?.len() > 1 {
                         return Err(GameError::UnsupportedManifestFact(
                             "teleportAllyToTargetSite:occupiesSquareArea".to_owned(),
