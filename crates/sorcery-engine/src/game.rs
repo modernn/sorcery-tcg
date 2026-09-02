@@ -1397,19 +1397,6 @@ impl Game {
         }
         let manifest: Manifest = serde_json::from_value(raw.clone())?;
         let mut parsed_facts = validate_manifest(&raw, &manifest)?;
-        if let Some(field) = parsed_facts.values().find_map(|facts| {
-            let CardFacts::Minion(facts) = facts else {
-                return None;
-            };
-            match facts.required_cast_region {
-                Some(RequiredCastRegion::Underground) => Some("mustBeCastBurrowed"),
-                Some(RequiredCastRegion::Underwater) => Some("mustBeCastSubmerged"),
-                None => None,
-            }
-        }) {
-            return Err(GameError::UnsupportedManifestFact(field.to_owned()));
-        }
-
         let mut cards = Vec::with_capacity(manifest.cards.len());
         let mut card_ids = BTreeMap::new();
         for (index, (id, value)) in manifest.cards.iter().enumerate() {
@@ -5575,7 +5562,7 @@ impl Game {
                 .into_iter()
                 .flat_map(|cell| {
                     summon_cell(cell)
-                        .map(|mana_cost| self.summon_regions(minion, cell, mana_cost))
+                        .map(|mana_cost| self.summon_regions(minion, cell, mana_cost, false))
                         .unwrap_or_default()
                 })
                 .collect()
@@ -5594,33 +5581,40 @@ impl Game {
     }
 
     /// The surface placement plus every lower layer the minion's own region abilities reach.
+    ///
+    /// A free placement ignores the printed cast-region restriction, so `anywhere` keeps every
+    /// layer the minion could survive in rather than only the one it must be cast into.
     fn summon_regions(
         &self,
         minion: &MinionFacts,
         cell: Cell,
         mana_cost: u64,
+        anywhere: bool,
     ) -> Vec<SummonDestination> {
-        let mut destinations = vec![SummonDestination {
-            cell,
-            cells: None,
-            mana_cost,
-            region: None,
-        }];
-        if minion.burrowing && self.underground_location_exists(cell) {
+        let required = (!anywhere).then_some(minion.required_cast_region).flatten();
+        let mut destinations = Vec::new();
+        let mut offer = |region: Option<LowerRegion>| {
             destinations.push(SummonDestination {
                 cell,
                 cells: None,
                 mana_cost,
-                region: Some(LowerRegion::Underground),
+                region,
             });
+        };
+        if required.is_none() {
+            offer(None);
         }
-        if minion.submerge && self.is_water_site(cell) {
-            destinations.push(SummonDestination {
-                cell,
-                cells: None,
-                mana_cost,
-                region: Some(LowerRegion::Underwater),
-            });
+        if minion.burrowing
+            && required != Some(RequiredCastRegion::Underwater)
+            && self.underground_location_exists(cell)
+        {
+            offer(Some(LowerRegion::Underground));
+        }
+        if minion.submerge
+            && required != Some(RequiredCastRegion::Underground)
+            && self.is_water_site(cell)
+        {
+            offer(Some(LowerRegion::Underwater));
         }
         destinations
     }
@@ -5643,7 +5637,7 @@ impl Game {
             Cell::ALL
                 .into_iter()
                 .filter(|cell| self.surface_location_exists(*cell))
-                .flat_map(|cell| self.summon_regions(minion, cell, 0))
+                .flat_map(|cell| self.summon_regions(minion, cell, 0, true))
                 .collect()
         }
     }
@@ -15788,12 +15782,14 @@ mod tests {
             .expect("valid Submerge manifest")
             .ensure_selfplay_supported()
             .expect("Submerge minion Bury is self-play safe");
-        assert!(matches!(
-            Game::from_manifest_json(&bury_manifest(Some(("waterbound", json!(true)))))
-                .expect("valid Waterbound manifest")
-                .ensure_selfplay_supported(),
-            Err(GameError::UnsupportedManifestFact(field)) if field == "waterbound"
-        ));
+        for unmodeled in ["voidwalk", "waterbound"] {
+            assert!(matches!(
+                Game::from_manifest_json(&bury_manifest(Some((unmodeled, json!(true)))))
+                    .expect("valid unmodeled region manifest")
+                    .ensure_selfplay_supported(),
+                Err(GameError::UnsupportedManifestFact(field)) if field == unmodeled
+            ));
+        }
 
         let cave_in = selfplay_manifest_with(31, |manifest| {
             for ordinal in 1..=50 {

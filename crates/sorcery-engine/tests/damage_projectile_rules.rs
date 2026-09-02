@@ -5,8 +5,7 @@ use sorcery_engine::checkpoint::{
     serialize_game_checkpoint,
 };
 use sorcery_engine::contract::{ActionRequest, Receipt};
-use sorcery_engine::game::GameError;
-use sorcery_engine::session::{Session, SessionError, StepResult};
+use sorcery_engine::session::{Session, StepResult};
 
 struct ProjectileSetup {
     far_target_id: String,
@@ -503,26 +502,5 @@ fn fixed_projectile_should_apply_ward_lethal_and_ordinary_death() {
                 .any(|card| card["instanceId"] == dead.far_target_id)
         );
         assert_exact_replay(&dead_session);
-    }
-}
-
-#[test]
-fn non_surface_projectile_manifest_should_fail_closed() {
-    let encoded = manifest(
-        89,
-        &minion(json!({
-            "burrowing": true,
-            "mustBeCastBurrowed": true,
-            "tapToShootProjectileDamage": 1,
-        })),
-        &minion(json!({})),
-        &minion(json!({})),
-    );
-    let error = Session::new(&encoded).expect_err("non-surface positions remain unsupported");
-    match error {
-        SessionError::Game(GameError::UnsupportedManifestFact(field)) => {
-            assert_eq!(field, "mustBeCastBurrowed");
-        }
-        other => panic!("expected unsupported cast region, received {other}"),
     }
 }

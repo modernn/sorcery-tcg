@@ -2329,7 +2329,7 @@
         "RULE-03"
       ],
       "plainLanguage": "A must-be-burrowed cast restriction suppresses only non-underground casts.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "burrowing"
       ],
@@ -2339,8 +2339,8 @@
       ],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 a must-be-burrowed cast restriction suppresses only non-underground casts"
+        "file": "crates/sorcery-engine/tests/burrowing_rules.rs",
+        "testName": "rule_catalog_0116_a_must_be_burrowed_minion_should_only_be_summoned_underground"
       }
     },
     {
@@ -2349,7 +2349,7 @@
         "RULE-03"
       ],
       "plainLanguage": "A must-be-submerged cast restriction suppresses only non-underwater casts.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "submerge"
       ],
@@ -2359,8 +2359,8 @@
       ],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 a must-be-submerged cast restriction suppresses only non-underwater casts"
+        "file": "crates/sorcery-engine/tests/submerge_rules.rs",
+        "testName": "rule_catalog_0117_a_must_be_submerged_minion_should_only_be_summoned_underwater"
       }
     },
     {

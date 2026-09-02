@@ -36,9 +36,13 @@ fn minion(burrowing: bool) -> Value {
 }
 
 fn manifest(seed: u64, north_water: bool) -> String {
+    manifest_with(seed, north_water, &minion(true))
+}
+
+fn manifest_with(seed: u64, north_water: bool, burrower: &Value) -> String {
     let cards = json!({
         "north-avatar": avatar(),
-        "north-burrower": minion(true),
+        "north-burrower": burrower,
         "north-site": site(north_water),
         "south-avatar": avatar(),
         "south-plain": minion(false),
@@ -160,6 +164,50 @@ fn assert_checkpoint_round_trip(session: &Session) {
     );
 }
 
+fn is_surface_summon(descriptor: &Value) -> bool {
+    descriptor["kind"] == "summon-minion" && descriptor["region"].is_null()
+}
+
+fn is_burrowed_summon(descriptor: &Value) -> bool {
+    descriptor["kind"] == "summon-minion" && descriptor["region"] == "underground"
+}
+
+#[test]
+fn rule_catalog_0116_a_must_be_burrowed_minion_should_only_be_summoned_underground() {
+    let mut restricted = minion(true);
+    restricted["mustBeCastBurrowed"] = json!(true);
+    let mut session = Session::new(&manifest_with(133, false, &restricted))
+        .expect("valid must-be-burrowed scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    assert!(!offers(&session, is_surface_summon));
+    assert!(offers(&session, is_burrowed_summon));
+    let (summoned, _) = accept_where(&mut session, is_burrowed_summon);
+    assert_eq!(
+        state(&session)["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .find(|unit| unit["instanceId"] == summoned["cardInstanceId"])
+            .expect("restricted minion")["region"],
+        "underground"
+    );
+    assert_exact_replay(&session);
+
+    let mut water = Session::new(&manifest_with(134, true, &restricted))
+        .expect("valid water must-be-burrowed scenario");
+    keep(&mut water);
+    keep(&mut water);
+    accept_where(&mut water, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    assert!(!offers(&water, |descriptor| descriptor["kind"] == "summon-minion"));
+    assert_exact_replay(&water);
+}
+
 #[test]
 fn rule_catalog_0114_burrowing_should_summon_and_move_underground_only_at_land_sites() {
     let mut session = Session::new(&manifest(131, false)).expect("valid Burrowing scenario");
@@ -169,12 +217,6 @@ fn rule_catalog_0114_burrowing_should_summon_and_move_underground_only_at_land_s
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
     });
 
-    let is_surface_summon = |descriptor: &Value| {
-        descriptor["kind"] == "summon-minion" && descriptor["region"].is_null()
-    };
-    let is_burrowed_summon = |descriptor: &Value| {
-        descriptor["kind"] == "summon-minion" && descriptor["region"] == "underground"
-    };
     assert!(offers(&session, is_surface_summon));
     assert!(offers(&session, is_burrowed_summon));
 

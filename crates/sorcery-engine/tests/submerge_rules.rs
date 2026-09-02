@@ -36,10 +36,14 @@ fn minion(submerge: bool) -> Value {
 }
 
 fn manifest(seed: u64, water: bool) -> String {
+    manifest_with(seed, water, &minion(true))
+}
+
+fn manifest_with(seed: u64, water: bool, swimmer: &Value) -> String {
     let cards = json!({
         "north-avatar": avatar(),
         "north-site": site(water),
-        "north-swimmer": minion(true),
+        "north-swimmer": swimmer,
         "south-avatar": avatar(),
         "south-plain": minion(false),
         "south-site": site(water),
@@ -199,6 +203,34 @@ fn is_surface_summon(descriptor: &Value) -> bool {
 
 fn is_underwater_summon(descriptor: &Value) -> bool {
     descriptor["kind"] == "summon-minion" && descriptor["region"] == "underwater"
+}
+
+#[test]
+fn rule_catalog_0117_a_must_be_submerged_minion_should_only_be_summoned_underwater() {
+    let mut restricted = minion(true);
+    restricted["mustBeCastSubmerged"] = json!(true);
+    let mut session = Session::new(&manifest_with(131, true, &restricted))
+        .expect("valid must-be-submerged scenario");
+    keep(&mut session);
+    keep(&mut session);
+    play_site(&mut session, "C4");
+    assert!(!offers(&session, is_surface_summon));
+    assert!(offers(&session, is_underwater_summon));
+    let (summoned, _) = accept_where(&mut session, is_underwater_summon);
+    let swimmer_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("restricted identity")
+        .to_owned();
+    assert_eq!(unit_region(&session, &swimmer_id), "underwater");
+    assert_exact_replay(&session);
+
+    let mut land = Session::new(&manifest_with(132, false, &restricted))
+        .expect("valid land must-be-submerged scenario");
+    keep(&mut land);
+    keep(&mut land);
+    play_site(&mut land, "C4");
+    assert!(!offers(&land, |descriptor| descriptor["kind"] == "summon-minion"));
+    assert_exact_replay(&land);
 }
 
 #[test]
