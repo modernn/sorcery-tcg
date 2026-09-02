@@ -3,6 +3,10 @@ use std::collections::BTreeSet;
 use serde_json::{Value, json};
 use sorcery_engine::action::{ActionDescriptor, CombatTarget, DeckZone};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
+use sorcery_engine::checkpoint::{
+    create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+    serialize_game_checkpoint,
+};
 use sorcery_engine::contract::{ActionRequest, Seat, opaque_action_id};
 use sorcery_engine::session::{Session, StepResult};
 
@@ -23,6 +27,8 @@ const SITE_DESTRUCTION_FIXTURE: &str =
     include_str!("../../../tests/engine/fixtures/site-destruction-action-v1.json");
 const RANDOM_CARD_DISCARD_SUMMON_FIXTURE: &str =
     include_str!("../../../tests/engine/fixtures/random-card-discard-summon-action-v1.json");
+const SACRIFICE_SUMMON_FIXTURE: &str =
+    include_str!("../../../tests/engine/fixtures/sacrifice-summon-action-v1.json");
 const NORTH_AVATAR: &str =
     "sha256:310a489a62739a8b1a6a13bf949daa8dc42ab0995619e5288691a0ac86a2472e";
 
@@ -340,6 +346,483 @@ fn random_card_discard_summon_descriptors_order_and_ids_should_match_typescript(
     assert_eq!(
         serde_json::to_value(receipt).expect("serialized Rust random-discard receipt"),
         fixture["transition"]["receipt"]
+    );
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one exact cross-engine fixture covers legal enumeration and its selected transition"
+)]
+fn sacrifice_summon_descriptors_order_and_receipt_should_match_typescript() {
+    let fixture: Value =
+        serde_json::from_str(SACRIFICE_SUMMON_FIXTURE).expect("valid sacrifice summon fixture");
+    assert_eq!(fixture["schemaVersion"], 1);
+    assert_eq!(fixture["source"], "typescript-legality-engine");
+
+    let zero = json!({ "air": 0, "earth": 0, "fire": 0, "water": 0 });
+    let avatar = json!({
+        "attack": 1,
+        "cardType": "avatar",
+        "defense": 1,
+        "drawSpell": false,
+        "life": 20,
+    });
+    let base = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({
+                "fixture": "synthetic-sacrifice-summon-action-v1",
+            }))
+            .expect("synthetic fixture authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-sacrifice-summon-action-v1",
+        },
+        "cards": {
+            "north-avatar": avatar,
+            "north-site": {
+                "cardType": "site",
+                "elements": ["earth"],
+                "genesisGainMana": 5,
+            },
+            "south-avatar": avatar,
+            "south-minion": {
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 1,
+                "manaCost": 0,
+                "thresholds": zero,
+            },
+            "south-site": { "cardType": "site", "elements": ["water"] },
+            "synthetic-fodder-minion": {
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 2,
+                "manaCost": 0,
+                "thresholds": zero,
+            },
+            "synthetic-tithe-beast": {
+                "attack": 8,
+                "cardType": "minion",
+                "defense": 4,
+                "manaCost": 6,
+                "sacrificeMinionAtSummoningLocationForManaDiscount": 2,
+                "thresholds": zero,
+            },
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 9],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "synthetic-tithe-beast",
+                    "synthetic-fodder-minion",
+                    "synthetic-fodder-minion",
+                    "synthetic-fodder-minion",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 9],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 3],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+    });
+    let expected_manifest_id = fixture["manifestId"]
+        .as_str()
+        .expect("fixture manifest identity");
+    let manifest = (1..=4_096)
+        .find_map(|seed| {
+            let mut candidate = base.clone();
+            candidate["seed"] = json!(seed);
+            candidate["manifestId"] =
+                json!(identity_hash(&candidate).expect("synthetic manifest identity"));
+            (candidate["manifestId"] == expected_manifest_id).then_some(candidate)
+        })
+        .expect("Rust reconstruction of TypeScript fixture manifest");
+    assert_eq!(manifest["manifestId"], fixture["manifestId"]);
+
+    let manifest = canonical_json(&manifest).expect("canonical synthetic fixture manifest");
+    let mut session = Session::new(&manifest).expect("valid synthetic fixture manifest");
+    let mut accept_where = |predicate: &dyn Fn(&Value) -> bool| {
+        let action = session
+            .legal_actions()
+            .expect("fixture legal actions")
+            .into_iter()
+            .find(|action| predicate(&action.descriptor))
+            .expect("fixture setup action");
+        let StepResult::Accepted(_) = session
+            .step(ActionRequest {
+                action_id: action.action_id.to_string(),
+                seat: action.seat,
+                state_version: action.state_version,
+            })
+            .expect("fixture setup step")
+        else {
+            panic!("engine-issued fixture action must be accepted");
+        };
+    };
+    let keep = |descriptor: &Value| {
+        descriptor["kind"] == "mulligan"
+            && descriptor["atlasOrder"] == json!([])
+            && descriptor["spellbookOrder"] == json!([])
+    };
+    let end_turn = |descriptor: &Value| descriptor["kind"] == "end-turn";
+    let summon_fodder = |descriptor: &Value| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "synthetic-fodder-minion"
+            && descriptor["cell"] == "C4"
+    };
+    accept_where(&keep);
+    accept_where(&keep);
+    accept_where(&|descriptor| descriptor["kind"] == "play-site" && descriptor["cell"] == "C4");
+    accept_where(&summon_fodder);
+    accept_where(&summon_fodder);
+    accept_where(&end_turn);
+    accept_where(&|descriptor| descriptor["kind"] == "draw" && descriptor["zone"] == "atlas");
+    accept_where(&|descriptor| descriptor["kind"] == "play-site" && descriptor["cell"] == "C1");
+    accept_where(&end_turn);
+    accept_where(&|descriptor| descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook");
+    accept_where(&|descriptor| descriptor["kind"] == "play-site" && descriptor["cell"] == "C3");
+    accept_where(&summon_fodder);
+
+    let casting_instance_id = fixture["actions"][0]["descriptor"]["cardInstanceId"]
+        .as_str()
+        .expect("fixture casting instance identity");
+    let issued = session
+        .legal_actions()
+        .expect("Rust sacrifice-summon legal actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["cardInstanceId"] == casting_instance_id
+                && action.descriptor["cell"] == "C4"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(issued.len(), 8);
+    assert_eq!(
+        issued
+            .iter()
+            .map(|action| json!({
+                "actionId": action.action_id,
+                "descriptor": action.descriptor,
+                "label": action.label,
+            }))
+            .collect::<Vec<_>>(),
+        fixture["actions"]
+            .as_array()
+            .expect("fixture sacrifice-summon actions")
+            .clone()
+    );
+
+    let state = session.replay_value().expect("Rust fixture replay state")["state"].clone();
+    let mut eligible_candidates = state["realm"]["units"]
+        .as_array()
+        .expect("fixture units")
+        .iter()
+        .filter(|unit| {
+            unit["controller"] == "north" && unit["location"] == "C4" && unit["region"] == "surface"
+        })
+        .map(|unit| unit["instanceId"].clone())
+        .collect::<Vec<_>>();
+    eligible_candidates.sort_unstable_by(|left, right| {
+        left.as_str()
+            .expect("candidate identity")
+            .cmp(right.as_str().expect("candidate identity"))
+    });
+    assert_eq!(
+        eligible_candidates,
+        fixture["eligibleSacrificeCandidateIds"]
+            .as_array()
+            .expect("fixture sacrifice candidates")
+            .clone()
+    );
+
+    let selected_action_id = fixture["transition"]["selectedActionId"]
+        .as_str()
+        .expect("fixture selected action identity");
+    let selected = issued
+        .iter()
+        .find(|action| action.action_id.as_str() == selected_action_id)
+        .expect("Rust issued selected sacrifice-summon action");
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: selected_action_id.to_owned(),
+            seat: selected.seat,
+            state_version: selected.state_version,
+        })
+        .expect("Rust selected sacrifice-summon transition")
+    else {
+        panic!("Rust issued selected sacrifice-summon action must be accepted");
+    };
+    assert_eq!(
+        serde_json::to_value(receipt).expect("serialized Rust sacrifice-summon receipt"),
+        fixture["transition"]["receipt"]
+    );
+
+    let mut deathrite_base = base;
+    deathrite_base["authority"]["contentHash"] = json!(
+        identity_hash(&json!({
+            "fixture": "synthetic-sacrifice-summon-deathrite-v1",
+        }))
+        .expect("synthetic Deathrite authority identity")
+    );
+    deathrite_base["authority"]["revisionId"] = json!("synthetic-sacrifice-summon-deathrite-v1");
+    deathrite_base["cards"]["synthetic-fodder-minion"]["deathriteDrawSite"] = json!(true);
+    let expected_deathrite_manifest_id = fixture["deathrite"]["manifestId"]
+        .as_str()
+        .expect("fixture Deathrite manifest identity");
+    let deathrite_manifest = (1..=4_096)
+        .find_map(|seed| {
+            let mut candidate = deathrite_base.clone();
+            candidate["seed"] = json!(seed);
+            candidate["manifestId"] =
+                json!(identity_hash(&candidate).expect("synthetic Deathrite manifest identity"));
+            (candidate["manifestId"] == expected_deathrite_manifest_id).then_some(candidate)
+        })
+        .expect("Rust reconstruction of TypeScript Deathrite manifest");
+    assert_eq!(
+        deathrite_manifest["manifestId"],
+        fixture["deathrite"]["manifestId"]
+    );
+
+    let deathrite_manifest =
+        canonical_json(&deathrite_manifest).expect("canonical Deathrite fixture manifest");
+    let mut deathrite_session =
+        Session::new(&deathrite_manifest).expect("valid Deathrite fixture manifest");
+    let mut accept_deathrite_setup = |predicate: &dyn Fn(&Value) -> bool| {
+        let action = deathrite_session
+            .legal_actions()
+            .expect("Deathrite fixture legal actions")
+            .into_iter()
+            .find(|action| predicate(&action.descriptor))
+            .expect("Deathrite fixture setup action");
+        let StepResult::Accepted(_) = deathrite_session
+            .step(ActionRequest {
+                action_id: action.action_id.to_string(),
+                seat: action.seat,
+                state_version: action.state_version,
+            })
+            .expect("Deathrite fixture setup step")
+        else {
+            panic!("engine-issued Deathrite setup action must be accepted");
+        };
+    };
+    let keep = |descriptor: &Value| {
+        descriptor["kind"] == "mulligan"
+            && descriptor["atlasOrder"] == json!([])
+            && descriptor["spellbookOrder"] == json!([])
+    };
+    let end_turn = |descriptor: &Value| descriptor["kind"] == "end-turn";
+    let summon_fodder = |descriptor: &Value| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "synthetic-fodder-minion"
+            && descriptor["cell"] == "C4"
+    };
+    accept_deathrite_setup(&keep);
+    accept_deathrite_setup(&keep);
+    accept_deathrite_setup(&|descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_deathrite_setup(&summon_fodder);
+    accept_deathrite_setup(&summon_fodder);
+    accept_deathrite_setup(&end_turn);
+    accept_deathrite_setup(&|descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_deathrite_setup(&|descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_deathrite_setup(&end_turn);
+    accept_deathrite_setup(&|descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_deathrite_setup(&|descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    accept_deathrite_setup(&summon_fodder);
+
+    let expected_payment = &fixture["deathrite"]["paymentAction"];
+    let payment = deathrite_session
+        .legal_actions()
+        .expect("Deathrite payment actions")
+        .into_iter()
+        .find(|action| action.action_id.as_str() == expected_payment["actionId"])
+        .expect("Rust issued fixture Deathrite payment");
+    assert_eq!(
+        json!({
+            "actionId": payment.action_id,
+            "descriptor": payment.descriptor,
+            "label": payment.label,
+            "seat": payment.seat,
+            "stateVersion": payment.state_version,
+        }),
+        *expected_payment
+    );
+    let StepResult::Accepted(interrupted) = deathrite_session
+        .step(ActionRequest {
+            action_id: payment.action_id.to_string(),
+            seat: payment.seat,
+            state_version: payment.state_version,
+        })
+        .expect("Rust Deathrite payment transition")
+    else {
+        panic!("Rust issued Deathrite payment must be accepted");
+    };
+    assert_eq!(
+        serde_json::to_value(interrupted).expect("serialized Rust interrupted receipt"),
+        fixture["deathrite"]["pending"]["receipt"]
+    );
+    let pending_state = deathrite_session
+        .replay_value()
+        .expect("Rust pending replay state")["state"]
+        .clone();
+    assert_eq!(
+        pending_state["phase"],
+        fixture["deathrite"]["pending"]["phase"]
+    );
+    assert_eq!(
+        pending_state["decisionSeat"],
+        fixture["deathrite"]["pending"]["decisionSeat"]
+    );
+    assert_eq!(
+        pending_state["stateVersion"],
+        fixture["deathrite"]["pending"]["stateVersion"]
+    );
+    assert!(!pending_state["pendingDeathrites"].is_null());
+    assert_eq!(
+        identity_hash(&pending_state).expect("Rust pending state identity"),
+        IdentityHash::parse(
+            fixture["deathrite"]["pending"]["stateHash"]
+                .as_str()
+                .expect("fixture pending state identity")
+        )
+        .expect("valid fixture pending state identity")
+    );
+    let pending_checkpoint =
+        create_game_checkpoint(&deathrite_session).expect("Rust pending checkpoint");
+    let serialized_pending =
+        serialize_game_checkpoint(&pending_checkpoint).expect("serialized Rust pending checkpoint");
+    assert_eq!(
+        identity_hash(&Value::String(serialized_pending.clone()))
+            .expect("serialized Rust pending checkpoint identity"),
+        IdentityHash::parse(
+            fixture["deathrite"]["pending"]["serializedCheckpointHash"]
+                .as_str()
+                .expect("fixture serialized pending checkpoint identity")
+        )
+        .expect("valid fixture serialized pending checkpoint identity")
+    );
+    assert_eq!(
+        pending_checkpoint.checkpoint_id.as_str(),
+        fixture["deathrite"]["pending"]["checkpointId"]
+    );
+    assert_eq!(
+        pending_checkpoint.expected_session_hash.as_str(),
+        fixture["deathrite"]["pending"]["expectedSessionHash"]
+    );
+
+    let parsed =
+        parse_game_checkpoint(&serialized_pending).expect("parsed Rust pending checkpoint");
+    let mut restored = resume_game_checkpoint(&parsed).expect("restored Rust pending checkpoint");
+    assert_eq!(
+        restored
+            .replay_value()
+            .expect("restored Rust pending state"),
+        deathrite_session
+            .replay_value()
+            .expect("source Rust pending state")
+    );
+    let order_actions = restored
+        .legal_actions()
+        .expect("Rust Deathrite order actions");
+    assert_eq!(
+        order_actions
+            .iter()
+            .map(|action| json!({
+                "actionId": action.action_id,
+                "descriptor": action.descriptor,
+                "label": action.label,
+                "seat": action.seat,
+                "stateVersion": action.state_version,
+            }))
+            .collect::<Vec<_>>(),
+        fixture["deathrite"]["pending"]["orderActions"]
+            .as_array()
+            .expect("fixture Deathrite order actions")
+            .clone()
+    );
+    let selected_order_id = fixture["deathrite"]["resolved"]["selectedOrderActionId"]
+        .as_str()
+        .expect("fixture selected Deathrite order identity");
+    let selected_order = order_actions
+        .iter()
+        .find(|action| action.action_id.as_str() == selected_order_id)
+        .expect("Rust issued selected Deathrite order");
+    let StepResult::Accepted(resolved) = restored
+        .step(ActionRequest {
+            action_id: selected_order.action_id.to_string(),
+            seat: selected_order.seat,
+            state_version: selected_order.state_version,
+        })
+        .expect("Rust selected Deathrite order transition")
+    else {
+        panic!("Rust issued Deathrite order must be accepted");
+    };
+    assert_eq!(
+        serde_json::to_value(resolved).expect("serialized Rust resolved receipt"),
+        fixture["deathrite"]["resolved"]["receipt"]
+    );
+    let resolved_state =
+        restored.replay_value().expect("Rust resolved replay state")["state"].clone();
+    assert_eq!(
+        resolved_state["phase"],
+        fixture["deathrite"]["resolved"]["phase"]
+    );
+    assert_eq!(
+        resolved_state["decisionSeat"],
+        fixture["deathrite"]["resolved"]["decisionSeat"]
+    );
+    assert_eq!(
+        resolved_state["stateVersion"],
+        fixture["deathrite"]["resolved"]["stateVersion"]
+    );
+    assert!(resolved_state["pendingDeathrites"].is_null());
+    assert_eq!(
+        identity_hash(&resolved_state).expect("Rust resolved state identity"),
+        IdentityHash::parse(
+            fixture["deathrite"]["resolved"]["stateHash"]
+                .as_str()
+                .expect("fixture resolved state identity")
+        )
+        .expect("valid fixture resolved state identity")
+    );
+    assert!(
+        restored
+            .verify_replay()
+            .expect("verified Rust Deathrite replay")
+    );
+    let resolved_checkpoint = create_game_checkpoint(&restored).expect("Rust resolved checkpoint");
+    let serialized_resolved = serialize_game_checkpoint(&resolved_checkpoint)
+        .expect("serialized Rust resolved checkpoint");
+    assert_eq!(
+        identity_hash(&Value::String(serialized_resolved))
+            .expect("serialized Rust resolved checkpoint identity"),
+        IdentityHash::parse(
+            fixture["deathrite"]["resolved"]["serializedCheckpointHash"]
+                .as_str()
+                .expect("fixture serialized resolved checkpoint identity")
+        )
+        .expect("valid fixture serialized resolved checkpoint identity")
+    );
+    assert_eq!(
+        resolved_checkpoint.checkpoint_id.as_str(),
+        fixture["deathrite"]["resolved"]["checkpointId"]
+    );
+    assert_eq!(
+        resolved_checkpoint.expected_session_hash.as_str(),
+        fixture["deathrite"]["resolved"]["expectedSessionHash"]
     );
 }
 

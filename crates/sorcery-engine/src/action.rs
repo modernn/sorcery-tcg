@@ -310,6 +310,9 @@ pub enum ActionDescriptor {
         /// Optional non-mana payment selected by the engine.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         payment_mode: Option<SummonPaymentMode>,
+        /// Exact local minions sacrificed for the engine-issued mana discount.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sacrificed_minion_instance_ids: Option<Vec<IdentityHash>>,
     },
     /// Cast one supported Magic card from the player's hand.
     CastMagic {
@@ -798,6 +801,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     genesis_damage_target: left_target,
                     mana_cost: left_mana,
                     payment_mode: left_payment,
+                    sacrificed_minion_instance_ids: left_sacrifices,
                 },
                 ActionDescriptor::SummonMinion {
                     card_id: right_card,
@@ -809,6 +813,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     genesis_damage_target: right_target,
                     mana_cost: right_mana,
                     payment_mode: right_payment,
+                    sacrificed_minion_instance_ids: right_sacrifices,
                 },
             ) => compare_json_strings(left_card, right_card)
                 .then_with(|| left_instance.cmp(right_instance))
@@ -820,7 +825,13 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     compare_optional_unit_targets(left_target.as_ref(), right_target.as_ref())
                 })
                 .then_with(|| compare_json_integers(*left_mana, *right_mana))
-                .then_with(|| compare_optional_summon_payments(*left_payment, *right_payment)),
+                .then_with(|| compare_optional_summon_payments(*left_payment, *right_payment))
+                .then_with(|| {
+                    compare_optional_identity_arrays(
+                        left_sacrifices.as_deref(),
+                        right_sacrifices.as_deref(),
+                    )
+                }),
             (ActionDescriptor::BeginChainMagic { .. }, ActionDescriptor::CastMagic { .. })
             | (ActionDescriptor::BeginChainMagic { .. }, ActionDescriptor::PlaySite { .. })
             | (ActionDescriptor::CastMagic { .. }, ActionDescriptor::PlaySite { .. })
@@ -1147,6 +1158,18 @@ fn compare_optional_identities(
 ) -> Ordering {
     match (left, right) {
         (Some(left), Some(right)) => left.cmp(right),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+fn compare_optional_identity_arrays(
+    left: Option<&[IdentityHash]>,
+    right: Option<&[IdentityHash]>,
+) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => compare_json_array(left, right, IdentityHash::cmp),
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (None, None) => Ordering::Equal,

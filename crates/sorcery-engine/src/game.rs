@@ -506,9 +506,20 @@ struct SiteGenesisContinuation {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+struct PaidSummonContinuation {
+    caster: UnitTarget,
+    genesis_damage_choice: Option<GenesisDamageChoice>,
+    genesis_damage_target: Option<UnitTarget>,
+    mana_paid: u16,
+    sacrificed_minion_instance_ids: Vec<IdentityHash>,
+    unit: UnitPosition,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum DeathriteContinuation {
     EndTurn(EndTurnContinuation),
     FirstStrike(FirstStrikeContinuation),
+    PaidSummon(PaidSummonContinuation),
     SiteGenesis(SiteGenesisContinuation),
 }
 
@@ -689,6 +700,36 @@ struct SummonDestination {
     mana_cost: u64,
 }
 
+fn nonempty_identity_combinations(
+    instance_ids: &[IdentityHash],
+    maximum_count: usize,
+) -> Vec<Vec<IdentityHash>> {
+    fn choose(
+        instance_ids: &[IdentityHash],
+        start: usize,
+        remaining: usize,
+        chosen: &mut Vec<IdentityHash>,
+        combinations: &mut Vec<Vec<IdentityHash>>,
+    ) {
+        if remaining == 0 {
+            combinations.push(chosen.clone());
+            return;
+        }
+        for index in start..=instance_ids.len() - remaining {
+            chosen.push(instance_ids[index].clone());
+            choose(instance_ids, index + 1, remaining - 1, chosen, combinations);
+            chosen.pop();
+        }
+    }
+
+    let mut combinations = Vec::new();
+    let mut chosen = Vec::with_capacity(maximum_count);
+    for count in 1..=maximum_count.min(instance_ids.len()) {
+        choose(instance_ids, 0, count, &mut chosen, &mut combinations);
+    }
+    combinations
+}
+
 #[derive(Clone, Copy)]
 struct MovementProfile {
     airborne: bool,
@@ -861,11 +902,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
 
 fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
     account_for_selfplay_minion_fields(facts);
-    if facts.alternative_summon_payment
-        == Some(AlternativeSummonPayment::SacrificeMinionAtSummoningLocationForManaDiscountTwo)
-    {
-        Some("sacrificeMinionAtSummoningLocationForManaDiscount")
-    } else if facts.at_start_of_controller_turn_teleport_to_random_site_or_void {
+    if facts.at_start_of_controller_turn_teleport_to_random_site_or_void {
         Some("atStartOfControllerTurnTeleportToRandomSiteOrVoid")
     } else if facts.burrowing {
         Some("burrowing")
@@ -2342,11 +2379,51 @@ impl Game {
                             .iter()
                             .any(|candidate| candidate.instance_id != card.instance_id));
                 let payments = [
-                    (destination.mana_cost <= u64::from(player.mana))
-                        .then_some((destination.mana_cost, None)),
-                    can_discard_random_card
-                        .then_some((0, Some(SummonPaymentMode::RandomCardDiscard))),
+                    (destination.mana_cost <= u64::from(player.mana)).then_some((
+                        destination.mana_cost,
+                        None,
+                        None,
+                    )),
+                    can_discard_random_card.then_some((
+                        0,
+                        Some(SummonPaymentMode::RandomCardDiscard),
+                        None,
+                    )),
                 ];
+                let mut sacrifice_payments = Vec::new();
+                if facts.alternative_summon_payment
+                    == Some(
+                        AlternativeSummonPayment::SacrificeMinionAtSummoningLocationForManaDiscountTwo,
+                    )
+                {
+                    let mut sacrifice_candidates = self
+                        .position
+                        .units
+                        .iter()
+                        .filter(|unit| {
+                            unit.controller == seat
+                                && unit.region == Region::Surface
+                                && Self::unit_occupies_cell(unit, destination.cell)
+                        })
+                        .map(|unit| unit.card.instance_id.clone())
+                        .collect::<Vec<_>>();
+                    sacrifice_candidates.sort_unstable();
+                    let useful_count = usize::try_from(destination.mana_cost.div_ceil(2))
+                        .unwrap_or(usize::MAX)
+                        .min(sacrifice_candidates.len());
+                    for sacrificed in
+                        nonempty_identity_combinations(&sacrifice_candidates, useful_count)
+                    {
+                        let count = u64::try_from(sacrificed.len())
+                            .map_err(|_| GameError::IllegalAction)?;
+                        let mana_cost = destination
+                            .mana_cost
+                            .saturating_sub(count.saturating_mul(2));
+                        if mana_cost <= u64::from(player.mana) {
+                            sacrifice_payments.push((mana_cost, None, Some(sacrificed)));
+                        }
+                    }
+                }
                 let genesis_choices = if facts.genesis
                     == Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo)
                 {
@@ -2360,7 +2437,9 @@ impl Game {
                 } else {
                     vec![(None, None)]
                 };
-                for (mana_cost, payment_mode) in payments.into_iter().flatten() {
+                for (mana_cost, payment_mode, sacrificed_minion_instance_ids) in
+                    payments.into_iter().flatten().chain(sacrifice_payments)
+                {
                     for (caster_kind, caster_instance_id) in &spellcasters {
                         for (genesis_damage_choice, genesis_damage_target) in &genesis_choices {
                             let genesis_suffix =
@@ -2383,6 +2462,12 @@ impl Game {
                             let payment =
                                 if payment_mode == Some(SummonPaymentMode::RandomCardDiscard) {
                                     "discard random card".to_owned()
+                                } else if let Some(sacrificed) = &sacrificed_minion_instance_ids {
+                                    format!(
+                                        "{mana_cost} mana + sacrifice {} minion{}",
+                                        sacrificed.len(),
+                                        if sacrificed.len() == 1 { "" } else { "s" }
+                                    )
                                 } else {
                                     format!("{mana_cost} mana")
                                 };
@@ -2398,6 +2483,8 @@ impl Game {
                                     genesis_damage_target: genesis_damage_target.clone(),
                                     mana_cost,
                                     payment_mode,
+                                    sacrificed_minion_instance_ids: sacrificed_minion_instance_ids
+                                        .clone(),
                                 },
                                 format!(
                                     "Summon {} at {} ({payment}){genesis_suffix}{caster_suffix}",
@@ -6835,6 +6922,11 @@ impl Game {
                     DeathriteContinuation::FirstStrike(continuation) => {
                         self.continue_after_first_strike(continuation, outcomes)
                     }
+                    DeathriteContinuation::PaidSummon(continuation) => {
+                        self.position.phase = pending.return_phase;
+                        self.position.decision_seat = pending.return_decision_seat;
+                        self.finish_paid_summon(continuation, outcomes)
+                    }
                     DeathriteContinuation::SiteGenesis(continuation) => {
                         self.finish_site_genesis(continuation, outcomes)
                     }
@@ -8998,6 +9090,7 @@ impl Game {
             genesis_damage_target,
             mana_cost,
             payment_mode,
+            sacrificed_minion_instance_ids,
         } = &action.descriptor
         else {
             return Err(GameError::IllegalAction);
@@ -9032,27 +9125,73 @@ impl Game {
                 "minion Genesis effect".to_owned(),
             ));
         }
-        let destination_matches =
-            self.summon_destinations(seat, facts)
-                .into_iter()
-                .any(|destination| {
-                    destination.cell == *cell
-                        && destination.cells == *cells
-                        && match payment_mode {
-                            None => {
-                                destination.mana_cost == *mana_cost
-                                    && *mana_cost <= u64::from(player.mana)
-                            }
-                            Some(SummonPaymentMode::RandomCardDiscard) => *mana_cost == 0
-                                && facts.alternative_summon_payment
-                                    == Some(
-                                        AlternativeSummonPayment::DiscardRandomCardInsteadOfMana,
-                                    ),
-                        }
-                });
+        let Some(destination) = self
+            .summon_destinations(seat, facts)
+            .into_iter()
+            .find(|destination| destination.cell == *cell && destination.cells == *cells)
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let sacrifices = sacrificed_minion_instance_ids
+            .as_deref()
+            .unwrap_or_default();
+        if sacrificed_minion_instance_ids
+            .as_ref()
+            .is_some_and(Vec::is_empty)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let sacrifice_payment_matches = if sacrifices.is_empty() {
+            false
+        } else {
+            let mut sacrifice_candidates = self
+                .position
+                .units
+                .iter()
+                .filter(|unit| {
+                    unit.controller == seat
+                        && unit.region == Region::Surface
+                        && Self::unit_occupies_cell(unit, *cell)
+                })
+                .map(|unit| unit.card.instance_id.clone())
+                .collect::<Vec<_>>();
+            sacrifice_candidates.sort_unstable();
+            let useful_sacrifice_count = usize::try_from(destination.mana_cost.div_ceil(2))
+                .unwrap_or(usize::MAX)
+                .min(sacrifice_candidates.len());
+            payment_mode.is_none()
+                && facts.alternative_summon_payment
+                    == Some(
+                        AlternativeSummonPayment::SacrificeMinionAtSummoningLocationForManaDiscountTwo,
+                    )
+                && sacrifices.len() <= useful_sacrifice_count
+                && sacrifices.windows(2).all(|pair| pair[0] < pair[1])
+                && sacrifices
+                    .iter()
+                    .all(|instance_id| sacrifice_candidates.binary_search(instance_id).is_ok())
+                && u64::try_from(sacrifices.len()).is_ok_and(|count| {
+                    destination
+                        .mana_cost
+                        .saturating_sub(count.saturating_mul(2))
+                        == *mana_cost
+                })
+                && *mana_cost <= u64::from(player.mana)
+        };
+        let payment_matches = if sacrifices.is_empty() {
+            match payment_mode {
+                None => destination.mana_cost == *mana_cost && *mana_cost <= u64::from(player.mana),
+                Some(SummonPaymentMode::RandomCardDiscard) => {
+                    *mana_cost == 0
+                        && facts.alternative_summon_payment
+                            == Some(AlternativeSummonPayment::DiscardRandomCardInsteadOfMana)
+                }
+            }
+        } else {
+            sacrifice_payment_matches
+        };
         let discard_candidate_count =
             player.hand_atlas.len() + player.hand_spellbook.len().saturating_sub(1);
-        if !destination_matches
+        if !payment_matches
             || (*payment_mode == Some(SummonPaymentMode::RandomCardDiscard)
                 && discard_candidate_count == 0)
             || !self.thresholds_met(seat, facts.thresholds)
@@ -9139,13 +9278,18 @@ impl Game {
                 .cemetery
                 .push(discarded_card);
         }
-        self.record_unit_interaction(
-            caster_kind.ok_or(GameError::IllegalAction)?,
-            seat,
-            caster_instance_id,
-            outcomes,
-        )?;
-        self.position.units.push(UnitPosition {
+        let caster_kind = caster_kind.ok_or(GameError::IllegalAction)?;
+        let caster = match caster_kind {
+            UnitKind::Avatar => UnitTarget::Avatar {
+                instance_id: caster_instance_id.clone(),
+                seat,
+            },
+            UnitKind::Minion => UnitTarget::Minion {
+                instance_id: caster_instance_id.clone(),
+                seat,
+            },
+        };
+        let unit = UnitPosition {
             card,
             carried_lance_count: lance_count.unwrap_or(0),
             controller: seat,
@@ -9162,15 +9306,89 @@ impl Game {
             temporary_charge_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             warded: starts_warded,
-        });
+        };
+        let continuation = PaidSummonContinuation {
+            caster,
+            genesis_damage_choice: *genesis_damage_choice,
+            genesis_damage_target: genesis_damage_target.clone(),
+            mana_paid: paid_mana,
+            sacrificed_minion_instance_ids: sacrifices.to_vec(),
+            unit,
+        };
         self.position.state_version += 1;
+        if !sacrifices.is_empty() {
+            for instance_id in sacrifices {
+                let sacrificed_unit = self
+                    .position
+                    .units
+                    .iter()
+                    .find(|unit| unit.card.instance_id == *instance_id)
+                    .ok_or(GameError::IllegalAction)?;
+                outcomes.push("minion-sacrificed", || {
+                    json!({
+                        "cardId": self.rules.cards[usize::from(sacrificed_unit.card.card_id.0)].id,
+                        "instanceId": sacrificed_unit.card.instance_id,
+                        "owner": sacrificed_unit.card.owner,
+                        "seat": sacrificed_unit.controller,
+                        "sourceInstanceId": card_instance_id,
+                    })
+                });
+            }
+            return self.begin_minion_deaths_with_continuation(
+                sacrifices,
+                &[],
+                Phase::Main,
+                seat,
+                Some(DeathriteContinuation::PaidSummon(continuation)),
+                outcomes,
+            );
+        }
+        self.finish_paid_summon(continuation, outcomes)
+    }
+
+    fn finish_paid_summon(
+        &mut self,
+        continuation: PaidSummonContinuation,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let PaidSummonContinuation {
+            caster,
+            genesis_damage_choice,
+            genesis_damage_target,
+            mana_paid,
+            sacrificed_minion_instance_ids: _,
+            unit,
+        } = continuation;
+        let seat = unit.controller;
+        let card_id = unit.card.card_id;
+        let card_instance_id = unit.card.instance_id.clone();
+        let caster_instance_id = caster.instance_id().clone();
+        let caster_kind = match caster {
+            UnitTarget::Avatar { .. } => UnitKind::Avatar,
+            UnitTarget::Minion { .. } => UnitKind::Minion,
+        };
+        if caster_kind == UnitKind::Avatar
+            || self.position.units.iter().any(|candidate| {
+                candidate.controller == seat && candidate.card.instance_id == caster_instance_id
+            })
+        {
+            self.record_unit_interaction(caster_kind, seat, &caster_instance_id, outcomes)?;
+        }
+        let cell = unit.location;
+        let cells = unit.occupied_cells;
+        let lance_count = unit.carried_lance_count;
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(card_id.0)].facts else {
+            return Err(GameError::IllegalAction);
+        };
+        let genesis = facts.genesis;
+        self.position.units.push(unit);
         outcomes.push("minion-summoned", || {
             let mut payload = json!({
-                "cardId": card_id,
+                "cardId": self.rules.cards[usize::from(card_id.0)].id,
                 "casterInstanceId": caster_instance_id,
                 "cell": cell,
                 "instanceId": card_instance_id,
-                "manaPaid": mana_cost,
+                "manaPaid": mana_paid,
                 "seat": seat,
             });
             if let Some(cells) = cells {
@@ -9178,20 +9396,20 @@ impl Game {
             }
             payload
         });
-        if let Some(count) = lance_count {
+        if lance_count > 0 {
             outcomes.push("lance-gained", || {
                 json!({
                     "bearerInstanceId": card_instance_id,
-                    "count": count,
+                    "count": lance_count,
                     "sourceInstanceId": card_instance_id,
                 })
             });
         }
         self.apply_minion_genesis(
             seat,
-            card_instance_id,
+            &card_instance_id,
             genesis,
-            *genesis_damage_choice,
+            genesis_damage_choice,
             genesis_damage_target.as_ref(),
             outcomes,
         )?;
@@ -9965,6 +10183,9 @@ impl Game {
                         "kind": "first-strike",
                         "pending": Self::pending_combat_value(&continuation.pending),
                     }),
+                    DeathriteContinuation::PaidSummon(continuation) => {
+                        self.paid_summon_continuation_value(continuation)
+                    }
                     DeathriteContinuation::SiteGenesis(continuation) => {
                         self.site_genesis_continuation_value(continuation)
                     }
@@ -9972,6 +10193,37 @@ impl Game {
             );
         }
         value
+    }
+
+    fn paid_summon_continuation_value(&self, continuation: &PaidSummonContinuation) -> Value {
+        let card_id = &self.rules.cards[usize::from(continuation.unit.card.card_id.0)].id;
+        let mut descriptor = json!({
+            "cardId": card_id,
+            "cardInstanceId": continuation.unit.card.instance_id,
+            "casterInstanceId": continuation.caster.instance_id(),
+            "cell": continuation.unit.location,
+            "kind": "summon-minion",
+            "manaCost": continuation.mana_paid,
+            "sacrificedMinionInstanceIds": continuation.sacrificed_minion_instance_ids,
+        });
+        let Value::Object(descriptor) = &mut descriptor else {
+            unreachable!("summon descriptor is an object");
+        };
+        if let Some(cells) = continuation.unit.occupied_cells {
+            descriptor.insert("cells".to_owned(), json!(cells));
+        }
+        if let Some(choice) = continuation.genesis_damage_choice {
+            descriptor.insert("genesisDamageChoice".to_owned(), json!(choice));
+        }
+        if let Some(target) = &continuation.genesis_damage_target {
+            descriptor.insert("genesisDamageTarget".to_owned(), json!(target));
+        }
+        json!({
+            "caster": continuation.caster,
+            "descriptor": descriptor,
+            "kind": "paid-summon",
+            "unit": self.unit_value(&continuation.unit),
+        })
     }
 
     fn site_genesis_continuation_value(&self, continuation: &SiteGenesisContinuation) -> Value {
@@ -10770,7 +11022,7 @@ mod tests {
         clippy::too_many_lines,
         reason = "one direct payment proof keeps self-play admission and zero/one-card legality together"
     )]
-    fn random_discard_summon_should_admit_only_its_mode_and_require_another_card() {
+    fn alternate_summon_payments_should_be_admitted_and_require_their_costs() {
         let discard_manifest = selfplay_manifest_with(417, |manifest| {
             for ordinal in 1..=50 {
                 manifest["cards"][format!("north-spell-{ordinal}")]["discardRandomCardInsteadOfMana"] =
@@ -10786,13 +11038,10 @@ mod tests {
             manifest["cards"]["north-spell-1"]["sacrificeMinionAtSummoningLocationForManaDiscount"] =
                 json!(2);
         });
-        assert!(matches!(
-            Game::from_manifest_json(&sacrifice_manifest)
-                .expect("valid sacrifice-payment manifest")
-                .ensure_selfplay_supported(),
-            Err(GameError::UnsupportedManifestFact(field))
-                if field == "sacrificeMinionAtSummoningLocationForManaDiscount"
-        ));
+        Game::from_manifest_json(&sacrifice_manifest)
+            .expect("valid sacrifice-payment manifest")
+            .ensure_selfplay_supported()
+            .expect("sacrifice-discount payment is self-play safe");
 
         let mut game = Game::from_manifest_json(&discard_manifest).expect("valid Aramos game");
         let cell = Cell::parse("C4").expect("C4");

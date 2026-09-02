@@ -294,7 +294,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Gnarled Wendigo sacrifices local minions before paying its discounted summon.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "summon",
@@ -305,8 +305,8 @@
         "summon"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Gnarled Wendigo sacrifices local minions before paying its discounted summon"
+        "file": "crates/sorcery-engine/tests/summon_rules.rs",
+        "testName": "gnarled_wendigo_should_sacrifice_only_local_surface_allies_before_paying_mana"
       }
     },
     {
