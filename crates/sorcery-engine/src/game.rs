@@ -360,6 +360,8 @@ struct UnitPosition {
     last_picked_up_artifacts_turn: Option<u64>,
     location: Cell,
     occupied_cells: Option<SquareArea>,
+    /// Voidwalk borrowed from a Planar Gate, kept only while the unit stays in the void.
+    planar_gate_voidwalk: bool,
     region: Region,
     stealthed: bool,
     summoning_sickness: bool,
