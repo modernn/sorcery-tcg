@@ -2968,7 +2968,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Sparkmage may tap for zero damage at a nearby location with no other unit.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "tap"
@@ -2977,8 +2977,8 @@
         "damage"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Sparkmage may tap for zero damage at a nearby location with no other unit"
+        "file": "crates/sorcery-engine/tests/sparkmage_rules.rs",
+        "testName": "zero_air_threshold_activation_without_another_unit_should_tap_without_rng_or_damage"
       }
     },
     {
@@ -3006,13 +3006,13 @@
         "RULE-03"
       ],
       "plainLanguage": "Sparkmage chooses among multiple other units with deterministic private RNG.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Sparkmage chooses among multiple other units with deterministic private RNG"
+        "file": "crates/sorcery-engine/tests/sparkmage_rules.rs",
+        "testName": "air_thresholds_should_select_a_hidden_candidate_deterministically_damage_it_and_reset"
       }
     },
     {

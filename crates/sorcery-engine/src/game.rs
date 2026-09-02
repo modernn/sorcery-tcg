@@ -749,9 +749,7 @@ fn unsupported_selfplay_fact(facts: &CardFacts) -> Option<&'static str> {
     match facts {
         CardFacts::Avatar(facts) => {
             account_for_selfplay_avatar_fields(*facts);
-            facts
-                .tap_damage_random_other_unit_at_nearby_location_per_air_threshold_cast_this_turn
-                .then_some("tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn")
+            None
         }
         CardFacts::Artifact(_) => Some("cardType:artifact"),
         CardFacts::Aura(_) => Some("cardType:aura"),
@@ -2045,6 +2043,30 @@ impl Game {
                     self.push_action(actions, descriptor, label);
                 }
             }
+            if avatar
+                .tap_damage_random_other_unit_at_nearby_location_per_air_threshold_cast_this_turn
+            {
+                let amount = player.air_thresholds_cast_this_turn.unwrap_or(0);
+                let source_instance_id = player.avatar.card.instance_id.clone();
+                let cells = std::iter::once(player.avatar.location)
+                    .chain(player.avatar.location.bordering(false))
+                    .chain(player.avatar.location.diagonals(false))
+                    .filter(|cell| self.position.sites[cell.index()].is_some())
+                    .collect::<BTreeSet<_>>();
+                for cell in cells {
+                    self.push_action(
+                        actions,
+                        ActionDescriptor::ActivateSparkmage {
+                            source_instance_id: source_instance_id.clone(),
+                            target_location: Location {
+                                cell,
+                                region: Region::Surface,
+                            },
+                        },
+                        format!("Tap Sparkmage to deal {amount} to a random other unit at {cell}"),
+                    );
+                }
+            }
         }
         if !player.domain_established {
             return Ok(());
@@ -3333,16 +3355,25 @@ impl Game {
     /// Returns [`GameError::IllegalAction`] when the action is stale, belongs to
     /// another decision, or is not valid for the current phase.
     pub fn apply_action(&mut self, action: &IssuedAction) -> Result<(), GameError> {
-        self.apply_action_with_log(action, &mut OutcomeLog::Ignore)
+        self.apply_action_with_log(action, &mut OutcomeLog::Ignore, None)
     }
 
+    #[expect(
+        clippy::type_complexity,
+        reason = "the internal transition returns its two existing receipt logs together"
+    )]
     pub(crate) fn apply_action_recorded(
         &mut self,
         action: &IssuedAction,
-    ) -> Result<Vec<(String, Value)>, GameError> {
+    ) -> Result<(Vec<(String, Value)>, Vec<EngineRandomDraw>), GameError> {
         let mut outcomes = Vec::new();
-        self.apply_action_with_log(action, &mut OutcomeLog::Record(&mut outcomes))?;
-        Ok(outcomes)
+        let mut random_draws = Vec::new();
+        self.apply_action_with_log(
+            action,
+            &mut OutcomeLog::Record(&mut outcomes),
+            Some(&mut random_draws),
+        )?;
+        Ok((outcomes, random_draws))
     }
 
     #[expect(
@@ -3353,6 +3384,7 @@ impl Game {
         &mut self,
         action: &IssuedAction,
         outcomes: &mut OutcomeLog<'_>,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
     ) -> Result<(), GameError> {
         if action.seat != self.position.decision_seat
             || action.state_version != self.position.state_version
@@ -3368,6 +3400,9 @@ impl Game {
             _ => None,
         };
         let applied = match &action.descriptor {
+            ActionDescriptor::ActivateSparkmage { .. } => {
+                self.apply_sparkmage_action(action, outcomes, random_draws)
+            }
             ActionDescriptor::AllocateStrike {
                 amount,
                 target_instance_id,
@@ -7135,6 +7170,147 @@ impl Game {
 
     #[expect(
         clippy::too_many_lines,
+        reason = "the closed random activation keeps validation, draw, damage, and deaths atomic"
+    )]
+    fn apply_sparkmage_action(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::ActivateSparkmage {
+            source_instance_id,
+            target_location,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let seat = action.seat;
+        let player = &self.position.players[seat_index(seat)];
+        let CardFacts::Avatar(facts) =
+            &self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let target_is_nearby = std::iter::once(player.avatar.location)
+            .chain(player.avatar.location.bordering(false))
+            .chain(player.avatar.location.diagonals(false))
+            .any(|cell| cell == target_location.cell);
+        if self.position.phase != Phase::Main
+            || self.position.active_seat != seat
+            || self.position.decision_seat != seat
+            || player.avatar.card.instance_id != *source_instance_id
+            || player.avatar.tapped
+            || !facts
+                .tap_damage_random_other_unit_at_nearby_location_per_air_threshold_cast_this_turn
+            || target_location.region != Region::Surface
+            || !target_is_nearby
+            || self.position.sites[target_location.cell.index()].is_none()
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let amount = player.air_thresholds_cast_this_turn.unwrap_or(0);
+        let (current_power, lethal) =
+            self.combatant_attack_and_lethal(UnitKind::Avatar, seat, source_instance_id)?;
+        self.position.players[seat_index(seat)].avatar.tapped = true;
+
+        let mut candidates = Vec::new();
+        for candidate_seat in [Seat::North, Seat::South] {
+            let avatar = &self.position.players[seat_index(candidate_seat)].avatar;
+            if avatar.location == target_location.cell
+                && avatar.card.instance_id != *source_instance_id
+            {
+                candidates.push((
+                    avatar.card.instance_id.clone(),
+                    UnitKind::Avatar,
+                    candidate_seat,
+                ));
+            }
+        }
+        candidates.extend(
+            self.position
+                .units
+                .iter()
+                .filter(|unit| {
+                    unit.card.instance_id != *source_instance_id
+                        && Self::unit_occupies_cell(unit, target_location.cell)
+                })
+                .map(|unit| {
+                    (
+                        unit.card.instance_id.clone(),
+                        UnitKind::Minion,
+                        unit.controller,
+                    )
+                }),
+        );
+        candidates.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+
+        let selected = if candidates.is_empty() {
+            None
+        } else {
+            let index = draw_index(
+                &mut self.position.prng,
+                candidates.len(),
+                "sparkmage_random_other_unit_at_nearby_location",
+                "unit_index_candidate",
+                random_draws,
+            )?;
+            Some(candidates[index].clone())
+        };
+        outcomes.push("sparkmage-activated", || {
+            let mut payload = json!({
+                "amount": amount,
+                "seat": seat,
+                "sourceInstanceId": source_instance_id,
+                "targetLocation": target_location,
+            });
+            if let Some((target_instance_id, target_kind, target_seat)) = &selected {
+                payload["targetInstanceId"] = json!(target_instance_id);
+                payload["targetKind"] = json!(target_kind.as_str());
+                payload["targetSeat"] = json!(target_seat);
+            }
+            payload
+        });
+        self.record_unit_interaction(UnitKind::Avatar, seat, source_instance_id, outcomes)?;
+
+        if let Some((target_instance_id, target_kind, target_seat)) = selected
+            && amount > 0
+        {
+            let result = self.apply_simple_damage(
+                target_kind,
+                target_seat,
+                &target_instance_id,
+                amount,
+                UnitDamageSource {
+                    current_power,
+                    lethal,
+                },
+                outcomes,
+            )?;
+            if result.minion_died || result.avatar_defeated {
+                self.begin_minion_deaths(
+                    if result.minion_died {
+                        std::slice::from_ref(&target_instance_id)
+                    } else {
+                        &[]
+                    },
+                    if result.avatar_defeated {
+                        std::slice::from_ref(&target_seat)
+                    } else {
+                        &[]
+                    },
+                    Phase::Main,
+                    self.position.active_seat,
+                    outcomes,
+                )?;
+            }
+        }
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    #[expect(
+        clippy::too_many_lines,
         reason = "the closed Magic transaction keeps validation, payment, and effects atomic"
     )]
     fn apply_cast_magic_action(
@@ -7502,12 +7678,21 @@ impl Game {
         {
             return Err(GameError::IllegalAction);
         }
+        let next_air_thresholds_cast_this_turn = player
+            .air_thresholds_cast_this_turn
+            .map(|cast_air| {
+                let added = u16::try_from(facts.thresholds.get(Element::Air))
+                    .map_err(|_| GameError::IllegalAction)?;
+                cast_air.checked_add(added).ok_or(GameError::IllegalAction)
+            })
+            .transpose()?;
         let paid_mana = u16::try_from(*mana_cost).map_err(|_| GameError::IllegalAction)?;
         let card = self.position.players[player_index]
             .hand_spellbook
             .remove(hand_index);
         let player = &mut self.position.players[player_index];
         player.mana -= paid_mana;
+        player.air_thresholds_cast_this_turn = next_air_thresholds_cast_this_turn;
         self.record_unit_interaction(
             caster_kind.ok_or(GameError::IllegalAction)?,
             seat,
@@ -8717,7 +8902,13 @@ fn shuffle(
     random_draws: &mut Vec<EngineRandomDraw>,
 ) -> Result<(), GameError> {
     for index in (1..cards.len()).rev() {
-        let candidate = draw_index(prng, index + 1, purpose, random_draws)?;
+        let candidate = draw_index(
+            prng,
+            index + 1,
+            purpose,
+            "shuffle_index_candidate",
+            Some(random_draws),
+        )?;
         cards.swap(index, candidate);
     }
     Ok(())
@@ -8727,28 +8918,36 @@ fn draw_index(
     prng: &mut PrngState,
     exclusive_maximum: usize,
     purpose: &str,
-    random_draws: &mut Vec<EngineRandomDraw>,
+    domain_kind: &'static str,
+    mut random_draws: Option<&mut Vec<EngineRandomDraw>>,
 ) -> Result<usize, GameError> {
     let maximum = u64::try_from(exclusive_maximum)
         .map_err(|_| invalid("random choice size exceeds the supported range"))?;
     let limit = (1_u64 << 32) / maximum * maximum;
     loop {
-        let pre_prng_state_hash = identity_hash(&serde_json::to_value(*prng)?)?;
+        let pre_prng_state_hash = if random_draws.is_some() {
+            Some(identity_hash(&serde_json::to_value(*prng)?)?)
+        } else {
+            None
+        };
         let result = prng.draw_u32();
         let draw = u64::from(result);
         let accepted = draw < limit;
-        random_draws.push(EngineRandomDraw {
-            domain: RandomDomain {
-                accepted,
-                exclusive_maximum,
-                kind: "shuffle_index_candidate",
-            },
-            draw_sequence: prng.draws,
-            post_prng_state_hash: identity_hash(&serde_json::to_value(*prng)?)?,
-            pre_prng_state_hash,
-            purpose: purpose.to_owned(),
-            result,
-        });
+        if let Some(random_draws) = random_draws.as_deref_mut() {
+            random_draws.push(EngineRandomDraw {
+                domain: RandomDomain {
+                    accepted,
+                    exclusive_maximum,
+                    kind: domain_kind,
+                },
+                draw_sequence: prng.draws,
+                post_prng_state_hash: identity_hash(&serde_json::to_value(*prng)?)?,
+                pre_prng_state_hash: pre_prng_state_hash
+                    .ok_or_else(|| invalid("recorded random draw lacks its pre-state hash"))?,
+                purpose: purpose.to_owned(),
+                result,
+            });
+        }
         if accepted {
             return usize::try_from(draw % maximum)
                 .map_err(|_| invalid("random choice index exceeds the supported range"));
@@ -8893,9 +9092,10 @@ mod tests {
             .location = c4;
         let replacement_actions = play_site_actions(&game, &recovery_card);
         assert_eq!(replacement_actions.len(), 1);
-        let outcomes = game
+        let (outcomes, random_draws) = game
             .apply_action_recorded(&replacement_actions[0])
             .expect("issued Rubble replacement");
+        assert!(random_draws.is_empty());
         assert_eq!(
             outcomes
                 .iter()

@@ -209,6 +209,13 @@ pub enum ActionDescriptor {
         /// Authoritative source minion identity.
         unit_instance_id: IdentityHash,
     },
+    /// Tap the Avatar to damage one hidden random other unit at a nearby location.
+    ActivateSparkmage {
+        /// Authoritative source Avatar identity.
+        source_instance_id: IdentityHash,
+        /// Engine-issued nearby location; the random target remains private until resolution.
+        target_location: Location,
+    },
     /// Keep an opening hand or return selected cards in the specified order.
     Mulligan {
         /// Atlas instance IDs returned to the deck bottom, in order.
@@ -560,7 +567,8 @@ impl ActionDescriptor {
             Self::ReplaceRubbleWithTopAtlasSite { target_cell, .. } => Some(format!(
                 "Replace Rubble at {target_cell} with the top site of your Atlas"
             )),
-            Self::PlaySite { .. }
+            Self::ActivateSparkmage { .. }
+            | Self::PlaySite { .. }
             | Self::ContinueBasicMovement { .. }
             | Self::OrderDeathrites { .. }
             | Self::ResolveGenesisSpell { .. }
@@ -778,6 +786,18 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
             _ => action_kind(left)
                 .cmp(&action_kind(right))
                 .then_with(|| match (left, right) {
+                    (
+                        ActionDescriptor::ActivateSparkmage {
+                            source_instance_id: left_source,
+                            target_location: left_location,
+                        },
+                        ActionDescriptor::ActivateSparkmage {
+                            source_instance_id: right_source,
+                            target_location: right_location,
+                        },
+                    ) => left_source
+                        .cmp(right_source)
+                        .then_with(|| left_location.cmp(right_location)),
                     (
                         ActionDescriptor::CloseDefend {
                             original_target_participates: left,
@@ -1052,30 +1072,31 @@ fn card_prefix(action: &ActionDescriptor) -> (&str, &IdentityHash) {
 const fn action_kind(action: &ActionDescriptor) -> u8 {
     match action {
         ActionDescriptor::ActivateMana { .. } => 0,
-        ActionDescriptor::AllocateStrike { .. } => 1,
-        ActionDescriptor::CastMagic { .. } => 2,
-        ActionDescriptor::CloseDefend { .. } => 3,
-        ActionDescriptor::CloseIntercept {} => 4,
-        ActionDescriptor::ContinueBasicMovement { .. } => 5,
-        ActionDescriptor::DeclareAttack { .. } => 6,
-        ActionDescriptor::DeclineAttack => 7,
-        ActionDescriptor::Defend { .. } => 8,
-        ActionDescriptor::Draw { .. } => 9,
-        ActionDescriptor::DrawSite => 10,
-        ActionDescriptor::DrawSpell => 11,
-        ActionDescriptor::EndTurn => 12,
-        ActionDescriptor::Intercept { .. } => 13,
-        ActionDescriptor::OrderDeathrites { .. } => 14,
-        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 15,
-        ActionDescriptor::ResolveGenesisSpell { .. } => 16,
-        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 17,
-        ActionDescriptor::ResolveGenesisToken { .. } => 18,
-        ActionDescriptor::ResolveRangedStep { .. } => 19,
-        ActionDescriptor::Mulligan { .. } => 20,
-        ActionDescriptor::PlaySite { .. } => 21,
-        ActionDescriptor::ShootDamageProjectile { .. } => 22,
-        ActionDescriptor::ShootProjectile { .. } => 23,
-        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 24,
+        ActionDescriptor::ActivateSparkmage { .. } => 1,
+        ActionDescriptor::AllocateStrike { .. } => 2,
+        ActionDescriptor::CastMagic { .. } => 3,
+        ActionDescriptor::CloseDefend { .. } => 4,
+        ActionDescriptor::CloseIntercept {} => 5,
+        ActionDescriptor::ContinueBasicMovement { .. } => 6,
+        ActionDescriptor::DeclareAttack { .. } => 7,
+        ActionDescriptor::DeclineAttack => 8,
+        ActionDescriptor::Defend { .. } => 9,
+        ActionDescriptor::Draw { .. } => 10,
+        ActionDescriptor::DrawSite => 11,
+        ActionDescriptor::DrawSpell => 12,
+        ActionDescriptor::EndTurn => 13,
+        ActionDescriptor::Intercept { .. } => 14,
+        ActionDescriptor::OrderDeathrites { .. } => 15,
+        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 16,
+        ActionDescriptor::ResolveGenesisSpell { .. } => 17,
+        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 18,
+        ActionDescriptor::ResolveGenesisToken { .. } => 19,
+        ActionDescriptor::ResolveRangedStep { .. } => 20,
+        ActionDescriptor::Mulligan { .. } => 21,
+        ActionDescriptor::PlaySite { .. } => 22,
+        ActionDescriptor::ShootDamageProjectile { .. } => 23,
+        ActionDescriptor::ShootProjectile { .. } => 24,
+        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 25,
     }
 }
 

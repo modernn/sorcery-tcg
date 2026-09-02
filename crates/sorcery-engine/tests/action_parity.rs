@@ -16,12 +16,15 @@ const SHOOT_PROJECTILE_FIXTURE: &str =
     include_str!("../../../tests/engine/fixtures/shoot-projectile-action-v1.json");
 const SHOOT_DAMAGE_PROJECTILE_FIXTURE: &str =
     include_str!("../../../tests/engine/fixtures/shoot-damage-projectile-action-v1.json");
+const SPARKMAGE_FIXTURE: &str =
+    include_str!("../../../tests/engine/fixtures/sparkmage-action-v1.json");
 const NORTH_AVATAR: &str =
     "sha256:310a489a62739a8b1a6a13bf949daa8dc42ab0995619e5288691a0ac86a2472e";
 
 fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
     match descriptor {
         ActionDescriptor::ActivateMana { .. } => "activate-mana",
+        ActionDescriptor::ActivateSparkmage { .. } => "activate-sparkmage",
         ActionDescriptor::AllocateStrike { .. } => "allocate-strike",
         ActionDescriptor::CastMagic { .. } => "cast-magic",
         ActionDescriptor::Mulligan { .. } => "mulligan",
@@ -242,6 +245,99 @@ fn shoot_damage_projectile_descriptors_labels_order_and_ids_should_match_typescr
             "kind": "shoot-damage-projectile",
             "path": [{ "cell": "C4", "region": "surface" }],
             "shooterInstanceId": fixture["shooterInstanceId"],
+        }),
+    ] {
+        assert!(serde_json::from_value::<ActionDescriptor>(invalid).is_err());
+    }
+}
+
+#[test]
+fn sparkmage_descriptors_order_and_action_ids_should_match_typescript() {
+    let fixture: Value =
+        serde_json::from_str(SPARKMAGE_FIXTURE).expect("valid Sparkmage action fixture");
+    assert_eq!(fixture["schemaVersion"], 1);
+    assert_eq!(fixture["source"], "typescript-legality-engine");
+    assert_eq!(
+        fixture["actions"]
+            .as_array()
+            .expect("fixture actions")
+            .len(),
+        6
+    );
+    let contract = fixture["contract"].as_str().expect("action contract");
+    let seat: Seat = serde_json::from_value(fixture["seat"].clone()).expect("fixture seat");
+    let state_version = fixture["stateVersion"]
+        .as_u64()
+        .expect("fixture state version");
+    let source_instance_id = fixture["avatarInstanceId"]
+        .as_str()
+        .expect("fixture Avatar identity");
+    let mut ordered = Vec::new();
+    let mut target_cells = Vec::new();
+
+    for action in fixture["actions"].as_array().expect("fixture actions") {
+        let descriptor: ActionDescriptor = serde_json::from_value(action["descriptor"].clone())
+            .expect("typed Sparkmage descriptor");
+        assert!(matches!(
+            descriptor,
+            ActionDescriptor::ActivateSparkmage { .. }
+        ));
+        assert_eq!(descriptor_kind(&descriptor), "activate-sparkmage");
+        assert_eq!(descriptor.state_independent_label(), None);
+        let serialized = serde_json::to_value(&descriptor).expect("serialized descriptor");
+        assert_eq!(serialized, action["descriptor"]);
+        assert_eq!(serialized["sourceInstanceId"], source_instance_id);
+        target_cells.push(
+            serialized["targetLocation"]["cell"]
+                .as_str()
+                .expect("target cell")
+                .to_owned(),
+        );
+        let expected_id =
+            IdentityHash::parse(action["actionId"].as_str().expect("TypeScript action ID"))
+                .expect("valid TypeScript action ID");
+        assert_eq!(
+            opaque_action_id(contract, seat, state_version, &serialized)
+                .expect("Rust action identity"),
+            expected_id
+        );
+        ordered.push((
+            canonical_json(&serialized).expect("canonical descriptor"),
+            expected_id,
+        ));
+    }
+
+    assert_eq!(target_cells, ["B3", "B4", "C3", "C4", "D3", "D4"]);
+    ordered.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+    assert_eq!(
+        ordered
+            .into_iter()
+            .map(|(_, action_id)| action_id.to_string())
+            .collect::<Vec<_>>(),
+        fixture["canonicalActionIds"]
+            .as_array()
+            .expect("canonical TypeScript order")
+            .iter()
+            .map(|action_id| action_id.as_str().expect("action ID").to_owned())
+            .collect::<Vec<_>>()
+    );
+
+    for invalid in [
+        json!({
+            "kind": "activate-sparkmage",
+            "sourceInstanceId": source_instance_id,
+            "targetLocation": null,
+        }),
+        json!({
+            "kind": "activate-sparkmage",
+            "sourceInstanceId": source_instance_id,
+            "targetLocation": { "cell": "C4", "region": "surface" },
+            "unknown": true,
+        }),
+        json!({
+            "kind": "activate-sparkmage",
+            "sourceInstanceId": source_instance_id,
+            "targetLocation": { "cell": "C4", "region": "sky" },
         }),
     ] {
         assert!(serde_json::from_value::<ActionDescriptor>(invalid).is_err());

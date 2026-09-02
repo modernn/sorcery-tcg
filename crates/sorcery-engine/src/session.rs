@@ -174,7 +174,7 @@ impl Session {
             .event_count
             .checked_add(1)
             .ok_or(SessionError::SequenceExhausted)?;
-        let outcomes = self.game.apply_action_recorded(&action)?;
+        let (outcomes, random_draws) = self.game.apply_action_recorded(&action)?;
         let post_state_hash = self.game.state_hash()?;
         let next_event_count = self
             .event_count
@@ -194,7 +194,10 @@ impl Session {
             next_state_version: self.game.position().state_version(),
             post_state_hash: post_state_hash.clone(),
             pre_state_hash: state_hash.clone(),
-            random_draws: Vec::new(),
+            random_draws: random_draws
+                .into_iter()
+                .map(serde_json::to_value)
+                .collect::<Result<_, _>>()?,
             receipt_sequence,
             seat: request.seat,
             state_version,
