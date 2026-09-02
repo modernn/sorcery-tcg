@@ -64,6 +64,7 @@ fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
         ActionDescriptor::OrderDeathrites { .. } => "order-deathrites",
         ActionDescriptor::ShootProjectile { .. } => "shoot-projectile",
         ActionDescriptor::ShootDamageProjectile { .. } => "shoot-damage-projectile",
+        ActionDescriptor::ShootDragProjectile { .. } => "shoot-drag-projectile",
         ActionDescriptor::CloseIntercept {} => "close-intercept",
         ActionDescriptor::EndTurn => "end-turn",
         ActionDescriptor::ExtendChainMagic { .. } => "extend-chain-magic",

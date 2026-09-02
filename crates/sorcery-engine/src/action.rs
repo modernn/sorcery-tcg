@@ -396,6 +396,21 @@ pub enum ActionDescriptor {
         /// Authoritative source unit identity.
         shooter_instance_id: IdentityHash,
     },
+    /// Tap a ready minion to shoot its drag projectile, hauling the first visible unit hit back
+    /// along the ray and optionally fighting it on arrival.
+    ShootDragProjectile {
+        /// Cardinal direction of travel.
+        direction: ProjectileDirection,
+        /// Fight the hauled unit once it arrives beside the shooter.
+        fight_on_arrival: bool,
+        /// First visible unit hit, or explicit null when the ray is empty.
+        #[serde(deserialize_with = "required_nullable_unit_target")]
+        hit: Option<UnitTarget>,
+        /// Complete ray, including the shooter's origin.
+        path: Vec<Location>,
+        /// Authoritative source minion identity.
+        shooter_instance_id: IdentityHash,
+    },
     /// Tap a ready minion to shoot its fixed-damage projectile along one issued ray.
     ShootDamageProjectile {
         /// Cardinal direction of travel.
@@ -617,25 +632,22 @@ impl ActionDescriptor {
                 format!("Move {}… {path}", short_identity(unit_instance_id))
             }),
             Self::ShootProjectile { direction, hit, .. }
-            | Self::ShootDamageProjectile { direction, hit, .. } => {
-                let direction = match direction {
-                    ProjectileDirection::East => "east",
-                    ProjectileDirection::North => "north",
-                    ProjectileDirection::South => "south",
-                    ProjectileDirection::West => "west",
-                };
-                let target = hit.as_ref().map_or_else(
-                    || "nothing".to_owned(),
-                    |target| {
-                        format!(
-                            "{} {}…",
-                            target.kind(),
-                            short_identity(target.instance_id())
-                        )
-                    },
-                );
-                Some(format!("Shoot {direction} at {target}"))
-            }
+            | Self::ShootDamageProjectile { direction, hit, .. } => Some(format!(
+                "Shoot {} at {}",
+                direction_name(*direction),
+                projectile_target_label(hit.as_ref())
+            )),
+            Self::ShootDragProjectile {
+                direction,
+                fight_on_arrival,
+                hit,
+                ..
+            } => Some(format!(
+                "Hook {} at {}{}",
+                direction_name(*direction),
+                projectile_target_label(hit.as_ref()),
+                if *fight_on_arrival { " and fight" } else { "" }
+            )),
             Self::DeclineAttack => Some("Decline attack".to_owned()),
             Self::ResolveRangedStep {
                 choice,
@@ -924,9 +936,11 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
             }
             (
                 ActionDescriptor::ShootProjectile { .. }
-                | ActionDescriptor::ShootDamageProjectile { .. },
+                | ActionDescriptor::ShootDamageProjectile { .. }
+                | ActionDescriptor::ShootDragProjectile { .. },
                 ActionDescriptor::ShootProjectile { .. }
-                | ActionDescriptor::ShootDamageProjectile { .. },
+                | ActionDescriptor::ShootDamageProjectile { .. }
+                | ActionDescriptor::ShootDragProjectile { .. },
             ) => compare_projectiles(left, right),
             (
                 ActionDescriptor::MoveAndAttack {
@@ -1177,51 +1191,79 @@ fn compare_nullable_unit_targets(
 }
 
 fn compare_projectiles(left: &ActionDescriptor, right: &ActionDescriptor) -> Ordering {
-    let (left_direction, left_hit, left_kind, left_path, left_shooter) = projectile_fields(left);
-    let (right_direction, right_hit, right_kind, right_path, right_shooter) =
-        projectile_fields(right);
-    left_direction
-        .cmp(&right_direction)
-        .then_with(|| compare_nullable_unit_targets(left_hit, right_hit))
-        .then_with(|| compare_json_strings(left_kind, right_kind))
-        .then_with(|| compare_json_array(left_path, right_path, Location::cmp))
-        .then_with(|| left_shooter.cmp(right_shooter))
+    let left = projectile_fields(left);
+    let right = projectile_fields(right);
+    left.direction
+        .cmp(&right.direction)
+        .then_with(|| compare_optional_flags(left.fight_on_arrival, right.fight_on_arrival))
+        .then_with(|| compare_nullable_unit_targets(left.hit, right.hit))
+        .then_with(|| compare_json_strings(left.kind, right.kind))
+        .then_with(|| compare_json_array(left.path, right.path, Location::cmp))
+        .then_with(|| left.shooter_instance_id.cmp(right.shooter_instance_id))
 }
 
-fn projectile_fields(
-    action: &ActionDescriptor,
-) -> (
-    ProjectileDirection,
-    Option<&UnitTarget>,
-    &'static str,
-    &[Location],
-    &IdentityHash,
-) {
+/// Orders a present `fightOnArrival` flag ahead of an absent one, matching canonical JSON where the
+/// drag projectile's extra key precedes the `hit` key every projectile descriptor shares.
+fn compare_optional_flags(left: Option<bool>, right: Option<bool>) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => left.cmp(&right),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+struct ProjectileFields<'a> {
+    direction: ProjectileDirection,
+    fight_on_arrival: Option<bool>,
+    hit: Option<&'a UnitTarget>,
+    kind: &'static str,
+    path: &'a [Location],
+    shooter_instance_id: &'a IdentityHash,
+}
+
+fn projectile_fields(action: &ActionDescriptor) -> ProjectileFields<'_> {
     match action {
         ActionDescriptor::ShootDamageProjectile {
             direction,
             hit,
             path,
             shooter_instance_id,
-        } => (
-            *direction,
-            hit.as_ref(),
-            "shoot-damage-projectile",
+        } => ProjectileFields {
+            direction: *direction,
+            fight_on_arrival: None,
+            hit: hit.as_ref(),
+            kind: "shoot-damage-projectile",
             path,
             shooter_instance_id,
-        ),
+        },
+        ActionDescriptor::ShootDragProjectile {
+            direction,
+            fight_on_arrival,
+            hit,
+            path,
+            shooter_instance_id,
+        } => ProjectileFields {
+            direction: *direction,
+            fight_on_arrival: Some(*fight_on_arrival),
+            hit: hit.as_ref(),
+            kind: "shoot-drag-projectile",
+            path,
+            shooter_instance_id,
+        },
         ActionDescriptor::ShootProjectile {
             direction,
             hit,
             path,
             shooter_instance_id,
-        } => (
-            *direction,
-            hit.as_ref(),
-            "shoot-projectile",
+        } => ProjectileFields {
+            direction: *direction,
+            fight_on_arrival: None,
+            hit: hit.as_ref(),
+            kind: "shoot-projectile",
             path,
             shooter_instance_id,
-        ),
+        },
         _ => unreachable!("projectile fields are used only for projectile actions"),
     }
 }
@@ -1287,6 +1329,7 @@ const fn descriptor_group(action: &ActionDescriptor) -> u8 {
         | ActionDescriptor::PlaySite { .. }
         | ActionDescriptor::SummonMinion { .. } => 3,
         ActionDescriptor::ShootDamageProjectile { .. }
+        | ActionDescriptor::ShootDragProjectile { .. }
         | ActionDescriptor::ShootProjectile { .. } => 4,
         ActionDescriptor::Defend { .. } | ActionDescriptor::MoveAndAttack { .. } => 5,
         _ => 6,
@@ -1355,8 +1398,9 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::Mulligan { .. } => 25,
         ActionDescriptor::PlaySite { .. } => 26,
         ActionDescriptor::ShootDamageProjectile { .. } => 27,
-        ActionDescriptor::ShootProjectile { .. } => 28,
-        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 29,
+        ActionDescriptor::ShootDragProjectile { .. } => 28,
+        ActionDescriptor::ShootProjectile { .. } => 29,
+        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 30,
     }
 }
 
@@ -1510,6 +1554,28 @@ fn region_name(region: Region) -> &'static str {
         Region::Underwater => "underwater",
         Region::Void => "void",
     }
+}
+
+const fn direction_name(direction: ProjectileDirection) -> &'static str {
+    match direction {
+        ProjectileDirection::East => "east",
+        ProjectileDirection::North => "north",
+        ProjectileDirection::South => "south",
+        ProjectileDirection::West => "west",
+    }
+}
+
+fn projectile_target_label(hit: Option<&UnitTarget>) -> String {
+    hit.map_or_else(
+        || "nothing".to_owned(),
+        |target| {
+            format!(
+                "{} {}…",
+                target.kind(),
+                short_identity(target.instance_id())
+            )
+        },
+    )
 }
 
 fn location_label(location: Location) -> String {

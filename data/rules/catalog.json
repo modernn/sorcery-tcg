@@ -1855,15 +1855,15 @@
         "RULE-04"
       ],
       "plainLanguage": "A drag projectile stops at the first visible unit and may fight after arrival.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "fight"
       ],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 a drag projectile stops at the first visible unit and may fight after arrival"
+        "file": "crates/sorcery-engine/tests/drag_projectile_rules.rs",
+        "testName": "rule_catalog_0092_drag_projectile_should_stop_at_the_first_visible_unit_and_may_fight"
       }
     },
     {
@@ -1873,15 +1873,15 @@
         "RULE-04"
       ],
       "plainLanguage": "A drag projectile resumes after ordered movement Deathrites before fighting.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "fight"
       ],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03/04 a drag projectile resumes after ordered movement Deathrites before fighting"
+        "file": "crates/sorcery-engine/tests/drag_projectile_rules.rs",
+        "testName": "rule_catalog_0093_drag_projectile_should_resume_after_ordered_movement_deathrites"
       }
     },
     {

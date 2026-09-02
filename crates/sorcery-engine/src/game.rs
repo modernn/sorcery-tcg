@@ -522,11 +522,21 @@ struct PaidSummonContinuation {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum DeathriteContinuation {
+    DragProjectile(DragProjectileContinuation),
     EndTurn(EndTurnContinuation),
     FirstStrike(FirstStrikeContinuation),
     LeapAttack(LeapAttackContinuation),
     PaidSummon(PaidSummonContinuation),
     SiteGenesis(SiteGenesisContinuation),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct DragProjectileContinuation {
+    fight_on_arrival: bool,
+    path: Vec<Location>,
+    path_index: usize,
+    shooter: UnitTarget,
+    target: UnitTarget,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -846,6 +856,12 @@ impl OutcomeLog<'_> {
             outcomes.push((kind.to_owned(), payload()));
         }
     }
+
+    fn insert(&mut self, index: usize, kind: &'static str, payload: impl FnOnce() -> Value) {
+        if let Self::Record(outcomes) = self {
+            outcomes.insert(index, (kind.to_owned(), payload()));
+        }
+    }
 }
 
 fn invalid(message: impl Into<String>) -> GameError {
@@ -965,8 +981,6 @@ fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
         Some(field)
     } else if facts.must_be_cast_to_outer_column {
         Some("mustBeCastToOuterColumn")
-    } else if facts.shoots_drag_projectile {
-        Some("shootsDragProjectile")
     } else if facts.submerge {
         Some("submerge")
     } else if facts.tap_to_damage_each_unit_at_adjacent_location {
@@ -2602,6 +2616,12 @@ impl Game {
                     .ok_or_else(|| invalid("shoot-damage-projectile action requires a label"))?;
                 self.push_action(actions, descriptor, label);
             }
+            for descriptor in self.drag_projectile_descriptors(seat, &unit.card.instance_id)? {
+                let label = descriptor
+                    .state_independent_label()
+                    .ok_or_else(|| invalid("shoot-drag-projectile action requires a label"))?;
+                self.push_action(actions, descriptor, label);
+            }
         }
         if !player.avatar.tapped {
             self.append_unit_move_actions(
@@ -2731,6 +2751,60 @@ impl Game {
                 hit: option.hit,
                 path: option.path,
                 shooter_instance_id: shooter_instance_id.clone(),
+            })
+            .collect())
+    }
+
+    fn drag_projectile_descriptors(
+        &self,
+        seat: Seat,
+        shooter_instance_id: &IdentityHash,
+    ) -> Result<Vec<ActionDescriptor>, GameError> {
+        if self.position.phase != Phase::Main
+            || self.position.active_seat != seat
+            || self.position.decision_seat != seat
+        {
+            return Ok(Vec::new());
+        }
+        let Some(shooter) =
+            self.position.units.iter().find(|unit| {
+                unit.controller == seat && unit.card.instance_id == *shooter_instance_id
+            })
+        else {
+            return Ok(Vec::new());
+        };
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(shooter.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        if !facts.shoots_drag_projectile
+            || shooter.region != Region::Surface
+            || self.minion_is_disabled(shooter)
+            || shooter.tapped
+            || shooter.summoning_sickness
+        {
+            return Ok(Vec::new());
+        }
+        Ok(self
+            .projectile_options(shooter, usize::MAX)
+            .into_iter()
+            .flat_map(|option| {
+                // A miss leaves nothing to haul back, so only a hit offers the fight choice.
+                let arrivals: &[bool] = if option.hit.is_some() {
+                    &[false, true]
+                } else {
+                    &[false]
+                };
+                arrivals
+                    .iter()
+                    .map(|fight_on_arrival| ActionDescriptor::ShootDragProjectile {
+                        direction: option.direction,
+                        fight_on_arrival: *fight_on_arrival,
+                        hit: option.hit.clone(),
+                        path: option.path.clone(),
+                        shooter_instance_id: shooter_instance_id.clone(),
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect())
     }
@@ -4490,6 +4564,9 @@ impl Game {
             ActionDescriptor::ShootDamageProjectile { .. } => {
                 self.apply_damage_projectile_action(action, outcomes)
             }
+            ActionDescriptor::ShootDragProjectile { .. } => {
+                self.apply_drag_projectile_action(action, outcomes)
+            }
             ActionDescriptor::SummonMinion { .. } => {
                 self.apply_summon_minion_action(action, outcomes, random_draws)
             }
@@ -4921,6 +4998,280 @@ impl Game {
         }
         self.position.state_version += 1;
         Ok(())
+    }
+
+    fn apply_drag_projectile_action(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::ShootDragProjectile {
+            direction,
+            fight_on_arrival,
+            hit,
+            path,
+            shooter_instance_id,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        if !self
+            .drag_projectile_descriptors(action.seat, shooter_instance_id)?
+            .iter()
+            .any(|candidate| candidate == &action.descriptor)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let shooter_index = self
+            .position
+            .units
+            .iter()
+            .position(|unit| {
+                unit.controller == action.seat && unit.card.instance_id == *shooter_instance_id
+            })
+            .ok_or(GameError::IllegalAction)?;
+        self.position.units[shooter_index].tapped = true;
+        outcomes.push("projectile-shot", || {
+            json!({
+                "direction": direction,
+                "hit": hit,
+                "path": path,
+                "seat": action.seat,
+                "shooterInstanceId": shooter_instance_id,
+            })
+        });
+        self.record_unit_interaction(UnitKind::Minion, action.seat, shooter_instance_id, outcomes)?;
+        let Some(target) = hit else {
+            self.position.state_version += 1;
+            return Ok(());
+        };
+        let continuation = DragProjectileContinuation {
+            fight_on_arrival: *fight_on_arrival,
+            path: self.hauled_path(target, path)?,
+            path_index: 0,
+            shooter: UnitTarget::Minion {
+                instance_id: shooter_instance_id.clone(),
+                seat: action.seat,
+            },
+            target: target.clone(),
+        };
+        self.continue_drag_projectile(&continuation, true, outcomes)?;
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    /// Reverses the ray so the hauled unit walks its own footprint back to the shooter's cell.
+    fn hauled_path(
+        &self,
+        target: &UnitTarget,
+        ray: &[Location],
+    ) -> Result<Vec<Location>, GameError> {
+        let contacted = ray.last().copied().ok_or(GameError::IllegalAction)?;
+        let anchor = self.unit_target_location(target)?;
+        ray.iter()
+            .rev()
+            .map(|location| {
+                anchor
+                    .cell
+                    .translated(contacted.cell, location.cell)
+                    .map(|cell| Location {
+                        cell,
+                        region: location.region,
+                    })
+                    .ok_or(GameError::IllegalAction)
+            })
+            .collect()
+    }
+
+    fn continue_drag_projectile(
+        &mut self,
+        continuation: &DragProjectileContinuation,
+        emit_zero_step: bool,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        if self.position.terminal.is_some() || !self.ally_remains(&continuation.target) {
+            return Ok(());
+        }
+        let mut path_index = continuation.path_index;
+        if path_index + 1 < continuation.path.len() || emit_zero_step {
+            path_index = self.haul_along_path(continuation, emit_zero_step, outcomes)?;
+            if self.position.pending_deathrites.is_some() {
+                if path_index + 1 < continuation.path.len() || continuation.fight_on_arrival {
+                    let resumed = DragProjectileContinuation {
+                        path_index,
+                        ..continuation.clone()
+                    };
+                    if let Some(pending) = self.position.pending_deathrites.as_mut() {
+                        pending.continuation = Some(DeathriteContinuation::DragProjectile(resumed));
+                    }
+                }
+                return Ok(());
+            }
+        }
+        let destination = continuation
+            .path
+            .last()
+            .copied()
+            .ok_or(GameError::IllegalAction)?;
+        let arrived = self.ally_remains(&continuation.target)
+            && self.unit_target_location(&continuation.target)? == destination;
+        if !continuation.fight_on_arrival
+            || !arrived
+            || !self.ally_remains(&continuation.shooter)
+            || self.position.terminal.is_some()
+        {
+            return Ok(());
+        }
+        self.position.pending_combat = Some(PendingCombat {
+            allocations: Vec::new(),
+            attacker_instance_id: continuation.shooter.instance_id().clone(),
+            attacker_kind: UnitKind::Minion,
+            attacking_seat: continuation.shooter.seat(),
+            cell: destination.cell,
+            combatants: Vec::new(),
+            defenders: Vec::new(),
+            original_target: Some(match &continuation.target {
+                UnitTarget::Avatar { instance_id, seat } => CombatTarget::Avatar {
+                    instance_id: instance_id.clone(),
+                    seat: *seat,
+                },
+                UnitTarget::Minion { instance_id, seat } => CombatTarget::Minion {
+                    instance_id: instance_id.clone(),
+                    seat: *seat,
+                },
+            }),
+            region: destination.region,
+            target_removed: false,
+        });
+        self.begin_fight(vec![continuation.target.clone()], outcomes)
+    }
+
+    /// Walks the hauled unit one location at a time, settling after each step so a mid-path death
+    /// interrupts the haul exactly where it happened.
+    fn haul_along_path(
+        &mut self,
+        continuation: &DragProjectileContinuation,
+        emit_zero_step: bool,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<usize, GameError> {
+        let start = continuation
+            .path
+            .get(continuation.path_index)
+            .copied()
+            .ok_or(GameError::IllegalAction)?;
+        if self.unit_target_location(&continuation.target)? != start {
+            return Ok(continuation.path_index);
+        }
+        let segment_start = outcomes.len();
+        let mut path_index = continuation.path_index;
+        let mut walked = vec![start];
+        while let Some(next) = continuation.path.get(path_index + 1).copied() {
+            let from = continuation.path[path_index];
+            if self.unit_target_location(&continuation.target)? != from
+                || !self.haul_entry_allowed(&continuation.target, from, next)?
+            {
+                break;
+            }
+            self.move_unit_target_to(&continuation.target, next)?;
+            path_index += 1;
+            walked.push(next);
+            self.settle_lower_region_minion_deaths(outcomes)?;
+            self.settle_nearby_enemy_stealth(outcomes);
+            self.settle_static_power_deaths(outcomes)?;
+            if self.position.pending_deathrites.is_some()
+                || !self.ally_remains(&continuation.target)
+                || self.position.terminal.is_some()
+            {
+                break;
+            }
+        }
+        if walked.len() > 1 || emit_zero_step {
+            let from = walked[0];
+            let to = *walked.last().expect("hauled path starts nonempty");
+            let steps = walked.len() - 1;
+            let seat = continuation.shooter.seat();
+            let source_instance_id = continuation.shooter.instance_id().clone();
+            let target_instance_id = continuation.target.instance_id().clone();
+            outcomes.insert(segment_start, "unit-dragged", || {
+                json!({
+                    "from": from,
+                    "path": walked,
+                    "seat": seat,
+                    "sourceInstanceId": source_instance_id,
+                    "steps": steps,
+                    "targetInstanceId": target_instance_id,
+                    "to": to,
+                })
+            });
+        }
+        Ok(path_index)
+    }
+
+    fn haul_entry_allowed(
+        &self,
+        target: &UnitTarget,
+        from: Location,
+        next: Location,
+    ) -> Result<bool, GameError> {
+        if next.region != Region::Surface || from.region != Region::Surface {
+            return Ok(false);
+        }
+        let anchor = self.unit_target_location(target)?;
+        let footprint = match target {
+            UnitTarget::Avatar { .. } => None,
+            UnitTarget::Minion { instance_id, seat } => {
+                self.position
+                    .units
+                    .iter()
+                    .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
+                    .ok_or(GameError::IllegalAction)?
+                    .occupied_cells
+            }
+        };
+        let occupied = footprint.map_or_else(|| vec![anchor.cell], Vec::from);
+        let entered = match footprint {
+            None => vec![next.cell],
+            Some(area) => match translated_square(area, anchor.cell, next.cell) {
+                None => return Ok(false),
+                Some(area) => Vec::from(area),
+            },
+        };
+        let profile = self.haul_movement_profile(target)?;
+        Ok(entered.into_iter().all(|cell| {
+            self.surface_location_exists(cell)
+                && (occupied.contains(&cell)
+                    || self.surface_entry_allowed(from.cell, cell, profile))
+        }))
+    }
+
+    fn haul_movement_profile(&self, target: &UnitTarget) -> Result<MovementProfile, GameError> {
+        let (airborne, connects_top_bottom, moving_minion) = match target {
+            UnitTarget::Avatar { .. } => (false, false, false),
+            UnitTarget::Minion { instance_id, seat } => {
+                let unit = self
+                    .position
+                    .units
+                    .iter()
+                    .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
+                    .ok_or(GameError::IllegalAction)?;
+                let CardFacts::Minion(facts) =
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                (facts.airborne, facts.connects_top_bottom, true)
+            }
+        };
+        Ok(MovementProfile {
+            airborne,
+            cause: MovementCause::CardEffect,
+            connects_top_bottom,
+            maximum_cost: None,
+            moving_minion,
+            occupied_cells: None,
+            restriction: None,
+            seat: target.seat(),
+        })
     }
 
     fn apply_decline_attack_action(
@@ -7277,6 +7628,45 @@ impl Game {
         }
     }
 
+    /// Restores the interrupted phase and hands control back to whatever the deaths interrupted.
+    fn resume_deathrite_continuation(
+        &mut self,
+        continuation: DeathriteContinuation,
+        return_phase: Phase,
+        return_decision_seat: Seat,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let mut restore = || {
+            self.position.phase = return_phase;
+            self.position.decision_seat = return_decision_seat;
+        };
+        match continuation {
+            DeathriteContinuation::DragProjectile(continuation) => {
+                restore();
+                self.continue_drag_projectile(&continuation, false, outcomes)
+            }
+            DeathriteContinuation::EndTurn(continuation) => self.continue_end_turn_deaths(
+                continuation.seat,
+                &continuation.remaining_instance_ids,
+                outcomes,
+            ),
+            DeathriteContinuation::FirstStrike(continuation) => {
+                self.continue_after_first_strike(continuation, outcomes)
+            }
+            DeathriteContinuation::LeapAttack(continuation) => {
+                restore();
+                self.finish_leap_attack(&continuation, outcomes)
+            }
+            DeathriteContinuation::PaidSummon(continuation) => {
+                restore();
+                self.finish_paid_summon(continuation, outcomes)
+            }
+            DeathriteContinuation::SiteGenesis(continuation) => {
+                self.finish_site_genesis(continuation, outcomes)
+            }
+        }
+    }
+
     fn finish_deathrites(
         &mut self,
         pending: PendingDeathrites,
@@ -7342,29 +7732,12 @@ impl Game {
                 })
             });
         } else if let Some(continuation) = continuation {
-            return match continuation {
-                DeathriteContinuation::EndTurn(continuation) => self.continue_end_turn_deaths(
-                    continuation.seat,
-                    &continuation.remaining_instance_ids,
-                    outcomes,
-                ),
-                DeathriteContinuation::FirstStrike(continuation) => {
-                    self.continue_after_first_strike(continuation, outcomes)
-                }
-                DeathriteContinuation::LeapAttack(continuation) => {
-                    self.position.phase = pending.return_phase;
-                    self.position.decision_seat = pending.return_decision_seat;
-                    self.finish_leap_attack(&continuation, outcomes)
-                }
-                DeathriteContinuation::PaidSummon(continuation) => {
-                    self.position.phase = pending.return_phase;
-                    self.position.decision_seat = pending.return_decision_seat;
-                    self.finish_paid_summon(continuation, outcomes)
-                }
-                DeathriteContinuation::SiteGenesis(continuation) => {
-                    self.finish_site_genesis(continuation, outcomes)
-                }
-            };
+            return self.resume_deathrite_continuation(
+                continuation,
+                pending.return_phase,
+                pending.return_decision_seat,
+                outcomes,
+            );
         } else {
             self.position.phase = pending.return_phase;
             self.position.decision_seat = pending.return_decision_seat;
@@ -11018,6 +11391,14 @@ impl Game {
             object.insert(
                 "continuation".to_owned(),
                 match continuation {
+                    DeathriteContinuation::DragProjectile(continuation) => json!({
+                        "fightOnArrival": continuation.fight_on_arrival,
+                        "kind": "drag-projectile",
+                        "path": continuation.path,
+                        "pathIndex": continuation.path_index,
+                        "shooter": continuation.shooter,
+                        "target": continuation.target,
+                    }),
                     DeathriteContinuation::EndTurn(continuation) => json!({
                         "kind": "end-turn",
                         "remainingInstanceIds": continuation.remaining_instance_ids,
