@@ -502,7 +502,15 @@ impl ActionDescriptor {
                 target,
                 target_location,
                 ..
-            } => Some(if let Some(ally) = ally {
+            } => Some(if let (Some(ally), Some(target)) = (ally, target) {
+                format!(
+                    "Cast {card_id}: {} {}… fights {} {}…",
+                    ally.kind(),
+                    short_identity(ally.instance_id()),
+                    target.kind(),
+                    short_identity(target.instance_id())
+                )
+            } else if let Some(ally) = ally {
                 format!(
                     "Cast {card_id} to grant Charge to {} {}…",
                     ally.kind(),

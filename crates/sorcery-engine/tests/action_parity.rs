@@ -17,6 +17,7 @@ const COMBAT_RESPONSE_FIXTURE: &str =
     include_str!("../../../tests/engine/fixtures/combat-response-action-v1.json");
 const DEATHRITE_ORDER_FIXTURE: &str =
     include_str!("../../../tests/engine/fixtures/deathrite-order-action-v1.json");
+const DUEL_FIXTURE: &str = include_str!("../../../tests/engine/fixtures/duel-action-v1.json");
 const SHOOT_PROJECTILE_FIXTURE: &str =
     include_str!("../../../tests/engine/fixtures/shoot-projectile-action-v1.json");
 const SHOOT_DAMAGE_PROJECTILE_FIXTURE: &str =
@@ -823,6 +824,709 @@ fn sacrifice_summon_descriptors_order_and_receipt_should_match_typescript() {
     assert_eq!(
         resolved_checkpoint.expected_session_hash.as_str(),
         fixture["deathrite"]["resolved"]["expectedSessionHash"]
+    );
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one exact cross-engine fixture covers Duel legality, combat, Ward, and replay"
+)]
+fn duel_descriptors_order_and_transitions_should_match_typescript() {
+    fn accept_underground_setup(session: &mut Session, predicate: &dyn Fn(&Value) -> bool) {
+        let action = session
+            .legal_actions()
+            .expect("underground Duel fixture legal actions")
+            .into_iter()
+            .find(|action| predicate(&action.descriptor))
+            .expect("underground Duel fixture setup action");
+        let StepResult::Accepted(_) = session
+            .step(ActionRequest {
+                action_id: action.action_id.to_string(),
+                seat: action.seat,
+                state_version: action.state_version,
+            })
+            .expect("underground Duel fixture setup step")
+        else {
+            panic!("engine-issued underground Duel setup action must be accepted");
+        };
+    }
+
+    let fixture: Value = serde_json::from_str(DUEL_FIXTURE).expect("valid Duel fixture");
+    assert_eq!(fixture["schemaVersion"], 1);
+    assert_eq!(fixture["source"], "typescript-legality-engine");
+    let zero = json!({ "air": 0, "earth": 0, "fire": 0, "water": 0 });
+    let avatar = json!({
+        "attack": 1,
+        "cardType": "avatar",
+        "defense": 1,
+        "drawSpell": false,
+        "life": 20,
+    });
+    let mut manifest = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "synthetic-duel-action-v1" }))
+                .expect("synthetic Duel authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-duel-action-v1",
+        },
+        "cards": {
+            "north-avatar": avatar,
+            "north-filler": {
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 1,
+                "manaCost": 0,
+                "thresholds": zero,
+            },
+            "north-site": { "cardType": "site", "elements": ["earth"] },
+            "south-avatar": avatar,
+            "south-filler": {
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 1,
+                "manaCost": 0,
+                "thresholds": zero,
+            },
+            "south-site": { "cardType": "site", "elements": ["water"] },
+            "synthetic-duel-ally": {
+                "attack": 3,
+                "cardType": "minion",
+                "defense": 4,
+                "manaCost": 0,
+                "thresholds": zero,
+            },
+            "synthetic-duel-target": {
+                "attack": 2,
+                "cardType": "minion",
+                "defense": 3,
+                "manaCost": 0,
+                "summonToAnySite": true,
+                "thresholds": zero,
+            },
+            "synthetic-forced-duel": {
+                "cardType": "magic",
+                "fightAllyWithAdjacentEnemy": true,
+                "manaCost": 1,
+                "thresholds": { "air": 0, "earth": 1, "fire": 0, "water": 0 },
+            },
+            "synthetic-warded-target": {
+                "attack": 2,
+                "cardType": "minion",
+                "defense": 3,
+                "manaCost": 0,
+                "summonToAnySite": true,
+                "thresholds": zero,
+                "ward": true,
+            },
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 9],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "synthetic-forced-duel",
+                    "synthetic-duel-ally",
+                    "north-filler",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 9],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "synthetic-duel-target",
+                    "synthetic-warded-target",
+                    "south-filler",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": 719,
+    });
+    manifest["manifestId"] =
+        json!(identity_hash(&manifest).expect("synthetic Duel manifest identity"));
+    assert_eq!(manifest["manifestId"], fixture["manifestId"]);
+    let manifest = canonical_json(&manifest).expect("canonical Duel fixture manifest");
+    let mut session = Session::new(&manifest).expect("valid Duel fixture manifest");
+    let mut accept_where = |predicate: &dyn Fn(&Value) -> bool| {
+        let action = session
+            .legal_actions()
+            .expect("Duel fixture legal actions")
+            .into_iter()
+            .find(|action| predicate(&action.descriptor))
+            .expect("Duel fixture setup action");
+        let StepResult::Accepted(_) = session
+            .step(ActionRequest {
+                action_id: action.action_id.to_string(),
+                seat: action.seat,
+                state_version: action.state_version,
+            })
+            .expect("Duel fixture setup step")
+        else {
+            panic!("engine-issued Duel setup action must be accepted");
+        };
+    };
+    let keep = |descriptor: &Value| {
+        descriptor["kind"] == "mulligan"
+            && descriptor["atlasOrder"] == json!([])
+            && descriptor["spellbookOrder"] == json!([])
+    };
+    let end_turn = |descriptor: &Value| descriptor["kind"] == "end-turn";
+    accept_where(&keep);
+    accept_where(&keep);
+    accept_where(&|descriptor| descriptor["kind"] == "play-site" && descriptor["cell"] == "C4");
+    accept_where(&|descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "synthetic-duel-ally"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&end_turn);
+    accept_where(&|descriptor| descriptor["kind"] == "draw" && descriptor["zone"] == "atlas");
+    accept_where(&|descriptor| descriptor["kind"] == "play-site" && descriptor["cell"] == "C1");
+    for card_id in ["synthetic-duel-target", "synthetic-warded-target"] {
+        accept_where(&|descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == card_id
+                && descriptor["cell"] == "C4"
+        });
+    }
+    accept_where(&end_turn);
+    accept_where(&|descriptor| descriptor["kind"] == "draw" && descriptor["zone"] == "atlas");
+
+    let issued = session
+        .legal_actions()
+        .expect("Rust Duel legal actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "synthetic-forced-duel"
+                && action.descriptor["ally"]["instanceId"] == fixture["allyInstanceId"]
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        issued
+            .iter()
+            .map(|action| json!({
+                "actionId": action.action_id,
+                "descriptor": action.descriptor,
+                "label": action.label,
+            }))
+            .collect::<Vec<_>>(),
+        fixture["actions"]
+            .as_array()
+            .expect("fixture Duel actions")
+            .clone()
+    );
+    assert_eq!(
+        issued
+            .iter()
+            .map(|action| action.action_id.to_string())
+            .collect::<Vec<_>>(),
+        fixture["canonicalActionIds"]
+            .as_array()
+            .expect("fixture canonical Duel action IDs")
+            .iter()
+            .map(|value| value.as_str().expect("Duel action ID").to_owned())
+            .collect::<Vec<_>>()
+    );
+
+    let start_state = session.replay_value().expect("Rust Duel start state")["state"].clone();
+    assert_eq!(
+        identity_hash(&start_state).expect("Rust Duel start state identity"),
+        IdentityHash::parse(
+            fixture["startCheckpoint"]["stateHash"]
+                .as_str()
+                .expect("fixture Duel start state identity")
+        )
+        .expect("valid fixture Duel start state identity")
+    );
+    let start_checkpoint = create_game_checkpoint(&session).expect("Rust Duel start checkpoint");
+    let serialized_start = serialize_game_checkpoint(&start_checkpoint)
+        .expect("serialized Rust Duel start checkpoint");
+    assert_eq!(
+        start_checkpoint.checkpoint_id.as_str(),
+        fixture["startCheckpoint"]["checkpointId"]
+    );
+    assert_eq!(
+        start_checkpoint.expected_session_hash.as_str(),
+        fixture["startCheckpoint"]["expectedSessionHash"]
+    );
+    assert_eq!(
+        identity_hash(&Value::String(serialized_start.clone()))
+            .expect("serialized Rust Duel start checkpoint identity"),
+        IdentityHash::parse(
+            fixture["startCheckpoint"]["serializedCheckpointHash"]
+                .as_str()
+                .expect("fixture serialized Duel start checkpoint identity")
+        )
+        .expect("valid fixture serialized Duel start checkpoint identity")
+    );
+
+    for (transition_name, target_field) in [
+        ("normalTransition", "normalTargetInstanceId"),
+        ("wardedTransition", "wardedTargetInstanceId"),
+    ] {
+        let parsed =
+            parse_game_checkpoint(&serialized_start).expect("parsed Duel start checkpoint");
+        let mut branch = resume_game_checkpoint(&parsed).expect("restored Duel start checkpoint");
+        let transition = &fixture[transition_name];
+        let selected_action_id = transition["selectedActionId"]
+            .as_str()
+            .expect("fixture selected Duel action identity");
+        let selected = branch
+            .legal_actions()
+            .expect("restored Duel actions")
+            .into_iter()
+            .find(|action| action.action_id.as_str() == selected_action_id)
+            .expect("Rust issued selected Duel action");
+        let StepResult::Accepted(receipt) = branch
+            .step(ActionRequest {
+                action_id: selected.action_id.to_string(),
+                seat: selected.seat,
+                state_version: selected.state_version,
+            })
+            .expect("Rust selected Duel transition")
+        else {
+            panic!("Rust issued Duel action must be accepted");
+        };
+        assert_eq!(
+            serde_json::to_value(receipt).expect("serialized Rust Duel receipt"),
+            transition["receipt"]
+        );
+        let state = branch.replay_value().expect("Rust Duel branch state")["state"].clone();
+        assert_eq!(
+            identity_hash(&state).expect("Rust Duel branch state identity"),
+            IdentityHash::parse(
+                transition["stateHash"]
+                    .as_str()
+                    .expect("fixture Duel branch state identity")
+            )
+            .expect("valid fixture Duel branch state identity")
+        );
+        let ally = state["realm"]["units"]
+            .as_array()
+            .expect("Duel branch units")
+            .iter()
+            .find(|unit| unit["instanceId"] == fixture["allyInstanceId"])
+            .expect("Duel ally survives");
+        let target = state["realm"]["units"]
+            .as_array()
+            .expect("Duel branch units")
+            .iter()
+            .find(|unit| unit["instanceId"] == fixture[target_field]);
+        assert_eq!(
+            json!({
+                "allyDamage": ally["damage"],
+                "mana": state["players"]["north"]["mana"],
+                "targetPresent": target.is_some(),
+                "targetWarded": target.map_or(Value::Null, |unit| unit["warded"].clone()),
+            }),
+            transition["summary"]
+        );
+        assert!(branch.verify_replay().expect("verified Rust Duel replay"));
+        let checkpoint = create_game_checkpoint(&branch).expect("Rust Duel result checkpoint");
+        let serialized =
+            serialize_game_checkpoint(&checkpoint).expect("serialized Rust Duel result checkpoint");
+        assert_eq!(
+            checkpoint.checkpoint_id.as_str(),
+            transition["checkpointId"]
+        );
+        assert_eq!(
+            checkpoint.expected_session_hash.as_str(),
+            transition["expectedSessionHash"]
+        );
+        assert_eq!(
+            identity_hash(&Value::String(serialized))
+                .expect("serialized Rust Duel result checkpoint identity"),
+            IdentityHash::parse(
+                transition["serializedCheckpointHash"]
+                    .as_str()
+                    .expect("fixture serialized Duel result checkpoint identity")
+            )
+            .expect("valid fixture serialized Duel result checkpoint identity")
+        );
+    }
+
+    let mut underground_manifest = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({
+                "fixture": "synthetic-underground-duel-action-v1"
+            }))
+            .expect("synthetic underground Duel authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-underground-duel-action-v1",
+        },
+        "cards": {
+            "north-avatar": {
+                "attack": 1,
+                "cardType": "avatar",
+                "defense": 1,
+                "drawSpell": false,
+                "life": 20,
+            },
+            "north-site": { "cardType": "site", "elements": ["earth"] },
+            "south-avatar": {
+                "attack": 1,
+                "cardType": "avatar",
+                "defense": 1,
+                "drawSpell": false,
+                "life": 20,
+            },
+            "south-site": { "cardType": "site", "elements": ["water"] },
+            "synthetic-forced-duel": {
+                "cardType": "magic",
+                "fightAllyWithAdjacentEnemy": true,
+                "manaCost": 1,
+                "thresholds": { "air": 0, "earth": 1, "fire": 0, "water": 0 },
+            },
+            "synthetic-bury-duelists": {
+                "burrowTargetMinionOrArtifact": true,
+                "cardType": "magic",
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
+            "synthetic-underground-deathrite": {
+                "attack": 2,
+                "burrowing": true,
+                "cardType": "minion",
+                "deathriteDamageEachUnitHere": 1,
+                "defense": 3,
+                "manaCost": 0,
+                "summonToAnySite": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
+            "synthetic-underground-duelist": {
+                "attack": 3,
+                "burrowing": true,
+                "cardType": "minion",
+                "defense": 6,
+                "manaCost": 0,
+                "strikesFirstWhileAttacking": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
+            "synthetic-underground-fragile": {
+                "attack": 0,
+                "burrowing": true,
+                "cardType": "minion",
+                "deathriteDrawSite": true,
+                "defense": 1,
+                "manaCost": 0,
+                "summonToAnySite": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 9],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "synthetic-forced-duel",
+                    "synthetic-underground-duelist",
+                    "synthetic-bury-duelists",
+                    "synthetic-bury-duelists",
+                    "synthetic-bury-duelists",
+                    "synthetic-bury-duelists",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 9],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "synthetic-underground-deathrite",
+                    "synthetic-underground-fragile",
+                    "synthetic-underground-fragile",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": 1,
+    });
+    underground_manifest["manifestId"] = json!(
+        identity_hash(&underground_manifest).expect("synthetic underground Duel manifest identity")
+    );
+    let underground = &fixture["undergroundDeathrite"];
+    assert_eq!(
+        underground_manifest["manifestId"],
+        underground["manifestId"]
+    );
+    let underground_manifest =
+        canonical_json(&underground_manifest).expect("canonical underground Duel fixture manifest");
+    let mut underground_session =
+        Session::new(&underground_manifest).expect("valid underground Duel fixture manifest");
+    accept_underground_setup(&mut underground_session, &keep);
+    accept_underground_setup(&mut underground_session, &keep);
+    accept_underground_setup(&mut underground_session, &|descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_underground_setup(&mut underground_session, &|descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "synthetic-underground-duelist"
+            && descriptor["cell"] == "C4"
+    });
+    accept_underground_setup(&mut underground_session, &end_turn);
+    accept_underground_setup(&mut underground_session, &|descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_underground_setup(&mut underground_session, &|descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    for card_id in [
+        "synthetic-underground-deathrite",
+        "synthetic-underground-fragile",
+        "synthetic-underground-fragile",
+    ] {
+        accept_underground_setup(&mut underground_session, &|descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == card_id
+                && descriptor["cell"] == "C4"
+        });
+    }
+    accept_underground_setup(&mut underground_session, &end_turn);
+    for _ in 0..3 {
+        accept_underground_setup(&mut underground_session, &|descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+        loop {
+            let current = underground_session
+                .replay_value()
+                .expect("underground Duel setup state")["state"]
+                .clone();
+            let has_bury = current["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("North underground Duel hand")
+                .iter()
+                .any(|card| card["cardId"] == "synthetic-bury-duelists");
+            let target_id = current["realm"]["units"]
+                .as_array()
+                .expect("underground Duel units")
+                .iter()
+                .find(|unit| unit["region"] == "surface")
+                .and_then(|unit| unit["instanceId"].as_str())
+                .map(str::to_owned);
+            let (true, Some(target_id)) = (has_bury, target_id) else {
+                break;
+            };
+            accept_underground_setup(&mut underground_session, &|descriptor| {
+                descriptor["kind"] == "cast-magic"
+                    && descriptor["cardId"] == "synthetic-bury-duelists"
+                    && descriptor["target"]["instanceId"] == target_id
+            });
+        }
+        let current = underground_session
+            .replay_value()
+            .expect("underground Duel readiness state")["state"]
+            .clone();
+        let ready = current["realm"]["units"]
+            .as_array()
+            .expect("underground Duel readiness units")
+            .iter()
+            .all(|unit| unit["region"] == "underground")
+            && current["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("North underground Duel readiness hand")
+                .iter()
+                .any(|card| card["cardId"] == "synthetic-forced-duel");
+        if ready {
+            break;
+        }
+        accept_underground_setup(&mut underground_session, &end_turn);
+        accept_underground_setup(&mut underground_session, &|descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+        });
+        accept_underground_setup(&mut underground_session, &end_turn);
+    }
+
+    let expected_duel = &underground["duelAction"];
+    let duel = underground_session
+        .legal_actions()
+        .expect("underground Duel actions")
+        .into_iter()
+        .find(|action| action.action_id.as_str() == expected_duel["actionId"])
+        .expect("Rust issued underground Duel action");
+    assert_eq!(
+        json!({
+            "actionId": duel.action_id,
+            "descriptor": duel.descriptor,
+            "label": duel.label,
+            "seat": duel.seat,
+            "stateVersion": duel.state_version,
+        }),
+        *expected_duel
+    );
+    let StepResult::Accepted(interrupted) = underground_session
+        .step(ActionRequest {
+            action_id: duel.action_id.to_string(),
+            seat: duel.seat,
+            state_version: duel.state_version,
+        })
+        .expect("Rust underground Duel transition")
+    else {
+        panic!("Rust issued underground Duel action must be accepted");
+    };
+    assert_eq!(
+        serde_json::to_value(interrupted).expect("serialized Rust underground Duel receipt"),
+        underground["pending"]["receipt"]
+    );
+    let pending_state = underground_session
+        .replay_value()
+        .expect("Rust underground Duel pending state")["state"]
+        .clone();
+    assert_eq!(
+        pending_state["pendingDeathrites"]["continuation"],
+        underground["pending"]["continuation"]
+    );
+    assert_eq!(
+        pending_state["pendingDeathrites"]["continuation"]["pending"]["region"],
+        "underground"
+    );
+    assert_eq!(pending_state["phase"], underground["pending"]["phase"]);
+    assert_eq!(
+        pending_state["decisionSeat"],
+        underground["pending"]["decisionSeat"]
+    );
+    assert_eq!(
+        pending_state["stateVersion"],
+        underground["pending"]["stateVersion"]
+    );
+    assert_eq!(
+        identity_hash(&pending_state).expect("Rust underground Duel pending state identity"),
+        IdentityHash::parse(
+            underground["pending"]["stateHash"]
+                .as_str()
+                .expect("fixture underground Duel pending state identity")
+        )
+        .expect("valid fixture underground Duel pending state identity")
+    );
+    let pending_checkpoint = create_game_checkpoint(&underground_session)
+        .expect("Rust underground Duel pending checkpoint");
+    let serialized_pending = serialize_game_checkpoint(&pending_checkpoint)
+        .expect("serialized Rust underground Duel pending checkpoint");
+    assert_eq!(
+        pending_checkpoint.checkpoint_id.as_str(),
+        underground["pending"]["checkpointId"]
+    );
+    assert_eq!(
+        pending_checkpoint.expected_session_hash.as_str(),
+        underground["pending"]["expectedSessionHash"]
+    );
+    assert_eq!(
+        identity_hash(&Value::String(serialized_pending.clone()))
+            .expect("serialized Rust underground Duel pending checkpoint identity"),
+        IdentityHash::parse(
+            underground["pending"]["serializedCheckpointHash"]
+                .as_str()
+                .expect("fixture serialized underground Duel pending checkpoint identity")
+        )
+        .expect("valid fixture serialized underground Duel pending checkpoint identity")
+    );
+
+    let parsed = parse_game_checkpoint(&serialized_pending)
+        .expect("parsed Rust underground Duel pending checkpoint");
+    let mut restored =
+        resume_game_checkpoint(&parsed).expect("restored Rust underground Duel pending checkpoint");
+    assert_eq!(
+        restored
+            .replay_value()
+            .expect("restored Rust underground Duel pending state"),
+        underground_session
+            .replay_value()
+            .expect("source Rust underground Duel pending state")
+    );
+    let order_actions = restored
+        .legal_actions()
+        .expect("Rust underground Deathrite order actions");
+    assert_eq!(
+        order_actions
+            .iter()
+            .map(|action| json!({
+                "actionId": action.action_id,
+                "descriptor": action.descriptor,
+                "label": action.label,
+                "seat": action.seat,
+                "stateVersion": action.state_version,
+            }))
+            .collect::<Vec<_>>(),
+        underground["pending"]["orderActions"]
+            .as_array()
+            .expect("fixture underground Deathrite order actions")
+            .clone()
+    );
+    let selected_order_id = underground["resolved"]["selectedOrderActionId"]
+        .as_str()
+        .expect("fixture selected underground Deathrite order identity");
+    let selected_order = order_actions
+        .iter()
+        .find(|action| action.action_id.as_str() == selected_order_id)
+        .expect("Rust issued selected underground Deathrite order");
+    let StepResult::Accepted(resolved) = restored
+        .step(ActionRequest {
+            action_id: selected_order.action_id.to_string(),
+            seat: selected_order.seat,
+            state_version: selected_order.state_version,
+        })
+        .expect("Rust selected underground Deathrite order transition")
+    else {
+        panic!("Rust issued underground Deathrite order must be accepted");
+    };
+    assert_eq!(
+        serde_json::to_value(resolved)
+            .expect("serialized Rust underground Deathrite resolved receipt"),
+        underground["resolved"]["receipt"]
+    );
+    let resolved_state = restored
+        .replay_value()
+        .expect("Rust underground Duel resolved state")["state"]
+        .clone();
+    assert_eq!(resolved_state["phase"], underground["resolved"]["phase"]);
+    assert_eq!(
+        resolved_state["decisionSeat"],
+        underground["resolved"]["decisionSeat"]
+    );
+    assert_eq!(
+        resolved_state["stateVersion"],
+        underground["resolved"]["stateVersion"]
+    );
+    assert!(resolved_state["pendingCombat"].is_null());
+    assert!(resolved_state["pendingDeathrites"].is_null());
+    assert_eq!(
+        identity_hash(&resolved_state).expect("Rust underground Duel resolved state identity"),
+        IdentityHash::parse(
+            underground["resolved"]["stateHash"]
+                .as_str()
+                .expect("fixture underground Duel resolved state identity")
+        )
+        .expect("valid fixture underground Duel resolved state identity")
+    );
+    assert!(
+        restored
+            .verify_replay()
+            .expect("verified Rust underground Duel replay")
+    );
+    let resolved_checkpoint =
+        create_game_checkpoint(&restored).expect("Rust underground Duel resolved checkpoint");
+    let serialized_resolved = serialize_game_checkpoint(&resolved_checkpoint)
+        .expect("serialized Rust underground Duel resolved checkpoint");
+    assert_eq!(
+        resolved_checkpoint.checkpoint_id.as_str(),
+        underground["resolved"]["checkpointId"]
+    );
+    assert_eq!(
+        resolved_checkpoint.expected_session_hash.as_str(),
+        underground["resolved"]["expectedSessionHash"]
+    );
+    assert_eq!(
+        identity_hash(&Value::String(serialized_resolved))
+            .expect("serialized Rust underground Duel resolved checkpoint identity"),
+        IdentityHash::parse(
+            underground["resolved"]["serializedCheckpointHash"]
+                .as_str()
+                .expect("fixture serialized underground Duel resolved checkpoint identity")
+        )
+        .expect("valid fixture serialized underground Duel resolved checkpoint identity")
     );
 }
 

@@ -4,7 +4,7 @@ use sorcery_engine::checkpoint::{
     create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
     serialize_game_checkpoint,
 };
-use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
+use sorcery_engine::contract::{ActionRequest, Receipt, RejectionCode, Seat};
 use sorcery_engine::session::{Session, StepResult};
 
 fn avatar(life: u8) -> Value {
@@ -4144,5 +4144,732 @@ fn rule_catalog_0033_overpower_changes_current_power_until_the_current_end_phase
             .iter()
             .any(|unit| unit["instanceId"] == enemy_id)
     );
+    assert_exact_replay(&session);
+}
+
+struct DuelSetup {
+    ally_id: String,
+    caster_id: String,
+    diagonal_id: String,
+    disabled_id: String,
+    normal_id: String,
+    session: Session,
+    stealthed_id: String,
+    warded_id: String,
+    wrong_region_id: String,
+}
+
+fn summon_duel_minion(
+    session: &mut Session,
+    card_id: &str,
+    cell: &str,
+    region: Option<&str>,
+) -> String {
+    let (descriptor, _) = accept_where(session, |candidate| {
+        candidate["kind"] == "summon-minion"
+            && candidate["cardId"] == card_id
+            && candidate["cell"] == cell
+            && region.map_or_else(
+                || candidate["region"].is_null(),
+                |expected| candidate["region"] == expected,
+            )
+    });
+    descriptor["cardInstanceId"]
+        .as_str()
+        .expect("summoned Duel minion identity")
+        .to_owned()
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "one staged checkpoint keeps Duel geometry and branch comparisons on the same position"
+)]
+fn duel_checkpoint() -> DuelSetup {
+    let cards = json!({
+        "north-ally": minion(json!({ "attack": 3, "defense": 4 })),
+        "north-avatar": avatar(20),
+        "north-bury": magic(("burrowTargetMinionOrArtifact", json!(true)), 0),
+        "north-caster": minion(json!({ "burrowing": true, "spellcaster": true })),
+        "north-duel": magic(("fightAllyWithAdjacentEnemy", json!(true)), 1),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-diagonal": minion(json!({ "attack": 2, "defense": 3, "summonToAnySite": true })),
+        "south-disabled": minion(json!({
+            "attack": 2,
+            "defense": 3,
+            "summonToAnySite": true,
+            "waterbound": true,
+        })),
+        "south-normal": minion(json!({ "attack": 2, "defense": 3, "summonToAnySite": true })),
+        "south-site": site(false),
+        "south-stealthed": minion(json!({
+            "attack": 2,
+            "defense": 3,
+            "stealth": true,
+            "summonToAnySite": true,
+        })),
+        "south-warded": minion(json!({
+            "attack": 2,
+            "defense": 3,
+            "summonToAnySite": true,
+            "ward": true,
+        })),
+        "south-wrong-region": minion(json!({
+            "attack": 2,
+            "burrowing": true,
+            "defense": 3,
+            "summonToAnySite": true,
+        })),
+    });
+    let north_spellbook = [
+        "north-duel",
+        "north-ally",
+        "north-caster",
+        "north-bury",
+        "north-bury",
+        "north-bury",
+    ];
+    let south_spellbook = [
+        "south-normal",
+        "south-warded",
+        "south-stealthed",
+        "south-disabled",
+        "south-wrong-region",
+        "south-diagonal",
+    ];
+
+    for seed in 1..=128 {
+        let manifest = manifest(seed, &cards, &north_spellbook, &south_spellbook);
+        let mut session = Session::new(&manifest).expect("valid Duel scenario");
+        keep(&mut session);
+        keep(&mut session);
+        let opening = state(&session);
+        let north_hand = opening["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("North opening spellbook hand");
+        if !["north-duel", "north-ally", "north-caster"]
+            .into_iter()
+            .all(|card_id| north_hand.iter().any(|card| card["cardId"] == card_id))
+        {
+            continue;
+        }
+
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+        });
+        let ally_id = summon_duel_minion(&mut session, "north-ally", "C4", None);
+        let caster_id = summon_duel_minion(&mut session, "north-caster", "C4", None);
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+        });
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+        for south_site in ["C2", "C3"] {
+            accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "draw"
+                    && descriptor["zone"]
+                        == if south_site == "C2" {
+                            "spellbook"
+                        } else {
+                            "atlas"
+                        }
+            });
+            if south_site == "C2" {
+                accept_where(&mut session, |descriptor| {
+                    descriptor["kind"] == "cast-magic"
+                        && descriptor["cardId"] == "north-bury"
+                        && descriptor["target"]["instanceId"] == caster_id
+                });
+            }
+            accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+            accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+            });
+            accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "play-site" && descriptor["cell"] == south_site
+            });
+            if south_site == "C2" {
+                accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+            }
+        }
+
+        let normal_id = summon_duel_minion(&mut session, "south-normal", "C3", None);
+        let warded_id = summon_duel_minion(&mut session, "south-warded", "C4", None);
+        let stealthed_id = summon_duel_minion(&mut session, "south-stealthed", "C4", None);
+        let disabled_id = summon_duel_minion(&mut session, "south-disabled", "C4", None);
+        let wrong_region_id = summon_duel_minion(&mut session, "south-wrong-region", "C4", None);
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-magic"
+                && descriptor["cardId"] == "north-bury"
+                && descriptor["target"]["instanceId"] == wrong_region_id
+        });
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+        });
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == "B3"
+        });
+        let diagonal_id = summon_duel_minion(&mut session, "south-diagonal", "B3", None);
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+        });
+
+        return DuelSetup {
+            ally_id,
+            caster_id,
+            diagonal_id,
+            disabled_id,
+            normal_id,
+            session,
+            stealthed_id,
+            warded_id,
+            wrong_region_id,
+        };
+    }
+    panic!("no deterministic Duel opening found");
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one direct Duel proof keeps legality, all three outcome branches, checkpoint, stale request, and replay together"
+)]
+fn rule_catalog_0020_duel_uses_an_allys_region_and_the_shared_fight_pipeline() {
+    let setup = duel_checkpoint();
+    let checkpoint_state = state(&setup.session);
+    let duel_spell_id = checkpoint_state["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North spellbook hand")
+        .iter()
+        .find(|card| card["cardId"] == "north-duel")
+        .expect("Duel in hand")["instanceId"]
+        .as_str()
+        .expect("Duel identity")
+        .to_owned();
+    let checkpoint_mana = checkpoint_state["players"]["north"]["mana"]
+        .as_u64()
+        .expect("North mana");
+    let checkpoint_actions = setup.session.legal_actions().expect("Duel actions");
+    let duel_actions: Vec<_> = checkpoint_actions
+        .iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardInstanceId"] == duel_spell_id
+                && action.descriptor["casterInstanceId"] == setup.caster_id
+                && action.descriptor["ally"]["instanceId"] == setup.ally_id
+        })
+        .cloned()
+        .collect();
+    let target_ids: Vec<_> = duel_actions
+        .iter()
+        .map(|action| {
+            action.descriptor["target"]["instanceId"]
+                .as_str()
+                .expect("Duel target identity")
+                .to_owned()
+        })
+        .collect();
+    let mut expected_target_ids = vec![
+        setup.disabled_id.clone(),
+        setup.normal_id.clone(),
+        setup.warded_id.clone(),
+    ];
+    expected_target_ids.sort_unstable();
+    assert_eq!(target_ids, expected_target_ids);
+    assert!(!target_ids.contains(&setup.stealthed_id));
+    assert!(!target_ids.contains(&setup.wrong_region_id));
+    assert!(!target_ids.contains(&setup.diagonal_id));
+    assert_eq!(
+        checkpoint_state["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .find(|unit| unit["instanceId"] == setup.caster_id)
+            .expect("Duel caster")["region"],
+        "underground"
+    );
+    for action in &duel_actions {
+        let target_id = action.descriptor["target"]["instanceId"]
+            .as_str()
+            .expect("Duel target identity");
+        assert_eq!(
+            action.descriptor,
+            json!({
+                "ally": { "instanceId": setup.ally_id, "kind": "minion", "seat": "north" },
+                "cardId": "north-duel",
+                "cardInstanceId": duel_spell_id,
+                "casterInstanceId": setup.caster_id,
+                "kind": "cast-magic",
+                "target": { "instanceId": target_id, "kind": "minion", "seat": "south" },
+            })
+        );
+        assert_eq!(
+            action.label,
+            format!(
+                "Cast north-duel: minion {}… fights minion {}… with minion {}…",
+                &setup.ally_id[..15],
+                &target_id[..15],
+                &setup.caster_id[..15]
+            )
+        );
+    }
+
+    let checkpoint = create_game_checkpoint(&setup.session).expect("captured Duel checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized Duel checkpoint");
+    let mut restored = resume_game_checkpoint(
+        &parse_game_checkpoint(&serialized).expect("parsed Duel checkpoint"),
+    )
+    .expect("restored Duel checkpoint");
+    assert_eq!(state(&restored), checkpoint_state);
+    assert_eq!(
+        restored.legal_actions().expect("restored Duel actions"),
+        checkpoint_actions
+    );
+
+    let normal_action = duel_actions
+        .iter()
+        .find(|action| action.descriptor["target"]["instanceId"] == setup.normal_id)
+        .expect("normal Duel action")
+        .clone();
+    let pre_stale_hash = restored.state_hash().expect("pre-stale state hash");
+    let pre_stale_transcript = restored.transcript().to_vec();
+    let StepResult::Rejected(stale) = restored
+        .step(ActionRequest {
+            action_id: normal_action.action_id.to_string(),
+            seat: normal_action.seat,
+            state_version: normal_action.state_version + 1,
+        })
+        .expect("stable stale Duel rejection")
+    else {
+        panic!("stale Duel request must be rejected");
+    };
+    assert_eq!(stale.code, RejectionCode::StaleVersion);
+    assert_eq!(
+        restored.state_hash().expect("unchanged Duel state"),
+        pre_stale_hash
+    );
+    assert_eq!(restored.transcript(), pre_stale_transcript);
+
+    let StepResult::Accepted(normal) = restored
+        .step(ActionRequest {
+            action_id: normal_action.action_id.to_string(),
+            seat: normal_action.seat,
+            state_version: normal_action.state_version,
+        })
+        .expect("normal Duel step")
+    else {
+        panic!("engine-issued Duel action must be accepted");
+    };
+    assert_eq!(
+        event_types(&normal),
+        [
+            "magic-cast",
+            "fight-started",
+            "strike-damage-allocated",
+            "damage-dealt",
+            "damage-dealt",
+            "minion-died",
+            "magic-resolved",
+        ]
+    );
+    assert_eq!(
+        normal.events[0].payload,
+        json!({
+            "allyInstanceId": setup.ally_id,
+            "allySeat": "north",
+            "cardId": "north-duel",
+            "casterInstanceId": setup.caster_id,
+            "instanceId": duel_spell_id,
+            "manaPaid": 1,
+            "seat": "north",
+            "targetInstanceId": setup.normal_id,
+            "targetSeat": "south",
+        })
+    );
+    assert_eq!(
+        normal.events[1].payload,
+        json!({
+            "attackerInstanceId": setup.ally_id,
+            "combatantInstanceIds": [setup.normal_id],
+        })
+    );
+    assert_eq!(
+        normal.events[2].payload,
+        json!({
+            "amount": 3,
+            "strikerInstanceId": setup.ally_id,
+            "targetInstanceId": setup.normal_id,
+        })
+    );
+    assert_eq!(normal.events[3].payload["instanceId"], setup.ally_id);
+    assert_eq!(normal.events[3].payload["amount"], 2);
+    assert_eq!(normal.events[4].payload["instanceId"], setup.normal_id);
+    assert_eq!(normal.events[4].payload["amount"], 3);
+    assert_eq!(
+        normal.events[5].payload,
+        json!({
+            "cardId": "south-normal",
+            "instanceId": setup.normal_id,
+            "owner": "south",
+        })
+    );
+    assert_eq!(
+        normal.events[6].payload,
+        json!({
+            "cardId": "north-duel",
+            "instanceId": duel_spell_id,
+            "owner": "north",
+        })
+    );
+    assert!(normal.random_draws.is_empty());
+    let fought = state(&restored);
+    let ally = fought["realm"]["units"]
+        .as_array()
+        .expect("post-Duel units")
+        .iter()
+        .find(|unit| unit["instanceId"] == setup.ally_id)
+        .expect("surviving Duel ally");
+    assert_eq!(ally["damage"], 2);
+    assert_eq!(ally["location"], "C4");
+    assert_eq!(ally["tapped"], false);
+    assert!(
+        fought["realm"]["units"]
+            .as_array()
+            .expect("post-Duel units")
+            .iter()
+            .all(|unit| unit["instanceId"] != setup.normal_id)
+    );
+    assert!(
+        fought["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == setup.normal_id)
+    );
+    assert_eq!(fought["players"]["north"]["mana"], checkpoint_mana - 1);
+    assert!(
+        fought["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("North cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == duel_spell_id)
+    );
+    assert_exact_replay(&restored);
+
+    let mut warded = setup.session.clone();
+    let warded_action = duel_actions
+        .iter()
+        .find(|action| action.descriptor["target"]["instanceId"] == setup.warded_id)
+        .expect("warded Duel action");
+    let StepResult::Accepted(ward) = warded
+        .step(ActionRequest {
+            action_id: warded_action.action_id.to_string(),
+            seat: warded_action.seat,
+            state_version: warded_action.state_version,
+        })
+        .expect("warded Duel step")
+    else {
+        panic!("engine-issued warded Duel must be accepted");
+    };
+    assert_eq!(
+        event_types(&ward),
+        ["magic-cast", "ward-broken", "magic-resolved"]
+    );
+    let warded_state = state(&warded);
+    assert_eq!(
+        warded_state["realm"]["units"]
+            .as_array()
+            .expect("ward branch units")
+            .iter()
+            .find(|unit| unit["instanceId"] == setup.ally_id)
+            .expect("unharmed Duel ally")["damage"],
+        0
+    );
+    assert_eq!(
+        warded_state["realm"]["units"]
+            .as_array()
+            .expect("ward branch units")
+            .iter()
+            .find(|unit| unit["instanceId"] == setup.warded_id)
+            .expect("surviving Ward target")["warded"],
+        false
+    );
+    assert_exact_replay(&warded);
+
+    let mut disabled = setup.session;
+    let disabled_action = duel_actions
+        .iter()
+        .find(|action| action.descriptor["target"]["instanceId"] == setup.disabled_id)
+        .expect("disabled Duel action");
+    let StepResult::Accepted(disabled_fight) = disabled
+        .step(ActionRequest {
+            action_id: disabled_action.action_id.to_string(),
+            seat: disabled_action.seat,
+            state_version: disabled_action.state_version,
+        })
+        .expect("disabled Duel step")
+    else {
+        panic!("engine-issued disabled Duel must be accepted");
+    };
+    assert_eq!(
+        event_types(&disabled_fight),
+        [
+            "magic-cast",
+            "fight-started",
+            "strike-damage-allocated",
+            "damage-dealt",
+            "minion-died",
+            "magic-resolved",
+        ]
+    );
+    assert_eq!(
+        disabled_fight.events[3].payload["instanceId"],
+        setup.disabled_id
+    );
+    let disabled_state = state(&disabled);
+    assert_eq!(
+        disabled_state["realm"]["units"]
+            .as_array()
+            .expect("disabled branch units")
+            .iter()
+            .find(|unit| unit["instanceId"] == setup.ally_id)
+            .expect("unharmed Duel ally")["damage"],
+        0
+    );
+    assert!(
+        disabled_state["realm"]["units"]
+            .as_array()
+            .expect("disabled branch units")
+            .iter()
+            .all(|unit| unit["instanceId"] != setup.disabled_id)
+    );
+    assert!(disabled_fight.random_draws.is_empty());
+    assert_exact_replay(&disabled);
+}
+
+#[test]
+fn duel_should_apply_an_avatar_ally_from_the_existing_checkpoint() {
+    let setup = duel_checkpoint();
+    let north_avatar_id = state(&setup.session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let mut session = setup.session;
+    let (descriptor, fight) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["ally"]["instanceId"] == north_avatar_id
+            && descriptor["target"]["instanceId"] == setup.normal_id
+    });
+    assert_eq!(descriptor["ally"]["kind"], "avatar");
+    assert_eq!(descriptor["target"]["kind"], "minion");
+    assert_eq!(
+        event_types(&fight),
+        [
+            "magic-cast",
+            "fight-started",
+            "strike-damage-allocated",
+            "damage-dealt",
+            "avatar-life-lost",
+            "damage-dealt",
+            "magic-resolved",
+        ]
+    );
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 18);
+    assert_exact_replay(&session);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one pending Duel proof keeps lower-region combat, first strike, ordered Deathrites, terminal completion, checkpoint, and replay together"
+)]
+fn duel_should_checkpoint_an_underground_first_strike_and_finish_before_terminal() {
+    let cards = json!({
+        "north-ally": minion(json!({
+            "attack": 2,
+            "burrowing": true,
+            "defense": 10,
+            "strikesFirstWhileAttacking": true,
+        })),
+        "north-avatar": avatar(20),
+        "north-burrow": magic(("burrowAllMinionsAndArtifactsAtTargetLandSite", json!(true)), 0),
+        "north-duel": magic(("fightAllyWithAdjacentEnemy", json!(true)), 0),
+        "north-filler": minion(json!({})),
+        "north-pinger": minion(json!({
+            "defense": 10,
+            "genesisDamageEachOtherUnitHere": 1,
+        })),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-buff": minion(json!({
+            "burrowing": true,
+            "deathriteDrawSite": true,
+            "otherNearbyAlliesPowerBonus": 1,
+            "summonToAnySite": true,
+        })),
+        "south-site": site(false),
+    });
+    let north_spellbook = [
+        "north-ally",
+        "north-pinger",
+        "north-burrow",
+        "north-duel",
+        "north-filler",
+        "north-filler",
+    ];
+    let mut prepared = None;
+    for seed in 1..=512 {
+        let manifest = manifest(seed, &cards, &north_spellbook, &["south-buff"; 6]);
+        let mut session = Session::new(&manifest).expect("valid pending Duel candidate");
+        keep(&mut session);
+        keep(&mut session);
+        let opening = state(&session);
+        let hand = opening["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("North opening hand");
+        if !hand.iter().any(|card| card["cardId"] == "north-ally") {
+            continue;
+        }
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+        });
+        let ally_id = summon_duel_minion(&mut session, "north-ally", "C4", None);
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+        });
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+        });
+        let mut target_ids = Vec::new();
+        for _ in 0..2 {
+            target_ids.push(summon_duel_minion(&mut session, "south-buff", "C4", None));
+        }
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+        let drawn = state(&session);
+        let north_hand = drawn["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("North hand after one draw")
+            .iter()
+            .filter_map(|card| card["cardId"].as_str())
+            .collect::<Vec<_>>();
+        if !["north-pinger", "north-burrow", "north-duel"]
+            .into_iter()
+            .all(|card_id| north_hand.contains(&card_id))
+        {
+            continue;
+        }
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+        });
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+        });
+        summon_duel_minion(&mut session, "north-pinger", "C4", None);
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-magic"
+                && descriptor["cardId"] == "north-burrow"
+                && descriptor["targetLocation"]["cell"] == "C4"
+        });
+        let pre_duel = state(&session);
+        assert!(target_ids.iter().all(|instance_id| {
+            realm_unit(&pre_duel, instance_id).is_some_and(|unit| unit["damage"] == 1)
+        }));
+        prepared = Some((session, ally_id, target_ids));
+        break;
+    }
+    let (mut session, ally_id, mut target_ids) =
+        prepared.expect("bounded seed with the complete pending Duel setup");
+    target_ids.sort_unstable();
+    let target_id = target_ids[0].clone();
+    let duel_action = session
+        .legal_actions()
+        .expect("underground Duel actions")
+        .into_iter()
+        .find(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-duel"
+                && action.descriptor["ally"]["instanceId"] == ally_id
+                && action.descriptor["target"]["instanceId"] == target_id
+        })
+        .expect("engine-issued underground Duel");
+    let StepResult::Accepted(cast) = session
+        .step(ActionRequest {
+            action_id: duel_action.action_id.to_string(),
+            seat: duel_action.seat,
+            state_version: duel_action.state_version,
+        })
+        .expect("underground Duel cast")
+    else {
+        panic!("engine-issued underground Duel must be accepted");
+    };
+    assert_eq!(
+        event_types(&cast),
+        [
+            "magic-cast",
+            "fight-started",
+            "strike-damage-allocated",
+            "damage-dealt",
+        ]
+    );
+    let pending = state(&session);
+    assert_eq!(pending["phase"], "deathrite-order");
+    assert_eq!(pending["decisionSeat"], "south");
+    assert_eq!(
+        pending["pendingDeathrites"]["continuation"]["kind"],
+        "first-strike"
+    );
+    assert_eq!(
+        pending["pendingDeathrites"]["continuation"]["pending"]["region"],
+        "underground"
+    );
+    assert_eq!(
+        pending["pendingDeathrites"]["deferredOutcomes"],
+        json!([{
+            "payload": {
+                "cardId": "north-duel",
+                "instanceId": cast.events[0].payload["instanceId"],
+                "owner": "north",
+            },
+            "type": "magic-resolved",
+        }])
+    );
+
+    let checkpoint = create_game_checkpoint(&session).expect("pending Duel checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized pending Duel");
+    session = resume_game_checkpoint(
+        &parse_game_checkpoint(&serialized).expect("parsed pending Duel checkpoint"),
+    )
+    .expect("resumed pending Duel checkpoint");
+    assert_eq!(state(&session), pending);
+    let (_, completed) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == target_ids[0]
+    });
+    let completed_types = event_types(&completed);
+    assert_eq!(
+        &completed_types[completed_types.len() - 2..],
+        ["magic-resolved", "game-ended"]
+    );
+    assert_eq!(state(&session)["phase"], "terminal");
     assert_exact_replay(&session);
 }

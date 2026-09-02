@@ -380,8 +380,8 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Duel makes a chosen ally fight a same-square targeted enemy.",
-      "implementationStatus": "typescript-supported",
+      "plainLanguage": "Duel makes a chosen ally fight a targeted enemy at the ally's location or a bordering location in the same region.",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "choose-target",
@@ -389,8 +389,8 @@
       ],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03/04 Duel makes a chosen ally fight a same-square targeted enemy"
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0020_duel_uses_an_allys_region_and_the_shared_fight_pipeline"
       }
     },
     {

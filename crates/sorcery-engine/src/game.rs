@@ -396,6 +396,7 @@ struct PendingCombat {
     combatants: Vec<UnitTarget>,
     defenders: Vec<UnitTarget>,
     original_target: Option<CombatTarget>,
+    region: Region,
     target_removed: bool,
 }
 
@@ -883,12 +884,12 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::ReturnMinionFromOwnCemetery
         | MagicEffect::DamageTargetUnit { .. }
         | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
+        | MagicEffect::FightAllyWithAdjacentEnemy
         | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_)
         | MagicEffect::GrantChargeToAllyThisTurn
         | MagicEffect::GrantPowerTwoToAllyThisTurn => None,
         MagicEffect::DamageRandomUnitAtLocation(_) => Some("damageRandomUnitAtLocation"),
         MagicEffect::DestroyTargetSiteWithDamageGrid(_) => Some("destroyTargetSiteWithDamageGrid"),
-        MagicEffect::FightAllyWithAdjacentEnemy => Some("fightAllyWithAdjacentEnemy"),
         MagicEffect::GainControlOfTargetNearbyMinion => Some("gainControlOfTargetNearbyMinion"),
         MagicEffect::KillTargetWoundedMinion => Some("killTargetWoundedMinion"),
         MagicEffect::LeapAttackAlly => Some("leapAttackAlly"),
@@ -3284,6 +3285,74 @@ impl Game {
                 );
                 choices
             }
+            MagicEffect::FightAllyWithAdjacentEnemy => {
+                let unit_targets = |target_seat| {
+                    let player = &self.position.players[seat_index(target_seat)];
+                    std::iter::once(UnitTarget::Avatar {
+                        instance_id: player.avatar.card.instance_id.clone(),
+                        seat: target_seat,
+                    })
+                    .chain(
+                        self.position
+                            .units
+                            .iter()
+                            .filter(move |unit| unit.controller == target_seat)
+                            .map(move |unit| UnitTarget::Minion {
+                                instance_id: unit.card.instance_id.clone(),
+                                seat: target_seat,
+                            }),
+                    )
+                    .collect::<Vec<_>>()
+                };
+                let allies = unit_targets(seat);
+                let enemies = unit_targets(other_seat(seat));
+                let mut choices = Vec::new();
+                // ponytail: the realm is bounded; index only if Duel enumeration profiles hot.
+                for ally in allies {
+                    let ally_kind = match ally {
+                        UnitTarget::Avatar { .. } => UnitKind::Avatar,
+                        UnitTarget::Minion { .. } => UnitKind::Minion,
+                    };
+                    let ally_region = self.unit_target_region(&ally)?;
+                    let ally_cells =
+                        self.combatant_occupied_cells(ally_kind, ally.seat(), ally.instance_id())?;
+                    for target in &enemies {
+                        let target_kind = match target {
+                            UnitTarget::Avatar { .. } => UnitKind::Avatar,
+                            UnitTarget::Minion { .. } => UnitKind::Minion,
+                        };
+                        if self.unit_target_region(target)? != ally_region
+                            || !Self::footprints_here_or_bordering(
+                                ally_cells,
+                                self.combatant_occupied_cells(
+                                    target_kind,
+                                    target.seat(),
+                                    target.instance_id(),
+                                )?,
+                            )
+                        {
+                            continue;
+                        }
+                        if let UnitTarget::Minion { instance_id, .. } = target {
+                            let unit = self
+                                .position
+                                .units
+                                .iter()
+                                .find(|unit| unit.card.instance_id == *instance_id)
+                                .ok_or(GameError::IllegalAction)?;
+                            if self.minion_has_active_stealth(unit) {
+                                continue;
+                            }
+                        }
+                        choices.push(MagicChoice {
+                            ally: Some(ally.clone()),
+                            target: Some(target.clone()),
+                            ..MagicChoice::default()
+                        });
+                    }
+                }
+                choices
+            }
             MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_) => self
                 .locations_within_two_measured_steps(
                     self.spellcaster_location(seat, caster_instance_id)?,
@@ -4668,6 +4737,7 @@ impl Game {
                     combatants: Vec::new(),
                     defenders: Vec::new(),
                     original_target: None,
+                    region: to.region,
                     target_removed: false,
                 });
                 self.position.phase = Phase::Attack;
@@ -7170,6 +7240,7 @@ impl Game {
             combatants: Vec::new(),
             defenders: Vec::new(),
             original_target: None,
+            region: to.region,
             target_removed: false,
         });
         self.position.phase = Phase::Attack;
@@ -8567,6 +8638,80 @@ impl Game {
             }
             _ => Vec::new(),
         };
+        let duel = if effect == MagicEffect::FightAllyWithAdjacentEnemy {
+            let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
+            let target = target.as_ref().ok_or(GameError::IllegalAction)?;
+            let attacker_kind = match ally {
+                UnitTarget::Avatar { .. } => UnitKind::Avatar,
+                UnitTarget::Minion { .. } => UnitKind::Minion,
+            };
+            let region = self.unit_target_region(ally)?;
+            let cell = match ally {
+                UnitTarget::Avatar { instance_id, seat } => {
+                    let avatar = &self.position.players[seat_index(*seat)].avatar;
+                    if avatar.card.instance_id != *instance_id {
+                        return Err(GameError::IllegalAction);
+                    }
+                    avatar.location
+                }
+                UnitTarget::Minion { instance_id, seat } => self
+                    .position
+                    .units
+                    .iter()
+                    .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
+                    .map(|unit| unit.location)
+                    .ok_or(GameError::IllegalAction)?,
+            };
+            let (original_target, warded_target_index) = match target {
+                UnitTarget::Avatar { instance_id, seat } => {
+                    let avatar = &self.position.players[seat_index(*seat)].avatar;
+                    if avatar.card.instance_id != *instance_id {
+                        return Err(GameError::IllegalAction);
+                    }
+                    (
+                        CombatTarget::Avatar {
+                            instance_id: instance_id.clone(),
+                            seat: *seat,
+                        },
+                        None,
+                    )
+                }
+                UnitTarget::Minion { instance_id, seat } => {
+                    let index = self
+                        .position
+                        .units
+                        .iter()
+                        .position(|unit| {
+                            unit.controller == *seat && unit.card.instance_id == *instance_id
+                        })
+                        .ok_or(GameError::IllegalAction)?;
+                    (
+                        CombatTarget::Minion {
+                            instance_id: instance_id.clone(),
+                            seat: *seat,
+                        },
+                        self.position.units[index].warded.then_some(index),
+                    )
+                }
+            };
+            Some((
+                PendingCombat {
+                    allocations: Vec::new(),
+                    attacker_instance_id: ally.instance_id().clone(),
+                    attacker_kind,
+                    attacking_seat: seat,
+                    cell,
+                    combatants: vec![target.clone()],
+                    defenders: Vec::new(),
+                    original_target: Some(original_target),
+                    region,
+                    target_removed: false,
+                },
+                warded_target_index,
+            ))
+        } else {
+            None
+        };
         let card = self.position.players[player_index]
             .hand_spellbook
             .remove(hand_index);
@@ -8699,6 +8844,25 @@ impl Game {
                         "sourceInstanceId": card_instance_id,
                     })
                 });
+            }
+            MagicEffect::FightAllyWithAdjacentEnemy => {
+                let Some((pending, warded_target_index)) = duel else {
+                    return Err(GameError::IllegalAction);
+                };
+                if let Some(target_index) = warded_target_index {
+                    let target = &mut self.position.units[target_index];
+                    target.warded = false;
+                    outcomes.push("ward-broken", || {
+                        json!({
+                            "instanceId": target.card.instance_id,
+                            "seat": target.controller,
+                        })
+                    });
+                } else {
+                    let combatants = pending.combatants.clone();
+                    self.position.pending_combat = Some(pending);
+                    self.begin_fight(combatants, outcomes)?;
+                }
             }
             MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => {
                 for token in token_units {
@@ -10437,7 +10601,7 @@ impl Game {
     }
 
     fn pending_combat_value(pending: &PendingCombat) -> Value {
-        json!({
+        let mut value = json!({
             "allocations": pending.allocations.iter().map(|allocation| json!({
                 "amount": allocation.amount,
                 "targetInstanceId": allocation.target_instance_id,
@@ -10453,7 +10617,11 @@ impl Game {
             "defenders": pending.defenders,
             "originalTarget": pending.original_target,
             "targetRemoved": pending.target_removed,
-        })
+        });
+        if pending.region != Region::Surface {
+            value["region"] = json!(pending.region);
+        }
+        value
     }
 
     fn terminal_value(&self) -> Value {
@@ -10981,7 +11149,7 @@ mod tests {
     }
 
     #[test]
-    fn simultaneous_magic_should_be_selfplay_supported() {
+    fn supported_magic_effects_should_be_selfplay_supported() {
         for (effect, field, value) in [
             (
                 MagicEffect::DamageChainNearbyUnits,
@@ -10998,6 +11166,11 @@ mod tests {
                 "damageEachUnitAtLocationWithinTwoSteps",
                 json!(3),
             ),
+            (
+                MagicEffect::FightAllyWithAdjacentEnemy,
+                "fightAllyWithAdjacentEnemy",
+                json!(true),
+            ),
         ] {
             assert_eq!(unsupported_magic_effect(&effect), None);
             let manifest = selfplay_manifest_with(31, |manifest| {
@@ -11011,9 +11184,9 @@ mod tests {
                 }
             });
             Game::from_manifest_json(&manifest)
-                .expect("valid simultaneous Magic manifest")
+                .expect("valid supported Magic manifest")
                 .ensure_selfplay_supported()
-                .expect("simultaneous Magic is self-play safe");
+                .expect("supported Magic effect is self-play safe");
         }
     }
 
@@ -12265,6 +12438,7 @@ mod tests {
             combatants: Vec::new(),
             defenders: Vec::new(),
             original_target: None,
+            region: Region::Surface,
             target_removed: false,
         });
         let target = CombatTarget::Minion {
