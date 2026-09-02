@@ -3385,3 +3385,372 @@ fn freeze_should_disable_nearby_minion_until_caster_next_start_phase() {
     );
     assert_exact_replay(&session);
 }
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one direct Charge proof retains ally legality, stacking, expiry, and replay"
+)]
+fn rule_catalog_0032_charge_magic_grants_an_ally_charge_only_for_the_current_turn() {
+    let cards = json!({
+        "north-ally": minion(json!({})),
+        "north-avatar": avatar(20),
+        "north-charge": magic(("grantChargeToAllyThisTurn", json!(true)), 1),
+        "north-filler": minion(json!({})),
+        "north-printed": minion(json!({
+            "charge": true,
+            "stealth": true,
+            "ward": true,
+        })),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-enemy": minion(json!({
+            "stealth": true,
+            "ward": true,
+        })),
+        "south-site": site(false),
+    });
+    let north_spellbook = [
+        "north-printed",
+        "north-charge",
+        "north-charge",
+        "north-ally",
+        "north-filler",
+        "north-filler",
+    ];
+    let manifest = (1..=512)
+        .map(|seed| manifest(seed, &cards, &north_spellbook, &["south-enemy"; 6]))
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("candidate Charge session");
+            let preview = state(&preview);
+            let hand = preview["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("North opening Spellbook hand");
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-charge")
+                .count()
+                == 2
+                && hand.iter().any(|card| card["cardId"] == "north-printed")
+                && preview["players"]["north"]["spellbook"][0]["cardId"] == "north-ally"
+        })
+        .expect("seed with printed Charge, two Charge Magics, and the ally next");
+    let mut session = opening_main(&manifest);
+
+    let (printed_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-printed"
+            && descriptor["cell"] == "C4"
+    });
+    let printed_id = printed_summon["cardInstanceId"]
+        .as_str()
+        .expect("printed Charge identity")
+        .to_owned();
+    let after_printed = state(&session);
+    let printed = after_printed["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == printed_id)
+        .expect("printed Charge minion");
+    assert_eq!(
+        (
+            printed["region"].as_str(),
+            printed["stealthed"].as_bool(),
+            printed["warded"].as_bool(),
+            printed["summoningSickness"].as_bool(),
+        ),
+        (Some("surface"), Some(true), Some(true), Some(true))
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("printed Charge actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "move-and-attack"
+                    && action.descriptor["unitInstanceId"] == printed_id
+            })
+    );
+
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (enemy_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-enemy"
+            && descriptor["cell"] == "C1"
+    });
+    let enemy_id = enemy_summon["cardInstanceId"]
+        .as_str()
+        .expect("enemy identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    let (ally_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+    });
+    let ally_id = ally_summon["cardInstanceId"]
+        .as_str()
+        .expect("Charge ally identity")
+        .to_owned();
+
+    let checkpoint = session.clone();
+    let checkpoint_state = state(&checkpoint);
+    let avatar_id = checkpoint_state["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let charge_ids: Vec<_> = checkpoint_state["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North Spellbook hand")
+        .iter()
+        .filter(|card| card["cardId"] == "north-charge")
+        .map(|card| {
+            card["instanceId"]
+                .as_str()
+                .expect("Charge Magic identity")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(charge_ids.len(), 2);
+
+    let checkpoint_actions = checkpoint.legal_actions().expect("Charge Magic actions");
+    let canonical_actions: Vec<_> = checkpoint_actions
+        .iter()
+        .map(|action| canonical_json(&action.descriptor).expect("canonical action descriptor"))
+        .collect();
+    let mut sorted_actions = canonical_actions.clone();
+    sorted_actions.sort_unstable();
+    assert_eq!(canonical_actions, sorted_actions);
+    let casts: Vec<_> = checkpoint_actions
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardInstanceId"] == charge_ids[0]
+        })
+        .collect();
+    let canonical_casts: Vec<_> = casts
+        .iter()
+        .map(|action| canonical_json(&action.descriptor).expect("canonical Charge descriptor"))
+        .collect();
+    let mut sorted_casts = canonical_casts.clone();
+    sorted_casts.sort_unstable();
+    assert_eq!(canonical_casts, sorted_casts);
+    let mut ally_ids: Vec<_> = casts
+        .iter()
+        .map(|action| {
+            assert!(action.descriptor["target"].is_null());
+            action.descriptor["ally"]["instanceId"]
+                .as_str()
+                .expect("engine-issued Charge ally")
+                .to_owned()
+        })
+        .collect();
+    ally_ids.sort_unstable();
+    let mut expected_ally_ids = vec![avatar_id.clone(), printed_id.clone(), ally_id.clone()];
+    expected_ally_ids.sort_unstable();
+    assert_eq!(ally_ids, expected_ally_ids);
+    assert!(!ally_ids.contains(&enemy_id));
+    assert!(casts.iter().any(|action| {
+        action.descriptor["ally"]["instanceId"] == ally_id && action.label.contains("grant Charge")
+    }));
+    assert!(
+        !checkpoint
+            .legal_actions()
+            .expect("pre-Charge actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "move-and-attack"
+                    && action.descriptor["unitInstanceId"] == ally_id
+            })
+    );
+
+    let mut avatar_branch = checkpoint.clone();
+    let (_, avatar_grant) = accept_where(&mut avatar_branch, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardInstanceId"] == charge_ids[0]
+            && descriptor["ally"]["kind"] == "avatar"
+    });
+    assert_eq!(
+        event_types(&avatar_grant),
+        ["magic-cast", "charge-granted", "magic-resolved"]
+    );
+    assert_eq!(
+        avatar_grant.events[1].payload,
+        json!({
+            "instanceId": avatar_id,
+            "seat": "north",
+            "sourceInstanceId": charge_ids[0],
+        })
+    );
+    assert!(
+        state(&avatar_branch)["realm"]["units"]
+            .as_array()
+            .expect("avatar branch units")
+            .iter()
+            .all(|unit| unit["temporaryChargeSources"].is_null())
+    );
+    assert!(avatar_grant.random_draws.is_empty());
+    assert_exact_replay(&avatar_branch);
+
+    let checkpoint_version = checkpoint_state["stateVersion"]
+        .as_u64()
+        .expect("checkpoint state version");
+    let checkpoint_mana = checkpoint_state["players"]["north"]["mana"]
+        .as_u64()
+        .expect("checkpoint mana");
+    session = checkpoint;
+    let (_, first) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardInstanceId"] == charge_ids[0]
+            && descriptor["ally"]["instanceId"] == ally_id
+    });
+    assert_eq!(
+        event_types(&first),
+        ["magic-cast", "charge-granted", "magic-resolved"]
+    );
+    assert_eq!(
+        first.events[0].payload,
+        json!({
+            "allyInstanceId": ally_id,
+            "allySeat": "north",
+            "cardId": "north-charge",
+            "casterInstanceId": avatar_id,
+            "instanceId": charge_ids[0],
+            "manaPaid": 1,
+            "seat": "north",
+        })
+    );
+    assert_eq!(
+        first.events[1].payload,
+        json!({
+            "instanceId": ally_id,
+            "seat": "north",
+            "sourceInstanceId": charge_ids[0],
+        })
+    );
+    assert!(first.random_draws.is_empty());
+    assert_eq!(
+        state(&session)["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .find(|unit| unit["instanceId"] == ally_id)
+            .expect("charged ally")["temporaryChargeSources"],
+        json!([charge_ids[0]])
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("temporarily charged actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "move-and-attack"
+                    && action.descriptor["unitInstanceId"] == ally_id
+            })
+    );
+    let charged_state = state(&session);
+    let charged_checkpoint = create_game_checkpoint(&session).expect("captured Charge checkpoint");
+    let charged_bytes =
+        serialize_game_checkpoint(&charged_checkpoint).expect("serialized Charge checkpoint");
+    session = resume_game_checkpoint(
+        &parse_game_checkpoint(&charged_bytes).expect("parsed Charge checkpoint"),
+    )
+    .expect("restored Charge checkpoint");
+    assert_eq!(state(&session), charged_state);
+
+    let (_, second) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardInstanceId"] == charge_ids[1]
+            && descriptor["ally"]["instanceId"] == ally_id
+    });
+    assert_eq!(
+        event_types(&second),
+        ["magic-cast", "charge-granted", "magic-resolved"]
+    );
+    assert!(second.random_draws.is_empty());
+    let stacked = state(&session);
+    assert_eq!(
+        stacked["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .find(|unit| unit["instanceId"] == ally_id)
+            .expect("stacked Charge ally")["temporaryChargeSources"],
+        json!(charge_ids)
+    );
+    assert_eq!(stacked["players"]["north"]["mana"], checkpoint_mana - 2);
+    assert_eq!(stacked["stateVersion"], checkpoint_version + 2);
+    assert_eq!(
+        stacked["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("North cemetery")
+            .iter()
+            .filter(|card| charge_ids.iter().any(|id| card["instanceId"] == *id))
+            .count(),
+        2
+    );
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == ally_id
+            && descriptor["to"]["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
+    let (_, ended) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert_eq!(
+        event_types(&ended),
+        [
+            "charge-expired",
+            "charge-expired",
+            "turn-ended",
+            "turn-started",
+        ]
+    );
+    assert_eq!(
+        ended.events[..2]
+            .iter()
+            .map(|event| event.payload.clone())
+            .collect::<Vec<_>>(),
+        charge_ids
+            .iter()
+            .map(|source_id| json!({
+                "instanceId": ally_id,
+                "seat": "north",
+                "sourceInstanceId": source_id,
+            }))
+            .collect::<Vec<_>>()
+    );
+    let expired = state(&session);
+    let units = expired["realm"]["units"]
+        .as_array()
+        .expect("expired realm units");
+    let expired_ally = units
+        .iter()
+        .find(|unit| unit["instanceId"] == ally_id)
+        .expect("expired Charge ally");
+    assert!(expired_ally["temporaryChargeSources"].is_null());
+    assert_eq!(expired_ally["tapped"], true);
+    assert!(
+        units
+            .iter()
+            .find(|unit| unit["instanceId"] == printed_id)
+            .expect("printed Charge minion")["temporaryChargeSources"]
+            .is_null()
+    );
+    assert_eq!(cards["north-printed"]["charge"], true);
+    assert_exact_replay(&session);
+}

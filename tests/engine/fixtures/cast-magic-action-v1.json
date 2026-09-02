@@ -1,6 +1,34 @@
 {
   "actions": [
     {
+      "actionId": "sha256:0110a7c1e549e6348229b74ace8ad8f7bfc809787484503fa1f28003872db033",
+      "descriptor": {
+        "ally": {
+          "instanceId": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+          "kind": "avatar",
+          "seat": "north"
+        },
+        "cardId": "charge",
+        "cardInstanceId": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+        "casterInstanceId": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "kind": "cast-magic"
+      }
+    },
+    {
+      "actionId": "sha256:7d1331ff963a7c0a44f422fc646dfdd0c267fee9ab318b213023d74946fdb6cc",
+      "descriptor": {
+        "ally": {
+          "instanceId": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+          "kind": "minion",
+          "seat": "north"
+        },
+        "cardId": "charge",
+        "cardInstanceId": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+        "casterInstanceId": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "kind": "cast-magic"
+      }
+    },
+    {
       "actionId": "sha256:bbd5a65ccf6e18cdcf56c0f9e08b3bcbe7369b3d9700687240468e501baccf38",
       "descriptor": {
         "cardId": "healing-magic",
@@ -45,6 +73,8 @@
     }
   ],
   "canonicalActionIds": [
+    "sha256:0110a7c1e549e6348229b74ace8ad8f7bfc809787484503fa1f28003872db033",
+    "sha256:7d1331ff963a7c0a44f422fc646dfdd0c267fee9ab318b213023d74946fdb6cc",
     "sha256:0e1642dbf7f8160658aa1680f1571549c798029b08516d39ed8a786a70f14e02",
     "sha256:bbd5a65ccf6e18cdcf56c0f9e08b3bcbe7369b3d9700687240468e501baccf38",
     "sha256:3839dd572a94131544f692829e96f45a3dcc5da19ea10966a8bd974de970d89e",

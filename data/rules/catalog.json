@@ -613,15 +613,17 @@
         "RULE-03"
       ],
       "plainLanguage": "Charge Magic grants an untargeted ally Charge only for the current turn.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "charge"
       ],
       "actionHints": [],
-      "eventHints": [],
+      "eventHints": [
+        "charge"
+      ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Charge Magic grants an untargeted ally Charge only for the current turn"
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0032_charge_magic_grants_an_ally_charge_only_for_the_current_turn"
       }
     },
     {

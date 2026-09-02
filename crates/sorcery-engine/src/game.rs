@@ -349,6 +349,7 @@ struct UnitPosition {
     stealthed: bool,
     summoning_sickness: bool,
     tapped: bool,
+    temporary_charge_sources: Vec<IdentityHash>,
     warded: bool,
 }
 
@@ -360,6 +361,7 @@ struct DisableEffect {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct MagicChoice {
+    ally: Option<UnitTarget>,
     cemetery_minion_instance_id: Option<IdentityHash>,
     target: Option<UnitTarget>,
     target_location: Option<Location>,
@@ -837,12 +839,12 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::ReturnMinionFromOwnCemetery
         | MagicEffect::DamageTargetUnit { .. }
         | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
-        | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => None,
+        | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_)
+        | MagicEffect::GrantChargeToAllyThisTurn => None,
         MagicEffect::DamageRandomUnitAtLocation(_) => Some("damageRandomUnitAtLocation"),
         MagicEffect::DestroyTargetSiteWithDamageGrid(_) => Some("destroyTargetSiteWithDamageGrid"),
         MagicEffect::FightAllyWithAdjacentEnemy => Some("fightAllyWithAdjacentEnemy"),
         MagicEffect::GainControlOfTargetNearbyMinion => Some("gainControlOfTargetNearbyMinion"),
-        MagicEffect::GrantChargeToAllyThisTurn => Some("grantChargeToAllyThisTurn"),
         MagicEffect::GrantPowerTwoToAllyThisTurn => Some("grantPowerTwoToAllyThisTurn"),
         MagicEffect::KillTargetWoundedMinion => Some("killTargetWoundedMinion"),
         MagicEffect::LeapAttackAlly => Some("leapAttackAlly"),
@@ -1747,7 +1749,7 @@ impl Game {
                 return Err(invalid("realm minion lacks Minion facts"));
             };
             if facts.cannot_defend_or_intercept
-                || unit.summoning_sickness && !facts.charge
+                || unit.summoning_sickness && !self.minion_has_active_charge(unit)
                 || attacker_airborne && !facts.airborne && !facts.ranged
             {
                 continue;
@@ -1856,7 +1858,7 @@ impl Game {
             if facts.cannot_defend_or_intercept {
                 continue;
             }
-            if unit.summoning_sickness && !facts.charge {
+            if unit.summoning_sickness && !self.minion_has_active_charge(unit) {
                 continue;
             }
             candidates.push((
@@ -2252,6 +2254,7 @@ impl Game {
                 }
                 for choice in self.magic_choices(seat, caster_instance_id, &facts.effect)? {
                     let descriptor = ActionDescriptor::CastMagic {
+                        ally: choice.ally,
                         card_id: definition.id.clone(),
                         card_instance_id: card.instance_id.clone(),
                         caster_instance_id: caster_instance_id.clone(),
@@ -3090,6 +3093,30 @@ impl Game {
             | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => {
                 vec![MagicChoice::default()]
             }
+            MagicEffect::GrantChargeToAllyThisTurn => {
+                let player = &self.position.players[seat_index(seat)];
+                let mut choices = vec![MagicChoice {
+                    ally: Some(UnitTarget::Avatar {
+                        instance_id: player.avatar.card.instance_id.clone(),
+                        seat,
+                    }),
+                    ..MagicChoice::default()
+                }];
+                choices.extend(
+                    self.position
+                        .units
+                        .iter()
+                        .filter(|unit| unit.controller == seat)
+                        .map(|unit| MagicChoice {
+                            ally: Some(UnitTarget::Minion {
+                                instance_id: unit.card.instance_id.clone(),
+                                seat,
+                            }),
+                            ..MagicChoice::default()
+                        }),
+                );
+                choices
+            }
             MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_) => self
                 .locations_within_two_measured_steps(
                     self.spellcaster_location(seat, caster_instance_id)?,
@@ -3455,15 +3482,20 @@ impl Game {
     }
 
     fn minion_can_move_and_attack(&self, unit: &UnitPosition, seat: Seat) -> bool {
-        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
-        else {
-            return false;
-        };
         unit.controller == seat
             && unit.region == Region::Surface
             && !self.minion_is_disabled(unit)
             && !unit.tapped
-            && (!unit.summoning_sickness || facts.charge)
+            && (!unit.summoning_sickness || self.minion_has_active_charge(unit))
+    }
+
+    fn minion_has_active_charge(&self, unit: &UnitPosition) -> bool {
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return false;
+        };
+        !self.minion_is_disabled(unit)
+            && (facts.charge || !unit.temporary_charge_sources.is_empty())
     }
 
     fn attacker_can_target_sites(&self, pending: &PendingCombat) -> Result<bool, GameError> {
@@ -7404,6 +7436,7 @@ impl Game {
             stealthed: facts.stealth,
             summoning_sickness: true,
             tapped: false,
+            temporary_charge_sources: Vec::new(),
             warded: matches!(facts.damage_prevention, Some(DamagePrevention::Ward)),
         })
     }
@@ -8105,6 +8138,7 @@ impl Game {
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
         let ActionDescriptor::CastMagic {
+            ally,
             card_id,
             card_instance_id,
             caster_instance_id,
@@ -8142,6 +8176,7 @@ impl Game {
             || !self
                 .magic_choices(seat, caster_instance_id, &facts.effect)?
                 .contains(&MagicChoice {
+                    ally: ally.clone(),
                     cemetery_minion_instance_id: cemetery_minion_instance_id.clone(),
                     target: target.clone(),
                     target_location: *target_location,
@@ -8207,6 +8242,10 @@ impl Game {
             if let Some(selected_id) = cemetery_minion_instance_id {
                 payload["cemeteryMinionInstanceId"] = json!(selected_id);
             }
+            if let Some(ally) = ally {
+                payload["allyInstanceId"] = json!(ally.instance_id());
+                payload["allySeat"] = json!(ally.seat());
+            }
             if let Some(target) = target {
                 payload["targetInstanceId"] = json!(target.instance_id());
                 payload["targetSeat"] = json!(target.seat());
@@ -8252,6 +8291,31 @@ impl Game {
                         })
                     });
                 }
+            }
+            MagicEffect::GrantChargeToAllyThisTurn => {
+                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
+                if let UnitTarget::Minion {
+                    instance_id,
+                    seat: ally_seat,
+                } = ally
+                {
+                    self.position
+                        .units
+                        .iter_mut()
+                        .find(|unit| {
+                            unit.card.instance_id == *instance_id && unit.controller == *ally_seat
+                        })
+                        .ok_or(GameError::IllegalAction)?
+                        .temporary_charge_sources
+                        .push(card_instance_id.clone());
+                }
+                outcomes.push("charge-granted", || {
+                    json!({
+                        "instanceId": ally.instance_id(),
+                        "seat": ally.seat(),
+                        "sourceInstanceId": card_instance_id,
+                    })
+                });
             }
             MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => {
                 for token in token_units {
@@ -8731,6 +8795,7 @@ impl Game {
             stealthed: starts_stealthed,
             summoning_sickness: true,
             tapped: false,
+            temporary_charge_sources: Vec::new(),
             warded: starts_warded,
         });
         self.position.state_version += 1;
@@ -9198,6 +9263,20 @@ impl Game {
                     })
             })
             .collect();
+        let expired_charge_sources: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .flat_map(|unit| {
+                unit.temporary_charge_sources.iter().map(|source| {
+                    (
+                        unit.card.instance_id.clone(),
+                        unit.controller,
+                        source.clone(),
+                    )
+                })
+            })
+            .collect();
         for (instance_id, controller) in &end_phase_untapped {
             let unit = self
                 .position
@@ -9216,6 +9295,7 @@ impl Game {
         }
         for (unit, disabled) in self.position.units.iter_mut().zip(disabled_units) {
             unit.damage = 0;
+            unit.temporary_charge_sources.clear();
             if unit.controller == seat {
                 let gains_stealth = matches!(
                     &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
@@ -9246,6 +9326,15 @@ impl Game {
         self.position.active_seat = next_seat;
         self.position.decision_seat = next_seat;
         self.position.phase = Phase::Draw;
+        for (instance_id, controller, source_instance_id) in expired_charge_sources {
+            outcomes.push("charge-expired", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": controller,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
         outcomes.push(
             "turn-ended",
             || json!({ "seat": seat, "turnNumber": ended_turn }),
@@ -9680,6 +9769,12 @@ impl Game {
             object.insert(
                 "carriedLanceCount".to_owned(),
                 json!(unit.carried_lance_count),
+            );
+        }
+        if !unit.temporary_charge_sources.is_empty() {
+            object.insert(
+                "temporaryChargeSources".to_owned(),
+                json!(unit.temporary_charge_sources),
             );
         }
         value
@@ -10557,6 +10652,7 @@ mod tests {
             stealthed: false,
             summoning_sickness: false,
             tapped: false,
+            temporary_charge_sources: Vec::new(),
             warded: false,
         });
         game.position.active_seat = Seat::North;
@@ -10626,6 +10722,7 @@ mod tests {
             stealthed: false,
             summoning_sickness: false,
             tapped: true,
+            temporary_charge_sources: Vec::new(),
             warded: false,
         }
     }
@@ -11120,6 +11217,7 @@ mod tests {
                 stealthed,
                 summoning_sickness: false,
                 tapped: false,
+                temporary_charge_sources: Vec::new(),
                 warded: false,
             };
         game.position.units = vec![

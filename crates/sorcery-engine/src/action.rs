@@ -293,6 +293,9 @@ pub enum ActionDescriptor {
     },
     /// Cast one supported Magic card from the player's hand.
     CastMagic {
+        /// Exact engine-issued ally selected by an ally-buffing Magic.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ally: Option<UnitTarget>,
         /// Stable rules card identity.
         card_id: String,
         /// Authoritative card instance identity.
@@ -470,12 +473,19 @@ impl ActionDescriptor {
             Self::DrawSite => Some("Draw a site with Avatar".to_owned()),
             Self::DrawSpell => Some("Draw a spell with Avatar".to_owned()),
             Self::CastMagic {
+                ally,
                 card_id,
                 cemetery_minion_instance_id,
                 target,
                 target_location,
                 ..
-            } => Some(if let Some(instance_id) = cemetery_minion_instance_id {
+            } => Some(if let Some(ally) = ally {
+                format!(
+                    "Cast {card_id} to grant Charge to {} {}…",
+                    ally.kind(),
+                    short_identity(ally.instance_id())
+                )
+            } else if let Some(instance_id) = cemetery_minion_instance_id {
                 format!(
                     "Cast {card_id} to return minion {}…",
                     short_identity(instance_id)
@@ -723,6 +733,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 .then_with(|| compare_unit_targets(left_target, right_target)),
             (
                 ActionDescriptor::CastMagic {
+                    ally: left_ally,
                     card_id: left_card,
                     card_instance_id: left_instance,
                     caster_instance_id: left_caster,
@@ -732,6 +743,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     target_site_instance_id: left_site,
                 },
                 ActionDescriptor::CastMagic {
+                    ally: right_ally,
                     card_id: right_card,
                     card_instance_id: right_instance,
                     caster_instance_id: right_caster,
@@ -740,7 +752,8 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     target_location: right_location,
                     target_site_instance_id: right_site,
                 },
-            ) => compare_json_strings(left_card, right_card)
+            ) => compare_optional_unit_targets(left_ally.as_ref(), right_ally.as_ref())
+                .then_with(|| compare_json_strings(left_card, right_card))
                 .then_with(|| left_instance.cmp(right_instance))
                 .then_with(|| left_caster.cmp(right_caster))
                 .then_with(|| {
@@ -1116,16 +1129,17 @@ fn compare_optional_square_areas(left: Option<SquareArea>, right: Option<SquareA
 
 const fn descriptor_group(action: &ActionDescriptor) -> u8 {
     match action {
-        ActionDescriptor::ActivateMana { .. } | ActionDescriptor::AllocateStrike { .. } => 0,
-        ActionDescriptor::Mulligan { .. } => 1,
+        ActionDescriptor::CastMagic { ally: Some(_), .. } => 0,
+        ActionDescriptor::ActivateMana { .. } | ActionDescriptor::AllocateStrike { .. } => 1,
+        ActionDescriptor::Mulligan { .. } => 2,
         ActionDescriptor::BeginChainMagic { .. }
         | ActionDescriptor::CastMagic { .. }
         | ActionDescriptor::PlaySite { .. }
-        | ActionDescriptor::SummonMinion { .. } => 2,
+        | ActionDescriptor::SummonMinion { .. } => 3,
         ActionDescriptor::ShootDamageProjectile { .. }
-        | ActionDescriptor::ShootProjectile { .. } => 3,
-        ActionDescriptor::Defend { .. } | ActionDescriptor::MoveAndAttack { .. } => 4,
-        _ => 5,
+        | ActionDescriptor::ShootProjectile { .. } => 4,
+        ActionDescriptor::Defend { .. } | ActionDescriptor::MoveAndAttack { .. } => 5,
+        _ => 6,
     }
 }
 
@@ -1454,6 +1468,56 @@ mod tests {
         canonical.sort_unstable_by_key(|candidate| {
             canonical_json(&serde_json::to_value(candidate).expect("serialized ordering candidate"))
                 .expect("canonical ordering candidate")
+        });
+
+        assert_eq!(descriptors, canonical);
+    }
+
+    #[test]
+    fn charge_magic_order_should_match_canonical_typescript_shape() {
+        const CARD_ID: &str =
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+        const CASTER_ID: &str =
+            "sha256:2222222222222222222222222222222222222222222222222222222222222222";
+        const ALLY_ID: &str =
+            "sha256:3333333333333333333333333333333333333333333333333333333333333333";
+        let descriptor =
+            |value| serde_json::from_value::<ActionDescriptor>(value).expect("typed descriptor");
+        let charge = descriptor(json!({
+            "ally": { "instanceId": ALLY_ID, "kind": "minion", "seat": "north" },
+            "cardId": "charge",
+            "cardInstanceId": CARD_ID,
+            "casterInstanceId": CASTER_ID,
+            "kind": "cast-magic",
+        }));
+        assert_eq!(
+            charge.state_independent_label().as_deref(),
+            Some("Cast charge to grant Charge to minion sha256:33333333…")
+        );
+        let mut descriptors = [
+            descriptor(json!({
+                "amount": 1,
+                "kind": "activate-mana",
+                "unitInstanceId": CASTER_ID,
+            })),
+            descriptor(json!({
+                "atlasOrder": [],
+                "kind": "mulligan",
+                "spellbookOrder": [],
+            })),
+            descriptor(json!({
+                "cardId": "ordinary",
+                "cardInstanceId": CARD_ID,
+                "casterInstanceId": CASTER_ID,
+                "kind": "cast-magic",
+            })),
+            charge,
+        ];
+        let mut canonical = descriptors.clone();
+        descriptors.sort_unstable_by(compare_canonical);
+        canonical.sort_unstable_by_key(|candidate| {
+            canonical_json(&serde_json::to_value(candidate).expect("serialized descriptor"))
+                .expect("canonical descriptor")
         });
 
         assert_eq!(descriptors, canonical);
