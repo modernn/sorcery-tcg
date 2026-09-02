@@ -5664,3 +5664,147 @@ fn rule_catalog_0022_leap_attack_resumes_its_strike_after_ordered_movement_death
     }
     assert_eq!(branch_hashes[0], branch_hashes[1]);
 }
+
+fn fatality_manifest() -> String {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-fatality": magic(("killTargetWoundedMinion", json!(true)), 0),
+        "north-lash": magic(("damageTargetUnit", json!(1)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({ "defense": 3 })),
+        "south-site": site(false),
+    });
+    let north_spellbook = [
+        "north-lash",
+        "north-lash",
+        "north-lash",
+        "north-fatality",
+        "north-fatality",
+        "north-fatality",
+    ];
+    (1..=512)
+        .map(|seed| manifest(seed, &cards, &north_spellbook, &["south-minion"; 6]))
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("Fatality seed candidate");
+            let hand = state(&preview)["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("North opening hand")
+                .clone();
+            ["north-fatality", "north-lash"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+        .expect("bounded seed with both North Magic cards in hand")
+}
+
+fn fatality_targets(session: &Session) -> Vec<String> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("Fatality actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-fatality"
+        })
+        .filter_map(|action| {
+            action.descriptor["target"]["instanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+#[test]
+fn rule_catalog_0147_fatality_should_kill_only_a_wounded_minion_in_the_caster_region() {
+    let manifest = fatality_manifest();
+    let mut session = opening_main(&manifest);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let mut enemy_ids = Vec::new();
+    for _ in 0..2 {
+        let (summoned, _) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C1"
+        });
+        enemy_ids.push(
+            summoned["cardInstanceId"]
+                .as_str()
+                .expect("summoned enemy identity")
+                .to_owned(),
+        );
+    }
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+
+    let wounded_id = enemy_ids[0].clone();
+    let healthy_id = enemy_ids[1].clone();
+    // Nothing is wounded yet, so the caster has no legal Fatality target at all.
+    assert!(fatality_targets(&session).is_empty());
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-lash"
+            && descriptor["target"]["instanceId"] == wounded_id.as_str()
+    });
+    let wounded_only = fatality_targets(&session);
+    assert_eq!(wounded_only, [wounded_id.as_str()]);
+    assert!(!wounded_only.contains(&healthy_id));
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-fatality"
+    });
+    assert_eq!(descriptor["target"]["instanceId"], wounded_id.as_str());
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "minion-killed",
+            "minion-died",
+            "magic-resolved"
+        ]
+    );
+    let killed = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-killed")
+        .expect("Fatality kill event");
+    assert_eq!(killed.payload["cardId"], "south-minion");
+    assert_eq!(killed.payload["owner"], "south");
+    assert_eq!(killed.payload["seat"], "south");
+
+    let finished = state(&session);
+    assert!(realm_unit(&finished, &wounded_id).is_none());
+    assert_eq!(
+        realm_unit(&finished, &healthy_id).expect("survivor")["damage"],
+        0
+    );
+    assert!(
+        finished["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == wounded_id.as_str())
+    );
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("Fatality checkpoint");
+    let serialized =
+        serialize_game_checkpoint(&checkpoint).expect("serialized Fatality checkpoint");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed Fatality checkpoint");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed Fatality session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}

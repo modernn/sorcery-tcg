@@ -950,12 +950,12 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_)
         | MagicEffect::GrantChargeToAllyThisTurn
         | MagicEffect::GrantPowerTwoToAllyThisTurn
+        | MagicEffect::KillTargetWoundedMinion
         | MagicEffect::LureEnemyMinionOneStepCloser
         | MagicEffect::TeleportAllyToTargetSite => None,
         MagicEffect::DamageRandomUnitAtLocation(_) => Some("damageRandomUnitAtLocation"),
         MagicEffect::DestroyTargetSiteWithDamageGrid(_) => Some("destroyTargetSiteWithDamageGrid"),
         MagicEffect::GainControlOfTargetNearbyMinion => Some("gainControlOfTargetNearbyMinion"),
-        MagicEffect::KillTargetWoundedMinion => Some("killTargetWoundedMinion"),
         MagicEffect::SubmergeTargetMinion => Some("submergeTargetMinion"),
         MagicEffect::SummonRandomMinionFromAnyCemetery => Some("summonRandomMinionFromAnyCemetery"),
         MagicEffect::TeleportNearbyAllyThenDrawCard => Some("teleportNearbyAllyThenDrawCard"),
@@ -3646,6 +3646,22 @@ impl Game {
             MagicEffect::BurrowTargetMinionOrArtifact => {
                 self.targeted_magic_choices(seat, caster_instance_id, false, true)?
             }
+            MagicEffect::KillTargetWoundedMinion => self
+                .targeted_magic_choices(seat, caster_instance_id, false, true)?
+                .into_iter()
+                .filter(|choice| {
+                    choice
+                        .target
+                        .as_ref()
+                        .and_then(|target| {
+                            self.position
+                                .units
+                                .iter()
+                                .find(|unit| unit.card.instance_id == *target.instance_id())
+                        })
+                        .is_some_and(|unit| unit.damage > 0)
+                })
+                .collect(),
             MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite => {
                 if self.spellcaster_location(seat, caster_instance_id)?.region == Region::Surface {
                     Cell::ALL
@@ -9791,6 +9807,52 @@ impl Game {
                             })
                         });
                     }
+                }
+            }
+            MagicEffect::KillTargetWoundedMinion => {
+                let Some(UnitTarget::Minion {
+                    instance_id,
+                    seat: target_seat,
+                }) = target
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                let unit = self
+                    .position
+                    .units
+                    .iter_mut()
+                    .find(|unit| {
+                        unit.card.instance_id == *instance_id && unit.controller == *target_seat
+                    })
+                    .ok_or(GameError::IllegalAction)?;
+                // A Ward absorbs the kill outright, even when its own controller casts the Magic.
+                if unit.warded {
+                    unit.warded = false;
+                    outcomes.push(
+                        "ward-broken",
+                        || json!({ "instanceId": instance_id, "seat": target_seat }),
+                    );
+                } else {
+                    let card_id = self.rules.cards[usize::from(unit.card.card_id.0)]
+                        .id
+                        .clone();
+                    let owner = unit.card.owner;
+                    outcomes.push("minion-killed", || {
+                        json!({
+                            "cardId": card_id,
+                            "instanceId": instance_id,
+                            "owner": owner,
+                            "seat": target_seat,
+                            "sourceInstanceId": card_instance_id,
+                        })
+                    });
+                    self.begin_minion_deaths(
+                        std::slice::from_ref(instance_id),
+                        &[],
+                        Phase::Main,
+                        self.position.active_seat,
+                        outcomes,
+                    )?;
                 }
             }
             MagicEffect::DisableTargetNearbyMinionUntilNextTurn => {
