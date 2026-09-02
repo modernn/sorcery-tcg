@@ -95,6 +95,7 @@ async function runRustBatch(request: string): Promise<unknown> {
     '--bin', 'sorcery-engine', '--', 'batch-json',
   ], { cwd: REPOSITORY_ROOT, stdio: ['pipe', 'pipe', 'pipe'] });
   const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
   let stdoutBytes = 0;
   let stderrBytes = 0;
   return new Promise((resolvePromise, rejectPromise) => {
@@ -115,10 +116,16 @@ async function runRustBatch(request: string): Promise<unknown> {
     child.stderr.on('data', (chunk: Buffer) => {
       stderrBytes += chunk.length;
       if (stderrBytes > MAX_OUTPUT_BYTES) return fail('game batch Rust error output exceeded its limit');
+      stderr.push(chunk);
     });
     child.once('close', (code) => {
       if (settled) return;
       if (code !== 0) {
+        const unsupported = /not yet supported by Rust: ([A-Za-z][A-Za-z0-9:]*)/u
+          .exec(Buffer.concat(stderr).toString('utf8'))?.[1];
+        if (unsupported) {
+          return fail(`game batch failed in Rust: unsupported fact ${unsupported}`);
+        }
         return fail('game batch failed in Rust');
       }
       try {

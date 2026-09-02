@@ -49,5 +49,32 @@ test('one and many workers produce byte-identical ordered game reports', async (
     assert.equal(error.message.includes('futureUnsupportedMechanic'), false);
     return true;
   });
+  const unsupportedBody = {
+    authority: source.authority,
+    cards: Object.fromEntries(Object.entries(source.cards).map(([id, card]) => [
+      id,
+      id.startsWith('south-spell-')
+        ? {
+          cardType: 'magic',
+          damageChainNearbyUnits: true,
+          manaCost: 0,
+          thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+        }
+        : card,
+    ])),
+    decks: source.decks,
+    engineVersion: source.engineVersion,
+    firstSeat: source.firstSeat,
+    schemaVersion: source.schemaVersion,
+    seed: source.seed,
+  };
+  const unsupported = {
+    ...unsupportedBody,
+    manifestId: identityHash(unsupportedBody as unknown as JsonValue),
+  } as GameManifest;
+  await assert.rejects(
+    runGameBatch([unsupported], 1),
+    /game batch failed in Rust: unsupported fact damageChainNearbyUnits/u,
+  );
   await assert.rejects(runGameBatch(manifests, 9), /requestedWorkers/);
 });

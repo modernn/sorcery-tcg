@@ -377,6 +377,427 @@ fn rule_catalog_0019_targeted_magic_is_a_non_unit_source_and_resolves_deathrites
     assert_exact_replay(&session);
 }
 
+fn bury_checkpoint(seed: u32, target_extra: Value, water: bool) -> (Session, String, String) {
+    let mut cards = json!({
+        "north-avatar": avatar(20),
+        "north-bury": magic(("burrowTargetMinionOrArtifact", json!(true)), 1),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(target_extra),
+        "south-site": site(false),
+    });
+    if water {
+        cards["south-site"]["elements"] = json!(["earth", "water"]);
+    }
+    let manifest = manifest(seed, &cards, &["north-bury"; 6], &["south-minion"; 6]);
+    let mut session = opening_main(&manifest);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C1"
+    });
+    let target_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("Bury target identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let spell_id = state(&session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North hand")
+        .iter()
+        .find(|card| card["cardId"] == "north-bury")
+        .expect("Bury in hand")["instanceId"]
+        .as_str()
+        .expect("Bury identity")
+        .to_owned();
+    (session, target_id, spell_id)
+}
+
+fn cast_bury(session: &mut Session, target_id: &str, spell_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardInstanceId"] == spell_id
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    receipt
+}
+
+fn realm_unit<'a>(value: &'a Value, instance_id: &str) -> Option<&'a Value> {
+    value["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one direct proof retains Bury survival, death, Ward, terrain, checkpoint, and replay"
+)]
+fn rule_catalog_0042_bury_moves_and_immediately_settles_a_minion() {
+    let (mut survivor, survivor_id, survivor_spell) =
+        bury_checkpoint(420, json!({ "burrowing": true }), false);
+    let actions = survivor.legal_actions().expect("Bury actions");
+    let bury_actions: Vec<_> = actions
+        .iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardInstanceId"] == survivor_spell
+        })
+        .collect();
+    assert_eq!(bury_actions.len(), 1);
+    assert_eq!(bury_actions[0].descriptor["target"]["kind"], "minion");
+    assert_eq!(
+        bury_actions[0].descriptor["target"]["instanceId"],
+        survivor_id
+    );
+
+    let checkpoint = create_game_checkpoint(&survivor).expect("captured Bury checkpoint");
+    let restored = resume_game_checkpoint(
+        &parse_game_checkpoint(
+            &serialize_game_checkpoint(&checkpoint).expect("serialized Bury checkpoint"),
+        )
+        .expect("parsed Bury checkpoint"),
+    )
+    .expect("restored Bury checkpoint");
+    assert_eq!(
+        restored.replay_value().expect("restored Bury state"),
+        survivor.replay_value().expect("source Bury state")
+    );
+    assert_eq!(
+        restored.legal_actions().expect("restored Bury actions"),
+        actions
+    );
+
+    let survived = cast_bury(&mut survivor, &survivor_id, &survivor_spell);
+    assert_eq!(
+        event_types(&survived),
+        ["magic-cast", "minion-burrowed", "magic-resolved"]
+    );
+    assert!(survived.random_draws.is_empty());
+    assert_eq!(
+        survived.events[1].payload,
+        json!({
+            "cell": "C1",
+            "instanceId": survivor_id,
+            "seat": "south",
+            "sourceInstanceId": survivor_spell,
+        })
+    );
+    assert_eq!(
+        realm_unit(&state(&survivor), &survivor_id).expect("burrowed survivor")["region"],
+        "underground"
+    );
+    assert!(
+        !survivor
+            .legal_actions()
+            .expect("post-Bury actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "cast-magic"
+                    && action.descriptor["target"]["instanceId"] == survivor_id
+            })
+    );
+    assert_exact_replay(&survivor);
+
+    let (mut ordinary, ordinary_id, ordinary_spell) = bury_checkpoint(421, json!({}), false);
+    let died = cast_bury(&mut ordinary, &ordinary_id, &ordinary_spell);
+    assert_eq!(
+        event_types(&died),
+        [
+            "magic-cast",
+            "minion-burrowed",
+            "minion-died",
+            "magic-resolved",
+        ]
+    );
+    let ordinary_state = state(&ordinary);
+    assert!(realm_unit(&ordinary_state, &ordinary_id).is_none());
+    assert!(
+        ordinary_state["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == ordinary_id)
+    );
+    assert_exact_replay(&ordinary);
+
+    let (mut warded, warded_id, warded_spell) =
+        bury_checkpoint(422, json!({ "ward": true }), false);
+    let ward = cast_bury(&mut warded, &warded_id, &warded_spell);
+    assert_eq!(
+        event_types(&ward),
+        ["magic-cast", "ward-broken", "magic-resolved"]
+    );
+    let warded_state = state(&warded);
+    let warded_unit = realm_unit(&warded_state, &warded_id).expect("Ward survivor");
+    assert_eq!(warded_unit["region"], "surface");
+    assert_eq!(warded_unit["warded"], false);
+    assert_exact_replay(&warded);
+
+    let (mut water, water_id, water_spell) = bury_checkpoint(423, json!({}), true);
+    let water_before = realm_unit(&state(&water), &water_id)
+        .expect("Water target")
+        .clone();
+    let blocked = cast_bury(&mut water, &water_id, &water_spell);
+    assert_eq!(event_types(&blocked), ["magic-cast", "magic-resolved"]);
+    assert_eq!(
+        realm_unit(&state(&water), &water_id).expect("blocked target"),
+        &water_before
+    );
+    assert_exact_replay(&water);
+
+    let (mut deathrite, deathrite_id, deathrite_spell) =
+        bury_checkpoint(424, json!({ "deathriteDrawSite": true }), false);
+    let deathrite_result = cast_bury(&mut deathrite, &deathrite_id, &deathrite_spell);
+    assert_eq!(
+        event_types(&deathrite_result),
+        [
+            "magic-cast",
+            "minion-burrowed",
+            "site-drawn",
+            "minion-died",
+            "magic-resolved",
+        ]
+    );
+    assert_exact_replay(&deathrite);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one ordered Bury proof retains setup, deferred state, checkpoint, completion, and replay"
+)]
+fn bury_should_defer_completion_until_ordered_static_deathrites_finish() {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-bury": magic(("burrowTargetMinionOrArtifact", json!(true)), 0),
+        "north-pinger": minion(json!({
+            "defense": 10,
+            "genesisDamageEachOtherUnitHere": 1,
+            "summonToAnySite": true,
+        })),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-buff": minion(json!({
+            "burrowing": true,
+            "deathriteDrawSite": true,
+            "otherNearbyAlliesPowerBonus": 1,
+        })),
+        "south-site": site(false),
+    });
+    let north_spellbook = [
+        "north-bury",
+        "north-bury",
+        "north-pinger",
+        "north-bury",
+        "north-bury",
+        "north-pinger",
+    ];
+    let manifest = (1..=512)
+        .map(|seed| manifest(seed, &cards, &north_spellbook, &["south-buff"; 6]))
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("ordered Bury candidate");
+            let hand = state(&preview)["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("North opening hand")
+                .clone();
+            hand.iter().any(|card| card["cardId"] == "north-bury")
+                && hand.iter().any(|card| card["cardId"] == "north-pinger")
+        })
+        .expect("bounded seed with Bury and a pinger");
+    let mut session = opening_main(&manifest);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let mut buff_ids = Vec::new();
+    for _ in 0..2 {
+        let (summoned, _) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == "south-buff"
+                && descriptor["cell"] == "C1"
+        });
+        buff_ids.push(
+            summoned["cardInstanceId"]
+                .as_str()
+                .expect("buff identity")
+                .to_owned(),
+        );
+    }
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-pinger"
+            && descriptor["cell"] == "C1"
+    });
+    assert!(buff_ids.iter().all(|instance_id| {
+        realm_unit(&state(&session), instance_id).is_some_and(|unit| unit["damage"] == 1)
+    }));
+    let spell_id = state(&session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North hand")
+        .iter()
+        .find(|card| card["cardId"] == "north-bury")
+        .expect("Bury in hand")["instanceId"]
+        .as_str()
+        .expect("Bury identity")
+        .to_owned();
+
+    let cast = cast_bury(&mut session, &buff_ids[0], &spell_id);
+    assert_eq!(event_types(&cast), ["magic-cast", "minion-burrowed"]);
+    let pending = state(&session);
+    assert_eq!(pending["phase"], "deathrite-order");
+    assert_eq!(pending["decisionSeat"], "south");
+    assert_eq!(
+        pending["pendingDeathrites"]["deferredOutcomes"],
+        json!([{
+            "payload": {
+                "cardId": "north-bury",
+                "instanceId": spell_id,
+                "owner": "north",
+            },
+            "type": "magic-resolved",
+        }])
+    );
+
+    let checkpoint = create_game_checkpoint(&session).expect("ordered Bury checkpoint");
+    let restored = resume_game_checkpoint(&checkpoint).expect("restored ordered Bury checkpoint");
+    assert_eq!(
+        restored.replay_value().expect("restored pending state"),
+        session.replay_value().expect("source pending state")
+    );
+    let (_, ordered) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == buff_ids[0]
+    });
+    assert_eq!(
+        event_types(&ordered),
+        [
+            "deathrite-order-committed",
+            "site-drawn",
+            "site-drawn",
+            "minion-died",
+            "minion-died",
+            "magic-resolved",
+        ]
+    );
+    assert_eq!(state(&session)["phase"], "main");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn disable_magic_should_kill_its_underground_burrowing_target() {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-bury": magic(("burrowTargetMinionOrArtifact", json!(true)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-freeze": magic(("disableTargetNearbyMinionUntilNextTurn", json!(true)), 0),
+        "south-minion": minion(json!({
+            "burrowing": true,
+            "spellcaster": true,
+        })),
+        "south-site": site(false),
+    });
+    let south_spellbook = [
+        "south-freeze",
+        "south-minion",
+        "south-freeze",
+        "south-minion",
+        "south-freeze",
+        "south-minion",
+    ];
+    let manifest = (1..=512)
+        .map(|seed| manifest(seed, &cards, &["north-bury"; 6], &south_spellbook))
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("Disable candidate");
+            let hand = state(&preview)["players"]["south"]["hand"]["spellbook"]
+                .as_array()
+                .expect("South opening hand")
+                .clone();
+            hand.iter().any(|card| card["cardId"] == "south-freeze")
+                && hand.iter().any(|card| card["cardId"] == "south-minion")
+        })
+        .expect("bounded seed with Freeze and a Burrowing spellcaster");
+    let mut session = opening_main(&manifest);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+    });
+    let target_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("Burrowing spellcaster identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let bury_id = state(&session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North hand")
+        .iter()
+        .find(|card| card["cardId"] == "north-bury")
+        .expect("Bury in hand")["instanceId"]
+        .as_str()
+        .expect("Bury identity")
+        .to_owned();
+    cast_bury(&mut session, &target_id, &bury_id);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let freeze_id = state(&session)["players"]["south"]["hand"]["spellbook"]
+        .as_array()
+        .expect("South hand")
+        .iter()
+        .find(|card| card["cardId"] == "south-freeze")
+        .expect("Freeze in hand")["instanceId"]
+        .as_str()
+        .expect("Freeze identity")
+        .to_owned();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardInstanceId"] == freeze_id
+            && descriptor["casterInstanceId"] == target_id
+            && descriptor["target"]["instanceId"] == target_id
+    });
+
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "minion-disabled",
+            "minion-died",
+            "magic-resolved",
+        ]
+    );
+    assert!(realm_unit(&state(&session), &target_id).is_none());
+    assert_exact_replay(&session);
+}
+
 #[test]
 fn targeted_magic_allows_friendly_stealth_and_excludes_enemy_active_stealth() {
     let cards = json!({
