@@ -1042,14 +1042,13 @@ fn unsupported_selfplay_artifact(facts: &ArtifactFacts) -> Option<&'static str> 
 /// The Artifact effects the realm cannot yet honor, named by their authoring field.
 const fn unsupported_artifact_effect(effect: ArtifactEffect) -> Option<&'static str> {
     match effect {
-        ArtifactEffect::GrantsBearerPowerTwo => None,
+        ArtifactEffect::GrantsBearerLethal | ArtifactEffect::GrantsBearerPowerTwo => None,
         ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(_) => {
             Some("atEndOfEachTurnSiteControllerLosesLife")
         }
         ArtifactEffect::BearerControllerChoosesExtraRandomOutcome => {
             Some("bearerControllerChoosesExtraRandomOutcome")
         }
-        ArtifactEffect::GrantsBearerLethal => Some("grantsBearerLethal"),
         ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps => {
             Some("tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps")
         }
@@ -14708,11 +14707,16 @@ mod tests {
             "manaCost": 0,
             "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
         });
+        Game::from_manifest_json(&artifact_manifest(&lethal_artifact, false))
+            .expect("valid Lethal Artifact manifest")
+            .ensure_selfplay_supported()
+            .expect("Lethal Artifacts are self-play safe");
         assert!(matches!(
-            Game::from_manifest_json(&artifact_manifest(&lethal_artifact, false))
-                .expect("valid Lethal Artifact manifest")
+            Game::from_manifest_json(&artifact_manifest(&lethal_artifact, true))
+                .expect("valid Bury plus Lethal Artifact manifest")
                 .ensure_selfplay_supported(),
-            Err(GameError::UnsupportedManifestFact(field)) if field == "grantsBearerLethal"
+            Err(GameError::UnsupportedManifestFact(field))
+                if field == "burrowTargetMinionOrArtifact with cardType:artifact"
         ));
     }
 

@@ -1,5 +1,6 @@
-//! Direct proofs for local carried Artifacts (RULE-CATALOG-0140) and the power an Artifact
-//! carries away from a lethally wounded bearer when it is dropped (RULE-CATALOG-0141).
+//! Direct proofs for local carried Artifacts (RULE-CATALOG-0140), the power an Artifact
+//! carries away from a lethally wounded bearer when it is dropped (RULE-CATALOG-0141), and the
+//! Lethal a carried Artifact grants its bearer until the bearer falls (RULE-CATALOG-0142).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -35,6 +36,15 @@ fn power_artifact(mana_cost: u64) -> Value {
     json!({
         "cardType": "artifact",
         "grantsBearerPower": 2,
+        "manaCost": mana_cost,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn lethal_artifact(mana_cost: u64) -> Value {
+    json!({
+        "cardType": "artifact",
+        "grantsBearerLethal": true,
         "manaCost": mana_cost,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
@@ -104,6 +114,16 @@ fn realm_artifacts(current: &Value) -> Vec<Value> {
         .as_array()
         .cloned()
         .unwrap_or_default()
+}
+
+/// The realm unit with this identity, absent once it has died.
+fn realm_unit(current: &Value, instance_id: &str) -> Option<Value> {
+    current["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+        .cloned()
 }
 
 fn descriptors_of_kind(session: &Session, kind: &str) -> Vec<Value> {
@@ -397,14 +417,8 @@ fn rule_catalog_0141_dropping_a_power_artifact_should_kill_a_lethally_wounded_be
             .iter()
             .any(|event| event.event_type == "minion-died")
     );
-    let alive = state(&session);
     assert_eq!(
-        alive["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .find(|unit| unit["instanceId"] == bearer.as_str())
-            .expect("wounded bearer")["damage"],
+        realm_unit(&state(&session), &bearer).expect("wounded bearer")["damage"],
         1
     );
 
@@ -423,13 +437,7 @@ fn rule_catalog_0141_dropping_a_power_artifact_should_kill_a_lethally_wounded_be
     assert!(released.random_draws.is_empty());
 
     let settled = state(&session);
-    assert!(
-        !settled["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .any(|unit| unit["instanceId"] == bearer.as_str())
-    );
+    assert!(realm_unit(&settled, &bearer).is_none());
     assert!(
         settled["players"]["north"]["cemetery"]
             .as_array()
@@ -442,5 +450,204 @@ fn rule_catalog_0141_dropping_a_power_artifact_should_kill_a_lethally_wounded_be
     assert!(artifacts[0]["bearer"].is_null());
     assert_eq!(artifacts[0]["location"], "C4");
     assert_eq!(artifacts[0]["region"], "surface");
+    assert_exact_replay(&session);
+}
+
+fn lethal_strike_scenario() -> String {
+    let cards = json!({
+        "dagger-avatar": avatar(),
+        "dagger-bearer": minion(json!({
+            "attack": 2,
+            "defense": 2,
+            "manaCost": 1,
+            "thresholds": { "air": 0, "earth": 1, "fire": 0, "water": 0 },
+        })),
+        "dagger-enemy": minion(json!({
+            "attack": 2,
+            "charge": true,
+            "defense": 3,
+            "manaCost": 1,
+            "summonToAnySite": true,
+            "thresholds": { "air": 0, "earth": 1, "fire": 0, "water": 0 },
+        })),
+        "dagger-site": { "cardType": "site", "elements": ["earth"], "genesisGainMana": 6 },
+        "poisonous-dagger": lethal_artifact(2),
+    });
+    let decks = json!({
+        "north": {
+            "atlas": vec!["dagger-site"; 6],
+            "avatar": "dagger-avatar",
+            "spellbook": [
+                "poisonous-dagger",
+                "dagger-bearer",
+                "poisonous-dagger",
+                "dagger-bearer",
+                "poisonous-dagger",
+                "dagger-bearer",
+            ],
+        },
+        "south": {
+            "atlas": vec!["dagger-site"; 6],
+            "avatar": "dagger-avatar",
+            "spellbook": vec!["dagger-enemy"; 6],
+        },
+    });
+    (1..=4096)
+        .map(|seed| manifest("synthetic-lethal-artifact-v1", &cards, &decks, seed))
+        .find(|candidate| {
+            let opening = state(&Session::new(candidate).expect("lethal strike candidate"));
+            ["dagger-bearer", "poisonous-dagger"]
+                .into_iter()
+                .all(|card_id| {
+                    opening["players"]["north"]["hand"]["spellbook"]
+                        .as_array()
+                        .expect("opening spellbook hand")
+                        .iter()
+                        .any(|card| card["cardId"] == card_id)
+                })
+        })
+        .expect("bounded seed opening with the bearer and its dagger in hand")
+}
+
+/// Walks both seats up to the strike exchange between North's two-power bearer at C3 and the
+/// three-defense enemy that charges in to attack it. The dagger is conjured either onto the bearer
+/// or loose on the same cell, which is the only difference between the two outcomes.
+fn lethal_strike_position(session: &mut Session, carried: bool) -> (String, String) {
+    play_site(session, "dagger-site", "C4");
+    let bearer = summon(session, "dagger-bearer", "C4");
+    end_and_draw(session);
+    play_site(session, "dagger-site", "C1");
+    end_and_draw(session);
+
+    play_site(session, "dagger-site", "C3");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "poisonous-dagger"
+            && if carried {
+                descriptor["bearer"]["instanceId"] == bearer.as_str()
+            } else {
+                descriptor["bearer"].is_null() && descriptor["cell"] == "C3"
+            }
+    });
+    // Stepping to C3 leaves the bearer alone with the dagger, so the exchange is a clean duel.
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == bearer.as_str()
+            && descriptor["to"]["cell"] == "C3"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    end_and_draw(session);
+
+    play_site(session, "dagger-site", "C2");
+    let enemy = summon(session, "dagger-enemy", "C3");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == enemy.as_str()
+            && descriptor["to"]["cell"] == "C3"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "declare-attack"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == bearer.as_str()
+    });
+    (bearer, enemy)
+}
+
+#[test]
+fn rule_catalog_0142_carried_lethal_should_kill_on_positive_strike_damage_and_drop_with_bearer() {
+    let mut session =
+        Session::new(&lethal_strike_scenario()).expect("valid lethal strike scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let (bearer, enemy) = lethal_strike_position(&mut session, true);
+
+    let (_, fought) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "close-defend" && descriptor["originalTargetParticipates"] == true
+    });
+    // Two power against three defense is short of lethal on its own, so only the carried Lethal
+    // can explain the enemy's death; the bearer dies to the ordinary two it takes back.
+    let struck: Vec<_> = fought
+        .events
+        .iter()
+        .filter(|event| event.event_type == "damage-dealt")
+        .map(|event| {
+            (
+                event.payload["instanceId"].clone(),
+                event.payload["amount"].clone(),
+            )
+        })
+        .collect();
+    assert!(struck.contains(&(json!(enemy), json!(2))));
+    assert!(struck.contains(&(json!(bearer), json!(2))));
+
+    let event_types: Vec<_> = fought
+        .events
+        .iter()
+        .map(|event| event.event_type.as_str())
+        .collect();
+    assert_eq!(
+        event_types
+            .iter()
+            .filter(|event_type| **event_type == "minion-died")
+            .count(),
+        2
+    );
+    // The dagger leaves its bearer as the bearer falls, before the death is recorded.
+    let dropped = event_types
+        .iter()
+        .position(|event_type| *event_type == "artifact-dropped")
+        .expect("the dagger drops with its bearer");
+    let bearer_died = fought
+        .events
+        .iter()
+        .position(|event| {
+            event.event_type == "minion-died" && event.payload["instanceId"] == bearer.as_str()
+        })
+        .expect("the bearer dies in the exchange");
+    assert!(dropped < bearer_died);
+
+    let settled = state(&session);
+    assert!(realm_unit(&settled, &bearer).is_none());
+    assert!(realm_unit(&settled, &enemy).is_none());
+    let artifacts = realm_artifacts(&settled);
+    assert_eq!(artifacts.len(), 1);
+    assert!(artifacts[0]["bearer"].is_null());
+    assert_eq!(artifacts[0]["location"], "C3");
+    assert_eq!(artifacts[0]["region"], "surface");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn a_loose_lethal_artifact_should_not_grant_lethal_to_the_unit_standing_on_it() {
+    let mut session =
+        Session::new(&lethal_strike_scenario()).expect("valid lethal strike scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let (bearer, enemy) = lethal_strike_position(&mut session, false);
+
+    let (_, fought) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "close-defend" && descriptor["originalTargetParticipates"] == true
+    });
+    assert_eq!(
+        fought
+            .events
+            .iter()
+            .filter(|event| event.event_type == "minion-died")
+            .map(|event| event.payload["instanceId"].clone())
+            .collect::<Vec<_>>(),
+        vec![json!(bearer)]
+    );
+
+    // The same two damage only wounds the enemy while the dagger lies loose on its cell.
+    let settled = state(&session);
+    assert_eq!(
+        realm_unit(&settled, &enemy).expect("surviving enemy")["damage"],
+        2
+    );
+    assert!(realm_unit(&settled, &bearer).is_none());
+    let artifacts = realm_artifacts(&settled);
+    assert_eq!(artifacts.len(), 1);
+    assert!(artifacts[0]["bearer"].is_null());
+    assert_eq!(artifacts[0]["location"], "C3");
     assert_exact_replay(&session);
 }
