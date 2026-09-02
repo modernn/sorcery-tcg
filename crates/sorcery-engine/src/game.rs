@@ -43,6 +43,7 @@ pub struct RulesContext {
 pub struct Position {
     active_seat: Seat,
     decision_seat: Seat,
+    immobile_areas: Vec<ImmobileArea>,
     pending_basic_movement: PendingField<PendingBasicMovement>,
     pending_chain_magic: PendingField<PendingChainMagic>,
     pending_combat: Option<PendingCombat>,
@@ -358,6 +359,14 @@ struct UnitPosition {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct DisableEffect {
+    expires_at_seat: Seat,
+    source_instance_id: IdentityHash,
+}
+
+/// A realm area whose occupants cannot depart until the recorded seat's next turn.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ImmobileArea {
+    cells: BTreeSet<Cell>,
     expires_at_seat: Seat,
     source_instance_id: IdentityHash,
 }
@@ -991,8 +1000,6 @@ fn unsupported_selfplay_site(facts: &SiteFacts) -> Option<&'static str> {
         Some("connectsBurrowedAllies")
     } else if facts.fly_to_nearby_void_once_per_turn_at_air_threshold {
         Some("flyToNearbyVoidOncePerTurnAtAirThreshold")
-    } else if facts.genesis_immobilize_nearby_until_next_turn {
-        Some("genesisImmobilizeNearbyUntilNextTurn")
     } else if facts.minions_here_gain_voidwalk_until_leaving_void {
         Some("minionsHereGainVoidwalkUntilLeavingVoid")
     } else if facts
@@ -1237,6 +1244,7 @@ impl Game {
             position: Position {
                 active_seat: Seat::North,
                 decision_seat: Seat::North,
+                immobile_areas: Vec::new(),
                 pending_basic_movement: PendingField::Absent,
                 pending_chain_magic: PendingField::Absent,
                 pending_combat: None,
@@ -4018,6 +4026,9 @@ impl Game {
                 if cost == maximum_cost && step_cost != 0 {
                     continue;
                 }
+                if self.footprint_is_immobilized(profile.occupied_cells, start.cell, current.cell) {
+                    continue;
+                }
                 for cell in current.cell.bordering(profile.connects_top_bottom).chain(
                     profile
                         .airborne
@@ -4077,6 +4088,31 @@ impl Game {
             paths.extend(frontier.iter().map(|(_, path)| path.clone()));
         }
         paths
+    }
+
+    fn cell_is_immobilized(&self, cell: Cell) -> bool {
+        self.position
+            .immobile_areas
+            .iter()
+            .any(|area| area.cells.contains(&cell))
+    }
+
+    fn footprint_is_immobilized(
+        &self,
+        occupied_cells: Option<SquareArea>,
+        start: Cell,
+        current: Cell,
+    ) -> bool {
+        occupied_cells.map_or_else(
+            || self.cell_is_immobilized(current),
+            |area| {
+                translated_square(area, start, current).is_some_and(|translated| {
+                    translated
+                        .into_iter()
+                        .any(|cell| self.cell_is_immobilized(cell))
+                })
+            },
+        )
     }
 
     fn surface_movement_step_cost(&self, current: Cell, profile: MovementProfile) -> usize {
@@ -8379,6 +8415,18 @@ impl Game {
                 }
             }
         }
+        if facts.genesis_immobilize_nearby_until_next_turn {
+            let cells: BTreeSet<Cell> = std::iter::once(cell)
+                .chain(cell.bordering(false))
+                .chain(cell.diagonals(false))
+                .filter(|nearby| self.position.sites[nearby.index()].is_some())
+                .collect();
+            self.position.immobile_areas.push(ImmobileArea {
+                cells,
+                expires_at_seat: seat,
+                source_instance_id: card_instance_id.clone(),
+            });
+        }
         if let Some(amount) = genesis_gain_mana {
             outcomes.push("mana-gained", || {
                 json!({
@@ -11546,6 +11594,9 @@ impl Game {
             unit.disable_effects
                 .retain(|effect| effect.expires_at_seat != next_seat);
         }
+        self.position
+            .immobile_areas
+            .retain(|area| area.expires_at_seat != next_seat);
         let ended_turn = self.position.turn_number;
         self.position.turn_number += 1;
         self.position.active_seat = next_seat;
@@ -11668,6 +11719,20 @@ impl Game {
             }
             self.insert_pending_movement_state(object);
             self.insert_pending_chain_magic_state(object);
+        }
+        if !self.position.immobile_areas.is_empty() {
+            value["realm"]["immobileAreas"] = self
+                .position
+                .immobile_areas
+                .iter()
+                .map(|area| {
+                    json!({
+                        "cells": area.cells,
+                        "expiresAtSeat": area.expires_at_seat,
+                        "sourceInstanceId": area.source_instance_id,
+                    })
+                })
+                .collect();
         }
         value
     }
