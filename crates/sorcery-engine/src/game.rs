@@ -494,6 +494,7 @@ struct MagicChoice {
     discard_site_instance_id: Option<IdentityHash>,
     draw_zone: Option<DeckZone>,
     target: Option<UnitTarget>,
+    target_artifact_instance_id: Option<IdentityHash>,
     target_location: Option<Location>,
     target_site_instance_id: Option<IdentityHash>,
     tempted_destination: Option<Location>,
@@ -1152,7 +1153,6 @@ fn unsupported_alongside_artifacts(facts: &CardFacts) -> Option<&'static str> {
             MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite => {
                 Some("burrowAllMinionsAndArtifactsAtTargetLandSite")
             }
-            MagicEffect::BurrowTargetMinionOrArtifact => Some("burrowTargetMinionOrArtifact"),
             _ => None,
         },
         // An oversized bearer carries each Artifact at one exact cell of its footprint.
@@ -2691,6 +2691,7 @@ impl Game {
                         discard_site_instance_id: choice.discard_site_instance_id,
                         draw_zone: choice.draw_zone,
                         target: choice.target,
+                        target_artifact_instance_id: choice.target_artifact_instance_id,
                         target_location: choice.target_location,
                         target_site_instance_id: choice.target_site_instance_id,
                         tempted_destination: choice.tempted_destination,
@@ -4644,8 +4645,21 @@ impl Game {
                 *target_nearby,
                 *untap_target_minion_after_damage,
             )?,
-            MagicEffect::BurrowTargetMinionOrArtifact | MagicEffect::SubmergeTargetMinion => {
+            MagicEffect::SubmergeTargetMinion => {
                 self.targeted_magic_choices(seat, caster_instance_id, false, true)?
+            }
+            MagicEffect::BurrowTargetMinionOrArtifact => {
+                let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
+                let mut choices =
+                    self.targeted_magic_choices(seat, caster_instance_id, false, true)?;
+                choices.extend(self.position.artifacts.iter().filter_map(|artifact| {
+                    let location = self.artifact_location(artifact).ok()?;
+                    (location.region == caster_location.region).then_some(MagicChoice {
+                        target_artifact_instance_id: Some(artifact.card.instance_id.clone()),
+                        ..MagicChoice::default()
+                    })
+                }));
+                choices
             }
             MagicEffect::GainControlOfTargetNearbyMinion => {
                 self.targeted_magic_choices(seat, caster_instance_id, true, true)?
@@ -11776,6 +11790,7 @@ impl Game {
             discard_site_instance_id,
             draw_zone,
             target,
+            target_artifact_instance_id,
             target_location,
             target_site_instance_id,
             tempted_destination,
@@ -11817,6 +11832,7 @@ impl Game {
                     discard_site_instance_id: discard_site_instance_id.clone(),
                     draw_zone: *draw_zone,
                     target: target.clone(),
+                    target_artifact_instance_id: target_artifact_instance_id.clone(),
                     target_location: *target_location,
                     target_site_instance_id: target_site_instance_id.clone(),
                     tempted_destination: *tempted_destination,
@@ -11993,6 +12009,9 @@ impl Game {
             if let Some(target) = target {
                 payload["targetInstanceId"] = json!(target.instance_id());
                 payload["targetSeat"] = json!(target.seat());
+            }
+            if let Some(target_artifact_instance_id) = target_artifact_instance_id {
+                payload["targetArtifactInstanceId"] = json!(target_artifact_instance_id);
             }
             if let Some(target_location) = target_location {
                 payload["targetLocation"] = json!(target_location);
@@ -12311,8 +12330,79 @@ impl Game {
                     });
                 }
             }
-            MagicEffect::BurrowTargetMinionOrArtifact | MagicEffect::SubmergeTargetMinion => {
-                let submerged = matches!(effect, MagicEffect::SubmergeTargetMinion);
+            MagicEffect::BurrowTargetMinionOrArtifact => {
+                if let Some(artifact_instance_id) = target_artifact_instance_id {
+                    let artifact_index = self
+                        .position
+                        .artifacts
+                        .iter()
+                        .position(|artifact| artifact.card.instance_id == *artifact_instance_id)
+                        .ok_or(GameError::IllegalAction)?;
+                    let location =
+                        self.artifact_location(&self.position.artifacts[artifact_index])?;
+                    let can_move = location.region == Region::Surface
+                        && self.surface_location_exists(location.cell)
+                        && !self.is_water_site(location.cell);
+                    if can_move {
+                        let cell = location.cell;
+                        let owner = self.position.artifacts[artifact_index].card.owner;
+                        self.position.artifacts[artifact_index].placement =
+                            ArtifactPlacement::Loose {
+                                location: cell,
+                                region: Region::Underground,
+                            };
+                        outcomes.push("artifact-burrowed", || {
+                            json!({
+                                "cell": cell,
+                                "instanceId": artifact_instance_id,
+                                "owner": owner,
+                                "sourceInstanceId": card_instance_id,
+                            })
+                        });
+                    }
+                } else {
+                    let Some(UnitTarget::Minion {
+                        instance_id,
+                        seat: target_seat,
+                    }) = target
+                    else {
+                        return Err(GameError::IllegalAction);
+                    };
+                    let target_index = self
+                        .position
+                        .units
+                        .iter()
+                        .position(|unit| {
+                            unit.card.instance_id == *instance_id && unit.controller == *target_seat
+                        })
+                        .ok_or(GameError::IllegalAction)?;
+                    if self.position.units[target_index].warded && *target_seat != seat {
+                        self.position.units[target_index].warded = false;
+                        outcomes.push(
+                            "ward-broken",
+                            || json!({ "instanceId": instance_id, "seat": target_seat }),
+                        );
+                    } else {
+                        let can_move = self.position.units[target_index].region == Region::Surface
+                            && Self::unit_occupied_cells(&self.position.units[target_index])
+                                .iter()
+                                .all(|cell| self.underground_location_exists(*cell));
+                        if can_move {
+                            self.position.units[target_index].region = Region::Underground;
+                            let cell = self.position.units[target_index].location;
+                            outcomes.push("minion-burrowed", || {
+                                json!({
+                                    "cell": cell,
+                                    "instanceId": instance_id,
+                                    "seat": target_seat,
+                                    "sourceInstanceId": card_instance_id,
+                                })
+                            });
+                        }
+                    }
+                }
+            }
+            MagicEffect::SubmergeTargetMinion => {
                 let Some(UnitTarget::Minion {
                     instance_id,
                     seat: target_seat,
@@ -12335,33 +12425,21 @@ impl Game {
                         || json!({ "instanceId": instance_id, "seat": target_seat }),
                     );
                 } else {
-                    let destination = if submerged {
-                        Region::Underwater
-                    } else {
-                        Region::Underground
-                    };
                     let can_move = self.position.units[target_index].region == Region::Surface
                         && Self::unit_occupied_cells(&self.position.units[target_index])
                             .iter()
-                            .all(|cell| self.location_exists_in_region(*cell, destination));
+                            .all(|cell| self.location_exists_in_region(*cell, Region::Underwater));
                     if can_move {
-                        self.position.units[target_index].region = destination;
+                        self.position.units[target_index].region = Region::Underwater;
                         let cell = self.position.units[target_index].location;
-                        outcomes.push(
-                            if submerged {
-                                "minion-submerged"
-                            } else {
-                                "minion-burrowed"
-                            },
-                            || {
-                                json!({
-                                    "cell": cell,
-                                    "instanceId": instance_id,
-                                    "seat": target_seat,
-                                    "sourceInstanceId": card_instance_id,
-                                })
-                            },
-                        );
+                        outcomes.push("minion-submerged", || {
+                            json!({
+                                "cell": cell,
+                                "instanceId": instance_id,
+                                "seat": target_seat,
+                                "sourceInstanceId": card_instance_id,
+                            })
+                        });
                     }
                 }
             }
@@ -15878,13 +15956,10 @@ mod tests {
             .expect("valid power Artifact manifest")
             .ensure_selfplay_supported()
             .expect("power Artifacts are self-play safe");
-        assert!(matches!(
-            Game::from_manifest_json(&artifact_manifest(&power_artifact, true))
-                .expect("valid Bury plus Artifact manifest")
-                .ensure_selfplay_supported(),
-            Err(GameError::UnsupportedManifestFact(field))
-                if field == "burrowTargetMinionOrArtifact with cardType:artifact"
-        ));
+        Game::from_manifest_json(&artifact_manifest(&power_artifact, true))
+            .expect("valid Bury plus Artifact manifest")
+            .ensure_selfplay_supported()
+            .expect("Bury with power Artifacts is self-play safe");
 
         let lethal_artifact = json!({
             "cardType": "artifact",
@@ -15896,13 +15971,10 @@ mod tests {
             .expect("valid Lethal Artifact manifest")
             .ensure_selfplay_supported()
             .expect("Lethal Artifacts are self-play safe");
-        assert!(matches!(
-            Game::from_manifest_json(&artifact_manifest(&lethal_artifact, true))
-                .expect("valid Bury plus Lethal Artifact manifest")
-                .ensure_selfplay_supported(),
-            Err(GameError::UnsupportedManifestFact(field))
-                if field == "burrowTargetMinionOrArtifact with cardType:artifact"
-        ));
+        Game::from_manifest_json(&artifact_manifest(&lethal_artifact, true))
+            .expect("valid Bury plus Lethal Artifact manifest")
+            .ensure_selfplay_supported()
+            .expect("Bury with Lethal Artifacts is self-play safe");
     }
 
     #[test]

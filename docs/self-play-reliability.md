@@ -49,13 +49,11 @@ ordinary debug suite because running the same workload there takes several minut
 
 ## Current blockers to strong unattended self-play
 
-- Rust has direct proofs for 147 of 161 cataloged scenarios. The remaining mechanics must be ported
+- Rust has direct proofs for 148 of 161 cataloged scenarios. The remaining mechanics must be ported
   or rejected at manifest admission before their games can affect training.
 - Realm Artifacts are admitted only as power Artifacts, Lethal Artifacts, end-turn site-controller
-  life-loss Artifacts, the Siege Ballista, the Payload Trebuchet, and the Rolling Boulder. The
-  remaining ability Artifacts, plus any manifest that pairs an Artifact with burrow Magic or an
-  oversized minion, still fail closed
-  at admission.
+  life-loss Artifacts, the Siege Ballista, the Payload Trebuchet, and the Rolling Boulder. Manifests
+  that pair an Artifact with an oversized minion still fail closed at admission.
 - A Siege Ballista shoots three damage at one unit within two measured steps of the cell its bearer
   stands on, paid for by tapping that bearer and one other ready ally standing with it. The
   Artifact is the source, so the shot carries neither the bearer's power nor its Lethal, is not
