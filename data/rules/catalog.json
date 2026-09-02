@@ -441,7 +441,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Magic targets stay in the caster region and exclude enemy Stealth.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "stealth",
         "region"
@@ -453,8 +453,8 @@
         "stealth-change"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Magic targets stay in the caster region and exclude enemy Stealth"
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0023_magic_targets_should_stay_in_the_caster_region_and_exclude_enemy_stealth"
       }
     },
     {

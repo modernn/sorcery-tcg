@@ -2325,67 +2325,10 @@ fn disable_magic_should_kill_its_underground_burrowing_target() {
     assert_exact_replay(&session);
 }
 
-#[test]
-fn targeted_magic_allows_friendly_stealth_and_excludes_enemy_active_stealth() {
-    let cards = json!({
-        "north-avatar": avatar(20),
-        "north-magic": magic(("damageTargetUnit", json!(1)), 0),
-        "north-minion": minion(json!({ "stealth": true })),
-        "north-site": site(false),
-        "south-avatar": avatar(20),
-        "south-minion": minion(json!({ "stealth": true })),
-        "south-site": site(false),
-    });
-    let north_spellbook = [
-        "north-magic",
-        "north-magic",
-        "north-magic",
-        "north-minion",
-        "north-minion",
-        "north-minion",
-    ];
-    let manifest = (1..=512)
-        .map(|seed| manifest(seed, &cards, &north_spellbook, &["south-minion"; 6]))
-        .find(|candidate| {
-            let preview = Session::new(candidate).expect("target visibility candidate");
-            let hand = state(&preview)["players"]["north"]["hand"]["spellbook"]
-                .as_array()
-                .expect("North opening hand")
-                .clone();
-            ["north-magic", "north-minion"]
-                .into_iter()
-                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
-        })
-        .expect("bounded seed with Magic and friendly Stealth");
-    let mut session = opening_main(&manifest);
-    let (friendly, _) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "north-minion"
-    });
-    let friendly_id = friendly["cardInstanceId"]
-        .as_str()
-        .expect("friendly Stealth identity")
-        .to_owned();
-    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
-    accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
-    });
-    accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
-    });
-    let (enemy, _) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "south-minion"
-    });
-    let enemy_id = enemy["cardInstanceId"]
-        .as_str()
-        .expect("enemy Stealth identity")
-        .to_owned();
-    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
-    accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
-    });
-    let target_ids: Vec<_> = session
+fn magic_target_ids(session: &Session) -> Vec<String> {
+    session
         .legal_actions()
-        .expect("Stealth target actions")
+        .expect("targeted Magic actions")
         .into_iter()
         .filter(|action| {
             action.descriptor["kind"] == "cast-magic"
@@ -2396,9 +2339,138 @@ fn targeted_magic_allows_friendly_stealth_and_excludes_enemy_active_stealth() {
                 .as_str()
                 .map(ToOwned::to_owned)
         })
-        .collect();
-    assert!(target_ids.contains(&friendly_id));
-    assert!(!target_ids.contains(&enemy_id));
+        .collect()
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one direct proof keeps region confinement and Stealth exclusion in one scenario"
+)]
+fn rule_catalog_0023_magic_targets_should_stay_in_the_caster_region_and_exclude_enemy_stealth() {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-bury": magic(("burrowTargetMinionOrArtifact", json!(true)), 0),
+        "north-magic": magic(("damageTargetUnit", json!(1)), 0),
+        "north-minion": minion(json!({ "burrowing": true, "stealth": true })),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-plain": minion(json!({})),
+        "south-site": site(false),
+        "south-stealth": minion(json!({ "stealth": true })),
+    });
+    let north_spellbook = [
+        "north-bury",
+        "north-bury",
+        "north-magic",
+        "north-magic",
+        "north-minion",
+        "north-minion",
+    ];
+    let manifest = (1..=512)
+        .map(|seed| {
+            manifest(
+                seed,
+                &cards,
+                &north_spellbook,
+                &[
+                    "south-plain",
+                    "south-plain",
+                    "south-plain",
+                    "south-stealth",
+                    "south-stealth",
+                    "south-stealth",
+                ],
+            )
+        })
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("target visibility candidate");
+            let hand = state(&preview)["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("North opening hand")
+                .clone();
+            ["north-bury", "north-magic", "north-minion"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+        .expect("bounded seed with Bury, targeted Magic, and friendly Stealth");
+    let mut session = opening_main(&manifest);
+    let (friendly, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "north-minion"
+    });
+    let friendly_id = friendly["cardInstanceId"]
+        .as_str()
+        .expect("friendly Stealth identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (stealth, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "south-stealth"
+    });
+    let stealth_id = stealth["cardInstanceId"]
+        .as_str()
+        .expect("enemy Stealth identity")
+        .to_owned();
+    let (plain, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "south-plain"
+    });
+    let plain_id = plain["cardInstanceId"]
+        .as_str()
+        .expect("plain enemy identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let surface = magic_target_ids(&session);
+    assert!(
+        surface.contains(&friendly_id),
+        "own Stealth stays targetable"
+    );
+    assert!(
+        surface.contains(&plain_id),
+        "an exposed enemy stays targetable"
+    );
+    assert!(
+        !surface.contains(&stealth_id),
+        "enemy active Stealth must never be offered"
+    );
+
+    let bury = state(&session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North hand")
+        .iter()
+        .find(|card| card["cardId"] == "north-bury")
+        .expect("Bury in hand")["instanceId"]
+        .as_str()
+        .expect("Bury identity")
+        .to_owned();
+    let burrowed = cast_bury(&mut session, &friendly_id, &bury);
+    assert_eq!(
+        event_types(&burrowed),
+        ["magic-cast", "minion-burrowed", "magic-resolved"]
+    );
+    assert_eq!(
+        realm_unit(&state(&session), &friendly_id).expect("burrowed ally")["region"],
+        "underground"
+    );
+
+    let confined = magic_target_ids(&session);
+    assert!(
+        !confined.contains(&friendly_id),
+        "a surface caster may not reach its own burrowed ally"
+    );
+    assert!(
+        confined.contains(&plain_id),
+        "the surface enemy stays reachable from the surface"
+    );
     assert_exact_replay(&session);
 }
 
