@@ -4873,3 +4873,794 @@ fn duel_should_checkpoint_an_underground_first_strike_and_finish_before_terminal
     assert_eq!(state(&session)["phase"], "terminal");
     assert_exact_replay(&session);
 }
+
+fn fire_site() -> Value {
+    json!({
+        "cardType": "site",
+        "elements": ["fire"],
+    })
+}
+
+fn fire_minion(extra: Value) -> Value {
+    let mut value = minion(extra);
+    value["thresholds"] = json!({ "air": 0, "earth": 0, "fire": 1, "water": 0 });
+    value
+}
+
+fn fire_magic(effect: (&str, Value), mana_cost: u8) -> Value {
+    let mut value = magic(effect, mana_cost);
+    value["thresholds"] = json!({ "air": 0, "earth": 0, "fire": 1, "water": 0 });
+    value
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "the catalog proof keeps the oversized Leap destination and focused strike beside the core rule"
+)]
+fn assert_oversized_leap_attack_focuses_one_occupied_cell() {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-filler": fire_minion(json!({})),
+        "north-giant": fire_minion(json!({
+            "attack": 3,
+            "defense": 6,
+            "occupiesSquareArea": 2,
+        })),
+        "north-leap": fire_magic(("leapAttackAlly", json!(true)), 1),
+        "north-site": fire_site(),
+        "south-avatar": avatar(20),
+        "south-enemy": fire_minion(json!({
+            "attack": 1,
+            "defense": 3,
+            "summonToAnySite": true,
+        })),
+        "south-site": fire_site(),
+    });
+    let north_spellbook = [
+        "north-giant",
+        "north-leap",
+        "north-filler",
+        "north-leap",
+        "north-giant",
+        "north-leap",
+    ];
+    let manifest = (1..=512)
+        .map(|seed| manifest(seed, &cards, &north_spellbook, &["south-enemy"; 6]))
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("oversized Leap candidate");
+            let opening = state(&preview);
+            let hand = opening["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("North opening hand");
+            let future = opening["players"]["north"]["spellbook"]
+                .as_array()
+                .expect("North spellbook");
+            ["north-giant", "north-leap"].into_iter().all(|card_id| {
+                hand.iter()
+                    .chain(future.iter().take(3))
+                    .any(|card| card["cardId"] == card_id)
+            })
+        })
+        .expect("bounded seed with Giant and Leap by the fourth turn");
+    let mut session = Session::new(&manifest).expect("valid oversized Leap scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "B4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    let c2_enemy = summon_duel_minion(&mut session, "south-enemy", "C2", None);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "B2"
+    });
+    let b2_enemy = summon_duel_minion(&mut session, "south-enemy", "B2", None);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "B3"
+    });
+    let giant_id = summon_duel_minion(&mut session, "north-giant", "B3", None);
+    let leap_id = state(&session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North hand")
+        .iter()
+        .find(|card| card["cardId"] == "north-leap")
+        .expect("oversized Leap in hand")["instanceId"]
+        .as_str()
+        .expect("oversized Leap identity")
+        .to_owned();
+
+    let actions = session.legal_actions().expect("oversized Leap actions");
+    let b2_actions: Vec<_> = actions
+        .iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardInstanceId"] == leap_id
+                && action.descriptor["ally"]["instanceId"] == giant_id
+                && action.descriptor["allyDestination"]["cell"] == "B2"
+        })
+        .cloned()
+        .collect();
+    assert_eq!(
+        b2_actions
+            .iter()
+            .map(|action| action.descriptor["allyStrikeLocation"]["cell"]
+                .as_str()
+                .expect("oversized strike cell"))
+            .collect::<Vec<_>>(),
+        ["B2", "B3", "C2", "C3"]
+    );
+    let focused = b2_actions
+        .iter()
+        .find(|action| action.descriptor["allyStrikeLocation"]["cell"] == "B2")
+        .expect("focused B2 oversized Leap");
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: focused.action_id.to_string(),
+            seat: focused.seat,
+            state_version: focused.state_version,
+        })
+        .expect("focused oversized Leap")
+    else {
+        panic!("engine-issued oversized Leap must be accepted");
+    };
+    let allocations: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "strike-damage-allocated")
+        .map(|event| event.payload["targetInstanceId"].clone())
+        .collect();
+    assert_eq!(allocations, [json!(b2_enemy)]);
+    let after = state(&session);
+    assert!(realm_unit(&after, &b2_enemy).is_none());
+    assert!(realm_unit(&after, &c2_enemy).is_some());
+    assert_eq!(
+        realm_unit(&after, &giant_id).expect("surviving Giant")["occupiedCells"],
+        json!(["B2", "B3", "C2", "C3"])
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one direct Leap Attack proof keeps legality, status restrictions, both outcomes, oversized focus, and replay together"
+)]
+fn rule_catalog_0021_leap_attack_optionally_steps_an_ally_before_it_strikes_every_enemy_there() {
+    let cards = json!({
+        "north-ally": fire_minion(json!({
+            "attack": 3,
+            "defense": 4,
+            "movementBonus": 2,
+        })),
+        "north-avatar": avatar(20),
+        "north-disabled": fire_minion(json!({ "defense": 4, "waterbound": true })),
+        "north-immobile": fire_minion(json!({ "defense": 4, "immobile": true })),
+        "north-leap": fire_magic(("leapAttackAlly", json!(true)), 1),
+        "north-site": fire_site(),
+        "south-avatar": avatar(20),
+        "south-normal": fire_minion(json!({
+            "attack": 2,
+            "defense": 3,
+            "summonToAnySite": true,
+        })),
+        "south-origin": fire_minion(json!({
+            "attack": 2,
+            "defense": 3,
+            "summonToAnySite": true,
+        })),
+        "south-site": fire_site(),
+        "south-stealthed": fire_minion(json!({
+            "attack": 2,
+            "defense": 3,
+            "stealth": true,
+            "summonToAnySite": true,
+        })),
+        "south-warded": fire_minion(json!({
+            "airborne": true,
+            "attack": 2,
+            "defense": 3,
+            "summonToAnySite": true,
+            "ward": true,
+        })),
+    });
+    let north_spellbook = [
+        "north-leap",
+        "north-ally",
+        "north-immobile",
+        "north-disabled",
+        "north-leap",
+        "north-ally",
+    ];
+    let south_spellbook = [
+        "south-origin",
+        "south-normal",
+        "south-warded",
+        "south-stealthed",
+        "south-origin",
+        "south-normal",
+    ];
+    let manifest = (1..=512)
+        .map(|seed| manifest(seed, &cards, &north_spellbook, &south_spellbook))
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("Leap Attack candidate");
+            let opening = state(&preview);
+            let north_hand = opening["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("North opening hand");
+            let north_future = opening["players"]["north"]["spellbook"]
+                .as_array()
+                .expect("North spellbook");
+            let south_hand = opening["players"]["south"]["hand"]["spellbook"]
+                .as_array()
+                .expect("South opening hand");
+            let south_future = opening["players"]["south"]["spellbook"]
+                .as_array()
+                .expect("South spellbook");
+            ["north-leap", "north-ally"]
+                .into_iter()
+                .all(|card_id| north_hand.iter().any(|card| card["cardId"] == card_id))
+                && ["north-immobile", "north-disabled"]
+                    .into_iter()
+                    .all(|card_id| {
+                        north_hand
+                            .iter()
+                            .chain(north_future.iter().take(1))
+                            .any(|card| card["cardId"] == card_id)
+                    })
+                && [
+                    "south-origin",
+                    "south-normal",
+                    "south-warded",
+                    "south-stealthed",
+                ]
+                .into_iter()
+                .all(|card_id| {
+                    south_hand
+                        .iter()
+                        .chain(south_future.iter().take(1))
+                        .any(|card| card["cardId"] == card_id)
+                })
+        })
+        .expect("bounded seed with complete Leap Attack setup");
+    let mut session = Session::new(&manifest).expect("valid Leap Attack scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let ally_id = summon_duel_minion(&mut session, "north-ally", "C4", None);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let origin_id = summon_duel_minion(&mut session, "south-origin", "C4", None);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    let immobile_id = summon_duel_minion(&mut session, "north-immobile", "C4", None);
+    let disabled_id = summon_duel_minion(&mut session, "north-disabled", "C4", None);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let normal_id = summon_duel_minion(&mut session, "south-normal", "C3", None);
+    let warded_id = summon_duel_minion(&mut session, "south-warded", "C3", None);
+    let stealthed_id = summon_duel_minion(&mut session, "south-stealthed", "C3", None);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+
+    let before = state(&session);
+    let spell_id = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North hand")
+        .iter()
+        .find(|card| card["cardId"] == "north-leap")
+        .expect("Leap Attack in hand")["instanceId"]
+        .as_str()
+        .expect("Leap Attack identity")
+        .to_owned();
+    let actions = session.legal_actions().expect("Leap Attack actions");
+    let actions_for = |instance_id: &str| {
+        actions
+            .iter()
+            .filter(|action| {
+                action.descriptor["kind"] == "cast-magic"
+                    && action.descriptor["cardInstanceId"] == spell_id
+                    && action.descriptor["ally"]["instanceId"] == instance_id
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let ally_actions = actions_for(&ally_id);
+    assert_eq!(
+        ally_actions
+            .iter()
+            .map(|action| format!(
+                "{}/{}",
+                action.descriptor["allyDestination"]["cell"]
+                    .as_str()
+                    .expect("destination cell"),
+                action.descriptor["allyDestination"]["region"]
+                    .as_str()
+                    .expect("destination region")
+            ))
+            .collect::<Vec<_>>(),
+        ["C3/surface", "C4/surface"]
+    );
+    assert_eq!(
+        actions_for(&immobile_id)
+            .iter()
+            .map(|action| action.descriptor["allyDestination"]["cell"].clone())
+            .collect::<Vec<_>>(),
+        [json!("C4")]
+    );
+    assert_eq!(
+        actions_for(&disabled_id)
+            .iter()
+            .map(|action| action.descriptor["allyDestination"]["cell"].clone())
+            .collect::<Vec<_>>(),
+        [json!("C4")]
+    );
+    assert!(actions.iter().any(|action| {
+        action.descriptor["kind"] == "cast-magic"
+            && action.descriptor["cardInstanceId"] == spell_id
+            && action.descriptor["ally"]["kind"] == "avatar"
+    }));
+    let stay_action = ally_actions
+        .iter()
+        .find(|action| action.descriptor["allyDestination"]["cell"] == "C4")
+        .expect("Leap stay action");
+    let step_action = ally_actions
+        .iter()
+        .find(|action| action.descriptor["allyDestination"]["cell"] == "C3")
+        .expect("Leap step action");
+    assert_eq!(
+        stay_action.label,
+        format!(
+            "Cast north-leap: minion {}… stays and strikes enemies at C4",
+            &ally_id[..15]
+        )
+    );
+    assert_eq!(
+        step_action.label,
+        format!(
+            "Cast north-leap: minion {}… steps to C3 and strikes enemies at C3",
+            &ally_id[..15]
+        )
+    );
+    let before_mana = before["players"]["north"]["mana"]
+        .as_u64()
+        .expect("North mana");
+    let before_version = before["stateVersion"].as_u64().expect("state version");
+
+    let mut stayed = session.clone();
+    let StepResult::Accepted(stay_receipt) = stayed
+        .step(ActionRequest {
+            action_id: stay_action.action_id.to_string(),
+            seat: stay_action.seat,
+            state_version: stay_action.state_version,
+        })
+        .expect("stay Leap")
+    else {
+        panic!("engine-issued stay Leap must be accepted");
+    };
+    assert!(!event_types(&stay_receipt).contains(&"unit-stepped"));
+    assert_eq!(
+        event_types(&stay_receipt)
+            .into_iter()
+            .filter(|event_type| *event_type == "strike-damage-allocated")
+            .count(),
+        1
+    );
+    let stayed_state = state(&stayed);
+    assert!(realm_unit(&stayed_state, &origin_id).is_none());
+    assert!(realm_unit(&stayed_state, &normal_id).is_some());
+    assert!(realm_unit(&stayed_state, &warded_id).is_some());
+    assert!(realm_unit(&stayed_state, &stealthed_id).is_some());
+    assert_eq!(stayed_state["stateVersion"], before_version + 1);
+    assert_exact_replay(&stayed);
+
+    let mut stepped = session;
+    let StepResult::Accepted(step_receipt) = stepped
+        .step(ActionRequest {
+            action_id: step_action.action_id.to_string(),
+            seat: step_action.seat,
+            state_version: step_action.state_version,
+        })
+        .expect("step Leap")
+    else {
+        panic!("engine-issued step Leap must be accepted");
+    };
+    let movement = step_receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "unit-stepped")
+        .expect("Leap movement");
+    assert_eq!(
+        movement.payload,
+        json!({
+            "from": { "cell": "C4", "region": "surface" },
+            "instanceId": ally_id,
+            "seat": "north",
+            "sourceInstanceId": spell_id,
+            "steps": 1,
+            "to": { "cell": "C3", "region": "surface" },
+        })
+    );
+    assert_eq!(
+        step_receipt
+            .events
+            .iter()
+            .filter(|event| event.event_type == "strike-damage-allocated")
+            .count(),
+        3
+    );
+    assert!(!event_types(&step_receipt).contains(&"fight-started"));
+    assert!(step_receipt.random_draws.is_empty());
+    assert_eq!(
+        step_receipt
+            .events
+            .last()
+            .expect("Leap completion")
+            .event_type,
+        "magic-resolved"
+    );
+    let after = state(&stepped);
+    let ally = realm_unit(&after, &ally_id).expect("surviving Leap ally");
+    assert_eq!(ally["damage"], 0);
+    assert_eq!(ally["location"], "C3");
+    assert_eq!(ally["tapped"], false);
+    assert!(realm_unit(&after, &normal_id).is_none());
+    assert!(realm_unit(&after, &stealthed_id).is_none());
+    assert_eq!(
+        realm_unit(&after, &warded_id).expect("Ward survivor")["warded"],
+        false
+    );
+    assert!(realm_unit(&after, &origin_id).is_some());
+    assert_eq!(after["players"]["north"]["mana"], before_mana - 1);
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("North cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == spell_id)
+    );
+    assert_eq!(after["stateVersion"], before_version + 1);
+    assert_exact_replay(&stepped);
+
+    assert_oversized_leap_attack_focuses_one_occupied_cell();
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one ordered Leap proof retains setup, continuation JSON, checkpoint, both order branches, versioning, and replay"
+)]
+fn rule_catalog_0022_leap_attack_resumes_its_strike_after_ordered_movement_deathrites() {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-fragile-a": fire_minion(json!({
+            "deathriteDrawSite": true,
+            "defense": 1,
+        })),
+        "north-fragile-b": fire_minion(json!({
+            "deathriteDrawSite": true,
+            "defense": 1,
+        })),
+        "north-leap": fire_magic(("leapAttackAlly", json!(true)), 1),
+        "north-rain": fire_magic(("damageEachAbovegroundMinion", json!(1)), 1),
+        "north-site": fire_site(),
+        "north-source": fire_minion(json!({
+            "attack": 3,
+            "defense": 3,
+            "otherNearbyAlliesPowerBonus": 1,
+        })),
+        "south-avatar": avatar(20),
+        "south-enemy": fire_minion(json!({
+            "attack": 1,
+            "defense": 3,
+            "summonToAnySite": true,
+        })),
+        "south-site": fire_site(),
+    });
+    let north_spellbook = [
+        "north-leap",
+        "north-source",
+        "north-fragile-a",
+        "north-fragile-b",
+        "north-rain",
+        "north-leap",
+        "north-source",
+        "north-rain",
+    ];
+    let manifest = (1..=4096)
+        .map(|seed| manifest(seed, &cards, &north_spellbook, &["south-enemy"; 8]))
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("ordered Leap candidate");
+            let opening = state(&preview);
+            let north_hand = opening["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("North opening hand");
+            let north_future = opening["players"]["north"]["spellbook"]
+                .as_array()
+                .expect("North spellbook");
+            ["north-fragile-a", "north-fragile-b"]
+                .into_iter()
+                .all(|card_id| north_hand.iter().any(|card| card["cardId"] == card_id))
+                && ["north-source"].into_iter().all(|card_id| {
+                    north_hand
+                        .iter()
+                        .chain(north_future.iter().take(1))
+                        .any(|card| card["cardId"] == card_id)
+                })
+                && ["north-leap", "north-rain"].into_iter().all(|card_id| {
+                    north_hand
+                        .iter()
+                        .chain(north_future.iter().take(2))
+                        .any(|card| card["cardId"] == card_id)
+                })
+        })
+        .expect("bounded seed with complete ordered Leap setup");
+    let mut session = Session::new(&manifest).expect("valid ordered Leap scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let fragile_ids = [
+        summon_duel_minion(&mut session, "north-fragile-a", "C4", None),
+        summon_duel_minion(&mut session, "north-fragile-b", "C4", None),
+    ];
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    let source_id = summon_duel_minion(&mut session, "north-source", "C3", None);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    let enemy_id = summon_duel_minion(&mut session, "south-enemy", "C2", None);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    });
+    let before = state(&session);
+    assert!(fragile_ids.iter().all(|instance_id| {
+        realm_unit(&before, instance_id).is_some_and(|unit| unit["damage"] == 1)
+    }));
+    let atlas_before = before["players"]["north"]["atlas"]
+        .as_array()
+        .expect("North atlas")
+        .len();
+    let leap_id = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North hand")
+        .iter()
+        .find(|card| card["cardId"] == "north-leap")
+        .expect("Leap Attack in hand")["instanceId"]
+        .as_str()
+        .expect("Leap identity")
+        .to_owned();
+    let before_version = before["stateVersion"].as_u64().expect("state version");
+    let leap = session
+        .legal_actions()
+        .expect("ordered Leap actions")
+        .into_iter()
+        .find(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardInstanceId"] == leap_id
+                && action.descriptor["ally"]["instanceId"] == source_id
+                && action.descriptor["allyDestination"]["cell"] == "C2"
+        })
+        .expect("engine-issued ordered Leap");
+    let StepResult::Accepted(interrupted) = session
+        .step(ActionRequest {
+            action_id: leap.action_id.to_string(),
+            seat: leap.seat,
+            state_version: leap.state_version,
+        })
+        .expect("ordered Leap cast")
+    else {
+        panic!("engine-issued ordered Leap must be accepted");
+    };
+    assert_eq!(event_types(&interrupted), ["magic-cast", "unit-stepped"]);
+    let pending = state(&session);
+    assert_eq!(pending["phase"], "deathrite-order");
+    assert_eq!(pending["decisionSeat"], "north");
+    assert_eq!(pending["stateVersion"], before_version + 1);
+    assert_eq!(
+        pending["pendingDeathrites"]["continuation"],
+        json!({
+            "ally": { "instanceId": source_id, "kind": "minion", "seat": "north" },
+            "cardId": "north-leap",
+            "instanceId": leap_id,
+            "kind": "leap-attack",
+            "owner": "north",
+            "strikeLocation": { "cell": "C2", "region": "surface" },
+        })
+    );
+    assert_eq!(
+        realm_unit(&pending, &source_id).expect("moved Leap source")["location"],
+        "C2"
+    );
+    assert!(realm_unit(&pending, &enemy_id).is_some());
+    assert!(
+        fragile_ids
+            .iter()
+            .all(|instance_id| realm_unit(&pending, instance_id).is_none())
+    );
+    assert!(fragile_ids.iter().all(|instance_id| {
+        !pending["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("North cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == instance_id.as_str())
+    }));
+
+    let checkpoint = create_game_checkpoint(&session).expect("ordered Leap checkpoint");
+    let serialized =
+        serialize_game_checkpoint(&checkpoint).expect("serialized ordered Leap checkpoint");
+    let restored = resume_game_checkpoint(
+        &parse_game_checkpoint(&serialized).expect("parsed ordered Leap checkpoint"),
+    )
+    .expect("resumed ordered Leap checkpoint");
+    assert_eq!(state(&restored), pending);
+    let order_actions = session.legal_actions().expect("source order actions");
+    let restored_actions = restored.legal_actions().expect("restored order actions");
+    assert_eq!(
+        restored_actions
+            .iter()
+            .map(|action| action.action_id.clone())
+            .collect::<Vec<_>>(),
+        order_actions
+            .iter()
+            .map(|action| action.action_id.clone())
+            .collect::<Vec<_>>()
+    );
+    let order_actions: Vec<_> = restored_actions
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .collect();
+    assert_eq!(order_actions.len(), 2);
+
+    let mut branch_hashes = Vec::new();
+    for order in order_actions {
+        let chosen_id = order.descriptor["sourceInstanceId"]
+            .as_str()
+            .expect("chosen Deathrite identity");
+        let other_id = fragile_ids
+            .iter()
+            .find(|instance_id| instance_id.as_str() != chosen_id)
+            .expect("other Deathrite identity");
+        let mut branch = restored.clone();
+        let StepResult::Accepted(ordered) = branch
+            .step(ActionRequest {
+                action_id: order.action_id.to_string(),
+                seat: order.seat,
+                state_version: order.state_version,
+            })
+            .expect("ordered Leap completion")
+        else {
+            panic!("engine-issued Deathrite order must be accepted");
+        };
+        let types = event_types(&ordered);
+        assert_eq!(
+            &types[..5],
+            [
+                "deathrite-order-committed",
+                "site-drawn",
+                "site-drawn",
+                "minion-died",
+                "minion-died",
+            ]
+        );
+        assert_eq!(types.last(), Some(&"magic-resolved"));
+        let strike_index = types
+            .iter()
+            .position(|event_type| *event_type == "strike-damage-allocated")
+            .expect("resumed Leap strike");
+        assert!(strike_index > 4);
+        assert!(
+            strike_index
+                < types
+                    .iter()
+                    .rposition(|event_type| *event_type == "minion-died")
+                    .expect("enemy death")
+        );
+        assert_eq!(
+            ordered
+                .events
+                .iter()
+                .filter(|event| event.event_type == "site-drawn")
+                .map(|event| event.payload["sourceInstanceId"].clone())
+                .collect::<Vec<_>>(),
+            [json!(chosen_id), json!(other_id)]
+        );
+        let completed = state(&branch);
+        assert_eq!(completed["phase"], "main");
+        assert!(completed["pendingDeathrites"].is_null());
+        assert_eq!(
+            realm_unit(&completed, &source_id).expect("surviving Leap source")["location"],
+            "C2"
+        );
+        assert!(realm_unit(&completed, &enemy_id).is_none());
+        assert!(fragile_ids.iter().all(|instance_id| {
+            completed["players"]["north"]["cemetery"]
+                .as_array()
+                .expect("North cemetery")
+                .iter()
+                .any(|card| card["instanceId"] == instance_id.as_str())
+        }));
+        assert_eq!(
+            completed["players"]["north"]["atlas"]
+                .as_array()
+                .expect("North atlas")
+                .len(),
+            atlas_before - 2
+        );
+        assert_eq!(completed["stateVersion"], before_version + 2);
+        assert_exact_replay(&branch);
+        branch_hashes.push(branch.state_hash().expect("completed state hash"));
+    }
+    assert_eq!(branch_hashes[0], branch_hashes[1]);
+}

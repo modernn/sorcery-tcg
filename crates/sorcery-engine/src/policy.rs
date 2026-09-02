@@ -701,6 +701,8 @@ mod tests {
     fn beneficial_tactics_should_be_card_independent_safe_and_canonical() {
         let cemetery_magic = ActionDescriptor::CastMagic {
             ally: None,
+            ally_destination: None,
+            ally_strike_location: None,
             card_id: "synthetic-magic".to_owned(),
             card_instance_id: identity('c'),
             caster_instance_id: identity('d'),
@@ -711,6 +713,8 @@ mod tests {
         };
         let enemy_magic = ActionDescriptor::CastMagic {
             ally: None,
+            ally_destination: None,
+            ally_strike_location: None,
             card_id: "synthetic-unknown-effect".to_owned(),
             card_instance_id: identity('f'),
             caster_instance_id: identity('1'),

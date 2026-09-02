@@ -319,6 +319,12 @@ pub enum ActionDescriptor {
         /// Exact engine-issued ally selected by an ally-buffing Magic.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ally: Option<UnitTarget>,
+        /// Optional one-step destination chosen for a Leap Attack ally.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ally_destination: Option<Location>,
+        /// Selected strike cell inside an oversized Leap Attack footprint.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ally_strike_location: Option<Location>,
         /// Stable rules card identity.
         card_id: String,
         /// Authoritative card instance identity.
@@ -497,6 +503,8 @@ impl ActionDescriptor {
             Self::DrawSpell => Some("Draw a spell with Avatar".to_owned()),
             Self::CastMagic {
                 ally,
+                ally_destination,
+                ally_strike_location,
                 card_id,
                 cemetery_minion_instance_id,
                 target,
@@ -509,6 +517,15 @@ impl ActionDescriptor {
                     short_identity(ally.instance_id()),
                     target.kind(),
                     short_identity(target.instance_id())
+                )
+            } else if let (Some(ally), Some(destination)) = (ally, ally_destination) {
+                let strike = ally_strike_location.unwrap_or(*destination);
+                format!(
+                    "Cast {card_id}: {} {}… steps to {} and strikes enemies at {}",
+                    ally.kind(),
+                    short_identity(ally.instance_id()),
+                    destination.cell,
+                    strike.cell
                 )
             } else if let Some(ally) = ally {
                 format!(
@@ -768,6 +785,8 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
             (
                 ActionDescriptor::CastMagic {
                     ally: left_ally,
+                    ally_destination: left_destination,
+                    ally_strike_location: left_strike,
                     card_id: left_card,
                     card_instance_id: left_instance,
                     caster_instance_id: left_caster,
@@ -778,6 +797,8 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 },
                 ActionDescriptor::CastMagic {
                     ally: right_ally,
+                    ally_destination: right_destination,
+                    ally_strike_location: right_strike,
                     card_id: right_card,
                     card_instance_id: right_instance,
                     caster_instance_id: right_caster,
@@ -787,6 +808,8 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     target_site_instance_id: right_site,
                 },
             ) => compare_optional_unit_targets(left_ally.as_ref(), right_ally.as_ref())
+                .then_with(|| compare_optional_locations(*left_destination, *right_destination))
+                .then_with(|| compare_optional_locations(*left_strike, *right_strike))
                 .then_with(|| compare_json_strings(left_card, right_card))
                 .then_with(|| left_instance.cmp(right_instance))
                 .then_with(|| left_caster.cmp(right_caster))
