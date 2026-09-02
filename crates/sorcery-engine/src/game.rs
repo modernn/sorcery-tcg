@@ -377,6 +377,7 @@ struct MagicChoice {
     ally_destination: Option<Location>,
     ally_strike_location: Option<Location>,
     cemetery_minion_instance_id: Option<IdentityHash>,
+    discard_site_instance_id: Option<IdentityHash>,
     draw_zone: Option<DeckZone>,
     target: Option<UnitTarget>,
     target_location: Option<Location>,
@@ -966,6 +967,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::DamageRandomUnitAtLocation(_)
         | MagicEffect::ReturnMinionFromOwnCemetery
         | MagicEffect::DamageTargetUnit { .. }
+        | MagicEffect::DestroyTargetSiteWithDamageGrid(_)
         | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
         | MagicEffect::FightAllyWithAdjacentEnemy
         | MagicEffect::LeapAttackAlly
@@ -978,7 +980,6 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::SubmergeTargetMinion
         | MagicEffect::TeleportAllyToTargetSite
         | MagicEffect::TeleportNearbyAllyThenDrawCard => None,
-        MagicEffect::DestroyTargetSiteWithDamageGrid(_) => Some("destroyTargetSiteWithDamageGrid"),
         MagicEffect::SummonRandomMinionFromAnyCemetery => Some("summonRandomMinionFromAnyCemetery"),
     }
 }
@@ -2409,6 +2410,7 @@ impl Game {
                         card_instance_id: card.instance_id.clone(),
                         caster_instance_id: caster_instance_id.clone(),
                         cemetery_minion_instance_id: choice.cemetery_minion_instance_id,
+                        discard_site_instance_id: choice.discard_site_instance_id,
                         draw_zone: choice.draw_zone,
                         target: choice.target,
                         target_location: choice.target_location,
@@ -3814,6 +3816,47 @@ impl Game {
                     Vec::new()
                 }
             }
+            MagicEffect::DestroyTargetSiteWithDamageGrid(_) => {
+                let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
+                if caster_location.region == Region::Void {
+                    return Ok(Vec::new());
+                }
+                let mut discard_site_instance_ids: Vec<_> = self.position.players[seat_index(seat)]
+                    .hand_atlas
+                    .iter()
+                    .map(|card| card.instance_id.clone())
+                    .collect();
+                discard_site_instance_ids.sort_unstable();
+                let mut choices = Vec::new();
+                for cell in Cell::ALL {
+                    let Some(target_site_instance_id) = self.position.sites[cell.index()]
+                        .as_ref()
+                        .map(|site| &site.card.instance_id)
+                        .or(self.position.rubble[cell.index()].as_ref())
+                    else {
+                        continue;
+                    };
+                    // A subsurface caster only reaches the layer its own region occupies.
+                    let water = self.location_exists_in_region(cell, Region::Underwater);
+                    if caster_location.region == Region::Underwater && !water
+                        || caster_location.region == Region::Underground && water
+                    {
+                        continue;
+                    }
+                    for discard_site_instance_id in &discard_site_instance_ids {
+                        choices.push(MagicChoice {
+                            discard_site_instance_id: Some(discard_site_instance_id.clone()),
+                            target_location: Some(Location {
+                                cell,
+                                region: caster_location.region,
+                            }),
+                            target_site_instance_id: Some(target_site_instance_id.clone()),
+                            ..MagicChoice::default()
+                        });
+                    }
+                }
+                choices
+            }
             MagicEffect::DisableTargetNearbyMinionUntilNextTurn => {
                 let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
                 let caster_cells = [caster_location.cell];
@@ -4277,6 +4320,57 @@ impl Game {
         );
         candidates.sort_unstable_by(|left, right| left.0.cmp(&right.0));
         candidates
+    }
+
+    /// Every unit the printed grid reaches above and below one cell, in canonical target order.
+    fn site_grid_damage_targets(
+        &self,
+        cell: Cell,
+        grid: [u8; 5],
+    ) -> Vec<(IdentityHash, UnitKind, Seat, u16)> {
+        let mut targets = Vec::new();
+        for seat in [Seat::North, Seat::South] {
+            let avatar = &self.position.players[seat_index(seat)].avatar;
+            let amount = Self::grid_damage(grid, cell, std::slice::from_ref(&avatar.location));
+            if amount > 0 {
+                targets.push((
+                    avatar.card.instance_id.clone(),
+                    UnitKind::Avatar,
+                    seat,
+                    amount,
+                ));
+            }
+        }
+        for unit in &self.position.units {
+            // The Void sits beside the realm rather than above or below any cell.
+            if unit.region == Region::Void {
+                continue;
+            }
+            let amount = Self::grid_damage(grid, cell, Self::unit_occupied_cells(unit));
+            if amount > 0 {
+                targets.push((
+                    unit.card.instance_id.clone(),
+                    UnitKind::Minion,
+                    unit.controller,
+                    amount,
+                ));
+            }
+        }
+        targets.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        targets
+    }
+
+    /// Sums the grid entry for every occupied cell within two files and two ranks of the centre.
+    fn grid_damage(grid: [u8; 5], center: Cell, occupied: &[Cell]) -> u16 {
+        occupied.iter().fold(0_u16, |total, cell| {
+            let files = center.file_index().abs_diff(cell.file_index());
+            let ranks = center.rank_index().abs_diff(cell.rank_index());
+            if files <= 2 && ranks <= 2 {
+                total.saturating_add(u16::from(grid[usize::from(files + ranks)]))
+            } else {
+                total
+            }
+        })
     }
 
     fn location_exists_in_region(&self, cell: Cell, region: Region) -> bool {
@@ -7389,8 +7483,22 @@ impl Game {
         if self.position.terminal.is_some() || self.position.pending_deathrites.is_some() {
             return Ok(());
         }
-        let deaths = self
-            .position
+        let deaths = self.lower_region_minion_deaths();
+        if deaths.is_empty() {
+            return Ok(());
+        }
+        self.begin_minion_deaths(
+            &deaths,
+            &[],
+            self.position.phase,
+            self.position.decision_seat,
+            outcomes,
+        )
+    }
+
+    /// Every minion whose current region can no longer keep it alive.
+    fn lower_region_minion_deaths(&self) -> Vec<IdentityHash> {
+        self.position
             .units
             .iter()
             .filter(|unit| matches!(unit.region, Region::Underground | Region::Underwater))
@@ -7411,17 +7519,7 @@ impl Game {
                         .any(|cell| !self.location_exists_in_region(*cell, unit.region))
             })
             .map(|unit| unit.card.instance_id.clone())
-            .collect::<Vec<_>>();
-        if deaths.is_empty() {
-            return Ok(());
-        }
-        self.begin_minion_deaths(
-            &deaths,
-            &[],
-            self.position.phase,
-            self.position.decision_seat,
-            outcomes,
-        )
+            .collect()
     }
 
     fn begin_minion_deaths(
@@ -8859,6 +8957,40 @@ impl Game {
         {
             destroyed.push((target_cell, target));
         }
+        let (destroyed_cards, rubble) =
+            self.destroy_sites_into_rubble(destroyed, source_site_instance_id)?;
+        self.settle_lower_region_minion_deaths(outcomes)?;
+        for card in destroyed_cards {
+            self.position.players[seat_index(card.owner)]
+                .cemetery
+                .push(card);
+        }
+        let rubble_start = outcomes.len();
+        for (cell, instance_id) in rubble {
+            outcomes.push("rubble-created", || {
+                json!({
+                    "cell": cell,
+                    "instanceId": instance_id,
+                    "sourceInstanceId": source_site_instance_id,
+                })
+            });
+        }
+        outcomes.move_tail_before_completion(rubble_start);
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    /// Replaces every destroyed site with Rubble, drains the units its Water layer supported, and
+    /// hands back the destroyed cards with the Rubble identities they left behind.
+    #[expect(
+        clippy::type_complexity,
+        reason = "the caller settles the destroyed cards and the Rubble receipts on separate schedules"
+    )]
+    fn destroy_sites_into_rubble(
+        &mut self,
+        mut destroyed: Vec<(Cell, SitePosition)>,
+        source_instance_id: &IdentityHash,
+    ) -> Result<(Vec<CardInstance>, Vec<(Cell, IdentityHash)>), GameError> {
         destroyed.sort_unstable_by_key(|(cell, _)| *cell);
         let flooded = destroyed
             .iter()
@@ -8888,31 +9020,13 @@ impl Game {
                 "cell": cell,
                 "destroyedSiteInstanceId": site.card.instance_id,
                 "kind": "rubble",
-                "sourceInstanceId": source_site_instance_id,
+                "sourceInstanceId": source_instance_id,
             }))?;
             self.position.rubble[cell.index()] = Some(rubble_instance_id.clone());
             destroyed_cards.push(site.card);
             rubble.push((cell, rubble_instance_id));
         }
-        self.settle_lower_region_minion_deaths(outcomes)?;
-        for card in destroyed_cards {
-            self.position.players[seat_index(card.owner)]
-                .cemetery
-                .push(card);
-        }
-        let rubble_start = outcomes.len();
-        for (cell, instance_id) in rubble {
-            outcomes.push("rubble-created", || {
-                json!({
-                    "cell": cell,
-                    "instanceId": instance_id,
-                    "sourceInstanceId": source_site_instance_id,
-                })
-            });
-        }
-        outcomes.move_tail_before_completion(rubble_start);
-        self.position.state_version += 1;
-        Ok(())
+        Ok((destroyed_cards, rubble))
     }
 
     fn begin_hidden_spell_genesis(
@@ -9634,6 +9748,7 @@ impl Game {
             card_instance_id,
             caster_instance_id,
             cemetery_minion_instance_id,
+            discard_site_instance_id,
             draw_zone,
             target,
             target_location,
@@ -9674,6 +9789,7 @@ impl Game {
                     ally_destination: *ally_destination,
                     ally_strike_location: *ally_strike_location,
                     cemetery_minion_instance_id: cemetery_minion_instance_id.clone(),
+                    discard_site_instance_id: discard_site_instance_id.clone(),
                     draw_zone: *draw_zone,
                     target: target.clone(),
                     target_location: *target_location,
@@ -9795,6 +9911,27 @@ impl Game {
         } else {
             None
         };
+        // The additional site discard is a cost, so it is paid before the cast is announced.
+        if let Some(discard_site_instance_id) = discard_site_instance_id {
+            let player = &mut self.position.players[player_index];
+            let atlas_index = player
+                .hand_atlas
+                .iter()
+                .position(|card| card.instance_id == *discard_site_instance_id)
+                .ok_or(GameError::IllegalAction)?;
+            let discarded = player.hand_atlas.remove(atlas_index);
+            outcomes.push("card-discarded", || {
+                json!({
+                    "cardId": self.rules.cards[usize::from(discarded.card_id.0)].id,
+                    "instanceId": discarded.instance_id,
+                    "owner": discarded.owner,
+                    "seat": seat,
+                    "sourceInstanceId": card_instance_id,
+                    "zone": "atlas",
+                })
+            });
+            self.position.players[player_index].cemetery.push(discarded);
+        }
         let card = self.position.players[player_index]
             .hand_spellbook
             .remove(hand_index);
@@ -9814,6 +9951,9 @@ impl Game {
             });
             if let Some(selected_id) = cemetery_minion_instance_id {
                 payload["cemeteryMinionInstanceId"] = json!(selected_id);
+            }
+            if let Some(discard_site_instance_id) = discard_site_instance_id {
+                payload["discardSiteInstanceId"] = json!(discard_site_instance_id);
             }
             if let Some(ally) = ally {
                 payload["allyInstanceId"] = json!(ally.instance_id());
@@ -10542,6 +10682,125 @@ impl Game {
                         self.position.active_seat,
                         outcomes,
                     )?;
+                }
+            }
+            MagicEffect::DestroyTargetSiteWithDamageGrid(grid) => {
+                let cell = target_location.ok_or(GameError::IllegalAction)?.cell;
+                let target_site_instance_id = target_site_instance_id
+                    .as_ref()
+                    .ok_or(GameError::IllegalAction)?;
+                let target_site = self.position.sites[cell.index()]
+                    .as_ref()
+                    .filter(|site| site.card.instance_id == *target_site_instance_id)
+                    .cloned();
+                if target_site.is_none()
+                    && self.position.rubble[cell.index()].as_ref() != Some(target_site_instance_id)
+                {
+                    return Err(GameError::IllegalAction);
+                }
+                // Rubble is already destroyed, and a protected site survives its own crater.
+                let target_protected = target_site.as_ref().is_some_and(|site| {
+                    matches!(
+                        &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                        CardFacts::Site(facts) if facts.cannot_be_moved_destroyed_or_modified
+                    )
+                });
+                let targets = self.site_grid_damage_targets(cell, grid);
+                let statuses = targets
+                    .iter()
+                    .map(|(instance_id, kind, _, _)| match kind {
+                        UnitKind::Avatar => Ok(None),
+                        UnitKind::Minion => self.minion_damage_status(instance_id).map(Some),
+                    })
+                    .collect::<Result<Vec<_>, GameError>>()?;
+                outcomes.push(
+                    if target_protected {
+                        "site-destruction-prevented"
+                    } else {
+                        "site-destroyed"
+                    },
+                    || {
+                        let mut payload = json!({
+                            "cell": cell,
+                            "instanceId": target_site_instance_id,
+                            "sourceInstanceId": card_instance_id,
+                        });
+                        if let Some(site) = &target_site {
+                            payload["owner"] = json!(site.card.owner);
+                        }
+                        payload
+                    },
+                );
+                for (instance_id, _, _, amount) in &targets {
+                    outcomes.push("magic-damage-allocated", || {
+                        json!({
+                            "amount": amount,
+                            "sourceInstanceId": card_instance_id,
+                            "targetInstanceId": instance_id,
+                        })
+                    });
+                }
+                let mut dead_minions = Vec::new();
+                let mut defeated_avatars = Vec::new();
+                for ((instance_id, kind, target_seat, amount), status) in
+                    targets.into_iter().zip(statuses)
+                {
+                    let damage = self.apply_simple_damage_with_status(
+                        kind,
+                        target_seat,
+                        &instance_id,
+                        amount,
+                        UnitDamageSource {
+                            current_power: 0,
+                            lethal: false,
+                        },
+                        status,
+                        outcomes,
+                    )?;
+                    if damage.minion_died {
+                        dead_minions.push(instance_id);
+                    }
+                    if damage.avatar_defeated && !defeated_avatars.contains(&target_seat) {
+                        defeated_avatars.push(target_seat);
+                    }
+                }
+                let destroyed_cards = match target_site {
+                    Some(site) if !target_protected => {
+                        let (cards, rubble) =
+                            self.destroy_sites_into_rubble(vec![(cell, site)], card_instance_id)?;
+                        for (rubble_cell, instance_id) in rubble {
+                            outcomes.push("rubble-created", || {
+                                json!({
+                                    "cell": rubble_cell,
+                                    "instanceId": instance_id,
+                                    "sourceInstanceId": card_instance_id,
+                                })
+                            });
+                        }
+                        cards
+                    }
+                    _ => Vec::new(),
+                };
+                // The crater and its damage settle together, so drained minions die alongside
+                // the ones the grid killed outright.
+                for instance_id in self.lower_region_minion_deaths() {
+                    if !dead_minions.contains(&instance_id) {
+                        dead_minions.push(instance_id);
+                    }
+                }
+                if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
+                    self.begin_minion_deaths(
+                        &dead_minions,
+                        &defeated_avatars,
+                        Phase::Main,
+                        self.position.active_seat,
+                        outcomes,
+                    )?;
+                }
+                for card in destroyed_cards {
+                    self.position.players[seat_index(card.owner)]
+                        .cemetery
+                        .push(card);
                 }
             }
             _ => return Err(GameError::IllegalAction),
@@ -12851,38 +13110,48 @@ mod tests {
 
     #[test]
     fn supported_magic_effects_should_be_selfplay_supported() {
-        for (effect, field, value) in [
+        for (effect, facts) in [
             (
                 MagicEffect::DamageChainNearbyUnits,
-                "damageChainNearbyUnits",
-                json!(true),
+                json!({ "damageChainNearbyUnits": true }),
             ),
             (
                 MagicEffect::DamageEachAbovegroundMinionOne,
-                "damageEachAbovegroundMinion",
-                json!(1),
+                json!({ "damageEachAbovegroundMinion": 1 }),
             ),
             (
                 MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(3),
-                "damageEachUnitAtLocationWithinTwoSteps",
-                json!(3),
+                json!({ "damageEachUnitAtLocationWithinTwoSteps": 3 }),
+            ),
+            (
+                MagicEffect::DestroyTargetSiteWithDamageGrid([10, 7, 4, 2, 1]),
+                json!({
+                    "damageUnitsAboveAndBelowTargetSiteByManhattanDistance": [10, 7, 4, 2, 1],
+                    "destroyTargetSite": true,
+                    "discardSiteAsAdditionalCost": true,
+                }),
             ),
             (
                 MagicEffect::FightAllyWithAdjacentEnemy,
-                "fightAllyWithAdjacentEnemy",
-                json!(true),
+                json!({ "fightAllyWithAdjacentEnemy": true }),
             ),
-            (MagicEffect::LeapAttackAlly, "leapAttackAlly", json!(true)),
+            (
+                MagicEffect::LeapAttackAlly,
+                json!({ "leapAttackAlly": true }),
+            ),
         ] {
             assert_eq!(unsupported_magic_effect(&effect), None);
             let manifest = selfplay_manifest_with(31, |manifest| {
                 for ordinal in 1..=50 {
-                    manifest["cards"][format!("north-spell-{ordinal}")] = json!({
+                    let card = &mut manifest["cards"][format!("north-spell-{ordinal}")];
+                    *card = json!({
                         "cardType": "magic",
-                        (field): value.clone(),
                         "manaCost": 0,
                         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
                     });
+                    for (field, value) in facts.as_object().expect("supported Magic facts") {
+                        card[field.as_str()] = value.clone();
+                    }
                 }
             });
             Game::from_manifest_json(&manifest)
@@ -14272,5 +14541,391 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    /// One crater board: a Water target at C2, both Avatars inside the grid, and one South minion
+    /// per interesting distance, footprint, Ward, Stealth, and Void case.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one shared crater board keeps every distance, terrain, and status case visible together"
+    )]
+    fn craterize_fixture(protected: bool) -> (Game, BTreeMap<&'static str, IdentityHash>) {
+        let manifest = selfplay_manifest_with(197, |manifest| {
+            for ordinal in 1..=50 {
+                manifest["cards"][format!("north-spell-{ordinal}")] = json!({
+                    "cardType": "magic",
+                    "damageUnitsAboveAndBelowTargetSiteByManhattanDistance": [10, 7, 4, 2, 1],
+                    "destroyTargetSite": true,
+                    "discardSiteAsAdditionalCost": true,
+                    "manaCost": 8,
+                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                });
+            }
+            manifest["cards"]["south-site-1"]["elements"] = json!(["water"]);
+            if protected {
+                manifest["cards"]["south-site-1"]["cannotBeMovedDestroyedOrModified"] = json!(true);
+            }
+            for (ordinal, facts) in [
+                (1, json!({ "burrowing": true, "submerge": true })),
+                (2, json!({ "burrowing": true })),
+                (3, json!({})),
+                (4, json!({ "stealth": true })),
+                (5, json!({ "ward": true })),
+                (6, json!({ "occupiesSquareArea": 2 })),
+                (7, json!({ "voidwalk": true })),
+            ] {
+                let card = &mut manifest["cards"][format!("south-spell-{ordinal}")];
+                card["defense"] = json!(40);
+                card["manaCost"] = json!(0);
+                for (field, value) in facts.as_object().expect("fixture minion facts") {
+                    card[field.as_str()] = value.clone();
+                }
+            }
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid Craterize manifest");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let north_land = card_id("north-site-1");
+        let south_land = card_id("south-site-2");
+        let water = card_id("south-site-1");
+        let minions: [CardId; 7] =
+            std::array::from_fn(|index| card_id(&format!("south-spell-{}", index + 1)));
+
+        game.position.sites = std::array::from_fn(|_| None);
+        game.position.rubble = std::array::from_fn(|_| None);
+        for (cell, card, owner) in [
+            ("B1", south_land, Seat::South),
+            ("B2", south_land, Seat::South),
+            ("C1", south_land, Seat::South),
+            ("C2", water, Seat::South),
+            ("C3", south_land, Seat::South),
+            ("C4", north_land, Seat::North),
+            ("D3", south_land, Seat::South),
+            ("D4", north_land, Seat::North),
+            ("E3", south_land, Seat::South),
+            ("E4", south_land, Seat::South),
+        ] {
+            let cell = Cell::parse(cell).expect("fixture cell");
+            game.position.sites[cell.index()] = Some(SitePosition {
+                card: CardInstance {
+                    card_id: card,
+                    instance_id: identity_hash(
+                        &json!({ "cell": cell, "fixture": "craterize-site" }),
+                    )
+                    .expect("fixture site identity"),
+                    owner,
+                    source: CardSource::Atlas,
+                },
+                controller: owner,
+            });
+        }
+
+        let mut identities = BTreeMap::new();
+        game.position.units = Vec::new();
+        for (name, index, cell, region) in [
+            ("center", 0, "C2", Region::Underwater),
+            ("seven", 1, "C3", Region::Underground),
+            ("four", 2, "D3", Region::Surface),
+            ("two", 3, "E3", Region::Surface),
+            ("one", 4, "E4", Region::Surface),
+            ("oversized", 5, "B1", Region::Surface),
+            ("void", 6, "A4", Region::Void),
+        ] {
+            let instance_id =
+                identity_hash(&json!({ "fixture": name, "kind": "craterize-minion" }))
+                    .expect("fixture minion identity");
+            let mut unit = test_minion(
+                minions[index],
+                instance_id.as_str(),
+                Seat::South,
+                Cell::parse(cell).expect("fixture cell"),
+                (name == "oversized").then_some(Cell::SQUARE_AREAS[3]),
+            );
+            unit.region = region;
+            unit.stealthed = name == "two";
+            unit.warded = name == "one";
+            game.position.units.push(unit);
+            identities.insert(name, instance_id);
+        }
+
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        game.position.players[seat_index(Seat::South)]
+            .avatar
+            .location = Cell::parse("C3").expect("C3");
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.avatar.location = Cell::parse("C4").expect("C4");
+        north.domain_established = true;
+        north.mana = 8;
+        (game, identities)
+    }
+
+    fn craterize_casts(game: &Game, card_instance_id: &IdentityHash) -> Vec<IssuedAction> {
+        game.legal_actions()
+            .expect("Craterize actions")
+            .into_iter()
+            .filter(|action| match &action.descriptor {
+                ActionDescriptor::CastMagic {
+                    card_instance_id: candidate,
+                    ..
+                } => *candidate == *card_instance_id,
+                _ => false,
+            })
+            .collect()
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one direct crater proof keeps the discard cost, protection, grid, and terrain branches together"
+    )]
+    fn craterize_should_discard_a_site_destroy_its_target_and_apply_its_damage_grid() {
+        let (base, identities) = craterize_fixture(false);
+        let c2 = Cell::parse("C2").expect("C2");
+        let craterize = base.position.players[seat_index(Seat::North)].hand_spellbook[0]
+            .instance_id
+            .clone();
+        let target_site_instance_id = base.position.sites[c2.index()]
+            .as_ref()
+            .expect("Water target site")
+            .card
+            .instance_id
+            .clone();
+        let discard_count = base.position.players[seat_index(Seat::North)]
+            .hand_atlas
+            .len();
+        assert!(discard_count > 1);
+
+        // The additional cost is mandatory, so an empty Atlas hand offers no cast at all.
+        let mut costless = base.clone();
+        costless.position.players[seat_index(Seat::North)]
+            .hand_atlas
+            .clear();
+        assert!(craterize_casts(&costless, &craterize).is_empty());
+
+        let casts = craterize_casts(&base, &craterize);
+        let target_cells = casts
+            .iter()
+            .filter_map(|action| match &action.descriptor {
+                ActionDescriptor::CastMagic {
+                    target_location, ..
+                } => target_location.map(|location| location.cell),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(target_cells.len(), 10);
+        let target_casts: Vec<_> = casts
+            .iter()
+            .filter(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::CastMagic {
+                        target_site_instance_id: Some(site),
+                        ..
+                    } if *site == target_site_instance_id
+                )
+            })
+            .collect();
+        assert_eq!(target_casts.len(), discard_count);
+        let cast = target_casts[0].clone();
+        let ActionDescriptor::CastMagic {
+            discard_site_instance_id: Some(discarded_site_instance_id),
+            ..
+        } = &cast.descriptor
+        else {
+            unreachable!("Craterize issues its discard cost");
+        };
+        let discarded_site_instance_id = discarded_site_instance_id.clone();
+
+        // Only an Atlas card in hand pays the cost; the target site itself is not a legal payment.
+        let mut forged = cast.clone();
+        let ActionDescriptor::CastMagic {
+            discard_site_instance_id,
+            ..
+        } = &mut forged.descriptor
+        else {
+            unreachable!("filtered Craterize cast");
+        };
+        *discard_site_instance_id = Some(target_site_instance_id.clone());
+        let mut forgery = base.clone();
+        let before_forgery = forgery.authoritative_state();
+        assert!(matches!(
+            forgery.apply_action(&forged),
+            Err(GameError::IllegalAction)
+        ));
+        assert_eq!(forgery.authoritative_state(), before_forgery);
+
+        let (protected_base, protected_identities) = craterize_fixture(true);
+        let protected_site = protected_base.position.sites[c2.index()].clone();
+        let protected_spell = protected_base.position.players[seat_index(Seat::North)]
+            .hand_spellbook[0]
+            .instance_id
+            .clone();
+        let protected_cast = craterize_casts(&protected_base, &protected_spell)
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::CastMagic { target_location: Some(location), .. }
+                        if location.cell == c2
+                )
+            })
+            .expect("protected Craterize cast");
+        let mut protected = protected_base;
+        let (protected_events, protected_random) = protected
+            .apply_action_recorded(&protected_cast)
+            .expect("protected Craterize cast");
+        assert!(protected_random.is_empty());
+        let protected_types: Vec<_> = protected_events
+            .iter()
+            .map(|(event_type, _)| event_type.as_str())
+            .collect();
+        assert!(protected_types.contains(&"site-destruction-prevented"));
+        assert!(!protected_types.contains(&"rubble-created"));
+        assert_eq!(protected.position.sites[c2.index()], protected_site);
+        let protected_center = protected
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == protected_identities["center"])
+            .expect("protected crater centre");
+        assert_eq!(
+            (protected_center.damage, protected_center.region),
+            (10, Region::Underwater)
+        );
+
+        let mut destroyed = base.clone();
+        let (events, random_draws) = destroyed
+            .apply_action_recorded(&cast)
+            .expect("Craterize cast");
+        assert!(random_draws.is_empty());
+        let event_types: Vec<_> = events
+            .iter()
+            .map(|(event_type, _)| event_type.as_str())
+            .collect();
+        assert_eq!(
+            &event_types[..3],
+            ["card-discarded", "magic-cast", "site-destroyed"]
+        );
+        assert!(event_types.contains(&"rubble-created"));
+        assert_eq!(event_types.last(), Some(&"magic-resolved"));
+        assert_eq!(events[0].1["zone"], json!("atlas"));
+        assert_eq!(
+            events[0].1["instanceId"],
+            json!(discarded_site_instance_id.as_str())
+        );
+        assert_eq!(
+            events[1].1["discardSiteInstanceId"],
+            json!(discarded_site_instance_id.as_str())
+        );
+
+        let allocated: BTreeMap<&str, u64> = events
+            .iter()
+            .filter(|(event_type, _)| event_type == "magic-damage-allocated")
+            .map(|(_, payload)| {
+                (
+                    payload["targetInstanceId"]
+                        .as_str()
+                        .expect("allocated target"),
+                    payload["amount"].as_u64().expect("allocated amount"),
+                )
+            })
+            .collect();
+        assert_eq!(
+            ["center", "seven", "four", "two", "one", "oversized", "void",]
+                .map(|name| allocated.get(identities[name].as_str()).copied()),
+            [Some(10), Some(7), Some(4), Some(2), Some(1), Some(28), None,]
+        );
+
+        let settled = |name: &str| {
+            destroyed
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == identities[name])
+                .map(|unit| (unit.damage, unit.region, unit.stealthed, unit.warded))
+        };
+        assert_eq!(
+            ["center", "seven", "four", "two", "one", "oversized", "void"].map(settled),
+            [
+                // The drained Water layer drops the submerged minion into its Burrowing layer.
+                Some((10, Region::Underground, false, false)),
+                Some((7, Region::Underground, false, false)),
+                Some((4, Region::Surface, false, false)),
+                Some((2, Region::Surface, true, false)),
+                // A Ward absorbs the grid damage outright and breaks.
+                Some((0, Region::Surface, false, false)),
+                Some((28, Region::Surface, false, false)),
+                Some((0, Region::Void, false, false)),
+            ]
+        );
+        assert_eq!(
+            (
+                destroyed.position.players[seat_index(Seat::North)]
+                    .avatar
+                    .life,
+                destroyed.position.players[seat_index(Seat::South)]
+                    .avatar
+                    .life,
+                destroyed.position.players[seat_index(Seat::North)].mana,
+            ),
+            (16, 13, 0)
+        );
+
+        let north_cemetery = &destroyed.position.players[seat_index(Seat::North)].cemetery;
+        assert!(
+            north_cemetery
+                .iter()
+                .any(|card| card.instance_id == craterize)
+        );
+        assert!(
+            north_cemetery
+                .iter()
+                .any(|card| card.instance_id == discarded_site_instance_id)
+        );
+        assert!(
+            !destroyed.position.players[seat_index(Seat::North)]
+                .hand_atlas
+                .iter()
+                .any(|card| card.instance_id == discarded_site_instance_id)
+        );
+        assert!(
+            destroyed.position.players[seat_index(Seat::South)]
+                .cemetery
+                .iter()
+                .any(|card| card.instance_id == target_site_instance_id)
+        );
+        assert!(destroyed.position.sites[c2.index()].is_none());
+        assert_eq!(
+            destroyed.position.rubble[c2.index()],
+            Some(
+                identity_hash(&json!({
+                    "cell": c2,
+                    "destroyedSiteInstanceId": target_site_instance_id,
+                    "kind": "rubble",
+                    "sourceInstanceId": craterize,
+                }))
+                .expect("deterministic Rubble identity")
+            )
+        );
+
+        let mut repeated = base;
+        let (repeated_events, repeated_random) = repeated
+            .apply_action_recorded(&cast)
+            .expect("repeated Craterize cast");
+        assert_eq!(repeated_events, events);
+        assert!(repeated_random.is_empty());
+        assert_eq!(repeated.position, destroyed.position);
     }
 }

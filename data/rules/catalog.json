@@ -3207,8 +3207,10 @@
         "RULE-03"
       ],
       "plainLanguage": "Craterize discards a site, destroys its target, and applies the printed damage grid.",
-      "implementationStatus": "typescript-supported",
-      "genericFactHints": [],
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "rubble"
+      ],
       "actionHints": [
         "choose-target",
         "discard",
@@ -3219,8 +3221,8 @@
         "card-discard"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Craterize discards a site, destroys its target, and applies the printed damage grid"
+        "file": "crates/sorcery-engine/src/game.rs",
+        "testName": "craterize_should_discard_a_site_destroy_its_target_and_apply_its_damage_grid"
       }
     },
     {
