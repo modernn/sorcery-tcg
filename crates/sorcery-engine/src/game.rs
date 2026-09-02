@@ -32,6 +32,7 @@ const CHAIN_MAGIC_EXTRA_TARGET_MANA: u64 = 2;
 const AREA_DAMAGE_AMOUNT: u8 = 2;
 /// The one damage amount `tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps` is admitted with.
 const ARTIFACT_DAMAGE_AMOUNT: u8 = 3;
+const ARTIFACT_ROLL_DAMAGE_AMOUNT: u8 = 4;
 
 /// Immutable manifest facts shared by cloned game positions.
 #[derive(Debug)]
@@ -1062,18 +1063,14 @@ fn unsupported_selfplay_artifact(facts: &ArtifactFacts) -> Option<&'static str> 
 /// The Artifact effects the realm cannot yet honor, named by their authoring field.
 const fn unsupported_artifact_effect(effect: ArtifactEffect) -> Option<&'static str> {
     match effect {
-        ArtifactEffect::GrantsBearerLethal
+        ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(_)
+        | ArtifactEffect::GrantsBearerLethal
         | ArtifactEffect::GrantsBearerPowerTwo
         | ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
-        | ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree => None,
-        ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(_) => {
-            Some("atEndOfEachTurnSiteControllerLosesLife")
-        }
+        | ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree
+        |         ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour => None,
         ArtifactEffect::BearerControllerChoosesExtraRandomOutcome => {
             Some("bearerControllerChoosesExtraRandomOutcome")
-        }
-        ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour => {
-            Some("tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath")
         }
     }
 }
@@ -1082,10 +1079,12 @@ const fn unsupported_artifact_effect(effect: ArtifactEffect) -> Option<&'static 
 const fn artifact_effect_supported(effect: ArtifactEffect) -> bool {
     matches!(
         effect,
-        ArtifactEffect::GrantsBearerLethal
+        ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(_)
+            | ArtifactEffect::GrantsBearerLethal
             | ArtifactEffect::GrantsBearerPowerTwo
             | ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
             | ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree
+            | ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour
     )
 }
 
@@ -3348,7 +3347,8 @@ impl Game {
             .chain(self.pick_up_artifact_descriptors(seat)?)
             .chain(self.drop_artifact_descriptors(seat)?)
             .chain(self.artifact_damage_descriptors(seat)?)
-            .chain(self.artifact_discard_area_damage_descriptors(seat)?);
+            .chain(self.artifact_discard_area_damage_descriptors(seat)?)
+            .chain(self.artifact_roll_damage_descriptors(seat)?);
         for descriptor in descriptors {
             let label = descriptor
                 .state_independent_label()
@@ -3606,6 +3606,79 @@ impl Game {
         Ok(descriptors)
     }
 
+    /// Offers each Rolling Boulder push the seat can pay for right now.
+    ///
+    /// Any ready co-located unit may tap to roll the Boulder maximally in one cardinal direction.
+    /// No bearer is required, and the pusher is excluded from path damage.
+    fn artifact_roll_damage_descriptors(
+        &self,
+        seat: Seat,
+    ) -> Result<Vec<ActionDescriptor>, GameError> {
+        if !self.artifact_activation_window(seat) {
+            return Ok(Vec::new());
+        }
+        let pushers = self.seat_unit_targets(seat);
+        let directions = [
+            ProjectileDirection::East,
+            ProjectileDirection::North,
+            ProjectileDirection::South,
+            ProjectileDirection::West,
+        ];
+        let mut descriptors = Vec::new();
+        for artifact in &self.position.artifacts {
+            if self.artifact_facts(artifact)?.effect
+                != ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour
+            {
+                continue;
+            }
+            let origin = self.artifact_location(artifact)?;
+            for pusher in &pushers {
+                if !self.unit_target_is_ready(pusher)?
+                    || self.unit_target_region(pusher)? != origin.region
+                    || !self
+                        .unit_target_occupied_cells(pusher)?
+                        .contains(&origin.cell)
+                {
+                    continue;
+                }
+                for direction in directions {
+                    let path = self.maximal_roll_path(origin, direction);
+                    descriptors.push(ActionDescriptor::ActivateArtifactRollDamage {
+                        artifact_instance_id: artifact.card.instance_id.clone(),
+                        direction,
+                        path,
+                        pusher: pusher.clone(),
+                    });
+                }
+            }
+        }
+        Ok(descriptors)
+    }
+
+    /// The maximal cardinal roll path from one location without revisiting a cell or leaving the
+    /// starting region.
+    fn maximal_roll_path(&self, origin: Location, direction: ProjectileDirection) -> Vec<Location> {
+        let mut path = vec![origin];
+        let mut seen = BTreeSet::from([origin.cell]);
+        loop {
+            let location = *path.last().expect("roll path always starts at origin");
+            let Some(next_cell) = Self::projectile_step(location.cell, direction) else {
+                break;
+            };
+            if seen.contains(&next_cell)
+                || !self.location_exists_in_region(next_cell, origin.region)
+            {
+                break;
+            }
+            path.push(Location {
+                cell: next_cell,
+                region: origin.region,
+            });
+            seen.insert(next_cell);
+        }
+        path
+    }
+
     /// Whether a unit can still pay a tap cost: awake, untapped, and clear of summoning sickness.
     fn unit_target_is_ready(&self, target: &UnitTarget) -> Result<bool, GameError> {
         match target {
@@ -3708,6 +3781,17 @@ impl Game {
             return Err(GameError::IllegalAction);
         };
         Ok(*facts)
+    }
+
+    /// Where an Artifact currently sits: the cell its bearer stands on, or the cell it lies on.
+    fn artifact_location(&self, artifact: &ArtifactPosition) -> Result<Location, GameError> {
+        match &artifact.placement {
+            ArtifactPlacement::Carried { bearer } => self.unit_target_location(bearer),
+            ArtifactPlacement::Loose { location, region } => Ok(Location {
+                cell: *location,
+                region: *region,
+            }),
+        }
     }
 
     /// Total power the unit gains from the Artifacts it carries.
@@ -5566,6 +5650,9 @@ impl Game {
             }
             ActionDescriptor::ActivateArtifactDiscardAreaDamage { .. } => {
                 self.apply_artifact_discard_area_damage_action(action, outcomes)
+            }
+            ActionDescriptor::ActivateArtifactRollDamage { .. } => {
+                self.apply_artifact_roll_damage_action(action, outcomes)
             }
             ActionDescriptor::ActivateDiscardRandomDamage { .. } => {
                 self.apply_discard_random_damage_action(action, outcomes, random_draws)
@@ -10410,6 +10497,166 @@ impl Game {
         )
     }
 
+    /// Every other unit whose footprint overlaps a Rolling Boulder roll path, excluding the pusher.
+    fn rolling_boulder_damage_targets(
+        &self,
+        path: &[Location],
+        destination: Location,
+        pusher: &UnitTarget,
+        amount_per_cell: u16,
+    ) -> Result<Vec<(UnitTarget, u16)>, GameError> {
+        let path_cells: BTreeSet<Cell> = if path.len() > 1 {
+            path.iter().map(|location| location.cell).collect()
+        } else {
+            BTreeSet::new()
+        };
+        let mut targets = Vec::new();
+        for target_seat in [Seat::North, Seat::South] {
+            for target in self.seat_unit_targets(target_seat) {
+                if target.instance_id() == pusher.instance_id() {
+                    continue;
+                }
+                if self.unit_target_region(&target)? != destination.region {
+                    continue;
+                }
+                let covered = self
+                    .unit_target_occupied_cells(&target)?
+                    .iter()
+                    .filter(|cell| path_cells.contains(cell))
+                    .count();
+                if covered > 0 {
+                    targets.push((
+                        target,
+                        amount_per_cell.saturating_mul(u16::try_from(covered).unwrap_or(u16::MAX)),
+                    ));
+                }
+            }
+        }
+        targets
+            .sort_unstable_by(|(left, _), (right, _)| left.instance_id().cmp(right.instance_id()));
+        Ok(targets)
+    }
+
+    /// Taps one ready co-located unit to push a Rolling Boulder maximally in one cardinal direction,
+    /// move the Artifact along the issued path, and deal its printed damage to every other unit
+    /// whose footprint overlaps that path. The Artifact is the source, so no bearer power or Lethal
+    /// rides along, and the pusher never damages itself.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one roll keeps tap cost, movement, allocations, and simultaneous damage explicit"
+    )]
+    fn apply_artifact_roll_damage_action(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::ActivateArtifactRollDamage {
+            artifact_instance_id,
+            direction,
+            path,
+            pusher,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let seat = action.seat;
+        if !self
+            .artifact_roll_damage_descriptors(seat)?
+            .contains(&action.descriptor)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let destination = *path.last().ok_or(GameError::IllegalAction)?;
+        let amount_per_cell = u16::from(ARTIFACT_ROLL_DAMAGE_AMOUNT);
+        let damaged_targets =
+            self.rolling_boulder_damage_targets(path, destination, pusher, amount_per_cell)?;
+        outcomes.push("artifact-roll-damage-activated", || {
+            json!({
+                "direction": direction,
+                "fromCell": path[0].cell,
+                "fromRegion": path[0].region,
+                "path": path,
+                "pusherInstanceId": pusher.instance_id(),
+                "pusherKind": pusher.kind(),
+                "pusherSeat": pusher.seat(),
+                "seat": seat,
+                "sourceInstanceId": artifact_instance_id,
+                "toCell": destination.cell,
+                "toRegion": destination.region,
+            })
+        });
+        self.tap_unit_target(pusher)?;
+        let artifact_index = self
+            .position
+            .artifacts
+            .iter()
+            .position(|artifact| artifact.card.instance_id == *artifact_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        self.position.artifacts[artifact_index].placement = ArtifactPlacement::Loose {
+            location: destination.cell,
+            region: destination.region,
+        };
+        if damaged_targets.is_empty() {
+            self.position.state_version += 1;
+            return Ok(());
+        }
+        for (target, amount) in &damaged_targets {
+            outcomes.push("artifact-roll-damage-allocated", || {
+                json!({
+                    "amount": amount,
+                    "sourceInstanceId": artifact_instance_id,
+                    "targetInstanceId": target.instance_id(),
+                })
+            });
+        }
+        let source = UnitDamageSource {
+            current_power: 0,
+            lethal: false,
+        };
+        let snapshots: Vec<_> = damaged_targets
+            .iter()
+            .map(|(target, amount)| {
+                let kind = unit_target_kind(target);
+                let status = if kind == UnitKind::Minion {
+                    Some(self.minion_damage_status(target.instance_id())?)
+                } else {
+                    None
+                };
+                Ok((target.clone(), *amount, kind, status))
+            })
+            .collect::<Result<Vec<_>, GameError>>()?;
+        let mut dead_minions = Vec::new();
+        let mut defeated_avatars = Vec::new();
+        for (target, amount, kind, status) in snapshots {
+            let result = self.apply_simple_damage_with_status(
+                kind,
+                target.seat(),
+                target.instance_id(),
+                amount,
+                source,
+                status,
+                outcomes,
+            )?;
+            if result.minion_died {
+                dead_minions.push(target.instance_id().clone());
+            }
+            if result.avatar_defeated && !defeated_avatars.contains(&target.seat()) {
+                defeated_avatars.push(target.seat());
+            }
+        }
+        self.position.state_version += 1;
+        if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
+            self.begin_minion_deaths(
+                &dead_minions,
+                &defeated_avatars,
+                Phase::Main,
+                self.position.active_seat,
+                outcomes,
+            )?;
+        }
+        Ok(())
+    }
+
     /// Discards one Spellbook card so a minion damages a hidden random other unit at its location.
     fn apply_discard_random_damage_action(
         &mut self,
@@ -13475,6 +13722,7 @@ impl Game {
         {
             return Err(GameError::IllegalAction);
         }
+        self.resolve_end_of_each_turn_site_controller_life_loss(seat, outcomes)?;
         let triggered: Vec<_> = self
             .position
             .units
@@ -13492,6 +13740,92 @@ impl Game {
             .collect();
         self.continue_end_turn_deaths(seat, &triggered, outcomes)?;
         self.position.state_version += 1;
+        Ok(())
+    }
+
+    /// Charges each Artifact's current site controller the life the Artifact's card names, in the
+    /// order the ending turn gives the two seats.
+    ///
+    /// The Artifact is the source, so a carried Artifact charges the site its bearer stands on and
+    /// keeps charging while that bearer is Disabled. An Artifact standing over no site — lying on
+    /// Rubble, or beside the realm in the Void — finds no controller to charge. The charge is a
+    /// life loss rather than damage, so an Avatar already on Death's Door only records the trigger.
+    fn resolve_end_of_each_turn_site_controller_life_loss(
+        &mut self,
+        active_seat: Seat,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let non_active_seat = other_seat(active_seat);
+        let mut triggered = Vec::new();
+        for artifact in &self.position.artifacts {
+            let ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(amount) =
+                self.artifact_facts(artifact)?.effect
+            else {
+                continue;
+            };
+            let ordering_seat = artifact
+                .bearer()
+                .map_or(artifact.card.owner, UnitTarget::seat);
+            triggered.push((
+                ordering_seat != non_active_seat,
+                artifact.card.instance_id.clone(),
+                u16::from(amount),
+            ));
+        }
+        triggered.sort_unstable();
+        for (_, instance_id, amount) in triggered {
+            let Some(artifact) = self
+                .position
+                .artifacts
+                .iter()
+                .find(|candidate| candidate.card.instance_id == instance_id)
+            else {
+                continue;
+            };
+            let cell = self.artifact_location(artifact)?.cell;
+            let Some(site) = self.position.sites[cell.index()].as_ref() else {
+                continue;
+            };
+            let seat = site.controller;
+            let site_instance_id = site.card.instance_id.clone();
+            let avatar = &mut self.position.players[seat_index(seat)].avatar;
+            let old_life = avatar.life;
+            avatar.life = old_life.saturating_sub(amount);
+            let lost = old_life - avatar.life;
+            let reached_deaths_door = old_life > 0 && avatar.life == 0;
+            if reached_deaths_door {
+                avatar.death_door_turn = Some(self.position.turn_number);
+            }
+            let life = avatar.life;
+            outcomes.push("end-turn-site-life-loss-triggered", || {
+                json!({
+                    "amount": amount,
+                    "seat": seat,
+                    "siteInstanceId": site_instance_id,
+                    "sourceInstanceId": instance_id,
+                })
+            });
+            if lost > 0 {
+                outcomes.push("avatar-life-lost", || {
+                    json!({
+                        "amount": lost,
+                        "life": life,
+                        "seat": seat,
+                        "sourceInstanceId": instance_id,
+                    })
+                });
+            }
+            if reached_deaths_door {
+                let turn_number = self.position.turn_number;
+                outcomes.push("avatar-reached-deaths-door", || {
+                    json!({
+                        "seat": seat,
+                        "sourceInstanceId": instance_id,
+                        "turnNumber": turn_number,
+                    })
+                });
+            }
+        }
         Ok(())
     }
 

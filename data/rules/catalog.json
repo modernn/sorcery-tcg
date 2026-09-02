@@ -2923,15 +2923,15 @@
         "RULE-03"
       ],
       "plainLanguage": "Rolling Boulder rolls maximally and damages other units along its path.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [],
       "eventHints": [
         "damage"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Rolling Boulder rolls maximally and damages other units along its path"
+        "file": "crates/sorcery-engine/tests/rolling_boulder_rules.rs",
+        "testName": "rule_catalog_0145_rolling_boulder_should_roll_maximally_and_damage_other_units_along_its_path"
       }
     },
     {

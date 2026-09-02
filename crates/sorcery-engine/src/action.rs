@@ -233,6 +233,18 @@ pub enum ActionDescriptor {
         /// Engine-issued unit within two measured steps of the Artifact, in the bearer's region.
         target: UnitTarget,
     },
+    /// Tap one ready ally standing on a Rolling Boulder to push it maximally in one cardinal
+    /// direction and damage every other unit whose footprint overlaps the roll path.
+    ActivateArtifactRollDamage {
+        /// Authoritative Artifact identity being rolled.
+        artifact_instance_id: IdentityHash,
+        /// Engine-issued cardinal direction the Boulder rolls.
+        direction: ProjectileDirection,
+        /// Maximal roll path from the Artifact's current location through its destination.
+        path: Vec<Location>,
+        /// Ready unit tapped to push the Boulder; excluded from path damage.
+        pusher: UnitTarget,
+    },
     /// Tap a carried Artifact's bearer and one ally beside it and discard one card in hand to
     /// damage every unit at a measured location.
     ActivateArtifactDiscardAreaDamage {
@@ -887,6 +899,21 @@ impl ActionDescriptor {
                 short_identity(artifact_instance_id),
                 target_location.cell
             )),
+            Self::ActivateArtifactRollDamage {
+                direction,
+                path,
+                pusher,
+                ..
+            } => Some(format!(
+                "Tap {} {}… to roll artifact {} through {}",
+                pusher.kind(),
+                short_identity(pusher.instance_id()),
+                direction_name(*direction),
+                path.iter()
+                    .map(|location| location.cell.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" → ")
+            )),
             Self::ActivateDiscardRandomDamage { .. }
             | Self::ActivateSparkmage { .. }
             | Self::PlaySite { .. }
@@ -1362,6 +1389,26 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                         .then_with(|| compare_unit_targets(left_helper, right_helper))
                         .then_with(|| left_location.cmp(right_location)),
                     (
+                        ActionDescriptor::ActivateArtifactRollDamage {
+                            artifact_instance_id: left_artifact,
+                            direction: left_direction,
+                            path: left_path,
+                            pusher: left_pusher,
+                        },
+                        ActionDescriptor::ActivateArtifactRollDamage {
+                            artifact_instance_id: right_artifact,
+                            direction: right_direction,
+                            path: right_path,
+                            pusher: right_pusher,
+                        },
+                    ) => left_artifact
+                        .cmp(right_artifact)
+                        .then_with(|| {
+                            direction_order(*left_direction).cmp(&direction_order(*right_direction))
+                        })
+                        .then_with(|| compare_json_array(left_path, right_path, Location::cmp))
+                        .then_with(|| compare_unit_targets(left_pusher, right_pusher)),
+                    (
                         ActionDescriptor::ActivateAreaDamage {
                             source_instance_id: left_source,
                             target_location: left_location,
@@ -1691,7 +1738,8 @@ const fn descriptor_group(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::CastMagic { ally: Some(_), .. } => 0,
         ActionDescriptor::ActivateMana { .. } | ActionDescriptor::AllocateStrike { .. } => 1,
         ActionDescriptor::ActivateArtifactDamage { .. }
-        | ActionDescriptor::ActivateArtifactDiscardAreaDamage { .. } => 2,
+        | ActionDescriptor::ActivateArtifactDiscardAreaDamage { .. }
+        | ActionDescriptor::ActivateArtifactRollDamage { .. } => 2,
         ActionDescriptor::DropArtifacts { .. } | ActionDescriptor::PickUpArtifacts { .. } => 3,
         ActionDescriptor::Mulligan { .. } => 4,
         ActionDescriptor::CastArtifact {
@@ -1821,41 +1869,42 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::ActivateAreaDamage { .. } => 0,
         ActionDescriptor::ActivateArtifactDamage { .. } => 1,
         ActionDescriptor::ActivateArtifactDiscardAreaDamage { .. } => 2,
-        ActionDescriptor::ActivateDiscardRandomDamage { .. } => 3,
-        ActionDescriptor::ActivateMana { .. } => 4,
-        ActionDescriptor::ActivateSiteDestruction { .. } => 5,
-        ActionDescriptor::ActivateSparkmage { .. } => 6,
-        ActionDescriptor::AllocateStrike { .. } => 7,
-        ActionDescriptor::BeginChainMagic { .. } => 8,
-        ActionDescriptor::CastArtifact { .. } => 9,
-        ActionDescriptor::CastMagic { .. } => 10,
-        ActionDescriptor::CloseDefend { .. } => 11,
-        ActionDescriptor::CloseIntercept {} => 12,
-        ActionDescriptor::ContinueBasicMovement { .. } => 13,
-        ActionDescriptor::DeclareAttack { .. } => 14,
-        ActionDescriptor::DeclineAttack => 15,
-        ActionDescriptor::Defend { .. } => 16,
-        ActionDescriptor::Draw { .. } => 17,
-        ActionDescriptor::DrawSite => 18,
-        ActionDescriptor::DrawSpell => 19,
-        ActionDescriptor::DropArtifacts { .. } => 20,
-        ActionDescriptor::EndTurn => 21,
-        ActionDescriptor::ExtendChainMagic { .. } => 22,
-        ActionDescriptor::Intercept { .. } => 23,
-        ActionDescriptor::OrderDeathrites { .. } => 24,
-        ActionDescriptor::PickUpArtifacts { .. } => 25,
-        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 26,
-        ActionDescriptor::ResolveChainMagic => 27,
-        ActionDescriptor::ResolveGenesisSpell { .. } => 28,
-        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 29,
-        ActionDescriptor::ResolveGenesisToken { .. } => 30,
-        ActionDescriptor::ResolveRangedStep { .. } => 31,
-        ActionDescriptor::Mulligan { .. } => 32,
-        ActionDescriptor::PlaySite { .. } => 33,
-        ActionDescriptor::ShootDamageProjectile { .. } => 34,
-        ActionDescriptor::ShootDragProjectile { .. } => 35,
-        ActionDescriptor::ShootProjectile { .. } => 36,
-        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 37,
+        ActionDescriptor::ActivateArtifactRollDamage { .. } => 3,
+        ActionDescriptor::ActivateDiscardRandomDamage { .. } => 4,
+        ActionDescriptor::ActivateMana { .. } => 5,
+        ActionDescriptor::ActivateSiteDestruction { .. } => 6,
+        ActionDescriptor::ActivateSparkmage { .. } => 7,
+        ActionDescriptor::AllocateStrike { .. } => 8,
+        ActionDescriptor::BeginChainMagic { .. } => 9,
+        ActionDescriptor::CastArtifact { .. } => 10,
+        ActionDescriptor::CastMagic { .. } => 11,
+        ActionDescriptor::CloseDefend { .. } => 12,
+        ActionDescriptor::CloseIntercept {} => 13,
+        ActionDescriptor::ContinueBasicMovement { .. } => 14,
+        ActionDescriptor::DeclareAttack { .. } => 15,
+        ActionDescriptor::DeclineAttack => 16,
+        ActionDescriptor::Defend { .. } => 17,
+        ActionDescriptor::Draw { .. } => 18,
+        ActionDescriptor::DrawSite => 19,
+        ActionDescriptor::DrawSpell => 20,
+        ActionDescriptor::DropArtifacts { .. } => 21,
+        ActionDescriptor::EndTurn => 22,
+        ActionDescriptor::ExtendChainMagic { .. } => 23,
+        ActionDescriptor::Intercept { .. } => 24,
+        ActionDescriptor::OrderDeathrites { .. } => 25,
+        ActionDescriptor::PickUpArtifacts { .. } => 26,
+        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 27,
+        ActionDescriptor::ResolveChainMagic => 28,
+        ActionDescriptor::ResolveGenesisSpell { .. } => 29,
+        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 30,
+        ActionDescriptor::ResolveGenesisToken { .. } => 31,
+        ActionDescriptor::ResolveRangedStep { .. } => 32,
+        ActionDescriptor::Mulligan { .. } => 33,
+        ActionDescriptor::PlaySite { .. } => 34,
+        ActionDescriptor::ShootDamageProjectile { .. } => 35,
+        ActionDescriptor::ShootDragProjectile { .. } => 36,
+        ActionDescriptor::ShootProjectile { .. } => 37,
+        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 38,
     }
 }
 
@@ -2017,6 +2066,15 @@ const fn direction_name(direction: ProjectileDirection) -> &'static str {
         ProjectileDirection::North => "north",
         ProjectileDirection::South => "south",
         ProjectileDirection::West => "west",
+    }
+}
+
+const fn direction_order(direction: ProjectileDirection) -> u8 {
+    match direction {
+        ProjectileDirection::East => 0,
+        ProjectileDirection::North => 1,
+        ProjectileDirection::South => 2,
+        ProjectileDirection::West => 3,
     }
 }
 
