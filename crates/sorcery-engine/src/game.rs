@@ -942,6 +942,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::DamageChainNearbyUnits
         | MagicEffect::DamageEachAbovegroundMinionOne
         | MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_)
+        | MagicEffect::DamageRandomUnitAtLocation(_)
         | MagicEffect::ReturnMinionFromOwnCemetery
         | MagicEffect::DamageTargetUnit { .. }
         | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
@@ -954,7 +955,6 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::KillTargetWoundedMinion
         | MagicEffect::LureEnemyMinionOneStepCloser
         | MagicEffect::TeleportAllyToTargetSite => None,
-        MagicEffect::DamageRandomUnitAtLocation(_) => Some("damageRandomUnitAtLocation"),
         MagicEffect::DestroyTargetSiteWithDamageGrid(_) => Some("destroyTargetSiteWithDamageGrid"),
         MagicEffect::SubmergeTargetMinion => Some("submergeTargetMinion"),
         MagicEffect::SummonRandomMinionFromAnyCemetery => Some("summonRandomMinionFromAnyCemetery"),
@@ -3612,6 +3612,17 @@ impl Game {
                     ..MagicChoice::default()
                 })
                 .collect(),
+            MagicEffect::DamageRandomUnitAtLocation(_) => {
+                let region = self.spellcaster_location(seat, caster_instance_id)?.region;
+                Cell::ALL
+                    .into_iter()
+                    .filter(|cell| self.location_exists_in_region(*cell, region))
+                    .map(|cell| MagicChoice {
+                        target_location: Some(Location { cell, region }),
+                        ..MagicChoice::default()
+                    })
+                    .collect()
+            }
             MagicEffect::ReturnMinionFromOwnCemetery => {
                 let choices: Vec<_> = self.position.players[seat_index(seat)]
                     .cemetery
@@ -4097,6 +4108,36 @@ impl Game {
                 })
     }
 
+    /// Every unit standing at one location in canonical identity order, for random selection.
+    fn units_at_location(&self, location: Location) -> Vec<(IdentityHash, UnitKind, Seat)> {
+        let mut candidates = Vec::new();
+        if location.region == Region::Surface {
+            for seat in [Seat::North, Seat::South] {
+                let avatar = &self.position.players[seat_index(seat)].avatar;
+                if avatar.location == location.cell {
+                    candidates.push((avatar.card.instance_id.clone(), UnitKind::Avatar, seat));
+                }
+            }
+        }
+        candidates.extend(
+            self.position
+                .units
+                .iter()
+                .filter(|unit| {
+                    unit.region == location.region && Self::unit_occupies_cell(unit, location.cell)
+                })
+                .map(|unit| {
+                    (
+                        unit.card.instance_id.clone(),
+                        UnitKind::Minion,
+                        unit.controller,
+                    )
+                }),
+        );
+        candidates.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        candidates
+    }
+
     fn location_exists_in_region(&self, cell: Cell, region: Region) -> bool {
         match region {
             Region::Surface => self.surface_location_exists(cell),
@@ -4510,7 +4551,9 @@ impl Game {
                 amount,
                 unit_instance_id,
             } => self.apply_mana_activation(action.seat, *amount, unit_instance_id, outcomes),
-            ActionDescriptor::CastMagic { .. } => self.apply_cast_magic_action(action, outcomes),
+            ActionDescriptor::CastMagic { .. } => {
+                self.apply_cast_magic_action(action, outcomes, random_draws)
+            }
             ActionDescriptor::BeginChainMagic { .. } => self.apply_begin_chain_magic(action),
             ActionDescriptor::CloseDefend {
                 original_target_participates,
@@ -8935,10 +8978,6 @@ impl Game {
         self.record_unit_interaction(UnitKind::Minion, seat, unit_instance_id, outcomes)
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "the closed random activation keeps validation, draw, damage, and deaths atomic"
-    )]
     fn apply_sparkmage_action(
         &mut self,
         action: &IssuedAction,
@@ -8981,37 +9020,8 @@ impl Game {
             self.combatant_attack_and_lethal(UnitKind::Avatar, seat, source_instance_id)?;
         self.position.players[seat_index(seat)].avatar.tapped = true;
 
-        let mut candidates = Vec::new();
-        for candidate_seat in [Seat::North, Seat::South] {
-            let avatar = &self.position.players[seat_index(candidate_seat)].avatar;
-            if avatar.location == target_location.cell
-                && avatar.card.instance_id != *source_instance_id
-            {
-                candidates.push((
-                    avatar.card.instance_id.clone(),
-                    UnitKind::Avatar,
-                    candidate_seat,
-                ));
-            }
-        }
-        candidates.extend(
-            self.position
-                .units
-                .iter()
-                .filter(|unit| {
-                    unit.card.instance_id != *source_instance_id
-                        && unit.region == target_location.region
-                        && Self::unit_occupies_cell(unit, target_location.cell)
-                })
-                .map(|unit| {
-                    (
-                        unit.card.instance_id.clone(),
-                        UnitKind::Minion,
-                        unit.controller,
-                    )
-                }),
-        );
-        candidates.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        let mut candidates = self.units_at_location(*target_location);
+        candidates.retain(|(instance_id, _, _)| instance_id != source_instance_id);
 
         let selected = if candidates.is_empty() {
             None
@@ -9310,6 +9320,7 @@ impl Game {
         &mut self,
         action: &IssuedAction,
         outcomes: &mut OutcomeLog<'_>,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
     ) -> Result<(), GameError> {
         let ActionDescriptor::CastMagic {
             ally,
@@ -9809,6 +9820,56 @@ impl Game {
                                 "sourceInstanceId": card_instance_id,
                             })
                         });
+                    }
+                }
+            }
+            MagicEffect::DamageRandomUnitAtLocation(amount) => {
+                let location = target_location.ok_or(GameError::IllegalAction)?;
+                let candidates = self.units_at_location(location);
+                if !candidates.is_empty() {
+                    let index = draw_index(
+                        &mut self.position.prng,
+                        candidates.len(),
+                        "magic_random_unit_at_location",
+                        "unit_index_candidate",
+                        random_draws,
+                    )?;
+                    let (target_instance_id, target_kind, target_seat) = candidates[index].clone();
+                    let allocated = u16::from(amount);
+                    outcomes.push("magic-damage-allocated", || {
+                        json!({
+                            "amount": allocated,
+                            "sourceInstanceId": card_instance_id,
+                            "targetInstanceId": target_instance_id,
+                        })
+                    });
+                    let damage = self.apply_simple_damage(
+                        target_kind,
+                        target_seat,
+                        &target_instance_id,
+                        allocated,
+                        UnitDamageSource {
+                            current_power: 0,
+                            lethal: false,
+                        },
+                        outcomes,
+                    )?;
+                    if damage.minion_died || damage.avatar_defeated {
+                        self.begin_minion_deaths(
+                            if damage.minion_died {
+                                std::slice::from_ref(&target_instance_id)
+                            } else {
+                                &[]
+                            },
+                            if damage.avatar_defeated {
+                                std::slice::from_ref(&target_seat)
+                            } else {
+                                &[]
+                            },
+                            Phase::Main,
+                            self.position.active_seat,
+                            outcomes,
+                        )?;
                     }
                 }
             }

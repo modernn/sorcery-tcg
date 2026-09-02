@@ -5698,6 +5698,133 @@ fn fatality_manifest() -> String {
         .expect("bounded seed with both North Magic cards in hand")
 }
 
+/// Walks South into a second site at C2 holding two identical minions.
+fn two_minions_at_c2(session: &mut Session) -> Vec<String> {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    let mut candidates = Vec::new();
+    for _ in 0..2 {
+        let (summoned, _) = accept_where(session, |descriptor| {
+            descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C2"
+        });
+        candidates.push(
+            summoned["cardInstanceId"]
+                .as_str()
+                .expect("summoned candidate identity")
+                .to_owned(),
+        );
+    }
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    candidates.sort_unstable();
+    candidates
+}
+
+#[test]
+fn rule_catalog_0027_lightning_bolt_should_damage_one_random_unit_at_the_chosen_location() {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-bolt": magic(("damageRandomUnitAtLocation", json!(2)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({ "defense": 3 })),
+        "south-site": site(false),
+    });
+    let manifest = manifest(37, &cards, &["north-bolt"; 6], &["south-minion"; 6]);
+    let mut session = opening_main(&manifest);
+    let candidates = two_minions_at_c2(&mut session);
+
+    // One choice per surface location that exists, and the target unit stays out of the descriptor.
+    let mut offered: Vec<_> = session
+        .legal_actions()
+        .expect("Lightning Bolt actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-bolt"
+        })
+        .map(|action| {
+            assert_eq!(action.descriptor["targetLocation"]["region"], "surface");
+            assert!(action.descriptor.get("target").is_none());
+            action.descriptor["targetLocation"]["cell"]
+                .as_str()
+                .expect("bolt target cell")
+                .to_owned()
+        })
+        .collect();
+    offered.sort_unstable();
+    offered.dedup();
+    assert_eq!(offered, ["C1", "C2", "C4"]);
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-bolt"
+            && descriptor["targetLocation"]["cell"] == "C2"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "magic-resolved",
+        ]
+    );
+    assert!(receipt.random_draws.iter().all(|draw| {
+        draw["purpose"] == "magic_random_unit_at_location"
+            && draw["domain"]["kind"] == "unit_index_candidate"
+            && draw["domain"]["exclusiveMaximum"] == 2
+    }));
+    let accepted = receipt
+        .random_draws
+        .iter()
+        .rev()
+        .find(|draw| draw["domain"]["accepted"] == true)
+        .expect("accepted random draw");
+    let selected_index = usize::try_from(
+        accepted["result"].as_u64().expect("random uint32") % candidates.len() as u64,
+    )
+    .expect("candidate index");
+    let selected = candidates[selected_index].clone();
+    let spared = candidates
+        .iter()
+        .find(|instance_id| **instance_id != selected)
+        .expect("spared candidate")
+        .clone();
+    assert_eq!(
+        receipt.events[1].payload["targetInstanceId"],
+        selected.as_str()
+    );
+
+    let damaged = state(&session);
+    assert_eq!(
+        realm_unit(&damaged, &selected).expect("struck unit")["damage"],
+        2
+    );
+    assert_eq!(
+        realm_unit(&damaged, &spared).expect("spared unit")["damage"],
+        0
+    );
+    assert_exact_replay(&session);
+}
+
 fn mesmerism_manifest() -> String {
     let cards = json!({
         "north-avatar": avatar(20),

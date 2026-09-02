@@ -527,7 +527,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Lightning Bolt targets a location and deterministically damages one random unit there.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "choose-target"
@@ -536,8 +536,8 @@
         "damage"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Lightning Bolt targets a location and deterministically damages one random unit there"
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0027_lightning_bolt_should_damage_one_random_unit_at_the_chosen_location"
       }
     },
     {
