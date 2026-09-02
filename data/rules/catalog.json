@@ -3190,15 +3190,20 @@
         "RULE-03"
       ],
       "plainLanguage": "Raise Dead selects a public random cemetery minion before free placement.",
-      "implementationStatus": "typescript-supported",
-      "genericFactHints": [],
-      "actionHints": [],
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "cemetery"
+      ],
+      "actionHints": [
+        "summon"
+      ],
       "eventHints": [
-        "cemetery-entry"
+        "cemetery-entry",
+        "random-selection"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Raise Dead selects a public random cemetery minion before free placement"
+        "file": "crates/sorcery-engine/src/game.rs",
+        "testName": "raise_dead_should_select_a_public_random_cemetery_minion_before_free_placement"
       }
     },
     {

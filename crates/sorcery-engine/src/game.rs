@@ -45,6 +45,7 @@ pub struct Position {
     decision_seat: Seat,
     immobile_areas: Vec<ImmobileArea>,
     pending_basic_movement: PendingField<PendingBasicMovement>,
+    pending_cemetery_summon: Option<PendingCemeterySummon>,
     pending_chain_magic: PendingField<PendingChainMagic>,
     pending_combat: Option<PendingCombat>,
     pending_deathrites: Option<PendingDeathrites>,
@@ -614,6 +615,18 @@ struct PendingGenesisSpellOrder {
     source_instance_id: IdentityHash,
 }
 
+/// The free placement a cemetery summon owes after its public random selection.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PendingCemeterySummon {
+    card_instance_id: IdentityHash,
+    card_owner: Seat,
+    caster_instance_id: IdentityHash,
+    seat: Seat,
+    source_magic_card_id: CardId,
+    source_magic_instance_id: IdentityHash,
+    source_magic_owner: Seat,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum PendingField<T> {
     Absent,
@@ -645,6 +658,7 @@ impl<T> PendingField<T> {
 enum Phase {
     Allocate,
     Attack,
+    CemeterySummon,
     ChainMagic,
     DeathriteOrder,
     Defend,
@@ -663,6 +677,7 @@ impl Phase {
         match self {
             Self::Allocate => "allocate",
             Self::Attack => "attack",
+            Self::CemeterySummon => "cemetery-summon",
             Self::ChainMagic => "chain-magic",
             Self::DeathriteOrder => "deathrite-order",
             Self::Defend => "defend",
@@ -756,6 +771,15 @@ struct SummonDestination {
     cell: Cell,
     cells: Option<SquareArea>,
     mana_cost: u64,
+}
+
+#[derive(Clone, Copy)]
+struct CemeterySummonRequest<'a> {
+    card_instance_id: &'a IdentityHash,
+    caster_instance_id: &'a IdentityHash,
+    seat: Seat,
+    source_magic_card_id: CardId,
+    source_magic_owner: Seat,
 }
 
 fn minimum_cardinal_distance(source: &[Cell], target: &[Cell]) -> u8 {
@@ -978,9 +1002,9 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::KillTargetWoundedMinion
         | MagicEffect::LureEnemyMinionOneStepCloser
         | MagicEffect::SubmergeTargetMinion
+        | MagicEffect::SummonRandomMinionFromAnyCemetery
         | MagicEffect::TeleportAllyToTargetSite
         | MagicEffect::TeleportNearbyAllyThenDrawCard => None,
-        MagicEffect::SummonRandomMinionFromAnyCemetery => Some("summonRandomMinionFromAnyCemetery"),
     }
 }
 
@@ -1259,6 +1283,7 @@ impl Game {
                 decision_seat: Seat::North,
                 immobile_areas: Vec::new(),
                 pending_basic_movement: PendingField::Absent,
+                pending_cemetery_summon: None,
                 pending_chain_magic: PendingField::Absent,
                 pending_combat: None,
                 pending_deathrites: None,
@@ -1412,6 +1437,7 @@ impl Game {
         match self.position.phase {
             Phase::Allocate => self.append_allocate_actions(&mut actions)?,
             Phase::Attack => self.append_attack_actions(&mut actions)?,
+            Phase::CemeterySummon => self.append_cemetery_summon_actions(&mut actions)?,
             Phase::ChainMagic => self.append_chain_magic_actions(&mut actions)?,
             Phase::DeathriteOrder => self.append_deathrite_order_actions(&mut actions)?,
             Phase::Defend => self.append_defend_actions(&mut actions)?,
@@ -2067,6 +2093,64 @@ impl Game {
         Ok(())
     }
 
+    /// Issues the free placements owed by an already selected cemetery minion.
+    fn append_cemetery_summon_actions(
+        &self,
+        actions: &mut Vec<IssuedAction>,
+    ) -> Result<(), GameError> {
+        let seat = self.position.decision_seat;
+        let pending = self
+            .position
+            .pending_cemetery_summon
+            .as_ref()
+            .ok_or_else(|| invalid("cemetery summon phase lacks its selected minion"))?;
+        if pending.seat != seat {
+            return Err(invalid("cemetery summon placement belongs to another seat"));
+        }
+        let card = self.position.players[seat_index(pending.card_owner)]
+            .cemetery
+            .iter()
+            .find(|card| card.instance_id == pending.card_instance_id)
+            .ok_or_else(|| invalid("selected cemetery minion left its cemetery"))?;
+        let definition = &self.rules.cards[usize::from(card.card_id.0)];
+        let CardFacts::Minion(facts) = &definition.facts else {
+            return Err(invalid("selected cemetery minion lacks minion facts"));
+        };
+        for destination in self.free_summon_destinations(facts) {
+            for (genesis_damage_choice, genesis_damage_target) in self.genesis_damage_choices(
+                seat,
+                &card.instance_id,
+                destination.cell,
+                facts.genesis,
+            ) {
+                let genesis_suffix = Self::genesis_damage_suffix(
+                    genesis_damage_choice,
+                    genesis_damage_target.as_ref(),
+                );
+                self.push_action(
+                    actions,
+                    ActionDescriptor::SummonMinion {
+                        card_id: definition.id.clone(),
+                        card_instance_id: card.instance_id.clone(),
+                        caster_instance_id: pending.caster_instance_id.clone(),
+                        cell: destination.cell,
+                        cells: destination.cells,
+                        genesis_damage_choice,
+                        genesis_damage_target,
+                        mana_cost: 0,
+                        payment_mode: None,
+                        sacrificed_minion_instance_ids: None,
+                    },
+                    format!(
+                        "Raise {} at {} (free){genesis_suffix}",
+                        definition.id, destination.cell
+                    ),
+                );
+            }
+        }
+        Ok(())
+    }
+
     fn append_genesis_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
         let seat = self.position.decision_seat;
         if let PendingField::Pending(pending) = &self.position.pending_genesis_spell_order {
@@ -2528,36 +2612,21 @@ impl Game {
                         }
                     }
                 }
-                let genesis_choices = if facts.genesis
-                    == Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo)
-                {
-                    std::iter::once((Some(GenesisDamageChoice::Decline), None))
-                        .chain(
-                            self.genesis_damage_targets(seat, &card.instance_id, destination.cell)
-                                .into_iter()
-                                .map(|target| (Some(GenesisDamageChoice::Target), Some(target))),
-                        )
-                        .collect::<Vec<_>>()
-                } else {
-                    vec![(None, None)]
-                };
+                let genesis_choices = self.genesis_damage_choices(
+                    seat,
+                    &card.instance_id,
+                    destination.cell,
+                    facts.genesis,
+                );
                 for (mana_cost, payment_mode, sacrificed_minion_instance_ids) in
                     payments.into_iter().flatten().chain(sacrifice_payments)
                 {
                     for (caster_kind, caster_instance_id) in &spellcasters {
                         for (genesis_damage_choice, genesis_damage_target) in &genesis_choices {
-                            let genesis_suffix =
-                                match (genesis_damage_choice, genesis_damage_target) {
-                                    (Some(GenesisDamageChoice::Decline), None) => {
-                                        "; decline Genesis".to_owned()
-                                    }
-                                    (Some(GenesisDamageChoice::Target), Some(target)) => format!(
-                                        "; Genesis targets {} {}…",
-                                        target.kind(),
-                                        &target.instance_id().as_str()[..15]
-                                    ),
-                                    _ => String::new(),
-                                };
+                            let genesis_suffix = Self::genesis_damage_suffix(
+                                *genesis_damage_choice,
+                                genesis_damage_target.as_ref(),
+                            );
                             let caster_suffix = if *caster_kind == UnitKind::Minion {
                                 self.minion_caster_suffix(seat, caster_instance_id)
                             } else {
@@ -3498,6 +3567,7 @@ impl Game {
         Ok(match effect {
             MagicEffect::HealController(_)
             | MagicEffect::DamageEachAbovegroundMinionOne
+            | MagicEffect::SummonRandomMinionFromAnyCemetery
             | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => {
                 vec![MagicChoice::default()]
             }
@@ -3889,7 +3959,8 @@ impl Game {
                 });
                 targets
             }
-            _ => {
+            // Chained Magic enumerates its targets through its own pending decision instead.
+            MagicEffect::DamageChainNearbyUnits => {
                 return Err(GameError::UnsupportedManifestFact(
                     unsupported_magic_effect(effect)
                         .unwrap_or("Magic effect")
@@ -4575,6 +4646,32 @@ impl Game {
         }
     }
 
+    /// Enumerates the placements a free summon grants: any existing surface location, ignoring
+    /// site control, mana, thresholds, and the printed casting restrictions.
+    fn free_summon_destinations(&self, minion: &MinionFacts) -> Vec<SummonDestination> {
+        if minion.occupies_square_area_two {
+            Cell::SQUARE_AREAS
+                .into_iter()
+                .filter(|cells| cells.iter().all(|cell| self.surface_location_exists(*cell)))
+                .map(|cells| SummonDestination {
+                    cell: cells[0],
+                    cells: Some(cells),
+                    mana_cost: 0,
+                })
+                .collect()
+        } else {
+            Cell::ALL
+                .into_iter()
+                .filter(|cell| self.surface_location_exists(*cell))
+                .map(|cell| SummonDestination {
+                    cell,
+                    cells: None,
+                    mana_cost: 0,
+                })
+                .collect()
+        }
+    }
+
     fn genesis_damage_targets(
         &self,
         seat: Seat,
@@ -4618,6 +4715,42 @@ impl Game {
         }
         targets.sort_unstable_by(|left, right| left.instance_id().cmp(right.instance_id()));
         targets
+    }
+
+    /// Enumerates the optional Genesis damage decisions one summon at `cell` may issue.
+    fn genesis_damage_choices(
+        &self,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+        cell: Cell,
+        genesis: Option<MinionGenesis>,
+    ) -> Vec<(Option<GenesisDamageChoice>, Option<UnitTarget>)> {
+        if genesis == Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo) {
+            std::iter::once((Some(GenesisDamageChoice::Decline), None))
+                .chain(
+                    self.genesis_damage_targets(seat, source_instance_id, cell)
+                        .into_iter()
+                        .map(|target| (Some(GenesisDamageChoice::Target), Some(target))),
+                )
+                .collect()
+        } else {
+            vec![(None, None)]
+        }
+    }
+
+    fn genesis_damage_suffix(
+        choice: Option<GenesisDamageChoice>,
+        target: Option<&UnitTarget>,
+    ) -> String {
+        match (choice, target) {
+            (Some(GenesisDamageChoice::Decline), None) => "; decline Genesis".to_owned(),
+            (Some(GenesisDamageChoice::Target), Some(target)) => format!(
+                "; Genesis targets {} {}…",
+                target.kind(),
+                &target.instance_id().as_str()[..15]
+            ),
+            _ => String::new(),
+        }
     }
 
     fn valid_genesis_damage_choice(
@@ -4909,16 +5042,17 @@ impl Game {
         }
         outcomes.move_tail_before_completion(settlement_start);
         // Magic that owns its own resolution event resumes through its continuation instead.
-        let continuing_cast = matches!(
-            action.descriptor,
-            ActionDescriptor::CastMagic {
-                ally_destination: Some(_),
-                ..
-            } | ActionDescriptor::CastMagic {
-                draw_zone: Some(_),
-                ..
-            }
-        );
+        let continuing_cast = self.position.pending_cemetery_summon.is_some()
+            || matches!(
+                action.descriptor,
+                ActionDescriptor::CastMagic {
+                    ally_destination: Some(_),
+                    ..
+                } | ActionDescriptor::CastMagic {
+                    draw_zone: Some(_),
+                    ..
+                }
+            );
         if let (Some(completion), Some(pending)) =
             (magic_completion, &mut self.position.pending_deathrites)
             && pending.deferred_magic_resolved.is_none()
@@ -5612,6 +5746,48 @@ impl Game {
         Ok(())
     }
 
+    /// Walks a declared defender one cell at a time, settling derived power after each interior
+    /// step so an aura the defender carries away kills its allies where it left them instead of
+    /// being restored by the rest of the path. Returns the path index actually reached.
+    ///
+    /// The arrival step is deliberately left for the shared post-action settlement, so a defender
+    /// that only strands its allies as it lands still joins the combat before they die.
+    fn walk_declared_defend_path(
+        &mut self,
+        seat: Seat,
+        path: &[Location],
+        unit_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<usize, GameError> {
+        self.position
+            .units
+            .iter_mut()
+            .find(|unit| unit.controller == seat && unit.card.instance_id == *unit_instance_id)
+            .ok_or(GameError::IllegalAction)?
+            .tapped = true;
+        let mut reached = 0;
+        while let Some(next) = path.get(reached + 1).copied() {
+            let Some(unit) =
+                self.position.units.iter_mut().find(|unit| {
+                    unit.controller == seat && unit.card.instance_id == *unit_instance_id
+                })
+            else {
+                break;
+            };
+            Self::move_minion_to(unit, next.cell)?;
+            reached += 1;
+            self.settle_nearby_enemy_stealth(outcomes);
+            if reached + 1 >= path.len() {
+                break;
+            }
+            self.settle_static_power_deaths(outcomes)?;
+            if self.position.pending_deathrites.is_some() || self.position.terminal.is_some() {
+                break;
+            }
+        }
+        Ok(reached)
+    }
+
     fn begin_basic_movement(
         &mut self,
         seat: Seat,
@@ -5959,7 +6135,51 @@ impl Game {
                 outcomes,
             );
         }
-        outcomes.push("defender-joined", || {
+        let joined_start = outcomes.len();
+        match kind {
+            UnitKind::Avatar => {
+                let avatar = &mut self.position.players[seat_index(seat)].avatar;
+                avatar.location = final_anchor.cell;
+                avatar.tapped = true;
+            }
+            UnitKind::Minion => {
+                let reached =
+                    self.walk_declared_defend_path(seat, path, unit_instance_id, outcomes)?;
+                // An interrupted defender owes the rest of its path, so the combat it was joining
+                // cannot be restored until that movement finishes.
+                if reached + 1 < path.len() {
+                    self.position.pending_basic_movement =
+                        PendingField::Pending(PendingBasicMovement {
+                            path: path.to_vec(),
+                            path_index: reached,
+                            purpose: BasicMovementPurpose::Defend,
+                            ranged_strike_used: false,
+                            seat,
+                            source_instance_id: unit_instance_id.clone(),
+                        });
+                    if let Some(pending) = self.position.pending_deathrites.as_mut() {
+                        pending.return_decision_seat = seat;
+                        pending.return_phase = Phase::Movement;
+                    } else {
+                        self.position.phase = Phase::Movement;
+                        self.position.decision_seat = seat;
+                    }
+                    self.position.state_version += 1;
+                    outcomes.insert(joined_start, "basic-movement-started", || {
+                        json!({
+                            "from": path[0],
+                            "path": path,
+                            "purpose": BasicMovementPurpose::Defend.as_str(),
+                            "seat": seat,
+                            "sourceInstanceId": unit_instance_id,
+                            "to": path[path.len() - 1],
+                        })
+                    });
+                    return Ok(());
+                }
+            }
+        }
+        outcomes.insert(joined_start, "defender-joined", || {
             json!({
                 "from": from,
                 "instanceId": unit_instance_id,
@@ -5969,35 +6189,6 @@ impl Game {
                 "to": final_anchor,
             })
         });
-        match kind {
-            UnitKind::Avatar => {
-                let avatar = &mut self.position.players[seat_index(seat)].avatar;
-                avatar.location = final_anchor.cell;
-                avatar.tapped = true;
-            }
-            UnitKind::Minion => {
-                for location in path.iter().skip(1) {
-                    let unit = self
-                        .position
-                        .units
-                        .iter_mut()
-                        .find(|unit| {
-                            unit.card.instance_id == *unit_instance_id && unit.controller == seat
-                        })
-                        .ok_or(GameError::IllegalAction)?;
-                    Self::move_minion_to(unit, location.cell)?;
-                    self.settle_nearby_enemy_stealth(outcomes);
-                }
-                self.position
-                    .units
-                    .iter_mut()
-                    .find(|unit| {
-                        unit.card.instance_id == *unit_instance_id && unit.controller == seat
-                    })
-                    .ok_or(GameError::IllegalAction)?
-                    .tapped = true;
-            }
-        }
         let defender = match kind {
             UnitKind::Avatar => UnitTarget::Avatar {
                 instance_id: unit_instance_id.clone(),
@@ -8064,6 +8255,7 @@ impl Game {
 
     fn clear_ordered_terminal_continuations(&mut self) {
         self.position.pending_basic_movement = PendingField::Absent;
+        self.position.pending_cemetery_summon = None;
         self.position.pending_chain_magic = PendingField::Absent;
         self.position.pending_ranged_step = PendingField::Absent;
         self.position.pending_combat = None;
@@ -9730,6 +9922,86 @@ impl Game {
         Ok(())
     }
 
+    /// Publicly draws one dead minion from either cemetery and opens the free placement it owes.
+    ///
+    /// Returns whether the caster still owes that placement; an empty cemetery pool or a minion
+    /// with no legal location resolves the Magic immediately instead.
+    fn begin_cemetery_summon(
+        &mut self,
+        request: CemeterySummonRequest<'_>,
+        outcomes: &mut OutcomeLog<'_>,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
+    ) -> Result<bool, GameError> {
+        let CemeterySummonRequest {
+            card_instance_id,
+            caster_instance_id,
+            seat,
+            source_magic_card_id,
+            source_magic_owner,
+        } = request;
+        let mut candidates: Vec<(Seat, IdentityHash, CardId)> = Vec::new();
+        for owner in [Seat::North, Seat::South] {
+            for card in &self.position.players[seat_index(owner)].cemetery {
+                if matches!(
+                    self.rules.cards[usize::from(card.card_id.0)].facts,
+                    CardFacts::Minion(_)
+                ) {
+                    candidates.push((owner, card.instance_id.clone(), card.card_id));
+                }
+            }
+        }
+        candidates.sort_unstable_by(|left, right| left.1.cmp(&right.1));
+        if candidates.is_empty() {
+            return Ok(false);
+        }
+        let index = draw_index(
+            &mut self.position.prng,
+            candidates.len(),
+            "magic_random_dead_minion",
+            "dead_minion_instance_candidate",
+            random_draws,
+        )?;
+        let (card_owner, dead_instance_id, dead_card_id) = candidates.swap_remove(index);
+        let dead_definition = &self.rules.cards[usize::from(dead_card_id.0)];
+        let CardFacts::Minion(facts) = &dead_definition.facts else {
+            return Err(invalid("cemetery minion candidate lacks minion facts"));
+        };
+        let dead_card_name = dead_definition.id.clone();
+        let placements = self.free_summon_destinations(facts);
+        outcomes.push("dead-minion-selected", || {
+            json!({
+                "cardId": dead_card_name,
+                "instanceId": dead_instance_id,
+                "owner": card_owner,
+                "seat": seat,
+                "sourceInstanceId": card_instance_id,
+            })
+        });
+        if placements.is_empty() {
+            outcomes.push("minion-summon-failed", || {
+                json!({
+                    "instanceId": dead_instance_id,
+                    "owner": card_owner,
+                    "reason": "no-legal-location",
+                    "seat": seat,
+                    "sourceInstanceId": card_instance_id,
+                })
+            });
+            return Ok(false);
+        }
+        self.position.pending_cemetery_summon = Some(PendingCemeterySummon {
+            card_instance_id: dead_instance_id,
+            card_owner,
+            caster_instance_id: caster_instance_id.clone(),
+            seat,
+            source_magic_card_id,
+            source_magic_instance_id: card_instance_id.clone(),
+            source_magic_owner,
+        });
+        self.position.phase = Phase::CemeterySummon;
+        Ok(true)
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "the closed Magic transaction keeps validation, payment, and effects atomic"
@@ -9985,9 +10257,24 @@ impl Game {
         )?;
         let leap_attack = effect == MagicEffect::LeapAttackAlly;
         let blink = effect == MagicEffect::TeleportNearbyAllyThenDrawCard;
+        // A raised minion resolves its Magic from the free placement it still owes.
+        let mut raising = false;
         match effect {
             MagicEffect::HealController(amount) => {
                 self.heal_avatar(seat, u16::from(amount), card_instance_id, outcomes)?;
+            }
+            MagicEffect::SummonRandomMinionFromAnyCemetery => {
+                raising = self.begin_cemetery_summon(
+                    CemeterySummonRequest {
+                        card_instance_id,
+                        caster_instance_id,
+                        seat,
+                        source_magic_card_id: compact_card_id,
+                        source_magic_owner: owner,
+                    },
+                    outcomes,
+                    random_draws,
+                )?;
             }
             MagicEffect::ReturnMinionFromOwnCemetery => {
                 if let Some(selected_id) = cemetery_minion_instance_id {
@@ -10803,9 +11090,10 @@ impl Game {
                         .push(card);
                 }
             }
-            _ => return Err(GameError::IllegalAction),
+            // Chained Magic resolves through its own pending decision instead.
+            MagicEffect::DamageChainNearbyUnits => return Err(GameError::IllegalAction),
         }
-        if !leap_attack && !blink {
+        if !leap_attack && !blink && !raising {
             if let Some(pending) = &mut self.position.pending_deathrites {
                 pending.deferred_magic_resolved = Some(DeferredMagicResolved {
                     card_id: compact_card_id,
@@ -11131,6 +11419,9 @@ impl Game {
             return Err(GameError::IllegalAction);
         };
         let seat = action.seat;
+        if self.position.phase == Phase::CemeterySummon {
+            return self.apply_cemetery_summon_action(action, outcomes);
+        }
         let player_index = seat_index(seat);
         let player = &self.position.players[player_index];
         let caster_kind = self.spellcaster_kind(seat, caster_instance_id);
@@ -11381,6 +11672,19 @@ impl Game {
         continuation: PaidSummonContinuation,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        self.finish_summon(continuation, None, outcomes)
+    }
+
+    /// Places one summoned minion and resolves its Genesis.
+    ///
+    /// A `raised` placement carries the free summon a cemetery Magic still owed, so it skips the
+    /// caster interaction a paid summon records and completes that Magic once the minion lands.
+    fn finish_summon(
+        &mut self,
+        continuation: PaidSummonContinuation,
+        raised: Option<PendingCemeterySummon>,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
         let PaidSummonContinuation {
             caster,
             genesis_damage_choice,
@@ -11392,15 +11696,17 @@ impl Game {
         let seat = unit.controller;
         let card_id = unit.card.card_id;
         let card_instance_id = unit.card.instance_id.clone();
+        let card_owner = unit.card.owner;
         let caster_instance_id = caster.instance_id().clone();
         let caster_kind = match caster {
             UnitTarget::Avatar { .. } => UnitKind::Avatar,
             UnitTarget::Minion { .. } => UnitKind::Minion,
         };
-        if caster_kind == UnitKind::Avatar
-            || self.position.units.iter().any(|candidate| {
-                candidate.controller == seat && candidate.card.instance_id == caster_instance_id
-            })
+        if raised.is_none()
+            && (caster_kind == UnitKind::Avatar
+                || self.position.units.iter().any(|candidate| {
+                    candidate.controller == seat && candidate.card.instance_id == caster_instance_id
+                }))
         {
             self.record_unit_interaction(caster_kind, seat, &caster_instance_id, outcomes)?;
         }
@@ -11424,6 +11730,10 @@ impl Game {
             if let Some(cells) = cells {
                 payload["cells"] = json!(cells);
             }
+            if let Some(raised) = &raised {
+                payload["owner"] = json!(card_owner);
+                payload["sourceInstanceId"] = json!(raised.source_magic_instance_id);
+            }
             payload
         });
         if lance_count > 0 {
@@ -11443,7 +11753,154 @@ impl Game {
             genesis_damage_target.as_ref(),
             outcomes,
         )?;
+        if let Some(raised) = raised {
+            let source_card_id = self.rules.cards[usize::from(raised.source_magic_card_id.0)]
+                .id
+                .clone();
+            if let Some(pending) = &mut self.position.pending_deathrites {
+                pending.deferred_magic_resolved = Some(DeferredMagicResolved {
+                    card_id: raised.source_magic_card_id,
+                    instance_id: raised.source_magic_instance_id,
+                    owner: raised.source_magic_owner,
+                });
+            } else {
+                Self::emit_continuation_magic_resolved(
+                    &source_card_id,
+                    &raised.source_magic_instance_id,
+                    raised.source_magic_owner,
+                    outcomes,
+                );
+            }
+        }
         Ok(())
+    }
+
+    /// Names the caster a summon event credits.
+    ///
+    /// A raised minion only labels its caster, so the reference survives a spellcaster that left
+    /// the realm between the cast and the placement it owed.
+    fn recorded_caster(&self, seat: Seat, caster_instance_id: &IdentityHash) -> UnitTarget {
+        if self.position.players[seat_index(seat)]
+            .avatar
+            .card
+            .instance_id
+            == *caster_instance_id
+        {
+            UnitTarget::Avatar {
+                instance_id: caster_instance_id.clone(),
+                seat,
+            }
+        } else {
+            UnitTarget::Minion {
+                instance_id: caster_instance_id.clone(),
+                seat,
+            }
+        }
+    }
+
+    /// Applies the free placement a cemetery Magic owes after its public random selection.
+    fn apply_cemetery_summon_action(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::SummonMinion {
+            card_id,
+            card_instance_id,
+            caster_instance_id,
+            cell,
+            cells,
+            genesis_damage_choice,
+            genesis_damage_target,
+            mana_cost,
+            payment_mode,
+            sacrificed_minion_instance_ids,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let seat = action.seat;
+        let pending = self
+            .position
+            .pending_cemetery_summon
+            .clone()
+            .ok_or(GameError::IllegalAction)?;
+        if pending.seat != seat
+            || pending.card_instance_id != *card_instance_id
+            || pending.caster_instance_id != *caster_instance_id
+            || *mana_cost != 0
+            || payment_mode.is_some()
+            || sacrificed_minion_instance_ids.is_some()
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let owner_index = seat_index(pending.card_owner);
+        let cemetery_index = self.position.players[owner_index]
+            .cemetery
+            .iter()
+            .position(|card| {
+                card.instance_id == *card_instance_id
+                    && self.rules.cards[usize::from(card.card_id.0)].id == card_id.as_str()
+            })
+            .ok_or(GameError::IllegalAction)?;
+        let compact_card_id = self.position.players[owner_index].cemetery[cemetery_index].card_id;
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(compact_card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let genesis = facts.genesis;
+        let lance_count = facts.lance_count.unwrap_or(0);
+        let starts_stealthed = facts.stealth;
+        let starts_warded = facts.damage_prevention == Some(DamagePrevention::Ward);
+        let placeable = self
+            .free_summon_destinations(facts)
+            .into_iter()
+            .any(|destination| destination.cell == *cell && destination.cells == *cells);
+        if !placeable
+            || !self.valid_genesis_damage_choice(
+                seat,
+                card_instance_id,
+                *cell,
+                genesis,
+                *genesis_damage_choice,
+                genesis_damage_target.as_ref(),
+            )
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let card = self.position.players[owner_index]
+            .cemetery
+            .remove(cemetery_index);
+        let unit = UnitPosition {
+            card,
+            carried_lance_count: lance_count,
+            controller: seat,
+            damage: 0,
+            disable_effects: Vec::new(),
+            disabled_until_damaged: false,
+            last_interacted_turn: None,
+            location: *cell,
+            occupied_cells: *cells,
+            region: Region::Surface,
+            stealthed: starts_stealthed,
+            summoning_sickness: true,
+            tapped: false,
+            temporary_charge_sources: Vec::new(),
+            temporary_power_sources: Vec::new(),
+            warded: starts_warded,
+        };
+        let continuation = PaidSummonContinuation {
+            caster: self.recorded_caster(seat, caster_instance_id),
+            genesis_damage_choice: *genesis_damage_choice,
+            genesis_damage_target: genesis_damage_target.clone(),
+            mana_paid: 0,
+            sacrificed_minion_instance_ids: Vec::new(),
+            unit,
+        };
+        self.position.pending_cemetery_summon = None;
+        self.position.phase = Phase::Main;
+        self.position.state_version += 1;
+        self.finish_summon(continuation, Some(pending), outcomes)
     }
 
     fn apply_minion_genesis(
@@ -12128,6 +12585,18 @@ impl Game {
             }
             self.insert_pending_movement_state(object);
             self.insert_pending_chain_magic_state(object);
+            if let Some(pending) = &self.position.pending_cemetery_summon {
+                object.insert(
+                    "pendingCemeterySummon".to_owned(),
+                    json!({
+                        "cardInstanceId": pending.card_instance_id,
+                        "cardOwner": pending.card_owner,
+                        "casterInstanceId": pending.caster_instance_id,
+                        "seat": pending.seat,
+                        "sourceMagicInstanceId": pending.source_magic_instance_id,
+                    }),
+                );
+            }
         }
         if !self.position.immobile_areas.is_empty() {
             value["realm"]["immobileAreas"] = self
@@ -14927,5 +15396,365 @@ mod tests {
         assert_eq!(repeated_events, events);
         assert!(repeated_random.is_empty());
         assert_eq!(repeated.position, destroyed.position);
+    }
+
+    struct RaiseDeadFixture {
+        game: Game,
+        north_corpse: IdentityHash,
+        raise_dead: IdentityHash,
+        south_corpse: IdentityHash,
+    }
+
+    /// One Raise Dead board: sites only at C1 and C4, so free placement has to cross site
+    /// control and cannot host a two-by-two footprint, plus one corpse in each cemetery.
+    fn raise_dead_fixture(oversized: bool) -> RaiseDeadFixture {
+        let manifest = selfplay_manifest_with(198, |manifest| {
+            manifest["cards"]["north-spell-1"] = json!({
+                "cardType": "magic",
+                "manaCost": 0,
+                "summonRandomMinionFromAnyCemetery": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+            // The corpse is unaffordable and off-threshold, so only a free placement can raise it.
+            let corpse = &mut manifest["cards"]["south-spell-1"];
+            corpse["defense"] = json!(3);
+            corpse["manaCost"] = json!(9);
+            corpse["thresholds"] = json!({ "air": 0, "earth": 0, "fire": 0, "water": 4 });
+            // An oversized footprint cannot also carry a Genesis, so the branches split here.
+            if oversized {
+                corpse["occupiesSquareArea"] = json!(2);
+            } else {
+                corpse["genesisLoseControllerLife"] = json!(2);
+            }
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid Raise Dead manifest");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let instance = |card_id: CardId, owner: Seat, source: CardSource, ordinal: usize| {
+            card_instance(&game.rules, card_id, owner, source, ordinal).expect("fixture instance")
+        };
+        let raise_dead = instance(
+            card_id("north-spell-1"),
+            Seat::North,
+            CardSource::Spellbook,
+            500,
+        );
+        let south_corpse = instance(
+            card_id("south-spell-1"),
+            Seat::South,
+            CardSource::Spellbook,
+            501,
+        );
+        let north_corpse = instance(
+            card_id("north-spell-2"),
+            Seat::North,
+            CardSource::Spellbook,
+            502,
+        );
+        let sites = [
+            (
+                Cell::parse("C4").expect("C4"),
+                Seat::North,
+                instance(card_id("north-site-1"), Seat::North, CardSource::Atlas, 503),
+            ),
+            (
+                Cell::parse("C1").expect("C1"),
+                Seat::South,
+                instance(card_id("south-site-1"), Seat::South, CardSource::Atlas, 504),
+            ),
+        ];
+
+        game.position.sites = std::array::from_fn(|_| None);
+        game.position.rubble = std::array::from_fn(|_| None);
+        for (cell, controller, card) in sites {
+            game.position.sites[cell.index()] = Some(SitePosition { card, controller });
+        }
+        game.position.units = Vec::new();
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        let south = &mut game.position.players[seat_index(Seat::South)];
+        south.avatar.location = Cell::parse("C1").expect("C1");
+        south.cemetery = vec![south_corpse.clone()];
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.avatar.location = Cell::parse("C4").expect("C4");
+        north.cemetery = vec![north_corpse.clone()];
+        north.domain_established = true;
+        north.hand_spellbook = vec![raise_dead.clone()];
+        north.mana = 3;
+        RaiseDeadFixture {
+            game,
+            north_corpse: north_corpse.instance_id,
+            raise_dead: raise_dead.instance_id,
+            south_corpse: south_corpse.instance_id,
+        }
+    }
+
+    fn only_action(
+        actions: &[IssuedAction],
+        matches: impl Fn(&ActionDescriptor) -> bool,
+    ) -> &IssuedAction {
+        let mut found = actions.iter().filter(|action| matches(&action.descriptor));
+        let action = found.next().expect("expected one issued action");
+        assert!(found.next().is_none(), "expected exactly one issued action");
+        action
+    }
+
+    fn raise_dead_cast(game: &Game) -> IssuedAction {
+        only_action(
+            &game.legal_actions().expect("Raise Dead actions"),
+            |descriptor| matches!(descriptor, ActionDescriptor::CastMagic { .. }),
+        )
+        .clone()
+    }
+
+    fn event_types(events: &[(String, Value)]) -> Vec<&str> {
+        events
+            .iter()
+            .map(|(event_type, _)| event_type.as_str())
+            .collect()
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one direct Raise Dead proof keeps the empty pool, blocked placement, and free summon branches together"
+    )]
+    fn raise_dead_should_select_a_public_random_cemetery_minion_before_free_placement() {
+        let base = raise_dead_fixture(false);
+        let c1 = Cell::parse("C1").expect("C1");
+        let c4 = Cell::parse("C4").expect("C4");
+
+        // An empty cemetery pool resolves the Magic outright and never touches the PRNG.
+        let mut empty = base.game.clone();
+        empty.position.players[seat_index(Seat::North)].cemetery = Vec::new();
+        empty.position.players[seat_index(Seat::South)].cemetery = Vec::new();
+        let empty_cast = raise_dead_cast(&empty);
+        let (empty_events, empty_random) = empty
+            .apply_action_recorded(&empty_cast)
+            .expect("empty cemetery Raise Dead cast");
+        assert_eq!(event_types(&empty_events), ["magic-cast", "magic-resolved"]);
+        assert!(empty_random.is_empty());
+        assert_eq!(empty.position.phase, Phase::Main);
+        assert!(empty.position.pending_cemetery_summon.is_none());
+
+        // Both cemeteries feed one public draw over the shared candidate pool.
+        let mut both = base.game.clone();
+        let both_cast = raise_dead_cast(&both);
+        let (both_events, both_random) = both
+            .apply_action_recorded(&both_cast)
+            .expect("two candidate Raise Dead cast");
+        assert_eq!(
+            event_types(&both_events),
+            ["magic-cast", "dead-minion-selected"]
+        );
+        assert_eq!(both_random.len(), 1);
+        assert_eq!(both_random[0].purpose, "magic_random_dead_minion");
+        assert_eq!(both_random[0].domain.kind, "dead_minion_instance_candidate");
+        assert_eq!(both_random[0].domain.exclusive_maximum, 2);
+        assert_eq!(both.position.phase, Phase::CemeterySummon);
+        let selected = both_events[1].1["instanceId"]
+            .as_str()
+            .expect("selected corpse")
+            .to_owned();
+        assert!(
+            selected == base.north_corpse.as_str() || selected == base.south_corpse.as_str(),
+            "the draw stays inside the cemetery pool"
+        );
+        // Selection alone moves nothing: both corpses wait in their cemeteries.
+        assert_eq!(
+            both.position.players[seat_index(Seat::North)]
+                .cemetery
+                .len(),
+            2,
+        );
+        assert_eq!(
+            both.position.players[seat_index(Seat::South)]
+                .cemetery
+                .len(),
+            1,
+        );
+
+        // A footprint with nowhere to land fails its summon instead of silently vanishing.
+        let oversized = raise_dead_fixture(true);
+        let mut blocked = oversized.game;
+        blocked.position.players[seat_index(Seat::North)].cemetery = Vec::new();
+        let blocked_cast = raise_dead_cast(&blocked);
+        let (blocked_events, blocked_random) = blocked
+            .apply_action_recorded(&blocked_cast)
+            .expect("blocked Raise Dead cast");
+        assert_eq!(
+            event_types(&blocked_events),
+            [
+                "magic-cast",
+                "dead-minion-selected",
+                "minion-summon-failed",
+                "magic-resolved",
+            ]
+        );
+        assert_eq!(blocked_random.len(), 1);
+        assert_eq!(blocked_events[2].1["reason"], json!("no-legal-location"));
+        assert_eq!(
+            blocked_events[2].1["instanceId"],
+            json!(oversized.south_corpse.as_str())
+        );
+        assert_eq!(blocked.position.phase, Phase::Main);
+        assert!(blocked.position.pending_cemetery_summon.is_none());
+        assert_eq!(
+            blocked.position.players[seat_index(Seat::South)].cemetery[0].instance_id,
+            oversized.south_corpse
+        );
+
+        // One candidate proves the placement itself: free, anywhere, and enemy owned.
+        let mut game = base.game.clone();
+        game.position.players[seat_index(Seat::North)].cemetery = Vec::new();
+        let cast = raise_dead_cast(&game);
+        let (cast_events, cast_random) = game
+            .apply_action_recorded(&cast)
+            .expect("single candidate Raise Dead cast");
+        assert_eq!(
+            event_types(&cast_events),
+            ["magic-cast", "dead-minion-selected"]
+        );
+        assert_eq!(cast_random.len(), 1);
+        assert_eq!(cast_random[0].domain.exclusive_maximum, 1);
+        assert_eq!(
+            cast_events[1].1,
+            json!({
+                "cardId": "south-spell-1",
+                "instanceId": base.south_corpse,
+                "owner": "south",
+                "seat": "north",
+                "sourceInstanceId": base.raise_dead,
+            })
+        );
+        assert_eq!(game.position.phase, Phase::CemeterySummon);
+        assert_eq!(
+            game.authoritative_state()["pendingCemeterySummon"],
+            json!({
+                "cardInstanceId": base.south_corpse,
+                "cardOwner": "south",
+                "casterInstanceId": game.position.players[seat_index(Seat::North)]
+                    .avatar
+                    .card
+                    .instance_id,
+                "seat": "north",
+                "sourceMagicInstanceId": base.raise_dead,
+            })
+        );
+
+        let placements = game.legal_actions().expect("free placement actions");
+        assert!(!placements.is_empty());
+        assert!(placements.iter().all(|action| matches!(
+            &action.descriptor,
+            ActionDescriptor::SummonMinion {
+                card_instance_id,
+                mana_cost: 0,
+                payment_mode: None,
+                sacrificed_minion_instance_ids: None,
+                ..
+            } if *card_instance_id == base.south_corpse
+        )));
+        let cells: BTreeSet<_> = placements
+            .iter()
+            .filter_map(|action| match &action.descriptor {
+                ActionDescriptor::SummonMinion { cell, .. } => Some(*cell),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(cells, BTreeSet::from([c1, c4]));
+
+        // Only engine-issued cells place the corpse; an empty cell is not a legal destination.
+        let placement = only_action(&placements, |descriptor| {
+            matches!(descriptor, ActionDescriptor::SummonMinion { cell, .. } if *cell == c1)
+        })
+        .clone();
+        let mut forged = placement.clone();
+        let ActionDescriptor::SummonMinion { cell, .. } = &mut forged.descriptor else {
+            unreachable!("filtered free placement");
+        };
+        *cell = Cell::parse("A1").expect("A1");
+        let mut forgery = game.clone();
+        let before_forgery = forgery.authoritative_state();
+        assert!(matches!(
+            forgery.apply_action(&forged),
+            Err(GameError::IllegalAction)
+        ));
+        assert_eq!(forgery.authoritative_state(), before_forgery);
+
+        let mut placed = game.clone();
+        let (placed_events, placed_random) = placed
+            .apply_action_recorded(&placement)
+            .expect("free cemetery placement");
+        assert!(placed_random.is_empty());
+        assert_eq!(
+            event_types(&placed_events),
+            ["minion-summoned", "avatar-life-lost", "magic-resolved"]
+        );
+        assert_eq!(placed_events[0].1["manaPaid"], json!(0));
+        assert_eq!(placed_events[0].1["owner"], json!("south"));
+        assert_eq!(
+            placed_events[0].1["sourceInstanceId"],
+            json!(base.raise_dead.as_str())
+        );
+        assert_eq!(
+            placed_events[2].1["instanceId"],
+            json!(base.raise_dead.as_str())
+        );
+        let raised = placed
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == base.south_corpse)
+            .expect("raised minion");
+        assert_eq!(
+            (
+                raised.card.owner,
+                raised.controller,
+                raised.location,
+                raised.region,
+                raised.summoning_sickness,
+            ),
+            (Seat::South, Seat::North, c1, Region::Surface, true)
+        );
+        assert_eq!(placed.position.phase, Phase::Main);
+        assert!(placed.position.pending_cemetery_summon.is_none());
+        assert!(
+            placed
+                .authoritative_state()
+                .get("pendingCemeterySummon")
+                .is_none()
+        );
+        // The Genesis bills the raising controller, and the nine-mana corpse still costs nothing.
+        assert_eq!(
+            (
+                placed.position.players[seat_index(Seat::North)].avatar.life,
+                placed.position.players[seat_index(Seat::North)].mana,
+            ),
+            (18, 3)
+        );
+        assert!(
+            placed.position.players[seat_index(Seat::South)]
+                .cemetery
+                .is_empty()
+        );
+
+        let mut repeated = game;
+        let (repeated_events, repeated_random) = repeated
+            .apply_action_recorded(&placement)
+            .expect("repeated free cemetery placement");
+        assert_eq!(repeated_events, placed_events);
+        assert!(repeated_random.is_empty());
+        assert_eq!(repeated.position, placed.position);
     }
 }
