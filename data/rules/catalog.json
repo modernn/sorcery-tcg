@@ -560,15 +560,15 @@
         "RULE-04"
       ],
       "plainLanguage": "Minor Explosion damages every unit at a location up to two cardinal steps away.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [],
       "eventHints": [
         "damage"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03/04 Minor Explosion damages every unit at a location up to two cardinal steps away"
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0029_minor_explosion_damages_every_unit_at_one_nearby_location"
       }
     },
     {

@@ -833,13 +833,11 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::BurrowTargetMinionOrArtifact
         | MagicEffect::DamageChainNearbyUnits
         | MagicEffect::DamageEachAbovegroundMinionOne
+        | MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_)
         | MagicEffect::ReturnMinionFromOwnCemetery
         | MagicEffect::DamageTargetUnit { .. }
         | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
         | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => None,
-        MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_) => {
-            Some("damageEachUnitAtLocationWithinTwoSteps")
-        }
         MagicEffect::DamageRandomUnitAtLocation(_) => Some("damageRandomUnitAtLocation"),
         MagicEffect::DestroyTargetSiteWithDamageGrid(_) => Some("destroyTargetSiteWithDamageGrid"),
         MagicEffect::FightAllyWithAdjacentEnemy => Some("fightAllyWithAdjacentEnemy"),
@@ -3092,6 +3090,16 @@ impl Game {
             | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => {
                 vec![MagicChoice::default()]
             }
+            MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_) => self
+                .locations_within_two_measured_steps(
+                    self.spellcaster_location(seat, caster_instance_id)?,
+                )
+                .into_iter()
+                .map(|target_location| MagicChoice {
+                    target_location: Some(target_location),
+                    ..MagicChoice::default()
+                })
+                .collect(),
             MagicEffect::ReturnMinionFromOwnCemetery => {
                 let choices: Vec<_> = self.position.players[seat_index(seat)]
                     .cemetery
@@ -3406,6 +3414,36 @@ impl Game {
                 }),
             Region::Void => !self.surface_location_exists(cell),
         }
+    }
+
+    fn locations_within_two_measured_steps(&self, start: Location) -> Vec<Location> {
+        if !self.location_exists_in_region(start.cell, start.region) {
+            return Vec::new();
+        }
+        let mut distances = [u8::MAX; Cell::ALL.len()];
+        distances[start.cell.index()] = 0;
+        for distance in 0..2 {
+            for cell in Cell::ALL {
+                if distances[cell.index()] != distance {
+                    continue;
+                }
+                for bordering in cell.bordering(false) {
+                    if distances[bordering.index()] == u8::MAX
+                        && self.location_exists_in_region(bordering, start.region)
+                    {
+                        distances[bordering.index()] = distance + 1;
+                    }
+                }
+            }
+        }
+        Cell::ALL
+            .into_iter()
+            .filter(|cell| distances[cell.index()] != u8::MAX)
+            .map(|cell| Location {
+                cell,
+                region: start.region,
+            })
+            .collect()
     }
 
     fn move_underground_units_to_underwater(&mut self, cell: Cell) {
@@ -8486,6 +8524,82 @@ impl Game {
                     )?;
                 }
             }
+            MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(amount) => {
+                let target_location = target_location.ok_or(GameError::IllegalAction)?;
+                let mut targets = Vec::new();
+                if target_location.region == Region::Surface {
+                    for target_seat in [Seat::North, Seat::South] {
+                        let avatar = &self.position.players[seat_index(target_seat)].avatar;
+                        if avatar.location == target_location.cell {
+                            targets.push((
+                                avatar.card.instance_id.clone(),
+                                UnitKind::Avatar,
+                                target_seat,
+                                None,
+                            ));
+                        }
+                    }
+                }
+                targets.extend(
+                    self.position
+                        .units
+                        .iter()
+                        .filter(|unit| {
+                            unit.region == target_location.region
+                                && Self::unit_occupies_cell(unit, target_location.cell)
+                        })
+                        .map(|unit| {
+                            Ok((
+                                unit.card.instance_id.clone(),
+                                UnitKind::Minion,
+                                unit.controller,
+                                Some(self.minion_damage_status(&unit.card.instance_id)?),
+                            ))
+                        })
+                        .collect::<Result<Vec<_>, GameError>>()?,
+                );
+                targets.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+                for (instance_id, _, _, _) in &targets {
+                    outcomes.push("magic-damage-allocated", || {
+                        json!({
+                            "amount": amount,
+                            "sourceInstanceId": card_instance_id,
+                            "targetInstanceId": instance_id,
+                        })
+                    });
+                }
+                let mut dead_minions = Vec::new();
+                let mut defeated_avatars = Vec::new();
+                for (instance_id, kind, target_seat, status) in targets {
+                    let damage = self.apply_simple_damage_with_status(
+                        kind,
+                        target_seat,
+                        &instance_id,
+                        u16::from(amount),
+                        UnitDamageSource {
+                            current_power: 0,
+                            lethal: false,
+                        },
+                        status,
+                        outcomes,
+                    )?;
+                    if damage.minion_died {
+                        dead_minions.push(instance_id);
+                    }
+                    if damage.avatar_defeated && !defeated_avatars.contains(&target_seat) {
+                        defeated_avatars.push(target_seat);
+                    }
+                }
+                if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
+                    self.begin_minion_deaths(
+                        &dead_minions,
+                        &defeated_avatars,
+                        Phase::Main,
+                        self.position.active_seat,
+                        outcomes,
+                    )?;
+                }
+            }
             _ => return Err(GameError::IllegalAction),
         }
         if let Some(pending) = &mut self.position.pending_deathrites {
@@ -10127,6 +10241,11 @@ mod tests {
                 "damageEachAbovegroundMinion",
                 json!(1),
             ),
+            (
+                MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(3),
+                "damageEachUnitAtLocationWithinTwoSteps",
+                json!(3),
+            ),
         ] {
             assert_eq!(unsupported_magic_effect(&effect), None);
             let manifest = selfplay_manifest_with(31, |manifest| {
@@ -10144,6 +10263,172 @@ mod tests {
                 .ensure_selfplay_supported()
                 .expect("simultaneous Magic is self-play safe");
         }
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one internal proof keeps measured topology, oversized footprints, and region isolation together"
+    )]
+    fn minor_explosion_should_measure_connected_locations_and_hit_only_the_target_region() {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            for ordinal in 1..=50 {
+                manifest["cards"][format!("north-spell-{ordinal}")] = json!({
+                    "cardType": "magic",
+                    "damageEachUnitAtLocationWithinTwoSteps": 3,
+                    "manaCost": 0,
+                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                });
+            }
+            for ordinal in 1..=30 {
+                manifest["cards"][format!("north-site-{ordinal}")]["elements"] = json!(["fire"]);
+            }
+            manifest["cards"]["south-spell-1"] = json!({
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 10,
+                "manaCost": 0,
+                "occupiesSquareArea": 2,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+            manifest["cards"]["south-spell-2"] = json!({
+                "attack": 1,
+                "burrowing": true,
+                "cardType": "minion",
+                "defense": 10,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid Minor Explosion game");
+        let cells =
+            ["B2", "B3", "C2", "C3", "C4"].map(|cell| Cell::parse(cell).expect("fixture cell"));
+        let mut site_cards = Vec::new();
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        while site_cards.len() < cells.len() {
+            site_cards.push(if north.hand_atlas.is_empty() {
+                north.atlas.remove(0)
+            } else {
+                north.hand_atlas.remove(0)
+            });
+        }
+        game.position.sites.fill(None);
+        for (cell, card) in [cells[1], cells[2], cells[4]]
+            .into_iter()
+            .zip(site_cards.drain(..3))
+        {
+            game.position.sites[cell.index()] = Some(SitePosition {
+                card,
+                controller: Seat::North,
+            });
+        }
+        let start = Location {
+            cell: cells[4],
+            region: Region::Surface,
+        };
+        assert_eq!(game.locations_within_two_measured_steps(start), [start]);
+
+        for (cell, card) in [cells[0], cells[3]].into_iter().zip(site_cards) {
+            game.position.sites[cell.index()] = Some(SitePosition {
+                card,
+                controller: Seat::North,
+            });
+        }
+        assert_eq!(
+            game.locations_within_two_measured_steps(start),
+            [cells[1], cells[2], cells[3], cells[4]].map(|cell| Location {
+                cell,
+                region: Region::Surface,
+            })
+        );
+
+        let card_id = |id: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == id)
+                        .expect("target card"),
+                )
+                .expect("target card index"),
+            )
+        };
+        let surface_id = "sha256:7777777777777777777777777777777777777777777777777777777777777777";
+        let underground_id =
+            "sha256:8888888888888888888888888888888888888888888888888888888888888888";
+        let area = Cell::SQUARE_AREAS
+            .into_iter()
+            .find(|area| area[0] == cells[0])
+            .expect("B2 footprint");
+        game.position.units.push(test_minion(
+            card_id("south-spell-1"),
+            surface_id,
+            Seat::South,
+            area[0],
+            Some(area),
+        ));
+        let mut underground = test_minion(
+            card_id("south-spell-2"),
+            underground_id,
+            Seat::South,
+            cells[2],
+            None,
+        );
+        underground.region = Region::Underground;
+        game.position.units.push(underground);
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.avatar.location = cells[4];
+        north.domain_established = true;
+        north.mana = 10;
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        let action = game
+            .legal_actions()
+            .expect("Minor Explosion actions")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    action.descriptor,
+                    ActionDescriptor::CastMagic {
+                        target_location: Some(Location { cell, region: Region::Surface }),
+                        ..
+                    } if cell == cells[2]
+                )
+            })
+            .expect("C2 Minor Explosion");
+        let (outcomes, random_draws) = game
+            .apply_action_recorded(&action)
+            .expect("issued Minor Explosion");
+
+        assert!(random_draws.is_empty());
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|(event_type, _)| event_type == "magic-damage-allocated")
+                .map(|(_, payload)| payload["targetInstanceId"].clone())
+                .collect::<Vec<_>>(),
+            [json!(surface_id)]
+        );
+        assert_eq!(
+            game.position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id.as_str() == surface_id)
+                .expect("surface oversized minion")
+                .damage,
+            3
+        );
+        assert_eq!(
+            game.position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id.as_str() == underground_id)
+                .expect("underground minion")
+                .damage,
+            0
+        );
     }
 
     #[test]
