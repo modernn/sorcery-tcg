@@ -760,7 +760,11 @@ fn unsupported_selfplay_fact(facts: &CardFacts) -> Option<&'static str> {
 }
 
 fn unsupported_selfplay_magic(facts: &MagicFacts) -> Option<&'static str> {
-    match facts.effect {
+    unsupported_magic_effect(&facts.effect)
+}
+
+fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
+    match effect {
         MagicEffect::HealController(_)
         | MagicEffect::ReturnMinionFromOwnCemetery
         | MagicEffect::DamageTargetUnit { .. }
@@ -2051,7 +2055,7 @@ impl Game {
                 let cells = std::iter::once(player.avatar.location)
                     .chain(player.avatar.location.bordering(false))
                     .chain(player.avatar.location.diagonals(false))
-                    .filter(|cell| self.position.sites[cell.index()].is_some())
+                    .filter(|cell| self.surface_location_exists(*cell))
                     .collect::<BTreeSet<_>>();
                 for cell in cells {
                     self.push_action(
@@ -2898,7 +2902,9 @@ impl Game {
             }
             _ => {
                 return Err(GameError::UnsupportedManifestFact(
-                    "Magic effect".to_owned(),
+                    unsupported_magic_effect(effect)
+                        .unwrap_or("Magic effect")
+                        .to_owned(),
                 ));
             }
         })
@@ -7205,7 +7211,7 @@ impl Game {
                 .tap_damage_random_other_unit_at_nearby_location_per_air_threshold_cast_this_turn
             || target_location.region != Region::Surface
             || !target_is_nearby
-            || self.position.sites[target_location.cell.index()].is_none()
+            || !self.surface_location_exists(target_location.cell)
         {
             return Err(GameError::IllegalAction);
         }
@@ -9130,6 +9136,85 @@ mod tests {
                 .ensure_selfplay_supported(),
             Err(GameError::UnsupportedManifestFact(field)) if field == "genesisGainMana"
         ));
+    }
+
+    #[test]
+    fn unsupported_magic_diagnostics_should_name_the_concrete_fact() {
+        assert_eq!(
+            unsupported_magic_effect(&MagicEffect::DamageChainNearbyUnits),
+            Some("damageChainNearbyUnits")
+        );
+    }
+
+    #[test]
+    fn sparkmage_should_issue_and_accept_a_nearby_rubble_target() {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            manifest["cards"]["north-avatar"]["tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"] =
+                json!(true);
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid game");
+        let c4 = Cell::parse("C4").expect("C4");
+        game.position.rubble[c4.index()] = Some(
+            identity_hash(&json!({ "fixture": "sparkmage-rubble" })).expect("Rubble identity"),
+        );
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.avatar.tapped = false;
+        north.domain_established = true;
+        let candidate_card = north.hand_spellbook.remove(0);
+        game.position.units.push(UnitPosition {
+            card: candidate_card,
+            carried_lance_count: 0,
+            controller: Seat::North,
+            damage: 0,
+            disable_effects: Vec::new(),
+            disabled_until_damaged: false,
+            last_interacted_turn: None,
+            location: c4,
+            occupied_cells: None,
+            stealthed: false,
+            summoning_sickness: false,
+            tapped: false,
+            warded: false,
+        });
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+
+        let action = game
+            .legal_actions()
+            .expect("legal actions")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    action.descriptor,
+                    ActionDescriptor::ActivateSparkmage {
+                        target_location: Location {
+                            cell,
+                            region: Region::Surface,
+                        },
+                        ..
+                    } if cell == c4
+                )
+            })
+            .expect("Rubble is an existing surface target");
+        let mut speculative = game.clone();
+        speculative
+            .apply_action(&action)
+            .expect("speculative Sparkmage action");
+        let (outcomes, random_draws) = game
+            .apply_action_recorded(&action)
+            .expect("issued Sparkmage action");
+
+        assert_eq!(
+            outcomes
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            ["sparkmage-activated"]
+        );
+        assert!(!random_draws.is_empty());
+        assert_eq!(speculative.position, game.position);
+        assert!(game.position.players[seat_index(Seat::North)].avatar.tapped);
     }
 
     fn oversized_test_minion(
