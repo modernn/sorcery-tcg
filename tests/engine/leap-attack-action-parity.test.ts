@@ -86,10 +86,20 @@ const fixture = fixtureExists
   ? JSON.parse(readFileSync(fixtureUrl, 'utf8')) as Fixture
   : undefined;
 
+type CastMagicDescriptor = EngineActionDescriptor & Readonly<{
+  kind: 'cast-magic';
+  allyDestination?: Readonly<{
+    cell?: string;
+    region?: string;
+  }> | null;
+}>;
+
 function castMagicDescriptor(
   descriptor: EngineActionDescriptor,
-): Extract<EngineActionDescriptor, { kind: 'cast-magic' }> | undefined {
-  return descriptor.kind === 'cast-magic' ? descriptor : undefined;
+): CastMagicDescriptor | undefined {
+  return descriptor.kind === 'cast-magic'
+    ? descriptor as CastMagicDescriptor
+    : undefined;
 }
 
 function eventTypes(receipt: Receipt): readonly string[] {

@@ -536,6 +536,17 @@ struct LeapAttackContinuation {
     strike_location: Location,
 }
 
+#[derive(Clone, Copy)]
+struct LeapAttackRequest<'a> {
+    ally: &'a UnitTarget,
+    card_id: &'a str,
+    card_instance_id: &'a IdentityHash,
+    destination: Location,
+    owner: Seat,
+    seat: Seat,
+    strike_location: Option<Location>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct FirstStrikeContinuation {
     attacker_struck: bool,
@@ -743,11 +754,17 @@ fn nonempty_identity_combinations(
     combinations
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MovementCause {
+    BasicMovement,
+    CardEffect,
+}
+
 #[derive(Clone, Copy)]
 struct MovementProfile {
     airborne: bool,
+    cause: MovementCause,
     connects_top_bottom: bool,
-    effect: bool,
     maximum_cost: Option<usize>,
     moving_minion: bool,
     occupied_cells: Option<SquareArea>,
@@ -898,6 +915,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::DamageTargetUnit { .. }
         | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
         | MagicEffect::FightAllyWithAdjacentEnemy
+        | MagicEffect::LeapAttackAlly
         | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_)
         | MagicEffect::GrantChargeToAllyThisTurn
         | MagicEffect::GrantPowerTwoToAllyThisTurn => None,
@@ -905,7 +923,6 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         MagicEffect::DestroyTargetSiteWithDamageGrid(_) => Some("destroyTargetSiteWithDamageGrid"),
         MagicEffect::GainControlOfTargetNearbyMinion => Some("gainControlOfTargetNearbyMinion"),
         MagicEffect::KillTargetWoundedMinion => Some("killTargetWoundedMinion"),
-        MagicEffect::LeapAttackAlly => Some("leapAttackAlly"),
         MagicEffect::LureEnemyMinionOneStepCloser => Some("lureEnemyMinionOneStepCloser"),
         MagicEffect::SubmergeTargetMinion => Some("submergeTargetMinion"),
         MagicEffect::SummonRandomMinionFromAnyCemetery => Some("summonRandomMinionFromAnyCemetery"),
@@ -1546,8 +1563,8 @@ impl Game {
         };
         let profile = MovementProfile {
             airborne: facts.airborne,
+            cause: MovementCause::BasicMovement,
             connects_top_bottom: facts.connects_top_bottom,
-            effect: false,
             maximum_cost: (!facts.immobile).then_some(1),
             moving_minion: true,
             occupied_cells: unit.occupied_cells,
@@ -1885,8 +1902,8 @@ impl Game {
                 player.avatar.location,
                 MovementProfile {
                     airborne: false,
+                    cause: MovementCause::BasicMovement,
                     connects_top_bottom: false,
-                    effect: false,
                     maximum_cost: Some(1),
                     moving_minion: false,
                     occupied_cells: None,
@@ -1921,8 +1938,8 @@ impl Game {
                 unit.location,
                 MovementProfile {
                     airborne: facts.airborne,
+                    cause: MovementCause::BasicMovement,
                     connects_top_bottom: facts.connects_top_bottom,
-                    effect: false,
                     maximum_cost: if facts.cannot_defend || facts.immobile {
                         None
                     } else {
@@ -2576,8 +2593,8 @@ impl Game {
                 player.avatar.location,
                 MovementProfile {
                     airborne: false,
+                    cause: MovementCause::BasicMovement,
                     connects_top_bottom: false,
-                    effect: false,
                     maximum_cost: Some(1),
                     moving_minion: false,
                     occupied_cells: None,
@@ -2603,8 +2620,8 @@ impl Game {
                 unit.location,
                 MovementProfile {
                     airborne: facts.airborne,
+                    cause: MovementCause::BasicMovement,
                     connects_top_bottom: facts.connects_top_bottom,
-                    effect: false,
                     maximum_cost: if facts.immobile {
                         None
                     } else {
@@ -3592,8 +3609,8 @@ impl Game {
                     false,
                     MovementProfile {
                         airborne: false,
+                        cause: MovementCause::CardEffect,
                         connects_top_bottom: false,
-                        effect: true,
                         maximum_cost: Some(1),
                         moving_minion: false,
                         occupied_cells: None,
@@ -3620,8 +3637,8 @@ impl Game {
                     facts.immobile,
                     MovementProfile {
                         airborne: facts.airborne,
+                        cause: MovementCause::CardEffect,
                         connects_top_bottom: facts.connects_top_bottom,
-                        effect: true,
                         maximum_cost: Some(1),
                         moving_minion: true,
                         occupied_cells: unit.occupied_cells,
@@ -3791,7 +3808,8 @@ impl Game {
     }
 
     fn surface_movement_step_cost(&self, current: Cell, profile: MovementProfile) -> usize {
-        if profile.effect || !profile.airborne || !profile.moving_minion {
+        if profile.cause == MovementCause::CardEffect || !profile.airborne || !profile.moving_minion
+        {
             return 1;
         }
         let Some(site) = &self.position.sites[current.index()] else {
@@ -7167,7 +7185,7 @@ impl Game {
             .collect();
         if losers.len() == 2 {
             if let Some(DeathriteContinuation::LeapAttack(leap)) = &continuation {
-                self.emit_leap_magic_resolved(leap, outcomes);
+                Self::emit_leap_magic_resolved(leap, outcomes);
             }
             let reason = if defeated.len() == 2 && deck_losers.is_empty() {
                 DrawReason::SimultaneousAvatarDefeat
@@ -7187,7 +7205,7 @@ impl Game {
             });
         } else if let Some(&loser) = losers.first() {
             if let Some(DeathriteContinuation::LeapAttack(leap)) = &continuation {
-                self.emit_leap_magic_resolved(leap, outcomes);
+                Self::emit_leap_magic_resolved(leap, outcomes);
             }
             let winner = other_seat(loser);
             let reason = if defeated.contains(&loser) {
@@ -7224,7 +7242,7 @@ impl Game {
                 DeathriteContinuation::LeapAttack(continuation) => {
                     self.position.phase = pending.return_phase;
                     self.position.decision_seat = pending.return_decision_seat;
-                    self.finish_leap_attack(continuation, outcomes)
+                    self.finish_leap_attack(&continuation, outcomes)
                 }
                 DeathriteContinuation::PaidSummon(continuation) => {
                     self.position.phase = pending.return_phase;
@@ -7370,8 +7388,8 @@ impl Game {
                     !player.avatar.tapped,
                     MovementProfile {
                         airborne: false,
+                        cause: MovementCause::BasicMovement,
                         connects_top_bottom: false,
-                        effect: false,
                         maximum_cost: Some(1),
                         moving_minion: false,
                         occupied_cells: None,
@@ -7398,8 +7416,8 @@ impl Game {
                     self.minion_can_move_and_attack(unit, seat),
                     MovementProfile {
                         airborne: facts.airborne,
+                        cause: MovementCause::BasicMovement,
                         connects_top_bottom: facts.connects_top_bottom,
-                        effect: false,
                         maximum_cost: if facts.immobile {
                             None
                         } else {
@@ -9094,13 +9112,15 @@ impl Game {
             }
             MagicEffect::LeapAttackAlly => {
                 self.apply_leap_attack(
-                    ally.as_ref().ok_or(GameError::IllegalAction)?,
-                    ally_destination.ok_or(GameError::IllegalAction)?,
-                    *ally_strike_location,
-                    card_id,
-                    card_instance_id,
-                    owner,
-                    seat,
+                    LeapAttackRequest {
+                        ally: ally.as_ref().ok_or(GameError::IllegalAction)?,
+                        card_id,
+                        card_instance_id,
+                        destination: ally_destination.ok_or(GameError::IllegalAction)?,
+                        owner,
+                        seat,
+                        strike_location: *ally_strike_location,
+                    },
                     outcomes,
                 )?;
             }
@@ -9497,15 +9517,18 @@ impl Game {
 
     fn apply_leap_attack(
         &mut self,
-        ally: &UnitTarget,
-        destination: Location,
-        strike_location: Option<Location>,
-        card_id: &str,
-        card_instance_id: &IdentityHash,
-        owner: Seat,
-        seat: Seat,
+        leap: LeapAttackRequest<'_>,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        let LeapAttackRequest {
+            ally,
+            card_id,
+            card_instance_id,
+            destination,
+            owner,
+            seat,
+            strike_location,
+        } = leap;
         let from = self.unit_target_location(ally)?;
         let stepped_to = self.move_unit_target_to(ally, destination)?;
         if stepped_to != from {
@@ -9539,7 +9562,7 @@ impl Game {
             pending.return_phase = Phase::Main;
             return Ok(());
         }
-        self.finish_leap_attack(continuation, outcomes)
+        self.finish_leap_attack(&continuation, outcomes)
     }
 
     fn move_unit_target_to(
@@ -9575,12 +9598,12 @@ impl Game {
 
     fn finish_leap_attack(
         &mut self,
-        continuation: LeapAttackContinuation,
+        continuation: &LeapAttackContinuation,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
         let ally_remains = self.ally_remains(&continuation.ally);
         if self.position.terminal.is_some() || !ally_remains {
-            self.emit_leap_magic_resolved(&continuation, outcomes);
+            Self::emit_leap_magic_resolved(continuation, outcomes);
             return Ok(());
         }
         let striker_kind = match continuation.ally {
@@ -9613,7 +9636,7 @@ impl Game {
             Vec::new()
         };
         if enemies.is_empty() {
-            self.emit_leap_magic_resolved(&continuation, outcomes);
+            Self::emit_leap_magic_resolved(continuation, outcomes);
             return Ok(());
         }
         let amount = self
@@ -9655,7 +9678,7 @@ impl Game {
             target_removed: false,
         };
         self.resolve_fight_window(&pending, true, &[], None, outcomes)?;
-        self.emit_leap_magic_resolved(&continuation, outcomes);
+        Self::emit_leap_magic_resolved(continuation, outcomes);
         Ok(())
     }
 
@@ -9668,9 +9691,11 @@ impl Game {
                     .instance_id
                     == *instance_id
             }
-            UnitTarget::Minion { instance_id, seat } => self.position.units.iter().any(|unit| {
-                unit.controller == *seat && unit.card.instance_id == *instance_id
-            }),
+            UnitTarget::Minion { instance_id, seat } => self
+                .position
+                .units
+                .iter()
+                .any(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id),
         }
     }
 
@@ -9702,7 +9727,6 @@ impl Game {
     }
 
     fn emit_leap_magic_resolved(
-        &self,
         continuation: &LeapAttackContinuation,
         outcomes: &mut OutcomeLog<'_>,
     ) {
@@ -11662,6 +11686,7 @@ mod tests {
                 "fightAllyWithAdjacentEnemy",
                 json!(true),
             ),
+            (MagicEffect::LeapAttackAlly, "leapAttackAlly", json!(true)),
         ] {
             assert_eq!(unsupported_magic_effect(&effect), None);
             let manifest = selfplay_manifest_with(31, |manifest| {

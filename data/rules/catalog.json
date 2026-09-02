@@ -400,7 +400,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Leap Attack optionally steps an ally before it strikes every enemy there.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "attack",
@@ -410,8 +410,8 @@
         "strike"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03/04 Leap Attack optionally steps an ally before it strikes every enemy there"
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0021_leap_attack_optionally_steps_an_ally_before_it_strikes_every_enemy_there"
       }
     },
     {
@@ -421,7 +421,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Leap Attack resumes its strike after ordered movement Deathrites.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "attack",
@@ -431,8 +431,8 @@
         "strike"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03/04 Leap Attack resumes its strike after ordered movement Deathrites"
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0022_leap_attack_resumes_its_strike_after_ordered_movement_deathrites"
       }
     },
     {

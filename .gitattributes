@@ -1,1 +1,2 @@
 tests/authority/fixtures/bundle-input/*.json text eol=lf
+tests/engine/fixtures/*.json text eol=lf
