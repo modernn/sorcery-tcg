@@ -49,6 +49,14 @@ pub enum GenesisDamageChoice {
     Target,
 }
 
+/// An engine-issued alternative payment for a minion summon.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SummonPaymentMode {
+    /// Discard one other random hand card instead of paying mana.
+    RandomCardDiscard,
+}
+
 /// An engine-issued resolution of the optional step after a Ranged strike.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -299,6 +307,9 @@ pub enum ActionDescriptor {
         genesis_damage_target: Option<UnitTarget>,
         /// Mana paid for the summon.
         mana_cost: u64,
+        /// Optional non-mana payment selected by the engine.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        payment_mode: Option<SummonPaymentMode>,
     },
     /// Cast one supported Magic card from the player's hand.
     CastMagic {
@@ -786,6 +797,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     genesis_damage_choice: left_choice,
                     genesis_damage_target: left_target,
                     mana_cost: left_mana,
+                    payment_mode: left_payment,
                 },
                 ActionDescriptor::SummonMinion {
                     card_id: right_card,
@@ -796,6 +808,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     genesis_damage_choice: right_choice,
                     genesis_damage_target: right_target,
                     mana_cost: right_mana,
+                    payment_mode: right_payment,
                 },
             ) => compare_json_strings(left_card, right_card)
                 .then_with(|| left_instance.cmp(right_instance))
@@ -806,7 +819,8 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 .then_with(|| {
                     compare_optional_unit_targets(left_target.as_ref(), right_target.as_ref())
                 })
-                .then_with(|| compare_json_integers(*left_mana, *right_mana)),
+                .then_with(|| compare_json_integers(*left_mana, *right_mana))
+                .then_with(|| compare_optional_summon_payments(*left_payment, *right_payment)),
             (ActionDescriptor::BeginChainMagic { .. }, ActionDescriptor::CastMagic { .. })
             | (ActionDescriptor::BeginChainMagic { .. }, ActionDescriptor::PlaySite { .. })
             | (ActionDescriptor::CastMagic { .. }, ActionDescriptor::PlaySite { .. })
@@ -1032,6 +1046,18 @@ fn compare_optional_genesis_choices(
 fn compare_optional_genesis_damage_choices(
     left: Option<GenesisDamageChoice>,
     right: Option<GenesisDamageChoice>,
+) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => left.cmp(&right),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+fn compare_optional_summon_payments(
+    left: Option<SummonPaymentMode>,
+    right: Option<SummonPaymentMode>,
 ) -> Ordering {
     match (left, right) {
         (Some(left), Some(right)) => left.cmp(&right),
@@ -1293,11 +1319,7 @@ fn compare_json_integers(left: u64, right: u64) -> Ordering {
     let (right_digits, right_start) = decimal_digits(right);
     let left = &left_digits[left_start..];
     let right = &right_digits[right_start..];
-    left.iter()
-        .zip(right)
-        .map(|(left, right)| left.cmp(right))
-        .find(|ordering| *ordering != Ordering::Equal)
-        .unwrap_or_else(|| right.len().cmp(&left.len()))
+    left.cmp(right)
 }
 
 fn decimal_digits(mut value: u64) -> ([u8; 20], usize) {
@@ -1412,11 +1434,46 @@ mod tests {
         include_str!("../../../tests/engine/fixtures/combat-response-action-v1.json");
     const SITE_DESTRUCTION_FIXTURE: &str =
         include_str!("../../../tests/engine/fixtures/site-destruction-action-v1.json");
+    const RANDOM_CARD_DISCARD_SUMMON_FIXTURE: &str =
+        include_str!("../../../tests/engine/fixtures/random-card-discard-summon-action-v1.json");
 
     #[test]
     fn native_site_destruction_order_should_match_typescript() {
         let fixture: Value =
             serde_json::from_str(SITE_DESTRUCTION_FIXTURE).expect("valid parity fixture");
+        let mut actions = fixture["actions"]
+            .as_array()
+            .expect("fixture actions")
+            .iter()
+            .map(|action| {
+                (
+                    serde_json::from_value::<ActionDescriptor>(action["descriptor"].clone())
+                        .expect("typed descriptor"),
+                    action["actionId"].as_str().expect("action ID").to_owned(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        actions.sort_unstable_by(|(left, _), (right, _)| compare_canonical(left, right));
+
+        assert_eq!(
+            actions
+                .into_iter()
+                .map(|(_, action_id)| action_id)
+                .collect::<Vec<_>>(),
+            fixture["canonicalActionIds"]
+                .as_array()
+                .expect("canonical action IDs")
+                .iter()
+                .map(|action_id| action_id.as_str().expect("action ID").to_owned())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn native_random_card_discard_summon_order_should_match_typescript() {
+        let fixture: Value =
+            serde_json::from_str(RANDOM_CARD_DISCARD_SUMMON_FIXTURE).expect("valid parity fixture");
         let mut actions = fixture["actions"]
             .as_array()
             .expect("fixture actions")
@@ -1605,12 +1662,11 @@ mod tests {
     }
 
     #[test]
-    fn native_integer_order_should_match_canonical_json_delimiters() {
+    fn native_integer_order_should_match_typescript_locale_prefixes() {
         let values = [0, 1, 2, 9, 10, 11, 20, u64::MAX];
         for left in values {
             for right in values {
-                let expected =
-                    format!("{{\"manaCost\":{left}}}").cmp(&format!("{{\"manaCost\":{right}}}"));
+                let expected = left.to_string().cmp(&right.to_string());
                 assert_eq!(
                     compare_json_integers(left, right),
                     expected,

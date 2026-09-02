@@ -2,8 +2,9 @@ use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
 use sorcery_engine::action::{ActionDescriptor, CombatTarget, DeckZone};
-use sorcery_engine::canonical::{IdentityHash, canonical_json};
-use sorcery_engine::contract::{Seat, opaque_action_id};
+use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
+use sorcery_engine::contract::{ActionRequest, Seat, opaque_action_id};
+use sorcery_engine::session::{Session, StepResult};
 
 const FIXTURE: &str = include_str!("../../../tests/engine/fixtures/typescript-parity-v1.json");
 const CAST_MAGIC_FIXTURE: &str =
@@ -20,6 +21,8 @@ const SPARKMAGE_FIXTURE: &str =
     include_str!("../../../tests/engine/fixtures/sparkmage-action-v1.json");
 const SITE_DESTRUCTION_FIXTURE: &str =
     include_str!("../../../tests/engine/fixtures/site-destruction-action-v1.json");
+const RANDOM_CARD_DISCARD_SUMMON_FIXTURE: &str =
+    include_str!("../../../tests/engine/fixtures/random-card-discard-summon-action-v1.json");
 const NORTH_AVATAR: &str =
     "sha256:310a489a62739a8b1a6a13bf949daa8dc42ab0995619e5288691a0ac86a2472e";
 
@@ -121,6 +124,222 @@ fn site_destruction_descriptors_labels_order_and_ids_should_match_typescript() {
             "Sacrifice site to destroy C3",
             "Sacrifice site to destroy C2",
         ]
+    );
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one exact cross-engine fixture covers legal enumeration and its selected transition"
+)]
+fn random_card_discard_summon_descriptors_order_and_ids_should_match_typescript() {
+    let fixture: Value = serde_json::from_str(RANDOM_CARD_DISCARD_SUMMON_FIXTURE)
+        .expect("valid random-card-discard summon fixture");
+    assert_eq!(fixture["schemaVersion"], 1);
+    assert_eq!(fixture["source"], "typescript-legality-engine");
+    let contract = fixture["contract"].as_str().expect("action contract");
+    let seat: Seat = serde_json::from_value(fixture["seat"].clone()).expect("fixture seat");
+    let state_version = fixture["stateVersion"]
+        .as_u64()
+        .expect("fixture state version");
+    let mut actions = Vec::new();
+
+    for action in fixture["actions"].as_array().expect("fixture actions") {
+        let descriptor: ActionDescriptor = serde_json::from_value(action["descriptor"].clone())
+            .expect("typed random-card-discard summon descriptor");
+        assert!(matches!(descriptor, ActionDescriptor::SummonMinion { .. }));
+        let serialized = serde_json::to_value(&descriptor).expect("serialized descriptor");
+        assert_eq!(serialized, action["descriptor"]);
+        let expected_id =
+            IdentityHash::parse(action["actionId"].as_str().expect("TypeScript action ID"))
+                .expect("valid TypeScript action ID");
+        assert_eq!(
+            opaque_action_id(contract, seat, state_version, &serialized)
+                .expect("Rust action identity"),
+            expected_id
+        );
+        actions.push((
+            canonical_json(&serialized).expect("canonical summon descriptor"),
+            expected_id,
+        ));
+    }
+
+    actions.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+    assert_eq!(
+        actions
+            .into_iter()
+            .map(|(_, action_id)| action_id.to_string())
+            .collect::<Vec<_>>(),
+        fixture["canonicalActionIds"]
+            .as_array()
+            .expect("canonical TypeScript order")
+            .iter()
+            .map(|action_id| action_id.as_str().expect("action ID").to_owned())
+            .collect::<Vec<_>>()
+    );
+
+    let zero = json!({ "air": 0, "earth": 0, "fire": 0, "water": 0 });
+    let avatar = json!({
+        "attack": 1,
+        "cardType": "avatar",
+        "defense": 1,
+        "drawSpell": false,
+        "life": 20,
+    });
+    let mut manifest = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({
+                "fixture": "synthetic-random-discard-action-v1",
+            }))
+            .expect("synthetic fixture authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-random-discard-action-v1",
+        },
+        "cards": {
+            "north-avatar": avatar,
+            "north-site": { "cardType": "site", "elements": ["fire"] },
+            "south-avatar": avatar,
+            "south-minion": {
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 1,
+                "manaCost": 0,
+                "thresholds": zero,
+            },
+            "south-site": { "cardType": "site", "elements": ["earth"] },
+            "synthetic-random-discard-minion": {
+                "attack": 7,
+                "cardType": "minion",
+                "defense": 5,
+                "discardRandomCardInsteadOfMana": true,
+                "manaCost": 2,
+                "thresholds": { "air": 0, "earth": 0, "fire": 1, "water": 0 },
+            },
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 9],
+                "avatar": "north-avatar",
+                "spellbook": vec!["synthetic-random-discard-minion"; 3],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 9],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 3],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": 417,
+    });
+    manifest["manifestId"] = json!(identity_hash(&manifest).expect("synthetic manifest identity"));
+    assert_eq!(manifest["manifestId"], fixture["manifestId"]);
+    let manifest = canonical_json(&manifest).expect("canonical synthetic fixture manifest");
+    let mut session = Session::new(&manifest).expect("valid synthetic fixture manifest");
+    let mut accept_where = |predicate: &dyn Fn(&Value) -> bool| {
+        let action = session
+            .legal_actions()
+            .expect("fixture legal actions")
+            .into_iter()
+            .find(|action| predicate(&action.descriptor))
+            .expect("fixture setup action");
+        let StepResult::Accepted(_) = session
+            .step(ActionRequest {
+                action_id: action.action_id.to_string(),
+                seat: action.seat,
+                state_version: action.state_version,
+            })
+            .expect("fixture setup step")
+        else {
+            panic!("engine-issued fixture action must be accepted");
+        };
+    };
+    let keep = |descriptor: &Value| {
+        descriptor["kind"] == "mulligan"
+            && descriptor["atlasOrder"] == json!([])
+            && descriptor["spellbookOrder"] == json!([])
+    };
+    let end_turn = |descriptor: &Value| descriptor["kind"] == "end-turn";
+    accept_where(&keep);
+    accept_where(&keep);
+    accept_where(&|descriptor| descriptor["kind"] == "play-site" && descriptor["cell"] == "C4");
+    accept_where(&end_turn);
+    accept_where(&|descriptor| descriptor["kind"] == "draw" && descriptor["zone"] == "atlas");
+    accept_where(&|descriptor| descriptor["kind"] == "play-site" && descriptor["cell"] == "C1");
+    accept_where(&end_turn);
+    accept_where(&|descriptor| descriptor["kind"] == "draw" && descriptor["zone"] == "atlas");
+    accept_where(&|descriptor| descriptor["kind"] == "play-site" && descriptor["cell"] == "C3");
+
+    let casting_instance_id = fixture["actions"][0]["descriptor"]["cardInstanceId"]
+        .as_str()
+        .expect("fixture casting instance identity");
+    let issued = session
+        .legal_actions()
+        .expect("Rust random-discard legal actions")
+        .into_iter()
+        .filter(|action| action.descriptor["cardInstanceId"] == casting_instance_id)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        issued
+            .iter()
+            .map(|action| json!({
+                "actionId": action.action_id,
+                "descriptor": action.descriptor,
+                "label": action.label,
+            }))
+            .collect::<Vec<_>>(),
+        fixture["actions"]
+            .as_array()
+            .expect("fixture random-discard actions")
+            .clone()
+    );
+
+    let state = session.replay_value().expect("Rust fixture replay state")["state"].clone();
+    let hand = &state["players"]["north"]["hand"];
+    let eligible_candidates = hand["atlas"]
+        .as_array()
+        .expect("fixture Atlas hand")
+        .iter()
+        .map(|card| json!({ "instanceId": card["instanceId"], "zone": "atlas" }))
+        .chain(
+            hand["spellbook"]
+                .as_array()
+                .expect("fixture Spellbook hand")
+                .iter()
+                .filter(|card| card["instanceId"] != casting_instance_id)
+                .map(|card| json!({ "instanceId": card["instanceId"], "zone": "spellbook" })),
+        )
+        .collect::<Vec<_>>();
+    assert!(eligible_candidates.len() > 1);
+    assert_eq!(
+        eligible_candidates,
+        fixture["transition"]["eligibleCandidates"]
+            .as_array()
+            .expect("fixture discard candidates")
+            .clone()
+    );
+
+    let selected_action_id = fixture["transition"]["selectedActionId"]
+        .as_str()
+        .expect("fixture selected action identity");
+    let selected = issued
+        .iter()
+        .find(|action| action.action_id.as_str() == selected_action_id)
+        .expect("Rust issued selected random-discard action");
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: selected_action_id.to_owned(),
+            seat: selected.seat,
+            state_version: selected.state_version,
+        })
+        .expect("Rust selected random-discard transition")
+    else {
+        panic!("Rust issued selected random-discard action must be accepted");
+    };
+    assert_eq!(
+        serde_json::to_value(receipt).expect("serialized Rust random-discard receipt"),
+        fixture["transition"]["receipt"]
     );
 }
 

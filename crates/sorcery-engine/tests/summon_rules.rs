@@ -1,6 +1,10 @@
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
-use sorcery_engine::contract::{ActionRequest, Receipt};
+use sorcery_engine::checkpoint::{
+    create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+    serialize_game_checkpoint,
+};
+use sorcery_engine::contract::{ActionRequest, Receipt, RejectionCode};
 use sorcery_engine::session::{Session, StepResult};
 
 fn thresholds(element: Option<&str>, required: u64) -> Value {
@@ -204,6 +208,165 @@ fn spellcaster_should_pay_mana_and_summon_at_controlled_site() {
     assert_eq!(receipt.events[0].payload["manaPaid"], 1);
     assert_eq!(receipt.events[0].payload["cardId"], summon["cardId"]);
     assert!(session.verify_replay().expect("verified replay"));
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one catalog proof keeps payment privacy, checkpoint, PRNG, state, stale rejection, and replay together"
+)]
+fn aramos_should_discard_one_deterministic_random_hand_card_instead_of_mana() {
+    let mut aramos = minion(3, &thresholds(Some("earth"), 1));
+    aramos["discardRandomCardInsteadOfMana"] = json!(true);
+    let manifest = scenario_manifest(417, &site("earth", false), &aramos, &site("earth", false));
+    let mut session = first_main(&manifest);
+    let before = state(&session);
+    assert_eq!(before["players"]["north"]["mana"], 1);
+
+    let actions = session.legal_actions().expect("Aramos legal actions");
+    let summons: Vec<_> = actions
+        .iter()
+        .filter(|action| action.descriptor["kind"] == "summon-minion")
+        .collect();
+    assert!(!summons.is_empty());
+    assert!(summons.iter().all(|action| {
+        action.descriptor["manaCost"] == 0
+            && action.descriptor["paymentMode"] == "random-card-discard"
+            && action.label == "Summon north-minion at C4 (discard random card)"
+    }));
+
+    let action = summons[0];
+    let cast_instance_id = action.descriptor["cardInstanceId"]
+        .as_str()
+        .expect("Aramos instance identity");
+    let eligible = before["players"]["north"]["hand"]["atlas"]
+        .as_array()
+        .expect("Atlas hand")
+        .iter()
+        .map(|card| {
+            (
+                card["instanceId"]
+                    .as_str()
+                    .expect("Atlas hand identity")
+                    .to_owned(),
+                "atlas",
+            )
+        })
+        .chain(
+            before["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("Spellbook hand")
+                .iter()
+                .filter(|card| card["instanceId"] != cast_instance_id)
+                .map(|card| {
+                    (
+                        card["instanceId"]
+                            .as_str()
+                            .expect("Spellbook hand identity")
+                            .to_owned(),
+                        "spellbook",
+                    )
+                }),
+        )
+        .collect::<Vec<_>>();
+    let action_json = canonical_json(&action.descriptor).expect("canonical Aramos descriptor");
+    assert!(
+        eligible
+            .iter()
+            .all(|(instance_id, _)| !action_json.contains(instance_id))
+    );
+    let request = ActionRequest {
+        action_id: action.action_id.to_string(),
+        seat: action.seat,
+        state_version: action.state_version,
+    };
+    let checkpoint = create_game_checkpoint(&session).expect("captured Aramos checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized Aramos checkpoint");
+    let mut repeated = resume_game_checkpoint(
+        &parse_game_checkpoint(&serialized).expect("parsed Aramos checkpoint"),
+    )
+    .expect("restored Aramos checkpoint");
+    assert_eq!(
+        session.session_hash().expect("original session hash"),
+        repeated.session_hash().expect("restored session hash")
+    );
+    let StepResult::Accepted(first) = session.step(request.clone()).expect("first Aramos summon")
+    else {
+        panic!("engine-issued Aramos action must be accepted");
+    };
+    let StepResult::Accepted(second) = repeated
+        .step(request.clone())
+        .expect("repeated Aramos summon")
+    else {
+        panic!("repeated engine-issued Aramos action must be accepted");
+    };
+    assert_eq!(first, second);
+    assert_eq!(
+        first
+            .events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect::<Vec<_>>(),
+        ["card-discarded", "minion-summoned"]
+    );
+    assert_eq!(
+        first.events[0].payload["sourceInstanceId"],
+        cast_instance_id
+    );
+    assert_eq!(first.events[1].payload["manaPaid"], 0);
+    assert_eq!(first.random_draws.len(), 1);
+    assert_eq!(
+        first.random_draws[0]["purpose"],
+        "summon_random_card_discard_cost"
+    );
+    assert_eq!(
+        first.random_draws[0]["domain"]["kind"],
+        "card_index_candidate"
+    );
+    assert_eq!(
+        first.random_draws[0]["domain"]["exclusiveMaximum"],
+        eligible.len()
+    );
+
+    let discarded_instance_id = first.events[0].payload["instanceId"].clone();
+    let accepted_draw = first
+        .random_draws
+        .iter()
+        .find(|draw| draw["domain"]["accepted"] == true)
+        .expect("accepted random discard draw");
+    let selected_index = usize::try_from(
+        accepted_draw["result"]
+            .as_u64()
+            .expect("random discard result")
+            % u64::try_from(eligible.len()).expect("eligible count"),
+    )
+    .expect("selected payment index");
+    assert_eq!(
+        first.events[0].payload["instanceId"],
+        eligible[selected_index].0
+    );
+    assert_eq!(first.events[0].payload["zone"], eligible[selected_index].1);
+    let after = state(&session);
+    assert_eq!(after["players"]["north"]["mana"], 1);
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == discarded_instance_id)
+    );
+    assert!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .any(|unit| unit["instanceId"] == cast_instance_id)
+    );
+    let StepResult::Rejected(stale) = session.step(request).expect("stale Aramos request") else {
+        panic!("reused Aramos request must be stale");
+    };
+    assert_eq!(stale.code, RejectionCode::StaleVersion);
+    assert!(session.verify_replay().expect("verified Aramos replay"));
 }
 
 #[test]

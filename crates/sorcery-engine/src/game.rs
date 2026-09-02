@@ -10,15 +10,16 @@ use serde_json::{Map, Value, json};
 
 use crate::action::{
     ActionDescriptor, CombatTarget, DeckZone, GenesisDamageChoice, GenesisSpellChoice,
-    GenesisTokenChoice, ProjectileDirection, RangedStepChoice, UnitTarget, compare_canonical,
+    GenesisTokenChoice, ProjectileDirection, RangedStepChoice, SummonPaymentMode, UnitTarget,
+    compare_canonical,
 };
 use crate::board::{Cell, Location, Region, SquareArea, translated_square};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{
-    AvatarFacts, BasicMovementRestriction, CardFacts, DamagePrevention, Element, EndTurnStealth,
-    FactError, MagicEffect, MagicFacts, MinionFacts, MinionGenesis, RequiredCastRegion, SiteFacts,
-    Thresholds, parse_card_definition, validate_identifier,
+    AlternativeSummonPayment, AvatarFacts, BasicMovementRestriction, CardFacts, DamagePrevention,
+    Element, EndTurnStealth, FactError, MagicEffect, MagicFacts, MinionFacts, MinionGenesis,
+    RequiredCastRegion, SiteFacts, Thresholds, parse_card_definition, validate_identifier,
 };
 use crate::prng::PrngState;
 
@@ -860,8 +861,10 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
 
 fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
     account_for_selfplay_minion_fields(facts);
-    if facts.alternative_summon_payment.is_some() {
-        Some("alternativeSummonPayment")
+    if facts.alternative_summon_payment
+        == Some(AlternativeSummonPayment::SacrificeMinionAtSummoningLocationForManaDiscountTwo)
+    {
+        Some("sacrificeMinionAtSummoningLocationForManaDiscount")
     } else if facts.at_start_of_controller_turn_teleport_to_random_site_or_void {
         Some("atStartOfControllerTurnTeleportToRandomSiteOrVoid")
     } else if facts.burrowing {
@@ -2330,11 +2333,20 @@ impl Game {
             if !self.thresholds_met(seat, facts.thresholds) {
                 continue;
             }
-            for destination in self
-                .summon_destinations(seat, facts)
-                .into_iter()
-                .filter(|destination| destination.mana_cost <= u64::from(player.mana))
-            {
+            for destination in self.summon_destinations(seat, facts) {
+                let can_discard_random_card = facts.alternative_summon_payment
+                    == Some(AlternativeSummonPayment::DiscardRandomCardInsteadOfMana)
+                    && (!player.hand_atlas.is_empty()
+                        || player
+                            .hand_spellbook
+                            .iter()
+                            .any(|candidate| candidate.instance_id != card.instance_id));
+                let payments = [
+                    (destination.mana_cost <= u64::from(player.mana))
+                        .then_some((destination.mana_cost, None)),
+                    can_discard_random_card
+                        .then_some((0, Some(SummonPaymentMode::RandomCardDiscard))),
+                ];
                 let genesis_choices = if facts.genesis
                     == Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo)
                 {
@@ -2348,41 +2360,51 @@ impl Game {
                 } else {
                     vec![(None, None)]
                 };
-                for (caster_kind, caster_instance_id) in &spellcasters {
-                    for (genesis_damage_choice, genesis_damage_target) in &genesis_choices {
-                        let genesis_suffix = match (genesis_damage_choice, genesis_damage_target) {
-                            (Some(GenesisDamageChoice::Decline), None) => {
-                                "; decline Genesis".to_owned()
-                            }
-                            (Some(GenesisDamageChoice::Target), Some(target)) => format!(
-                                "; Genesis targets {} {}…",
-                                target.kind(),
-                                &target.instance_id().as_str()[..15]
-                            ),
-                            _ => String::new(),
-                        };
-                        let caster_suffix = if *caster_kind == UnitKind::Minion {
-                            self.minion_caster_suffix(seat, caster_instance_id)
-                        } else {
-                            String::new()
-                        };
-                        self.push_action(
-                            actions,
-                            ActionDescriptor::SummonMinion {
-                                card_id: definition.id.clone(),
-                                card_instance_id: card.instance_id.clone(),
-                                caster_instance_id: caster_instance_id.clone(),
-                                cell: destination.cell,
-                                cells: destination.cells,
-                                genesis_damage_choice: *genesis_damage_choice,
-                                genesis_damage_target: genesis_damage_target.clone(),
-                                mana_cost: destination.mana_cost,
-                            },
-                            format!(
-                                "Summon {} at {} ({} mana){genesis_suffix}{caster_suffix}",
-                                definition.id, destination.cell, destination.mana_cost
-                            ),
-                        );
+                for (mana_cost, payment_mode) in payments.into_iter().flatten() {
+                    for (caster_kind, caster_instance_id) in &spellcasters {
+                        for (genesis_damage_choice, genesis_damage_target) in &genesis_choices {
+                            let genesis_suffix =
+                                match (genesis_damage_choice, genesis_damage_target) {
+                                    (Some(GenesisDamageChoice::Decline), None) => {
+                                        "; decline Genesis".to_owned()
+                                    }
+                                    (Some(GenesisDamageChoice::Target), Some(target)) => format!(
+                                        "; Genesis targets {} {}…",
+                                        target.kind(),
+                                        &target.instance_id().as_str()[..15]
+                                    ),
+                                    _ => String::new(),
+                                };
+                            let caster_suffix = if *caster_kind == UnitKind::Minion {
+                                self.minion_caster_suffix(seat, caster_instance_id)
+                            } else {
+                                String::new()
+                            };
+                            let payment =
+                                if payment_mode == Some(SummonPaymentMode::RandomCardDiscard) {
+                                    "discard random card".to_owned()
+                                } else {
+                                    format!("{mana_cost} mana")
+                                };
+                            self.push_action(
+                                actions,
+                                ActionDescriptor::SummonMinion {
+                                    card_id: definition.id.clone(),
+                                    card_instance_id: card.instance_id.clone(),
+                                    caster_instance_id: caster_instance_id.clone(),
+                                    cell: destination.cell,
+                                    cells: destination.cells,
+                                    genesis_damage_choice: *genesis_damage_choice,
+                                    genesis_damage_target: genesis_damage_target.clone(),
+                                    mana_cost,
+                                    payment_mode,
+                                },
+                                format!(
+                                    "Summon {} at {} ({payment}){genesis_suffix}{caster_suffix}",
+                                    definition.id, destination.cell
+                                ),
+                            );
+                        }
                     }
                 }
             }
@@ -3972,7 +3994,7 @@ impl Game {
                 self.apply_damage_projectile_action(action, outcomes)
             }
             ActionDescriptor::SummonMinion { .. } => {
-                self.apply_summon_minion_action(action, outcomes)
+                self.apply_summon_minion_action(action, outcomes, random_draws)
             }
             ActionDescriptor::MoveAndAttack {
                 from,
@@ -8964,6 +8986,7 @@ impl Game {
         &mut self,
         action: &IssuedAction,
         outcomes: &mut OutcomeLog<'_>,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
     ) -> Result<(), GameError> {
         let ActionDescriptor::SummonMinion {
             card_id,
@@ -8974,6 +8997,7 @@ impl Game {
             genesis_damage_choice,
             genesis_damage_target,
             mana_cost,
+            payment_mode,
         } = &action.descriptor
         else {
             return Err(GameError::IllegalAction);
@@ -9008,15 +9032,29 @@ impl Game {
                 "minion Genesis effect".to_owned(),
             ));
         }
-        if !self
-            .summon_destinations(seat, facts)
-            .into_iter()
-            .any(|destination| {
-                destination.cell == *cell
-                    && destination.cells == *cells
-                    && destination.mana_cost == *mana_cost
-            })
-            || *mana_cost > u64::from(player.mana)
+        let destination_matches =
+            self.summon_destinations(seat, facts)
+                .into_iter()
+                .any(|destination| {
+                    destination.cell == *cell
+                        && destination.cells == *cells
+                        && match payment_mode {
+                            None => {
+                                destination.mana_cost == *mana_cost
+                                    && *mana_cost <= u64::from(player.mana)
+                            }
+                            Some(SummonPaymentMode::RandomCardDiscard) => *mana_cost == 0
+                                && facts.alternative_summon_payment
+                                    == Some(
+                                        AlternativeSummonPayment::DiscardRandomCardInsteadOfMana,
+                                    ),
+                        }
+                });
+        let discard_candidate_count =
+            player.hand_atlas.len() + player.hand_spellbook.len().saturating_sub(1);
+        if !destination_matches
+            || (*payment_mode == Some(SummonPaymentMode::RandomCardDiscard)
+                && discard_candidate_count == 0)
             || !self.thresholds_met(seat, facts.thresholds)
             || !self.valid_genesis_damage_choice(
                 seat,
@@ -9037,13 +9075,70 @@ impl Game {
                 cast_air.checked_add(added).ok_or(GameError::IllegalAction)
             })
             .transpose()?;
+        let discarded = if *payment_mode == Some(SummonPaymentMode::RandomCardDiscard) {
+            let index = draw_index(
+                &mut self.position.prng,
+                discard_candidate_count,
+                "summon_random_card_discard_cost",
+                "card_index_candidate",
+                random_draws,
+            )?;
+            Some(if index < player.hand_atlas.len() {
+                (DeckZone::Atlas, index)
+            } else {
+                let spellbook_index = index - player.hand_atlas.len();
+                (
+                    DeckZone::Spellbook,
+                    if spellbook_index >= hand_index {
+                        spellbook_index + 1
+                    } else {
+                        spellbook_index
+                    },
+                )
+            })
+        } else {
+            None
+        };
         let paid_mana = u16::try_from(*mana_cost).map_err(|_| GameError::IllegalAction)?;
-        let card = self.position.players[player_index]
-            .hand_spellbook
-            .remove(hand_index);
-        let player = &mut self.position.players[player_index];
-        player.mana -= paid_mana;
-        player.air_thresholds_cast_this_turn = next_air_thresholds_cast_this_turn;
+        let (card, discarded_card) = {
+            let player = &mut self.position.players[player_index];
+            let card = player.hand_spellbook.remove(hand_index);
+            player.mana -= paid_mana;
+            player.air_thresholds_cast_this_turn = next_air_thresholds_cast_this_turn;
+            let discarded_card = discarded.map(|(zone, original_index)| {
+                let discarded_card = match zone {
+                    DeckZone::Atlas => player.hand_atlas.remove(original_index),
+                    DeckZone::Spellbook => {
+                        let index = if original_index > hand_index {
+                            original_index - 1
+                        } else {
+                            original_index
+                        };
+                        player.hand_spellbook.remove(index)
+                    }
+                };
+                (zone, discarded_card)
+            });
+            (card, discarded_card)
+        };
+        if let Some((zone, discarded_card)) = discarded_card {
+            outcomes.push("card-discarded", || {
+                json!({
+                    "cardId": self.rules.cards[usize::from(discarded_card.card_id.0)].id,
+                    "instanceId": discarded_card.instance_id,
+                    "owner": discarded_card.owner,
+                    "seat": seat,
+                    "sourceInstanceId": card_instance_id,
+                    "zone": match zone {
+                        DeckZone::Atlas => "atlas",
+                        DeckZone::Spellbook => "spellbook",
+                    },
+                })
+            });
+            self.position.players[player_index]
+                .cemetery
+                .push(discarded_card);
+        }
         self.record_unit_interaction(
             caster_kind.ok_or(GameError::IllegalAction)?,
             seat,
@@ -10668,6 +10763,128 @@ mod tests {
                 .ensure_selfplay_supported()
                 .expect("simultaneous Magic is self-play safe");
         }
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one direct payment proof keeps self-play admission and zero/one-card legality together"
+    )]
+    fn random_discard_summon_should_admit_only_its_mode_and_require_another_card() {
+        let discard_manifest = selfplay_manifest_with(417, |manifest| {
+            for ordinal in 1..=50 {
+                manifest["cards"][format!("north-spell-{ordinal}")]["discardRandomCardInsteadOfMana"] =
+                    json!(true);
+            }
+        });
+        Game::from_manifest_json(&discard_manifest)
+            .expect("valid random-discard manifest")
+            .ensure_selfplay_supported()
+            .expect("random-discard payment is self-play safe");
+
+        let sacrifice_manifest = selfplay_manifest_with(417, |manifest| {
+            manifest["cards"]["north-spell-1"]["sacrificeMinionAtSummoningLocationForManaDiscount"] =
+                json!(2);
+        });
+        assert!(matches!(
+            Game::from_manifest_json(&sacrifice_manifest)
+                .expect("valid sacrifice-payment manifest")
+                .ensure_selfplay_supported(),
+            Err(GameError::UnsupportedManifestFact(field))
+                if field == "sacrificeMinionAtSummoningLocationForManaDiscount"
+        ));
+
+        let mut game = Game::from_manifest_json(&discard_manifest).expect("valid Aramos game");
+        let cell = Cell::parse("C4").expect("C4");
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        let site_card = north.hand_atlas.remove(0);
+        north.atlas.extend(std::mem::take(&mut north.hand_atlas));
+        let aramos = north.hand_spellbook.remove(0);
+        north
+            .spellbook
+            .extend(std::mem::take(&mut north.hand_spellbook));
+        let aramos_instance_id = aramos.instance_id.clone();
+        north.hand_spellbook.push(aramos);
+        north.avatar.location = cell;
+        north.domain_established = true;
+        north.mana = 0;
+        game.position.sites[cell.index()] = Some(SitePosition {
+            card: site_card,
+            controller: Seat::North,
+        });
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+
+        assert!(
+            !game
+                .legal_actions()
+                .expect("actions without a payment card")
+                .iter()
+                .any(|action| matches!(
+                    action.descriptor,
+                    ActionDescriptor::SummonMinion {
+                        payment_mode: Some(SummonPaymentMode::RandomCardDiscard),
+                        ..
+                    }
+                ))
+        );
+
+        let only_payment_card = game.position.players[seat_index(Seat::North)]
+            .atlas
+            .pop()
+            .expect("one Atlas payment card");
+        let payment_instance_id = only_payment_card.instance_id.clone();
+        game.position.players[seat_index(Seat::North)]
+            .hand_atlas
+            .push(only_payment_card);
+        game.position.players[seat_index(Seat::North)].mana = 1;
+        let payment_actions = game.legal_actions().expect("actions with one payment card");
+        assert!(payment_actions.iter().any(|action| matches!(
+            action.descriptor,
+            ActionDescriptor::SummonMinion {
+                mana_cost: 1,
+                payment_mode: None,
+                ..
+            }
+        )));
+        let action = payment_actions
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::SummonMinion {
+                        card_instance_id,
+                        payment_mode: Some(SummonPaymentMode::RandomCardDiscard),
+                        ..
+                    } if *card_instance_id == aramos_instance_id
+                )
+            })
+            .expect("random-discard summon");
+        let (outcomes, random_draws) = game
+            .apply_action_recorded(&action)
+            .expect("issued random-discard summon");
+
+        assert_eq!(random_draws.len(), 1);
+        assert_eq!(random_draws[0].domain.exclusive_maximum, 1);
+        assert_eq!(random_draws[0].domain.kind, "card_index_candidate");
+        assert_eq!(random_draws[0].purpose, "summon_random_card_discard_cost");
+        assert_eq!(
+            outcomes
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            ["card-discarded", "minion-summoned"]
+        );
+        assert_eq!(outcomes[0].1["instanceId"], payment_instance_id.as_str());
+        assert_eq!(outcomes[0].1["zone"], "atlas");
+        assert!(
+            game.position.players[seat_index(Seat::North)]
+                .cemetery
+                .iter()
+                .any(|card| card.instance_id == payment_instance_id)
+        );
+        assert_eq!(game.position.players[seat_index(Seat::North)].mana, 1);
     }
 
     #[test]

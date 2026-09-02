@@ -273,7 +273,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Aramos Mercenaries may discard a deterministic random hand card instead of paying mana.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "discard",
@@ -284,8 +284,8 @@
         "mana-change"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Aramos Mercenaries may discard a deterministic random hand card instead of paying mana"
+        "file": "crates/sorcery-engine/tests/summon_rules.rs",
+        "testName": "aramos_should_discard_one_deterministic_random_hand_card_instead_of_mana"
       }
     },
     {
