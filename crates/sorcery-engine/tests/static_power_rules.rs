@@ -1,4 +1,4 @@
-//! Direct proofs for derived static power bonuses (RULE-CATALOG-0034 / 0035).
+//! Direct proofs for derived static power bonuses (RULE-CATALOG-0034 / 0035 / 0036).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -47,7 +47,13 @@ fn magic(effect: (&str, Value)) -> Value {
     value
 }
 
-fn manifest(seed: u32, cards: &Value, north: &[&str], south: &[&str]) -> String {
+fn manifest(
+    seed: u32,
+    cards: &Value,
+    north: &[&str],
+    south: &[&str],
+    north_atlas: usize,
+) -> String {
     let mut value = json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "static-power-rules" }))
@@ -58,7 +64,7 @@ fn manifest(seed: u32, cards: &Value, north: &[&str], south: &[&str]) -> String 
         "cards": cards,
         "decks": {
             "north": {
-                "atlas": vec!["north-site"; 6],
+                "atlas": vec!["north-site"; north_atlas],
                 "avatar": "north-avatar",
                 "spellbook": north,
             },
@@ -185,9 +191,15 @@ fn assert_exact_replay(session: &Session) {
     assert!(session.verify_replay().expect("verified replay"));
 }
 
-fn seeded(cards: &Value, north: &[&str], south: &[&str], wanted: &[&str]) -> String {
+fn seeded(
+    cards: &Value,
+    north: &[&str],
+    south: &[&str],
+    wanted: &[&str],
+    north_atlas: usize,
+) -> String {
     (1..=4096)
-        .map(|seed| manifest(seed, cards, north, south))
+        .map(|seed| manifest(seed, cards, north, south, north_atlas))
         .find(|candidate| {
             let preview = Session::new(candidate).expect("static power candidate");
             let current = state(&preview);
@@ -242,6 +254,7 @@ fn rule_catalog_0034_nearby_allies_power_is_derived_and_settles_deaths_when_its_
             "north:north-far",
             "south:south-rain",
         ],
+        6,
     );
     let mut session = Session::new(&manifest).expect("valid static power scenario");
     keep(&mut session);
@@ -371,6 +384,7 @@ fn rule_catalog_0035_controlled_mortal_power_should_follow_current_control_and_s
             "south:south-plain",
             "south:south-king",
         ],
+        6,
     );
     let mut session = Session::new(&manifest).expect("valid controlled Mortal scenario");
     keep(&mut session);
@@ -415,5 +429,95 @@ fn rule_catalog_0035_controlled_mortal_power_should_follow_current_control_and_s
     let second = rain(&mut session);
     assert!(died_order(&second).is_empty());
     assert_eq!(damage_of(&session, &north_mortal), 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0036_aura_loss_deathrite_should_end_the_game_after_its_triggering_magic_resolves() {
+    let cards = json!({
+        "north-ally": minion(json!({ "deathriteDrawSite": true })),
+        "north-avatar": avatar(),
+        "north-rain": magic(("damageEachAbovegroundMinion", json!(1))),
+        "north-site": site(),
+        "north-source": minion(json!({ "defense": 2, "otherNearbyAlliesPowerBonus": 1 })),
+        "north-teleport": magic(("teleportAllyToTargetSite", json!(true))),
+        "south-avatar": avatar(),
+        "south-filler": minion(json!({})),
+        "south-site": site(),
+    });
+    let north = [
+        "north-source",
+        "north-ally",
+        "north-rain",
+        "north-teleport",
+        "north-source",
+        "north-ally",
+        "north-rain",
+        "north-teleport",
+    ];
+    let south = ["south-filler"; 8];
+    // Three Atlas cards are the whole opening hand, so the Deathrite draw has nothing behind it.
+    let manifest = seeded(
+        &cards,
+        &north,
+        &south,
+        &["north:north-source", "north:north-ally"],
+        3,
+    );
+    let mut session = Session::new(&manifest).expect("valid aura-loss Deathrite scenario");
+    keep(&mut session);
+    keep(&mut session);
+
+    play_site(&mut session, "C4");
+    let source_id = summon(&mut session, "north-source", "C4");
+    let ally_id = summon(&mut session, "north-ally", "C4");
+    end_and_draw(&mut session);
+    play_site(&mut session, "C1");
+    // Four quiet North draws stock the rest of the hand whichever way the Spellbook shuffled.
+    for _ in 0..7 {
+        end_and_draw(&mut session);
+    }
+    assert_eq!(state(&session)["players"]["north"]["atlas"], json!([]));
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    });
+    assert_eq!(damage_of(&session, &ally_id), 1);
+    assert_eq!(damage_of(&session, &source_id), 1);
+
+    // Teleporting the aura away drops the ally to its printed defense of one.
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-teleport"
+            && descriptor["ally"]["instanceId"] == source_id.as_str()
+            && descriptor["targetLocation"]["cell"] == "C1"
+    });
+
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "magic-cast",
+            "unit-teleported",
+            "minion-died",
+            "magic-resolved",
+            "game-ended",
+        ],
+        "the triggering Magic must resolve before the Deathrite's empty draw ends the game"
+    );
+    let finished = state(&session);
+    assert!(realm_unit(&finished, &ally_id).is_none());
+    assert_eq!(
+        finished["terminal"],
+        json!({
+            "loser": "north",
+            "reason": "deck_empty",
+            "status": "finished",
+            "winner": "south",
+        })
+    );
     assert_exact_replay(&session);
 }

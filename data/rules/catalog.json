@@ -692,7 +692,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Aura-loss Deathrite ends the game after its triggering Magic resolves.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "deathrite",
         "aura"
@@ -703,8 +703,8 @@
         "resolution"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 aura-loss Deathrite ends the game after its triggering Magic resolves"
+        "file": "crates/sorcery-engine/tests/static_power_rules.rs",
+        "testName": "rule_catalog_0036_aura_loss_deathrite_should_end_the_game_after_its_triggering_magic_resolves"
       }
     },
     {
