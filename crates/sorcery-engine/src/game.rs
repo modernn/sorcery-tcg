@@ -1201,8 +1201,6 @@ fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
         Some("mustBeCastToOuterColumn")
     } else if facts.voidwalk {
         Some("voidwalk")
-    } else if facts.waterbound {
-        Some("waterbound")
     } else {
         None
     }
@@ -15782,14 +15780,16 @@ mod tests {
             .expect("valid Submerge manifest")
             .ensure_selfplay_supported()
             .expect("Submerge minion Bury is self-play safe");
-        for unmodeled in ["voidwalk", "waterbound"] {
-            assert!(matches!(
-                Game::from_manifest_json(&bury_manifest(Some((unmodeled, json!(true)))))
-                    .expect("valid unmodeled region manifest")
-                    .ensure_selfplay_supported(),
-                Err(GameError::UnsupportedManifestFact(field)) if field == unmodeled
-            ));
-        }
+        Game::from_manifest_json(&bury_manifest(Some(("waterbound", json!(true)))))
+            .expect("valid Waterbound manifest")
+            .ensure_selfplay_supported()
+            .expect("Waterbound minion Bury is self-play safe");
+        assert!(matches!(
+            Game::from_manifest_json(&bury_manifest(Some(("voidwalk", json!(true)))))
+                .expect("valid Voidwalk manifest")
+                .ensure_selfplay_supported(),
+            Err(GameError::UnsupportedManifestFact(field)) if field == "voidwalk"
+        ));
 
         let cave_in = selfplay_manifest_with(31, |manifest| {
             for ordinal in 1..=50 {

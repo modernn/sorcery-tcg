@@ -957,7 +957,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Waterbound derives Disabled from terrain and survives only with active abilities.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "disabled",
         "waterbound",
@@ -968,8 +968,8 @@
         "disable"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03/04 Waterbound derives Disabled from terrain and survives only with active abilities"
+        "file": "crates/sorcery-engine/tests/waterbound_rules.rs",
+        "testName": "rule_catalog_0049_waterbound_should_derive_disabled_from_terrain_and_die_without_abilities"
       }
     },
     {
