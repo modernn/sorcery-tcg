@@ -30,6 +30,8 @@ const CHAIN_MAGIC_DAMAGE: u16 = 2;
 const CHAIN_MAGIC_EXTRA_TARGET_MANA: u64 = 2;
 /// The one damage amount `tapToDamageEachUnitAtAdjacentLocation` is admitted with.
 const AREA_DAMAGE_AMOUNT: u8 = 2;
+/// The one damage amount `tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps` is admitted with.
+const ARTIFACT_DAMAGE_AMOUNT: u8 = 3;
 
 /// Immutable manifest facts shared by cloned game positions.
 #[derive(Debug)]
@@ -1044,7 +1046,9 @@ fn unsupported_selfplay_artifact(facts: &ArtifactFacts) -> Option<&'static str> 
 /// The Artifact effects the realm cannot yet honor, named by their authoring field.
 const fn unsupported_artifact_effect(effect: ArtifactEffect) -> Option<&'static str> {
     match effect {
-        ArtifactEffect::GrantsBearerLethal | ArtifactEffect::GrantsBearerPowerTwo => None,
+        ArtifactEffect::GrantsBearerLethal
+        | ArtifactEffect::GrantsBearerPowerTwo
+        | ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree => None,
         ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(_) => {
             Some("atEndOfEachTurnSiteControllerLosesLife")
         }
@@ -1053,9 +1057,6 @@ const fn unsupported_artifact_effect(effect: ArtifactEffect) -> Option<&'static 
         }
         ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps => {
             Some("tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps")
-        }
-        ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree => {
-            Some("tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps")
         }
         ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour => {
             Some("tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath")
@@ -1067,7 +1068,9 @@ const fn unsupported_artifact_effect(effect: ArtifactEffect) -> Option<&'static 
 const fn artifact_effect_supported(effect: ArtifactEffect) -> bool {
     matches!(
         effect,
-        ArtifactEffect::GrantsBearerLethal | ArtifactEffect::GrantsBearerPowerTwo
+        ArtifactEffect::GrantsBearerLethal
+            | ArtifactEffect::GrantsBearerPowerTwo
+            | ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree
     )
 }
 
@@ -3328,7 +3331,8 @@ impl Game {
             .artifact_cast_descriptors(seat)
             .into_iter()
             .chain(self.pick_up_artifact_descriptors(seat)?)
-            .chain(self.drop_artifact_descriptors(seat)?);
+            .chain(self.drop_artifact_descriptors(seat)?)
+            .chain(self.artifact_damage_descriptors(seat)?);
         for descriptor in descriptors {
             let label = descriptor
                 .state_independent_label()
@@ -3428,6 +3432,125 @@ impl Game {
             );
         }
         Ok(descriptors)
+    }
+
+    /// Offers each measured Artifact damage activation the seat can pay for right now.
+    ///
+    /// The Artifact fires from the cell its bearer stands on, so a loose Artifact offers nothing and
+    /// a bearer who cannot pay the tap costs alongside a second ally beside it offers nothing.
+    fn artifact_damage_descriptors(&self, seat: Seat) -> Result<Vec<ActionDescriptor>, GameError> {
+        if self.position.phase != Phase::Main
+            || self.position.active_seat != seat
+            || self.position.decision_seat != seat
+        {
+            return Ok(Vec::new());
+        }
+        let allies = self.seat_unit_targets(seat);
+        let mut descriptors = Vec::new();
+        for artifact in &self.position.artifacts {
+            let Some(bearer) = artifact.bearer() else {
+                continue;
+            };
+            if bearer.seat() != seat
+                || self.artifact_facts(artifact)?.effect
+                    != ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree
+                || !self.unit_target_is_ready(bearer)?
+            {
+                continue;
+            }
+            let carried_at = self.unit_target_location(bearer)?;
+            let reachable: BTreeSet<_> = self
+                .locations_within_two_measured_steps(carried_at)
+                .into_iter()
+                .map(|location| location.cell)
+                .collect();
+            let mut targets = Vec::new();
+            for target in [Seat::North, Seat::South]
+                .into_iter()
+                .flat_map(|target_seat| self.seat_unit_targets(target_seat))
+            {
+                let hidden = target.seat() != seat
+                    && self.combatant_stealthed(
+                        unit_target_kind(&target),
+                        target.seat(),
+                        target.instance_id(),
+                    )?;
+                if hidden
+                    || self.unit_target_region(&target)? != carried_at.region
+                    || !self
+                        .unit_target_occupied_cells(&target)?
+                        .iter()
+                        .any(|cell| reachable.contains(cell))
+                {
+                    continue;
+                }
+                targets.push(target);
+            }
+            for helper in &allies {
+                if helper.instance_id() == bearer.instance_id()
+                    || !self.unit_target_is_ready(helper)?
+                    || self.unit_target_region(helper)? != carried_at.region
+                    || !self
+                        .unit_target_occupied_cells(helper)?
+                        .contains(&carried_at.cell)
+                {
+                    continue;
+                }
+                descriptors.extend(targets.iter().map(|target| {
+                    ActionDescriptor::ActivateArtifactDamage {
+                        artifact_instance_id: artifact.card.instance_id.clone(),
+                        helper: helper.clone(),
+                        target: target.clone(),
+                    }
+                }));
+            }
+        }
+        Ok(descriptors)
+    }
+
+    /// Whether a unit can still pay a tap cost: awake, untapped, and clear of summoning sickness.
+    fn unit_target_is_ready(&self, target: &UnitTarget) -> Result<bool, GameError> {
+        match target {
+            UnitTarget::Avatar { instance_id, seat } => {
+                let avatar = &self.position.players[seat_index(*seat)].avatar;
+                if avatar.card.instance_id != *instance_id {
+                    return Err(GameError::IllegalAction);
+                }
+                Ok(!avatar.tapped)
+            }
+            UnitTarget::Minion { instance_id, seat } => self
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
+                .map(|unit| {
+                    !unit.tapped
+                        && !self.minion_is_disabled(unit)
+                        && (!unit.summoning_sickness || self.minion_has_active_charge(unit))
+                })
+                .ok_or(GameError::IllegalAction),
+        }
+    }
+
+    fn tap_unit_target(&mut self, target: &UnitTarget) -> Result<(), GameError> {
+        match target {
+            UnitTarget::Avatar { instance_id, seat } => {
+                let avatar = &mut self.position.players[seat_index(*seat)].avatar;
+                if avatar.card.instance_id != *instance_id {
+                    return Err(GameError::IllegalAction);
+                }
+                avatar.tapped = true;
+            }
+            UnitTarget::Minion { instance_id, seat } => {
+                self.position
+                    .units
+                    .iter_mut()
+                    .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
+                    .ok_or(GameError::IllegalAction)?
+                    .tapped = true;
+            }
+        }
+        Ok(())
     }
 
     fn loose_artifact_instance_ids(&self, cell: Cell, region: Region) -> Vec<IdentityHash> {
@@ -5336,6 +5459,9 @@ impl Game {
         let applied = match &action.descriptor {
             ActionDescriptor::ActivateAreaDamage { .. } => {
                 self.apply_area_damage_action(action, outcomes)
+            }
+            ActionDescriptor::ActivateArtifactDamage { .. } => {
+                self.apply_artifact_damage_action(action, outcomes)
             }
             ActionDescriptor::ActivateDiscardRandomDamage { .. } => {
                 self.apply_discard_random_damage_action(action, outcomes, random_draws)
@@ -10000,6 +10126,75 @@ impl Game {
                 outcomes,
             )?;
         }
+        Ok(())
+    }
+
+    /// Taps a carried Artifact's bearer and one other ally beside it so the Artifact damages one
+    /// measured target. The Artifact is the source, so damage prevention keyed to unit power does
+    /// not apply and no unit power or Lethal is lent to the shot.
+    fn apply_artifact_damage_action(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::ActivateArtifactDamage {
+            artifact_instance_id,
+            helper,
+            target,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let seat = action.seat;
+        if !self
+            .artifact_damage_descriptors(seat)?
+            .contains(&action.descriptor)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let bearer = self
+            .position
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.card.instance_id == *artifact_instance_id)
+            .and_then(ArtifactPosition::bearer)
+            .ok_or(GameError::IllegalAction)?
+            .clone();
+        let amount = u16::from(ARTIFACT_DAMAGE_AMOUNT);
+        outcomes.push("artifact-damage-activated", || {
+            json!({
+                "bearerInstanceId": bearer.instance_id(),
+                "helperInstanceId": helper.instance_id(),
+                "seat": seat,
+                "sourceInstanceId": artifact_instance_id,
+                "targetInstanceId": target.instance_id(),
+            })
+        });
+        // Both tap costs are paid before the shot lands, so an overlapping helper is already spent
+        // when the damage that kills it is dealt.
+        self.tap_unit_target(&bearer)?;
+        self.tap_unit_target(helper)?;
+        outcomes.push("artifact-damage-allocated", || {
+            json!({
+                "amount": amount,
+                "sourceInstanceId": artifact_instance_id,
+                "targetInstanceId": target.instance_id(),
+            })
+        });
+        self.damage_unit_and_settle_deaths(
+            &(
+                target.instance_id().clone(),
+                unit_target_kind(target),
+                target.seat(),
+            ),
+            amount,
+            UnitDamageSource {
+                current_power: 0,
+                lethal: false,
+            },
+            outcomes,
+        )?;
+        self.position.state_version += 1;
         Ok(())
     }
 

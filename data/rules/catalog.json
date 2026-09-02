@@ -2880,7 +2880,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Siege Ballista taps its bearer and another ally for measured artifact damage.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "artifact"
       ],
@@ -2891,8 +2891,8 @@
         "damage"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Siege Ballista taps its bearer and another ally for measured artifact damage"
+        "file": "crates/sorcery-engine/tests/artifact_rules.rs",
+        "testName": "rule_catalog_0143_siege_ballista_should_tap_bearer_and_ally_for_measured_artifact_damage"
       }
     },
     {

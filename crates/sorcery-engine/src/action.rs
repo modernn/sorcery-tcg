@@ -224,6 +224,15 @@ pub enum ActionDescriptor {
         /// Engine-issued adjacent location whose occupants all take the damage.
         target_location: Location,
     },
+    /// Tap a carried Artifact's bearer and one other ally beside it to damage a measured target.
+    ActivateArtifactDamage {
+        /// Authoritative carried Artifact identity granting the ability.
+        artifact_instance_id: IdentityHash,
+        /// Second ready ally tapped alongside the bearer to pay for the ability.
+        helper: UnitTarget,
+        /// Engine-issued unit within two measured steps of the Artifact, in the bearer's region.
+        target: UnitTarget,
+    },
     /// Discard one Spellbook card to damage a hidden random other unit at the source's location.
     ActivateDiscardRandomDamage {
         /// Exact Spellbook card discarded to pay for the ability.
@@ -842,6 +851,16 @@ impl ActionDescriptor {
                 short_identity(source_instance_id),
                 target_location.cell
             )),
+            Self::ActivateArtifactDamage {
+                artifact_instance_id,
+                target,
+                ..
+            } => Some(format!(
+                "Tap bearer and ally to activate artifact {}… on {} {}…",
+                short_identity(artifact_instance_id),
+                target.kind(),
+                short_identity(target.instance_id())
+            )),
             Self::ActivateDiscardRandomDamage { .. }
             | Self::ActivateSparkmage { .. }
             | Self::PlaySite { .. }
@@ -1257,6 +1276,21 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                         .cmp(right_discard)
                         .then_with(|| left_source.cmp(right_source)),
                     (
+                        ActionDescriptor::ActivateArtifactDamage {
+                            artifact_instance_id: left_artifact,
+                            helper: left_helper,
+                            target: left_target,
+                        },
+                        ActionDescriptor::ActivateArtifactDamage {
+                            artifact_instance_id: right_artifact,
+                            helper: right_helper,
+                            target: right_target,
+                        },
+                    ) => left_artifact
+                        .cmp(right_artifact)
+                        .then_with(|| compare_unit_targets(left_helper, right_helper))
+                        .then_with(|| compare_unit_targets(left_target, right_target)),
+                    (
                         ActionDescriptor::ActivateAreaDamage {
                             source_instance_id: left_source,
                             target_location: left_location,
@@ -1585,22 +1619,23 @@ const fn descriptor_group(action: &ActionDescriptor) -> u8 {
     match action {
         ActionDescriptor::CastMagic { ally: Some(_), .. } => 0,
         ActionDescriptor::ActivateMana { .. } | ActionDescriptor::AllocateStrike { .. } => 1,
-        ActionDescriptor::DropArtifacts { .. } | ActionDescriptor::PickUpArtifacts { .. } => 2,
-        ActionDescriptor::Mulligan { .. } => 3,
+        ActionDescriptor::ActivateArtifactDamage { .. } => 2,
+        ActionDescriptor::DropArtifacts { .. } | ActionDescriptor::PickUpArtifacts { .. } => 3,
+        ActionDescriptor::Mulligan { .. } => 4,
         ActionDescriptor::CastArtifact {
             bearer: Some(_), ..
-        } => 4,
+        } => 5,
         ActionDescriptor::BeginChainMagic { .. }
         | ActionDescriptor::CastArtifact { .. }
         | ActionDescriptor::CastMagic { .. }
         | ActionDescriptor::PlaySite { .. }
-        | ActionDescriptor::SummonMinion { .. } => 5,
+        | ActionDescriptor::SummonMinion { .. } => 6,
         ActionDescriptor::ShootDamageProjectile { .. }
         | ActionDescriptor::ShootDragProjectile { .. }
-        | ActionDescriptor::ShootProjectile { .. } => 6,
-        ActionDescriptor::ActivateDiscardRandomDamage { .. } => 7,
-        ActionDescriptor::Defend { .. } | ActionDescriptor::MoveAndAttack { .. } => 8,
-        _ => 9,
+        | ActionDescriptor::ShootProjectile { .. } => 7,
+        ActionDescriptor::ActivateDiscardRandomDamage { .. } => 8,
+        ActionDescriptor::Defend { .. } | ActionDescriptor::MoveAndAttack { .. } => 9,
+        _ => 10,
     }
 }
 
@@ -1712,41 +1747,42 @@ fn card_prefix(action: &ActionDescriptor) -> (&str, &IdentityHash) {
 const fn action_kind(action: &ActionDescriptor) -> u8 {
     match action {
         ActionDescriptor::ActivateAreaDamage { .. } => 0,
-        ActionDescriptor::ActivateDiscardRandomDamage { .. } => 1,
-        ActionDescriptor::ActivateMana { .. } => 2,
-        ActionDescriptor::ActivateSiteDestruction { .. } => 3,
-        ActionDescriptor::ActivateSparkmage { .. } => 4,
-        ActionDescriptor::AllocateStrike { .. } => 5,
-        ActionDescriptor::BeginChainMagic { .. } => 6,
-        ActionDescriptor::CastArtifact { .. } => 7,
-        ActionDescriptor::CastMagic { .. } => 8,
-        ActionDescriptor::CloseDefend { .. } => 9,
-        ActionDescriptor::CloseIntercept {} => 10,
-        ActionDescriptor::ContinueBasicMovement { .. } => 11,
-        ActionDescriptor::DeclareAttack { .. } => 12,
-        ActionDescriptor::DeclineAttack => 13,
-        ActionDescriptor::Defend { .. } => 14,
-        ActionDescriptor::Draw { .. } => 15,
-        ActionDescriptor::DrawSite => 16,
-        ActionDescriptor::DrawSpell => 17,
-        ActionDescriptor::DropArtifacts { .. } => 18,
-        ActionDescriptor::EndTurn => 19,
-        ActionDescriptor::ExtendChainMagic { .. } => 20,
-        ActionDescriptor::Intercept { .. } => 21,
-        ActionDescriptor::OrderDeathrites { .. } => 22,
-        ActionDescriptor::PickUpArtifacts { .. } => 23,
-        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 24,
-        ActionDescriptor::ResolveChainMagic => 25,
-        ActionDescriptor::ResolveGenesisSpell { .. } => 26,
-        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 27,
-        ActionDescriptor::ResolveGenesisToken { .. } => 28,
-        ActionDescriptor::ResolveRangedStep { .. } => 29,
-        ActionDescriptor::Mulligan { .. } => 30,
-        ActionDescriptor::PlaySite { .. } => 31,
-        ActionDescriptor::ShootDamageProjectile { .. } => 32,
-        ActionDescriptor::ShootDragProjectile { .. } => 33,
-        ActionDescriptor::ShootProjectile { .. } => 34,
-        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 35,
+        ActionDescriptor::ActivateArtifactDamage { .. } => 1,
+        ActionDescriptor::ActivateDiscardRandomDamage { .. } => 2,
+        ActionDescriptor::ActivateMana { .. } => 3,
+        ActionDescriptor::ActivateSiteDestruction { .. } => 4,
+        ActionDescriptor::ActivateSparkmage { .. } => 5,
+        ActionDescriptor::AllocateStrike { .. } => 6,
+        ActionDescriptor::BeginChainMagic { .. } => 7,
+        ActionDescriptor::CastArtifact { .. } => 8,
+        ActionDescriptor::CastMagic { .. } => 9,
+        ActionDescriptor::CloseDefend { .. } => 10,
+        ActionDescriptor::CloseIntercept {} => 11,
+        ActionDescriptor::ContinueBasicMovement { .. } => 12,
+        ActionDescriptor::DeclareAttack { .. } => 13,
+        ActionDescriptor::DeclineAttack => 14,
+        ActionDescriptor::Defend { .. } => 15,
+        ActionDescriptor::Draw { .. } => 16,
+        ActionDescriptor::DrawSite => 17,
+        ActionDescriptor::DrawSpell => 18,
+        ActionDescriptor::DropArtifacts { .. } => 19,
+        ActionDescriptor::EndTurn => 20,
+        ActionDescriptor::ExtendChainMagic { .. } => 21,
+        ActionDescriptor::Intercept { .. } => 22,
+        ActionDescriptor::OrderDeathrites { .. } => 23,
+        ActionDescriptor::PickUpArtifacts { .. } => 24,
+        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 25,
+        ActionDescriptor::ResolveChainMagic => 26,
+        ActionDescriptor::ResolveGenesisSpell { .. } => 27,
+        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 28,
+        ActionDescriptor::ResolveGenesisToken { .. } => 29,
+        ActionDescriptor::ResolveRangedStep { .. } => 30,
+        ActionDescriptor::Mulligan { .. } => 31,
+        ActionDescriptor::PlaySite { .. } => 32,
+        ActionDescriptor::ShootDamageProjectile { .. } => 33,
+        ActionDescriptor::ShootDragProjectile { .. } => 34,
+        ActionDescriptor::ShootProjectile { .. } => 35,
+        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 36,
     }
 }
 
@@ -2173,6 +2209,24 @@ mod tests {
         let bearer = json!({ "instanceId": CASTER_B, "kind": "minion", "seat": "north" });
         let avatar = json!({ "instanceId": CASTER_A, "kind": "avatar", "seat": "north" });
         [
+            json!({
+                "artifactInstanceId": ARTIFACT_A,
+                "helper": bearer,
+                "kind": "activate-artifact-damage",
+                "target": avatar,
+            }),
+            json!({
+                "artifactInstanceId": ARTIFACT_A,
+                "helper": bearer,
+                "kind": "activate-artifact-damage",
+                "target": bearer,
+            }),
+            json!({
+                "artifactInstanceId": ARTIFACT_B,
+                "helper": avatar,
+                "kind": "activate-artifact-damage",
+                "target": bearer,
+            }),
             json!({
                 "artifactInstanceIds": [ARTIFACT_A],
                 "kind": "drop-artifacts",

@@ -1,6 +1,8 @@
 //! Direct proofs for local carried Artifacts (RULE-CATALOG-0140), the power an Artifact
-//! carries away from a lethally wounded bearer when it is dropped (RULE-CATALOG-0141), and the
-//! Lethal a carried Artifact grants its bearer until the bearer falls (RULE-CATALOG-0142).
+//! carries away from a lethally wounded bearer when it is dropped (RULE-CATALOG-0141), the
+//! Lethal a carried Artifact grants its bearer until the bearer falls (RULE-CATALOG-0142), and the
+//! measured damage a Siege Ballista shoots for its bearer's tap plus another ally's
+//! (RULE-CATALOG-0143).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -98,11 +100,19 @@ fn keep(session: &mut Session) {
     });
 }
 
-fn end_and_draw(session: &mut Session) {
+fn end_and_draw(session: &mut Session, zone: &str) {
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        descriptor["kind"] == "draw" && descriptor["zone"] == zone
     });
+}
+
+fn event_types(receipt: &Receipt) -> Vec<&str> {
+    receipt
+        .events
+        .iter()
+        .map(|event| event.event_type.as_str())
+        .collect()
 }
 
 fn state(session: &Session) -> Value {
@@ -351,7 +361,7 @@ fn rule_catalog_0140_pick_up_and_drop_should_manage_local_carried_artifacts_once
     assert!(descriptors_of_kind(&session, "pick-up-artifacts").is_empty());
 
     // South's Avatar sits at C1, so the Artifacts on C4 are out of reach until a unit stands there.
-    end_and_draw(&mut session);
+    end_and_draw(&mut session, "spellbook");
     play_site(&mut session, "carry-site", "C1");
     assert!(descriptors_of_kind(&session, "pick-up-artifacts").is_empty());
     assert_exact_replay(&session);
@@ -515,9 +525,9 @@ fn lethal_strike_scenario() -> String {
 fn lethal_strike_position(session: &mut Session, carried: bool) -> (String, String) {
     play_site(session, "dagger-site", "C4");
     let bearer = summon(session, "dagger-bearer", "C4");
-    end_and_draw(session);
+    end_and_draw(session, "spellbook");
     play_site(session, "dagger-site", "C1");
-    end_and_draw(session);
+    end_and_draw(session, "spellbook");
 
     play_site(session, "dagger-site", "C3");
     accept_where(session, |descriptor| {
@@ -536,7 +546,7 @@ fn lethal_strike_position(session: &mut Session, carried: bool) -> (String, Stri
             && descriptor["to"]["cell"] == "C3"
     });
     accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
-    end_and_draw(session);
+    end_and_draw(session, "spellbook");
 
     play_site(session, "dagger-site", "C2");
     let enemy = summon(session, "dagger-enemy", "C3");
@@ -650,4 +660,343 @@ fn a_loose_lethal_artifact_should_not_grant_lethal_to_the_unit_standing_on_it() 
     assert!(artifacts[0]["bearer"].is_null());
     assert_eq!(artifacts[0]["location"], "C3");
     assert_exact_replay(&session);
+}
+
+/// Both spellbooks are small enough that the opening hand plus the seat's spellbook draws is the
+/// whole spellbook, so the scenario does not depend on the shuffle.
+fn ballista_scenario() -> String {
+    let cards = json!({
+        "ballista-avatar": avatar(),
+        // Lethal and Stealth on the bearer prove the Ballista shoots on its own account: the shot
+        // neither borrows the bearer's Lethal nor spends its Stealth.
+        "ballista-bearer": minion(json!({
+            "attack": 4,
+            "defense": 2,
+            "lethal": true,
+            "stealth": true,
+            "tapForMana": 1,
+        })),
+        "ballista-far-target": minion(json!({ "defense": 5 })),
+        "ballista-helper": minion(json!({ "defense": 2, "tapForMana": 1 })),
+        "ballista-hidden-target": minion(json!({ "defense": 5, "stealth": true })),
+        // Four is exactly the bearer's power, so only a source that is not a unit gets through.
+        "ballista-near-target": minion(json!({
+            "defense": 5,
+            "preventsDamageFromUnitsWithPowerAtLeast": 4,
+        })),
+        "ballista-north-site": { "cardType": "site", "elements": ["earth"] },
+        "ballista-south-site": { "cardType": "site", "elements": ["earth", "water"] },
+        "ballista-sunken-target": minion(json!({
+            "defense": 5,
+            "submerge": true,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 1 },
+        })),
+        "siege-ballista": {
+            "cardType": "artifact",
+            "manaCost": 0,
+            "tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps": 3,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        },
+        "whelm": {
+            "cardType": "magic",
+            "manaCost": 0,
+            "submergeTargetMinion": true,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 1 },
+        },
+    });
+    let decks = json!({
+        "north": {
+            "atlas": vec!["ballista-north-site"; 6],
+            "avatar": "ballista-avatar",
+            "spellbook": [
+                "siege-ballista",
+                "ballista-bearer",
+                "ballista-helper",
+                "siege-ballista",
+            ],
+        },
+        "south": {
+            "atlas": vec!["ballista-south-site"; 6],
+            "avatar": "ballista-avatar",
+            "spellbook": [
+                "ballista-far-target",
+                "ballista-hidden-target",
+                "ballista-near-target",
+                "ballista-sunken-target",
+                "whelm",
+            ],
+        },
+    });
+    manifest("synthetic-siege-ballista-v1", &cards, &decks, 11)
+}
+
+/// Every identity the Ballista at C4 either reaches or deliberately leaves alone.
+struct Ballista {
+    bearer: String,
+    carried: String,
+    far: String,
+    helper: String,
+    loose: String,
+    near: String,
+}
+
+/// Walks both seats up to North's ready Ballista bearer and its ready ally on C4, two measured
+/// steps from South's minions on C2 and three from its minion on C1. One Ballista is conjured onto
+/// the bearer and a second is left loose on the same cell.
+fn ballista_position(session: &mut Session) -> Ballista {
+    keep(session);
+    keep(session);
+
+    play_site(session, "ballista-north-site", "C4");
+    end_and_draw(session, "spellbook");
+    play_site(session, "ballista-south-site", "C1");
+    end_and_draw(session, "spellbook");
+
+    let bearer = summon(session, "ballista-bearer", "C4");
+    let helper = summon(session, "ballista-helper", "C4");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "siege-ballista"
+            && descriptor["bearer"]["instanceId"] == bearer.as_str()
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "siege-ballista"
+            && descriptor["bearer"].is_null()
+            && descriptor["cell"] == "C4"
+    });
+    // A summoning-sick bearer cannot pay the Ballista's first tap yet.
+    assert!(descriptors_of_kind(session, "activate-artifact-damage").is_empty());
+    play_site(session, "ballista-north-site", "C3");
+    end_and_draw(session, "spellbook");
+
+    play_site(session, "ballista-south-site", "C2");
+    let far = summon(session, "ballista-far-target", "C1");
+    let near = summon(session, "ballista-near-target", "C2");
+    let hidden = summon(session, "ballista-hidden-target", "C2");
+    let sunken = summon(session, "ballista-sunken-target", "C2");
+    // South pulls one minion under its Water site so C2 exposes only its surface layer.
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "whelm"
+            && descriptor["target"]["instanceId"] == sunken.as_str()
+    });
+    let opposed = state(session);
+    assert_eq!(
+        realm_unit(&opposed, &sunken).expect("sunken target")["region"],
+        "underwater"
+    );
+    assert_eq!(
+        realm_unit(&opposed, &hidden).expect("hidden target")["stealthed"],
+        true
+    );
+    end_and_draw(session, "atlas");
+
+    let artifacts = realm_artifacts(&state(session));
+    assert_eq!(artifacts.len(), 2);
+    let identity = |artifact: &Value| {
+        artifact["instanceId"]
+            .as_str()
+            .expect("Ballista identity")
+            .to_owned()
+    };
+    Ballista {
+        carried: artifacts
+            .iter()
+            .find(|artifact| artifact["bearer"]["instanceId"] == bearer.as_str())
+            .map(identity)
+            .expect("the conjured Ballista its bearer carries"),
+        loose: artifacts
+            .iter()
+            .find(|artifact| artifact["bearer"].is_null())
+            .map(identity)
+            .expect("the conjured Ballista lying loose on C4"),
+        bearer,
+        far,
+        helper,
+        near,
+    }
+}
+
+/// The (helper, target) tap pairs one Artifact currently offers, in sorted order.
+fn artifact_damage_pairs(session: &Session, artifact_instance_id: &str) -> Vec<(String, String)> {
+    let mut pairs: Vec<_> = descriptors_of_kind(session, "activate-artifact-damage")
+        .iter()
+        .filter(|descriptor| descriptor["artifactInstanceId"] == artifact_instance_id)
+        .map(|descriptor| {
+            (
+                descriptor["helper"]["instanceId"]
+                    .as_str()
+                    .expect("helper identity")
+                    .to_owned(),
+                descriptor["target"]["instanceId"]
+                    .as_str()
+                    .expect("target identity")
+                    .to_owned(),
+            )
+        })
+        .collect();
+    pairs.sort();
+    pairs
+}
+
+#[test]
+fn rule_catalog_0143_siege_ballista_should_tap_bearer_and_ally_for_measured_artifact_damage() {
+    let mut session = Session::new(&ballista_scenario()).expect("valid Siege Ballista scenario");
+    let ballista = ballista_position(&mut session);
+    let north_avatar = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+
+    // Either ready ally on C4 may pay the second tap, and the shot reaches every surface unit
+    // within two measured steps of C4: C4 itself, C3, and South's C2. South's minion on C1 is one
+    // step too far, its hidden minion cannot be targeted, and its submerged minion is at another
+    // location entirely.
+    let mut expected: Vec<(String, String)> = [&north_avatar, &ballista.helper]
+        .into_iter()
+        .flat_map(|helper| {
+            [
+                &north_avatar,
+                &ballista.bearer,
+                &ballista.helper,
+                &ballista.near,
+            ]
+            .into_iter()
+            .map(|target| (helper.clone(), target.clone()))
+        })
+        .collect();
+    expected.sort();
+    assert_eq!(artifact_damage_pairs(&session, &ballista.carried), expected);
+    assert!(
+        artifact_damage_pairs(&session, &ballista.loose).is_empty(),
+        "a loose Ballista has no bearer to tap"
+    );
+
+    let (_, fired) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "activate-artifact-damage"
+            && descriptor["artifactInstanceId"] == ballista.carried.as_str()
+            && descriptor["helper"]["instanceId"] == ballista.helper.as_str()
+            && descriptor["target"]["instanceId"] == ballista.near.as_str()
+    });
+    assert_eq!(
+        event_types(&fired),
+        [
+            "artifact-damage-activated",
+            "artifact-damage-allocated",
+            "damage-dealt",
+        ],
+        "the Ballista shoots without opening a strike exchange"
+    );
+    assert_eq!(
+        fired.events[0].payload,
+        json!({
+            "bearerInstanceId": ballista.bearer,
+            "helperInstanceId": ballista.helper,
+            "seat": "north",
+            "sourceInstanceId": ballista.carried,
+            "targetInstanceId": ballista.near,
+        })
+    );
+    assert_eq!(
+        fired.events[1].payload,
+        json!({
+            "amount": 3,
+            "sourceInstanceId": ballista.carried,
+            "targetInstanceId": ballista.near,
+        })
+    );
+    assert!(fired.random_draws.is_empty());
+
+    let settled = state(&session);
+    let bearer = realm_unit(&settled, &ballista.bearer).expect("bearer");
+    assert_eq!(
+        (&bearer["damage"], &bearer["stealthed"], &bearer["tapped"]),
+        (&json!(0), &json!(true), &json!(true)),
+        "the bearer pays a tap, keeps its Stealth, and takes nothing back"
+    );
+    assert_eq!(
+        realm_unit(&settled, &ballista.helper).expect("helper")["tapped"],
+        true
+    );
+    // Measured artifact damage is not unit damage, so four-power prevention does not stop it and
+    // the bearer's Lethal never reaches the five-defense minion it wounds.
+    assert_eq!(
+        realm_unit(&settled, &ballista.near).expect("near target")["damage"],
+        3
+    );
+    assert_eq!(
+        realm_unit(&settled, &ballista.far).expect("far target")["damage"],
+        0
+    );
+    assert!(
+        descriptors_of_kind(&session, "activate-artifact-damage").is_empty(),
+        "a spent bearer cannot shoot its Ballista twice in one turn"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn a_siege_ballista_should_shoot_the_ally_that_paid_its_second_tap() {
+    let mut session = Session::new(&ballista_scenario()).expect("valid Siege Ballista scenario");
+    let ballista = ballista_position(&mut session);
+
+    let (_, fired) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "activate-artifact-damage"
+            && descriptor["artifactInstanceId"] == ballista.carried.as_str()
+            && descriptor["helper"]["instanceId"] == ballista.helper.as_str()
+            && descriptor["target"]["instanceId"] == ballista.helper.as_str()
+    });
+    assert_eq!(
+        event_types(&fired),
+        [
+            "artifact-damage-activated",
+            "artifact-damage-allocated",
+            "damage-dealt",
+            "minion-died",
+        ]
+    );
+
+    let settled = state(&session);
+    assert!(realm_unit(&settled, &ballista.helper).is_none());
+    assert_eq!(
+        realm_unit(&settled, &ballista.bearer).expect("bearer")["tapped"],
+        true,
+        "the bearer still pays its tap when the shot kills the ally that paid the other"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn a_siege_ballista_should_require_both_its_bearer_and_a_second_ready_ally() {
+    // Tapping the bearer for mana spends the first cost, so the Ballista offers nothing even with
+    // two ready allies still standing on its cell.
+    let mut spent_bearer =
+        Session::new(&ballista_scenario()).expect("valid Siege Ballista scenario");
+    let ballista = ballista_position(&mut spent_bearer);
+    accept_where(&mut spent_bearer, |descriptor| {
+        descriptor["kind"] == "activate-mana"
+            && descriptor["unitInstanceId"] == ballista.bearer.as_str()
+    });
+    assert!(
+        descriptors_of_kind(&spent_bearer, "activate-artifact-damage").is_empty(),
+        "the bearer itself must be ready to pay the first tap"
+    );
+    assert_exact_replay(&spent_bearer);
+
+    // With the bearer still ready but every other ally on C4 spent, the second tap cannot be paid.
+    let mut spent_allies =
+        Session::new(&ballista_scenario()).expect("valid Siege Ballista scenario");
+    let ballista = ballista_position(&mut spent_allies);
+    accept_where(&mut spent_allies, |descriptor| {
+        descriptor["kind"] == "activate-mana"
+            && descriptor["unitInstanceId"] == ballista.helper.as_str()
+    });
+    // Playing a site taps North's Avatar, the only other ally standing on C4.
+    play_site(&mut spent_allies, "ballista-north-site", "D4");
+    assert!(
+        descriptors_of_kind(&spent_allies, "activate-artifact-damage").is_empty(),
+        "a lone ready bearer cannot pay the Ballista's second tap by itself"
+    );
+    assert_exact_replay(&spent_allies);
 }
