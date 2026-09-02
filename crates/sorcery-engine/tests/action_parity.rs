@@ -26,6 +26,7 @@ fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
         ActionDescriptor::ActivateMana { .. } => "activate-mana",
         ActionDescriptor::ActivateSparkmage { .. } => "activate-sparkmage",
         ActionDescriptor::AllocateStrike { .. } => "allocate-strike",
+        ActionDescriptor::BeginChainMagic { .. } => "begin-chain-magic",
         ActionDescriptor::CastMagic { .. } => "cast-magic",
         ActionDescriptor::Mulligan { .. } => "mulligan",
         ActionDescriptor::Draw { .. } => "draw",
@@ -52,6 +53,8 @@ fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
         ActionDescriptor::ShootDamageProjectile { .. } => "shoot-damage-projectile",
         ActionDescriptor::CloseIntercept {} => "close-intercept",
         ActionDescriptor::EndTurn => "end-turn",
+        ActionDescriptor::ExtendChainMagic { .. } => "extend-chain-magic",
+        ActionDescriptor::ResolveChainMagic => "resolve-chain-magic",
     }
 }
 

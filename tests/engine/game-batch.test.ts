@@ -49,7 +49,7 @@ test('one and many workers produce byte-identical ordered game reports', async (
     assert.equal(error.message.includes('futureUnsupportedMechanic'), false);
     return true;
   });
-  const unsupportedBody = {
+  const chainBody = {
     authority: source.authority,
     cards: Object.fromEntries(Object.entries(source.cards).map(([id, card]) => [
       id,
@@ -68,13 +68,16 @@ test('one and many workers produce byte-identical ordered game reports', async (
     schemaVersion: source.schemaVersion,
     seed: source.seed,
   };
-  const unsupported = {
-    ...unsupportedBody,
-    manifestId: identityHash(unsupportedBody as unknown as JsonValue),
+  const chain = {
+    ...chainBody,
+    manifestId: identityHash(chainBody as unknown as JsonValue),
   } as GameManifest;
-  await assert.rejects(
-    runGameBatch([unsupported], 1),
-    /game batch failed in Rust: unsupported fact damageChainNearbyUnits/u,
+  const chainOneWorker = await runGameBatch([chain], 1);
+  const chainTwoWorkers = await runGameBatch([chain], 2);
+  assert.equal(
+    canonicalJson(chainOneWorker as unknown as JsonValue),
+    canonicalJson(chainTwoWorkers as unknown as JsonValue),
   );
+  assert.equal(chainOneWorker[0]?.report.replayVerified, true);
   await assert.rejects(runGameBatch(manifests, 9), /requestedWorkers/);
 });

@@ -24,6 +24,8 @@ use crate::prng::PrngState;
 
 const ENGINE_VERSION: &str = "sorcery-core-v1";
 const MAX_DECK_CARDS: usize = 200;
+const CHAIN_MAGIC_DAMAGE: u16 = 2;
+const CHAIN_MAGIC_EXTRA_TARGET_MANA: u64 = 2;
 
 /// Immutable manifest facts shared by cloned game positions.
 #[derive(Debug)]
@@ -41,6 +43,7 @@ pub struct Position {
     active_seat: Seat,
     decision_seat: Seat,
     pending_basic_movement: PendingField<PendingBasicMovement>,
+    pending_chain_magic: PendingField<PendingChainMagic>,
     pending_combat: Option<PendingCombat>,
     pending_deathrites: Option<PendingDeathrites>,
     pending_genesis_spell: PendingField<PendingGenesisSpell>,
@@ -423,6 +426,15 @@ struct PendingRangedStep {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+struct PendingChainMagic {
+    card_id: CardId,
+    card_instance_id: IdentityHash,
+    caster_instance_id: IdentityHash,
+    seat: Seat,
+    targets: Vec<UnitTarget>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct PendingDeathriteSource {
     controller: Seat,
     current_power: u16,
@@ -559,6 +571,7 @@ impl<T> PendingField<T> {
 enum Phase {
     Allocate,
     Attack,
+    ChainMagic,
     DeathriteOrder,
     Defend,
     Draw,
@@ -576,6 +589,7 @@ impl Phase {
         match self {
             Self::Allocate => "allocate",
             Self::Attack => "attack",
+            Self::ChainMagic => "chain-magic",
             Self::DeathriteOrder => "deathrite-order",
             Self::Defend => "defend",
             Self::Draw => "draw",
@@ -817,11 +831,11 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         MagicEffect::HealController(_)
         | MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite
         | MagicEffect::BurrowTargetMinionOrArtifact
+        | MagicEffect::DamageChainNearbyUnits
         | MagicEffect::ReturnMinionFromOwnCemetery
         | MagicEffect::DamageTargetUnit { .. }
         | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
         | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => None,
-        MagicEffect::DamageChainNearbyUnits => Some("damageChainNearbyUnits"),
         MagicEffect::DamageEachAbovegroundMinionOne => Some("damageEachAbovegroundMinionOne"),
         MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_) => {
             Some("damageEachUnitAtLocationWithinTwoSteps")
@@ -1137,6 +1151,7 @@ impl Game {
                 active_seat: Seat::North,
                 decision_seat: Seat::North,
                 pending_basic_movement: PendingField::Absent,
+                pending_chain_magic: PendingField::Absent,
                 pending_combat: None,
                 pending_deathrites: None,
                 pending_genesis_spell: PendingField::Absent,
@@ -1289,6 +1304,7 @@ impl Game {
         match self.position.phase {
             Phase::Allocate => self.append_allocate_actions(&mut actions)?,
             Phase::Attack => self.append_attack_actions(&mut actions)?,
+            Phase::ChainMagic => self.append_chain_magic_actions(&mut actions)?,
             Phase::DeathriteOrder => self.append_deathrite_order_actions(&mut actions)?,
             Phase::Defend => self.append_defend_actions(&mut actions)?,
             Phase::Draw => self.append_draw_actions(&mut actions)?,
@@ -1369,6 +1385,79 @@ impl Game {
                 .state_independent_label()
                 .ok_or(GameError::IllegalAction)?;
             self.push_action(actions, descriptor, label);
+        }
+        Ok(())
+    }
+
+    fn append_chain_magic_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
+        let pending = self
+            .position
+            .pending_chain_magic
+            .as_pending()
+            .ok_or(GameError::IllegalAction)?;
+        if pending.seat != self.position.decision_seat || pending.targets.is_empty() {
+            return Err(GameError::IllegalAction);
+        }
+        let player = &self.position.players[seat_index(pending.seat)];
+        let card = player
+            .hand_spellbook
+            .iter()
+            .find(|card| {
+                card.card_id == pending.card_id && card.instance_id == pending.card_instance_id
+            })
+            .ok_or(GameError::IllegalAction)?;
+        let definition = &self.rules.cards[usize::from(card.card_id.0)];
+        let CardFacts::Magic(facts) = &definition.facts else {
+            return Err(GameError::IllegalAction);
+        };
+        if facts.effect != MagicEffect::DamageChainNearbyUnits {
+            return Err(GameError::IllegalAction);
+        }
+        let caster_kind = self
+            .spellcasters(pending.seat)
+            .into_iter()
+            .find_map(|(kind, instance_id)| {
+                (instance_id == pending.caster_instance_id).then_some(kind)
+            })
+            .ok_or(GameError::IllegalAction)?;
+        let caster = match caster_kind {
+            UnitKind::Avatar => UnitTarget::Avatar {
+                instance_id: pending.caster_instance_id.clone(),
+                seat: pending.seat,
+            },
+            UnitKind::Minion => UnitTarget::Minion {
+                instance_id: pending.caster_instance_id.clone(),
+                seat: pending.seat,
+            },
+        };
+        let chosen_count =
+            u64::try_from(pending.targets.len()).map_err(|_| GameError::IllegalAction)?;
+        let mana_paid = facts.mana_cost
+            + CHAIN_MAGIC_EXTRA_TARGET_MANA.saturating_mul(chosen_count.saturating_sub(1));
+        let finish = ActionDescriptor::ResolveChainMagic;
+        self.push_action(
+            actions,
+            finish,
+            format!(
+                "Cast {} through {} chosen unit{} ({mana_paid} mana)",
+                definition.id,
+                pending.targets.len(),
+                if pending.targets.len() == 1 { "" } else { "s" }
+            ),
+        );
+        let next_mana =
+            facts.mana_cost + CHAIN_MAGIC_EXTRA_TARGET_MANA.saturating_mul(chosen_count);
+        if u64::from(player.mana) >= next_mana {
+            let previous = pending.targets.last().ok_or(GameError::IllegalAction)?;
+            for target in
+                self.chain_magic_targets(pending.seat, &caster, previous, &pending.targets)?
+            {
+                let descriptor = ActionDescriptor::ExtendChainMagic { target };
+                let label = descriptor
+                    .state_independent_label()
+                    .ok_or_else(|| invalid("extend-chain-magic action requires a label"))?;
+                self.push_action(actions, descriptor, label);
+            }
         }
         Ok(())
     }
@@ -2137,7 +2226,32 @@ impl Game {
             {
                 continue;
             }
-            for (_, caster_instance_id) in &spellcasters {
+            for (caster_kind, caster_instance_id) in &spellcasters {
+                if facts.effect == MagicEffect::DamageChainNearbyUnits {
+                    let caster = match caster_kind {
+                        UnitKind::Avatar => UnitTarget::Avatar {
+                            instance_id: caster_instance_id.clone(),
+                            seat,
+                        },
+                        UnitKind::Minion => UnitTarget::Minion {
+                            instance_id: caster_instance_id.clone(),
+                            seat,
+                        },
+                    };
+                    for target in self.chain_magic_targets(seat, &caster, &caster, &[])? {
+                        let descriptor = ActionDescriptor::BeginChainMagic {
+                            card_id: definition.id.clone(),
+                            card_instance_id: card.instance_id.clone(),
+                            caster_instance_id: caster_instance_id.clone(),
+                            target,
+                        };
+                        let label = descriptor
+                            .state_independent_label()
+                            .ok_or_else(|| invalid("begin-chain-magic action requires a label"))?;
+                        self.push_action(actions, descriptor, label);
+                    }
+                    continue;
+                }
                 for choice in self.magic_choices(seat, caster_instance_id, &facts.effect)? {
                     let descriptor = ActionDescriptor::CastMagic {
                         card_id: definition.id.clone(),
@@ -2642,6 +2756,74 @@ impl Game {
                     .bordering(false)
                     .any(|cell| target.contains(&cell))
         })
+    }
+
+    fn chain_magic_targets(
+        &self,
+        seat: Seat,
+        caster: &UnitTarget,
+        previous: &UnitTarget,
+        selected: &[UnitTarget],
+    ) -> Result<Vec<UnitTarget>, GameError> {
+        let caster_region = self.unit_target_region(caster)?;
+        let previous_kind = match previous {
+            UnitTarget::Avatar { .. } => UnitKind::Avatar,
+            UnitTarget::Minion { .. } => UnitKind::Minion,
+        };
+        let previous_cells =
+            self.combatant_occupied_cells(previous_kind, previous.seat(), previous.instance_id())?;
+        let mut targets = Vec::new();
+        for target_seat in [Seat::North, Seat::South] {
+            let avatar = &self.position.players[seat_index(target_seat)].avatar;
+            let target = UnitTarget::Avatar {
+                instance_id: avatar.card.instance_id.clone(),
+                seat: target_seat,
+            };
+            if caster_region == Region::Surface
+                && !selected
+                    .iter()
+                    .any(|chosen| chosen.instance_id() == target.instance_id())
+                && Self::footprints_nearby(previous_cells, std::slice::from_ref(&avatar.location))
+            {
+                targets.push(target);
+            }
+        }
+        targets.extend(self.position.units.iter().filter_map(|unit| {
+            if unit.region != caster_region
+                || selected
+                    .iter()
+                    .any(|chosen| chosen.instance_id() == &unit.card.instance_id)
+                || (unit.controller != seat && self.minion_has_active_stealth(unit))
+                || !Self::footprints_nearby(previous_cells, Self::unit_occupied_cells(unit))
+            {
+                return None;
+            }
+            Some(UnitTarget::Minion {
+                instance_id: unit.card.instance_id.clone(),
+                seat: unit.controller,
+            })
+        }));
+        targets.sort_unstable_by(|left, right| left.instance_id().cmp(right.instance_id()));
+        Ok(targets)
+    }
+
+    fn unit_target_region(&self, target: &UnitTarget) -> Result<Region, GameError> {
+        match target {
+            UnitTarget::Avatar { instance_id, seat } => (self.position.players[seat_index(*seat)]
+                .avatar
+                .card
+                .instance_id
+                == *instance_id)
+                .then_some(Region::Surface)
+                .ok_or(GameError::IllegalAction),
+            UnitTarget::Minion { instance_id, seat } => self
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
+                .map(|unit| unit.region)
+                .ok_or(GameError::IllegalAction),
+        }
     }
 
     fn combatant_occupied_cells(
@@ -3545,6 +3727,21 @@ impl Game {
                     instance_id: card.instance_id.clone(),
                     owner: card.owner,
                 }),
+            ActionDescriptor::ResolveChainMagic => self
+                .position
+                .pending_chain_magic
+                .as_pending()
+                .and_then(|pending| {
+                    self.position.players[seat_index(action.seat)]
+                        .hand_spellbook
+                        .iter()
+                        .find(|card| card.instance_id == pending.card_instance_id)
+                })
+                .map(|card| DeferredMagicResolved {
+                    card_id: card.card_id,
+                    instance_id: card.instance_id.clone(),
+                    owner: card.owner,
+                }),
             _ => None,
         };
         let post_ranged_step = match &action.descriptor {
@@ -3573,6 +3770,7 @@ impl Game {
                 unit_instance_id,
             } => self.apply_mana_activation(action.seat, *amount, unit_instance_id, outcomes),
             ActionDescriptor::CastMagic { .. } => self.apply_cast_magic_action(action, outcomes),
+            ActionDescriptor::BeginChainMagic { .. } => self.apply_begin_chain_magic(action),
             ActionDescriptor::CloseDefend {
                 original_target_participates,
             } => {
@@ -3653,6 +3851,7 @@ impl Game {
                 self.apply_deathrite_order_action(action.seat, source_instance_id, outcomes)
             }
             ActionDescriptor::EndTurn => self.apply_end_turn_action(action.seat, outcomes),
+            ActionDescriptor::ExtendChainMagic { .. } => self.apply_extend_chain_magic(action),
             ActionDescriptor::Intercept { unit_instance_id } => {
                 self.apply_intercept_action(action.seat, unit_instance_id, outcomes)
             }
@@ -3662,6 +3861,7 @@ impl Game {
             ActionDescriptor::DrawSpell => {
                 self.apply_draw_action(action.seat, DeckZone::Spellbook, true, outcomes)
             }
+            ActionDescriptor::ResolveChainMagic => self.apply_resolve_chain_magic(action, outcomes),
         };
         applied?;
         let settlement_start = outcomes.len();
@@ -5531,12 +5731,14 @@ impl Game {
         }
         outcomes.push("damage-dealt", || {
             let mut payload = json!({
-                "accumulated": accumulated,
                 "amount": dealt,
                 "direct": true,
                 "instanceId": instance_id,
                 "seat": seat,
             });
+            if !ward_broken {
+                payload["accumulated"] = json!(accumulated);
+            }
             if dealt < attempted {
                 payload["attemptedAmount"] = json!(attempted);
                 payload["prevented"] = json!(true);
@@ -5639,12 +5841,14 @@ impl Game {
                 }
                 outcomes.push("damage-dealt", || {
                     let mut payload = json!({
-                        "accumulated": accumulated,
                         "amount": dealt,
                         "direct": true,
                         "instanceId": instance_id,
                         "seat": seat,
                     });
+                    if !ward_broken {
+                        payload["accumulated"] = json!(accumulated);
+                    }
                     if prevented {
                         payload["attemptedAmount"] = json!(amount);
                         payload["prevented"] = json!(true);
@@ -6471,10 +6675,7 @@ impl Game {
             self.position.decision_seat = pending.return_decision_seat;
         }
         if self.position.terminal.is_some() && ordered_resolution {
-            self.position.pending_basic_movement = PendingField::Absent;
-            self.position.pending_ranged_step = PendingField::Absent;
-            self.position.pending_combat = None;
-            self.position.phase = Phase::Terminal;
+            self.clear_ordered_terminal_continuations();
         } else if self.position.terminal.is_some()
             || self.position.pending_basic_movement.is_pending()
             || self.position.pending_ranged_step.is_pending()
@@ -6482,6 +6683,14 @@ impl Game {
             self.reconcile_projectile_continuations()?;
         }
         Ok(())
+    }
+
+    fn clear_ordered_terminal_continuations(&mut self) {
+        self.position.pending_basic_movement = PendingField::Absent;
+        self.position.pending_chain_magic = PendingField::Absent;
+        self.position.pending_ranged_step = PendingField::Absent;
+        self.position.pending_combat = None;
+        self.position.phase = Phase::Terminal;
     }
 
     fn apply_draw_action(
@@ -7622,6 +7831,231 @@ impl Game {
         Ok(())
     }
 
+    fn apply_begin_chain_magic(&mut self, action: &IssuedAction) -> Result<(), GameError> {
+        let ActionDescriptor::BeginChainMagic {
+            card_id,
+            card_instance_id,
+            caster_instance_id,
+            target,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        if self.position.phase != Phase::Main
+            || !self
+                .legal_actions()?
+                .iter()
+                .any(|candidate| candidate.descriptor == action.descriptor)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let card = self.position.players[seat_index(action.seat)]
+            .hand_spellbook
+            .iter()
+            .find(|card| {
+                card.instance_id == *card_instance_id
+                    && self.rules.cards[usize::from(card.card_id.0)].id == card_id.as_str()
+            })
+            .ok_or(GameError::IllegalAction)?;
+        self.position.pending_chain_magic = PendingField::Pending(PendingChainMagic {
+            card_id: card.card_id,
+            card_instance_id: card_instance_id.clone(),
+            caster_instance_id: caster_instance_id.clone(),
+            seat: action.seat,
+            targets: vec![target.clone()],
+        });
+        self.position.phase = Phase::ChainMagic;
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    fn apply_extend_chain_magic(&mut self, action: &IssuedAction) -> Result<(), GameError> {
+        let ActionDescriptor::ExtendChainMagic { target } = &action.descriptor else {
+            return Err(GameError::IllegalAction);
+        };
+        if self.position.phase != Phase::ChainMagic
+            || !self
+                .legal_actions()?
+                .iter()
+                .any(|candidate| candidate.descriptor == action.descriptor)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        self.position
+            .pending_chain_magic
+            .as_pending_mut()
+            .ok_or(GameError::IllegalAction)?
+            .targets
+            .push(target.clone());
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one staged Chain Magic transaction keeps payment and simultaneous damage atomic"
+    )]
+    fn apply_resolve_chain_magic(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        if !matches!(action.descriptor, ActionDescriptor::ResolveChainMagic)
+            || self.position.phase != Phase::ChainMagic
+            || !self
+                .legal_actions()?
+                .iter()
+                .any(|candidate| candidate.descriptor == action.descriptor)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let pending = self
+            .position
+            .pending_chain_magic
+            .as_pending()
+            .cloned()
+            .ok_or(GameError::IllegalAction)?;
+        let player_index = seat_index(action.seat);
+        let hand_index = self.position.players[player_index]
+            .hand_spellbook
+            .iter()
+            .position(|card| {
+                card.card_id == pending.card_id && card.instance_id == pending.card_instance_id
+            })
+            .ok_or(GameError::IllegalAction)?;
+        let definition = &self.rules.cards[usize::from(pending.card_id.0)];
+        let CardFacts::Magic(facts) = &definition.facts else {
+            return Err(GameError::IllegalAction);
+        };
+        if facts.effect != MagicEffect::DamageChainNearbyUnits {
+            return Err(GameError::IllegalAction);
+        }
+        let card_id = definition.id.clone();
+        let thresholds = facts.thresholds;
+        let extra_targets = u64::try_from(pending.targets.len().saturating_sub(1))
+            .map_err(|_| GameError::IllegalAction)?;
+        let mana_paid =
+            facts.mana_cost + CHAIN_MAGIC_EXTRA_TARGET_MANA.saturating_mul(extra_targets);
+        let mana_paid = u16::try_from(mana_paid).map_err(|_| GameError::IllegalAction)?;
+        let caster_kind = self
+            .spellcaster_kind(action.seat, &pending.caster_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        let next_air_thresholds_cast_this_turn = self.position.players[player_index]
+            .air_thresholds_cast_this_turn
+            .map(|cast_air| {
+                let added = u16::try_from(thresholds.get(Element::Air))
+                    .map_err(|_| GameError::IllegalAction)?;
+                cast_air.checked_add(added).ok_or(GameError::IllegalAction)
+            })
+            .transpose()?;
+        let card = self.position.players[player_index]
+            .hand_spellbook
+            .remove(hand_index);
+        let owner = card.owner;
+        let compact_card_id = card.card_id;
+        let player = &mut self.position.players[player_index];
+        player.mana = player
+            .mana
+            .checked_sub(mana_paid)
+            .ok_or(GameError::IllegalAction)?;
+        player.air_thresholds_cast_this_turn = next_air_thresholds_cast_this_turn;
+        self.position.players[seat_index(owner)].cemetery.push(card);
+        self.position.pending_chain_magic = PendingField::Resolved;
+        self.position.decision_seat = self.position.active_seat;
+        self.position.phase = Phase::Main;
+        outcomes.push("magic-cast", || {
+            json!({
+                "cardId": card_id,
+                "casterInstanceId": pending.caster_instance_id,
+                "instanceId": pending.card_instance_id,
+                "manaPaid": mana_paid,
+                "seat": action.seat,
+                "targetInstanceIds": pending.targets.iter().map(UnitTarget::instance_id).collect::<Vec<_>>(),
+            })
+        });
+        self.record_unit_interaction(
+            caster_kind,
+            action.seat,
+            &pending.caster_instance_id,
+            outcomes,
+        )?;
+        let targets = pending
+            .targets
+            .iter()
+            .map(|target| {
+                let kind = match target {
+                    UnitTarget::Avatar { .. } => UnitKind::Avatar,
+                    UnitTarget::Minion { .. } => UnitKind::Minion,
+                };
+                let status = if kind == UnitKind::Minion {
+                    Some(self.minion_damage_status(target.instance_id())?)
+                } else {
+                    None
+                };
+                Ok((target.clone(), kind, status))
+            })
+            .collect::<Result<Vec<_>, GameError>>()?;
+        for (target, _, _) in &targets {
+            outcomes.push("magic-damage-allocated", || {
+                json!({
+                    "amount": CHAIN_MAGIC_DAMAGE,
+                    "sourceInstanceId": pending.card_instance_id,
+                    "targetInstanceId": target.instance_id(),
+                })
+            });
+        }
+        let mut dead_minions = Vec::new();
+        let mut defeated_avatars = Vec::new();
+        for (target, kind, status) in targets {
+            let result = self.apply_simple_damage_with_status(
+                kind,
+                target.seat(),
+                target.instance_id(),
+                CHAIN_MAGIC_DAMAGE,
+                UnitDamageSource {
+                    current_power: 0,
+                    lethal: false,
+                },
+                status,
+                outcomes,
+            )?;
+            if result.minion_died {
+                dead_minions.push(target.instance_id().clone());
+            }
+            if result.avatar_defeated && !defeated_avatars.contains(&target.seat()) {
+                defeated_avatars.push(target.seat());
+            }
+        }
+        if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
+            self.begin_minion_deaths(
+                &dead_minions,
+                &defeated_avatars,
+                Phase::Main,
+                self.position.active_seat,
+                outcomes,
+            )?;
+        }
+        if let Some(deathrites) = &mut self.position.pending_deathrites {
+            deathrites.deferred_magic_resolved = Some(DeferredMagicResolved {
+                card_id: compact_card_id,
+                instance_id: pending.card_instance_id.clone(),
+                owner,
+            });
+        } else {
+            let resolved_start = outcomes.len();
+            outcomes.push("magic-resolved", || {
+                json!({
+                    "cardId": card_id,
+                    "instanceId": pending.card_instance_id,
+                    "owner": owner,
+                })
+            });
+            outcomes.move_tail_before_completion(resolved_start);
+        }
+        self.position.state_version += 1;
+        Ok(())
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "the closed Magic transaction keeps validation, payment, and effects atomic"
@@ -8740,8 +9174,31 @@ impl Game {
                 );
             }
             self.insert_pending_movement_state(object);
+            self.insert_pending_chain_magic_state(object);
         }
         value
+    }
+
+    fn insert_pending_chain_magic_state(&self, object: &mut Map<String, Value>) {
+        match &self.position.pending_chain_magic {
+            PendingField::Absent => {}
+            PendingField::Pending(pending) => {
+                let card_id = &self.rules.cards[usize::from(pending.card_id.0)].id;
+                object.insert(
+                    "pendingChainMagic".to_owned(),
+                    json!({
+                        "cardId": card_id,
+                        "cardInstanceId": pending.card_instance_id,
+                        "casterInstanceId": pending.caster_instance_id,
+                        "seat": pending.seat,
+                        "targets": pending.targets,
+                    }),
+                );
+            }
+            PendingField::Resolved => {
+                object.insert("pendingChainMagic".to_owned(), Value::Null);
+            }
+        }
     }
 
     fn insert_pending_movement_state(&self, object: &mut Map<String, Value>) {
@@ -9603,11 +10060,25 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_magic_diagnostics_should_name_the_concrete_fact() {
+    fn chain_magic_should_be_selfplay_supported() {
         assert_eq!(
             unsupported_magic_effect(&MagicEffect::DamageChainNearbyUnits),
-            Some("damageChainNearbyUnits")
+            None
         );
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            for ordinal in 1..=50 {
+                manifest["cards"][format!("north-spell-{ordinal}")] = json!({
+                    "cardType": "magic",
+                    "damageChainNearbyUnits": true,
+                    "manaCost": 0,
+                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                });
+            }
+        });
+        Game::from_manifest_json(&manifest)
+            .expect("valid Chain Magic manifest")
+            .ensure_selfplay_supported()
+            .expect("Chain Magic is self-play safe");
     }
 
     #[test]
@@ -9688,6 +10159,23 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["magic-cast", "minion-died", "magic-resolved", "game-ended",]
         );
+    }
+
+    #[test]
+    fn ordered_terminal_cleanup_should_omit_resolved_chain_magic() {
+        let manifest = selfplay_manifest_with(31, |_| {});
+        let mut game = Game::from_manifest_json(&manifest).expect("valid game");
+        game.position.pending_chain_magic = PendingField::Resolved;
+        game.position.phase = Phase::DeathriteOrder;
+        game.clear_ordered_terminal_continuations();
+
+        assert_eq!(game.position.pending_chain_magic, PendingField::Absent);
+        assert!(
+            game.authoritative_state()
+                .get("pendingChainMagic")
+                .is_none()
+        );
+        assert_eq!(game.position.phase, Phase::Terminal);
     }
 
     #[test]

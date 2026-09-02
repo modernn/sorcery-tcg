@@ -377,6 +377,415 @@ fn rule_catalog_0019_targeted_magic_is_a_non_unit_source_and_resolves_deathrites
     assert_exact_replay(&session);
 }
 
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one direct proof retains staged choices, Stealth, Ward, Deathrite, and replay"
+)]
+fn rule_catalog_0030_chain_magic_stages_distinct_nearby_hops_and_resolves_simultaneously() {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-chain": {
+            "cardType": "magic",
+            "damageChainNearbyUnits": true,
+            "manaCost": 2,
+            "thresholds": { "air": 2, "earth": 0, "fire": 0, "water": 0 },
+        },
+        "north-deathrite": minion(json!({
+            "deathriteDrawSite": true,
+            "defense": 2,
+            "spellcaster": true,
+            "stealth": true,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        })),
+        "north-site": {
+            "cardType": "site",
+            "elements": ["air"],
+        },
+        "north-warded": minion(json!({
+            "defense": 2,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            "ward": true,
+        })),
+        "south-avatar": avatar(20),
+        "south-site": {
+            "cardType": "site",
+            "elements": ["air"],
+        },
+        "south-stealthed": minion(json!({
+            "defense": 2,
+            "stealth": true,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        })),
+    });
+    let north_spellbook = [
+        "north-chain",
+        "north-deathrite",
+        "north-warded",
+        "north-chain",
+        "north-deathrite",
+        "north-warded",
+        "north-chain",
+        "north-deathrite",
+    ];
+    let manifest = (1..=512)
+        .map(|seed| manifest(seed, &cards, &north_spellbook, &["south-stealthed"; 8]))
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("candidate Chain Magic session");
+            let preview_state = state(&preview);
+            let hand = preview_state["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("North opening Spellbook hand");
+            ["north-chain", "north-deathrite", "north-warded"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+        .expect("seed with Chain Magic and both friendly targets in the opening hand");
+    let mut session = opening_main(&manifest);
+
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    let (deathrite_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-deathrite"
+            && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "B1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    let (warded_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-warded"
+            && descriptor["cell"] == "C2"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "B2"
+    });
+    let (stealthed_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-stealthed"
+            && descriptor["cell"] == "B2"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "B4"
+    });
+
+    let before = state(&session);
+    let chain_id = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North hand")
+        .iter()
+        .find(|card| card["cardId"] == "north-chain")
+        .expect("Chain Magic in hand")["instanceId"]
+        .as_str()
+        .expect("Chain Magic identity")
+        .to_owned();
+    let avatar_id = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let deathrite_id = deathrite_summon["cardInstanceId"]
+        .as_str()
+        .expect("Deathrite identity")
+        .to_owned();
+    let warded_id = warded_summon["cardInstanceId"]
+        .as_str()
+        .expect("warded target identity")
+        .to_owned();
+    let enemy_stealth_id = stealthed_summon["cardInstanceId"]
+        .as_str()
+        .expect("enemy Stealth identity")
+        .to_owned();
+    let all_starts: Vec<_> = session
+        .legal_actions()
+        .expect("Chain Magic starts")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "begin-chain-magic"
+                && action.descriptor["cardInstanceId"] == chain_id
+        })
+        .collect();
+    assert!(all_starts.iter().any(|action| {
+        action.descriptor["casterInstanceId"] == deathrite_id
+            && action.label.starts_with("Choose ")
+            && !action.label.contains("with minion")
+    }));
+    let starts: Vec<_> = all_starts
+        .into_iter()
+        .filter(|action| action.descriptor["casterInstanceId"] == avatar_id)
+        .collect();
+    let mut expected_start_ids = vec![avatar_id.clone(), deathrite_id.clone()];
+    expected_start_ids.sort_unstable();
+    assert_eq!(
+        starts
+            .iter()
+            .map(|action| action.descriptor["target"]["instanceId"]
+                .as_str()
+                .expect("start target identity")
+                .to_owned())
+            .collect::<Vec<_>>(),
+        expected_start_ids
+    );
+    assert!(!starts.iter().any(|action| {
+        matches!(
+            action.descriptor["target"]["instanceId"].as_str(),
+            Some(id) if id == warded_id || id == enemy_stealth_id
+        )
+    }));
+    let begin = starts
+        .into_iter()
+        .find(|action| action.descriptor["target"]["instanceId"] == deathrite_id)
+        .expect("engine-issued first hop");
+    assert_eq!(
+        begin.descriptor,
+        json!({
+            "cardId": "north-chain",
+            "cardInstanceId": chain_id,
+            "casterInstanceId": avatar_id,
+            "kind": "begin-chain-magic",
+            "target": {
+                "instanceId": deathrite_id,
+                "kind": "minion",
+                "seat": "north",
+            },
+        })
+    );
+    assert_eq!(
+        begin.label,
+        format!(
+            "Choose minion {}… as the first target for north-chain",
+            &deathrite_id[..15]
+        )
+    );
+    let before_mana = before["players"]["north"]["mana"]
+        .as_u64()
+        .expect("North mana");
+    let transcript_before = session.transcript().len();
+    let StepResult::Accepted(begin_receipt) = session
+        .step(ActionRequest {
+            action_id: begin.action_id.to_string(),
+            seat: begin.seat,
+            state_version: begin.state_version,
+        })
+        .expect("begin Chain Magic")
+    else {
+        panic!("engine-issued first hop must be accepted");
+    };
+    assert!(begin_receipt.events.is_empty());
+    assert!(begin_receipt.random_draws.is_empty());
+    let staged = state(&session);
+    assert_eq!(staged["phase"], "chain-magic");
+    assert_eq!(staged["players"]["north"]["mana"], before_mana);
+    assert_eq!(
+        staged["pendingChainMagic"],
+        json!({
+            "cardId": "north-chain",
+            "cardInstanceId": chain_id,
+            "casterInstanceId": avatar_id,
+            "seat": "north",
+            "targets": [{
+                "instanceId": deathrite_id,
+                "kind": "minion",
+                "seat": "north",
+            }],
+        })
+    );
+
+    let staged_actions = session.legal_actions().expect("staged Chain Magic actions");
+    let extend_target_ids: Vec<_> = staged_actions
+        .iter()
+        .filter(|action| action.descriptor["kind"] == "extend-chain-magic")
+        .map(|action| {
+            action.descriptor["target"]["instanceId"]
+                .as_str()
+                .expect("extension target identity")
+                .to_owned()
+        })
+        .collect();
+    let mut expected_extension_ids = vec![avatar_id.clone(), warded_id.clone()];
+    expected_extension_ids.sort_unstable();
+    assert_eq!(extend_target_ids, expected_extension_ids);
+    assert!(!extend_target_ids.contains(&deathrite_id));
+    assert!(!extend_target_ids.contains(&enemy_stealth_id));
+    assert_eq!(
+        staged_actions
+            .last()
+            .expect("resolve action after canonical extensions")
+            .descriptor,
+        json!({ "kind": "resolve-chain-magic" })
+    );
+    let extend = staged_actions
+        .into_iter()
+        .find(|action| {
+            action.descriptor["kind"] == "extend-chain-magic"
+                && action.descriptor["target"]["instanceId"] == warded_id
+        })
+        .expect("engine-issued second hop");
+    assert_eq!(
+        extend.descriptor,
+        json!({
+            "kind": "extend-chain-magic",
+            "target": {
+                "instanceId": warded_id,
+                "kind": "minion",
+                "seat": "north",
+            },
+        })
+    );
+    assert_eq!(
+        extend.label,
+        format!(
+            "Add minion {}… as a chained target (+2 mana)",
+            &warded_id[..15]
+        )
+    );
+    let StepResult::Accepted(extend_receipt) = session
+        .step(ActionRequest {
+            action_id: extend.action_id.to_string(),
+            seat: extend.seat,
+            state_version: extend.state_version,
+        })
+        .expect("extend Chain Magic")
+    else {
+        panic!("engine-issued second hop must be accepted");
+    };
+    assert!(extend_receipt.events.is_empty());
+    assert!(extend_receipt.random_draws.is_empty());
+    assert_eq!(state(&session)["players"]["north"]["mana"], before_mana);
+
+    let final_actions = session.legal_actions().expect("final Chain Magic actions");
+    assert_eq!(final_actions.len(), 1);
+    let finish = &final_actions[0];
+    assert_eq!(finish.descriptor, json!({ "kind": "resolve-chain-magic" }));
+    assert_eq!(
+        finish.label,
+        "Cast north-chain through 2 chosen units (4 mana)"
+    );
+    let StepResult::Accepted(resolved) = session
+        .step(ActionRequest {
+            action_id: finish.action_id.to_string(),
+            seat: finish.seat,
+            state_version: finish.state_version,
+        })
+        .expect("resolve Chain Magic")
+    else {
+        panic!("engine-issued Chain Magic resolution must be accepted");
+    };
+    assert!(resolved.random_draws.is_empty());
+    assert_eq!(
+        resolved
+            .events
+            .iter()
+            .filter(|event| event.event_type == "magic-damage-allocated")
+            .map(|event| event.payload.clone())
+            .collect::<Vec<_>>(),
+        [deathrite_id.clone(), warded_id.clone()]
+            .into_iter()
+            .map(|target_instance_id| json!({
+                "amount": 2,
+                "sourceInstanceId": chain_id,
+                "targetInstanceId": target_instance_id,
+            }))
+            .collect::<Vec<_>>()
+    );
+    let first_death = resolved
+        .events
+        .iter()
+        .position(|event| event.event_type == "minion-died")
+        .expect("Deathrite target death");
+    assert!(
+        resolved
+            .events
+            .iter()
+            .enumerate()
+            .filter(|(_, event)| event.event_type == "damage-dealt")
+            .all(|(index, _)| index < first_death)
+    );
+    assert!(
+        resolved
+            .events
+            .iter()
+            .any(|event| event.event_type == "ward-broken"
+                && event.payload["instanceId"] == warded_id)
+    );
+    assert_eq!(
+        resolved
+            .events
+            .iter()
+            .find(|event| {
+                event.event_type == "damage-dealt" && event.payload["instanceId"] == warded_id
+            })
+            .expect("Ward prevention damage event")
+            .payload,
+        json!({
+            "amount": 0,
+            "attemptedAmount": 2,
+            "direct": true,
+            "instanceId": warded_id,
+            "prevented": true,
+            "seat": "north",
+        })
+    );
+    let site_drawn = resolved
+        .events
+        .iter()
+        .position(|event| {
+            event.event_type == "site-drawn" && event.payload["sourceInstanceId"] == deathrite_id
+        })
+        .expect("Deathrite site draw");
+    assert!(site_drawn < first_death);
+    assert_eq!(
+        resolved
+            .events
+            .last()
+            .map(|event| event.event_type.as_str()),
+        Some("magic-resolved")
+    );
+    let after = state(&session);
+    assert_eq!(after["phase"], "main");
+    assert!(after["pendingChainMagic"].is_null());
+    assert_eq!(after["players"]["north"]["mana"], before_mana - 4);
+    assert!(realm_unit(&after, &deathrite_id).is_none());
+    assert_eq!(
+        realm_unit(&after, &warded_id).expect("Ward survivor")["warded"],
+        false
+    );
+    assert!(realm_unit(&after, &enemy_stealth_id).is_some());
+    assert_eq!(session.transcript().len(), transcript_before + 3);
+    assert_exact_replay(&session);
+}
+
 fn bury_checkpoint(seed: u32, target_extra: Value, water: bool) -> (Session, String, String) {
     let mut cards = json!({
         "north-avatar": avatar(20),
