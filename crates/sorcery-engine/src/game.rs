@@ -365,6 +365,8 @@ struct DisableEffect {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct MagicChoice {
     ally: Option<UnitTarget>,
+    ally_destination: Option<Location>,
+    ally_strike_location: Option<Location>,
     cemetery_minion_instance_id: Option<IdentityHash>,
     target: Option<UnitTarget>,
     target_location: Option<Location>,
@@ -520,8 +522,18 @@ struct PaidSummonContinuation {
 enum DeathriteContinuation {
     EndTurn(EndTurnContinuation),
     FirstStrike(FirstStrikeContinuation),
+    LeapAttack(LeapAttackContinuation),
     PaidSummon(PaidSummonContinuation),
     SiteGenesis(SiteGenesisContinuation),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct LeapAttackContinuation {
+    ally: UnitTarget,
+    card_id: String,
+    instance_id: IdentityHash,
+    owner: Seat,
+    strike_location: Location,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -735,6 +747,7 @@ fn nonempty_identity_combinations(
 struct MovementProfile {
     airborne: bool,
     connects_top_bottom: bool,
+    effect: bool,
     maximum_cost: Option<usize>,
     moving_minion: bool,
     occupied_cells: Option<SquareArea>,
@@ -1534,6 +1547,7 @@ impl Game {
         let profile = MovementProfile {
             airborne: facts.airborne,
             connects_top_bottom: facts.connects_top_bottom,
+            effect: false,
             maximum_cost: (!facts.immobile).then_some(1),
             moving_minion: true,
             occupied_cells: unit.occupied_cells,
@@ -1872,6 +1886,7 @@ impl Game {
                 MovementProfile {
                     airborne: false,
                     connects_top_bottom: false,
+                    effect: false,
                     maximum_cost: Some(1),
                     moving_minion: false,
                     occupied_cells: None,
@@ -1907,6 +1922,7 @@ impl Game {
                 MovementProfile {
                     airborne: facts.airborne,
                     connects_top_bottom: facts.connects_top_bottom,
+                    effect: false,
                     maximum_cost: if facts.cannot_defend || facts.immobile {
                         None
                     } else {
@@ -2332,6 +2348,8 @@ impl Game {
                 for choice in self.magic_choices(seat, caster_instance_id, &facts.effect)? {
                     let descriptor = ActionDescriptor::CastMagic {
                         ally: choice.ally,
+                        ally_destination: choice.ally_destination,
+                        ally_strike_location: choice.ally_strike_location,
                         card_id: definition.id.clone(),
                         card_instance_id: card.instance_id.clone(),
                         caster_instance_id: caster_instance_id.clone(),
@@ -2353,6 +2371,31 @@ impl Game {
                             definition.id,
                             ally.kind(),
                             &ally.instance_id().as_str()[..15]
+                        )
+                    } else if matches!(facts.effect, MagicEffect::LeapAttackAlly) {
+                        let ActionDescriptor::CastMagic {
+                            ally: Some(ally),
+                            ally_destination: Some(destination),
+                            ally_strike_location,
+                            ..
+                        } = &descriptor
+                        else {
+                            return Err(invalid("Leap Attack action requires an ally destination"));
+                        };
+                        let from = self.unit_target_location(ally)?;
+                        let stays = from == *destination;
+                        let strike = ally_strike_location.unwrap_or(*destination);
+                        format!(
+                            "Cast {}: {} {}… {} and strikes enemies at {}",
+                            definition.id,
+                            ally.kind(),
+                            &ally.instance_id().as_str()[..15],
+                            if stays {
+                                "stays".to_owned()
+                            } else {
+                                format!("steps to {}", destination.cell)
+                            },
+                            strike.cell
                         )
                     } else {
                         descriptor
@@ -2534,6 +2577,7 @@ impl Game {
                 MovementProfile {
                     airborne: false,
                     connects_top_bottom: false,
+                    effect: false,
                     maximum_cost: Some(1),
                     moving_minion: false,
                     occupied_cells: None,
@@ -2560,6 +2604,7 @@ impl Game {
                 MovementProfile {
                     airborne: facts.airborne,
                     connects_top_bottom: facts.connects_top_bottom,
+                    effect: false,
                     maximum_cost: if facts.immobile {
                         None
                     } else {
@@ -3285,6 +3330,7 @@ impl Game {
                 );
                 choices
             }
+            MagicEffect::LeapAttackAlly => self.leap_attack_choices(seat)?,
             MagicEffect::FightAllyWithAdjacentEnemy => {
                 let unit_targets = |target_seat| {
                     let player = &self.position.players[seat_index(target_seat)];
@@ -3464,6 +3510,171 @@ impl Game {
         })
     }
 
+    fn leap_attack_choices(&self, seat: Seat) -> Result<Vec<MagicChoice>, GameError> {
+        let mut choices = Vec::new();
+        for ally in self.controlled_allies(seat) {
+            let from = self.unit_target_location(&ally)?;
+            let occupied = self.combatant_occupied_cells(
+                match ally {
+                    UnitTarget::Avatar { .. } => UnitKind::Avatar,
+                    UnitTarget::Minion { .. } => UnitKind::Minion,
+                },
+                ally.seat(),
+                ally.instance_id(),
+            )?;
+            let destinations = self.leap_attack_destinations(&ally, from)?;
+            for destination in destinations {
+                if occupied.len() == 1 {
+                    choices.push(MagicChoice {
+                        ally: Some(ally.clone()),
+                        ally_destination: Some(destination),
+                        ..MagicChoice::default()
+                    });
+                    continue;
+                }
+                let area = self
+                    .position
+                    .units
+                    .iter()
+                    .find(|unit| unit.card.instance_id == *ally.instance_id())
+                    .and_then(|unit| unit.occupied_cells)
+                    .ok_or(GameError::IllegalAction)?;
+                let destination_cells = translated_square(area, from.cell, destination.cell)
+                    .ok_or(GameError::IllegalAction)?;
+                for cell in destination_cells {
+                    choices.push(MagicChoice {
+                        ally: Some(ally.clone()),
+                        ally_destination: Some(destination),
+                        ally_strike_location: Some(Location {
+                            cell,
+                            region: destination.region,
+                        }),
+                        ..MagicChoice::default()
+                    });
+                }
+            }
+        }
+        Ok(choices)
+    }
+
+    fn controlled_allies(&self, seat: Seat) -> Vec<UnitTarget> {
+        let player = &self.position.players[seat_index(seat)];
+        std::iter::once(UnitTarget::Avatar {
+            instance_id: player.avatar.card.instance_id.clone(),
+            seat,
+        })
+        .chain(
+            self.position
+                .units
+                .iter()
+                .filter(move |unit| unit.controller == seat)
+                .map(move |unit| UnitTarget::Minion {
+                    instance_id: unit.card.instance_id.clone(),
+                    seat,
+                }),
+        )
+        .collect()
+    }
+
+    fn leap_attack_destinations(
+        &self,
+        ally: &UnitTarget,
+        from: Location,
+    ) -> Result<Vec<Location>, GameError> {
+        let (disabled, immobile, profile) = match ally {
+            UnitTarget::Avatar { instance_id, seat } => {
+                let avatar = &self.position.players[seat_index(*seat)].avatar;
+                if avatar.card.instance_id != *instance_id {
+                    return Err(GameError::IllegalAction);
+                }
+                (
+                    false,
+                    false,
+                    MovementProfile {
+                        airborne: false,
+                        connects_top_bottom: false,
+                        effect: true,
+                        maximum_cost: Some(1),
+                        moving_minion: false,
+                        occupied_cells: None,
+                        restriction: None,
+                        seat: *seat,
+                    },
+                )
+            }
+            UnitTarget::Minion { instance_id, seat } => {
+                let unit = self
+                    .position
+                    .units
+                    .iter()
+                    .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
+                    .ok_or(GameError::IllegalAction)?;
+                let CardFacts::Minion(facts) =
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                let disabled = self.minion_is_disabled(unit);
+                (
+                    disabled,
+                    facts.immobile,
+                    MovementProfile {
+                        airborne: facts.airborne,
+                        connects_top_bottom: facts.connects_top_bottom,
+                        effect: true,
+                        maximum_cost: Some(1),
+                        moving_minion: true,
+                        occupied_cells: unit.occupied_cells,
+                        restriction: facts.movement_restriction,
+                        seat: *seat,
+                    },
+                )
+            }
+        };
+        if disabled || immobile || from.region != Region::Surface {
+            return Ok(vec![from]);
+        }
+        let mut destinations = Vec::new();
+        let mut seen = BTreeSet::new();
+        for path in self.surface_movement_paths(from.cell, profile) {
+            let Some(&destination) = path.last() else {
+                continue;
+            };
+            if seen.insert((destination.cell, destination.region)) {
+                destinations.push(destination);
+            }
+        }
+        if destinations.is_empty() {
+            destinations.push(from);
+        }
+        Ok(destinations)
+    }
+
+    fn unit_target_location(&self, target: &UnitTarget) -> Result<Location, GameError> {
+        match target {
+            UnitTarget::Avatar { instance_id, seat } => {
+                let avatar = &self.position.players[seat_index(*seat)].avatar;
+                if avatar.card.instance_id != *instance_id {
+                    return Err(GameError::IllegalAction);
+                }
+                Ok(Location {
+                    cell: avatar.location,
+                    region: Region::Surface,
+                })
+            }
+            UnitTarget::Minion { instance_id, seat } => self
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
+                .map(|unit| Location {
+                    cell: unit.location,
+                    region: unit.region,
+                })
+                .ok_or(GameError::IllegalAction),
+        }
+    }
+
     fn append_unit_move_actions(
         &self,
         actions: &mut Vec<IssuedAction>,
@@ -3580,7 +3791,7 @@ impl Game {
     }
 
     fn surface_movement_step_cost(&self, current: Cell, profile: MovementProfile) -> usize {
-        if !profile.airborne || !profile.moving_minion {
+        if profile.effect || !profile.airborne || !profile.moving_minion {
             return 1;
         }
         let Some(site) = &self.position.sites[current.index()] else {
@@ -4190,9 +4401,21 @@ impl Game {
             self.queue_ranged_step(action.seat, shooter_instance_id)?;
         }
         outcomes.move_tail_before_completion(settlement_start);
+        let leap_cast = matches!(
+            action.descriptor,
+            ActionDescriptor::CastMagic {
+                ally_destination: Some(_),
+                ..
+            }
+        );
         if let (Some(completion), Some(pending)) =
             (magic_completion, &mut self.position.pending_deathrites)
             && pending.deferred_magic_resolved.is_none()
+            && !leap_cast
+            && !matches!(
+                pending.continuation,
+                Some(DeathriteContinuation::LeapAttack(_))
+            )
         {
             pending.deferred_magic_resolved = Some(completion);
             outcomes.remove_first("magic-resolved");
@@ -6935,6 +7158,7 @@ impl Game {
             self.emit_deferred_magic_resolved(deferred, outcomes);
         }
         self.position.pending_deathrites = None;
+        let continuation = pending.continuation;
         let defeated = pending.defeated_avatars;
         let deck_losers = pending.deck_losers;
         let losers: Vec<_> = [Seat::North, Seat::South]
@@ -6942,6 +7166,9 @@ impl Game {
             .filter(|seat| defeated.contains(seat) || deck_losers.contains(seat))
             .collect();
         if losers.len() == 2 {
+            if let Some(DeathriteContinuation::LeapAttack(leap)) = &continuation {
+                self.emit_leap_magic_resolved(leap, outcomes);
+            }
             let reason = if defeated.len() == 2 && deck_losers.is_empty() {
                 DrawReason::SimultaneousAvatarDefeat
             } else {
@@ -6959,6 +7186,9 @@ impl Game {
                 })
             });
         } else if let Some(&loser) = losers.first() {
+            if let Some(DeathriteContinuation::LeapAttack(leap)) = &continuation {
+                self.emit_leap_magic_resolved(leap, outcomes);
+            }
             let winner = other_seat(loser);
             let reason = if defeated.contains(&loser) {
                 WinReason::AvatarDefeated
@@ -6981,27 +7211,31 @@ impl Game {
                     "winner": winner,
                 })
             });
+        } else if let Some(continuation) = continuation {
+            return match continuation {
+                DeathriteContinuation::EndTurn(continuation) => self.continue_end_turn_deaths(
+                    continuation.seat,
+                    &continuation.remaining_instance_ids,
+                    outcomes,
+                ),
+                DeathriteContinuation::FirstStrike(continuation) => {
+                    self.continue_after_first_strike(continuation, outcomes)
+                }
+                DeathriteContinuation::LeapAttack(continuation) => {
+                    self.position.phase = pending.return_phase;
+                    self.position.decision_seat = pending.return_decision_seat;
+                    self.finish_leap_attack(continuation, outcomes)
+                }
+                DeathriteContinuation::PaidSummon(continuation) => {
+                    self.position.phase = pending.return_phase;
+                    self.position.decision_seat = pending.return_decision_seat;
+                    self.finish_paid_summon(continuation, outcomes)
+                }
+                DeathriteContinuation::SiteGenesis(continuation) => {
+                    self.finish_site_genesis(continuation, outcomes)
+                }
+            };
         } else {
-            if let Some(continuation) = pending.continuation {
-                return match continuation {
-                    DeathriteContinuation::EndTurn(continuation) => self.continue_end_turn_deaths(
-                        continuation.seat,
-                        &continuation.remaining_instance_ids,
-                        outcomes,
-                    ),
-                    DeathriteContinuation::FirstStrike(continuation) => {
-                        self.continue_after_first_strike(continuation, outcomes)
-                    }
-                    DeathriteContinuation::PaidSummon(continuation) => {
-                        self.position.phase = pending.return_phase;
-                        self.position.decision_seat = pending.return_decision_seat;
-                        self.finish_paid_summon(continuation, outcomes)
-                    }
-                    DeathriteContinuation::SiteGenesis(continuation) => {
-                        self.finish_site_genesis(continuation, outcomes)
-                    }
-                };
-            }
             self.position.phase = pending.return_phase;
             self.position.decision_seat = pending.return_decision_seat;
         }
@@ -7137,6 +7371,7 @@ impl Game {
                     MovementProfile {
                         airborne: false,
                         connects_top_bottom: false,
+                        effect: false,
                         maximum_cost: Some(1),
                         moving_minion: false,
                         occupied_cells: None,
@@ -7164,6 +7399,7 @@ impl Game {
                     MovementProfile {
                         airborne: facts.airborne,
                         connects_top_bottom: facts.connects_top_bottom,
+                        effect: false,
                         maximum_cost: if facts.immobile {
                             None
                         } else {
@@ -8555,6 +8791,8 @@ impl Game {
     ) -> Result<(), GameError> {
         let ActionDescriptor::CastMagic {
             ally,
+            ally_destination,
+            ally_strike_location,
             card_id,
             card_instance_id,
             caster_instance_id,
@@ -8593,6 +8831,8 @@ impl Game {
                 .magic_choices(seat, caster_instance_id, &facts.effect)?
                 .contains(&MagicChoice {
                     ally: ally.clone(),
+                    ally_destination: *ally_destination,
+                    ally_strike_location: *ally_strike_location,
                     cemetery_minion_instance_id: cemetery_minion_instance_id.clone(),
                     target: target.clone(),
                     target_location: *target_location,
@@ -8736,6 +8976,12 @@ impl Game {
                 payload["allyInstanceId"] = json!(ally.instance_id());
                 payload["allySeat"] = json!(ally.seat());
             }
+            if let Some(destination) = ally_destination {
+                payload["allyDestination"] = json!(destination);
+            }
+            if let Some(strike) = ally_strike_location {
+                payload["allyStrikeLocation"] = json!(strike);
+            }
             if let Some(target) = target {
                 payload["targetInstanceId"] = json!(target.instance_id());
                 payload["targetSeat"] = json!(target.seat());
@@ -8754,6 +9000,7 @@ impl Game {
             caster_instance_id,
             outcomes,
         )?;
+        let leap_attack = effect == MagicEffect::LeapAttackAlly;
         match effect {
             MagicEffect::HealController(amount) => {
                 self.heal_avatar(seat, u16::from(amount), card_instance_id, outcomes)?;
@@ -8844,6 +9091,18 @@ impl Game {
                         "sourceInstanceId": card_instance_id,
                     })
                 });
+            }
+            MagicEffect::LeapAttackAlly => {
+                self.apply_leap_attack(
+                    ally.as_ref().ok_or(GameError::IllegalAction)?,
+                    ally_destination.ok_or(GameError::IllegalAction)?,
+                    *ally_strike_location,
+                    card_id,
+                    card_instance_id,
+                    owner,
+                    seat,
+                    outcomes,
+                )?;
             }
             MagicEffect::FightAllyWithAdjacentEnemy => {
                 let Some((pending, warded_target_index)) = duel else {
@@ -9213,25 +9472,249 @@ impl Game {
             }
             _ => return Err(GameError::IllegalAction),
         }
-        if let Some(pending) = &mut self.position.pending_deathrites {
-            pending.deferred_magic_resolved = Some(DeferredMagicResolved {
-                card_id: compact_card_id,
-                instance_id: card_instance_id.clone(),
-                owner,
-            });
-        } else {
-            let resolved_start = outcomes.len();
-            outcomes.push("magic-resolved", || {
-                json!({
-                    "cardId": card_id,
-                    "instanceId": card_instance_id,
-                    "owner": owner,
-                })
-            });
-            outcomes.move_tail_before_completion(resolved_start);
+        if !leap_attack {
+            if let Some(pending) = &mut self.position.pending_deathrites {
+                pending.deferred_magic_resolved = Some(DeferredMagicResolved {
+                    card_id: compact_card_id,
+                    instance_id: card_instance_id.clone(),
+                    owner,
+                });
+            } else {
+                let resolved_start = outcomes.len();
+                outcomes.push("magic-resolved", || {
+                    json!({
+                        "cardId": card_id,
+                        "instanceId": card_instance_id,
+                        "owner": owner,
+                    })
+                });
+                outcomes.move_tail_before_completion(resolved_start);
+            }
         }
         self.position.state_version += 1;
         Ok(())
+    }
+
+    fn apply_leap_attack(
+        &mut self,
+        ally: &UnitTarget,
+        destination: Location,
+        strike_location: Option<Location>,
+        card_id: &str,
+        card_instance_id: &IdentityHash,
+        owner: Seat,
+        seat: Seat,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let from = self.unit_target_location(ally)?;
+        let stepped_to = self.move_unit_target_to(ally, destination)?;
+        if stepped_to != from {
+            let instance_id = ally.instance_id().clone();
+            let ally_seat = ally.seat();
+            let source_instance_id = card_instance_id.clone();
+            outcomes.push("unit-stepped", || {
+                json!({
+                    "from": from,
+                    "instanceId": instance_id,
+                    "seat": ally_seat,
+                    "sourceInstanceId": source_instance_id,
+                    "steps": 1,
+                    "to": stepped_to,
+                })
+            });
+        }
+        self.settle_lower_region_minion_deaths(outcomes)?;
+        self.settle_nearby_enemy_stealth(outcomes);
+        self.settle_static_power_deaths(outcomes)?;
+        let continuation = LeapAttackContinuation {
+            ally: ally.clone(),
+            card_id: card_id.to_owned(),
+            instance_id: card_instance_id.clone(),
+            owner,
+            strike_location: strike_location.unwrap_or(stepped_to),
+        };
+        if let Some(pending) = &mut self.position.pending_deathrites {
+            pending.continuation = Some(DeathriteContinuation::LeapAttack(continuation));
+            pending.return_decision_seat = seat;
+            pending.return_phase = Phase::Main;
+            return Ok(());
+        }
+        self.finish_leap_attack(continuation, outcomes)
+    }
+
+    fn move_unit_target_to(
+        &mut self,
+        ally: &UnitTarget,
+        destination: Location,
+    ) -> Result<Location, GameError> {
+        let from = self.unit_target_location(ally)?;
+        if from == destination {
+            return Ok(from);
+        }
+        match ally {
+            UnitTarget::Avatar { instance_id, seat } => {
+                let avatar = &mut self.position.players[seat_index(*seat)].avatar;
+                if avatar.card.instance_id != *instance_id {
+                    return Err(GameError::IllegalAction);
+                }
+                avatar.location = destination.cell;
+            }
+            UnitTarget::Minion { instance_id, seat } => {
+                let unit = self
+                    .position
+                    .units
+                    .iter_mut()
+                    .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
+                    .ok_or(GameError::IllegalAction)?;
+                Self::move_minion_to(unit, destination.cell)?;
+                unit.region = destination.region;
+            }
+        }
+        Ok(destination)
+    }
+
+    fn finish_leap_attack(
+        &mut self,
+        continuation: LeapAttackContinuation,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let ally_remains = self.ally_remains(&continuation.ally);
+        if self.position.terminal.is_some() || !ally_remains {
+            self.emit_leap_magic_resolved(&continuation, outcomes);
+            return Ok(());
+        }
+        let striker_kind = match continuation.ally {
+            UnitTarget::Avatar { .. } => UnitKind::Avatar,
+            UnitTarget::Minion { .. } => UnitKind::Minion,
+        };
+        let striker_location = self.unit_target_location(&continuation.ally)?;
+        let occupied = self.combatant_occupied_cells(
+            striker_kind,
+            continuation.ally.seat(),
+            continuation.ally.instance_id(),
+        )?;
+        let can_occupy_strike = striker_location.region == continuation.strike_location.region
+            && occupied.contains(&continuation.strike_location.cell);
+        let disabled = match &continuation.ally {
+            UnitTarget::Avatar { .. } => false,
+            UnitTarget::Minion { instance_id, seat } => self
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
+                .is_some_and(|unit| self.minion_is_disabled(unit)),
+        };
+        let enemies = if can_occupy_strike && !disabled {
+            self.enemies_occupying(
+                other_seat(continuation.ally.seat()),
+                continuation.strike_location,
+            )
+        } else {
+            Vec::new()
+        };
+        if enemies.is_empty() {
+            self.emit_leap_magic_resolved(&continuation, outcomes);
+            return Ok(());
+        }
+        let amount = self
+            .combatant_strike_stats(
+                striker_kind,
+                continuation.ally.seat(),
+                continuation.ally.instance_id(),
+            )?
+            .amount;
+        let allocations: Vec<_> = enemies
+            .iter()
+            .map(|enemy| StrikeAllocation {
+                amount,
+                target_instance_id: enemy.instance_id().clone(),
+            })
+            .collect();
+        let attacker_id = continuation.ally.instance_id().clone();
+        for enemy in &enemies {
+            let striker_id = attacker_id.clone();
+            let target_id = enemy.instance_id().clone();
+            outcomes.push("strike-damage-allocated", || {
+                json!({
+                    "amount": amount,
+                    "strikerInstanceId": striker_id,
+                    "targetInstanceId": target_id,
+                })
+            });
+        }
+        let pending = PendingCombat {
+            allocations,
+            attacker_instance_id: continuation.ally.instance_id().clone(),
+            attacker_kind: striker_kind,
+            attacking_seat: continuation.ally.seat(),
+            cell: continuation.strike_location.cell,
+            combatants: enemies,
+            defenders: Vec::new(),
+            original_target: None,
+            region: striker_location.region,
+            target_removed: false,
+        };
+        self.resolve_fight_window(&pending, true, &[], None, outcomes)?;
+        self.emit_leap_magic_resolved(&continuation, outcomes);
+        Ok(())
+    }
+
+    fn ally_remains(&self, ally: &UnitTarget) -> bool {
+        match ally {
+            UnitTarget::Avatar { instance_id, seat } => {
+                self.position.players[seat_index(*seat)]
+                    .avatar
+                    .card
+                    .instance_id
+                    == *instance_id
+            }
+            UnitTarget::Minion { instance_id, seat } => self.position.units.iter().any(|unit| {
+                unit.controller == *seat && unit.card.instance_id == *instance_id
+            }),
+        }
+    }
+
+    fn enemies_occupying(&self, enemy_seat: Seat, location: Location) -> Vec<UnitTarget> {
+        let player = &self.position.players[seat_index(enemy_seat)];
+        let mut enemies = Vec::new();
+        if location.region == Region::Surface && player.avatar.location == location.cell {
+            enemies.push(UnitTarget::Avatar {
+                instance_id: player.avatar.card.instance_id.clone(),
+                seat: enemy_seat,
+            });
+        }
+        enemies.extend(
+            self.position
+                .units
+                .iter()
+                .filter(|unit| {
+                    unit.controller == enemy_seat
+                        && unit.region == location.region
+                        && Self::unit_occupies_cell(unit, location.cell)
+                })
+                .map(|unit| UnitTarget::Minion {
+                    instance_id: unit.card.instance_id.clone(),
+                    seat: enemy_seat,
+                }),
+        );
+        enemies.sort_unstable_by(|left, right| left.instance_id().cmp(right.instance_id()));
+        enemies
+    }
+
+    fn emit_leap_magic_resolved(
+        &self,
+        continuation: &LeapAttackContinuation,
+        outcomes: &mut OutcomeLog<'_>,
+    ) {
+        let resolved_start = outcomes.len();
+        outcomes.push("magic-resolved", || {
+            json!({
+                "cardId": continuation.card_id,
+                "instanceId": continuation.instance_id,
+                "owner": continuation.owner,
+            })
+        });
+        outcomes.move_tail_before_completion(resolved_start);
     }
 
     #[expect(
@@ -10346,6 +10829,14 @@ impl Game {
                         "firstCombatantInstanceIds": continuation.first_combatant_instance_ids,
                         "kind": "first-strike",
                         "pending": Self::pending_combat_value(&continuation.pending),
+                    }),
+                    DeathriteContinuation::LeapAttack(continuation) => json!({
+                        "ally": continuation.ally,
+                        "cardId": continuation.card_id,
+                        "instanceId": continuation.instance_id,
+                        "kind": "leap-attack",
+                        "owner": continuation.owner,
+                        "strikeLocation": continuation.strike_location,
                     }),
                     DeathriteContinuation::PaidSummon(continuation) => {
                         self.paid_summon_continuation_value(continuation)
