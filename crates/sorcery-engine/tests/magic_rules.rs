@@ -5698,6 +5698,206 @@ fn fatality_manifest() -> String {
         .expect("bounded seed with both North Magic cards in hand")
 }
 
+fn mesmerism_manifest() -> String {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-lash": magic(("damageTargetUnit", json!(1)), 0),
+        "north-mesmerism": magic(("gainControlOfTargetNearbyMinion", json!(true)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-far": minion(json!({ "deathriteDrawSite": true })),
+        "south-site": site(false),
+        "south-target": minion(json!({ "deathriteDrawSite": true })),
+    });
+    let north_spellbook = [
+        "north-mesmerism",
+        "north-lash",
+        "north-mesmerism",
+        "north-lash",
+        "north-mesmerism",
+        "north-lash",
+        "north-lash",
+        "north-lash",
+    ];
+    let south_spellbook = [
+        "south-far",
+        "south-target",
+        "south-far",
+        "south-target",
+        "south-far",
+        "south-target",
+        "south-far",
+        "south-target",
+    ];
+    (1..=512)
+        .map(|seed| manifest(seed, &cards, &north_spellbook, &south_spellbook))
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("Mesmerism seed candidate");
+            let opening = state(&preview);
+            let north = opening["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("North opening hand")
+                .clone();
+            let south = opening["players"]["south"]["hand"]["spellbook"]
+                .as_array()
+                .expect("South opening hand")
+                .clone();
+            ["north-lash", "north-mesmerism"]
+                .into_iter()
+                .all(|card_id| north.iter().any(|card| card["cardId"] == card_id))
+                && ["south-far", "south-target"]
+                    .into_iter()
+                    .all(|card_id| south.iter().any(|card| card["cardId"] == card_id))
+        })
+        .expect("bounded seed with both Mesmerism and both South minions in hand")
+}
+
+/// Walks the shared opening into North Avatar at C3 with South minions at C1 and C2.
+fn mesmerism_opening(session: &mut Session) -> (String, String) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (far, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-far"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    let (near, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-target"
+            && descriptor["cell"] == "C2"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let avatar_id = state(session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == avatar_id.as_str()
+            && descriptor["from"]["cell"] == "C4"
+            && descriptor["to"]["cell"] == "C3"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    (
+        far["cardInstanceId"]
+            .as_str()
+            .expect("far minion identity")
+            .to_owned(),
+        near["cardInstanceId"]
+            .as_str()
+            .expect("nearby minion identity")
+            .to_owned(),
+    )
+}
+
+#[test]
+fn rule_catalog_0146_mesmerism_should_transfer_a_minion_and_its_deathrite_to_the_new_controller() {
+    let manifest = mesmerism_manifest();
+    let mut session = opening_main(&manifest);
+    let (far_id, near_id) = mesmerism_opening(&mut session);
+
+    let mesmerism_targets: Vec<_> = session
+        .legal_actions()
+        .expect("Mesmerism actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-mesmerism"
+        })
+        .filter_map(|action| {
+            action.descriptor["target"]["instanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect();
+    assert!(mesmerism_targets.contains(&near_id));
+    assert!(!mesmerism_targets.contains(&far_id));
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-mesmerism"
+            && descriptor["target"]["instanceId"] == near_id.as_str()
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-control-changed", "magic-resolved"]
+    );
+    let changed = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-control-changed")
+        .expect("control change event");
+    assert_eq!(changed.payload["fromSeat"], "south");
+    assert_eq!(changed.payload["seat"], "north");
+
+    let transferred = state(&session);
+    assert_eq!(
+        realm_unit(&transferred, &near_id).expect("transferred minion")["controller"],
+        "north"
+    );
+    assert_eq!(
+        realm_unit(&transferred, &near_id).expect("transferred minion")["owner"],
+        "south"
+    );
+    let north_atlas = transferred["players"]["north"]["atlas"]
+        .as_array()
+        .expect("North atlas")
+        .len();
+
+    // Killing the stolen minion now fires its Deathrite for its new controller.
+    let (_, killed) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-lash"
+            && descriptor["target"]["instanceId"] == near_id.as_str()
+    });
+    let drawn = killed
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "north");
+    let finished = state(&session);
+    assert!(realm_unit(&finished, &near_id).is_none());
+    assert_eq!(
+        finished["players"]["north"]["atlas"]
+            .as_array()
+            .expect("North atlas after Deathrite")
+            .len(),
+        north_atlas - 1
+    );
+    // The corpse still returns to its owner's cemetery, not the new controller's.
+    assert!(
+        finished["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == near_id.as_str())
+    );
+    assert_exact_replay(&session);
+}
+
 fn fatality_targets(session: &Session) -> Vec<String> {
     let mut targets: Vec<_> = session
         .legal_actions()

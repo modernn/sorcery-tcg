@@ -950,12 +950,12 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_)
         | MagicEffect::GrantChargeToAllyThisTurn
         | MagicEffect::GrantPowerTwoToAllyThisTurn
+        | MagicEffect::GainControlOfTargetNearbyMinion
         | MagicEffect::KillTargetWoundedMinion
         | MagicEffect::LureEnemyMinionOneStepCloser
         | MagicEffect::TeleportAllyToTargetSite => None,
         MagicEffect::DamageRandomUnitAtLocation(_) => Some("damageRandomUnitAtLocation"),
         MagicEffect::DestroyTargetSiteWithDamageGrid(_) => Some("destroyTargetSiteWithDamageGrid"),
-        MagicEffect::GainControlOfTargetNearbyMinion => Some("gainControlOfTargetNearbyMinion"),
         MagicEffect::SubmergeTargetMinion => Some("submergeTargetMinion"),
         MagicEffect::SummonRandomMinionFromAnyCemetery => Some("summonRandomMinionFromAnyCemetery"),
         MagicEffect::TeleportNearbyAllyThenDrawCard => Some("teleportNearbyAllyThenDrawCard"),
@@ -3645,6 +3645,9 @@ impl Game {
             )?,
             MagicEffect::BurrowTargetMinionOrArtifact => {
                 self.targeted_magic_choices(seat, caster_instance_id, false, true)?
+            }
+            MagicEffect::GainControlOfTargetNearbyMinion => {
+                self.targeted_magic_choices(seat, caster_instance_id, true, true)?
             }
             MagicEffect::KillTargetWoundedMinion => self
                 .targeted_magic_choices(seat, caster_instance_id, false, true)?
@@ -9806,6 +9809,43 @@ impl Game {
                                 "sourceInstanceId": card_instance_id,
                             })
                         });
+                    }
+                }
+            }
+            MagicEffect::GainControlOfTargetNearbyMinion => {
+                let Some(UnitTarget::Minion {
+                    instance_id,
+                    seat: target_seat,
+                }) = target
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                let unit = self
+                    .position
+                    .units
+                    .iter_mut()
+                    .find(|unit| {
+                        unit.card.instance_id == *instance_id && unit.controller == *target_seat
+                    })
+                    .ok_or(GameError::IllegalAction)?;
+                if unit.controller != seat {
+                    if unit.warded {
+                        unit.warded = false;
+                        outcomes.push(
+                            "ward-broken",
+                            || json!({ "instanceId": instance_id, "seat": target_seat }),
+                        );
+                    } else {
+                        unit.controller = seat;
+                        outcomes.push("minion-control-changed", || {
+                            json!({
+                                "fromSeat": target_seat,
+                                "instanceId": instance_id,
+                                "seat": seat,
+                                "sourceInstanceId": card_instance_id,
+                            })
+                        });
+                        self.settle_static_power_deaths(outcomes)?;
                     }
                 }
             }
