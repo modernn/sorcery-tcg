@@ -49,8 +49,11 @@ ordinary debug suite because running the same workload there takes several minut
 
 ## Current blockers to strong unattended self-play
 
-- Rust has direct proofs for 129 of 161 cataloged scenarios. The remaining mechanics must be ported
+- Rust has direct proofs for 131 of 161 cataloged scenarios. The remaining mechanics must be ported
   or rejected at manifest admission before their games can affect training.
+- Realm Artifacts are admitted only as power Artifacts. Lethal, ability, and life-loss Artifacts,
+  plus any manifest that pairs an Artifact with burrow Magic or an oversized minion, still fail
+  closed at admission.
 - The selector neighborhood is intentionally small and `seat-observation-v1` does not expose enough
   state for strong tactical play; `powered-movement` is therefore inactive.
 - Campaign state round-trips through a strict checkpoint with the seed set, lineage, fixed action

@@ -363,6 +363,43 @@ pub enum ActionDescriptor {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tempted_enemy: Option<UnitTarget>,
     },
+    /// Conjure one supported Artifact from the player's hand.
+    CastArtifact {
+        /// Local ally selected to carry the Artifact, when it is not conjured loose.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bearer: Option<UnitTarget>,
+        /// Exact cell inside an oversized bearer's footprint.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bearer_cell: Option<Cell>,
+        /// Stable rules card identity.
+        card_id: String,
+        /// Authoritative card instance identity.
+        card_instance_id: IdentityHash,
+        /// Authoritative Spellcaster instance identity.
+        caster_instance_id: IdentityHash,
+        /// Controlled site cell receiving an uncarried Artifact.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cell: Option<Cell>,
+        /// Mana paid for the conjuration.
+        mana_cost: u64,
+    },
+    /// Drop selected carried Artifacts where their bearer stands.
+    DropArtifacts {
+        /// Exact carried Artifact identities, in canonical order.
+        artifact_instance_ids: Vec<IdentityHash>,
+        /// Authoritative bearer releasing the Artifacts.
+        unit: UnitTarget,
+    },
+    /// Pick up selected uncarried Artifacts at one of the unit's own cells.
+    PickUpArtifacts {
+        /// Exact uncarried Artifact identities, in canonical order.
+        artifact_instance_ids: Vec<IdentityHash>,
+        /// Exact cell inside an oversized unit's footprint.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cell: Option<Cell>,
+        /// Authoritative unit collecting the Artifacts.
+        unit: UnitTarget,
+    },
     /// Commit the first engine-issued target for a staged Chain Magic cast.
     BeginChainMagic {
         /// Stable rules card identity.
@@ -628,6 +665,53 @@ impl ActionDescriptor {
                     format!("Cast {card_id}")
                 },
             ),
+            Self::CastArtifact {
+                bearer,
+                card_id,
+                cell,
+                mana_cost,
+                ..
+            } => {
+                let destination = match (bearer, cell) {
+                    (Some(bearer), _) => format!(
+                        "carried by {} {}…",
+                        bearer.kind(),
+                        short_identity(bearer.instance_id())
+                    ),
+                    (None, Some(cell)) => format!("uncarried at {cell}"),
+                    (None, None) => return None,
+                };
+                Some(format!("Cast {card_id} {destination} ({mana_cost} mana)"))
+            }
+            Self::DropArtifacts {
+                artifact_instance_ids,
+                unit,
+            } => Some(format!(
+                "Drop {} artifact{} with {} {}…",
+                artifact_instance_ids.len(),
+                if artifact_instance_ids.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+                unit.kind(),
+                short_identity(unit.instance_id())
+            )),
+            Self::PickUpArtifacts {
+                artifact_instance_ids,
+                unit,
+                ..
+            } => Some(format!(
+                "Pick up {} artifact{} with {} {}…",
+                artifact_instance_ids.len(),
+                if artifact_instance_ids.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+                unit.kind(),
+                short_identity(unit.instance_id())
+            )),
             Self::BeginChainMagic {
                 card_id, target, ..
             } => Some(format!(
@@ -819,6 +903,95 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 compare_json_array(left_spellbook, right_spellbook, IdentityHash::cmp)
             }),
             (
+                ActionDescriptor::DropArtifacts {
+                    artifact_instance_ids: left_ids,
+                    unit: left_unit,
+                },
+                ActionDescriptor::DropArtifacts {
+                    artifact_instance_ids: right_ids,
+                    unit: right_unit,
+                },
+            ) => compare_json_array(left_ids, right_ids, IdentityHash::cmp)
+                .then_with(|| compare_unit_targets(left_unit, right_unit)),
+            (
+                ActionDescriptor::PickUpArtifacts {
+                    artifact_instance_ids: left_ids,
+                    cell: left_cell,
+                    unit: left_unit,
+                },
+                ActionDescriptor::PickUpArtifacts {
+                    artifact_instance_ids: right_ids,
+                    cell: right_cell,
+                    unit: right_unit,
+                },
+            ) => compare_json_array(left_ids, right_ids, IdentityHash::cmp)
+                .then_with(|| compare_optional_cells(*left_cell, *right_cell))
+                .then_with(|| compare_unit_targets(left_unit, right_unit)),
+            (
+                ActionDescriptor::DropArtifacts {
+                    artifact_instance_ids: left_ids,
+                    ..
+                },
+                ActionDescriptor::PickUpArtifacts {
+                    artifact_instance_ids: right_ids,
+                    cell,
+                    ..
+                },
+            ) => compare_json_array(left_ids, right_ids, IdentityHash::cmp)
+                .then(cell_qualified_pick_up_order(cell.is_some())),
+            (
+                ActionDescriptor::PickUpArtifacts {
+                    artifact_instance_ids: left_ids,
+                    cell,
+                    ..
+                },
+                ActionDescriptor::DropArtifacts {
+                    artifact_instance_ids: right_ids,
+                    ..
+                },
+            ) => compare_json_array(left_ids, right_ids, IdentityHash::cmp)
+                .then(cell_qualified_pick_up_order(cell.is_some()).reverse()),
+            (
+                ActionDescriptor::CastArtifact {
+                    bearer: left_bearer,
+                    bearer_cell: left_bearer_cell,
+                    card_id: left_card,
+                    card_instance_id: left_instance,
+                    caster_instance_id: left_caster,
+                    cell: left_cell,
+                    mana_cost: left_mana,
+                },
+                ActionDescriptor::CastArtifact {
+                    bearer: right_bearer,
+                    bearer_cell: right_bearer_cell,
+                    card_id: right_card,
+                    card_instance_id: right_instance,
+                    caster_instance_id: right_caster,
+                    cell: right_cell,
+                    mana_cost: right_mana,
+                },
+            ) => compare_optional_unit_targets(left_bearer.as_ref(), right_bearer.as_ref())
+                .then_with(|| compare_optional_cells(*left_bearer_cell, *right_bearer_cell))
+                .then_with(|| compare_json_strings(left_card, right_card))
+                .then_with(|| left_instance.cmp(right_instance))
+                .then_with(|| left_caster.cmp(right_caster))
+                .then_with(|| compare_optional_cells(*left_cell, *right_cell))
+                .then_with(|| compare_json_integers(*left_mana, *right_mana)),
+            (ActionDescriptor::CastArtifact { .. }, ActionDescriptor::SummonMinion { .. }) => {
+                compare_uncarried_artifact_with_summon(left, right)
+            }
+            (ActionDescriptor::SummonMinion { .. }, ActionDescriptor::CastArtifact { .. }) => {
+                compare_uncarried_artifact_with_summon(right, left).reverse()
+            }
+            (
+                ActionDescriptor::CastArtifact { .. },
+                ActionDescriptor::BeginChainMagic { .. } | ActionDescriptor::CastMagic { .. },
+            ) => compare_spellcast_prefix(left, right).then(Ordering::Less),
+            (
+                ActionDescriptor::BeginChainMagic { .. } | ActionDescriptor::CastMagic { .. },
+                ActionDescriptor::CastArtifact { .. },
+            ) => compare_spellcast_prefix(left, right).then(Ordering::Greater),
+            (
                 ActionDescriptor::PlaySite {
                     card_id: left_card,
                     card_instance_id: left_instance,
@@ -965,7 +1138,8 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
             | (ActionDescriptor::CastMagic { .. }, ActionDescriptor::PlaySite { .. })
             | (ActionDescriptor::SummonMinion { .. }, ActionDescriptor::CastMagic { .. })
             | (ActionDescriptor::SummonMinion { .. }, ActionDescriptor::BeginChainMagic { .. })
-            | (ActionDescriptor::SummonMinion { .. }, ActionDescriptor::PlaySite { .. }) => {
+            | (ActionDescriptor::SummonMinion { .. }, ActionDescriptor::PlaySite { .. })
+            | (ActionDescriptor::CastArtifact { .. }, ActionDescriptor::PlaySite { .. }) => {
                 compare_card_prefix(left, right).then(Ordering::Less)
             }
             (ActionDescriptor::CastMagic { .. }, ActionDescriptor::BeginChainMagic { .. })
@@ -973,7 +1147,8 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
             | (ActionDescriptor::PlaySite { .. }, ActionDescriptor::CastMagic { .. })
             | (ActionDescriptor::CastMagic { .. }, ActionDescriptor::SummonMinion { .. })
             | (ActionDescriptor::BeginChainMagic { .. }, ActionDescriptor::SummonMinion { .. })
-            | (ActionDescriptor::PlaySite { .. }, ActionDescriptor::SummonMinion { .. }) => {
+            | (ActionDescriptor::PlaySite { .. }, ActionDescriptor::SummonMinion { .. })
+            | (ActionDescriptor::PlaySite { .. }, ActionDescriptor::CastArtifact { .. }) => {
                 compare_card_prefix(left, right).then(Ordering::Greater)
             }
             (
@@ -1382,21 +1557,27 @@ fn compare_optional_square_areas(left: Option<SquareArea>, right: Option<SquareA
     }
 }
 
+/// Groups descriptors by the first key of their canonical JSON object.
 const fn descriptor_group(action: &ActionDescriptor) -> u8 {
     match action {
         ActionDescriptor::CastMagic { ally: Some(_), .. } => 0,
         ActionDescriptor::ActivateMana { .. } | ActionDescriptor::AllocateStrike { .. } => 1,
-        ActionDescriptor::Mulligan { .. } => 2,
+        ActionDescriptor::DropArtifacts { .. } | ActionDescriptor::PickUpArtifacts { .. } => 2,
+        ActionDescriptor::Mulligan { .. } => 3,
+        ActionDescriptor::CastArtifact {
+            bearer: Some(_), ..
+        } => 4,
         ActionDescriptor::BeginChainMagic { .. }
+        | ActionDescriptor::CastArtifact { .. }
         | ActionDescriptor::CastMagic { .. }
         | ActionDescriptor::PlaySite { .. }
-        | ActionDescriptor::SummonMinion { .. } => 3,
+        | ActionDescriptor::SummonMinion { .. } => 5,
         ActionDescriptor::ShootDamageProjectile { .. }
         | ActionDescriptor::ShootDragProjectile { .. }
-        | ActionDescriptor::ShootProjectile { .. } => 4,
-        ActionDescriptor::ActivateDiscardRandomDamage { .. } => 5,
-        ActionDescriptor::Defend { .. } | ActionDescriptor::MoveAndAttack { .. } => 6,
-        _ => 7,
+        | ActionDescriptor::ShootProjectile { .. } => 6,
+        ActionDescriptor::ActivateDiscardRandomDamage { .. } => 7,
+        ActionDescriptor::Defend { .. } | ActionDescriptor::MoveAndAttack { .. } => 8,
+        _ => 9,
     }
 }
 
@@ -1406,9 +1587,82 @@ fn compare_card_prefix(left: &ActionDescriptor, right: &ActionDescriptor) -> Ord
     compare_json_strings(left_card, right_card).then_with(|| left_instance.cmp(right_instance))
 }
 
+/// Orders two caster-qualified card actions by every key preceding their first divergence.
+fn compare_spellcast_prefix(left: &ActionDescriptor, right: &ActionDescriptor) -> Ordering {
+    compare_card_prefix(left, right)
+        .then_with(|| compare_optional_identities(caster_identity(left), caster_identity(right)))
+}
+
+/// Orders an uncarried Artifact conjuration against a summon sharing its card prefix.
+fn compare_uncarried_artifact_with_summon(
+    artifact: &ActionDescriptor,
+    summon: &ActionDescriptor,
+) -> Ordering {
+    let ActionDescriptor::SummonMinion {
+        cell: summon_cell,
+        cells,
+        genesis_damage_choice,
+        genesis_damage_target,
+        ..
+    } = summon
+    else {
+        unreachable!("artifact and summon ordering is used only for those actions");
+    };
+    let ActionDescriptor::CastArtifact {
+        cell: artifact_cell,
+        ..
+    } = artifact
+    else {
+        unreachable!("artifact and summon ordering is used only for those actions");
+    };
+    compare_spellcast_prefix(artifact, summon)
+        .then_with(|| compare_optional_cells(*artifact_cell, Some(*summon_cell)))
+        // Footprint and Genesis keys precede "kind"; without them the kinds decide.
+        .then(
+            if cells.is_some() || genesis_damage_choice.is_some() || genesis_damage_target.is_some()
+            {
+                Ordering::Greater
+            } else {
+                Ordering::Less
+            },
+        )
+}
+
+/// A cell-qualified Pick Up precedes a Drop because "cell" precedes "kind".
+const fn cell_qualified_pick_up_order(cell_qualified: bool) -> Ordering {
+    if cell_qualified {
+        Ordering::Greater
+    } else {
+        Ordering::Less
+    }
+}
+
+fn caster_identity(action: &ActionDescriptor) -> Option<&IdentityHash> {
+    match action {
+        ActionDescriptor::BeginChainMagic {
+            caster_instance_id, ..
+        }
+        | ActionDescriptor::CastArtifact {
+            caster_instance_id, ..
+        }
+        | ActionDescriptor::CastMagic {
+            caster_instance_id, ..
+        }
+        | ActionDescriptor::SummonMinion {
+            caster_instance_id, ..
+        } => Some(caster_instance_id),
+        _ => None,
+    }
+}
+
 fn card_prefix(action: &ActionDescriptor) -> (&str, &IdentityHash) {
     match action {
         ActionDescriptor::PlaySite {
+            card_id,
+            card_instance_id,
+            ..
+        }
+        | ActionDescriptor::CastArtifact {
             card_id,
             card_instance_id,
             ..
@@ -1440,32 +1694,35 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::ActivateSparkmage { .. } => 3,
         ActionDescriptor::AllocateStrike { .. } => 4,
         ActionDescriptor::BeginChainMagic { .. } => 5,
-        ActionDescriptor::CastMagic { .. } => 6,
-        ActionDescriptor::CloseDefend { .. } => 7,
-        ActionDescriptor::CloseIntercept {} => 8,
-        ActionDescriptor::ContinueBasicMovement { .. } => 9,
-        ActionDescriptor::DeclareAttack { .. } => 10,
-        ActionDescriptor::DeclineAttack => 11,
-        ActionDescriptor::Defend { .. } => 12,
-        ActionDescriptor::Draw { .. } => 13,
-        ActionDescriptor::DrawSite => 14,
-        ActionDescriptor::DrawSpell => 15,
-        ActionDescriptor::EndTurn => 16,
-        ActionDescriptor::ExtendChainMagic { .. } => 17,
-        ActionDescriptor::Intercept { .. } => 18,
-        ActionDescriptor::OrderDeathrites { .. } => 19,
-        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 20,
-        ActionDescriptor::ResolveChainMagic => 21,
-        ActionDescriptor::ResolveGenesisSpell { .. } => 22,
-        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 23,
-        ActionDescriptor::ResolveGenesisToken { .. } => 24,
-        ActionDescriptor::ResolveRangedStep { .. } => 25,
-        ActionDescriptor::Mulligan { .. } => 26,
-        ActionDescriptor::PlaySite { .. } => 27,
-        ActionDescriptor::ShootDamageProjectile { .. } => 28,
-        ActionDescriptor::ShootDragProjectile { .. } => 29,
-        ActionDescriptor::ShootProjectile { .. } => 30,
-        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 31,
+        ActionDescriptor::CastArtifact { .. } => 6,
+        ActionDescriptor::CastMagic { .. } => 7,
+        ActionDescriptor::CloseDefend { .. } => 8,
+        ActionDescriptor::CloseIntercept {} => 9,
+        ActionDescriptor::ContinueBasicMovement { .. } => 10,
+        ActionDescriptor::DeclareAttack { .. } => 11,
+        ActionDescriptor::DeclineAttack => 12,
+        ActionDescriptor::Defend { .. } => 13,
+        ActionDescriptor::Draw { .. } => 14,
+        ActionDescriptor::DrawSite => 15,
+        ActionDescriptor::DrawSpell => 16,
+        ActionDescriptor::DropArtifacts { .. } => 17,
+        ActionDescriptor::EndTurn => 18,
+        ActionDescriptor::ExtendChainMagic { .. } => 19,
+        ActionDescriptor::Intercept { .. } => 20,
+        ActionDescriptor::OrderDeathrites { .. } => 21,
+        ActionDescriptor::PickUpArtifacts { .. } => 22,
+        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 23,
+        ActionDescriptor::ResolveChainMagic => 24,
+        ActionDescriptor::ResolveGenesisSpell { .. } => 25,
+        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 26,
+        ActionDescriptor::ResolveGenesisToken { .. } => 27,
+        ActionDescriptor::ResolveRangedStep { .. } => 28,
+        ActionDescriptor::Mulligan { .. } => 29,
+        ActionDescriptor::PlaySite { .. } => 30,
+        ActionDescriptor::ShootDamageProjectile { .. } => 31,
+        ActionDescriptor::ShootDragProjectile { .. } => 32,
+        ActionDescriptor::ShootProjectile { .. } => 33,
+        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 34,
     }
 }
 
@@ -1869,6 +2126,164 @@ mod tests {
         });
 
         assert_eq!(descriptors, canonical);
+    }
+
+    const CARD_A: &str = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+    const CARD_B: &str = "sha256:2222222222222222222222222222222222222222222222222222222222222222";
+    const CASTER_A: &str =
+        "sha256:3333333333333333333333333333333333333333333333333333333333333333";
+    const CASTER_B: &str =
+        "sha256:4444444444444444444444444444444444444444444444444444444444444444";
+    const ARTIFACT_A: &str =
+        "sha256:5555555555555555555555555555555555555555555555555555555555555555";
+    const ARTIFACT_B: &str =
+        "sha256:6666666666666666666666666666666666666666666666666666666666666666";
+
+    fn typed_descriptor(value: Value) -> ActionDescriptor {
+        serde_json::from_value(value).expect("typed descriptor")
+    }
+
+    /// The Artifact conjure, Pick Up, and Drop shapes the ordering arms must separate.
+    fn artifact_order_descriptors() -> Vec<ActionDescriptor> {
+        let descriptor = typed_descriptor;
+        let bearer = json!({ "instanceId": CASTER_B, "kind": "minion", "seat": "north" });
+        let avatar = json!({ "instanceId": CASTER_A, "kind": "avatar", "seat": "north" });
+        [
+            json!({
+                "artifactInstanceIds": [ARTIFACT_A],
+                "kind": "drop-artifacts",
+                "unit": bearer,
+            }),
+            json!({
+                "artifactInstanceIds": [ARTIFACT_A, ARTIFACT_B],
+                "kind": "drop-artifacts",
+                "unit": avatar,
+            }),
+            json!({
+                "artifactInstanceIds": [ARTIFACT_A],
+                "kind": "pick-up-artifacts",
+                "unit": bearer,
+            }),
+            json!({
+                "artifactInstanceIds": [ARTIFACT_A],
+                "cell": "C4",
+                "kind": "pick-up-artifacts",
+                "unit": avatar,
+            }),
+            json!({
+                "artifactInstanceIds": [ARTIFACT_A, ARTIFACT_B],
+                "kind": "pick-up-artifacts",
+                "unit": avatar,
+            }),
+            json!({
+                "bearer": bearer,
+                "cardId": "sword",
+                "cardInstanceId": CARD_A,
+                "casterInstanceId": CASTER_A,
+                "kind": "cast-artifact",
+                "manaCost": 2,
+            }),
+            json!({
+                "bearer": avatar,
+                "bearerCell": "C3",
+                "cardId": "sword",
+                "cardInstanceId": CARD_A,
+                "casterInstanceId": CASTER_A,
+                "kind": "cast-artifact",
+                "manaCost": 2,
+            }),
+            json!({
+                "cardId": "sword",
+                "cardInstanceId": CARD_A,
+                "casterInstanceId": CASTER_A,
+                "cell": "C3",
+                "kind": "cast-artifact",
+                "manaCost": 2,
+            }),
+            json!({
+                "cardId": "sword",
+                "cardInstanceId": CARD_A,
+                "casterInstanceId": CASTER_B,
+                "cell": "C4",
+                "kind": "cast-artifact",
+                "manaCost": 10,
+            }),
+            json!({
+                "cardId": "sword",
+                "cardInstanceId": CARD_B,
+                "casterInstanceId": CASTER_A,
+                "cell": "C3",
+                "kind": "cast-artifact",
+                "manaCost": 0,
+            }),
+        ]
+        .map(descriptor)
+        .to_vec()
+    }
+
+    /// Neighbouring non-Artifact actions whose canonical keys interleave with the Artifact ones.
+    fn artifact_neighbour_descriptors() -> Vec<ActionDescriptor> {
+        let descriptor = typed_descriptor;
+        let bearer = json!({ "instanceId": CASTER_B, "kind": "minion", "seat": "north" });
+        [
+            json!({ "amount": 1, "kind": "activate-mana", "unitInstanceId": CASTER_A }),
+            json!({ "atlasOrder": [], "kind": "mulligan", "spellbookOrder": [] }),
+            json!({
+                "cardId": "sword",
+                "cardInstanceId": CARD_A,
+                "casterInstanceId": CASTER_A,
+                "kind": "cast-magic",
+            }),
+            json!({
+                "cardId": "sword",
+                "cardInstanceId": CARD_A,
+                "casterInstanceId": CASTER_A,
+                "kind": "begin-chain-magic",
+                "target": bearer,
+            }),
+            json!({ "cardId": "sword", "cardInstanceId": CARD_A, "cell": "C3", "kind": "play-site" }),
+            json!({
+                "cardId": "sword",
+                "cardInstanceId": CARD_A,
+                "casterInstanceId": CASTER_A,
+                "cell": "C3",
+                "kind": "summon-minion",
+                "manaCost": 1,
+            }),
+            json!({
+                "cardId": "sword",
+                "cardInstanceId": CARD_A,
+                "casterInstanceId": CASTER_A,
+                "cell": "C3",
+                "cells": ["C3", "C4", "D3", "D4"],
+                "kind": "summon-minion",
+                "manaCost": 1,
+            }),
+        ]
+        .map(descriptor)
+        .to_vec()
+    }
+
+    #[test]
+    fn artifact_action_order_should_match_canonical_json_for_every_pair() {
+        let mut descriptors = artifact_order_descriptors();
+        descriptors.extend(artifact_neighbour_descriptors());
+        let canonical = |candidate: &ActionDescriptor| {
+            canonical_json(&serde_json::to_value(candidate).expect("serialized descriptor"))
+                .expect("canonical descriptor")
+        };
+
+        for left in &descriptors {
+            for right in &descriptors {
+                assert_eq!(
+                    compare_canonical(left, right),
+                    canonical(left).cmp(&canonical(right)),
+                    "{} compared with {}",
+                    canonical(left),
+                    canonical(right)
+                );
+            }
+        }
     }
 
     #[test]

@@ -17,9 +17,10 @@ use crate::board::{Cell, Location, Region, SquareArea, translated_square};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{
-    AlternativeSummonPayment, AvatarFacts, BasicMovementRestriction, CardFacts, DamagePrevention,
-    Element, EndTurnStealth, FactError, MagicEffect, MagicFacts, MinionFacts, MinionGenesis,
-    RequiredCastRegion, SiteFacts, Thresholds, parse_card_definition, validate_identifier,
+    AlternativeSummonPayment, ArtifactEffect, ArtifactFacts, AvatarFacts, BasicMovementRestriction,
+    CardFacts, DamagePrevention, Element, EndTurnStealth, FactError, MagicEffect, MagicFacts,
+    MinionFacts, MinionGenesis, RequiredCastRegion, SiteFacts, Thresholds, parse_card_definition,
+    validate_identifier,
 };
 use crate::prng::PrngState;
 
@@ -42,6 +43,7 @@ pub struct RulesContext {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Position {
     active_seat: Seat,
+    artifacts: Vec<ArtifactPosition>,
     decision_seat: Seat,
     immobile_areas: Vec<ImmobileArea>,
     pending_basic_movement: PendingField<PendingBasicMovement>,
@@ -307,7 +309,9 @@ struct CardInstance {
 struct AvatarPosition {
     card: CardInstance,
     death_door_turn: Option<u64>,
+    last_dropped_artifacts_turn: Option<u64>,
     last_interacted_turn: Option<u64>,
+    last_picked_up_artifacts_turn: Option<u64>,
     life: u16,
     location: Cell,
     tapped: bool,
@@ -346,7 +350,9 @@ struct UnitPosition {
     damage: u16,
     disable_effects: Vec<DisableEffect>,
     disabled_until_damaged: bool,
+    last_dropped_artifacts_turn: Option<u64>,
     last_interacted_turn: Option<u64>,
+    last_picked_up_artifacts_turn: Option<u64>,
     location: Cell,
     occupied_cells: Option<SquareArea>,
     region: Region,
@@ -362,6 +368,55 @@ struct UnitPosition {
 struct DisableEffect {
     expires_at_seat: Seat,
     source_instance_id: IdentityHash,
+}
+
+/// Where a realm Artifact currently sits: carried by one unit, or loose in the realm.
+///
+/// Oversized bearers would need the exact carried cell inside their footprint; manifests that mix
+/// Artifacts with oversized minions are refused for self-play instead of guessing that cell.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ArtifactPlacement {
+    Carried { bearer: UnitTarget },
+    Loose { location: Cell, region: Region },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ArtifactPosition {
+    card: CardInstance,
+    placement: ArtifactPlacement,
+}
+
+impl ArtifactPosition {
+    /// The bearer carrying this Artifact, when it is not lying loose in the realm.
+    const fn bearer(&self) -> Option<&UnitTarget> {
+        match &self.placement {
+            ArtifactPlacement::Carried { bearer } => Some(bearer),
+            ArtifactPlacement::Loose { .. } => None,
+        }
+    }
+
+    fn carried_by(&self, kind: UnitKind, seat: Seat, instance_id: &IdentityHash) -> bool {
+        self.bearer().is_some_and(|bearer| {
+            unit_target_kind(bearer) == kind
+                && bearer.seat() == seat
+                && bearer.instance_id() == instance_id
+        })
+    }
+}
+
+/// The turns a unit last used its once-per-turn Artifact interactions on.
+#[derive(Clone, Copy)]
+struct UnitTurns {
+    dropped_artifacts: Option<u64>,
+    interacted: Option<u64>,
+    picked_up_artifacts: Option<u64>,
+}
+
+const fn unit_target_kind(target: &UnitTarget) -> UnitKind {
+    match target {
+        UnitTarget::Avatar { .. } => UnitKind::Avatar,
+        UnitTarget::Minion { .. } => UnitKind::Minion,
+    }
 }
 
 /// A realm area whose occupants cannot depart until the recorded seat's next turn.
@@ -968,7 +1023,7 @@ fn unsupported_selfplay_fact(facts: &CardFacts) -> Option<&'static str> {
             account_for_selfplay_avatar_fields(*facts);
             None
         }
-        CardFacts::Artifact(_) => Some("cardType:artifact"),
+        CardFacts::Artifact(facts) => unsupported_selfplay_artifact(facts),
         CardFacts::Aura(_) => Some("cardType:aura"),
         CardFacts::Magic(facts) => unsupported_selfplay_magic(facts),
         CardFacts::Minion(facts) => unsupported_selfplay_minion(facts),
@@ -978,6 +1033,59 @@ fn unsupported_selfplay_fact(facts: &CardFacts) -> Option<&'static str> {
 
 fn unsupported_selfplay_magic(facts: &MagicFacts) -> Option<&'static str> {
     unsupported_magic_effect(&facts.effect)
+}
+
+fn unsupported_selfplay_artifact(facts: &ArtifactFacts) -> Option<&'static str> {
+    unsupported_artifact_effect(facts.effect)
+}
+
+/// The Artifact effects the realm cannot yet honor, named by their authoring field.
+const fn unsupported_artifact_effect(effect: ArtifactEffect) -> Option<&'static str> {
+    match effect {
+        ArtifactEffect::GrantsBearerPowerTwo => None,
+        ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(_) => {
+            Some("atEndOfEachTurnSiteControllerLosesLife")
+        }
+        ArtifactEffect::BearerControllerChoosesExtraRandomOutcome => {
+            Some("bearerControllerChoosesExtraRandomOutcome")
+        }
+        ArtifactEffect::GrantsBearerLethal => Some("grantsBearerLethal"),
+        ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps => {
+            Some("tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps")
+        }
+        ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree => {
+            Some("tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps")
+        }
+        ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour => {
+            Some("tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath")
+        }
+    }
+}
+
+/// Artifact effects the realm honors in full once the Artifact reaches play.
+const fn artifact_effect_supported(effect: ArtifactEffect) -> bool {
+    matches!(
+        effect,
+        ArtifactEffect::GrantsBearerLethal | ArtifactEffect::GrantsBearerPowerTwo
+    )
+}
+
+/// Facts that reach realm Artifacts through paths the engine does not implement yet.
+fn unsupported_alongside_artifacts(facts: &CardFacts) -> Option<&'static str> {
+    match facts {
+        CardFacts::Magic(facts) => match facts.effect {
+            MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite => {
+                Some("burrowAllMinionsAndArtifactsAtTargetLandSite")
+            }
+            MagicEffect::BurrowTargetMinionOrArtifact => Some("burrowTargetMinionOrArtifact"),
+            _ => None,
+        },
+        // An oversized bearer carries each Artifact at one exact cell of its footprint.
+        CardFacts::Minion(facts) => facts
+            .occupies_square_area_two
+            .then_some("occupiesSquareArea"),
+        _ => None,
+    }
 }
 
 fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
@@ -1280,6 +1388,7 @@ impl Game {
             rules,
             position: Position {
                 active_seat: Seat::North,
+                artifacts: Vec::new(),
                 decision_seat: Seat::North,
                 immobile_areas: Vec::new(),
                 pending_basic_movement: PendingField::Absent,
@@ -1324,6 +1433,20 @@ impl Game {
         for card in &self.rules.cards {
             if let Some(field) = unsupported_selfplay_fact(&card.facts) {
                 return Err(GameError::UnsupportedManifestFact(field.to_owned()));
+            }
+        }
+        if self
+            .rules
+            .cards
+            .iter()
+            .any(|card| matches!(card.facts, CardFacts::Artifact(_)))
+        {
+            for card in &self.rules.cards {
+                if let Some(field) = unsupported_alongside_artifacts(&card.facts) {
+                    return Err(GameError::UnsupportedManifestFact(format!(
+                        "{field} with cardType:artifact"
+                    )));
+                }
             }
         }
         for player in &self.position.players {
@@ -2753,6 +2876,7 @@ impl Game {
                 },
             )?;
         }
+        self.append_artifact_actions(actions, seat)?;
         if !player.avatar.tapped {
             let descriptor = ActionDescriptor::DrawSite;
             let label = descriptor
@@ -3144,6 +3268,253 @@ impl Game {
         (facts.spellcaster || self.minion_atop_tower(unit)).then_some(UnitKind::Minion)
     }
 
+    fn append_artifact_actions(
+        &self,
+        actions: &mut Vec<IssuedAction>,
+        seat: Seat,
+    ) -> Result<(), GameError> {
+        let descriptors = self
+            .artifact_cast_descriptors(seat)
+            .into_iter()
+            .chain(self.pick_up_artifact_descriptors(seat)?)
+            .chain(self.drop_artifact_descriptors(seat)?);
+        for descriptor in descriptors {
+            let label = descriptor
+                .state_independent_label()
+                .ok_or_else(|| invalid("artifact action requires a label"))?;
+            self.push_action(actions, descriptor, label);
+        }
+        Ok(())
+    }
+
+    fn artifact_cast_descriptors(&self, seat: Seat) -> Vec<ActionDescriptor> {
+        let player = &self.position.players[seat_index(seat)];
+        let spellcasters = self.spellcasters(seat);
+        let bearers = self.seat_unit_targets(seat);
+        let cells: Vec<_> = self.controlled_site_cells(seat).collect();
+        let mut descriptors = Vec::new();
+        for card in &player.hand_spellbook {
+            let definition = &self.rules.cards[usize::from(card.card_id.0)];
+            let CardFacts::Artifact(facts) = &definition.facts else {
+                continue;
+            };
+            if !artifact_effect_supported(facts.effect)
+                || u64::from(player.mana) < facts.mana_cost
+                || !self.thresholds_met(seat, facts.thresholds)
+            {
+                continue;
+            }
+            for (_, caster_instance_id) in &spellcasters {
+                let conjure = |bearer, cell| ActionDescriptor::CastArtifact {
+                    bearer,
+                    bearer_cell: None,
+                    card_id: definition.id.clone(),
+                    card_instance_id: card.instance_id.clone(),
+                    caster_instance_id: caster_instance_id.clone(),
+                    cell,
+                    mana_cost: facts.mana_cost,
+                };
+                descriptors.extend(cells.iter().map(|cell| conjure(None, Some(*cell))));
+                descriptors.extend(
+                    bearers
+                        .iter()
+                        .map(|bearer| conjure(Some(bearer.clone()), None)),
+                );
+            }
+        }
+        descriptors
+    }
+
+    fn pick_up_artifact_descriptors(&self, seat: Seat) -> Result<Vec<ActionDescriptor>, GameError> {
+        let turn = Some(self.position.turn_number);
+        let mut descriptors = Vec::new();
+        for unit in self.seat_unit_targets(seat) {
+            let turns = self.unit_target_artifact_turns(&unit)?;
+            if turns.picked_up_artifacts == turn || self.unit_target_is_disabled(&unit)? {
+                continue;
+            }
+            let region = self.unit_target_region(&unit)?;
+            let cells = self.unit_target_occupied_cells(&unit)?.to_vec();
+            for cell in &cells {
+                let mut instance_ids = self.loose_artifact_instance_ids(*cell, region);
+                instance_ids.sort_unstable();
+                let count = instance_ids.len();
+                descriptors.extend(
+                    nonempty_identity_combinations(&instance_ids, count)
+                        .into_iter()
+                        .map(|artifact_instance_ids| ActionDescriptor::PickUpArtifacts {
+                            artifact_instance_ids,
+                            cell: (cells.len() > 1).then_some(*cell),
+                            unit: unit.clone(),
+                        }),
+                );
+            }
+        }
+        Ok(descriptors)
+    }
+
+    fn drop_artifact_descriptors(&self, seat: Seat) -> Result<Vec<ActionDescriptor>, GameError> {
+        let turn = Some(self.position.turn_number);
+        let mut descriptors = Vec::new();
+        for unit in self.seat_unit_targets(seat) {
+            let turns = self.unit_target_artifact_turns(&unit)?;
+            if turns.dropped_artifacts == turn
+                || turns.interacted == turn
+                || self.unit_target_is_disabled(&unit)?
+            {
+                continue;
+            }
+            let mut instance_ids = self.carried_artifact_instance_ids(&unit);
+            instance_ids.sort_unstable();
+            let count = instance_ids.len();
+            descriptors.extend(
+                nonempty_identity_combinations(&instance_ids, count)
+                    .into_iter()
+                    .map(|artifact_instance_ids| ActionDescriptor::DropArtifacts {
+                        artifact_instance_ids,
+                        unit: unit.clone(),
+                    }),
+            );
+        }
+        Ok(descriptors)
+    }
+
+    fn loose_artifact_instance_ids(&self, cell: Cell, region: Region) -> Vec<IdentityHash> {
+        self.position
+            .artifacts
+            .iter()
+            .filter(|artifact| {
+                matches!(
+                    artifact.placement,
+                    ArtifactPlacement::Loose {
+                        location,
+                        region: artifact_region,
+                    } if location == cell && artifact_region == region
+                )
+            })
+            .map(|artifact| artifact.card.instance_id.clone())
+            .collect()
+    }
+
+    fn carried_artifact_instance_ids(&self, bearer: &UnitTarget) -> Vec<IdentityHash> {
+        let kind = unit_target_kind(bearer);
+        self.position
+            .artifacts
+            .iter()
+            .filter(|artifact| artifact.carried_by(kind, bearer.seat(), bearer.instance_id()))
+            .map(|artifact| artifact.card.instance_id.clone())
+            .collect()
+    }
+
+    /// Every unit the seat controls, Avatar first, mirroring the authoritative unit reference order.
+    fn seat_unit_targets(&self, seat: Seat) -> Vec<UnitTarget> {
+        std::iter::once(UnitTarget::Avatar {
+            instance_id: self.position.players[seat_index(seat)]
+                .avatar
+                .card
+                .instance_id
+                .clone(),
+            seat,
+        })
+        .chain(
+            self.position
+                .units
+                .iter()
+                .filter(|unit| unit.controller == seat)
+                .map(|unit| UnitTarget::Minion {
+                    instance_id: unit.card.instance_id.clone(),
+                    seat,
+                }),
+        )
+        .collect()
+    }
+
+    fn artifact_facts(&self, artifact: &ArtifactPosition) -> Result<ArtifactFacts, GameError> {
+        let CardFacts::Artifact(facts) =
+            &self.rules.cards[usize::from(artifact.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        Ok(*facts)
+    }
+
+    /// Total power the unit gains from the Artifacts it carries.
+    fn carried_power_bonus(
+        &self,
+        kind: UnitKind,
+        seat: Seat,
+        instance_id: &IdentityHash,
+    ) -> Result<u16, GameError> {
+        let mut bonus = 0_u16;
+        for artifact in &self.position.artifacts {
+            if !artifact.carried_by(kind, seat, instance_id) {
+                continue;
+            }
+            if self.artifact_facts(artifact)?.effect == ArtifactEffect::GrantsBearerPowerTwo {
+                bonus = bonus.checked_add(2).ok_or(GameError::IllegalAction)?;
+            }
+        }
+        Ok(bonus)
+    }
+
+    /// Whether any carried Artifact grants the unit Lethal.
+    fn carried_lethal(
+        &self,
+        kind: UnitKind,
+        seat: Seat,
+        instance_id: &IdentityHash,
+    ) -> Result<bool, GameError> {
+        for artifact in &self.position.artifacts {
+            if artifact.carried_by(kind, seat, instance_id)
+                && self.artifact_facts(artifact)?.effect == ArtifactEffect::GrantsBearerLethal
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    fn unit_target_is_disabled(&self, target: &UnitTarget) -> Result<bool, GameError> {
+        match target {
+            UnitTarget::Avatar { .. } => Ok(false),
+            UnitTarget::Minion { instance_id, seat } => self
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
+                .map(|unit| self.minion_is_disabled(unit))
+                .ok_or(GameError::IllegalAction),
+        }
+    }
+
+    /// The turns on which this unit last picked up, dropped, and otherwise interacted.
+    fn unit_target_artifact_turns(&self, target: &UnitTarget) -> Result<UnitTurns, GameError> {
+        match target {
+            UnitTarget::Avatar { instance_id, seat } => {
+                let avatar = &self.position.players[seat_index(*seat)].avatar;
+                if avatar.card.instance_id != *instance_id {
+                    return Err(GameError::IllegalAction);
+                }
+                Ok(UnitTurns {
+                    dropped_artifacts: avatar.last_dropped_artifacts_turn,
+                    interacted: avatar.last_interacted_turn,
+                    picked_up_artifacts: avatar.last_picked_up_artifacts_turn,
+                })
+            }
+            UnitTarget::Minion { instance_id, seat } => self
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
+                .map(|unit| UnitTurns {
+                    dropped_artifacts: unit.last_dropped_artifacts_turn,
+                    interacted: unit.last_interacted_turn,
+                    picked_up_artifacts: unit.last_picked_up_artifacts_turn,
+                })
+                .ok_or(GameError::IllegalAction),
+        }
+    }
+
     fn minion_is_disabled(&self, unit: &UnitPosition) -> bool {
         if unit.disabled_until_damaged || !unit.disable_effects.is_empty() {
             return true;
@@ -3451,6 +3822,15 @@ impl Game {
         if self.minion_atop_tower(unit) {
             bonus = bonus.checked_add(2).ok_or(GameError::IllegalAction)?;
         }
+        bonus = bonus
+            .checked_add(self.carried_power_bonus(
+                UnitKind::Minion,
+                unit.controller,
+                &unit.card.instance_id,
+            )?)
+            .ok_or(GameError::IllegalAction)?;
+        let lethal = facts.lethal
+            || self.carried_lethal(UnitKind::Minion, unit.controller, &unit.card.instance_id)?;
         Ok((
             u16::from(facts.attack)
                 .checked_add(bonus)
@@ -3458,7 +3838,7 @@ impl Game {
             u16::from(facts.defense)
                 .checked_add(bonus)
                 .ok_or(GameError::IllegalAction)?,
-            !disabled && facts.lethal,
+            !disabled && lethal,
         ))
     }
 
@@ -4922,8 +5302,17 @@ impl Game {
                 amount,
                 unit_instance_id,
             } => self.apply_mana_activation(action.seat, *amount, unit_instance_id, outcomes),
+            ActionDescriptor::CastArtifact { .. } => {
+                self.apply_cast_artifact_action(action, outcomes)
+            }
             ActionDescriptor::CastMagic { .. } => {
                 self.apply_cast_magic_action(action, outcomes, random_draws)
+            }
+            ActionDescriptor::DropArtifacts { .. } => {
+                self.apply_drop_artifacts_action(action, outcomes)
+            }
+            ActionDescriptor::PickUpArtifacts { .. } => {
+                self.apply_pick_up_artifacts_action(action, outcomes)
             }
             ActionDescriptor::BeginChainMagic { .. } => self.apply_begin_chain_magic(action),
             ActionDescriptor::CloseDefend {
@@ -6657,13 +7046,14 @@ impl Game {
                 else {
                     return Err(GameError::IllegalAction);
                 };
+                let bonus = Self::temporary_power_bonus(&avatar.temporary_power_sources)?
+                    .checked_add(self.carried_power_bonus(UnitKind::Avatar, seat, instance_id)?)
+                    .ok_or(GameError::IllegalAction)?;
                 Ok((
                     u16::from(facts.attack)
-                        .checked_add(Self::temporary_power_bonus(
-                            &avatar.temporary_power_sources,
-                        )?)
+                        .checked_add(bonus)
                         .ok_or(GameError::IllegalAction)?,
-                    false,
+                    self.carried_lethal(UnitKind::Avatar, seat, instance_id)?,
                 ))
             }
             UnitKind::Minion => {
@@ -8109,11 +8499,23 @@ impl Game {
             let instance_id = corpse.card.instance_id.clone();
             let owner = corpse.card.owner;
             let token = corpse.card.source == CardSource::Token;
+            let fell_at = Location {
+                cell: corpse.location,
+                region: corpse.region,
+            };
+            let controller = corpse.controller;
             if !token {
                 self.position.players[seat_index(owner)]
                     .cemetery
                     .push(corpse.card);
             }
+            self.release_carried_artifacts(
+                UnitKind::Minion,
+                controller,
+                &instance_id,
+                fell_at,
+                outcomes,
+            );
             outcomes.push(
                 "minion-died",
                 || json!({ "cardId": card_id, "instanceId": instance_id, "owner": owner }),
@@ -8942,7 +9344,9 @@ impl Game {
             damage: 0,
             disable_effects: Vec::new(),
             disabled_until_damaged: false,
+            last_dropped_artifacts_turn: None,
             last_interacted_turn: None,
+            last_picked_up_artifacts_turn: None,
             location: cell,
             occupied_cells: None,
             region: Region::Surface,
@@ -10000,6 +10404,261 @@ impl Game {
         });
         self.position.phase = Phase::CemeterySummon;
         Ok(true)
+    }
+
+    fn apply_cast_artifact_action(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::CastArtifact {
+            bearer,
+            card_id,
+            card_instance_id,
+            caster_instance_id,
+            cell,
+            mana_cost,
+            ..
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let seat = action.seat;
+        let caster_kind = self
+            .spellcaster_kind(seat, caster_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        if self.position.phase != Phase::Main
+            || !self
+                .artifact_cast_descriptors(seat)
+                .contains(&action.descriptor)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let placement = match (bearer, cell) {
+            (Some(bearer), _) => ArtifactPlacement::Carried {
+                bearer: bearer.clone(),
+            },
+            (None, Some(cell)) => ArtifactPlacement::Loose {
+                location: *cell,
+                region: Region::Surface,
+            },
+            (None, None) => return Err(GameError::IllegalAction),
+        };
+        let player_index = seat_index(seat);
+        let hand_index = self.position.players[player_index]
+            .hand_spellbook
+            .iter()
+            .position(|card| card.instance_id == *card_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        let compact_card_id =
+            self.position.players[player_index].hand_spellbook[hand_index].card_id;
+        let CardFacts::Artifact(facts) = &self.rules.cards[usize::from(compact_card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let air = u16::try_from(facts.thresholds.get(Element::Air))
+            .map_err(|_| GameError::IllegalAction)?;
+        let paid_mana = u16::try_from(*mana_cost).map_err(|_| GameError::IllegalAction)?;
+        let player = &mut self.position.players[player_index];
+        let card = player.hand_spellbook.remove(hand_index);
+        player.mana = player
+            .mana
+            .checked_sub(paid_mana)
+            .ok_or(GameError::IllegalAction)?;
+        player.air_thresholds_cast_this_turn = player
+            .air_thresholds_cast_this_turn
+            .map(|cast_air| cast_air.checked_add(air).ok_or(GameError::IllegalAction))
+            .transpose()?;
+        self.record_unit_interaction(caster_kind, seat, caster_instance_id, outcomes)?;
+        let instance_id = card.instance_id.clone();
+        let owner = card.owner;
+        self.position
+            .artifacts
+            .push(ArtifactPosition { card, placement });
+        outcomes.push("artifact-conjured", || {
+            let mut payload = json!({
+                "cardId": card_id,
+                "casterInstanceId": caster_instance_id,
+                "instanceId": instance_id,
+                "manaPaid": paid_mana,
+                "owner": owner,
+                "seat": seat,
+            });
+            match (bearer, cell) {
+                (Some(bearer), _) => {
+                    payload["bearerInstanceId"] = json!(bearer.instance_id());
+                    payload["bearerKind"] = json!(bearer.kind());
+                    payload["bearerSeat"] = json!(bearer.seat());
+                }
+                (None, Some(cell)) => {
+                    payload["cell"] = json!(cell);
+                    payload["region"] = json!(Region::Surface);
+                }
+                (None, None) => {}
+            }
+            payload
+        });
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    fn apply_pick_up_artifacts_action(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::PickUpArtifacts {
+            artifact_instance_ids,
+            unit,
+            ..
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let seat = action.seat;
+        if self.position.phase != Phase::Main
+            || !self
+                .pick_up_artifact_descriptors(seat)?
+                .contains(&action.descriptor)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let selected: BTreeSet<_> = artifact_instance_ids.iter().cloned().collect();
+        for artifact in &mut self.position.artifacts {
+            if selected.contains(&artifact.card.instance_id) {
+                artifact.placement = ArtifactPlacement::Carried {
+                    bearer: unit.clone(),
+                };
+            }
+        }
+        let turn = self.position.turn_number;
+        self.record_artifact_turn(unit, |tracked| *tracked = Some(turn), true)?;
+        outcomes.push("artifacts-picked-up", || {
+            json!({
+                "artifactInstanceIds": artifact_instance_ids,
+                "seat": seat,
+                "unitInstanceId": unit.instance_id(),
+                "unitKind": unit.kind(),
+            })
+        });
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    fn apply_drop_artifacts_action(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::DropArtifacts {
+            artifact_instance_ids,
+            unit,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let seat = action.seat;
+        if self.position.phase != Phase::Main
+            || !self
+                .drop_artifact_descriptors(seat)?
+                .contains(&action.descriptor)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let fell_at = self.unit_target_location(unit)?;
+        let selected: BTreeSet<_> = artifact_instance_ids.iter().cloned().collect();
+        for artifact in &mut self.position.artifacts {
+            if selected.contains(&artifact.card.instance_id) {
+                artifact.placement = ArtifactPlacement::Loose {
+                    location: fell_at.cell,
+                    region: fell_at.region,
+                };
+            }
+        }
+        let turn = self.position.turn_number;
+        self.record_artifact_turn(unit, |tracked| *tracked = Some(turn), false)?;
+        outcomes.push("artifacts-dropped", || {
+            json!({
+                "artifactInstanceIds": artifact_instance_ids,
+                "seat": seat,
+                "unitInstanceId": unit.instance_id(),
+                "unitKind": unit.kind(),
+            })
+        });
+        // Losing a power Artifact can leave the bearer lethally wounded; shared settlement kills it.
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    /// Stamps the unit's most recent Artifact Pick Up or Drop turn.
+    fn record_artifact_turn(
+        &mut self,
+        unit: &UnitTarget,
+        stamp: impl FnOnce(&mut Option<u64>),
+        picked_up: bool,
+    ) -> Result<(), GameError> {
+        let tracked = match unit {
+            UnitTarget::Avatar { instance_id, seat } => {
+                let avatar = &mut self.position.players[seat_index(*seat)].avatar;
+                if avatar.card.instance_id != *instance_id {
+                    return Err(GameError::IllegalAction);
+                }
+                if picked_up {
+                    &mut avatar.last_picked_up_artifacts_turn
+                } else {
+                    &mut avatar.last_dropped_artifacts_turn
+                }
+            }
+            UnitTarget::Minion { instance_id, seat } => {
+                let minion = self
+                    .position
+                    .units
+                    .iter_mut()
+                    .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
+                    .ok_or(GameError::IllegalAction)?;
+                if picked_up {
+                    &mut minion.last_picked_up_artifacts_turn
+                } else {
+                    &mut minion.last_dropped_artifacts_turn
+                }
+            }
+        };
+        stamp(tracked);
+        Ok(())
+    }
+
+    /// Releases every Artifact the unit carried onto the location where it stood.
+    fn release_carried_artifacts(
+        &mut self,
+        kind: UnitKind,
+        seat: Seat,
+        instance_id: &IdentityHash,
+        fell_at: Location,
+        outcomes: &mut OutcomeLog<'_>,
+    ) {
+        let mut dropped = Vec::new();
+        for artifact in &mut self.position.artifacts {
+            if artifact.carried_by(kind, seat, instance_id) {
+                artifact.placement = ArtifactPlacement::Loose {
+                    location: fell_at.cell,
+                    region: fell_at.region,
+                };
+                dropped.push(artifact.card.clone());
+            }
+        }
+        for card in dropped {
+            let card_id = self.rules.cards[usize::from(card.card_id.0)].id.clone();
+            outcomes.push("artifact-dropped", || {
+                json!({
+                    "bearerInstanceId": instance_id,
+                    "cardId": card_id,
+                    "cell": fell_at.cell,
+                    "instanceId": card.instance_id,
+                    "owner": card.owner,
+                    "region": fell_at.region,
+                })
+            });
+        }
     }
 
     #[expect(
@@ -11617,7 +12276,9 @@ impl Game {
             damage: 0,
             disable_effects: Vec::new(),
             disabled_until_damaged: false,
+            last_dropped_artifacts_turn: None,
             last_interacted_turn: None,
+            last_picked_up_artifacts_turn: None,
             location: *cell,
             occupied_cells: *cells,
             region: Region::Surface,
@@ -11878,7 +12539,9 @@ impl Game {
             damage: 0,
             disable_effects: Vec::new(),
             disabled_until_damaged: false,
+            last_dropped_artifacts_turn: None,
             last_interacted_turn: None,
+            last_picked_up_artifacts_turn: None,
             location: *cell,
             occupied_cells: *cells,
             region: Region::Surface,
@@ -12598,6 +13261,7 @@ impl Game {
                 );
             }
         }
+        self.insert_realm_artifacts(&mut value);
         if !self.position.immobile_areas.is_empty() {
             value["realm"]["immobileAreas"] = self
                 .position
@@ -12936,11 +13600,22 @@ impl Game {
         {
             object.insert("airThresholdsCastThisTurn".to_owned(), json!(count));
         }
-        if let (Some(turn), Some(avatar)) = (
-            player.avatar.last_interacted_turn,
-            value.get_mut("avatar").and_then(Value::as_object_mut),
-        ) {
-            avatar.insert("lastInteractedTurn".to_owned(), json!(turn));
+        if let Some(avatar) = value.get_mut("avatar").and_then(Value::as_object_mut) {
+            for (key, turn) in [
+                (
+                    "lastDroppedArtifactsTurn",
+                    player.avatar.last_dropped_artifacts_turn,
+                ),
+                ("lastInteractedTurn", player.avatar.last_interacted_turn),
+                (
+                    "lastPickedUpArtifactsTurn",
+                    player.avatar.last_picked_up_artifacts_turn,
+                ),
+            ] {
+                if let Some(turn) = turn {
+                    avatar.insert(key.to_owned(), json!(turn));
+                }
+            }
         }
         if !player.avatar.temporary_power_sources.is_empty() {
             value["avatar"]["temporaryPowerSources"] = json!(player.avatar.temporary_power_sources);
@@ -12959,6 +13634,34 @@ impl Game {
             "owner": card.owner,
             "source": card.source.as_str(),
         })
+    }
+
+    fn insert_realm_artifacts(&self, value: &mut Value) {
+        if self.position.artifacts.is_empty() {
+            return;
+        }
+        value["realm"]["artifacts"] = self
+            .position
+            .artifacts
+            .iter()
+            .map(|artifact| self.artifact_value(artifact))
+            .collect();
+    }
+
+    fn artifact_value(&self, artifact: &ArtifactPosition) -> Value {
+        let mut value = self.card_value(&artifact.card);
+        if let Value::Object(object) = &mut value {
+            match &artifact.placement {
+                ArtifactPlacement::Carried { bearer } => {
+                    object.insert("bearer".to_owned(), json!(bearer));
+                }
+                ArtifactPlacement::Loose { location, region } => {
+                    object.insert("location".to_owned(), json!(location));
+                    object.insert("region".to_owned(), json!(region));
+                }
+            }
+        }
+        value
     }
 
     fn site_value(&self, site: &SitePosition) -> Value {
@@ -12985,8 +13688,14 @@ impl Game {
             ("tapped".to_owned(), json!(unit.tapped)),
             ("warded".to_owned(), json!(unit.warded)),
         ]);
+        if let Some(turn) = unit.last_dropped_artifacts_turn {
+            object.insert("lastDroppedArtifactsTurn".to_owned(), json!(turn));
+        }
         if let Some(turn) = unit.last_interacted_turn {
             object.insert("lastInteractedTurn".to_owned(), json!(turn));
+        }
+        if let Some(turn) = unit.last_picked_up_artifacts_turn {
+            object.insert("lastPickedUpArtifactsTurn".to_owned(), json!(turn));
         }
         if let Some(cells) = unit.occupied_cells {
             object.insert("occupiedCells".to_owned(), json!(cells));
@@ -13271,7 +13980,9 @@ fn create_player(
     let avatar = AvatarPosition {
         card: card_instance(rules, avatar_card_id, seat, CardSource::Avatar, 0)?,
         death_door_turn: None,
+        last_dropped_artifacts_turn: None,
         last_interacted_turn: None,
+        last_picked_up_artifacts_turn: None,
         life: u16::from(avatar_facts.life),
         location: Cell::parse(if seat == Seat::North { "C4" } else { "C1" })
             .map_err(|_| invalid("avatar start cell must be valid"))?,
@@ -13958,19 +14669,50 @@ mod tests {
             .ensure_selfplay_supported()
             .expect("artifact-free Cave-In is self-play safe");
 
-        let artifacts = selfplay_manifest_with(31, |manifest| {
-            manifest["cards"]["south-spell-1"] = json!({
-                "cardType": "artifact",
-                "grantsBearerPower": 2,
-                "manaCost": 0,
-                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-            });
+        let power_artifact = json!({
+            "cardType": "artifact",
+            "grantsBearerPower": 2,
+            "manaCost": 0,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        });
+        let artifact_manifest = |artifact: &Value, burrows: bool| {
+            selfplay_manifest_with(31, |manifest| {
+                manifest["cards"]["south-spell-1"] = artifact.clone();
+                if burrows {
+                    for ordinal in 1..=50 {
+                        manifest["cards"][format!("north-spell-{ordinal}")] = json!({
+                            "burrowTargetMinionOrArtifact": true,
+                            "cardType": "magic",
+                            "manaCost": 0,
+                            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                        });
+                    }
+                }
+            })
+        };
+        Game::from_manifest_json(&artifact_manifest(&power_artifact, false))
+            .expect("valid power Artifact manifest")
+            .ensure_selfplay_supported()
+            .expect("power Artifacts are self-play safe");
+        assert!(matches!(
+            Game::from_manifest_json(&artifact_manifest(&power_artifact, true))
+                .expect("valid Bury plus Artifact manifest")
+                .ensure_selfplay_supported(),
+            Err(GameError::UnsupportedManifestFact(field))
+                if field == "burrowTargetMinionOrArtifact with cardType:artifact"
+        ));
+
+        let lethal_artifact = json!({
+            "cardType": "artifact",
+            "grantsBearerLethal": true,
+            "manaCost": 0,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
         });
         assert!(matches!(
-            Game::from_manifest_json(&artifacts)
-                .expect("valid Artifact manifest")
+            Game::from_manifest_json(&artifact_manifest(&lethal_artifact, false))
+                .expect("valid Lethal Artifact manifest")
                 .ensure_selfplay_supported(),
-            Err(GameError::UnsupportedManifestFact(field)) if field == "cardType:artifact"
+            Err(GameError::UnsupportedManifestFact(field)) if field == "grantsBearerLethal"
         ));
     }
 
@@ -14034,7 +14776,9 @@ mod tests {
             damage: 0,
             disable_effects: Vec::new(),
             disabled_until_damaged: false,
+            last_dropped_artifacts_turn: None,
             last_interacted_turn: None,
+            last_picked_up_artifacts_turn: None,
             location: c4,
             occupied_cells: None,
             region: Region::Surface,
@@ -14105,7 +14849,9 @@ mod tests {
             damage: 0,
             disable_effects: Vec::new(),
             disabled_until_damaged: false,
+            last_dropped_artifacts_turn: None,
             last_interacted_turn: None,
+            last_picked_up_artifacts_turn: None,
             location,
             occupied_cells,
             region: Region::Surface,
@@ -14945,7 +15691,9 @@ mod tests {
                 damage: 0,
                 disable_effects: Vec::new(),
                 disabled_until_damaged: false,
+                last_dropped_artifacts_turn: None,
                 last_interacted_turn: None,
+                last_picked_up_artifacts_turn: None,
                 location: Cell::parse(location).expect("fixture cell"),
                 occupied_cells: None,
                 region: Region::Surface,
