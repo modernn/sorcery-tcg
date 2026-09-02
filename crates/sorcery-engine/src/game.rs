@@ -371,6 +371,8 @@ struct MagicChoice {
     target: Option<UnitTarget>,
     target_location: Option<Location>,
     target_site_instance_id: Option<IdentityHash>,
+    tempted_destination: Option<Location>,
+    tempted_enemy: Option<UnitTarget>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -724,6 +726,19 @@ struct SummonDestination {
     mana_cost: u64,
 }
 
+fn minimum_cardinal_distance(source: &[Cell], target: &[Cell]) -> u8 {
+    source
+        .iter()
+        .flat_map(|left| {
+            target.iter().map(move |right| {
+                left.file_index().abs_diff(right.file_index())
+                    + left.rank_index().abs_diff(right.rank_index())
+            })
+        })
+        .min()
+        .unwrap_or(u8::MAX)
+}
+
 fn nonempty_identity_combinations(
     instance_ids: &[IdentityHash],
     maximum_count: usize,
@@ -919,12 +934,12 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_)
         | MagicEffect::GrantChargeToAllyThisTurn
         | MagicEffect::GrantPowerTwoToAllyThisTurn
+        | MagicEffect::LureEnemyMinionOneStepCloser
         | MagicEffect::TeleportAllyToTargetSite => None,
         MagicEffect::DamageRandomUnitAtLocation(_) => Some("damageRandomUnitAtLocation"),
         MagicEffect::DestroyTargetSiteWithDamageGrid(_) => Some("destroyTargetSiteWithDamageGrid"),
         MagicEffect::GainControlOfTargetNearbyMinion => Some("gainControlOfTargetNearbyMinion"),
         MagicEffect::KillTargetWoundedMinion => Some("killTargetWoundedMinion"),
-        MagicEffect::LureEnemyMinionOneStepCloser => Some("lureEnemyMinionOneStepCloser"),
         MagicEffect::SubmergeTargetMinion => Some("submergeTargetMinion"),
         MagicEffect::SummonRandomMinionFromAnyCemetery => Some("summonRandomMinionFromAnyCemetery"),
         MagicEffect::TeleportNearbyAllyThenDrawCard => Some("teleportNearbyAllyThenDrawCard"),
@@ -2374,6 +2389,8 @@ impl Game {
                         target: choice.target,
                         target_location: choice.target_location,
                         target_site_instance_id: choice.target_site_instance_id,
+                        tempted_destination: choice.tempted_destination,
+                        tempted_enemy: choice.tempted_enemy,
                     };
                     let label = (if matches!(facts.effect, MagicEffect::GrantPowerTwoToAllyThisTurn)
                     {
@@ -3381,6 +3398,68 @@ impl Game {
                 }
                 choices
             }
+            MagicEffect::LureEnemyMinionOneStepCloser => {
+                let enemy_seat = other_seat(seat);
+                let tempted: Vec<UnitTarget> = self
+                    .position
+                    .units
+                    .iter()
+                    .filter(|unit| {
+                        unit.controller == enemy_seat
+                            && unit.region != Region::Void
+                            && !self.minion_is_disabled(unit)
+                            && Self::unit_occupied_cells(unit)
+                                .iter()
+                                .any(|cell| self.surface_location_exists(*cell))
+                    })
+                    .map(|unit| UnitTarget::Minion {
+                        instance_id: unit.card.instance_id.clone(),
+                        seat: enemy_seat,
+                    })
+                    .collect();
+                let mut choices = Vec::new();
+                for ally in self.controlled_allies(seat) {
+                    let ally_cells = self.unit_target_occupied_cells(&ally)?;
+                    for enemy in &tempted {
+                        let enemy_cells = self.unit_target_occupied_cells(enemy)?;
+                        if !Self::footprints_nearby(ally_cells, enemy_cells) {
+                            continue;
+                        }
+                        let from = self.unit_target_location(enemy)?;
+                        let starting_distance = minimum_cardinal_distance(enemy_cells, ally_cells);
+                        let area = self
+                            .position
+                            .units
+                            .iter()
+                            .find(|unit| unit.card.instance_id == *enemy.instance_id())
+                            .and_then(|unit| unit.occupied_cells);
+                        for destination in self.card_effect_step_destinations(enemy, from)? {
+                            let destination_cells = match area {
+                                Some(area) => translated_square(area, from.cell, destination.cell)
+                                    .ok_or(GameError::IllegalAction)?
+                                    .to_vec(),
+                                None => vec![destination.cell],
+                            };
+                            if minimum_cardinal_distance(&destination_cells, ally_cells)
+                                >= starting_distance
+                            {
+                                continue;
+                            }
+                            choices.push(MagicChoice {
+                                ally: Some(ally.clone()),
+                                tempted_destination: Some(destination),
+                                tempted_enemy: Some(enemy.clone()),
+                                ..MagicChoice::default()
+                            });
+                        }
+                    }
+                }
+                if choices.is_empty() {
+                    vec![MagicChoice::default()]
+                } else {
+                    choices
+                }
+            }
             MagicEffect::FightAllyWithAdjacentEnemy => {
                 let unit_targets = |target_seat| {
                     let player = &self.position.players[seat_index(target_seat)];
@@ -3572,7 +3651,7 @@ impl Game {
                 ally.seat(),
                 ally.instance_id(),
             )?;
-            let destinations = self.leap_attack_destinations(&ally, from)?;
+            let destinations = self.card_effect_step_destinations(&ally, from)?;
             for destination in destinations {
                 if occupied.len() == 1 {
                     choices.push(MagicChoice {
@@ -3626,7 +3705,7 @@ impl Game {
         .collect()
     }
 
-    fn leap_attack_destinations(
+    fn card_effect_step_destinations(
         &self,
         ally: &UnitTarget,
         from: Location,
@@ -8851,6 +8930,8 @@ impl Game {
             target,
             target_location,
             target_site_instance_id,
+            tempted_destination,
+            tempted_enemy,
         } = &action.descriptor
         else {
             return Err(GameError::IllegalAction);
@@ -8888,6 +8969,8 @@ impl Game {
                     target: target.clone(),
                     target_location: *target_location,
                     target_site_instance_id: target_site_instance_id.clone(),
+                    tempted_destination: *tempted_destination,
+                    tempted_enemy: tempted_enemy.clone(),
                 })
         {
             return Err(GameError::IllegalAction);
@@ -9181,6 +9264,38 @@ impl Game {
                         })
                     });
                     self.settle_lower_region_minion_deaths(outcomes)?;
+                    self.settle_static_power_deaths(outcomes)?;
+                }
+            }
+            MagicEffect::LureEnemyMinionOneStepCloser => {
+                if let (Some(ally), Some(enemy), Some(destination)) =
+                    (ally.as_ref(), tempted_enemy.as_ref(), *tempted_destination)
+                {
+                    let from = self.unit_target_location(enemy)?;
+                    let to = self.move_unit_target_to(enemy, destination)?;
+                    let ally_instance_id = ally.instance_id().clone();
+                    let enemy_instance_id = enemy.instance_id().clone();
+                    let enemy_seat = enemy.seat();
+                    let source_instance_id = card_instance_id.clone();
+                    let path = if to == from {
+                        vec![from]
+                    } else {
+                        vec![from, to]
+                    };
+                    outcomes.push("unit-lured", || {
+                        json!({
+                            "allyInstanceId": ally_instance_id,
+                            "from": from,
+                            "path": path,
+                            "seat": enemy_seat,
+                            "sourceInstanceId": source_instance_id,
+                            "steps": path.len() - 1,
+                            "targetInstanceId": enemy_instance_id,
+                            "to": to,
+                        })
+                    });
+                    self.settle_lower_region_minion_deaths(outcomes)?;
+                    self.settle_nearby_enemy_stealth(outcomes);
                     self.settle_static_power_deaths(outcomes)?;
                 }
             }

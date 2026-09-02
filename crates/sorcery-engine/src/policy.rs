@@ -710,6 +710,8 @@ mod tests {
             target: None,
             target_location: None,
             target_site_instance_id: None,
+            tempted_destination: None,
+            tempted_enemy: None,
         };
         let enemy_magic = ActionDescriptor::CastMagic {
             ally: None,
@@ -722,6 +724,8 @@ mod tests {
             target: Some(target(Seat::South)),
             target_location: None,
             target_site_instance_id: None,
+            tempted_destination: None,
+            tempted_enemy: None,
         };
         let rubble = ActionDescriptor::ReplaceRubbleWithTopAtlasSite {
             target_cell: Cell::parse("A1").expect("cell"),

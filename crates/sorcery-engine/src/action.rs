@@ -343,6 +343,12 @@ pub enum ActionDescriptor {
         /// Exact site or Rubble instance that made the location target legal.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target_site_instance_id: Option<IdentityHash>,
+        /// One-step destination the tempted enemy minion takes for Lure.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tempted_destination: Option<Location>,
+        /// Exact enemy minion tempted one step closer by Lure.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tempted_enemy: Option<UnitTarget>,
     },
     /// Commit the first engine-issued target for a staged Chain Magic cast.
     BeginChainMagic {
@@ -509,57 +515,71 @@ impl ActionDescriptor {
                 cemetery_minion_instance_id,
                 target,
                 target_location,
+                tempted_destination,
+                tempted_enemy,
                 ..
-            } => Some(if let (Some(ally), Some(target)) = (ally, target) {
-                format!(
-                    "Cast {card_id}: {} {}… fights {} {}…",
-                    ally.kind(),
-                    short_identity(ally.instance_id()),
-                    target.kind(),
-                    short_identity(target.instance_id())
-                )
-            } else if let (Some(ally), Some(destination)) = (ally, ally_destination) {
-                let strike = ally_strike_location.unwrap_or(*destination);
-                format!(
-                    "Cast {card_id}: {} {}… steps to {} and strikes enemies at {}",
-                    ally.kind(),
-                    short_identity(ally.instance_id()),
-                    destination.cell,
-                    strike.cell
-                )
-            } else if let (Some(ally), Some(location)) = (ally, target_location) {
-                format!(
-                    "Cast {card_id} to teleport {} {}… to {}",
-                    ally.kind(),
-                    short_identity(ally.instance_id()),
-                    location.cell
-                )
-            } else if let Some(ally) = ally {
-                format!(
-                    "Cast {card_id} to grant Charge to {} {}…",
-                    ally.kind(),
-                    short_identity(ally.instance_id())
-                )
-            } else if let Some(instance_id) = cemetery_minion_instance_id {
-                format!(
-                    "Cast {card_id} to return minion {}…",
-                    short_identity(instance_id)
-                )
-            } else if let Some(target) = target {
-                format!(
-                    "Cast {card_id} on {} {}…",
-                    target.kind(),
-                    short_identity(target.instance_id())
-                )
-            } else if let Some(location) = target_location {
-                format!(
-                    "Cast {card_id} at {} {}",
-                    location.cell,
-                    region_name(location.region)
-                )
-            } else {
-                format!("Cast {card_id}")
-            }),
+            } => Some(
+                if let (Some(ally), Some(enemy), Some(destination)) =
+                    (ally, tempted_enemy, tempted_destination)
+                {
+                    format!(
+                        "Cast {card_id}: {} {}… tempts minion {}… to {}",
+                        ally.kind(),
+                        short_identity(ally.instance_id()),
+                        short_identity(enemy.instance_id()),
+                        destination.cell
+                    )
+                } else if let (Some(ally), Some(target)) = (ally, target) {
+                    format!(
+                        "Cast {card_id}: {} {}… fights {} {}…",
+                        ally.kind(),
+                        short_identity(ally.instance_id()),
+                        target.kind(),
+                        short_identity(target.instance_id())
+                    )
+                } else if let (Some(ally), Some(destination)) = (ally, ally_destination) {
+                    let strike = ally_strike_location.unwrap_or(*destination);
+                    format!(
+                        "Cast {card_id}: {} {}… steps to {} and strikes enemies at {}",
+                        ally.kind(),
+                        short_identity(ally.instance_id()),
+                        destination.cell,
+                        strike.cell
+                    )
+                } else if let (Some(ally), Some(location)) = (ally, target_location) {
+                    format!(
+                        "Cast {card_id} to teleport {} {}… to {}",
+                        ally.kind(),
+                        short_identity(ally.instance_id()),
+                        location.cell
+                    )
+                } else if let Some(ally) = ally {
+                    format!(
+                        "Cast {card_id} to grant Charge to {} {}…",
+                        ally.kind(),
+                        short_identity(ally.instance_id())
+                    )
+                } else if let Some(instance_id) = cemetery_minion_instance_id {
+                    format!(
+                        "Cast {card_id} to return minion {}…",
+                        short_identity(instance_id)
+                    )
+                } else if let Some(target) = target {
+                    format!(
+                        "Cast {card_id} on {} {}…",
+                        target.kind(),
+                        short_identity(target.instance_id())
+                    )
+                } else if let Some(location) = target_location {
+                    format!(
+                        "Cast {card_id} at {} {}",
+                        location.cell,
+                        region_name(location.region)
+                    )
+                } else {
+                    format!("Cast {card_id}")
+                },
+            ),
             Self::BeginChainMagic {
                 card_id, target, ..
             } => Some(format!(
@@ -801,6 +821,8 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     target: left_target,
                     target_location: left_location,
                     target_site_instance_id: left_site,
+                    tempted_destination: left_tempted_destination,
+                    tempted_enemy: left_tempted_enemy,
                 },
                 ActionDescriptor::CastMagic {
                     ally: right_ally,
@@ -813,6 +835,8 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     target: right_target,
                     target_location: right_location,
                     target_site_instance_id: right_site,
+                    tempted_destination: right_tempted_destination,
+                    tempted_enemy: right_tempted_enemy,
                 },
             ) => compare_optional_unit_targets(left_ally.as_ref(), right_ally.as_ref())
                 .then_with(|| compare_optional_locations(*left_destination, *right_destination))
@@ -827,7 +851,19 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     compare_optional_unit_targets(left_target.as_ref(), right_target.as_ref())
                 })
                 .then_with(|| compare_optional_locations(*left_location, *right_location))
-                .then_with(|| compare_optional_identities(left_site.as_ref(), right_site.as_ref())),
+                .then_with(|| compare_optional_identities(left_site.as_ref(), right_site.as_ref()))
+                .then_with(|| {
+                    compare_optional_locations(
+                        *left_tempted_destination,
+                        *right_tempted_destination,
+                    )
+                })
+                .then_with(|| {
+                    compare_optional_unit_targets(
+                        left_tempted_enemy.as_ref(),
+                        right_tempted_enemy.as_ref(),
+                    )
+                }),
             (
                 ActionDescriptor::SummonMinion {
                     card_id: left_card,

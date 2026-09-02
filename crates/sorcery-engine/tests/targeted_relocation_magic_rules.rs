@@ -1,4 +1,4 @@
-//! Direct proofs for targeted relocation Magic (RULE-CATALOG-0039 Teleport).
+//! Direct proofs for targeted relocation Magic (RULE-CATALOG-0038 Lure, 0039 Teleport).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -19,26 +19,40 @@ fn site() -> Value {
     json!({ "cardType": "site", "elements": ["earth"] })
 }
 
-fn minion() -> Value {
-    json!({
+fn minion(extra: Value) -> Value {
+    let mut value = json!({
         "attack": 1,
         "cardType": "minion",
         "defense": 1,
         "manaCost": 0,
-        "thresholds": { "air": 0, "earth": 1, "fire": 0, "water": 0 },
-    })
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    });
+    let Value::Object(extra) = extra else {
+        panic!("extra minion facts must be an object");
+    };
+    value.as_object_mut().expect("minion facts").extend(extra);
+    value
 }
 
-fn teleport() -> Value {
-    json!({
+fn magic(effect: &str) -> Value {
+    let mut value = json!({
         "cardType": "magic",
         "manaCost": 0,
-        "teleportAllyToTargetSite": true,
         "thresholds": { "air": 0, "earth": 1, "fire": 0, "water": 0 },
-    })
+    });
+    value
+        .as_object_mut()
+        .expect("Magic facts")
+        .insert(effect.to_owned(), json!(true));
+    value
 }
 
-fn manifest(seed: u32) -> String {
+fn manifest(
+    seed: u32,
+    cards: &Value,
+    north_spellbook: &[&str],
+    south_spellbook: &[&str],
+) -> String {
     let mut value = json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "targeted-relocation-magic-rules" }))
@@ -46,31 +60,17 @@ fn manifest(seed: u32) -> String {
             "mode": "synthetic",
             "revisionId": "synthetic-targeted-relocation-magic-rules-v1",
         },
-        "cards": {
-            "north-avatar": avatar(),
-            "north-minion": minion(),
-            "north-site": site(),
-            "north-teleport": teleport(),
-            "south-avatar": avatar(),
-            "south-site": site(),
-        },
+        "cards": cards,
         "decks": {
             "north": {
                 "atlas": vec!["north-site"; 6],
                 "avatar": "north-avatar",
-                "spellbook": [
-                    "north-teleport",
-                    "north-minion",
-                    "north-teleport",
-                    "north-minion",
-                    "north-teleport",
-                    "north-minion",
-                ],
+                "spellbook": north_spellbook,
             },
             "south": {
                 "atlas": vec!["south-site"; 6],
                 "avatar": "south-avatar",
-                "spellbook": vec!["north-minion"; 6],
+                "spellbook": south_spellbook,
             },
         },
         "engineVersion": "sorcery-core-v1",
@@ -80,6 +80,28 @@ fn manifest(seed: u32) -> String {
     });
     value["manifestId"] = json!(identity_hash(&value).expect("synthetic manifest identity"));
     canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn teleport_cards() -> Value {
+    json!({
+        "north-avatar": avatar(),
+        "north-minion": minion(json!({})),
+        "north-site": site(),
+        "north-teleport": magic("teleportAllyToTargetSite"),
+        "south-avatar": avatar(),
+        "south-site": site(),
+    })
+}
+
+fn lure_cards() -> Value {
+    json!({
+        "north-avatar": avatar(),
+        "north-lure": magic("lureEnemyMinionOneStepCloser"),
+        "north-site": site(),
+        "south-avatar": avatar(),
+        "south-minion": minion(json!({ "summonToAnySite": true })),
+        "south-site": site(),
+    })
 }
 
 fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
@@ -145,7 +167,7 @@ fn assert_exact_replay(session: &Session) {
     assert!(session.verify_replay().expect("verified replay"));
 }
 
-fn teleport_actions(session: &Session, card_instance_id: &str) -> Vec<LegalAction> {
+fn cast_actions(session: &Session, card_instance_id: &str) -> Vec<LegalAction> {
     session
         .legal_actions()
         .expect("legal actions")
@@ -157,15 +179,15 @@ fn teleport_actions(session: &Session, card_instance_id: &str) -> Vec<LegalActio
         .collect()
 }
 
-fn first_teleport_in_hand(current: &Value) -> String {
-    current["players"]["north"]["hand"]["spellbook"]
+fn first_card_in_hand(current: &Value, seat: &str, card_id: &str) -> String {
+    current["players"][seat]["hand"]["spellbook"]
         .as_array()
-        .expect("North hand")
+        .expect("hand spellbook")
         .iter()
-        .find(|card| card["cardId"] == "north-teleport")
-        .expect("Teleport in hand")["instanceId"]
+        .find(|card| card["cardId"] == card_id)
+        .expect("card in hand")["instanceId"]
         .as_str()
-        .expect("Teleport identity")
+        .expect("card identity")
         .to_owned()
 }
 
@@ -187,8 +209,23 @@ fn realm_unit<'a>(current: &'a Value, instance_id: &str) -> &'a Value {
 
 /// Builds a North main phase with three surface sites, one North minion, and Teleport in hand.
 fn opening_with_three_sites() -> Session {
+    let north_spellbook = [
+        "north-teleport",
+        "north-minion",
+        "north-teleport",
+        "north-minion",
+        "north-teleport",
+        "north-minion",
+    ];
     let manifest = (1..=512)
-        .map(manifest)
+        .map(|seed| {
+            manifest(
+                seed,
+                &teleport_cards(),
+                &north_spellbook,
+                &["north-minion"; 6],
+            )
+        })
         .find(|candidate| {
             let preview = Session::new(candidate).expect("Teleport candidate");
             let hand = state(&preview)["players"]["north"]["hand"]["spellbook"]
@@ -239,8 +276,8 @@ fn rule_catalog_0039_teleport_should_move_ally_to_any_target_site_surface() {
         .expect("avatar identity")
         .to_owned();
 
-    let card_instance_id = first_teleport_in_hand(&current);
-    let actions = teleport_actions(&session, &card_instance_id);
+    let card_instance_id = first_card_in_hand(&current, "north", "north-teleport");
+    let actions = cast_actions(&session, &card_instance_id);
     assert_eq!(actions.len(), 6);
     for action in &actions {
         let descriptor = &action.descriptor;
@@ -344,5 +381,153 @@ fn teleport_to_the_site_an_ally_already_occupies_should_resolve_without_moving_i
         state(&session)["players"]["north"]["avatar"]["location"],
         avatar_cell.as_str()
     );
+    assert_exact_replay(&session);
+}
+
+/// Builds a North main phase with a South minion on the North C3 site and Lure in hand.
+fn opening_with_tempted_enemy() -> Session {
+    let north_spellbook = ["north-lure"; 6];
+    let manifest = (1..=512)
+        .map(|seed| manifest(seed, &lure_cards(), &north_spellbook, &["south-minion"; 6]))
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("Lure candidate");
+            state(&preview)["players"]["south"]["hand"]["spellbook"]
+                .as_array()
+                .expect("South opening hand")
+                .iter()
+                .any(|card| card["cardId"] == "south-minion")
+        })
+        .expect("bounded seed with a South minion in the opening hand");
+    let mut session = Session::new(&manifest).expect("valid Lure scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    end_and_draw(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    end_and_draw(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    end_and_draw(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C3"
+    });
+    end_and_draw(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    session
+}
+
+#[test]
+fn rule_catalog_0038_lure_should_make_a_nearby_enemy_minion_take_its_own_closer_step() {
+    let mut session = opening_with_tempted_enemy();
+    let current = state(&session);
+    assert_eq!(current["players"]["north"]["avatar"]["location"], "C4");
+    let avatar_instance_id = current["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("avatar identity")
+        .to_owned();
+    let units = current["realm"]["units"].as_array().expect("realm units");
+    assert_eq!(units.len(), 1);
+    let enemy_instance_id = units[0]["instanceId"]
+        .as_str()
+        .expect("enemy identity")
+        .to_owned();
+    assert_eq!(units[0]["location"], "C3");
+
+    // C2 is a legal step for the tempted minion but does not close the gap, so it must not appear.
+    assert_eq!(
+        current["realm"]["sites"]
+            .as_object()
+            .expect("realm sites")
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["C1", "C2", "C3", "C4"]
+    );
+    let card_instance_id = first_card_in_hand(&current, "north", "north-lure");
+    let actions = cast_actions(&session, &card_instance_id);
+    assert_eq!(actions.len(), 1);
+    let lure = &actions[0];
+    assert_eq!(
+        lure.descriptor["ally"]["instanceId"],
+        avatar_instance_id.as_str()
+    );
+    assert_eq!(
+        lure.descriptor["temptedEnemy"]["instanceId"],
+        enemy_instance_id.as_str()
+    );
+    assert_eq!(lure.descriptor["temptedEnemy"]["seat"], "south");
+    assert_eq!(
+        lure.descriptor["temptedDestination"],
+        json!({ "cell": "C4", "region": "surface" })
+    );
+    assert_eq!(
+        lure.label,
+        format!(
+            "Cast north-lure: avatar {}… tempts minion {}… to C4",
+            &avatar_instance_id[..15],
+            &enemy_instance_id[..15]
+        )
+    );
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardInstanceId"] == card_instance_id.as_str()
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "unit-lured", "magic-resolved"]
+    );
+    let payload = &receipt.events[1].payload;
+    assert_eq!(payload["allyInstanceId"], avatar_instance_id.as_str());
+    assert_eq!(payload["targetInstanceId"], enemy_instance_id.as_str());
+    assert_eq!(payload["seat"], "south");
+    assert_eq!(payload["steps"], 1);
+    assert_eq!(
+        payload["path"],
+        json!([
+            { "cell": "C3", "region": "surface" },
+            { "cell": "C4", "region": "surface" },
+        ])
+    );
+    assert_eq!(
+        realm_unit(&state(&session), &enemy_instance_id)["location"],
+        "C4"
+    );
+    assert!(receipt.random_draws.is_empty());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn lure_without_a_nearby_enemy_minion_should_resolve_as_a_paid_no_op() {
+    let north_spellbook = ["north-lure"; 6];
+    let manifest = manifest(7, &lure_cards(), &north_spellbook, &["south-minion"; 6]);
+    let mut session = Session::new(&manifest).expect("valid Lure scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let current = state(&session);
+    let card_instance_id = first_card_in_hand(&current, "north", "north-lure");
+    let actions = cast_actions(&session, &card_instance_id);
+    assert_eq!(actions.len(), 1);
+    assert!(actions[0].descriptor.get("ally").is_none());
+    assert!(actions[0].descriptor.get("temptedEnemy").is_none());
+    assert!(actions[0].descriptor.get("temptedDestination").is_none());
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardInstanceId"] == card_instance_id.as_str()
+    });
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
     assert_exact_replay(&session);
 }

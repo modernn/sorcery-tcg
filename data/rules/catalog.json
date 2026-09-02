@@ -733,13 +733,13 @@
         "RULE-03"
       ],
       "plainLanguage": "Lure makes a chosen enemy minion take its own closer step.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Lure makes a chosen enemy minion take its own closer step"
+        "file": "crates/sorcery-engine/tests/targeted_relocation_magic_rules.rs",
+        "testName": "rule_catalog_0038_lure_should_make_a_nearby_enemy_minion_take_its_own_closer_step"
       }
     },
     {
