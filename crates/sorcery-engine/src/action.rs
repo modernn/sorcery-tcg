@@ -396,6 +396,9 @@ pub enum ActionDescriptor {
         /// Exact engine-issued unit target.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target: Option<UnitTarget>,
+        /// Exact engine-issued Artifact target for Bury.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_artifact_instance_id: Option<IdentityHash>,
         /// Exact engine-issued realm location targeted by the Magic.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target_location: Option<Location>,
@@ -627,6 +630,7 @@ impl ActionDescriptor {
                 discard_site_instance_id,
                 draw_zone,
                 target,
+                target_artifact_instance_id,
                 target_location,
                 tempted_destination,
                 tempted_enemy,
@@ -693,6 +697,11 @@ impl ActionDescriptor {
                 } else if let Some(instance_id) = cemetery_minion_instance_id {
                     format!(
                         "Cast {card_id} to return minion {}…",
+                        short_identity(instance_id)
+                    )
+                } else if let Some(instance_id) = target_artifact_instance_id {
+                    format!(
+                        "Cast {card_id} on artifact {}…",
                         short_identity(instance_id)
                     )
                 } else if let Some(target) = target {
@@ -1130,6 +1139,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     discard_site_instance_id: left_discard,
                     draw_zone: left_draw_zone,
                     target: left_target,
+                    target_artifact_instance_id: left_artifact,
                     target_location: left_location,
                     target_site_instance_id: left_site,
                     tempted_destination: left_tempted_destination,
@@ -1146,6 +1156,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     discard_site_instance_id: right_discard,
                     draw_zone: right_draw_zone,
                     target: right_target,
+                    target_artifact_instance_id: right_artifact,
                     target_location: right_location,
                     target_site_instance_id: right_site,
                     tempted_destination: right_tempted_destination,
@@ -1166,6 +1177,9 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 .then_with(|| compare_optional_deck_zones(*left_draw_zone, *right_draw_zone))
                 .then_with(|| {
                     compare_optional_unit_targets(left_target.as_ref(), right_target.as_ref())
+                })
+                .then_with(|| {
+                    compare_optional_identities(left_artifact.as_ref(), right_artifact.as_ref())
                 })
                 .then_with(|| compare_optional_locations(*left_location, *right_location))
                 .then_with(|| compare_optional_identities(left_site.as_ref(), right_site.as_ref()))

@@ -1842,6 +1842,182 @@ fn rule_catalog_0042_bury_moves_and_immediately_settles_a_minion() {
     assert_exact_replay(&deathrite);
 }
 
+fn bury_artifact_site(water: bool) -> Value {
+    let mut site = json!({
+        "cardType": "site",
+        "elements": ["earth"],
+        "genesisGainMana": 6,
+    });
+    if water {
+        site["elements"] = json!(["water"]);
+    }
+    site
+}
+
+fn bury_artifact_manifest(seed: u32, water: bool) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "bury-artifact-rules" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-bury-artifact-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(20),
+            "north-bury": {
+                "burrowTargetMinionOrArtifact": true,
+                "cardType": "magic",
+                "manaCost": 1,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
+            "north-site": bury_artifact_site(false),
+            "south-artifact": {
+                "cardType": "artifact",
+                "grantsBearerPower": 2,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
+            "south-avatar": avatar(20),
+            "south-site": bury_artifact_site(water),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 4],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-bury"; 4],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 4],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-artifact"; 4],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn realm_artifact<'a>(value: &'a Value, instance_id: &str) -> Option<&'a Value> {
+    value["realm"]["artifacts"]
+        .as_array()
+        .expect("realm artifacts")
+        .iter()
+        .find(|artifact| artifact["instanceId"] == instance_id)
+}
+
+fn setup_bury_artifact(carried: bool, water: bool) -> (Session, String, String, Value) {
+    let mut session = opening_main(&bury_artifact_manifest(156, water));
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "south-artifact"
+            && if carried {
+                descriptor["bearer"]["kind"] == "avatar"
+            } else {
+                descriptor["bearer"].is_null() && descriptor["cell"] == "C1"
+            }
+    });
+    let artifact_id = state(&session)["realm"]["artifacts"][0]["instanceId"]
+        .as_str()
+        .expect("artifact identity")
+        .to_owned();
+    let before_cast = state(&session);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let spell_id = state(&session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North hand")
+        .iter()
+        .find(|card| card["cardId"] == "north-bury")
+        .expect("Bury in hand")["instanceId"]
+        .as_str()
+        .expect("Bury identity")
+        .to_owned();
+    let bury_actions: Vec<_> = session
+        .legal_actions()
+        .expect("Bury choices")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardInstanceId"] == spell_id
+                && action.descriptor["targetArtifactInstanceId"] == artifact_id
+        })
+        .collect();
+    assert_eq!(bury_actions.len(), 1);
+    assert!(bury_actions[0].label.contains("artifact"));
+    (session, artifact_id, spell_id, before_cast)
+}
+
+fn cast_bury_artifact(session: &mut Session, artifact_id: &str, spell_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardInstanceId"] == spell_id
+            && descriptor["targetArtifactInstanceId"] == artifact_id
+    });
+    receipt
+}
+
+#[test]
+fn rule_catalog_0043_bury_detaches_and_burrows_artifacts() {
+    let (mut uncarried, uncarried_id, uncarried_spell, uncarried_before) =
+        setup_bury_artifact(false, false);
+    let uncarried_receipt = cast_bury_artifact(&mut uncarried, &uncarried_id, &uncarried_spell);
+    assert_eq!(
+        event_types(&uncarried_receipt),
+        ["magic-cast", "artifact-burrowed", "magic-resolved"]
+    );
+    assert_eq!(
+        realm_artifact(&state(&uncarried), &uncarried_id).expect("burrowed artifact")["region"],
+        "underground"
+    );
+    assert_eq!(
+        realm_artifact(&state(&uncarried), &uncarried_id).expect("burrowed artifact")["location"],
+        realm_artifact(&uncarried_before, &uncarried_id).expect("surface artifact")["location"]
+    );
+    assert_eq!(
+        uncarried_receipt.events[0].payload["targetArtifactInstanceId"],
+        uncarried_id
+    );
+    assert_exact_replay(&uncarried);
+
+    let (mut carried, carried_id, carried_spell, _) = setup_bury_artifact(true, false);
+    let carried_receipt = cast_bury_artifact(&mut carried, &carried_id, &carried_spell);
+    assert_eq!(
+        event_types(&carried_receipt),
+        ["magic-cast", "artifact-burrowed", "magic-resolved"]
+    );
+    let carried_state = state(&carried);
+    let carried_artifact = realm_artifact(&carried_state, &carried_id).expect("detached artifact");
+    assert_eq!(carried_artifact["location"], "C1");
+    assert_eq!(carried_artifact["owner"], "south");
+    assert_eq!(carried_artifact["region"], "underground");
+    assert!(carried_artifact.get("bearer").is_none());
+    assert_exact_replay(&carried);
+
+    let (mut water, water_id, water_spell, water_before) = setup_bury_artifact(false, true);
+    let water_receipt = cast_bury_artifact(&mut water, &water_id, &water_spell);
+    assert_eq!(
+        event_types(&water_receipt),
+        ["magic-cast", "magic-resolved"]
+    );
+    let water_state = state(&water);
+    assert_eq!(
+        realm_artifact(&water_state, &water_id),
+        realm_artifact(&water_before, &water_id)
+    );
+    assert_exact_replay(&water);
+}
+
 #[test]
 #[expect(
     clippy::too_many_lines,
