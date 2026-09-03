@@ -261,6 +261,14 @@ export class RustSessionClient {
     });
   }
 
+  async observe(seat: 'north' | 'south'): Promise<JsonValue> {
+    const result = await this.call('observe', { seat });
+    if (!isRecord(result) || result.observation === undefined) {
+      throw new Error('Rust session observe result was invalid');
+    }
+    return result.observation as JsonValue;
+  }
+
   async verifyReplay(): Promise<boolean> {
     const result = await this.call('verifyReplay', {});
     if (!isRecord(result) || typeof result.verified !== 'boolean') {
