@@ -9,18 +9,12 @@ import {
 } from '../../src/engine/checkpoint.ts';
 import {
   createGameManifest,
-  createGameSession,
-  verifyGameReplay,
   type GameCardDefinition,
   type GameLegalAction,
-  type GameSession,
 } from '../../src/engine/game.ts';
 import {
-  accept,
-  action,
   cardsFor,
   deck,
-  keep,
   manifest,
   SYNTHETIC_AUTHORITY_HASH,
   takeAction,
@@ -28,20 +22,8 @@ import {
 } from './game-setup-helpers.ts';
 import { SetupCtx, withSetup } from './rust-setup-session.ts';
 
-// TODO(rust-cutover): stays on the legacy synchronous engine. This is not a
-// synthetic-state limitation — every branch here is reached through ordinary
-// legal play. Replaying the identical action sequence on the Rust engine
-// (verified with both a standalone script and a checkpoint-branch rewrite)
-// shows a real Rust/TS parity gap: when north summons its Stealth-conditional
-// minion onto the enemy Avatar's own cell (south's Avatar starts at C1), the
-// legacy TS engine correctly treats the co-located enemy Avatar as a "nearby
-// enemy" and withholds Stealth, but the Rust engine grants Stealth anyway.
-// Rust's `rule_catalog_0106_conditional_end_turn_stealth_should_require_no_nearby_enemy_minion`
-// (crates/sorcery-engine/tests/readiness_affinity_rules.rs) only proves the
-// nearby-enemy-*minion* case, not nearby-enemy-*Avatar*. This needs a Rust
-// engine fix (and a matching Rust proof) before this test can move to SetupCtx.
-test('RULE-04 conditional end-turn Stealth requires no nearby enemy in the same region', () => {
-  let prepared = keep(keep(createGameSession(manifest(241, {
+test('RULE-04 conditional end-turn Stealth requires no nearby enemy in the same region', async () => {
+  await withSetup(manifest(241, {
     northSpell: {
       attack: 2,
       defense: 2,
@@ -60,98 +42,95 @@ test('RULE-04 conditional end-turn Stealth requires no nearby enemy in the same 
       summonToAnySite: true,
       thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
     },
-  }))));
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    prepared = accept(prepared, action(prepared, predicate));
-  };
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cell === 'B3' && (descriptor.region ?? 'surface') === 'surface');
-  const enemyInstanceId = prepared.state.realm.units
-    .find(({ controller }) => controller === 'south')?.instanceId;
-  assert.ok(enemyInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const checkpoint = prepared;
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+      await takeAction(ctx, predicate);
+    };
+    await take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B4');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B1');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B3');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B2');
+    await take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'B3' && (descriptor.region ?? 'surface') === 'surface');
+    const enemyInstanceId = ctx.state.realm.units
+      .find(({ controller }) => controller === 'south')?.instanceId;
+    assert.ok(enemyInstanceId);
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const checkpoint = createGameCheckpoint(ctx.session);
 
-  const summon = (cell: 'C1' | 'C4', region: 'surface' | 'underwater'): GameSession =>
-    accept(checkpoint, action(checkpoint, ({ descriptor }) => descriptor.kind === 'summon-minion'
-      && descriptor.cell === cell && (descriptor.region ?? 'surface') === region));
-  const sourceId = (session: GameSession): string => {
-    const instanceId = session.state.realm.units
-      .find(({ controller }) => controller === 'north')?.instanceId;
-    assert.ok(instanceId);
-    return instanceId;
-  };
+    const summon = async (cell: 'C1' | 'C4', region: 'surface' | 'underwater'): Promise<void> => {
+      await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'summon-minion'
+        && descriptor.cell === cell && (descriptor.region ?? 'surface') === region);
+    };
+    const sourceId = (): string => {
+      const instanceId = ctx.state.realm.units
+        .find(({ controller }) => controller === 'north')?.instanceId;
+      assert.ok(instanceId);
+      return instanceId;
+    };
 
-  let avatarBlocked = summon('C1', 'surface');
-  const avatarBlockedId = sourceId(avatarBlocked);
-  avatarBlocked = accept(avatarBlocked, action(avatarBlocked, ({ descriptor }) =>
-    descriptor.kind === 'end-turn'));
-  assert.equal(avatarBlocked.state.realm.units
-    .find(({ instanceId }) => instanceId === avatarBlockedId)?.stealthed, false);
-  assert.deepEqual(avatarBlocked.transcript.at(-1)?.events.map(({ type }) => type), [
-    'turn-ended',
-    'turn-started',
-  ]);
-  assert.equal(verifyGameReplay(avatarBlocked), true);
+    await summon('C1', 'surface');
+    const avatarBlockedId = sourceId();
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === avatarBlockedId)?.stealthed, false);
+    assert.deepEqual(ctx.session.transcript.at(-1)?.events.map(({ type }) => type), [
+      'turn-ended',
+      'turn-started',
+    ]);
+    assert.equal(await ctx.verifyReplay(), true);
 
-  let otherRegion = summon('C1', 'underwater');
-  const otherRegionId = sourceId(otherRegion);
-  otherRegion = accept(otherRegion, action(otherRegion, ({ descriptor }) =>
-    descriptor.kind === 'end-turn'));
-  assert.equal(otherRegion.state.realm.units
-    .find(({ instanceId }) => instanceId === otherRegionId)?.stealthed, true);
-  assert.deepEqual(otherRegion.transcript.at(-1)?.events.map(({ type }) => type), [
-    'stealth-gained',
-    'turn-ended',
-    'turn-started',
-  ]);
-  assert.equal(verifyGameReplay(otherRegion), true);
+    await ctx.resume(checkpoint);
+    await summon('C1', 'underwater');
+    const otherRegionId = sourceId();
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === otherRegionId)?.stealthed, true);
+    assert.deepEqual(ctx.session.transcript.at(-1)?.events.map(({ type }) => type), [
+      'stealth-gained',
+      'turn-ended',
+      'turn-started',
+    ]);
+    assert.equal(await ctx.verifyReplay(), true);
 
-  let minionBlocked = summon('C4', 'surface');
-  const minionBlockedId = sourceId(minionBlocked);
-  minionBlocked = accept(minionBlocked, action(minionBlocked, ({ descriptor }) =>
-    descriptor.kind === 'end-turn'));
-  assert.equal(minionBlocked.state.realm.units
-    .find(({ instanceId }) => instanceId === minionBlockedId)?.stealthed, false);
-  minionBlocked = accept(minionBlocked, action(minionBlocked, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  minionBlocked = accept(minionBlocked, action(minionBlocked, ({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
+    await ctx.resume(checkpoint);
+    await summon('C4', 'surface');
+    const minionBlockedId = sourceId();
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === minionBlockedId)?.stealthed, false);
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === enemyInstanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'B3,B2'));
-  minionBlocked = accept(minionBlocked, action(minionBlocked, ({ descriptor }) =>
-    descriptor.kind === 'decline-attack'));
-  minionBlocked = accept(minionBlocked, action(minionBlocked, ({ descriptor }) =>
-    descriptor.kind === 'end-turn'));
-  minionBlocked = accept(minionBlocked, action(minionBlocked, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  minionBlocked = accept(minionBlocked, action(minionBlocked, ({ descriptor }) =>
-    descriptor.kind === 'end-turn'));
-  assert.equal(minionBlocked.state.realm.units
-    .find(({ instanceId }) => instanceId === minionBlockedId)?.stealthed, true);
-  assert.deepEqual(minionBlocked.transcript.at(-1)?.events.map(({ type }) => type), [
-    'stealth-gained',
-    'turn-ended',
-    'turn-started',
-  ]);
-  assert.equal(verifyGameReplay(minionBlocked), true);
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'B3,B2');
+    await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === minionBlockedId)?.stealthed, true);
+    assert.deepEqual(ctx.session.transcript.at(-1)?.events.map(({ type }) => type), [
+      'stealth-gained',
+      'turn-ended',
+      'turn-started',
+    ]);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
 test('RULE-04 Scent Hounds permanently removes nearby enemy Stealth', async () => {
