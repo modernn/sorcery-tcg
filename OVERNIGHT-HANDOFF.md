@@ -31,12 +31,17 @@ Branch: `cursor/phase3-drown-bury-artifacts-36d3` is the integration line. `mast
 | `bcd9d7d` | Migrate setup-02 nearby-allies and controlled Mortal power to SetupCtx. |
 | `d861152` | Migrate remaining setup-02 aura-loss and magic proofs (Deathrite→Bury). |
 | `9d8d49e` | Migrate setup-07 RULE-05 Deathrite family (Bladderblimp→healing). |
+| `ef5f7ab` | Document SetupCtx progress after setup-02 finish and setup-07 Deathrite. |
+| `81506e3` | Migrate setup-07 RULE-04 combat and Death's Door proofs onto SetupCtx. |
+| `ef278bc` | Migrate setup-07 Artifact Pick Up/Drop and lethal bearer proofs onto SetupCtx. |
+| `5af97d4` | Update carried Artifact bearer seat when Mesmerism transfers control. |
+| `15763be` | Migrate setup-07 Siege Ballista through Mesmerism proofs onto SetupCtx. |
 
 Tip: run `git log -1 --oneline` (expected near this handoff commit).
 
 ## Gate status at tip
 
-- `pnpm verify` — **404 tests, 0 fail** (green after setup-02 finish + setup-07 Deathrite family).
+- `pnpm verify` — **404 tests, 0 fail** (green after setup-07 Artifact family + Mesmerism bearer-seat Rust fix).
 - Do **not** apply `stash@{0}` (`wip-parallel`): incomplete/broken SetupCtx rewrites of setup-03/04/06 + novelty-rollout left by a parallel agent; tip TS versions of those files still pass.
 
 ## Boundary cutover status
@@ -50,18 +55,19 @@ Done:
 - RULE-03 opening draw-spell + Spellcaster summon.
 - `game-setup-05` **complete** (batches 1–3): genesis sleep through ranged/drag, Granary Rats, Airborne/Mountain Pass, Updraft Ridge, Stealth, Sly Fox.
 - `game-setup-02` **play-path complete**: Leap through Bury. Remaining refs are seed peeks + forged-state probes (Chain Magic mana/region/stealth; Blink empty-atlas steps).
-- `game-setup-07` RULE-05 Deathrite family: Bladderblimp, chained area damage, moved-last-location Ward/Lethal, power snapshot, healing.
+- `game-setup-07` **play-path complete**: Deathrite family; RULE-04 combat / Defend / Intercept / damage persistence / Death's Door; Artifact Pick Up/Drop + lethal bearers; Siege Ballista; Payload Trebuchet; Rolling Boulder; Mesmerism.
+- Rust Mesmerism now updates carried Artifact `bearer.seat` on control transfer (parity with TS).
 
 Still present — `src/engine/game.ts` (~525KB):
 - Still exports `createGameSession` / `legalGameActions` / `stepGame` because most split setup files and other callers still use them.
 - Keep types / `hashGameState` / `createGameManifest` / `observeGame` as the thin TS boundary.
-- Geomancer / Granary Rats / Chain Magic / Blink empty-atlas still use TS legality only for forged-state probes.
+- Geomancer / Granary Rats / Chain Magic / Blink empty-atlas / Artifact forged probes still use TS legality only for forged-state probes.
 - Seed-search loops may still peek opening hands via `createGameSession` (cheap); play paths use SetupCtx.
 - Note: mid-combat Rust journals can diverge from TS `resumeGameCheckpoint`; use `SetupCtx.resumeCheckpoint` / `ctx.resume` for those roundtrips.
 
 ## Remaining TS legality surface (estimate)
 
-`createGameSession(` / `legalGameActions(` / `stepGame(` call counts in setup tree ≈ **424** total:
+`createGameSession(` / `legalGameActions(` / `stepGame(` call counts in setup tree ≈ **383** total:
 
 | File | ~calls |
 | --- | ---: |
@@ -71,7 +77,7 @@ Still present — `src/engine/game.ts` (~525KB):
 | game-setup-04 | 83 |
 | game-setup-05 | 1 |
 | game-setup-06 | 70 |
-| game-setup-07 | 53 |
+| game-setup-07 | 12 |
 | game-setup-08 | 80 |
 | helpers | 7 |
 
@@ -85,10 +91,8 @@ Other public/private callers still needing Rust cutover later:
 
 ## Next exact step
 
-1. Continue `game-setup-07` from the next unmigrated test:
-   - Next: `RULE-04 Move and Attack stages movement before an undefended enemy-site strike`
-   - Then: Defend split damage; takes-less prevention; Intercept window; damage persistence; Death's Door pair; then Artifact family (Pick Up/Drop → Siege Ballista → Payload → Boulder → Mesmerism).
-2. Then setup-08, or remaining RULE-02/03 in setup-03/04/06.
+1. Start `game-setup-08` from the first unmigrated test (file still ~80 TS legality refs; play paths are the target).
+2. Then remaining RULE-02/03 in setup-03 / 04 / 06 / 01 as capacity allows.
 3. Prefer helpers in `game-setup-helpers.ts` (`withNorthAttacksAtC2`, …); do **not** re-run archived one-shot rewrite scripts under `.local/archive/`.
 4. After public tests no longer call TS legality, gut `createGameSession` / `legalGameActions` / `stepGame` in `game.ts`.
 5. Drop or ignore `stash@{0}` after confirming tip does not need it (`git stash drop` only when ready).
