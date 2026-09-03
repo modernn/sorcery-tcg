@@ -397,6 +397,7 @@ impl SummonPlacement {
             last_picked_up_artifacts_turn: None,
             location: self.location,
             occupied_cells: self.occupied_cells,
+            planar_gate_voidwalk: false,
             region: self.region,
             stealthed: self.stealthed,
             summoning_sickness: true,
@@ -959,6 +960,8 @@ enum RegionDisposition {
 #[derive(Clone, Copy, Default)]
 struct RegionAbilities {
     burrowing: bool,
+    /// Voidwalk the mover already borrowed from a Planar Gate before this path began.
+    planar_gate_voidwalk: bool,
     submerge: bool,
     voidwalk: bool,
 }
@@ -967,8 +970,16 @@ impl RegionAbilities {
     const fn of_minion(minion: &MinionFacts) -> Self {
         Self {
             burrowing: minion.burrowing,
+            planar_gate_voidwalk: false,
             submerge: minion.submerge,
             voidwalk: minion.voidwalk,
+        }
+    }
+
+    const fn of_unit(minion: &MinionFacts, planar_gate_voidwalk: bool) -> Self {
+        Self {
+            planar_gate_voidwalk,
+            ..Self::of_minion(minion)
         }
     }
 }
@@ -4144,7 +4155,19 @@ impl Game {
         }
     }
 
-    fn move_minion_to(unit: &mut UnitPosition, location: Location) -> Result<(), GameError> {
+    /// Relocates one realm minion, settling the Voidwalk it may have borrowed from a Planar Gate.
+    fn move_minion_to(
+        &mut self,
+        instance_id: &IdentityHash,
+        location: Location,
+    ) -> Result<(), GameError> {
+        let retains = self.retains_planar_gate_voidwalk(instance_id, location);
+        let unit = self
+            .position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == *instance_id)
+            .ok_or(GameError::IllegalAction)?;
         if let Some(area) = unit.occupied_cells {
             unit.occupied_cells = Some(
                 translated_square(area, unit.location, location.cell)
@@ -4152,6 +4175,7 @@ impl Game {
             );
         }
         unit.location = location.cell;
+        unit.planar_gate_voidwalk = retains;
         unit.region = location.region;
         Ok(())
     }
@@ -4994,16 +5018,27 @@ impl Game {
         let Some(maximum_cost) = profile.maximum_cost else {
             return paths;
         };
-        let mut frontier = vec![(0_usize, vec![start])];
+        let mut frontier = vec![(0_usize, vec![start], profile.regions.planar_gate_voidwalk)];
         while !frontier.is_empty() {
             let mut next_frontier = Vec::new();
-            for (cost, path) in frontier {
+            for (cost, path, borrowed_voidwalk) in frontier {
                 let current = *path.last().expect("movement path starts nonempty");
                 if self.footprint_is_immobilized(profile.occupied_cells, start.cell, current.cell) {
                     continue;
                 }
+                let can_voidwalk = profile.regions.voidwalk
+                    || borrowed_voidwalk
+                    || profile.moving_minion
+                        && self.cells_at_planar_gate(
+                            &Self::translated_footprint(
+                                profile.occupied_cells,
+                                start.cell,
+                                current.cell,
+                            ),
+                            current.region,
+                        );
                 let tunnel_hops = self.burrowed_connection_locations(profile, current.cell);
-                for candidate in self.movement_step_candidates(current, profile) {
+                for candidate in self.movement_step_candidates(current, profile, can_voidwalk) {
                     let tunnel_hop =
                         current.region == Region::Underground && tunnel_hops.contains(&candidate);
                     let footprint_allowed = profile.occupied_cells.map_or_else(
@@ -5051,13 +5086,35 @@ impl Game {
                     }
                     let mut next = path.clone();
                     next.push(candidate);
-                    next_frontier.push((next_cost, next));
+                    next_frontier.push((
+                        next_cost,
+                        next,
+                        !profile.regions.voidwalk
+                            && candidate.region == Region::Void
+                            && can_voidwalk,
+                    ));
                 }
             }
             frontier = next_frontier;
-            paths.extend(frontier.iter().map(|(_, path)| path.clone()));
+            paths.extend(frontier.iter().map(|(_, path, _)| path.clone()));
         }
         paths
+    }
+
+    /// The cells a footprint anchored at `start` covers once it stands on `current`.
+    fn translated_footprint(
+        occupied_cells: Option<SquareArea>,
+        start: Cell,
+        current: Cell,
+    ) -> Vec<Cell> {
+        occupied_cells.map_or_else(
+            || vec![current],
+            |area| {
+                translated_square(area, start, current)
+                    .map(Vec::from)
+                    .unwrap_or_default()
+            },
+        )
     }
 
     /// Every location one step reaches from `current`, honoring the mover's region abilities.
@@ -5065,6 +5122,7 @@ impl Game {
         &self,
         current: Location,
         profile: MovementProfile,
+        can_voidwalk: bool,
     ) -> Vec<Location> {
         let bordering = |region: Region| {
             current
@@ -5096,7 +5154,7 @@ impl Game {
                         region: Region::Underwater,
                     });
                 }
-                if profile.regions.voidwalk {
+                if can_voidwalk {
                     candidates.extend(bordering(Region::Void));
                 }
             }
@@ -5110,7 +5168,7 @@ impl Game {
                 if profile.regions.submerge {
                     candidates.extend(bordering(Region::Underwater));
                 }
-                if profile.regions.voidwalk {
+                if can_voidwalk {
                     candidates.extend(bordering(Region::Void));
                 }
             }
@@ -5123,11 +5181,11 @@ impl Game {
                 if profile.regions.burrowing {
                     candidates.extend(bordering(Region::Underground));
                 }
-                if profile.regions.voidwalk {
+                if can_voidwalk {
                     candidates.extend(bordering(Region::Void));
                 }
             }
-            Region::Void if profile.regions.voidwalk => {
+            Region::Void if can_voidwalk => {
                 candidates.extend(bordering(Region::Void));
                 candidates.extend(bordering(Region::Surface));
                 if profile.regions.burrowing {
@@ -5319,6 +5377,64 @@ impl Game {
                 })
             })
             .collect()
+    }
+
+    /// Whether a footprint stands on a site that lends its minions Voidwalk.
+    ///
+    /// A Planar Gate only reaches the layers its own cell holds, so a unit already in the void is
+    /// beyond its reach and keeps the ability through the flag it carried in with.
+    fn cells_at_planar_gate(&self, cells: &[Cell], region: Region) -> bool {
+        region != Region::Void
+            && cells.iter().any(|cell| {
+                self.position.sites[cell.index()]
+                    .as_ref()
+                    .is_some_and(|site| {
+                        matches!(
+                            &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                            CardFacts::Site(facts)
+                                if facts.minions_here_gain_voidwalk_until_leaving_void
+                        )
+                    })
+            })
+    }
+
+    fn minion_at_planar_gate(&self, unit: &UnitPosition) -> bool {
+        self.cells_at_planar_gate(Self::unit_occupied_cells(unit), unit.region)
+    }
+
+    /// Whether a minion may currently walk the void, printed or borrowed from a Planar Gate.
+    fn minion_can_voidwalk(&self, unit: &UnitPosition) -> bool {
+        if self.minion_is_disabled(unit) {
+            return false;
+        }
+        let printed = matches!(
+            &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
+            CardFacts::Minion(facts) if facts.voidwalk
+        );
+        printed || unit.planar_gate_voidwalk || self.minion_at_planar_gate(unit)
+    }
+
+    /// Whether a mover keeps its borrowed Voidwalk after landing on `location`.
+    ///
+    /// Borrowed Voidwalk lasts exactly as long as the void does: a minion carries it in from the
+    /// gate, keeps it for every void step after, and loses it the moment it leaves.
+    fn retains_planar_gate_voidwalk(&self, instance_id: &IdentityHash, location: Location) -> bool {
+        if location.region != Region::Void {
+            return false;
+        }
+        self.position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == *instance_id)
+            .is_some_and(|unit| {
+                let printed = matches!(
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
+                    CardFacts::Minion(facts) if facts.voidwalk
+                );
+                !printed
+                    && !self.minion_is_disabled(unit)
+                    && (unit.planar_gate_voidwalk || self.minion_at_planar_gate(unit))
+            })
     }
 
     /// Whether a played Water site currently stands at one cell.
@@ -6905,14 +7021,12 @@ impl Game {
             .tapped = true;
         let mut reached = 0;
         while let Some(next) = path.get(reached + 1).copied() {
-            let Some(unit) =
-                self.position.units.iter_mut().find(|unit| {
-                    unit.controller == seat && unit.card.instance_id == *unit_instance_id
-                })
-            else {
+            if !self.position.units.iter().any(|unit| {
+                unit.controller == seat && unit.card.instance_id == *unit_instance_id
+            }) {
                 break;
-            };
-            Self::move_minion_to(unit, next)?;
+            }
+            self.move_minion_to(unit_instance_id, next)?;
             reached += 1;
             self.settle_nearby_enemy_stealth(outcomes);
             if reached + 1 >= path.len() {
@@ -6995,14 +7109,14 @@ impl Game {
         let unit = self
             .position
             .units
-            .iter_mut()
+            .iter()
             .find(|unit| unit.controller == seat && unit.card.instance_id == *unit_instance_id)
             .ok_or(GameError::IllegalAction)?;
         let from = Location {
             cell: unit.location,
             region: unit.region,
         };
-        Self::move_minion_to(unit, next)?;
+        self.move_minion_to(unit_instance_id, next)?;
         self.position
             .pending_basic_movement
             .as_pending_mut()
@@ -7168,15 +7282,12 @@ impl Game {
         let (Some(from), Some(path), Some(to)) = (from, path, to) else {
             return Err(GameError::IllegalAction);
         };
-        let unit = self
-            .position
-            .units
-            .iter_mut()
-            .find(|unit| {
-                unit.controller == action.seat && unit.card.instance_id == *unit_instance_id
-            })
-            .ok_or(GameError::IllegalAction)?;
-        Self::move_minion_to(unit, *to)?;
+        if !self.position.units.iter().any(|unit| {
+            unit.controller == action.seat && unit.card.instance_id == *unit_instance_id
+        }) {
+            return Err(GameError::IllegalAction);
+        }
+        self.move_minion_to(unit_instance_id, *to)?;
         self.position.state_version += 1;
         outcomes.push("unit-stepped", || {
             json!({
@@ -9678,13 +9789,7 @@ impl Game {
             }
             UnitKind::Minion => {
                 for location in path.iter().skip(1) {
-                    let unit = self
-                        .position
-                        .units
-                        .iter_mut()
-                        .find(|unit| unit.card.instance_id == *unit_instance_id)
-                        .ok_or(GameError::IllegalAction)?;
-                    Self::move_minion_to(unit, *location)?;
+                    self.move_minion_to(unit_instance_id, *location)?;
                     self.settle_nearby_enemy_stealth(outcomes);
                 }
                 self.position
@@ -10169,6 +10274,7 @@ impl Game {
             last_picked_up_artifacts_turn: None,
             location: cell,
             occupied_cells: None,
+            planar_gate_voidwalk: false,
             region: Region::Surface,
             stealthed: facts.stealth,
             summoning_sickness: true,
@@ -13103,13 +13209,15 @@ impl Game {
                 avatar.location = destination.cell;
             }
             UnitTarget::Minion { instance_id, seat } => {
-                let unit = self
+                if !self
                     .position
                     .units
-                    .iter_mut()
-                    .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
-                    .ok_or(GameError::IllegalAction)?;
-                Self::move_minion_to(unit, destination)?;
+                    .iter()
+                    .any(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
+                {
+                    return Err(GameError::IllegalAction);
+                }
+                self.move_minion_to(instance_id, destination)?;
             }
         }
         Ok(destination)
@@ -15038,6 +15146,9 @@ impl Game {
         if let Some(cells) = unit.occupied_cells {
             object.insert("occupiedCells".to_owned(), json!(cells));
         }
+        if unit.planar_gate_voidwalk {
+            object.insert("planarGateVoidwalk".to_owned(), json!(true));
+        }
         if !unit.disable_effects.is_empty() {
             object.insert(
                 "disableEffects".to_owned(),
@@ -16149,6 +16260,7 @@ mod tests {
             last_picked_up_artifacts_turn: None,
             location: c4,
             occupied_cells: None,
+            planar_gate_voidwalk: false,
             region: Region::Surface,
             stealthed: false,
             summoning_sickness: false,
@@ -16222,6 +16334,7 @@ mod tests {
             last_picked_up_artifacts_turn: None,
             location,
             occupied_cells,
+            planar_gate_voidwalk: false,
             region: Region::Surface,
             stealthed: false,
             summoning_sickness: false,
@@ -17064,6 +17177,7 @@ mod tests {
                 last_picked_up_artifacts_turn: None,
                 location: Cell::parse(location).expect("fixture cell"),
                 occupied_cells: None,
+                planar_gate_voidwalk: false,
                 region: Region::Surface,
                 stealthed,
                 summoning_sickness: false,
