@@ -1739,203 +1739,198 @@ test('RULE-03 Observatory privately reorders the next three spells without drawi
   });
 });
 
-test('RULE-03 adjacent matching sites trigger one spell draw apiece and a short deck loses', () => {
+test('RULE-03 adjacent matching sites trigger one spell draw apiece and a short deck loses', async () => {
   const base = deck('leyline-north');
   const north = {
     ...base,
     atlas: base.atlas.map(() => 'leyline-site'),
   };
-  let session = keep(createGameSession(manifest(137, {
+  await withSetup(manifest(137, {
     north,
     site: { genesisDrawSpellPerAdjacentSameCard: true },
-  })));
-  session = keep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = accept(session, action(session, predicate));
-  };
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
 
-  const firstHandSize = session.state.players.north.hand.spellbook.length;
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
-  assert.equal(session.state.players.north.hand.spellbook.length, firstHandSize);
-  assert.deepEqual(session.transcript.at(-1)?.events.map(({ type }) => type), ['site-played']);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const beforeOne = session.state.players.north.hand.spellbook.length;
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B4');
-  assert.equal(session.state.players.north.hand.spellbook.length, beforeOne + 1);
-  assert.deepEqual(
-    session.transcript.at(-1)?.events.map(({ type }) => type),
-    ['site-played', 'spell-drawn'],
-  );
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  const beforeTwo = session.state.players.north.hand.spellbook.length;
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B3');
-  assert.equal(session.state.players.north.hand.spellbook.length, beforeTwo + 2);
-  assert.deepEqual(
-    session.transcript.at(-1)?.events.map(({ type }) => type),
-    ['site-played', 'spell-drawn', 'spell-drawn'],
-  );
-  assert.equal(verifyGameReplay(session), true);
+    const firstHandSize = ctx.state.players.north.hand.spellbook.length;
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    assert.equal(ctx.state.players.north.hand.spellbook.length, firstHandSize);
+    assert.deepEqual(ctx.session.transcript.at(-1)?.events.map(({ type }) => type), ['site-played']);
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const beforeOne = ctx.state.players.north.hand.spellbook.length;
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B4');
+    assert.equal(ctx.state.players.north.hand.spellbook.length, beforeOne + 1);
+    assert.deepEqual(
+      ctx.session.transcript.at(-1)?.events.map(({ type }) => type),
+      ['site-played', 'spell-drawn'],
+    );
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    const beforeTwo = ctx.state.players.north.hand.spellbook.length;
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B3');
+    assert.equal(ctx.state.players.north.hand.spellbook.length, beforeTwo + 2);
+    assert.deepEqual(
+      ctx.session.transcript.at(-1)?.events.map(({ type }) => type),
+      ['site-played', 'spell-drawn', 'spell-drawn'],
+    );
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 
   const shortBase = deck('leyline-short', 30, 6);
   const short = {
     ...shortBase,
     atlas: shortBase.atlas.map(() => 'leyline-short-site'),
   };
-  session = keep(createGameSession(manifest(138, {
+  await withSetup(manifest(138, {
     north: short,
     site: { genesisDrawSpellPerAdjacentSameCard: true },
-  })));
-  session = keep(session);
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'B4'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C3'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
-  const beforePartial = session.state.players.north;
-  assert.equal(beforePartial.spellbook.length, 1);
-  const fourth = action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'B3');
-  const partial = stepGame(session, fourth);
-  assert.equal(partial.accepted, true);
-  session = partial.session;
-  const fourthInstanceId = fourth.descriptor.kind === 'play-site'
-    ? fourth.descriptor.cardInstanceId
-    : '';
-  assert.equal(session.state.players.north.spellbook.length, 0);
-  assert.equal(
-    session.state.players.north.hand.spellbook.length,
-    beforePartial.hand.spellbook.length + 1,
-  );
-  assert.equal(session.state.realm.sites.B3?.instanceId, fourthInstanceId);
-  assert.deepEqual(session.state.terminal, {
-    loser: 'north',
-    reason: 'deck_empty',
-    status: 'finished',
-    winner: 'south',
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B4');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    const beforePartial = ctx.state.players.north;
+    assert.equal(beforePartial.spellbook.length, 1);
+    const fourth = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'B3');
+    const partial = await ctx.step(fourth);
+    assert.equal(partial.accepted, true);
+    if (!partial.accepted) return;
+    const fourthInstanceId = fourth.descriptor.kind === 'play-site'
+      ? fourth.descriptor.cardInstanceId
+      : '';
+    assert.equal(ctx.state.players.north.spellbook.length, 0);
+    assert.equal(
+      ctx.state.players.north.hand.spellbook.length,
+      beforePartial.hand.spellbook.length + 1,
+    );
+    assert.equal(ctx.state.realm.sites.B3?.instanceId, fourthInstanceId);
+    assert.deepEqual(ctx.state.terminal, {
+      loser: 'north',
+      reason: 'deck_empty',
+      status: 'finished',
+      winner: 'south',
+    });
+    assert.deepEqual(
+      ctx.session.transcript.at(-1)?.events.map(({ type }) => type),
+      ['site-played', 'spell-drawn', 'game-ended'],
+    );
+    assert.equal(
+      canonicalJson(ctx.session.transcript.at(-1)?.events[1]?.payload ?? null)
+        .includes(fourthInstanceId),
+      true,
+    );
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  assert.deepEqual(
-    session.transcript.at(-1)?.events.map(({ type }) => type),
-    ['site-played', 'spell-drawn', 'game-ended'],
-  );
-  assert.equal(
-    canonicalJson(session.transcript.at(-1)?.events[1]?.payload ?? null)
-      .includes(fourthInstanceId),
-    true,
-  );
-  assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-03 site Genesis discards up to two top spells publicly without deck-out', () => {
-  let session = keep(createGameSession(manifest(139, {
+test('RULE-03 site Genesis discards up to two top spells publicly without deck-out', async () => {
+  await withSetup(manifest(139, {
     site: { genesisDiscardTopSpells: 2 },
-  })));
-  session = keep(session);
-  const beforeVersion = session.state.stateVersion;
-  const [first, second, next] = session.state.players.north.spellbook;
-  assert.ok(first);
-  assert.ok(second);
-  assert.ok(next);
-  const southBefore = canonicalJson(observeGame(session.state, 'south'));
-  for (const hidden of [first, second, next]) {
-    assert.equal(southBefore.includes(hidden.cardId), false);
-    assert.equal(southBefore.includes(hidden.instanceId), false);
-  }
-  const play = action(session, ({ descriptor }) => descriptor.kind === 'play-site');
-  if (play.descriptor.kind !== 'play-site') throw new Error('expected site play');
-  const sourceInstanceId = play.descriptor.cardInstanceId;
-  const result = stepGame(session, play);
-  assert.equal(result.accepted, true);
-  session = result.session;
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    const beforeVersion = ctx.state.stateVersion;
+    const [first, second, next] = ctx.state.players.north.spellbook;
+    assert.ok(first);
+    assert.ok(second);
+    assert.ok(next);
+    const southBefore = canonicalJson(observeGame(ctx.state, 'south'));
+    for (const hidden of [first, second, next]) {
+      assert.equal(southBefore.includes(hidden.cardId), false);
+      assert.equal(southBefore.includes(hidden.instanceId), false);
+    }
+    const play = await ctx.action(({ descriptor }) => descriptor.kind === 'play-site');
+    if (play.descriptor.kind !== 'play-site') throw new Error('expected site play');
+    const sourceInstanceId = play.descriptor.cardInstanceId;
+    const result = await ctx.step(play);
+    assert.equal(result.accepted, true);
+    if (!result.accepted) return;
 
-  assert.equal(session.state.stateVersion, beforeVersion + 1);
-  assert.deepEqual(session.state.players.north.cemetery, [first, second]);
-  assert.equal(session.state.players.north.spellbook[0]?.instanceId, next.instanceId);
-  assert.deepEqual(result.receipt.events.map(({ payload, type }) => ({ payload, type })), [
-    {
-      payload: {
-        cardId: play.descriptor.cardId,
-        cell: play.descriptor.cell,
-        instanceId: sourceInstanceId,
-        seat: 'north',
+    assert.equal(ctx.state.stateVersion, beforeVersion + 1);
+    assert.deepEqual(ctx.state.players.north.cemetery, [first, second]);
+    assert.equal(ctx.state.players.north.spellbook[0]?.instanceId, next.instanceId);
+    assert.deepEqual(result.receipt.events.map(({ payload, type }) => ({ payload, type })), [
+      {
+        payload: {
+          cardId: play.descriptor.cardId,
+          cell: play.descriptor.cell,
+          instanceId: sourceInstanceId,
+          seat: 'north',
+        },
+        type: 'site-played',
       },
-      type: 'site-played',
-    },
-    {
-      payload: {
-        cardId: first.cardId,
-        instanceId: first.instanceId,
-        owner: 'north',
-        seat: 'north',
-        sourceInstanceId,
+      {
+        payload: {
+          cardId: first.cardId,
+          instanceId: first.instanceId,
+          owner: 'north',
+          seat: 'north',
+          sourceInstanceId,
+        },
+        type: 'spell-discarded',
       },
-      type: 'spell-discarded',
-    },
-    {
-      payload: {
-        cardId: second.cardId,
-        instanceId: second.instanceId,
-        owner: 'north',
-        seat: 'north',
-        sourceInstanceId,
+      {
+        payload: {
+          cardId: second.cardId,
+          instanceId: second.instanceId,
+          owner: 'north',
+          seat: 'north',
+          sourceInstanceId,
+        },
+        type: 'spell-discarded',
       },
-      type: 'spell-discarded',
-    },
-  ]);
-  const southAfter = canonicalJson(observeGame(session.state, 'south'));
-  assert.equal(southAfter.includes(first.instanceId), true);
-  assert.equal(southAfter.includes(second.instanceId), true);
-  assert.equal(southAfter.includes(next.instanceId), false);
-  assert.deepEqual(session.state.terminal, { status: 'active' });
-  assert.equal(verifyGameReplay(session), true);
+    ]);
+    const southAfter = canonicalJson(observeGame(ctx.state, 'south'));
+    assert.equal(southAfter.includes(first.instanceId), true);
+    assert.equal(southAfter.includes(second.instanceId), true);
+    assert.equal(southAfter.includes(next.instanceId), false);
+    assert.deepEqual(ctx.state.terminal, { status: 'active' });
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 
-  session = keep(createGameSession(manifest(140, {
+  await withSetup(manifest(140, {
     north: deck('shallow-short', 30, 4),
     site: { genesisDiscardTopSpells: 2 },
-  })));
-  session = keep(session);
-  const only = session.state.players.north.spellbook[0];
-  assert.ok(only);
-  const partial = stepGame(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  assert.equal(partial.accepted, true);
-  session = partial.session;
-  assert.deepEqual(session.state.players.north.cemetery, [only]);
-  assert.equal(session.state.players.north.spellbook.length, 0);
-  assert.deepEqual(partial.receipt.events.map(({ type }) => type), ['site-played', 'spell-discarded']);
-  assert.deepEqual(session.state.terminal, { status: 'active' });
-  assert.equal(verifyGameReplay(session), true);
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    const only = ctx.state.players.north.spellbook[0];
+    assert.ok(only);
+    const partial = await ctx.step(await ctx.action(({ descriptor }) => descriptor.kind === 'play-site'));
+    assert.equal(partial.accepted, true);
+    if (!partial.accepted) return;
+    assert.deepEqual(ctx.state.players.north.cemetery, [only]);
+    assert.equal(ctx.state.players.north.spellbook.length, 0);
+    assert.deepEqual(partial.receipt.events.map(({ type }) => type), ['site-played', 'spell-discarded']);
+    assert.deepEqual(ctx.state.terminal, { status: 'active' });
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
 test('RULE-03/04 Vikings area damage uses bearer Lethal without becoming a strike', () => {
