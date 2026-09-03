@@ -28,7 +28,7 @@ import {
   withNumericGenesisSession,
   type SpellFacts,
 } from './game-setup-helpers.ts';
-import { withPreview, withSetup } from './rust-setup-session.ts';
+import { withPreview, withSetup, type SetupCtx } from './rust-setup-session.ts';
 
 test('RULE-03/04 Bury detaches and burrows Artifacts if able', async () => {
   const castBury = async (
@@ -1922,7 +1922,7 @@ test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', a
   });
 });
 
-test('RULE-03/04 Vile Imp may deal 2 damage to one adjacent unit or decline', () => {
+test('RULE-03/04 Vile Imp may deal 2 damage to one adjacent unit or decline', async () => {
   const gameManifest = manifest(391, {
     northSpell: {
       attack: 2,
@@ -1939,167 +1939,187 @@ test('RULE-03/04 Vile Imp may deal 2 damage to one adjacent unit or decline', ()
       ward: true,
     },
   });
-  let checkpoint = keep(keep(createGameSession(gameManifest)));
-  const take = (predicate: Parameters<typeof action>[1]): void => {
-    checkpoint = accept(checkpoint, action(checkpoint, predicate));
-  };
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const card = checkpoint.state.players.north.hand.spellbook[0];
-  assert.ok(card);
-  assert.equal((gameManifest.cards[card.cardId] as unknown as
-    Readonly<Record<string, unknown>>).genesisMayDamageTargetAdjacentUnit, 2);
-  const avatar = checkpoint.state.players.north.avatar.card;
-  const wardedTarget = checkpoint.state.realm.units[0];
-  assert.ok(wardedTarget);
-  assert.equal(wardedTarget.warded, true);
-  const summons = legalGameActions(checkpoint.state, 'north')
-    .flatMap(({ descriptor }) => descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === card.instanceId
-      && descriptor.cell === 'C4' ? [descriptor] : []);
-  assert.deepEqual(summons.map((descriptor) => ({
-    choice: descriptor.genesisDamageChoice,
-    target: descriptor.genesisDamageTarget?.instanceId,
-  })).sort((left, right) => (left.target ?? '').localeCompare(right.target ?? '')), [
-    { choice: 'decline', target: undefined },
-    { choice: 'target', target: card.instanceId },
-    { choice: 'target', target: avatar.instanceId },
-    { choice: 'target', target: wardedTarget.instanceId },
-  ].sort((left, right) => (left.target ?? '').localeCompare(right.target ?? '')));
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    const take = async (
+      predicate: (candidate: GameLegalAction) => boolean,
+    ): Promise<void> => {
+      await takeAction(ctx, predicate);
+    };
+    await take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C4');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const checkpoint = createGameCheckpoint(ctx.session);
+    const checkpointVersion = ctx.state.stateVersion;
+    const card = ctx.state.players.north.hand.spellbook[0];
+    assert.ok(card);
+    assert.equal((gameManifest.cards[card.cardId] as unknown as
+      Readonly<Record<string, unknown>>).genesisMayDamageTargetAdjacentUnit, 2);
+    const avatar = ctx.state.players.north.avatar.card;
+    const wardedTarget = ctx.state.realm.units[0];
+    assert.ok(wardedTarget);
+    assert.equal(wardedTarget.warded, true);
+    const summons = (await ctx.legalActions('north'))
+      .flatMap(({ descriptor }) => descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === card.instanceId
+        && descriptor.cell === 'C4' ? [descriptor] : []);
+    assert.deepEqual(summons.map((descriptor) => ({
+      choice: descriptor.genesisDamageChoice,
+      target: descriptor.genesisDamageTarget?.instanceId,
+    })).sort((left, right) => (left.target ?? '').localeCompare(right.target ?? '')), [
+      { choice: 'decline', target: undefined },
+      { choice: 'target', target: card.instanceId },
+      { choice: 'target', target: avatar.instanceId },
+      { choice: 'target', target: wardedTarget.instanceId },
+    ].sort((left, right) => (left.target ?? '').localeCompare(right.target ?? '')));
 
-  const decline = stepGame(checkpoint, action(checkpoint, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === card.instanceId
-      && descriptor.cell === 'C4'
-      && descriptor.genesisDamageChoice === 'decline'));
-  assert.equal(decline.accepted, true);
-  assert.equal(decline.session.state.players.north.avatar.life, 20);
-  assert.deepEqual(decline.receipt.events.map(({ type }) => type), ['minion-summoned']);
-  assert.equal(verifyGameReplay(decline.session), true);
+    const decline = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === card.instanceId
+        && descriptor.cell === 'C4'
+        && descriptor.genesisDamageChoice === 'decline'));
+    assert.equal(decline.accepted, true);
+    assert.equal(decline.session.state.players.north.avatar.life, 20);
+    assert.deepEqual(decline.receipt.events.map(({ type }) => type), ['minion-summoned']);
+    assert.equal(await ctx.verifyReplay(), true);
 
-  const targeted = stepGame(checkpoint, action(checkpoint, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === card.instanceId
-      && descriptor.cell === 'C4'
-      && descriptor.genesisDamageChoice === 'target'
-      && descriptor.genesisDamageTarget?.instanceId === avatar.instanceId));
-  assert.equal(targeted.accepted, true);
-  const source = targeted.session.state.realm.units.find(({ instanceId }) =>
-    instanceId === card.instanceId);
-  assert.ok(source);
-  assert.equal(source.damage, 0);
-  assert.equal(targeted.session.state.players.north.avatar.life, 18);
-  assert.deepEqual(targeted.receipt.events.map(({ type }) => type), [
-    'minion-summoned',
-    'genesis-damage-allocated',
-    'damage-dealt',
-    'avatar-life-lost',
-  ]);
-  assert.deepEqual(targeted.receipt.events[1]?.payload, {
-    amount: 2,
-    sourceInstanceId: source.instanceId,
-    targetInstanceId: avatar.instanceId,
+    await ctx.resume(checkpoint);
+    const targeted = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === card.instanceId
+        && descriptor.cell === 'C4'
+        && descriptor.genesisDamageChoice === 'target'
+        && descriptor.genesisDamageTarget?.instanceId === avatar.instanceId));
+    assert.equal(targeted.accepted, true);
+    const source = targeted.session.state.realm.units.find(({ instanceId }) =>
+      instanceId === card.instanceId);
+    assert.ok(source);
+    assert.equal(source.damage, 0);
+    assert.equal(targeted.session.state.players.north.avatar.life, 18);
+    assert.deepEqual(targeted.receipt.events.map(({ type }) => type), [
+      'minion-summoned',
+      'genesis-damage-allocated',
+      'damage-dealt',
+      'avatar-life-lost',
+    ]);
+    assert.deepEqual(targeted.receipt.events[1]?.payload, {
+      amount: 2,
+      sourceInstanceId: source.instanceId,
+      targetInstanceId: avatar.instanceId,
+    });
+    assert.equal(targeted.receipt.randomDraws.length, 0);
+    assert.equal(targeted.session.state.stateVersion, checkpointVersion + 1);
+    assert.equal(await ctx.verifyReplay(), true);
+
+    await ctx.resume(checkpoint);
+    const warded = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === card.instanceId
+        && descriptor.cell === 'C4'
+        && descriptor.genesisDamageChoice === 'target'
+        && descriptor.genesisDamageTarget?.instanceId === wardedTarget.instanceId));
+    assert.equal(warded.accepted, true);
+    const wardedSurvivor = warded.session.state.realm.units.find(({ instanceId }) =>
+      instanceId === wardedTarget.instanceId);
+    assert.ok(wardedSurvivor);
+    assert.equal(wardedSurvivor.damage, 0);
+    assert.equal(wardedSurvivor.warded, false);
+    assert.deepEqual(warded.receipt.events.map(({ type }) => type), [
+      'minion-summoned',
+      'genesis-damage-allocated',
+      'damage-dealt',
+      'ward-broken',
+    ]);
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  assert.equal(targeted.receipt.randomDraws.length, 0);
-  assert.equal(targeted.session.state.stateVersion, checkpoint.state.stateVersion + 1);
-  assert.equal(verifyGameReplay(targeted.session), true);
-
-  const warded = stepGame(checkpoint, action(checkpoint, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === card.instanceId
-      && descriptor.cell === 'C4'
-      && descriptor.genesisDamageChoice === 'target'
-      && descriptor.genesisDamageTarget?.instanceId === wardedTarget.instanceId));
-  assert.equal(warded.accepted, true);
-  const wardedSurvivor = warded.session.state.realm.units.find(({ instanceId }) =>
-    instanceId === wardedTarget.instanceId);
-  assert.ok(wardedSurvivor);
-  assert.equal(wardedSurvivor.damage, 0);
-  assert.equal(wardedSurvivor.warded, false);
-  assert.deepEqual(warded.receipt.events.map(({ type }) => type), [
-    'minion-summoned',
-    'genesis-damage-allocated',
-    'damage-dealt',
-    'ward-broken',
-  ]);
-  assert.equal(verifyGameReplay(warded.session), true);
 });
 
-test("RULE-03 Genesis life loss reaches but cannot cross Death's Door", () => {
-  const readyToSummon = (life: number, seed: number): GameSession => {
-    let session = keep(createGameSession(manifest(seed, {
+test("RULE-03 Genesis life loss reaches but cannot cross Death's Door", async () => {
+  const withReadyToSummon = async (
+    life: number,
+    seed: number,
+    run: (ctx: SetupCtx) => Promise<void>,
+  ): Promise<void> => {
+    await withSetup(manifest(seed, {
       avatar: { attack: 1, defense: 1, drawSpell: false, life },
       spell: {
         genesisLoseControllerLife: 2,
         manaCost: 0,
         thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
       },
-    })));
-    session = keep(session);
-    return accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+    }), async (ctx) => {
+      await ctx.keep();
+      await ctx.keep();
+      await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'play-site');
+      await run(ctx);
+    });
   };
-  const summon = (checkpoint: GameSession) => {
-    const result = stepGame(
-      checkpoint,
-      action(checkpoint, ({ descriptor }) => descriptor.kind === 'summon-minion'),
+  const summon = async (ctx: SetupCtx) => {
+    const beforeVersion = ctx.state.stateVersion;
+    const result = await ctx.step(
+      await ctx.action(({ descriptor }) => descriptor.kind === 'summon-minion'),
     );
     assert.equal(result.accepted, true);
-    assert.equal(result.session.state.stateVersion, checkpoint.state.stateVersion + 1);
+    assert.equal(result.session.state.stateVersion, beforeVersion + 1);
     return result;
   };
 
-  const lifeThree = summon(readyToSummon(3, 226));
-  const lifeThreeSource = lifeThree.session.state.realm.units.at(-1)?.instanceId;
-  assert.ok(lifeThreeSource);
-  assert.equal(lifeThree.session.state.players.north.avatar.life, 1);
-  assert.deepEqual(lifeThree.receipt.events.map(({ type }) => type), [
-    'minion-summoned',
-    'avatar-life-lost',
-  ]);
-  assert.deepEqual(lifeThree.receipt.events[1]?.payload, {
-    amount: 2,
-    life: 1,
-    seat: 'north',
-    sourceInstanceId: lifeThreeSource,
+  await withReadyToSummon(3, 226, async (ctx) => {
+    const lifeThree = await summon(ctx);
+    const lifeThreeSource = lifeThree.session.state.realm.units.at(-1)?.instanceId;
+    assert.ok(lifeThreeSource);
+    assert.equal(lifeThree.session.state.players.north.avatar.life, 1);
+    assert.deepEqual(lifeThree.receipt.events.map(({ type }) => type), [
+      'minion-summoned',
+      'avatar-life-lost',
+    ]);
+    assert.deepEqual(lifeThree.receipt.events[1]?.payload, {
+      amount: 2,
+      life: 1,
+      seat: 'north',
+      sourceInstanceId: lifeThreeSource,
+    });
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  assert.equal(verifyGameReplay(lifeThree.session), true);
 
-  const lifeTwo = summon(readyToSummon(2, 227));
-  const lifeTwoSource = lifeTwo.session.state.realm.units.at(-1)?.instanceId;
-  assert.ok(lifeTwoSource);
-  assert.equal(lifeTwo.session.state.players.north.avatar.life, 0);
-  assert.deepEqual(lifeTwo.receipt.events.map(({ type }) => type), [
-    'minion-summoned',
-    'avatar-life-lost',
-    'avatar-reached-deaths-door',
-  ]);
-  assert.deepEqual(lifeTwo.receipt.events[1]?.payload, {
-    amount: 2,
-    life: 0,
-    seat: 'north',
-    sourceInstanceId: lifeTwoSource,
-  });
-  assert.deepEqual(lifeTwo.receipt.events[2]?.payload, {
-    seat: 'north',
-    sourceInstanceId: lifeTwoSource,
-    turnNumber: 1,
-  });
-  assert.deepEqual(lifeTwo.session.state.terminal, { status: 'active' });
-  assert.equal(verifyGameReplay(lifeTwo.session), true);
+  await withReadyToSummon(2, 227, async (ctx) => {
+    const lifeTwo = await summon(ctx);
+    const lifeTwoSource = lifeTwo.session.state.realm.units.at(-1)?.instanceId;
+    assert.ok(lifeTwoSource);
+    assert.equal(lifeTwo.session.state.players.north.avatar.life, 0);
+    assert.deepEqual(lifeTwo.receipt.events.map(({ type }) => type), [
+      'minion-summoned',
+      'avatar-life-lost',
+      'avatar-reached-deaths-door',
+    ]);
+    assert.deepEqual(lifeTwo.receipt.events[1]?.payload, {
+      amount: 2,
+      life: 0,
+      seat: 'north',
+      sourceInstanceId: lifeTwoSource,
+    });
+    assert.deepEqual(lifeTwo.receipt.events[2]?.payload, {
+      seat: 'north',
+      sourceInstanceId: lifeTwoSource,
+      turnNumber: 1,
+    });
+    assert.deepEqual(lifeTwo.session.state.terminal, { status: 'active' });
+    assert.equal(await ctx.verifyReplay(), true);
 
-  const atDeathsDoor = lifeTwo.session;
-  const deathDoorTurn = atDeathsDoor.state.players.north.avatar.deathDoorTurn;
-  const lifeZero = summon(atDeathsDoor);
-  assert.equal(lifeZero.session.state.players.north.avatar.life, 0);
-  assert.equal(lifeZero.session.state.players.north.avatar.deathDoorTurn, deathDoorTurn);
-  assert.deepEqual(lifeZero.receipt.events.map(({ type }) => type), ['minion-summoned']);
-  assert.deepEqual(lifeZero.session.state.terminal, { status: 'active' });
-  assert.equal(verifyGameReplay(lifeZero.session), true);
+    const atDeathsDoor = lifeTwo.session;
+    const deathDoorTurn = atDeathsDoor.state.players.north.avatar.deathDoorTurn;
+    const lifeZero = await summon(ctx);
+    assert.equal(lifeZero.session.state.players.north.avatar.life, 0);
+    assert.equal(lifeZero.session.state.players.north.avatar.deathDoorTurn, deathDoorTurn);
+    assert.deepEqual(lifeZero.receipt.events.map(({ type }) => type), ['minion-summoned']);
+    assert.deepEqual(lifeZero.session.state.terminal, { status: 'active' });
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
 test('RULE-03 Grain Sparrow Genesis gains controller life through shared healing semantics', () => {
