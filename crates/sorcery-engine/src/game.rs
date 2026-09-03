@@ -397,6 +397,7 @@ impl SummonPlacement {
             last_picked_up_artifacts_turn: None,
             location: self.location,
             occupied_cells: self.occupied_cells,
+            planar_gate_voidwalk: false,
             region: self.region,
             stealthed: self.stealthed,
             summoning_sickness: true,
@@ -5336,6 +5337,63 @@ impl Game {
     }
 
     /// Whether a played Water site currently stands at one cell.
+    fn cells_at_planar_gate(&self, cells: &[Cell], region: Region) -> bool {
+        region != Region::Void
+            && cells.iter().any(|cell| {
+                self.position.sites[cell.index()]
+                    .as_ref()
+                    .is_some_and(|site| {
+                        matches!(
+                            &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                            CardFacts::Site(facts)
+                                if facts.minions_here_gain_voidwalk_until_leaving_void
+                        )
+                    })
+            })
+    }
+
+    /// Whether a minion stands on a site that lends its occupants Voidwalk.
+    ///
+    /// A Planar Gate only reaches the layers of its own cell, so a minion already in the void is
+    /// beyond it and keeps the ability through the flag it carried in with instead.
+    fn minion_at_planar_gate(&self, unit: &UnitPosition) -> bool {
+        self.cells_at_planar_gate(Self::unit_occupied_cells(unit), unit.region)
+    }
+
+    fn minion_has_printed_voidwalk(&self, unit: &UnitPosition) -> bool {
+        matches!(
+            &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
+            CardFacts::Minion(facts) if facts.voidwalk
+        )
+    }
+
+    /// Whether a minion may currently walk the void, printed or borrowed from a Planar Gate.
+    fn minion_can_voidwalk(&self, unit: &UnitPosition) -> bool {
+        !self.minion_is_disabled(unit)
+            && (self.minion_has_printed_voidwalk(unit)
+                || unit.planar_gate_voidwalk
+                || self.minion_at_planar_gate(unit))
+    }
+
+    /// Whether a mover keeps its borrowed Voidwalk after landing on `location`.
+    ///
+    /// Borrowed Voidwalk lasts exactly as long as the void does: a minion carries it in from the
+    /// gate, keeps it for every void step after, and loses it the moment it leaves.
+    fn retains_planar_gate_voidwalk(&self, instance_id: &IdentityHash, location: Location) -> bool {
+        location.region == Region::Void
+            && self
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == *instance_id)
+                .is_some_and(|unit| {
+                    !self.minion_has_printed_voidwalk(unit)
+                        && !self.minion_is_disabled(unit)
+                        && (unit.planar_gate_voidwalk || self.minion_at_planar_gate(unit))
+                })
+    }
+
+    /// Whether a played Water site currently stands at one cell.
     fn is_water_site(&self, cell: Cell) -> bool {
         self.position.sites[cell.index()]
             .as_ref()
@@ -10183,6 +10241,7 @@ impl Game {
             last_picked_up_artifacts_turn: None,
             location: cell,
             occupied_cells: None,
+            planar_gate_voidwalk: false,
             region: Region::Surface,
             stealthed: facts.stealth,
             summoning_sickness: true,
@@ -15116,6 +15175,9 @@ impl Game {
         if let Some(cells) = unit.occupied_cells {
             object.insert("occupiedCells".to_owned(), json!(cells));
         }
+        if unit.planar_gate_voidwalk {
+            object.insert("planarGateVoidwalk".to_owned(), json!(true));
+        }
         if !unit.disable_effects.is_empty() {
             object.insert(
                 "disableEffects".to_owned(),
@@ -16221,6 +16283,7 @@ mod tests {
             last_picked_up_artifacts_turn: None,
             location: c4,
             occupied_cells: None,
+            planar_gate_voidwalk: false,
             region: Region::Surface,
             stealthed: false,
             summoning_sickness: false,
@@ -16294,6 +16357,7 @@ mod tests {
             last_picked_up_artifacts_turn: None,
             location,
             occupied_cells,
+            planar_gate_voidwalk: false,
             region: Region::Surface,
             stealthed: false,
             summoning_sickness: false,
@@ -17096,6 +17160,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one scenario proof keeps scent-hound event ordering and replay together"
+    )]
     fn scent_hound_events_should_follow_source_identity_before_target_order() {
         let manifest = selfplay_manifest_with(31, |manifest| {
             for card_id in ["north-spell-1", "north-spell-2"] {
@@ -17136,6 +17204,7 @@ mod tests {
                 last_picked_up_artifacts_turn: None,
                 location: Cell::parse(location).expect("fixture cell"),
                 occupied_cells: None,
+                planar_gate_voidwalk: false,
                 region: Region::Surface,
                 stealthed,
                 summoning_sickness: false,
