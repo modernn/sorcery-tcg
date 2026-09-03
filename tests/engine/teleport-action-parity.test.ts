@@ -50,10 +50,10 @@ function castMagic(descriptor: EngineActionDescriptor): CastMagicDescriptor | un
   return descriptor.kind === 'cast-magic' ? descriptor as CastMagicDescriptor : undefined;
 }
 
-test('Teleport fixture regenerates byte-identically from TypeScript legality', () => {
-  assert.equal(serializeTeleportActionParityFixture(), readFileSync(fixtureUrl, 'utf8'));
+test('Teleport fixture regenerates byte-identically from Rust legality', async () => {
+  assert.equal(await serializeTeleportActionParityFixture(), readFileSync(fixtureUrl, 'utf8'));
   assert.equal(fixture.schemaVersion, 1);
-  assert.equal(fixture.source, 'typescript-legality-engine');
+  assert.equal(fixture.source, 'rust-legality-engine');
   assert.equal(fixture.actions.length, 6);
 
   for (const action of fixture.actions) {

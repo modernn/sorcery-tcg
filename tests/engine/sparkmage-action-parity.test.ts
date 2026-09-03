@@ -27,10 +27,10 @@ type Fixture = Readonly<{
 const fixtureUrl = new URL('./fixtures/sparkmage-action-v1.json', import.meta.url);
 const fixture = JSON.parse(readFileSync(fixtureUrl, 'utf8')) as Fixture;
 
-test('Sparkmage fixture regenerates byte-identically from TypeScript legality', () => {
-  assert.equal(serializeSparkmageActionParityFixture(), readFileSync(fixtureUrl, 'utf8'));
+test('Sparkmage fixture regenerates byte-identically from Rust legality', async () => {
+  assert.equal(await serializeSparkmageActionParityFixture(), readFileSync(fixtureUrl, 'utf8'));
   assert.equal(fixture.schemaVersion, 1);
-  assert.equal(fixture.source, 'typescript-legality-engine');
+  assert.equal(fixture.source, 'rust-legality-engine');
   assert.equal(fixture.actions.length, 6);
   assert.deepEqual(
     fixture.actions.map(({ descriptor }) => descriptor.kind),

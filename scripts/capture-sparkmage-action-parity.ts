@@ -6,12 +6,12 @@ import { canonicalJson, type JsonValue } from '../src/authority/canonical-json.t
 import { identityHash } from '../src/authority/hash.ts';
 import {
   createGameManifest,
-  createGameSession,
-  legalGameActions,
-  stepGame,
   type GameLegalAction,
-  type GameSession,
 } from '../src/engine/game.ts';
+import {
+  RUST_LEGALITY_SOURCE,
+  withRustSession,
+} from '../src/engine/rust-session-helpers.ts';
 
 const FIXTURE_PATH = fileURLToPath(new URL(
   '../tests/engine/fixtures/sparkmage-action-v1.json',
@@ -64,87 +64,77 @@ function manifest() {
   });
 }
 
-function take(
-  session: GameSession,
-  predicate: (action: GameLegalAction) => boolean,
-): Readonly<{ action: GameLegalAction; session: GameSession }> {
-  const action = legalGameActions(session.state, session.state.decisionSeat).find(predicate);
-  if (!action) throw new Error('expected deterministic setup action');
-  const result = stepGame(session, action);
-  if (!result.accepted) throw new Error(`issued setup action was rejected: ${result.reason.code}`);
-  return { action, session: result.session };
+export async function captureSparkmageActionParityFixture(): Promise<JsonValue> {
+  return withRustSession(manifest(), async (handle) => {
+    const setupActionIds: string[] = [];
+    const step = async (predicate: (action: GameLegalAction) => boolean): Promise<void> => {
+      const { action } = await handle.take(predicate);
+      setupActionIds.push(action.actionId);
+    };
+    const kind = (wanted: string) => (action: GameLegalAction): boolean =>
+      action.descriptor.kind === wanted;
+    const playSite = (cell: string) => (action: GameLegalAction): boolean =>
+      action.descriptor.kind === 'play-site' && action.descriptor.cell === cell;
+    const drawAtlas = (action: GameLegalAction): boolean =>
+      action.descriptor.kind === 'draw' && action.descriptor.zone === 'atlas';
+
+    await step((action) => action.descriptor.kind === 'mulligan'
+      && action.descriptor.atlasOrder.length === 0
+      && action.descriptor.spellbookOrder.length === 0);
+    await step((action) => action.descriptor.kind === 'mulligan'
+      && action.descriptor.atlasOrder.length === 0
+      && action.descriptor.spellbookOrder.length === 0);
+
+    const northSites = ['C4', 'C3', 'B3', 'B4', 'D3', 'D4'] as const;
+    const southSites = ['C1', 'C2', 'B1', 'B2', 'D1'] as const;
+    await step(playSite(northSites[0]));
+    for (let turn = 0; turn < southSites.length; turn += 1) {
+      await step(kind('end-turn'));
+      await step(drawAtlas);
+      await step(playSite(southSites[turn]!));
+      await step(kind('end-turn'));
+      await step(drawAtlas);
+      await step(playSite(northSites[turn + 1]!));
+    }
+    await step(kind('end-turn'));
+    await step(drawAtlas);
+    await step(kind('end-turn'));
+    await step(drawAtlas);
+
+    const session = handle.snapshot;
+    const actions = (await handle.legalActions('north')).filter(({ descriptor }) =>
+      descriptor.kind === 'activate-sparkmage');
+    if (actions.length !== 6) {
+      throw new Error(`expected six Sparkmage actions, received ${actions.length}`);
+    }
+    const existingNearbySurfaceCells = northSites.filter((cell) =>
+      session.state.realm.sites[cell] !== undefined);
+    if (existingNearbySurfaceCells.length !== 6) {
+      throw new Error('expected six existing nearby surface locations');
+    }
+
+    const gameManifest = manifest();
+    return {
+      actions: actions.map(({ actionId, descriptor, label }) => ({ actionId, descriptor, label })),
+      avatarInstanceId: session.state.players.north.avatar.card.instanceId,
+      canonicalActionIds: actions.map(({ actionId }) => actionId),
+      contract: 'sorcery-core-v1',
+      manifestId: gameManifest.manifestId,
+      schemaVersion: 1,
+      seat: 'north',
+      setupActionIds,
+      source: RUST_LEGALITY_SOURCE,
+      stateVersion: session.state.stateVersion,
+    };
+  });
 }
 
-export function captureSparkmageActionParityFixture(): JsonValue {
-  const gameManifest = manifest();
-  let session = createGameSession(gameManifest);
-  const setupActionIds: string[] = [];
-  const step = (predicate: (action: GameLegalAction) => boolean): void => {
-    const result = take(session, predicate);
-    setupActionIds.push(result.action.actionId);
-    session = result.session;
-  };
-  const kind = (wanted: string) => (action: GameLegalAction): boolean =>
-    action.descriptor.kind === wanted;
-  const playSite = (cell: string) => (action: GameLegalAction): boolean =>
-    action.descriptor.kind === 'play-site' && action.descriptor.cell === cell;
-  const drawAtlas = (action: GameLegalAction): boolean =>
-    action.descriptor.kind === 'draw' && action.descriptor.zone === 'atlas';
-
-  step((action) => action.descriptor.kind === 'mulligan'
-    && action.descriptor.atlasOrder.length === 0
-    && action.descriptor.spellbookOrder.length === 0);
-  step((action) => action.descriptor.kind === 'mulligan'
-    && action.descriptor.atlasOrder.length === 0
-    && action.descriptor.spellbookOrder.length === 0);
-
-  const northSites = ['C4', 'C3', 'B3', 'B4', 'D3', 'D4'] as const;
-  const southSites = ['C1', 'C2', 'B1', 'B2', 'D1'] as const;
-  step(playSite(northSites[0]));
-  for (let turn = 0; turn < southSites.length; turn += 1) {
-    step(kind('end-turn'));
-    step(drawAtlas);
-    step(playSite(southSites[turn]!));
-    step(kind('end-turn'));
-    step(drawAtlas);
-    step(playSite(northSites[turn + 1]!));
-  }
-  step(kind('end-turn'));
-  step(drawAtlas);
-  step(kind('end-turn'));
-  step(drawAtlas);
-
-  const actions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
-    descriptor.kind === 'activate-sparkmage');
-  if (actions.length !== 6) {
-    throw new Error(`expected six Sparkmage actions, received ${actions.length}`);
-  }
-  const existingNearbySurfaceCells = northSites.filter((cell) =>
-    session.state.realm.sites[cell] !== undefined);
-  if (existingNearbySurfaceCells.length !== 6) {
-    throw new Error('expected six existing nearby surface locations');
-  }
-
-  return {
-    actions: actions.map(({ actionId, descriptor, label }) => ({ actionId, descriptor, label })),
-    avatarInstanceId: session.state.players.north.avatar.card.instanceId,
-    canonicalActionIds: actions.map(({ actionId }) => actionId),
-    contract: 'sorcery-core-v1',
-    manifestId: gameManifest.manifestId,
-    schemaVersion: 1,
-    seat: 'north',
-    setupActionIds,
-    source: 'typescript-legality-engine',
-    stateVersion: session.state.stateVersion,
-  };
+export async function serializeSparkmageActionParityFixture(): Promise<string> {
+  return `${canonicalJson(await captureSparkmageActionParityFixture())}\n`;
 }
 
-export function serializeSparkmageActionParityFixture(): string {
-  return `${canonicalJson(captureSparkmageActionParityFixture())}\n`;
-}
-
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const serialized = serializeSparkmageActionParityFixture();
+async function main(): Promise<void> {
+  const serialized = await serializeSparkmageActionParityFixture();
   if (process.argv[2] === '--check') {
     if (readFileSync(FIXTURE_PATH, 'utf8') !== serialized) {
       throw new Error(`Sparkmage action parity fixture is stale: ${FIXTURE_PATH}`);
@@ -154,4 +144,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   } else {
     process.stdout.write(serialized);
   }
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  void main();
 }
