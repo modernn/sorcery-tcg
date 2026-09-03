@@ -4,21 +4,18 @@ import { identityHash } from '../authority/hash.ts';
 import {
   createGameCheckpoint,
   parseGameCheckpoint,
-  resumeGameCheckpoint,
   serializeGameCheckpoint,
   type GameCheckpoint,
 } from '../engine/checkpoint.ts';
 import { deepFreeze, type EngineRejectionCode, type StateHash } from '../engine/contract.ts';
 import {
   hashGameState,
-  legalGameActions,
-  replayGame,
-  stepGame,
-  verifyGameReplay,
   type GameLegalAction,
   type GameSession,
+  type GameStepResult,
   type GameTerminal,
 } from '../engine/game.ts';
+import { withRustSession, type RustGameSessionHandle } from '../engine/rust-session-helpers.ts';
 
 export const NOVELTY_ROLLOUT_ACTION_LIMIT = 500;
 export const NOVELTY_ROLLOUT_WIDTH_LIMIT = 128;
@@ -131,7 +128,7 @@ type Probe = Readonly<{
   index: number;
   newActionKind: boolean;
   newEventCount: number;
-  result: Extract<ReturnType<typeof stepGame>, { accepted: true }>;
+  result: Extract<GameStepResult, { accepted: true }>;
   selectedByFallback: boolean;
 }>;
 
@@ -208,16 +205,30 @@ function compareStrings(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-export function runNoveltyRollout(
+/** Runs one coverage-guided rollout from `root` against the authoritative Rust engine. */
+export async function runNoveltyRollout(
   root: GameSession,
   options: NoveltyRolloutOptions = {},
-): NoveltyRolloutResult {
+): Promise<NoveltyRolloutResult> {
   const maxActions = options.maxActions ?? NOVELTY_ROLLOUT_ACTION_LIMIT;
   if (!Number.isSafeInteger(maxActions) || maxActions < 0
     || maxActions > NOVELTY_ROLLOUT_ACTION_LIMIT) {
     throw new RangeError(`maxActions must be 0-${NOVELTY_ROLLOUT_ACTION_LIMIT}`);
   }
+  // ponytail: one live session plus one probe session. The Rust boundary has no cheap undo,
+  // so every speculative branch resumes the current node checkpoint instead.
+  return withRustSession(root.manifest, async (main) =>
+    withRustSession(root.manifest, async (probe) =>
+      rollout(root, maxActions, options, main, probe)));
+}
 
+async function rollout(
+  root: GameSession,
+  maxActions: number,
+  options: NoveltyRolloutOptions,
+  main: RustGameSessionHandle,
+  probe: RustGameSessionHandle,
+): Promise<NoveltyRolloutResult> {
   const initialStateHash = hashGameState(root.state);
   const offeredActionKinds = new Map<ActionKind, FirstSeen<ActionKind>>();
   const branchFactors = new Map<number, FirstSeen<number>>();
@@ -230,25 +241,39 @@ export function runNoveltyRollout(
   const emittedCheckpoints = new Set<StateHash>();
   let acceptedActionCount = 0;
   let session = root;
-  let replayed: GameSession | undefined;
+  let prepared: Readonly<{ checkpoint: GameCheckpoint; session: GameSession }> | undefined;
 
-  const captureCheckpoint = (
-    candidate: GameSession,
-  ): Readonly<{ checkpointId: StateHash; ok: true } | { ok: false }> => {
+  /** Serializes one node checkpoint and proves the Rust engine resumes it byte-for-byte. */
+  const prepareCheckpoint = async (candidate: GameSession): Promise<GameCheckpoint | undefined> => {
+    if (prepared?.session === candidate) return prepared.checkpoint;
     try {
       const checkpoint = parseGameCheckpoint(
         serializeGameCheckpoint(createGameCheckpoint(candidate)),
       );
-      const resumed = resumeGameCheckpoint(checkpoint);
-      if (!sameReplay(candidate, resumed)) return { ok: false };
+      if (!sameReplay(candidate, await probe.resume(checkpoint as unknown as JsonValue))) {
+        return undefined;
+      }
+      prepared = { checkpoint, session: candidate };
+      return checkpoint;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const captureCheckpoint = async (candidate: GameSession): Promise<
+    Readonly<{ checkpointId: StateHash; ok: true } | { ok: false }>
+  > => {
+    const checkpoint = await prepareCheckpoint(candidate);
+    if (!checkpoint) return { ok: false };
+    try {
       if (!emittedCheckpoints.has(checkpoint.checkpointId)) {
         options.onCheckpoint?.(checkpoint);
         emittedCheckpoints.add(checkpoint.checkpointId);
       }
-      return { checkpointId: checkpoint.checkpointId, ok: true };
     } catch {
       return { ok: false };
     }
+    return { checkpointId: checkpoint.checkpointId, ok: true };
   };
 
   const summary = (candidate: GameSession, replayVerified: boolean): NoveltyRolloutSummary =>
@@ -290,8 +315,8 @@ export function runNoveltyRollout(
     status: 'failed' as const,
   });
 
-  const fail = (reason: NoveltyRolloutFailureReason): NoveltyRolloutResult => {
-    const captured = captureCheckpoint(session);
+  const fail = async (reason: NoveltyRolloutFailureReason): Promise<NoveltyRolloutResult> => {
+    const captured = await captureCheckpoint(session);
     if (!captured.ok) return checkpointFailure(reason.kind !== 'replay-mismatch');
     return deepFreeze({
       ...summary(session, reason.kind !== 'replay-mismatch'),
@@ -300,14 +325,25 @@ export function runNoveltyRollout(
     });
   };
 
-  if (!verifyGameReplay(root)) {
-    return fail({ kind: 'replay-mismatch' });
-  }
   try {
-    replayed = replayGame(root.manifest, root.transcript.map(({ actionId }) => actionId));
+    const rootCheckpoint = await prepareCheckpoint(root);
+    if (!rootCheckpoint) return await fail({ kind: 'replay-mismatch' });
+    await main.resume(rootCheckpoint as unknown as JsonValue);
+    if (!sameReplay(root, main.snapshot) || !await main.verifyReplay()) {
+      return await fail({ kind: 'replay-mismatch' });
+    }
   } catch {
-    return fail({ kind: 'replay-mismatch' });
+    return await fail({ kind: 'replay-mismatch' });
   }
+
+  /** Applies one speculative action to a fresh copy of the current node. */
+  const speculate = async (
+    node: GameCheckpoint,
+    candidate: GameLegalAction,
+  ): Promise<GameStepResult> => {
+    await probe.resume(node as unknown as JsonValue);
+    return probe.stepAction(candidate);
+  };
 
   while (true) {
     if (session.state.terminal.status === 'finished') {
@@ -317,8 +353,12 @@ export function runNoveltyRollout(
         terminal: session.state.terminal,
       });
     }
+
+    const node = await prepareCheckpoint(session);
+    if (!node) return checkpointFailure();
+
     if (acceptedActionCount >= maxActions) {
-      const captured = captureCheckpoint(session);
+      const captured = await captureCheckpoint(session);
       if (!captured.ok) return checkpointFailure();
       return deepFreeze({
         ...summary(session, true),
@@ -330,14 +370,14 @@ export function runNoveltyRollout(
     const currentPosition = position(session, acceptedActionCount);
     let actions: readonly GameLegalAction[];
     try {
-      actions = legalGameActions(session.state, session.state.decisionSeat);
+      actions = await main.legalActions();
     } catch {
-      return fail({ kind: 'exception', phase: 'legal-actions' });
+      return await fail({ kind: 'exception', phase: 'legal-actions' });
     }
     if (!branchFactors.has(actions.length)) {
       branchFactors.set(actions.length, { firstSeen: currentPosition, value: actions.length });
     }
-    if (actions.length === 0) return fail({ kind: 'deadlock' });
+    if (actions.length === 0) return await fail({ kind: 'deadlock' });
 
     for (const kind of new Set(actions.map(actionKind))) {
       if (!offeredActionKinds.has(kind)) {
@@ -345,25 +385,27 @@ export function runNoveltyRollout(
       }
     }
 
+    let fallback: GameLegalAction;
+    try {
+      const suggested = selectDeterministicGameAction(session, actions);
+      const found = actions.find(({ actionId }) => actionId === suggested.actionId);
+      if (!found) return await fail({ kind: 'exception', phase: 'selector' });
+      fallback = found;
+    } catch {
+      return await fail({ kind: 'exception', phase: 'selector' });
+    }
+
     let selected: Probe;
     if (actions.length > NOVELTY_ROLLOUT_WIDTH_LIMIT) {
       tooWide.push(currentPosition);
-      let fallback: GameLegalAction;
+      let result: GameStepResult;
       try {
-        const suggested = selectDeterministicGameAction(session, actions);
-        fallback = actions.find(({ actionId }) => actionId === suggested.actionId)!;
-        if (!fallback) return fail({ kind: 'exception', phase: 'selector' });
+        result = await speculate(node, fallback);
       } catch {
-        return fail({ kind: 'exception', phase: 'selector' });
-      }
-      let result: ReturnType<typeof stepGame>;
-      try {
-        result = stepGame(session, fallback);
-      } catch {
-        return fail({ actionId: fallback.actionId, kind: 'exception', phase: 'fallback' });
+        return await fail({ actionId: fallback.actionId, kind: 'exception', phase: 'fallback' });
       }
       if (!result.accepted) {
-        return fail({
+        return await fail({
           actionId: fallback.actionId,
           code: result.reason.code,
           kind: 'engine-rejection',
@@ -382,26 +424,16 @@ export function runNoveltyRollout(
         selectedByFallback: true,
       };
     } else {
-      let fallbackActionId: string;
-      try {
-        const suggested = selectDeterministicGameAction(session, actions);
-        const fallback = actions.find(({ actionId }) => actionId === suggested.actionId);
-        if (!fallback) return fail({ kind: 'exception', phase: 'selector' });
-        fallbackActionId = fallback.actionId;
-      } catch {
-        return fail({ kind: 'exception', phase: 'selector' });
-      }
-
       const probes: Probe[] = [];
       for (const [index, candidate] of actions.entries()) {
-        let result: ReturnType<typeof stepGame>;
+        let result: GameStepResult;
         try {
-          result = stepGame(session, candidate);
+          result = await speculate(node, candidate);
         } catch {
-          return fail({ actionId: candidate.actionId, kind: 'exception', phase: 'probe' });
+          return await fail({ actionId: candidate.actionId, kind: 'exception', phase: 'probe' });
         }
         if (!result.accepted) {
-          return fail({
+          return await fail({
             actionId: candidate.actionId,
             code: result.reason.code,
             kind: 'engine-rejection',
@@ -418,7 +450,7 @@ export function runNoveltyRollout(
           newActionKind: !committedActionKinds.has(actionKind(candidate)),
           newEventCount: eventTypes.filter((type) => !committedEventTypes.has(type)).length,
           result,
-          selectedByFallback: candidate.actionId === fallbackActionId,
+          selectedByFallback: candidate.actionId === fallback.actionId,
         });
       }
       selected = probes.reduce(preferredProbe);
@@ -428,32 +460,32 @@ export function runNoveltyRollout(
       const committedAfterEvents = new Set(committedEventTypes.keys());
       selected.eventTypes.forEach((type) => committedAfterEvents.add(type));
       const unchosen = probes.filter(({ action }) => action.actionId !== selected.action.actionId);
-      const candidates = unchosen.flatMap((probe) => [
-        ...(!committedAfterAction.has(actionKind(probe.action))
-          ? [{ kind: 'action-kind' as const, value: actionKind(probe.action) }]
+      const candidates = unchosen.flatMap((entry) => [
+        ...(!committedAfterAction.has(actionKind(entry.action))
+          ? [{ kind: 'action-kind' as const, value: actionKind(entry.action) }]
           : []),
-        ...probe.eventTypes
+        ...entry.eventTypes
           .filter((type) => !committedAfterEvents.has(type))
           .map((value) => ({ kind: 'event-type' as const, value })),
-      ].map((signal) => ({ probe, signal })));
+      ].map((signal) => ({ entry, signal })));
       if (candidates.length > 0) {
-        const captured = captureCheckpoint(session);
+        const captured = await captureCheckpoint(session);
         if (!captured.ok) return checkpointFailure();
-        for (const { probe, signal } of candidates) {
+        for (const { entry, signal } of candidates) {
           const ranked: RankedFrontier = {
             candidate: deepFreeze({
-              actionId: probe.action.actionId,
-              actionKind: actionKind(probe.action),
+              actionId: entry.action.actionId,
+              actionKind: actionKind(entry.action),
               checkpointId: captured.checkpointId,
-              predictedEventTypes: probe.eventTypes,
-              predictedStateHash: hashGameState(probe.result.session.state),
+              predictedEventTypes: entry.eventTypes,
+              predictedStateHash: hashGameState(entry.result.session.state),
               signal,
             }),
             decisionIndex: acceptedActionCount,
-            legalIndex: probe.index,
-            newActionKind: probe.newActionKind,
-            newEventCount: probe.newEventCount,
-            selectedByFallback: probe.selectedByFallback,
+            legalIndex: entry.index,
+            newActionKind: entry.newActionKind,
+            newEventCount: entry.newEventCount,
+            selectedByFallback: entry.selectedByFallback,
           };
           const key = signalKey(signal.kind, signal.value);
           const existing = frontier.get(key);
@@ -465,18 +497,16 @@ export function runNoveltyRollout(
     probedActionKinds.add(actionKind(selected.action));
     selected.eventTypes.forEach((type) => probedEventTypes.add(type));
 
-    let replayResult: ReturnType<typeof stepGame>;
+    // The live session advances incrementally while the probe replayed the same action from the
+    // manifest. Divergence between the two is a replay mismatch, not a rollout result.
+    let applied: GameStepResult;
     try {
-      replayResult = stepGame(replayed, {
-        actionId: selected.action.actionId,
-        seat: replayed.state.decisionSeat,
-        stateVersion: replayed.state.stateVersion,
-      });
+      applied = await main.stepAction(selected.action);
     } catch {
-      return fail({ kind: 'replay-mismatch' });
+      return await fail({ kind: 'replay-mismatch' });
     }
-    if (!replayResult.accepted || !sameReplay(selected.result.session, replayResult.session)) {
-      return fail({ kind: 'replay-mismatch' });
+    if (!applied.accepted || !sameReplay(selected.result.session, applied.session)) {
+      return await fail({ kind: 'replay-mismatch' });
     }
 
     const committedPosition = currentPosition;
@@ -491,8 +521,7 @@ export function runNoveltyRollout(
       frontier.delete(signalKey('event-type', type));
     }
     frontier.delete(signalKey('action-kind', selectedKind));
-    session = selected.result.session;
-    replayed = replayResult.session;
+    session = applied.session;
     acceptedActionCount += 1;
   }
 }

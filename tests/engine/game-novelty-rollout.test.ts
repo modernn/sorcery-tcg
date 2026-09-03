@@ -7,54 +7,43 @@ import {
   selectDeterministicGameAction,
 } from '../../src/commands/run-game-demo.ts';
 import {
-  resumeGameCheckpoint,
+  resumeGameCheckpointAsync,
   type GameCheckpoint,
 } from '../../src/engine/checkpoint.ts';
 import {
-  createGameSession,
   hashGameState,
-  legalGameActions,
-  stepGame,
   type GameLegalAction,
   type GameSession,
 } from '../../src/engine/game.ts';
+import {
+  withRustSession,
+  type RustGameSessionHandle,
+} from '../../src/engine/rust-session-helpers.ts';
 import { runNoveltyRollout } from '../../src/simulator/novelty-rollout.ts';
 
-function action(
-  session: GameSession,
-  predicate: (candidate: GameLegalAction) => boolean,
-): GameLegalAction {
-  const found = legalGameActions(session.state, session.state.decisionSeat).find(predicate);
-  assert.ok(found, 'expected legal action');
-  return found;
+/** Opens one Rust session parked on South's first main-phase decision. */
+async function withSouthFirstDecision<Value>(
+  run: (handle: RustGameSessionHandle) => Promise<Value>,
+): Promise<Value> {
+  return withRustSession(createSyntheticDemoManifest(31), async (handle) => {
+    const keepOpeningHand = ({ descriptor }: GameLegalAction): boolean =>
+      descriptor.kind === 'mulligan'
+        && descriptor.atlasOrder.length === 0
+        && descriptor.spellbookOrder.length === 0;
+    await handle.take(keepOpeningHand);
+    await handle.take(keepOpeningHand);
+    await handle.take(({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await handle.take(({ descriptor }) => descriptor.kind === 'summon-minion');
+    await handle.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    return run(handle);
+  });
 }
 
-function accept(session: GameSession, candidate: GameLegalAction): GameSession {
-  const result = stepGame(session, candidate);
-  assert.equal(result.accepted, true);
-  return result.session;
-}
-
-function southFirstDecision(): GameSession {
-  let session = createGameSession(createSyntheticDemoManifest(31));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'mulligan'
-      && descriptor.atlasOrder.length === 0
-      && descriptor.spellbookOrder.length === 0));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'mulligan'
-      && descriptor.atlasOrder.length === 0
-      && descriptor.spellbookOrder.length === 0));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'summon-minion'));
-  return accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-}
-
-test('coverage-guided rollout reports committed novelty and a resumable horizon checkpoint', () => {
-  const root = southFirstDecision();
+test('coverage-guided rollout reports committed novelty and a resumable horizon checkpoint', async () => {
+  const root = await withSouthFirstDecision(async (handle) => handle.snapshot);
   const checkpoints = new Map<string, GameCheckpoint>();
-  const result = runNoveltyRollout(root, {
+  const result = await runNoveltyRollout(root, {
     maxActions: 3,
     onCheckpoint(checkpoint) {
       checkpoints.set(checkpoint.checkpointId, checkpoint);
@@ -87,7 +76,10 @@ test('coverage-guided rollout reports committed novelty and a resumable horizon 
 
   const checkpoint = checkpoints.get(result.checkpointId);
   assert.ok(checkpoint);
-  assert.equal(hashGameState(resumeGameCheckpoint(checkpoint).state), result.finalStateHash);
+  assert.equal(
+    hashGameState((await resumeGameCheckpointAsync(checkpoint)).state),
+    result.finalStateHash,
+  );
   assert.equal('checkpoint' in result, false);
   assert.equal('manifest' in result, false);
   assert.equal('session' in result, false);
@@ -96,20 +88,24 @@ test('coverage-guided rollout reports committed novelty and a resumable horizon 
     /"(?:checkpoint|decks|descriptor|error|label|manifest|message|payload|session)":/u,
   );
   assert.equal(
-    canonicalJson(runNoveltyRollout(root, { maxActions: 3 }) as unknown as JsonValue),
+    canonicalJson(await runNoveltyRollout(root, { maxActions: 3 }) as unknown as JsonValue),
     canonicalJson(result as unknown as JsonValue),
   );
 
-  let terminal = root;
-  for (let count = 0; count < 500 && terminal.state.terminal.status === 'active'; count += 1) {
-    terminal = accept(
-      terminal,
-      selectDeterministicGameAction(terminal, legalGameActions(terminal.state, terminal.state.decisionSeat)),
-    );
-  }
+  const terminal = await withSouthFirstDecision(async (handle): Promise<GameSession> => {
+    let session = handle.snapshot;
+    for (let count = 0; count < 500 && session.state.terminal.status === 'active'; count += 1) {
+      const applied = await handle.stepAction(
+        selectDeterministicGameAction(session, await handle.legalActions()),
+      );
+      assert.equal(applied.accepted, true);
+      session = applied.session;
+    }
+    return session;
+  });
   assert.equal(terminal.state.terminal.status, 'finished');
   let terminalCheckpointCount = 0;
-  const completed = runNoveltyRollout(terminal, {
+  const completed = await runNoveltyRollout(terminal, {
     maxActions: 0,
     onCheckpoint() {
       terminalCheckpointCount += 1;
@@ -120,7 +116,7 @@ test('coverage-guided rollout reports committed novelty and a resumable horizon 
   assert.equal(completed.replayVerified, true);
   assert.equal(terminalCheckpointCount, 0);
 
-  const checkpointFailure = runNoveltyRollout(root, {
+  const checkpointFailure = await runNoveltyRollout(root, {
     maxActions: 0,
     onCheckpoint() {
       throw new Error('synthetic checkpoint sink failure');
