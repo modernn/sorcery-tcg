@@ -341,6 +341,8 @@ struct PlayerPosition {
 struct SitePosition {
     card: CardInstance,
     controller: Seat,
+    /// Turn on which this site last flew, so flight stays once per turn.
+    last_flight_turn: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -9987,6 +9989,7 @@ impl Game {
         self.position.sites[cell.index()] = Some(SitePosition {
             card,
             controller: seat,
+            last_flight_turn: None,
         });
         self.settle_covered_layers(cell, replacing_rubble_with_water);
         self.position.state_version += 1;
@@ -10348,6 +10351,7 @@ impl Game {
         self.position.sites[target_cell.index()] = Some(SitePosition {
             card,
             controller: seat,
+            last_flight_turn: None,
         });
         self.settle_covered_layers(target_cell, replacing_with_water);
         self.position.state_version += 1;
@@ -15271,6 +15275,9 @@ impl Game {
     fn site_value(&self, site: &SitePosition) -> Value {
         let mut value = self.card_value(&site.card);
         value["controller"] = json!(site.controller);
+        if let Some(turn) = site.last_flight_turn {
+            value["lastFlightTurn"] = json!(turn);
+        }
         value
     }
 
@@ -15812,6 +15819,7 @@ mod tests {
         game.position.sites[c3.index()] = Some(SitePosition {
             card: south_site,
             controller: Seat::South,
+            last_flight_turn: None,
         });
         game.position.rubble[c4.index()] = Some(
             identity_hash(&json!({ "fixture": "zero-site-recovery-rubble" }))
@@ -15991,6 +15999,7 @@ mod tests {
         game.position.sites[cell.index()] = Some(SitePosition {
             card: site_card,
             controller: Seat::North,
+            last_flight_turn: None,
         });
         game.position.active_seat = Seat::North;
         game.position.decision_seat = Seat::North;
@@ -16122,6 +16131,7 @@ mod tests {
             game.position.sites[cell.index()] = Some(SitePosition {
                 card,
                 controller: Seat::North,
+                last_flight_turn: None,
             });
         }
         let start = Location {
@@ -16134,6 +16144,7 @@ mod tests {
             game.position.sites[cell.index()] = Some(SitePosition {
                 card,
                 controller: Seat::North,
+                last_flight_turn: None,
             });
         }
         assert_eq!(
@@ -16552,6 +16563,7 @@ mod tests {
                 source: CardSource::Atlas,
             },
             controller: Seat::North,
+            last_flight_turn: None,
         };
         let protected = SitePosition {
             card: CardInstance {
@@ -16561,6 +16573,7 @@ mod tests {
                 source: CardSource::Atlas,
             },
             controller: Seat::North,
+            last_flight_turn: None,
         };
         let water = SitePosition {
             card: CardInstance {
@@ -16570,6 +16583,7 @@ mod tests {
                 source: CardSource::Atlas,
             },
             controller: Seat::South,
+            last_flight_turn: None,
         };
         let c2 = Cell::parse("C2").expect("C2");
         let c3 = Cell::parse("C3").expect("C3");
@@ -16891,6 +16905,7 @@ mod tests {
                 game.position.sites[cell.index()] = Some(SitePosition {
                     card,
                     controller: Seat::North,
+                    last_flight_turn: None,
                 });
             }
             if rubble {
@@ -17024,6 +17039,7 @@ mod tests {
         game.position.sites[cell.index()] = Some(SitePosition {
             card: site,
             controller: Seat::North,
+            last_flight_turn: None,
         });
         let card_id = |name: &str| {
             CardId(
@@ -17482,6 +17498,7 @@ mod tests {
                     source: CardSource::Atlas,
                 },
                 controller: owner,
+                last_flight_turn: None,
             });
         }
 
@@ -17863,7 +17880,11 @@ mod tests {
         game.position.sites = std::array::from_fn(|_| None);
         game.position.rubble = std::array::from_fn(|_| None);
         for (cell, controller, card) in sites {
-            game.position.sites[cell.index()] = Some(SitePosition { card, controller });
+            game.position.sites[cell.index()] = Some(SitePosition {
+                card,
+                controller,
+                last_flight_turn: None,
+            });
         }
         game.position.units = Vec::new();
         game.position.active_seat = Seat::North;
