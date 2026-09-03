@@ -12891,9 +12891,9 @@ impl Game {
                     .find(|candidate| *candidate == outcome_instance_id)
             {
                 let card_id = &self.rules.cards[usize::from(
-                    self.position.players[seat_index(pending.seat)]
-                        .cemetery
-                        .iter()
+                    [Seat::North, Seat::South]
+                        .into_iter()
+                        .flat_map(|owner| self.position.players[seat_index(owner)].cemetery.iter())
                         .find(|card| card.instance_id == *dead)
                         .expect("dead minion")
                         .card_id
@@ -19730,6 +19730,7 @@ mod tests {
     }
 
     struct RaiseDeadFixture {
+        charm: CardInstance,
         game: Game,
         north_corpse: IdentityHash,
         raise_dead: IdentityHash,
@@ -19738,12 +19739,22 @@ mod tests {
 
     /// One Raise Dead board: sites only at C1 and C4, so free placement has to cross site
     /// control and cannot host a two-by-two footprint, plus one corpse in each cemetery.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one fixture pins the Raise Dead spell, both corpses, the Lucky Charm, and the board"
+    )]
     fn raise_dead_fixture(oversized: bool) -> RaiseDeadFixture {
         let manifest = selfplay_manifest_with(198, |manifest| {
             manifest["cards"]["north-spell-1"] = json!({
                 "cardType": "magic",
                 "manaCost": 0,
                 "summonRandomMinionFromAnyCemetery": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+            manifest["cards"]["north-spell-3"] = json!({
+                "bearerControllerChoosesExtraRandomOutcome": true,
+                "cardType": "artifact",
+                "manaCost": 0,
                 "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
             });
             // The corpse is unaffordable and off-threshold, so only a free placement can raise it.
@@ -19792,6 +19803,12 @@ mod tests {
             CardSource::Spellbook,
             502,
         );
+        let charm = instance(
+            card_id("north-spell-3"),
+            Seat::North,
+            CardSource::Spellbook,
+            505,
+        );
         let sites = [
             (
                 Cell::parse("C4").expect("C4"),
@@ -19828,6 +19845,7 @@ mod tests {
         north.hand_spellbook = vec![raise_dead.clone()];
         north.mana = 3;
         RaiseDeadFixture {
+            charm,
             game,
             north_corpse: north_corpse.instance_id,
             raise_dead: raise_dead.instance_id,
@@ -19858,6 +19876,61 @@ mod tests {
             .iter()
             .map(|(event_type, _)| event_type.as_str())
             .collect()
+    }
+
+    #[test]
+    fn lucky_charm_raise_dead_labels_should_name_corpses_from_either_cemetery() {
+        let base = raise_dead_fixture(false);
+        let mut game = base.game;
+        let north_avatar = game.position.players[seat_index(Seat::North)]
+            .avatar
+            .card
+            .instance_id
+            .clone();
+        game.position.artifacts.push(ArtifactPosition {
+            card: base.charm,
+            placement: ArtifactPlacement::Carried {
+                bearer: UnitTarget::Avatar {
+                    instance_id: north_avatar,
+                    seat: Seat::North,
+                },
+            },
+        });
+        let cast = raise_dead_cast(&game);
+        game.apply_action_recorded(&cast)
+            .expect("Lucky Charm Raise Dead cast");
+        assert_eq!(game.position.phase, Phase::RandomChoice);
+        // Pin both corpses as outcomes so the label path must look in both cemeteries.
+        game.position
+            .pending_random_outcome
+            .as_mut()
+            .expect("pending Lucky Charm outcome")
+            .outcome_instance_ids = vec![base.north_corpse.clone(), base.south_corpse.clone()];
+        let labels: Vec<String> = game
+            .legal_actions()
+            .expect("Lucky Charm outcomes label corpses from either cemetery")
+            .into_iter()
+            .filter(|action| {
+                matches!(
+                    action.descriptor,
+                    ActionDescriptor::ResolveRandomOutcome { .. }
+                )
+            })
+            .map(|action| action.label)
+            .collect();
+        assert_eq!(labels.len(), 2, "{labels:?}");
+        assert!(
+            labels
+                .iter()
+                .any(|label| label.starts_with("Lucky Charm chooses north-spell-2 ")),
+            "{labels:?}"
+        );
+        assert!(
+            labels
+                .iter()
+                .any(|label| label.starts_with("Lucky Charm chooses south-spell-1 ")),
+            "{labels:?}"
+        );
     }
 
     #[test]
