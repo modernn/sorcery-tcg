@@ -59,6 +59,7 @@ fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
             "replace-rubble-with-top-atlas-site"
         }
         ActionDescriptor::ActivateSiteDestruction { .. } => "activate-site-destruction",
+        ActionDescriptor::FlySite { .. } => "fly-site",
         ActionDescriptor::ResolveGenesisSpell { .. } => "resolve-genesis-spell",
         ActionDescriptor::ResolveGenesisSpellOrder { .. } => "resolve-genesis-spell-order",
         ActionDescriptor::ResolveGenesisToken { .. } => "resolve-genesis-token",

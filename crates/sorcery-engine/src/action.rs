@@ -321,6 +321,13 @@ pub enum ActionDescriptor {
         /// Exact site or Rubble identity that made the action legal.
         target_site_instance_id: IdentityHash,
     },
+    /// Fly one controlled site to a nearby empty realm cell.
+    FlySite {
+        /// Exact controlled source site taking flight.
+        source_site_instance_id: IdentityHash,
+        /// Nearby empty realm cell the site settles into.
+        target_cell: Cell,
+    },
     /// Resolve a deferred paid-token Genesis after a hidden site is revealed.
     ResolveGenesisToken {
         /// Decline or pay for the revealed site's token.
@@ -882,6 +889,7 @@ impl ActionDescriptor {
             Self::ActivateSiteDestruction { target_cell, .. } => {
                 Some(format!("Sacrifice site to destroy {target_cell}"))
             }
+            Self::FlySite { target_cell, .. } => Some(format!("Fly site to {target_cell}")),
             Self::ActivateAreaDamage {
                 source_instance_id,
                 target_location,
@@ -1358,6 +1366,18 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                         .cmp(right_source)
                         .then_with(|| left_cell.cmp(right_cell))
                         .then_with(|| left_target.cmp(right_target)),
+                    (
+                        ActionDescriptor::FlySite {
+                            source_site_instance_id: left_source,
+                            target_cell: left_cell,
+                        },
+                        ActionDescriptor::FlySite {
+                            source_site_instance_id: right_source,
+                            target_cell: right_cell,
+                        },
+                    ) => left_source
+                        .cmp(right_source)
+                        .then_with(|| left_cell.cmp(right_cell)),
                     (
                         ActionDescriptor::ActivateDiscardRandomDamage {
                             discard_card_instance_id: left_discard,
@@ -1922,21 +1942,22 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::DropArtifacts { .. } => 21,
         ActionDescriptor::EndTurn => 22,
         ActionDescriptor::ExtendChainMagic { .. } => 23,
-        ActionDescriptor::Intercept { .. } => 24,
-        ActionDescriptor::OrderDeathrites { .. } => 25,
-        ActionDescriptor::PickUpArtifacts { .. } => 26,
-        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 27,
-        ActionDescriptor::ResolveChainMagic => 28,
-        ActionDescriptor::ResolveGenesisSpell { .. } => 29,
-        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 30,
-        ActionDescriptor::ResolveGenesisToken { .. } => 31,
-        ActionDescriptor::ResolveRangedStep { .. } => 32,
-        ActionDescriptor::Mulligan { .. } => 33,
-        ActionDescriptor::PlaySite { .. } => 34,
-        ActionDescriptor::ShootDamageProjectile { .. } => 35,
-        ActionDescriptor::ShootDragProjectile { .. } => 36,
-        ActionDescriptor::ShootProjectile { .. } => 37,
-        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 38,
+        ActionDescriptor::FlySite { .. } => 24,
+        ActionDescriptor::Intercept { .. } => 25,
+        ActionDescriptor::OrderDeathrites { .. } => 26,
+        ActionDescriptor::PickUpArtifacts { .. } => 27,
+        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 28,
+        ActionDescriptor::ResolveChainMagic => 29,
+        ActionDescriptor::ResolveGenesisSpell { .. } => 30,
+        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 31,
+        ActionDescriptor::ResolveGenesisToken { .. } => 32,
+        ActionDescriptor::ResolveRangedStep { .. } => 33,
+        ActionDescriptor::Mulligan { .. } => 34,
+        ActionDescriptor::PlaySite { .. } => 35,
+        ActionDescriptor::ShootDamageProjectile { .. } => 36,
+        ActionDescriptor::ShootDragProjectile { .. } => 37,
+        ActionDescriptor::ShootProjectile { .. } => 38,
+        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 39,
     }
 }
 

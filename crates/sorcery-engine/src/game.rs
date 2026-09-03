@@ -33,6 +33,8 @@ const AREA_DAMAGE_AMOUNT: u8 = 2;
 /// The one damage amount `tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps` is admitted with.
 const ARTIFACT_DAMAGE_AMOUNT: u8 = 3;
 const ARTIFACT_ROLL_DAMAGE_AMOUNT: u8 = 4;
+/// The one air affinity `flyToNearbyVoidOncePerTurnAtAirThreshold` is admitted with.
+const SITE_FLIGHT_AIR_THRESHOLD: u64 = 3;
 
 /// Immutable manifest facts shared by cloned game positions.
 #[derive(Debug)]
@@ -341,6 +343,8 @@ struct PlayerPosition {
 struct SitePosition {
     card: CardInstance,
     controller: Seat,
+    /// Turn on which this site last flew, so flight stays once per turn.
+    last_flight_turn: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1113,10 +1117,6 @@ fn unsupported_site_genesis_after_rubble_replacement(facts: &SiteFacts) -> Optio
         Some("genesisDrawSpellPerAdjacentSameCard")
     } else if facts.genesis_enemies_lose_stealth {
         Some("genesisEnemiesLoseStealth")
-    } else if facts.genesis_gain_mana.is_some() {
-        Some("genesisGainMana")
-    } else if facts.genesis_gain_mana_if_only_controlled_copy {
-        Some("genesisGainManaIfOnlyControlledCopy")
     } else if facts.genesis_heal_nearby_avatars {
         Some("genesisHealNearbyAvatars")
     } else if facts.genesis_immobilize_nearby_until_next_turn {
@@ -1234,9 +1234,7 @@ fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
 
 fn unsupported_selfplay_site(facts: &SiteFacts) -> Option<&'static str> {
     account_for_selfplay_site_fields(facts);
-    if facts.fly_to_nearby_void_once_per_turn_at_air_threshold {
-        Some("flyToNearbyVoidOncePerTurnAtAirThreshold")
-    } else if facts
+    if facts
         .prevents_units_with_power_at_least_from_entering
         .is_some()
     {
@@ -2666,6 +2664,7 @@ impl Game {
                 self.push_action(actions, descriptor, label);
             }
         }
+        self.push_site_flight_actions(seat, actions)?;
         let spellcasters = self.spellcasters(seat);
         for card in &player.hand_spellbook {
             let definition = &self.rules.cards[usize::from(card.card_id.0)];
@@ -5728,6 +5727,56 @@ impl Game {
             .all(|(available, required)| available >= required)
     }
 
+    /// Offers every nearby empty cell a controlled flying site may settle into this turn.
+    ///
+    /// Flight is an air-affinity ability, so it stays available only while the controller still
+    /// meets the printed threshold, and only once per turn for each individual site.
+    fn push_site_flight_actions(
+        &self,
+        seat: Seat,
+        actions: &mut Vec<IssuedAction>,
+    ) -> Result<(), GameError> {
+        if self.elemental_affinities(seat)[3] < SITE_FLIGHT_AIR_THRESHOLD {
+            return Ok(());
+        }
+        for source_cell in Cell::ALL {
+            let Some(source) = self.position.sites[source_cell.index()].as_ref() else {
+                continue;
+            };
+            let CardFacts::Site(facts) =
+                &self.rules.cards[usize::from(source.card.card_id.0)].facts
+            else {
+                return Err(invalid("realm site lacks Site facts"));
+            };
+            if source.controller != seat
+                || !facts.fly_to_nearby_void_once_per_turn_at_air_threshold
+                || facts.cannot_be_moved_destroyed_or_modified
+                || source.last_flight_turn == Some(self.position.turn_number)
+            {
+                continue;
+            }
+            let targets = source_cell
+                .bordering(false)
+                .chain(source_cell.diagonals(false))
+                .filter(|cell| {
+                    self.position.sites[cell.index()].is_none()
+                        && self.position.rubble[cell.index()].is_none()
+                })
+                .collect::<BTreeSet<_>>();
+            for target_cell in targets {
+                let descriptor = ActionDescriptor::FlySite {
+                    source_site_instance_id: source.card.instance_id.clone(),
+                    target_cell,
+                };
+                let label = descriptor
+                    .state_independent_label()
+                    .ok_or_else(|| invalid("site flight action requires a label"))?;
+                self.push_action(actions, descriptor, label);
+            }
+        }
+        Ok(())
+    }
+
     fn summon_destinations(&self, seat: Seat, minion: &MinionFacts) -> Vec<SummonDestination> {
         let summon_cell = |cell: Cell| {
             if minion.must_be_cast_to_outer_column && !cell.in_outer_file() {
@@ -6207,6 +6256,15 @@ impl Game {
                 source_site_instance_id,
                 *target_cell,
                 target_site_instance_id,
+                outcomes,
+            ),
+            ActionDescriptor::FlySite {
+                source_site_instance_id,
+                target_cell,
+            } => self.apply_site_flight_action(
+                action.seat,
+                source_site_instance_id,
+                *target_cell,
                 outcomes,
             ),
             ActionDescriptor::ResolveGenesisSpell { choice } => {
@@ -9987,6 +10045,7 @@ impl Game {
         self.position.sites[cell.index()] = Some(SitePosition {
             card,
             controller: seat,
+            last_flight_turn: None,
         });
         self.settle_covered_layers(cell, replacing_rubble_with_water);
         self.position.state_version += 1;
@@ -10335,6 +10394,14 @@ impl Game {
         let replacing_with_water = facts.elements.contains(Element::Water);
         let defer_token = facts.genesis_pay_one_mana_to_summon_token.is_some();
         let compact_card_id = top.card_id;
+        let genesis_gain_mana =
+            facts.genesis_gain_mana.or_else(|| {
+                (facts.genesis_gain_mana_if_only_controlled_copy
+                    && !self.position.sites.iter().flatten().any(|site| {
+                        site.controller == seat && site.card.card_id == compact_card_id
+                    }))
+                .then_some(1)
+            });
         let origin_state_version = self.position.state_version;
         let next_mana = player.mana.checked_add(1).ok_or(GameError::IllegalAction)?;
         let card = self.position.players[player_index].atlas.remove(0);
@@ -10348,6 +10415,7 @@ impl Game {
         self.position.sites[target_cell.index()] = Some(SitePosition {
             card,
             controller: seat,
+            last_flight_turn: None,
         });
         self.settle_covered_layers(target_cell, replacing_with_water);
         self.position.state_version += 1;
@@ -10373,7 +10441,7 @@ impl Game {
             create_rubble_at: None,
             defer_token,
             from_top_atlas: true,
-            genesis_gain_mana: None,
+            genesis_gain_mana,
             genesis_spell_draw_count: 0,
             genesis_token_choice: None,
             origin_state_version,
@@ -10507,6 +10575,98 @@ impl Game {
             });
         }
         outcomes.move_tail_before_completion(rubble_start);
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    /// Flies one controlled site to a nearby empty cell, carrying everything standing on it.
+    ///
+    /// The site keeps its identity and controller, so only its cell changes; oversized units are
+    /// left behind because they never stood on the flying site alone. Whatever the departure or
+    /// arrival strands is settled afterwards by the ordinary region rules.
+    fn apply_site_flight_action(
+        &mut self,
+        seat: Seat,
+        source_site_instance_id: &IdentityHash,
+        target_cell: Cell,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        if self.position.phase != Phase::Main
+            || self.position.active_seat != seat
+            || self.position.decision_seat != seat
+            || self.elemental_affinities(seat)[3] < SITE_FLIGHT_AIR_THRESHOLD
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let (source_cell, source) = Cell::ALL
+            .into_iter()
+            .find_map(|cell| {
+                self.position.sites[cell.index()]
+                    .as_ref()
+                    .filter(|site| site.card.instance_id == *source_site_instance_id)
+                    .cloned()
+                    .map(|site| (cell, site))
+            })
+            .ok_or(GameError::IllegalAction)?;
+        let CardFacts::Site(facts) = &self.rules.cards[usize::from(source.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let nearby = source_cell
+            .bordering(false)
+            .chain(source_cell.diagonals(false))
+            .any(|cell| cell == target_cell);
+        if source.controller != seat
+            || !facts.fly_to_nearby_void_once_per_turn_at_air_threshold
+            || facts.cannot_be_moved_destroyed_or_modified
+            || source.last_flight_turn == Some(self.position.turn_number)
+            || !nearby
+            || self.surface_location_exists(target_cell)
+        {
+            return Err(GameError::IllegalAction);
+        }
+
+        let mut carried_avatar_instance_ids = Vec::new();
+        for carried_seat in [Seat::North, Seat::South] {
+            let avatar = &mut self.position.players[seat_index(carried_seat)].avatar;
+            if avatar.location == source_cell {
+                avatar.location = target_cell;
+                carried_avatar_instance_ids.push(avatar.card.instance_id.clone());
+            }
+        }
+        let mut carried_minion_instance_ids = Vec::new();
+        for unit in &mut self.position.units {
+            if unit.location == source_cell && unit.occupied_cells.is_none() {
+                unit.location = target_cell;
+                carried_minion_instance_ids.push(unit.card.instance_id.clone());
+            }
+        }
+        let mut carried_artifact_instance_ids = Vec::new();
+        for artifact in &mut self.position.artifacts {
+            if let ArtifactPlacement::Loose { location, .. } = &mut artifact.placement
+                && *location == source_cell
+            {
+                *location = target_cell;
+                carried_artifact_instance_ids.push(artifact.card.instance_id.clone());
+            }
+        }
+        self.position.sites[source_cell.index()] = None;
+        self.position.sites[target_cell.index()] = Some(SitePosition {
+            last_flight_turn: Some(self.position.turn_number),
+            ..source
+        });
+        outcomes.push("site-flown", || {
+            json!({
+                "carriedArtifactInstanceIds": carried_artifact_instance_ids,
+                "carriedAvatarInstanceIds": carried_avatar_instance_ids,
+                "carriedMinionInstanceIds": carried_minion_instance_ids,
+                "from": source_cell,
+                "instanceId": source_site_instance_id,
+                "seat": seat,
+                "to": target_cell,
+            })
+        });
+        self.settle_region_occupancy(outcomes)?;
         self.position.state_version += 1;
         Ok(())
     }
@@ -15271,6 +15431,9 @@ impl Game {
     fn site_value(&self, site: &SitePosition) -> Value {
         let mut value = self.card_value(&site.card);
         value["controller"] = json!(site.controller);
+        if let Some(turn) = site.last_flight_turn {
+            value["lastFlightTurn"] = json!(turn);
+        }
         value
     }
 
@@ -15812,6 +15975,7 @@ mod tests {
         game.position.sites[c3.index()] = Some(SitePosition {
             card: south_site,
             controller: Seat::South,
+            last_flight_turn: None,
         });
         game.position.rubble[c4.index()] = Some(
             identity_hash(&json!({ "fixture": "zero-site-recovery-rubble" }))
@@ -15991,6 +16155,7 @@ mod tests {
         game.position.sites[cell.index()] = Some(SitePosition {
             card: site_card,
             controller: Seat::North,
+            last_flight_turn: None,
         });
         game.position.active_seat = Seat::North;
         game.position.decision_seat = Seat::North;
@@ -16122,6 +16287,7 @@ mod tests {
             game.position.sites[cell.index()] = Some(SitePosition {
                 card,
                 controller: Seat::North,
+                last_flight_turn: None,
             });
         }
         let start = Location {
@@ -16134,6 +16300,7 @@ mod tests {
             game.position.sites[cell.index()] = Some(SitePosition {
                 card,
                 controller: Seat::North,
+                last_flight_turn: None,
             });
         }
         assert_eq!(
@@ -16552,6 +16719,7 @@ mod tests {
                 source: CardSource::Atlas,
             },
             controller: Seat::North,
+            last_flight_turn: None,
         };
         let protected = SitePosition {
             card: CardInstance {
@@ -16561,6 +16729,7 @@ mod tests {
                 source: CardSource::Atlas,
             },
             controller: Seat::North,
+            last_flight_turn: None,
         };
         let water = SitePosition {
             card: CardInstance {
@@ -16570,6 +16739,7 @@ mod tests {
                 source: CardSource::Atlas,
             },
             controller: Seat::South,
+            last_flight_turn: None,
         };
         let c2 = Cell::parse("C2").expect("C2");
         let c3 = Cell::parse("C3").expect("C3");
@@ -16891,6 +17061,7 @@ mod tests {
                 game.position.sites[cell.index()] = Some(SitePosition {
                     card,
                     controller: Seat::North,
+                    last_flight_turn: None,
                 });
             }
             if rubble {
@@ -17024,6 +17195,7 @@ mod tests {
         game.position.sites[cell.index()] = Some(SitePosition {
             card: site,
             controller: Seat::North,
+            last_flight_turn: None,
         });
         let card_id = |name: &str| {
             CardId(
@@ -17482,6 +17654,7 @@ mod tests {
                     source: CardSource::Atlas,
                 },
                 controller: owner,
+                last_flight_turn: None,
             });
         }
 
@@ -17863,7 +18036,11 @@ mod tests {
         game.position.sites = std::array::from_fn(|_| None);
         game.position.rubble = std::array::from_fn(|_| None);
         for (cell, controller, card) in sites {
-            game.position.sites[cell.index()] = Some(SitePosition { card, controller });
+            game.position.sites[cell.index()] = Some(SitePosition {
+                card,
+                controller,
+                last_flight_turn: None,
+            });
         }
         game.position.units = Vec::new();
         game.position.active_seat = Seat::North;

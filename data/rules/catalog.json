@@ -2030,15 +2030,15 @@
         "RULE-02"
       ],
       "plainLanguage": "Cloud City flies once per turn at three Air affinity and carries normal occupants.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "elemental-affinity"
       ],
       "actionHints": [],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-02 Cloud City flies once per turn at three Air affinity and carries normal occupants"
+        "file": "crates/sorcery-engine/tests/cloud_city_rules.rs",
+        "testName": "rule_catalog_0101_cloud_city_should_fly_once_per_turn_at_three_air_and_carry_occupants"
       }
     },
     {
