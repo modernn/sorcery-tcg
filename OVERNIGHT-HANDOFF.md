@@ -25,12 +25,16 @@ Branch: `cursor/phase3-drown-bury-artifacts-36d3` is the integration line. `mast
 | `87fd0cf` | Migrate `game-setup-05` remaining proofs to SetupCtx (batch 3/3). |
 | `e05133d` | Migrate setup-02 Leap Attack / Magic targets / Lash to SetupCtx. |
 | `285c394` | Migrate setup-02 Freeze disable proof onto SetupCtx. |
+| `0ea6877` | Migrate setup-02 subsurface disable, Lightning Bolt, Lucky Charm to SetupCtx. |
+| `170a183` | Migrate setup-02 Minor Explosion, Chain Magic, Rain of Arrows to SetupCtx. |
+| `6ae4ed2` | Migrate setup-02 Charge and Overpower proofs to SetupCtx. |
+| `bcd9d7d` | Migrate setup-02 nearby-allies and controlled Mortal power to SetupCtx. |
 
-Tip: run `git log -1 --oneline` (expected near `e150a45`).
+Tip: run `git log -1 --oneline` (expected near this handoff commit).
 
 ## Gate status at tip
 
-- `pnpm verify` — **404 tests, 0 fail** (green after setup-05 batch 3/3 + setup-02 Leap/Magic/Lash + Freeze).
+- `pnpm verify` — **404 tests, 0 fail** (green after setup-02 magic + aura power chunks above).
 - Do **not** apply `stash@{0}` (`wip-parallel`): incomplete/broken SetupCtx rewrites of setup-03/04/06 + novelty-rollout left by a parallel agent; tip TS versions of those files still pass.
 
 ## Boundary cutover status
@@ -43,23 +47,22 @@ Done:
 - RULE-02 compounds: Geomancer rubble, region settlement (+ void Defend engine fix), top/bottom edge wrap.
 - RULE-03 opening draw-spell + Spellcaster summon.
 - `game-setup-05` **complete** (batches 1–3): genesis sleep through ranged/drag, Granary Rats, Airborne/Mountain Pass, Updraft Ridge, Stealth, Sly Fox.
-- `game-setup-02` started: Leap Attack (Deathrite resume), Magic target filtering, Lash, Freeze.
+- `game-setup-02` magic/aura cluster deep into RULE-04: Leap, Magic targets, Lash, Freeze, subsurface disable settle, Lightning Bolt, Lucky Charm, Minor Explosion, Chain Magic (forged-state probes keep TS `legalGameActions`), Rain of Arrows, Charge, Overpower, nearby-allies power, controlled Mortal power.
 
 Still present — `src/engine/game.ts` (~525KB):
 - Still exports `createGameSession` / `legalGameActions` / `stepGame` because most split setup files and other callers still use them.
 - Keep types / `hashGameState` / `createGameManifest` / `observeGame` as the thin TS boundary.
-- Geomancer still uses TS `legalGameActions` / `action()` only for forged-state privacy probes (atlas swap + Deathrite-ordered replacement legality).
-- Granary Rats keeps TS `legalGameActions` only for forged-state affinity/summon probes (same pattern).
+- Geomancer / Granary Rats / Chain Magic still use TS `legalGameActions` only for forged-state privacy probes.
 - Seed-search loops in setup-02+ may still peek opening hands via `createGameSession` (cheap); play paths use SetupCtx.
 
 ## Remaining TS legality surface (estimate)
 
-`createGameSession(` / `legalGameActions(` / `stepGame(` call counts in setup tree ≈ **502** total:
+`createGameSession(` / `legalGameActions(` / `stepGame(` call counts in setup tree ≈ **457** total:
 
 | File | ~calls |
 | --- | ---: |
 | game-setup-01 | 50 |
-| game-setup-02 | 88 |
+| game-setup-02 | 43 |
 | game-setup-03 | 61 |
 | game-setup-04 | 83 |
 | game-setup-05 | 1 |
@@ -78,8 +81,9 @@ Other public/private callers still needing Rust cutover later:
 
 ## Next exact step
 
-1. Continue `game-setup-02` RULE-03 magic cluster from the next unmigrated test:
-   - Next: subsurface disable settle, Lightning Bolt, Lucky Charm, Minor Explosion, Chain Magic, Rain of Arrows, Charge, Overpower, aura/power, Lure, Teleport, Blink, Rescue, Bury.
+1. Continue `game-setup-02` from the next unmigrated test:
+   - Next: `RULE-04 aura-loss Deathrite ends the game after its triggering Magic resolves`
+   - Then: aura-loss deaths cannot restore stale combat; Lure; Teleport; Blink; Rescue; Bury.
 2. Then setup-07 / 08 artifact + Deathrite families (or remaining RULE-02/03 in setup-03/04).
 3. Prefer helpers in `game-setup-helpers.ts`; do **not** re-run archived one-shot rewrite scripts under `.local/archive/`.
 4. After public tests no longer call TS legality, gut `createGameSession` / `legalGameActions` / `stepGame` in `game.ts`.
