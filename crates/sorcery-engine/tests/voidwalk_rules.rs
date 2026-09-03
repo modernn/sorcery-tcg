@@ -1,4 +1,5 @@
 //! Direct proofs for the void: the summons and steps Voidwalk grants (RULE-CATALOG-0119), the
+//! temporary Voidwalk a Planar Gate lends until a minion leaves the void (RULE-CATALOG-0120), the
 //! outer-column cast restriction that filters those summons but not movement (RULE-CATALOG-0121),
 //! the settlement that kills inhospitable minions and banishes stranded void occupants
 //! (RULE-CATALOG-0050), and the loose Artifacts a newly played site lifts out of the void it
@@ -224,6 +225,113 @@ fn voidwalk_cards(voidwalker: &Value, north_site: &Value) -> Value {
         "south-filler": minion(json!({})),
         "south-site": site(&["earth"]),
     })
+}
+
+fn planar_gate_site() -> Value {
+    json!({
+        "cardType": "site",
+        "elements": ["air"],
+        "minionsHereGainVoidwalkUntilLeavingVoid": true,
+    })
+}
+
+fn planar_gate_cards() -> Value {
+    json!({
+        "north-avatar": avatar(),
+        "north-site": planar_gate_site(),
+        "north-spell": minion(json!({
+            "attack": 2,
+            "defense": 2,
+            "manaCost": 1,
+            "movementBonus": 2,
+        })),
+        "south-avatar": avatar(),
+        "south-filler": minion(json!({})),
+        "south-site": site(&["earth"]),
+    })
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    if offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+#[test]
+fn rule_catalog_0120_planar_gate_should_grant_voidwalk_only_until_leaving_the_void() {
+    let cards = planar_gate_cards();
+    let mut session = Session::new(&manifest(162, &cards, "north-site", &["north-spell"; 8]))
+        .expect("valid Planar Gate scenario");
+    keep(&mut session);
+    keep(&mut session);
+
+    play_site(&mut session, "C4");
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C4"
+    });
+    let walker = summoned["cardInstanceId"]
+        .as_str()
+        .expect("summoned identity")
+        .to_owned();
+
+    pass_turn(&mut session);
+    play_site(&mut session, "C1");
+    pass_turn(&mut session);
+
+    let into_void = |descriptor: &Value| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == walker.as_str()
+            && path_locations(descriptor) == ["C4/surface", "B4/void"]
+    };
+    accept_where(&mut session, into_void);
+    decline_attack_if_needed(&mut session);
+    let borrowed = realm_unit(&state(&session), &walker).expect("void borrower");
+    assert_eq!(borrowed["planarGateVoidwalk"], json!(true));
+
+    pass_turn(&mut session);
+    play_site(&mut session, "C2");
+    pass_turn(&mut session);
+
+    let deeper_void = |descriptor: &Value| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == walker.as_str()
+            && path_locations(descriptor) == ["B4/void", "B3/void"]
+    };
+    assert!(offers(&session, deeper_void));
+    accept_where(&mut session, deeper_void);
+    decline_attack_if_needed(&mut session);
+
+    pass_turn(&mut session);
+    play_site(&mut session, "C3");
+    pass_turn(&mut session);
+
+    let reenter_void = |descriptor: &Value| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == walker.as_str()
+            && path_locations(descriptor) == ["B3/void", "C3/surface", "D3/void"]
+    };
+    assert!(!offers(&session, reenter_void));
+
+    let exit_void = |descriptor: &Value| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == walker.as_str()
+            && path_locations(descriptor) == ["B3/void", "C3/surface"]
+    };
+    accept_where(&mut session, exit_void);
+    decline_attack_if_needed(&mut session);
+    let surfaced = realm_unit(&state(&session), &walker).expect("surfaced borrower");
+    assert!(surfaced.get("planarGateVoidwalk").is_none());
+
+    pass_turn(&mut session);
+    pass_turn(&mut session);
+
+    let back_to_void = |descriptor: &Value| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == walker.as_str()
+            && path_locations(descriptor) == ["C3/surface", "D3/void"]
+    };
+    assert!(!offers(&session, back_to_void));
+    assert_exact_replay(&session);
 }
 
 #[test]

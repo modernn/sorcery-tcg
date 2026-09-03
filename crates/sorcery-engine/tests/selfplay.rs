@@ -697,20 +697,20 @@ fn pair_should_reject_scenario_changes_composition_mismatch_and_unsupported_fact
     )];
     assert!(train_and_promote(&champion, &candidate_deck, &mismatched, &heldout, 500).is_err());
 
-    let unsupported_north = mutate_manifest(&north, |manifest| {
+    let planar_gate_north = mutate_manifest(&north, |manifest| {
         manifest["cards"]["north-site-1"]["minionsHereGainVoidwalkUntilLeavingVoid"] = json!(true);
     });
-    let unsupported_south = mutate_manifest(&south, |manifest| {
+    let planar_gate_south = mutate_manifest(&south, |manifest| {
         manifest["cards"]["north-site-1"]["minionsHereGainVoidwalkUntilLeavingVoid"] = json!(true);
     });
-    let unsupported = [pair(
-        &unsupported_north,
-        &unsupported_south,
+    let planar_gate = [pair(
+        &planar_gate_north,
+        &planar_gate_south,
         30,
         &opponent,
         &opponent_deck,
     )];
-    assert!(train_and_promote(&champion, &candidate_deck, &unsupported, &heldout, 500).is_err());
+    assert!(train_and_promote(&champion, &candidate_deck, &planar_gate, &heldout, 500).is_ok());
 
     let unsupported_north = mutate_manifest(&north, |manifest| {
         manifest["cards"]["north-spell-1"]["atStartOfControllerTurnTeleportToRandomSiteOrVoid"] =
