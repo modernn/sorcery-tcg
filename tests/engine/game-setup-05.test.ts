@@ -20,7 +20,6 @@ import {
   type GameCardDefinition,
   type GameDeckSpec,
   type GameLegalAction,
-  type GameReceipt,
   type GameSession,
 } from '../../src/engine/game.ts';
 import {
