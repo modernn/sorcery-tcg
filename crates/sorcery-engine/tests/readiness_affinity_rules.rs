@@ -1137,3 +1137,55 @@ fn connected_top_bottom_should_wrap_only_the_minion() {
     });
     assert_exact_replay(&session);
 }
+
+#[test]
+fn conditional_end_turn_stealth_should_also_require_no_nearby_enemy_avatar() {
+    let mut lurker = minion(1, 3);
+    lurker["gainsStealthAtEndOfTurnIfNoEnemiesNearby"] = json!(true);
+    lurker["summonToAnySite"] = json!(true);
+    let manifest = scenario_manifest_with_atlas(
+        127,
+        &json!({ "north-lurker": lurker }),
+        &["north-lurker"; 10],
+        &["north-lurker"; 10],
+        10,
+    );
+    let mut session = Session::new(&manifest).expect("valid conditional Stealth scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+
+    // North drops the lurker onto the South Avatar's own cell: an Avatar is an enemy too.
+    let south_avatar_cell = state(&session)["players"]["south"]["avatar"]["location"].clone();
+    assert_eq!(south_avatar_cell, json!("C1"));
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-lurker"
+            && descriptor["cell"] == "C1"
+    });
+    let lurker_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("lurker identity")
+        .to_owned();
+    let (_, watched) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(!gained_stealth(&watched));
+    assert_eq!(
+        state(&session)["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .find(|unit| unit["instanceId"] == lurker_id.as_str())
+            .expect("watched lurker")["stealthed"],
+        false
+    );
+    assert_exact_replay(&session);
+}
