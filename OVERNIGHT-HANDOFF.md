@@ -1,44 +1,50 @@
 # Overnight handoff
 
-Branch: `cursor/phase3-drown-bury-artifacts-36d3`. Nothing pushed from this shipper turn.
+Branch: `cursor/phase3-drown-bury-artifacts-36d3` (ahead of origin by local tip). Nothing pushed from this shipper turn after `2d4363f`.
 
 ## Catalog count
 
 `data/rules/catalog.json`: **161 rust-supported / 0 typescript-supported** out of 161.
 
-## Commits landed
+## Commits landed (boundary cutover line)
 
 | Hash | Change |
 | --- | --- |
-| `82c4dac` | Route synthetic demo rollouts through the Rust engine subprocess (prior parallel work). |
-| _(this turn)_ | Rust `publicView` + TS `RustSessionClient`; harden demo hash types; session-json client proof. |
+| `82c4dac` | Route synthetic demo rollouts through the Rust engine subprocess. |
+| `2d6270f` | Add session-json RPC bridge and migrate parity capture to Rust. |
+| `ca6bb4c` | Route playable-core game server through Rust session-json. |
+| `397bdf5` / `8dc140e` | Migrate action parity capture scripts to Rust session helpers. |
+| `3d30a81` | Route checkpoint resume test through Rust session-json. |
+| `2d4363f` | Record handoff + harden `RustSessionClient` launch/types (`publicView` path). |
 
-## Gate status
+Tip: `2d4363f599d55a8c6ab14d5069b814a6ec737f5f`.
 
-- `cargo fmt --all -- --check` — clean.
-- `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` — clean.
-- `cargo test --workspace --all-features --locked` — green (ignored: two release-only soak gates).
-- `pnpm verify` — **404 tests, 0 fail** (was 403; added `tests/engine/rust-session-client.test.ts`).
-- `pnpm game:demo 31` — matches expected seed-31 hashes (`finalStateHash` / `transcriptHash` unchanged).
-- `pnpm play` — boots `http://127.0.0.1:4174` (still TypeScript legality for the HTTP prototype).
+## Gate status at tip
 
-## Boundary cutover progress
+- `cargo fmt` / `clippy -D warnings` / `cargo test --workspace --all-features --locked` — green when last run on the publicView work (ignored: two release-only soak gates).
+- `pnpm verify` — **404 tests, 0 fail** (includes `tests/engine/rust-session-client.test.ts`).
+- `pnpm game:demo 31` — canonical seed-31 report (`finalStateHash` `sha256:be86c59b…`, `transcriptHash` `sha256:fbdad70e…`, 230 actions, south wins).
+- `pnpm play` — boots `http://127.0.0.1:4174` via Rust `session-json` (`RustSessionClient` in `game-server.ts`).
+
+## Boundary cutover status
 
 Done:
-- Demo path: `runGameDemo` → `runRustSyntheticDemo` → `sorcery-engine demo` (typed `sha256:` hashes, no casts on hashes).
-- Batch path: already Rust `batch-json`.
-- Interactive boundary: Rust `Game::public_view` + `session-json` method `publicView` (seat-scoped UI observation, opponent hands redacted to counts).
-- TS client: `RustSessionClient` in `src/engine/rust-engine.ts` (prefers release `session-json` binary under `CARGO_TARGET_DIR` / `target/`).
+- Demo → Rust `sorcery-engine demo`.
+- Batch → Rust `batch-json`.
+- Play prototype → Rust `session-json` (`new` / `legalActions` / `step` / `publicView` / checkpoint / resume / verifyReplay).
+- Parity fixture regeneration → Rust session helpers (`source: rust-legality-engine` for the main parity fixture).
+- Interactive UI observation → Rust `Game::public_view` (opponent hands redacted to counts).
 
-Not done (honest remaining):
-- `src/prototype/game-server.ts` / `pnpm play` still call `src/engine/game.ts` for `createGameSession` / `legalGameActions` / `stepGame` / `observeGame`.
-- `src/engine/game.ts` still exists (~525KB) because public tests still exercise it (`game-setup.test.ts`, checkpoint/novelty/counterfactual tests) and parity fixture regeneration scripts still say `typescript-legality-engine`.
-- Next exact step: rewrite `createGamePrototypeServer` onto `RustSessionClient` (`new` / `legalActions` / `step` / `publicView` / `checkpoint` / `resume` / `verifyReplay`), adapt `selectDeterministicGameAction` to Rust-issued actions + public view, then delete or quarantine superseded TS legality call sites once public coverage stays green fail-closed.
+Still present:
+- `src/engine/game.ts` still exists (~525KB). It remains for types, manifest helpers, `hashGameState` on exported Rust state, and any leftover TS-backed tests/scripts not fully migrated.
+- Uncommitted WIP in the tree (do not treat as landed): edits under `tests/engine/game-setup.test.ts` (large), `game-demo.test.ts`, `game-counterfactual.test.ts`, `counterfactual.ts`, `run-private-game-check.ts`, `benchmarks/typescript-engine.ts`, plus untracked `tests/engine/rust-setup-session.ts`. Inspect/finish or discard before the next commit.
 
-## Engine notes
+## Next exact step
 
-- `publicView` derives unit attack/defense via `minion_current_stats` / avatar combat power, redacts opponent hands to counts, and exposes affinity / realm artifacts / auras / immobile areas for the play UI contract.
-- Keep `observe` as the compact policy `SeatObservation`; do not overload it for UI.
+1. Finish or discard the in-flight `game-setup` / counterfactual / private-check WIP so `pnpm verify` stays green on a clean tree.
+2. Delete or gut superseded TS legality (`legalGameActions` / `stepGame` / `createGameSession` bodies) only after every public test routes through Rust session-json fail-closed.
+3. Keep byte-identical Rust regeneration fixtures; do not reintroduce TypeScript as a second legality engine.
+4. Phase 4+ product surfaces stay out of scope until that deletion is complete.
 
 ## Do not
 
