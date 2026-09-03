@@ -2297,6 +2297,191 @@ fn rule_catalog_0044_cave_in_minion_slice_should_burrow_in_canonical_order() {
 #[test]
 #[expect(
     clippy::too_many_lines,
+    reason = "one Cave-In Artifact proof retains bearer variants, canonical burrow order, and replay"
+)]
+fn rule_catalog_0161_cave_in_burrows_artifacts_with_minions_in_canonical_order() {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-cave-in": {
+            "burrowAllMinionsAndArtifactsAtTargetLandSite": true,
+            "cardType": "magic",
+            "manaCost": 0,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        },
+        "north-water-site": {
+            "cardType": "site",
+            "elements": ["water"],
+        },
+        "south-artifact": {
+            "cardType": "artifact",
+            "grantsBearerPower": 2,
+            "manaCost": 0,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        },
+        "south-avatar": avatar(20),
+        "south-burrower": minion(json!({
+            "burrowing": true,
+            "stealth": true,
+            "ward": true,
+        })),
+        "south-site": site(false),
+        "south-victim": minion(json!({})),
+    });
+    let manifest = finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "cave-in-artifact-rules" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-cave-in-artifact-v1",
+        },
+        "cards": cards,
+        "decks": {
+            "north": {
+                "atlas": vec!["north-water-site"; 4],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-cave-in"; 4],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 4],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-burrower", "south-victim", "south-artifact"],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": 157,
+    }));
+
+    let mut session = opening_main(&manifest);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let south_avatar_id = state(&session)["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    let (burrower, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
+            && descriptor["cardId"] == "south-burrower"
+            && descriptor["cell"] == "C1"
+            && descriptor["casterInstanceId"] == south_avatar_id
+    });
+    let burrower_id = burrower["cardInstanceId"]
+        .as_str()
+        .expect("burrower identity")
+        .to_owned();
+    let (victim, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
+            && descriptor["cardId"] == "south-victim"
+            && descriptor["cell"] == "C1"
+            && descriptor["casterInstanceId"] == south_avatar_id
+    });
+    let victim_id = victim["cardInstanceId"]
+        .as_str()
+        .expect("victim identity")
+        .to_owned();
+    let artifact_id = state(&session)["players"]["south"]["hand"]["spellbook"]
+        .as_array()
+        .expect("South hand")
+        .iter()
+        .find(|card| card["cardId"] == "south-artifact")
+        .expect("Artifact in hand")["instanceId"]
+        .as_str()
+        .expect("Artifact identity")
+        .to_owned();
+    let checkpoint = create_game_checkpoint(&session).expect("Cave-In Artifact checkpoint");
+
+    let cast_cave_in = |bearer: &str| {
+        let mut session = resume_game_checkpoint(&checkpoint).expect("restored Cave-In checkpoint");
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-artifact"
+                && descriptor["cardInstanceId"] == artifact_id
+                && if bearer == "avatar" {
+                    descriptor["bearer"]["kind"] == "avatar"
+                } else {
+                    descriptor["bearer"]["kind"] == "minion"
+                        && descriptor["bearer"]["instanceId"] == burrower_id
+                }
+        });
+        let artifact_before = realm_artifact(&state(&session), &artifact_id)
+            .expect("cast artifact")
+            .clone();
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+        let turn_state = state(&session);
+        let spell_id = turn_state["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("North hand")
+            .iter()
+            .find(|card| card["cardId"] == "north-cave-in")
+            .expect("Cave-In in hand")["instanceId"]
+            .as_str()
+            .expect("Cave-In identity")
+            .to_owned();
+        let land_site_id = turn_state["realm"]["sites"]["C1"]["instanceId"]
+            .as_str()
+            .expect("Land Site identity")
+            .to_owned();
+        let (_, cast) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-magic"
+                && descriptor["cardInstanceId"] == spell_id
+                && descriptor["targetLocation"]["cell"] == "C1"
+                && descriptor["targetSiteInstanceId"] == land_site_id
+        });
+        let mut burrow_ids = vec![artifact_id.clone(), burrower_id.clone(), victim_id.clone()];
+        burrow_ids.sort();
+        let burrow_events: Vec<_> = cast
+            .events
+            .iter()
+            .filter(|event| {
+                event.event_type == "minion-burrowed" || event.event_type == "artifact-burrowed"
+            })
+            .map(|event| {
+                event.payload["instanceId"]
+                    .as_str()
+                    .expect("burrowed identity")
+                    .to_owned()
+            })
+            .collect();
+        assert_eq!(burrow_events, burrow_ids);
+        assert!(cast.events.iter().any(|event| event.event_type == "minion-died"));
+        let after = state(&session);
+        assert_eq!(after["phase"], "main");
+        let surviving_burrower = realm_unit(&after, &burrower_id).expect("burrowing survivor");
+        assert_eq!(surviving_burrower["region"], "underground");
+        assert_eq!(surviving_burrower["stealthed"], true);
+        assert_eq!(surviving_burrower["warded"], true);
+        assert!(realm_unit(&after, &victim_id).is_none());
+        assert_eq!(after["players"]["south"]["avatar"]["region"], "surface");
+        let moved_artifact = realm_artifact(&after, &artifact_id).expect("moved artifact");
+        if bearer == "minion" {
+            assert_eq!(moved_artifact, &artifact_before);
+        } else {
+            assert_eq!(moved_artifact["location"], "C1");
+            assert_eq!(moved_artifact["owner"], "south");
+            assert_eq!(moved_artifact["region"], "underground");
+            assert!(moved_artifact.get("bearer").is_none());
+        }
+        assert!(cast.random_draws.is_empty());
+        assert_exact_replay(&session);
+    };
+
+    cast_cave_in("minion");
+    cast_cave_in("avatar");
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
     reason = "one ordered Bury proof retains setup, deferred state, checkpoint, completion, and replay"
 )]
 fn bury_should_defer_completion_until_ordered_static_deathrites_finish() {
