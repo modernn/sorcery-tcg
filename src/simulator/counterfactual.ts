@@ -1,12 +1,17 @@
 import { selectDeterministicGameAction } from '../commands/run-game-demo.ts';
 import { deepFreeze, type StateHash } from '../engine/contract.ts';
 import {
+  createGameCheckpoint,
+} from '../engine/checkpoint.ts';
+import type { JsonValue } from '../authority/canonical-json.ts';
+import {
   hashGameState,
-  legalGameActions,
-  stepGame,
+  type GameLegalAction,
+  type GameManifest,
   type GameSession,
   type GameTerminal,
 } from '../engine/game.ts';
+import { withRustSession } from '../engine/rust-session-helpers.ts';
 
 const MAX_ROOT_ACTIONS = 128;
 const MAX_CONTINUATION_ACTIONS = 32;
@@ -61,42 +66,32 @@ function preferredBranch(left: TerminalBranch, right: TerminalBranch): TerminalB
   return left;
 }
 
-export function runCounterfactualRollouts(
-  root: GameSession,
-  maxContinuationDecisions = MAX_CONTINUATION_ACTIONS,
-): CounterfactualReport {
-  if (!Number.isSafeInteger(maxContinuationDecisions)
-    || maxContinuationDecisions < 0
-    || maxContinuationDecisions > MAX_CONTINUATION_ACTIONS) {
-    throw new RangeError(`maxContinuationDecisions must be 0-${MAX_CONTINUATION_ACTIONS}`);
-  }
-  const rootStateHash = hashGameState(root.state);
-  const actions = legalGameActions(root.state, root.state.decisionSeat);
-  const base = {
-    classification: 'authority-private-counterfactual' as const,
-    maxContinuationDecisions,
-    policyVersion: POLICY_VERSION,
-    rootActionCount: actions.length,
-    rootActionLimit: 128 as const,
-    rootStateHash,
-  };
-  if (actions.length > MAX_ROOT_ACTIONS) {
-    return deepFreeze({ ...base, branches: [], recommendation: null, status: 'too-wide' as const });
-  }
-
-  const perspective = root.state.decisionSeat;
-  const branches = actions.map((rootAction): CounterfactualBranch => {
-    const rootResult = stepGame(root, rootAction);
-    if (!rootResult.accepted) throw new Error(`engine rejected issued root action: ${rootResult.reason.code}`);
-    let session = rootResult.session;
+async function rolloutBranch(
+  manifest: GameManifest,
+  checkpoint: JsonValue,
+  rootAction: GameLegalAction,
+  maxContinuationDecisions: number,
+  perspective: GameSession['state']['decisionSeat'],
+): Promise<CounterfactualBranch> {
+  return withRustSession(manifest, async (handle) => {
+    await handle.resume(checkpoint);
+    const rootResult = await handle.stepAction(rootAction);
+    if (!rootResult.accepted) {
+      throw new Error(`engine rejected issued root action: ${rootResult.reason.code}`);
+    }
     let decisionCount = 1;
-    while (session.state.terminal.status === 'active'
+    while (handle.snapshot.state.terminal.status === 'active'
       && decisionCount <= maxContinuationDecisions) {
-      const result = stepGame(session, selectDeterministicGameAction(session));
-      if (!result.accepted) throw new Error(`engine rejected issued continuation: ${result.reason.code}`);
-      session = result.session;
+      const issuedActions = await handle.legalActions();
+      const result = await handle.stepAction(
+        selectDeterministicGameAction(handle.snapshot, issuedActions),
+      );
+      if (!result.accepted) {
+        throw new Error(`engine rejected issued continuation: ${result.reason.code}`);
+      }
       decisionCount += 1;
     }
+    const session = handle.snapshot;
     const common = {
       decisionCount,
       finalStateHash: hashGameState(session.state),
@@ -115,6 +110,38 @@ export function runCounterfactualRollouts(
         reason: 'horizon' as const,
       });
   });
+}
+
+export async function runCounterfactualRollouts(
+  root: GameSession,
+  maxContinuationDecisions = MAX_CONTINUATION_ACTIONS,
+): Promise<CounterfactualReport> {
+  if (!Number.isSafeInteger(maxContinuationDecisions)
+    || maxContinuationDecisions < 0
+    || maxContinuationDecisions > MAX_CONTINUATION_ACTIONS) {
+    throw new RangeError(`maxContinuationDecisions must be 0-${MAX_CONTINUATION_ACTIONS}`);
+  }
+  const rootStateHash = hashGameState(root.state);
+  const checkpoint = createGameCheckpoint(root) as unknown as JsonValue;
+  const actions = await withRustSession(root.manifest, async (handle) => {
+    await handle.resume(checkpoint);
+    return handle.legalActions(root.state.decisionSeat);
+  });
+  const base = {
+    classification: 'authority-private-counterfactual' as const,
+    maxContinuationDecisions,
+    policyVersion: POLICY_VERSION,
+    rootActionCount: actions.length,
+    rootActionLimit: 128 as const,
+    rootStateHash,
+  };
+  if (actions.length > MAX_ROOT_ACTIONS) {
+    return deepFreeze({ ...base, branches: [], recommendation: null, status: 'too-wide' as const });
+  }
+
+  const perspective = root.state.decisionSeat;
+  const branches = await Promise.all(actions.map((rootAction) =>
+    rolloutBranch(root.manifest, checkpoint, rootAction, maxContinuationDecisions, perspective)));
   const terminalBranches = branches.filter((branch): branch is TerminalBranch =>
     branch.outcome === 'terminal');
   const allTerminal = branches.length > 0 && terminalBranches.length === branches.length;

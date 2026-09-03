@@ -121,10 +121,10 @@ function replaySample(seed: number, gamesPerSample: number): Sample {
   };
 }
 
-function searchSample(seed: number, horizon: number): Sample {
+async function searchSample(seed: number, horizon: number): Promise<Sample> {
   const root = createGameSession(createSyntheticDemoManifest(seed));
   const started = performance.now();
-  const report = runCounterfactualRollouts(root, horizon);
+  const report = await runCounterfactualRollouts(root, horizon);
   const durationMs = performance.now() - started;
   if (report.status !== 'complete') throw new Error('synthetic search root exceeded width limit');
   recordMemory();
@@ -134,14 +134,14 @@ function searchSample(seed: number, horizon: number): Sample {
   };
 }
 
-export function benchmarkTypeScriptEngine(): JsonValue {
+export async function benchmarkTypeScriptEngine(): Promise<JsonValue> {
   const sampleCount = positiveInteger('BENCHMARK_SAMPLES', 5);
   const gamesPerSample = positiveInteger('BENCHMARK_GAMES_PER_SAMPLE', 1);
   const searchHorizon = positiveInteger('BENCHMARK_SEARCH_HORIZON', 2);
   if (searchHorizon > 32) throw new RangeError('BENCHMARK_SEARCH_HORIZON must be at most 32');
 
   runGame(SEEDS[0]);
-  runCounterfactualRollouts(createGameSession(createSyntheticDemoManifest(SEEDS[0])), 1);
+  await runCounterfactualRollouts(createGameSession(createSyntheticDemoManifest(SEEDS[0])), 1);
   recordMemory();
 
   const transitions: Sample[] = [];
@@ -151,7 +151,7 @@ export function benchmarkTypeScriptEngine(): JsonValue {
     const seed = SEEDS[sample % SEEDS.length]!;
     transitions.push(transitionSample(seed, gamesPerSample));
     replays.push(replaySample(seed, gamesPerSample));
-    searches.push(searchSample(seed, searchHorizon));
+    searches.push(await searchSample(seed, searchHorizon));
   }
 
   const cpu = cpus()[0];
@@ -187,5 +187,7 @@ export function benchmarkTypeScriptEngine(): JsonValue {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  process.stdout.write(`${canonicalJson(benchmarkTypeScriptEngine())}\n`);
+  void benchmarkTypeScriptEngine().then((report) => {
+    process.stdout.write(`${canonicalJson(report)}\n`);
+  });
 }

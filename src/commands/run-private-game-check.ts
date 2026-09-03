@@ -14568,9 +14568,9 @@ function runEarthBorderMilitia(
   });
 }
 
-function runEarthHumbleVillage(
+async function runEarthHumbleVillage(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthHumbleVillage'] {
+): Promise<PrivateGameCheck['earthHumbleVillage']> {
   const opening = findEarthHumbleVillageOpening(input);
   const checkpoint = keep(keep(opening.session));
   const rootActions = legalGameActions(checkpoint.state, 'north');
@@ -14599,7 +14599,7 @@ function runEarthHumbleVillage(
   const exactChoices = choices.length === 2
     && declined.actionId !== paid.actionId
     && new Set(choices.map(({ label }) => label)).size === 2;
-  const counterfactual = runCounterfactualRollouts(checkpoint, 0);
+  const counterfactual = await runCounterfactualRollouts(checkpoint, 0);
   const counterfactualRootCoverage = counterfactual.status === 'complete'
     && counterfactual.rootActionCount === rootActions.length
     && counterfactual.branches.length === rootActions.length
@@ -24368,7 +24368,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthPayloadTrebuchet = runEarthPayloadTrebuchet(input);
   const earthRollingBoulder = runEarthRollingBoulder(input);
   const earthBorderMilitia = runEarthBorderMilitia(input);
-  const earthHumbleVillage = runEarthHumbleVillage(input);
+  const earthHumbleVillage = await runEarthHumbleVillage(input);
   const earthDuel = runEarthDuel(input);
   const earthHuntersLodge = runEarthHuntersLodge(input);
   const earthPoisonousDagger = runEarthPoisonousDagger(input);
