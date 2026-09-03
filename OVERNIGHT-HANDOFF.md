@@ -36,19 +36,20 @@ Branch: `cursor/phase3-drown-bury-artifacts-36d3` is the integration line. `mast
 | `ef278bc` | Migrate setup-07 Artifact Pick Up/Drop and lethal bearer proofs onto SetupCtx. |
 | `5af97d4` | Update carried Artifact bearer seat when Mesmerism transfers control. |
 | `15763be` | Migrate setup-07 Siege Ballista through Mesmerism proofs onto SetupCtx. |
+| `7f3824d` | Migrate setup-08 Fatality through Devil's Egg play paths onto SetupCtx. |
 
 Tip: run `git log -1 --oneline` (expected near this handoff commit).
 
 ## Gate status at tip
 
-- `pnpm verify` — **404 tests, 0 fail** (green after setup-07 Artifact family + Mesmerism bearer-seat Rust fix).
+- `pnpm verify` — **404 tests, 0 fail** (green after setup-08 batch 1).
 - Do **not** apply `stash@{0}` (`wip-parallel`): incomplete/broken SetupCtx rewrites of setup-03/04/06 + novelty-rollout left by a parallel agent; tip TS versions of those files still pass.
 
 ## Boundary cutover status
 
 Done:
 - Demo / batch / play / parity / public views / fail-closed demo agent (prior).
-- SetupCtx bridge + helpers (`toNorthSecondMain`, `takeAction`, `withNorthAttacksAtC2`, …).
+- SetupCtx bridge + helpers (`toNorthSecondMain`, `takeAction`, `withNorthAttacksAtC2`, `withDevilsEggFixture`, …).
 - RULE-01 opening proofs (setup, mulligan, first player, empty-deck) + stale rejection.
 - Core RULE-02 spatial proofs (expansion, zero-domain recovery, draw-site, forged actions, Cloud City).
 - RULE-02 compounds: Geomancer rubble, region settlement (+ void Defend engine fix), top/bottom edge wrap.
@@ -57,17 +58,18 @@ Done:
 - `game-setup-02` **play-path complete**: Leap through Bury. Remaining refs are seed peeks + forged-state probes (Chain Magic mana/region/stealth; Blink empty-atlas steps).
 - `game-setup-07` **play-path complete**: Deathrite family; RULE-04 combat / Defend / Intercept / damage persistence / Death's Door; Artifact Pick Up/Drop + lethal bearers; Siege Ballista; Payload Trebuchet; Rolling Boulder; Mesmerism.
 - Rust Mesmerism now updates carried Artifact `bearer.seat` on control transfer (parity with TS).
+- `game-setup-08` **partial** (9/14 tests play-path on SetupCtx): Fatality; Sparkmage family (3); Tower minion (`ctx.resume` branches); Nimbus discard family (3); Devil's Egg site-controller life loss. Remaining: Devil's Egg carried/regions, Lucky Charm teleports, Raise Dead, Craterize. Forged-state probes (Fatality targets, Sparkmage reset, Nimbus disable/oversized) still use TS legality/stepGame intentionally.
 
 Still present — `src/engine/game.ts` (~525KB):
 - Still exports `createGameSession` / `legalGameActions` / `stepGame` because most split setup files and other callers still use them.
 - Keep types / `hashGameState` / `createGameManifest` / `observeGame` as the thin TS boundary.
-- Geomancer / Granary Rats / Chain Magic / Blink empty-atlas / Artifact forged probes still use TS legality only for forged-state probes.
+- Geomancer / Granary Rats / Chain Magic / Blink empty-atlas / setup-08 forged probes still use TS legality only for forged-state probes.
 - Seed-search loops may still peek opening hands via `createGameSession` (cheap); play paths use SetupCtx.
 - Note: mid-combat Rust journals can diverge from TS `resumeGameCheckpoint`; use `SetupCtx.resumeCheckpoint` / `ctx.resume` for those roundtrips.
 
 ## Remaining TS legality surface (estimate)
 
-`createGameSession(` / `legalGameActions(` / `stepGame(` call counts in setup tree ≈ **383** total:
+`createGameSession(` / `legalGameActions(` / `stepGame(` call counts in setup tree ≈ **354** total:
 
 | File | ~calls |
 | --- | ---: |
@@ -78,7 +80,7 @@ Still present — `src/engine/game.ts` (~525KB):
 | game-setup-05 | 1 |
 | game-setup-06 | 70 |
 | game-setup-07 | 12 |
-| game-setup-08 | 80 |
+| game-setup-08 | 51 |
 | helpers | 7 |
 
 Other public/private callers still needing Rust cutover later:
@@ -91,9 +93,9 @@ Other public/private callers still needing Rust cutover later:
 
 ## Next exact step
 
-1. Start `game-setup-08` from the first unmigrated test (file still ~80 TS legality refs; play paths are the target).
+1. Finish `game-setup-08`: migrate Devil's Egg carried + regions (`withDevilsEggFixture`), Lucky Charm teleports, Raise Dead, Craterize play paths.
 2. Then remaining RULE-02/03 in setup-03 / 04 / 06 / 01 as capacity allows.
-3. Prefer helpers in `game-setup-helpers.ts` (`withNorthAttacksAtC2`, …); do **not** re-run archived one-shot rewrite scripts under `.local/archive/`.
+3. Prefer helpers in `game-setup-helpers.ts` (`withNorthAttacksAtC2`, `withDevilsEggFixture`, …); do **not** re-run archived one-shot rewrite scripts under `.local/archive/`.
 4. After public tests no longer call TS legality, gut `createGameSession` / `legalGameActions` / `stepGame` in `game.ts`.
 5. Drop or ignore `stash@{0}` after confirming tip does not need it (`git stash drop` only when ready).
 
