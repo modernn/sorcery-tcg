@@ -1702,31 +1702,25 @@ test('RULE-02 the Avatar may draw a private site instead of playing one', async 
   });
 });
 
-test('RULE-03 a draw-spell Avatar pays its tap cost and keeps the drawn identity private', () => {
-  let session = keep(createGameSession(manifest(30, {
+test('RULE-03 a draw-spell Avatar pays its tap cost and keeps the drawn identity private', async () => {
+  await withSetup(manifest(30, {
     avatar: { attack: 1, defense: 1, drawSpell: true, life: 20 },
-  })));
-  session = keep(session);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-
-  const before = session.state.players.north;
-  const drawn = before.spellbook[0];
-  assert.ok(drawn);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'draw-spell'));
-  assert.equal(session.state.players.north.avatar.tapped, true);
-  assert.equal(session.state.players.north.spellbook.length, before.spellbook.length - 1);
-  assert.equal(session.state.players.north.hand.spellbook.length, before.hand.spellbook.length + 1);
-  assert.equal(session.transcript.at(-1)?.events[0]?.type, 'spell-drawn');
-  assert.doesNotMatch(canonicalJson(session.transcript.at(-1)?.events[0]?.payload ?? null), /north-spell-/);
-  assert.doesNotMatch(canonicalJson(observeGame(session.state, 'south')), new RegExp(drawn.cardId));
-  assert.equal(verifyGameReplay(session), true);
+  }), async (ctx) => {
+    await toNorthSecondMain(ctx);
+    const before = ctx.state.players.north;
+    const drawn = before.spellbook[0];
+    assert.ok(drawn);
+    const beforeSpellbook = before.spellbook.length;
+    const beforeHand = before.hand.spellbook.length;
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'draw-spell'));
+    assert.equal(ctx.state.players.north.avatar.tapped, true);
+    assert.equal(ctx.state.players.north.spellbook.length, beforeSpellbook - 1);
+    assert.equal(ctx.state.players.north.hand.spellbook.length, beforeHand + 1);
+    assert.equal(ctx.session.transcript.at(-1)?.events[0]?.type, 'spell-drawn');
+    assert.doesNotMatch(canonicalJson(ctx.session.transcript.at(-1)?.events[0]?.payload ?? null), /north-spell-/);
+    assert.doesNotMatch(canonicalJson(observeGame(ctx.state, 'south')), new RegExp(drawn.cardId));
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
 test('RULE-02 drawing a site from an empty Atlas pays the tap cost and loses', async () => {
@@ -2033,52 +2027,55 @@ test('RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relati
   assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-03/04 a Spellcaster pays mana and summons a minion atop a controlled site', () => {
-  let session = keep(createGameSession(manifest(41)));
-  session = keep(session);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  const before = session.state.players.north;
-  const summons = legalGameActions(session.state, 'north')
-    .filter(({ descriptor }) => descriptor.kind === 'summon-minion');
-  assert.equal(observeGame(session.state, 'north').players.north.affinity.earth, 1);
-  assert.equal(summons.length, 3);
-  assert.ok(summons.every(({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cell === 'C4'
-      && descriptor.casterInstanceId === before.avatar.card.instanceId
-      && descriptor.manaCost === 1));
+test('RULE-03/04 a Spellcaster pays mana and summons a minion atop a controlled site', async () => {
+  await withSetup(manifest(41), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'play-site'));
+    const before = ctx.state.players.north;
+    const summons = (await ctx.legalActions('north'))
+      .filter(({ descriptor }) => descriptor.kind === 'summon-minion');
+    assert.equal(observeGame(ctx.state, 'north').players.north.affinity.earth, 1);
+    assert.equal(summons.length, 3);
+    assert.ok(summons.every(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cell === 'C4'
+        && descriptor.casterInstanceId === before.avatar.card.instanceId
+        && descriptor.manaCost === 1));
 
-  const summon = summons[0];
-  assert.ok(summon);
-  const result = stepGame(session, summon);
-  assert.equal(result.accepted, true);
-  session = result.session;
-  const unit = session.state.realm.units[0];
-  assert.ok(unit);
-  assert.equal(session.state.players.north.hand.spellbook.length, before.hand.spellbook.length - 1);
-  assert.equal(session.state.players.north.mana, 0);
-  assert.deepEqual({
-    controller: unit.controller,
-    damage: unit.damage,
-    location: unit.location,
-    summoningSickness: unit.summoningSickness,
-    tapped: unit.tapped,
-  }, {
-    controller: 'north',
-    damage: 0,
-    location: 'C4',
-    summoningSickness: true,
-    tapped: false,
+    const summon = summons[0];
+    assert.ok(summon);
+    const beforeHand = before.hand.spellbook.length;
+    const result = await ctx.step(summon);
+    assert.equal(result.accepted, true);
+    if (!result.accepted) return;
+    const unit = ctx.state.realm.units[0];
+    assert.ok(unit);
+    assert.equal(ctx.state.players.north.hand.spellbook.length, beforeHand - 1);
+    assert.equal(ctx.state.players.north.mana, 0);
+    assert.deepEqual({
+      controller: unit.controller,
+      damage: unit.damage,
+      location: unit.location,
+      summoningSickness: unit.summoningSickness,
+      tapped: unit.tapped,
+    }, {
+      controller: 'north',
+      damage: 0,
+      location: 'C4',
+      summoningSickness: true,
+      tapped: false,
+    });
+    assert.equal(result.receipt.events[0]?.type, 'minion-summoned');
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'), false);
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === unit.instanceId), false);
+
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'end-turn'));
+    assert.equal(ctx.state.realm.units[0]?.summoningSickness, false);
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  assert.equal(result.receipt.events[0]?.type, 'minion-summoned');
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'summon-minion'), false);
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === unit.instanceId), false);
-
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  assert.equal(session.state.realm.units[0]?.summoningSickness, false);
-  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-03/04 token Magic summons deterministically and tokens banish instead of entering a cemetery', () => {
