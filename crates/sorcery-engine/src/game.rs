@@ -11270,6 +11270,14 @@ impl Game {
                 unit.region = Region::Underground;
             }
         }
+        for artifact in &mut self.position.artifacts {
+            if let ArtifactPlacement::Loose { location, region } = &mut artifact.placement
+                && *region == Region::Underwater
+                && flooded.contains(location)
+            {
+                *region = Region::Underground;
+            }
+        }
         let mut rubble = Vec::with_capacity(destroyed.len());
         let mut destroyed_cards = Vec::with_capacity(destroyed.len());
         for (cell, site) in destroyed {
@@ -18438,6 +18446,77 @@ mod tests {
             temporary_power_sources: Vec::new(),
             warded: false,
         }
+    }
+
+    #[test]
+    fn site_destruction_should_drain_loose_artifacts_with_the_flooded_layer() {
+        let manifest = selfplay_manifest_with(245, |manifest| {
+            manifest["cards"]["south-site-1"]["elements"] = json!(["water"]);
+            manifest["cards"]["north-spell-3"] = json!({
+                "bearerControllerChoosesExtraRandomOutcome": true,
+                "cardType": "artifact",
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+        });
+        let mut game =
+            Game::from_manifest_json(&manifest).expect("valid flooded Artifact manifest");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let c1 = Cell::parse("C1").expect("C1");
+        let site = card_instance(
+            &game.rules,
+            card_id("south-site-1"),
+            Seat::South,
+            CardSource::Atlas,
+            600,
+        )
+        .expect("water site instance");
+        let artifact = card_instance(
+            &game.rules,
+            card_id("north-spell-3"),
+            Seat::North,
+            CardSource::Spellbook,
+            601,
+        )
+        .expect("loose Artifact instance");
+        let source_instance_id = site.instance_id.clone();
+        let flooded_site = SitePosition {
+            card: site,
+            controller: Seat::South,
+            last_flight_turn: None,
+        };
+        game.position.sites[c1.index()] = Some(flooded_site.clone());
+        game.position.artifacts.push(ArtifactPosition {
+            card: artifact,
+            placement: ArtifactPlacement::Loose {
+                location: c1,
+                region: Region::Underwater,
+            },
+        });
+
+        game.destroy_sites_into_rubble(vec![(c1, flooded_site)], &source_instance_id)
+            .expect("Sinkhole drains the flooded layer");
+
+        assert!(game.position.sites[c1.index()].is_none());
+        assert!(game.position.rubble[c1.index()].is_some());
+        assert_eq!(
+            game.position.artifacts[0].placement,
+            ArtifactPlacement::Loose {
+                location: c1,
+                region: Region::Underground,
+            }
+        );
     }
 
     #[test]
