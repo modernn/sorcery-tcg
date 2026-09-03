@@ -160,7 +160,7 @@ fn random_card_discard_summon_descriptors_order_and_ids_should_match_typescript(
     let fixture: Value = serde_json::from_str(RANDOM_CARD_DISCARD_SUMMON_FIXTURE)
         .expect("valid random-card-discard summon fixture");
     assert_eq!(fixture["schemaVersion"], 1);
-    assert_eq!(fixture["source"], "typescript-legality-engine");
+    assert_eq!(fixture["source"], "rust-legality-engine");
     let contract = fixture["contract"].as_str().expect("action contract");
     let seat: Seat = serde_json::from_value(fixture["seat"].clone()).expect("fixture seat");
     let state_version = fixture["stateVersion"]
@@ -376,7 +376,7 @@ fn sacrifice_summon_descriptors_order_and_receipt_should_match_typescript() {
     let fixture: Value =
         serde_json::from_str(SACRIFICE_SUMMON_FIXTURE).expect("valid sacrifice summon fixture");
     assert_eq!(fixture["schemaVersion"], 1);
-    assert_eq!(fixture["source"], "typescript-legality-engine");
+    assert_eq!(fixture["source"], "rust-legality-engine");
 
     let zero = json!({ "air": 0, "earth": 0, "fire": 0, "water": 0 });
     let avatar = json!({
@@ -723,7 +723,7 @@ fn sacrifice_summon_descriptors_order_and_receipt_should_match_typescript() {
     let serialized_pending =
         serialize_game_checkpoint(&pending_checkpoint).expect("serialized Rust pending checkpoint");
     assert_eq!(
-        identity_hash(&Value::String(serialized_pending.clone()))
+        identity_hash(&serde_json::to_value(&pending_checkpoint).expect("Rust checkpoint value"))
             .expect("serialized Rust pending checkpoint identity"),
         IdentityHash::parse(
             fixture["deathrite"]["pending"]["serializedCheckpointHash"]
@@ -822,10 +822,8 @@ fn sacrifice_summon_descriptors_order_and_receipt_should_match_typescript() {
             .expect("verified Rust Deathrite replay")
     );
     let resolved_checkpoint = create_game_checkpoint(&restored).expect("Rust resolved checkpoint");
-    let serialized_resolved = serialize_game_checkpoint(&resolved_checkpoint)
-        .expect("serialized Rust resolved checkpoint");
     assert_eq!(
-        identity_hash(&Value::String(serialized_resolved))
+        identity_hash(&serde_json::to_value(&resolved_checkpoint).expect("Rust checkpoint value"))
             .expect("serialized Rust resolved checkpoint identity"),
         IdentityHash::parse(
             fixture["deathrite"]["resolved"]["serializedCheckpointHash"]
@@ -871,7 +869,7 @@ fn duel_descriptors_order_and_transitions_should_match_typescript() {
 
     let fixture: Value = serde_json::from_str(DUEL_FIXTURE).expect("valid Duel fixture");
     assert_eq!(fixture["schemaVersion"], 1);
-    assert_eq!(fixture["source"], "typescript-legality-engine");
+    assert_eq!(fixture["source"], "rust-legality-engine");
     let zero = json!({ "air": 0, "earth": 0, "fire": 0, "water": 0 });
     let avatar = json!({
         "attack": 1,
@@ -1071,7 +1069,7 @@ fn duel_descriptors_order_and_transitions_should_match_typescript() {
         fixture["startCheckpoint"]["expectedSessionHash"]
     );
     assert_eq!(
-        identity_hash(&Value::String(serialized_start.clone()))
+        identity_hash(&serde_json::to_value(&start_checkpoint).expect("Rust checkpoint value"))
             .expect("serialized Rust Duel start checkpoint identity"),
         IdentityHash::parse(
             fixture["startCheckpoint"]["serializedCheckpointHash"]
@@ -1144,8 +1142,6 @@ fn duel_descriptors_order_and_transitions_should_match_typescript() {
         );
         assert!(branch.verify_replay().expect("verified Rust Duel replay"));
         let checkpoint = create_game_checkpoint(&branch).expect("Rust Duel result checkpoint");
-        let serialized =
-            serialize_game_checkpoint(&checkpoint).expect("serialized Rust Duel result checkpoint");
         assert_eq!(
             checkpoint.checkpoint_id.as_str(),
             transition["checkpointId"]
@@ -1155,7 +1151,7 @@ fn duel_descriptors_order_and_transitions_should_match_typescript() {
             transition["expectedSessionHash"]
         );
         assert_eq!(
-            identity_hash(&Value::String(serialized))
+            identity_hash(&serde_json::to_value(&checkpoint).expect("Rust checkpoint value"))
                 .expect("serialized Rust Duel result checkpoint identity"),
             IdentityHash::parse(
                 transition["serializedCheckpointHash"]
@@ -1433,7 +1429,7 @@ fn duel_descriptors_order_and_transitions_should_match_typescript() {
         underground["pending"]["expectedSessionHash"]
     );
     assert_eq!(
-        identity_hash(&Value::String(serialized_pending.clone()))
+        identity_hash(&serde_json::to_value(&pending_checkpoint).expect("Rust checkpoint value"))
             .expect("serialized Rust underground Duel pending checkpoint identity"),
         IdentityHash::parse(
             underground["pending"]["serializedCheckpointHash"]
@@ -1527,8 +1523,6 @@ fn duel_descriptors_order_and_transitions_should_match_typescript() {
     );
     let resolved_checkpoint =
         create_game_checkpoint(&restored).expect("Rust underground Duel resolved checkpoint");
-    let serialized_resolved = serialize_game_checkpoint(&resolved_checkpoint)
-        .expect("serialized Rust underground Duel resolved checkpoint");
     assert_eq!(
         resolved_checkpoint.checkpoint_id.as_str(),
         underground["resolved"]["checkpointId"]
@@ -1538,7 +1532,7 @@ fn duel_descriptors_order_and_transitions_should_match_typescript() {
         underground["resolved"]["expectedSessionHash"]
     );
     assert_eq!(
-        identity_hash(&Value::String(serialized_resolved))
+        identity_hash(&serde_json::to_value(&resolved_checkpoint).expect("Rust checkpoint value"))
             .expect("serialized Rust underground Duel resolved checkpoint identity"),
         IdentityHash::parse(
             underground["resolved"]["serializedCheckpointHash"]
@@ -1554,7 +1548,7 @@ fn shoot_projectile_descriptors_labels_order_and_ids_should_match_typescript() {
     let fixture: Value =
         serde_json::from_str(SHOOT_PROJECTILE_FIXTURE).expect("valid ordinary Ranged fixture");
     assert_eq!(fixture["schemaVersion"], 1);
-    assert_eq!(fixture["source"], "typescript-legality-engine");
+    assert_eq!(fixture["source"], "rust-legality-engine");
     assert_eq!(
         fixture["actions"]
             .as_array()
@@ -1659,7 +1653,7 @@ fn shoot_damage_projectile_descriptors_labels_order_and_ids_should_match_typescr
     let fixture: Value = serde_json::from_str(SHOOT_DAMAGE_PROJECTILE_FIXTURE)
         .expect("valid Shoot Damage Projectile fixture");
     assert_eq!(fixture["schemaVersion"], 1);
-    assert_eq!(fixture["source"], "typescript-legality-engine");
+    assert_eq!(fixture["source"], "rust-legality-engine");
     let contract = fixture["contract"].as_str().expect("action contract");
     let seat: Seat = serde_json::from_value(fixture["seat"].clone()).expect("fixture seat");
     let state_version = fixture["stateVersion"]
@@ -1750,7 +1744,7 @@ fn sparkmage_descriptors_order_and_action_ids_should_match_typescript() {
     let fixture: Value =
         serde_json::from_str(SPARKMAGE_FIXTURE).expect("valid Sparkmage action fixture");
     assert_eq!(fixture["schemaVersion"], 1);
-    assert_eq!(fixture["source"], "typescript-legality-engine");
+    assert_eq!(fixture["source"], "rust-legality-engine");
     assert_eq!(
         fixture["actions"]
             .as_array()
