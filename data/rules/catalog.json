@@ -2409,15 +2409,19 @@
         "RULE-04"
       ],
       "plainLanguage": "Planar Gate grants minions Voidwalk only until they leave the void.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "voidwalk"
       ],
-      "actionHints": [],
-      "eventHints": [],
+      "actionHints": [
+        "move"
+      ],
+      "eventHints": [
+        "movement"
+      ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 Planar Gate grants minions Voidwalk only until they leave the void"
+        "file": "crates/sorcery-engine/tests/voidwalk_rules.rs",
+        "testName": "rule_catalog_0120_planar_gate_should_grant_voidwalk_only_until_leaving_the_void"
       }
     },
     {
@@ -3243,7 +3247,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Cave-In detaches or carries eligible Artifacts underground and merges their outcomes with minions in canonical identity order.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "artifact",
         "burrowing"
@@ -3253,8 +3257,8 @@
       ],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03/04 Cave-In burrows every surface minion and Artifact at one Land Site together"
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0161_cave_in_burrows_artifacts_with_minions_in_canonical_order"
       }
     }
   ]

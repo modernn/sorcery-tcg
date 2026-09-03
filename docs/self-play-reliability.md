@@ -49,7 +49,7 @@ ordinary debug suite because running the same workload there takes several minut
 
 ## Current blockers to strong unattended self-play
 
-- Rust has direct proofs for 152 of 161 cataloged scenarios. The remaining mechanics must be ported
+- Rust has direct proofs for 154 of 161 cataloged scenarios. The remaining mechanics must be ported
   or rejected at manifest admission before their games can affect training.
 - Realm Artifacts are admitted only as power Artifacts, Lethal Artifacts, end-turn site-controller
   life-loss Artifacts, the Siege Ballista, the Payload Trebuchet, and the Rolling Boulder. Manifests
