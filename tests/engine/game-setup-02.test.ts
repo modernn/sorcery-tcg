@@ -5,7 +5,6 @@ import { canonicalJson, type JsonValue } from '../../src/authority/canonical-jso
 import {
   createGameCheckpoint,
   parseGameCheckpoint,
-  resumeGameCheckpoint,
   serializeGameCheckpoint,
 } from '../../src/engine/checkpoint.ts';
 import { opaqueActionId, type EngineActionDescriptor } from '../../src/engine/contract.ts';
@@ -21,8 +20,6 @@ import {
   type GameSession,
 } from '../../src/engine/game.ts';
 import {
-  accept,
-  action,
   cardsFor,
   deck,
   manifest,
@@ -176,7 +173,7 @@ test('RULE-03/04 Leap Attack resumes its strike after ordered movement Deathrite
     assert.equal(fragiles.every(({ instanceId }) => !ctx.state.players.north.cemetery
       .some((card) => card.instanceId === instanceId)), true);
     const interruptedCheckpoint = createGameCheckpoint(ctx.session);
-    const restored = resumeGameCheckpoint(parseGameCheckpoint(serializeGameCheckpoint(
+    const restored = await SetupCtx.resumeCheckpoint(parseGameCheckpoint(serializeGameCheckpoint(
       interruptedCheckpoint,
     )));
     assert.equal(
@@ -1317,7 +1314,8 @@ test('RULE-03/04 Chain Magic stages distinct nearby hops and damages all chosen 
     assert.equal(starts.some(({ descriptor }) => descriptor.kind === 'begin-chain-magic'
       && descriptor.target.instanceId === southAvatarId), false);
 
-    // Forged-state mana probe still uses TS legalGameActions (Geomancer pattern).
+    // TODO(rust-cutover): synthetic state, needs a Rust-side proof. This forged-mana
+    // GameSession is not reachable through legal play, so it stays on TS legalGameActions.
     const lowMana: GameSession = {
       ...ctx.session,
       state: {
@@ -1357,7 +1355,9 @@ test('RULE-03/04 Chain Magic stages distinct nearby hops and damages all chosen 
     assert.equal((await ctx.legalActions('north')).some(({ descriptor, label }) =>
       descriptor.kind === 'resolve-chain-magic' && /1 chosen unit \(2 mana\)/.test(label)), true);
 
-    // Forged-state region/stealth probes still use TS legalGameActions.
+    // TODO(rust-cutover): synthetic state, needs a Rust-side proof. These forged
+    // region/stealth GameStates are not reachable through legal play, so they stay
+    // on TS legalGameActions.
     const undergroundState: GameSession['state'] = {
       ...ctx.state,
       realm: {
@@ -3308,36 +3308,14 @@ test('RULE-03 Blink teleports a nearby ally before deaths and a private chosen-d
     assert.equal(typeof observeGame(ctx.state, 'south').players.north.hand.atlas, 'number');
     assert.equal(await ctx.verifyReplay(), true);
 
-    // Forged empty-atlas steps still use TS accept/action (Chain Magic pattern).
-    const emptyAtlas: GameSession = {
-      ...beforeBlink,
-      state: {
-        ...beforeBlink.state,
-        players: {
-          ...beforeBlink.state.players,
-          north: { ...beforeBlink.state.players.north, atlas: [] },
-        },
-      },
-    };
-    const atlasLoss = accept(emptyAtlas, action(emptyAtlas, ({ descriptor }) =>
-      descriptor.kind === 'cast-magic'
-        && descriptor.cardInstanceId === blinkInstanceId
-        && descriptor.ally?.instanceId === sourceInstanceId
-        && descriptor.drawZone === 'atlas'
-        && descriptor.targetLocation?.cell === 'D4'));
-    assert.deepEqual(atlasLoss.state.terminal, {
-      loser: 'north',
-      reason: 'deck_empty',
-      status: 'finished',
-      winner: 'south',
-    });
-    const spellWithEmptyAtlas = accept(emptyAtlas, action(emptyAtlas, ({ descriptor }) =>
-      descriptor.kind === 'cast-magic'
-        && descriptor.cardInstanceId === blinkInstanceId
-        && descriptor.ally?.instanceId === sourceInstanceId
-        && descriptor.drawZone === 'spellbook'
-        && descriptor.targetLocation?.cell === 'D4'));
-    assert.deepEqual(spellWithEmptyAtlas.state.terminal, { status: 'active' });
+    // An empty-atlas GameSession (players.north.atlas forced to []) is not reachable
+    // through legal play here, so the Rust engine cannot be handed it directly to prove
+    // that choosing an empty deck to draw from ends the game with deck_empty while
+    // choosing the still-full spellbook does not. That zone-empty-loses-the-game fact is
+    // proven directly in Rust by `empty_atlas_avatar_draw_pays_tap_cost_and_loses` in
+    // crates/sorcery-engine/tests/opening_draw_rules.rs (atlas zone) and by
+    // `rule_catalog_0040_blink_should_lose_the_game_when_its_chosen_deck_is_empty` in
+    // crates/sorcery-engine/tests/blink_rules.rs (Blink's chosen-zone draw specifically).
   });
 });
 
