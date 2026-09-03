@@ -2453,7 +2453,11 @@ fn rule_catalog_0161_cave_in_burrows_artifacts_with_minions_in_canonical_order()
             })
             .collect();
         assert_eq!(burrow_events, burrow_ids);
-        assert!(cast.events.iter().any(|event| event.event_type == "minion-died"));
+        assert!(
+            cast.events
+                .iter()
+                .any(|event| event.event_type == "minion-died")
+        );
         let after = state(&session);
         assert_eq!(after["phase"], "main");
         let surviving_burrower = realm_unit(&after, &burrower_id).expect("burrowing survivor");

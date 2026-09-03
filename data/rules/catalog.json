@@ -1396,7 +1396,7 @@
         "RULE-03"
       ],
       "plainLanguage": "Site Genesis resumes after ordered terrain-replacement Deathrites.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "genesis",
         "terrain"
@@ -1404,8 +1404,8 @@
       "actionHints": [],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-02/03 site Genesis resumes after ordered terrain-replacement Deathrites"
+        "file": "crates/sorcery-engine/tests/genesis_terrain_rules.rs",
+        "testName": "site_genesis_should_resume_after_ordered_terrain_replacement_deathrites"
       }
     },
     {
