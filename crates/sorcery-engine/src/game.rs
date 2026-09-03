@@ -961,14 +961,17 @@ enum RegionDisposition {
 #[derive(Clone, Copy, Default)]
 struct RegionAbilities {
     burrowing: bool,
+    /// Voidwalk the mover already borrowed from a Planar Gate before this path began.
+    planar_gate_voidwalk: bool,
     submerge: bool,
     voidwalk: bool,
 }
 
 impl RegionAbilities {
-    const fn of_minion(minion: &MinionFacts) -> Self {
+    const fn of_unit(minion: &MinionFacts, planar_gate_voidwalk: bool) -> Self {
         Self {
             burrowing: minion.burrowing,
+            planar_gate_voidwalk,
             submerge: minion.submerge,
             voidwalk: minion.voidwalk,
         }
@@ -1827,7 +1830,7 @@ impl Game {
             maximum_cost: (!facts.immobile).then_some(1),
             moving_minion: true,
             occupied_cells: unit.occupied_cells,
-            regions: RegionAbilities::of_minion(facts),
+            regions: RegionAbilities::of_unit(facts, unit.planar_gate_voidwalk),
             restriction: facts.movement_restriction,
             seat: pending.seat,
         };
@@ -2214,7 +2217,7 @@ impl Game {
                     },
                     moving_minion: true,
                     occupied_cells: unit.occupied_cells,
-                    regions: RegionAbilities::of_minion(facts),
+                    regions: RegionAbilities::of_unit(facts, unit.planar_gate_voidwalk),
                     restriction: facts.movement_restriction,
                     seat,
                 },
@@ -2972,7 +2975,7 @@ impl Game {
                     },
                     moving_minion: true,
                     occupied_cells: unit.occupied_cells,
-                    regions: RegionAbilities::of_minion(facts),
+                    regions: RegionAbilities::of_unit(facts, unit.planar_gate_voidwalk),
                     restriction: facts.movement_restriction,
                     seat,
                 },
@@ -4146,7 +4149,19 @@ impl Game {
         }
     }
 
-    fn move_minion_to(unit: &mut UnitPosition, location: Location) -> Result<(), GameError> {
+    /// Relocates one realm minion, settling the Voidwalk it may have borrowed from a Planar Gate.
+    fn move_minion_to(
+        &mut self,
+        instance_id: &IdentityHash,
+        location: Location,
+    ) -> Result<(), GameError> {
+        let retains = self.retains_planar_gate_voidwalk(instance_id, location);
+        let unit = self
+            .position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == *instance_id)
+            .ok_or(GameError::IllegalAction)?;
         if let Some(area) = unit.occupied_cells {
             unit.occupied_cells = Some(
                 translated_square(area, unit.location, location.cell)
@@ -4154,6 +4169,7 @@ impl Game {
             );
         }
         unit.location = location.cell;
+        unit.planar_gate_voidwalk = retains;
         unit.region = location.region;
         Ok(())
     }
@@ -4924,7 +4940,7 @@ impl Game {
                         maximum_cost: Some(1),
                         moving_minion: true,
                         occupied_cells: unit.occupied_cells,
-                        regions: RegionAbilities::of_minion(facts),
+                        regions: RegionAbilities::of_unit(facts, unit.planar_gate_voidwalk),
                         restriction: facts.movement_restriction,
                         seat: *seat,
                     },
@@ -6977,14 +6993,15 @@ impl Game {
             .tapped = true;
         let mut reached = 0;
         while let Some(next) = path.get(reached + 1).copied() {
-            let Some(unit) =
-                self.position.units.iter_mut().find(|unit| {
-                    unit.controller == seat && unit.card.instance_id == *unit_instance_id
-                })
-            else {
+            if !self
+                .position
+                .units
+                .iter()
+                .any(|unit| unit.controller == seat && unit.card.instance_id == *unit_instance_id)
+            {
                 break;
-            };
-            Self::move_minion_to(unit, next)?;
+            }
+            self.move_minion_to(unit_instance_id, next)?;
             reached += 1;
             self.settle_nearby_enemy_stealth(outcomes);
             if reached + 1 >= path.len() {
@@ -7067,14 +7084,14 @@ impl Game {
         let unit = self
             .position
             .units
-            .iter_mut()
+            .iter()
             .find(|unit| unit.controller == seat && unit.card.instance_id == *unit_instance_id)
             .ok_or(GameError::IllegalAction)?;
         let from = Location {
             cell: unit.location,
             region: unit.region,
         };
-        Self::move_minion_to(unit, next)?;
+        self.move_minion_to(unit_instance_id, next)?;
         self.position
             .pending_basic_movement
             .as_pending_mut()
@@ -7240,15 +7257,12 @@ impl Game {
         let (Some(from), Some(path), Some(to)) = (from, path, to) else {
             return Err(GameError::IllegalAction);
         };
-        let unit = self
-            .position
-            .units
-            .iter_mut()
-            .find(|unit| {
-                unit.controller == action.seat && unit.card.instance_id == *unit_instance_id
-            })
-            .ok_or(GameError::IllegalAction)?;
-        Self::move_minion_to(unit, *to)?;
+        if !self.position.units.iter().any(|unit| {
+            unit.controller == action.seat && unit.card.instance_id == *unit_instance_id
+        }) {
+            return Err(GameError::IllegalAction);
+        }
+        self.move_minion_to(unit_instance_id, *to)?;
         self.position.state_version += 1;
         outcomes.push("unit-stepped", || {
             json!({
@@ -9706,7 +9720,7 @@ impl Game {
                         },
                         moving_minion: true,
                         occupied_cells: unit.occupied_cells,
-                        regions: RegionAbilities::of_minion(facts),
+                        regions: RegionAbilities::of_unit(facts, unit.planar_gate_voidwalk),
                         restriction: facts.movement_restriction,
                         seat,
                     },
@@ -9750,13 +9764,7 @@ impl Game {
             }
             UnitKind::Minion => {
                 for location in path.iter().skip(1) {
-                    let unit = self
-                        .position
-                        .units
-                        .iter_mut()
-                        .find(|unit| unit.card.instance_id == *unit_instance_id)
-                        .ok_or(GameError::IllegalAction)?;
-                    Self::move_minion_to(unit, *location)?;
+                    self.move_minion_to(unit_instance_id, *location)?;
                     self.settle_nearby_enemy_stealth(outcomes);
                 }
                 self.position
@@ -13240,13 +13248,15 @@ impl Game {
                 avatar.location = destination.cell;
             }
             UnitTarget::Minion { instance_id, seat } => {
-                let unit = self
+                if !self
                     .position
                     .units
-                    .iter_mut()
-                    .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
-                    .ok_or(GameError::IllegalAction)?;
-                Self::move_minion_to(unit, destination)?;
+                    .iter()
+                    .any(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
+                {
+                    return Err(GameError::IllegalAction);
+                }
+                self.move_minion_to(instance_id, destination)?;
             }
         }
         Ok(destination)
