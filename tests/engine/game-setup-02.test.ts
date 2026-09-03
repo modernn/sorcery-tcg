@@ -10,7 +10,6 @@ import {
 import { opaqueActionId, type EngineActionDescriptor } from '../../src/engine/contract.ts';
 import {
   createGameManifest,
-  createGameSession,
   hashGameState,
   legalGameActions,
   observeGame,
@@ -23,6 +22,7 @@ import {
   cardsFor,
   deck,
   manifest,
+  peekOpening,
   SYNTHETIC_AUTHORITY_HASH,
   takeAction,
   type SpellFacts,
@@ -87,8 +87,8 @@ test('RULE-03/04 Leap Attack resumes its strike after ordered movement Deathrite
   let gameManifest: GameManifest | undefined;
   for (let seed = 1; seed <= 4_096; seed += 1) {
     const candidate = createGameManifest({ ...input, seed });
-    // Seed search peeks opening hands via TS createGameSession (cheap); play path uses SetupCtx.
-    const opening = createGameSession(candidate).state.players;
+    // Seed search peeks opening hands from the shared Rust session process.
+    const opening = (await peekOpening(candidate)).state.players;
     const northOpening = new Set(opening.north.hand.spellbook.map(({ cardId }) => cardId));
     const northBySecondTurn = new Set([
       ...opening.north.hand.spellbook,
@@ -462,7 +462,7 @@ test('RULE-03 Freeze disables a nearby minion until the caster next Start Phase'
       firstSeat: 'north',
       seed,
     });
-    const preview = createGameSession(candidate).state.players;
+    const preview = (await peekOpening(candidate)).state.players;
     if (preview.north.hand.spellbook.some(({ cardId }) => cardId === allyCardId)
       && preview.south.hand.spellbook.some(({ cardId }) => cardId === targetCardId)
       && preview.south.hand.spellbook.some(({ cardId }) => cardId === stealthCardId)
@@ -899,8 +899,8 @@ test('RULE-03 Lucky Charm commits the random action before exposing two determin
       firstSeat: 'north',
       seed,
     });
-    // Seed search peeks opening hands via TS createGameSession (cheap); play path uses SetupCtx.
-    if (!createGameSession(candidate).state.players.north.hand.spellbook.some(({ cardId }) =>
+    // Seed search peeks opening hands from the shared Rust session process.
+    if (!(await peekOpening(candidate)).state.players.north.hand.spellbook.some(({ cardId }) =>
       cardId === luckyCharmId)) continue;
     gameManifest = candidate;
     let foundPair = false;
@@ -1016,8 +1016,8 @@ test('RULE-03/04 Minor Explosion damages every unit at a location up to two card
     revisionId: 'synthetic-minor-explosion-v1',
   };
   const seed = 249;
-  // Seed peek via TS createGameSession (cheap); play path uses SetupCtx.
-  const preview = createGameSession(createGameManifest({
+  // Seed peek from the shared Rust session process.
+  const preview = await peekOpening(createGameManifest({
     authority,
     cards: baseCards,
     decks,
@@ -1207,8 +1207,8 @@ test('RULE-03/04 Chain Magic stages distinct nearby hops and damages all chosen 
     revisionId: 'synthetic-chain-magic-v1',
   };
   const seed = 271;
-  // Seed peek via TS createGameSession (cheap); play path uses SetupCtx.
-  const preview = createGameSession(createGameManifest({
+  // Seed peek from the shared Rust session process.
+  const preview = await peekOpening(createGameManifest({
     authority,
     cards: baseCards,
     decks,
@@ -1451,8 +1451,8 @@ test('RULE-03/04 Rain of Arrows simultaneously damages every aboveground minion'
     revisionId: 'synthetic-rain-of-arrows-v1',
   };
   const seed = 263;
-  // Seed peek via TS createGameSession (cheap); play path uses SetupCtx.
-  const preview = createGameSession(createGameManifest({
+  // Seed peek from the shared Rust session process.
+  const preview = await peekOpening(createGameManifest({
     authority,
     cards: baseCards,
     decks,
@@ -1629,8 +1629,8 @@ test('RULE-03 Charge Magic grants an untargeted ally Charge only for the current
     revisionId: 'synthetic-charge-magic-v1',
   };
   const seed = 250;
-  // Seed peek via TS createGameSession (cheap); play path uses SetupCtx.
-  const preview = createGameSession(createGameManifest({
+  // Seed peek from the shared Rust session process.
+  const preview = await peekOpening(createGameManifest({
     authority,
     cards: baseCards,
     decks,
@@ -1826,8 +1826,8 @@ test('RULE-03 Overpower changes current power for source-aware prevention until 
     revisionId: 'synthetic-overpower-v1',
   };
   const seed = 264;
-  // Seed peek via TS createGameSession (cheap); play path uses SetupCtx.
-  const preview = createGameSession(createGameManifest({
+  // Seed peek from the shared Rust session process.
+  const preview = await peekOpening(createGameManifest({
     authority,
     cards: baseCards,
     decks,
@@ -2069,8 +2069,8 @@ test('RULE-04 nearby-allies power is derived and settles deaths when its source 
     revisionId: 'synthetic-nearby-power-v1',
   };
   const seed = 265;
-  // Seed peek via TS createGameSession (cheap); play path uses SetupCtx.
-  const preview = createGameSession(createGameManifest({
+  // Seed peek from the shared Rust session process.
+  const preview = await peekOpening(createGameManifest({
     authority,
     cards: baseCards,
     decks,
@@ -2190,8 +2190,8 @@ test('RULE-04 controlled Mortal power follows current control and settles deaths
     revisionId: 'synthetic-controlled-mortal-power-v1',
   };
   const seed = 266;
-  // Seed peek via TS createGameSession (cheap); play path uses SetupCtx.
-  const preview = createGameSession(createGameManifest({
+  // Seed peek from the shared Rust session process.
+  const preview = await peekOpening(createGameManifest({
     authority,
     cards: baseCards,
     decks,
@@ -2482,11 +2482,11 @@ test('RULE-04 aura-loss Deathrite ends the game after its triggering Magic resol
     decks: { north, south },
     firstSeat: 'north' as const,
   };
-  // Seed peek via TS createGameSession (cheap); play path uses SetupCtx.
+  // Seed peek from the shared Rust session process.
   let gameManifest: GameManifest | undefined;
   for (let seed = 1; seed <= 4_096; seed += 1) {
     const candidate = createGameManifest({ ...input, seed });
-    const opening = createGameSession(candidate).state.players.north;
+    const opening = (await peekOpening(candidate)).state.players.north;
     const openingNames = new Set(opening.hand.spellbook.map(({ cardId }) => cardId));
     const availableNames = new Set([
       ...opening.hand.spellbook,
@@ -2650,11 +2650,11 @@ test('RULE-04 aura-loss deaths cannot restore stale combat during a defender pat
     decks: { north, south },
     firstSeat: 'north' as const,
   };
-  // Seed peek via TS createGameSession (cheap); play path uses SetupCtx.
+  // Seed peek from the shared Rust session process.
   let gameManifest: GameManifest | undefined;
   for (let seed = 1; seed <= 4_096; seed += 1) {
     const candidate = createGameManifest({ ...input, seed });
-    const opening = createGameSession(candidate).state.players;
+    const opening = (await peekOpening(candidate)).state.players;
     const northOpening = new Set(opening.north.hand.spellbook.map(({ cardId }) => cardId));
     const southBySecondTurn = new Set([
       ...opening.south.hand.spellbook,
@@ -2811,8 +2811,8 @@ test('RULE-03 Lure makes a chosen enemy minion take its own closer step', async 
     revisionId: 'synthetic-lure-v1',
   };
   const seed = 251;
-  // Seed peek via TS createGameSession (cheap); play path uses SetupCtx.
-  const preview = createGameSession(createGameManifest({
+  // Seed peek from the shared Rust session process.
+  const preview = await peekOpening(createGameManifest({
     authority,
     cards: baseCards,
     decks,
@@ -3010,8 +3010,8 @@ test('RULE-03 Teleport forcefully moves a chosen ally to a target site surface',
     northSpell: allyFacts,
     site: { elements: ['water', 'air'] },
   });
-  // Seed peek via TS createGameSession (cheap); play path uses SetupCtx.
-  const preview = createGameSession(base);
+  // Seed peek from the shared Rust session process.
+  const preview = await peekOpening(base);
   const allyCardId = preview.state.players.north.hand.spellbook[0]?.cardId;
   const teleportCardId = preview.state.players.north.hand.spellbook[1]?.cardId;
   assert.ok(allyCardId);
@@ -3156,8 +3156,8 @@ test('RULE-03 Blink teleports a nearby ally before deaths and a private chosen-d
     firstSeat: 'north' as const,
     seed: 266,
   };
-  // Seed peek via TS createGameSession (cheap); play path uses SetupCtx.
-  const preview = createGameSession(createGameManifest({ ...input, cards: baseCards }));
+  // Seed peek from the shared Rust session process.
+  const preview = await peekOpening(createGameManifest({ ...input, cards: baseCards }));
   const [sourceCard, beneficiaryCard, rainCard] = preview.state.players.north.hand.spellbook;
   const blinkCard = preview.state.players.north.spellbook[0];
   assert.ok(sourceCard);
@@ -3336,7 +3336,7 @@ test('RULE-03 Rescue returns a chosen own cemetery minion to hidden hand or reso
       thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
     };
   }
-  // Seed peek via TS createGameSession (cheap); play path uses SetupCtx.
+  // Seed peek from the shared Rust session process.
   let gameManifest: GameManifest | undefined;
   for (let seed = 155; seed < 175; seed += 1) {
     const candidate = createGameManifest({
@@ -3350,7 +3350,7 @@ test('RULE-03 Rescue returns a chosen own cemetery minion to hidden hand or reso
       firstSeat: 'north',
       seed,
     });
-    const preview = createGameSession(candidate).state.players.north;
+    const preview = (await peekOpening(candidate)).state.players.north;
     const topTypes = preview.spellbook.slice(0, 2).map(({ cardId }) =>
       candidate.cards[cardId]?.cardType);
     if (topTypes.includes('minion')

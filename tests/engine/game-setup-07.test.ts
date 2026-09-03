@@ -10,7 +10,6 @@ import {
 import { opaqueActionId } from '../../src/engine/contract.ts';
 import {
   createGameManifest,
-  createGameSession,
   hashGameState,
   legalGameActions,
   observeGame,
@@ -26,6 +25,7 @@ import {
   cardsFor,
   deck,
   manifest,
+  peekOpening,
   SYNTHETIC_AUTHORITY_HASH,
   takeAction,
   withNorthAttacksAtC2,
@@ -128,8 +128,8 @@ test('RULE-05 Deathrite damages each other remaining unit here in simultaneous c
     revisionId: 'synthetic-deathrite-area-damage-v1',
   };
   const seed = 263;
-  // Seed peek via TS createGameSession (cheap); play path uses SetupCtx.
-  const preview = createGameSession(createGameManifest({
+  // Seed peek from the shared Rust session process.
+  const preview = await peekOpening(createGameManifest({
     authority,
     cards: baseCards,
     decks,
@@ -1020,8 +1020,8 @@ test('RULE-04 Pick Up and Drop manage local carried Artifacts once per unit turn
   let gameManifest: GameManifest | undefined;
   for (let seed = 83; seed < 256; seed += 1) {
     const candidate = createGameManifest({ ...input, seed });
-    // Seed peek via TS createGameSession (cheap); play path uses SetupCtx.
-    const opening = createGameSession(candidate).state.players.north.hand.spellbook;
+    // Seed peek from the shared Rust session process.
+    const opening = (await peekOpening(candidate)).state.players.north.hand.spellbook;
     if (opening.filter(({ cardId }) => cardId === 'sword-and-shield').length >= 2
       && opening.some(({ cardId }) => cardId === 'artifact-bearer')) {
       gameManifest = candidate;
