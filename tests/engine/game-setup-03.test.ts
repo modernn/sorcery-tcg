@@ -1594,7 +1594,7 @@ test('RULE-03 numeric Genesis spell draws exhaust 2, 1, or 0 remaining cards bef
   }
 });
 
-test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', () => {
+test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', async () => {
   const decks = {
     north: deck('static-north', 5, 6),
     south: deck('static-south', 5, 6),
@@ -1721,6 +1721,7 @@ test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', (
   let gameManifest: GameManifest | undefined;
   for (let seed = 1; seed <= 4_096; seed += 1) {
     const candidate = createGameManifest({ ...input, seed });
+    // Seed search peeks opening hands via TS createGameSession (cheap); play path uses SetupCtx.
     const opening = createGameSession(candidate).state.players;
     const northReady = [staticId, alliedMinionId, titanId].every((cardId) =>
       opening.north.hand.spellbook.some((card) => card.cardId === cardId));
@@ -1739,179 +1740,186 @@ test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', (
     Readonly<Record<string, unknown>>).genesisDamageEachOtherUnitHere, 1);
   assert.equal((gameManifest.cards[titanId] as unknown as
     Readonly<Record<string, unknown>>).genesisStrikeEachEnemyHere, true);
-  let session = keep(keep(createGameSession(gameManifest)));
-  const take = (predicate: Parameters<typeof action>[1]): void => {
-    session = accept(session, action(session, predicate));
-  };
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardId === alliedMinionId && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'cast-magic'
-    && descriptor.cardId === teleportId
-    && descriptor.ally?.kind === 'avatar'
-    && descriptor.allyDestination === undefined
-    && descriptor.targetLocation?.cell === 'C4');
-  for (const minionId of [enemyMinionId, wardedMinionId]) {
-    take(({ descriptor }) => descriptor.kind === 'summon-minion'
-      && descriptor.cardId === minionId
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    const take = async (
+      predicate: (candidate: GameLegalAction) => boolean,
+    ): Promise<void> => {
+      await takeAction(ctx, predicate);
+    };
+    await take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === alliedMinionId && descriptor.cell === 'C4');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await take(({ descriptor }) => descriptor.kind === 'cast-magic'
+      && descriptor.cardId === teleportId
+      && descriptor.ally?.kind === 'avatar'
+      && descriptor.allyDestination === undefined
+      && descriptor.targetLocation?.cell === 'C4');
+    for (const minionId of [enemyMinionId, wardedMinionId]) {
+      await take(({ descriptor }) => descriptor.kind === 'summon-minion'
+        && descriptor.cardId === minionId
+        && descriptor.cell === 'C4'
+        && descriptor.region === undefined);
+    }
+    await take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === undergroundMinionId
       && descriptor.cell === 'C4'
-      && descriptor.region === undefined);
-  }
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardId === undergroundMinionId
-    && descriptor.cell === 'C4'
-    && descriptor.region === 'underground');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+      && descriptor.region === 'underground');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
 
-  const beforeVersion = session.state.stateVersion;
-  const beforeNorthAtlas = session.state.players.north.atlas.length;
-  const alliedMinion = session.state.realm.units.find(({ cardId }) => cardId === alliedMinionId);
-  const enemyMinion = session.state.realm.units.find(({ cardId }) => cardId === enemyMinionId);
-  const wardedMinion = session.state.realm.units.find(({ cardId }) => cardId === wardedMinionId);
-  const undergroundMinion = session.state.realm.units.find(({ cardId }) =>
-    cardId === undergroundMinionId);
-  assert.ok(alliedMinion);
-  assert.ok(enemyMinion);
-  assert.ok(wardedMinion);
-  assert.ok(undergroundMinion);
-  const result = stepGame(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cardId === staticId
-      && descriptor.cell === 'C4'));
-  assert.equal(result.accepted, true);
-  const source = result.session.state.realm.units.find(({ cardId }) => cardId === staticId);
-  assert.ok(source);
-  assert.equal(result.session.state.stateVersion, beforeVersion + 1);
-  const allocations = result.receipt.events.filter(({ type }) =>
-    type === 'genesis-damage-allocated');
-  assert.deepEqual(allocations.map(({ payload }) => payload), [
-    result.session.state.players.north.avatar.card,
-    result.session.state.players.south.avatar.card,
-    alliedMinion,
-    enemyMinion,
-    wardedMinion,
-  ].map(({ instanceId }) => ({
-    amount: 1,
-    sourceInstanceId: source.instanceId,
-    targetInstanceId: instanceId,
-  })).sort((left, right) => left.targetInstanceId.localeCompare(right.targetInstanceId)));
-  assert.equal(allocations.some(({ payload }) =>
-    typeof payload === 'object'
-      && payload !== null
-      && 'targetInstanceId' in payload
-      && payload.targetInstanceId === source.instanceId), false);
-  assert.deepEqual({
-    northLife: result.session.state.players.north.avatar.life,
-    southLife: result.session.state.players.south.avatar.life,
-    sourceDamage: source.damage,
-    undergroundDamage: result.session.state.realm.units.find(({ instanceId }) =>
-      instanceId === undergroundMinion.instanceId)?.damage,
-    warded: result.session.state.realm.units.find(({ instanceId }) =>
-      instanceId === wardedMinion.instanceId)?.warded,
-  }, {
-    northLife: 19,
-    southLife: 19,
-    sourceDamage: 0,
-    undergroundDamage: 0,
-    warded: false,
-  });
-  assert.equal(result.session.state.realm.units.some(({ instanceId }) =>
-    instanceId === alliedMinion.instanceId), false);
-  assert.equal(result.session.state.realm.units.some(({ instanceId }) =>
-    instanceId === enemyMinion.instanceId), false);
-  assert.equal(result.session.state.players.north.atlas.length, beforeNorthAtlas - 1);
-  const avatarIds = new Set([
-    result.session.state.players.north.avatar.card.instanceId,
-    result.session.state.players.south.avatar.card.instanceId,
-  ]);
-  const targetIds = [
-    ...avatarIds,
-    alliedMinion.instanceId,
-    enemyMinion.instanceId,
-    wardedMinion.instanceId,
-  ].sort();
-  const resolutionTypes = targetIds.flatMap((instanceId) =>
-    avatarIds.has(instanceId)
-      ? ['damage-dealt', 'avatar-life-lost']
-      : instanceId === wardedMinion.instanceId
-        ? ['damage-dealt', 'ward-broken']
-        : ['damage-dealt']);
-  assert.deepEqual(result.receipt.events.map(({ type }) => type), [
-    'minion-summoned',
-    ...Array.from({ length: 5 }, () => 'genesis-damage-allocated'),
-    ...resolutionTypes,
-    'site-drawn',
-    'minion-died',
-    'minion-died',
-  ]);
-  assert.equal(result.receipt.randomDraws.length, 0);
-  assert.equal(result.session.state.pendingCombat, null);
-  assert.equal(result.session.state.terminal.status, 'active');
-  assert.equal(verifyGameReplay(result.session), true);
+    const beforeVersion = ctx.state.stateVersion;
+    const beforeNorthAtlas = ctx.state.players.north.atlas.length;
+    const alliedMinion = ctx.state.realm.units.find(({ cardId }) => cardId === alliedMinionId);
+    const enemyMinion = ctx.state.realm.units.find(({ cardId }) => cardId === enemyMinionId);
+    const wardedMinion = ctx.state.realm.units.find(({ cardId }) => cardId === wardedMinionId);
+    const undergroundMinion = ctx.state.realm.units.find(({ cardId }) =>
+      cardId === undergroundMinionId);
+    assert.ok(alliedMinion);
+    assert.ok(enemyMinion);
+    assert.ok(wardedMinion);
+    assert.ok(undergroundMinion);
+    const branchPoint = createGameCheckpoint(ctx.session);
+    const result = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === staticId
+        && descriptor.cell === 'C4'));
+    assert.equal(result.accepted, true);
+    const source = result.session.state.realm.units.find(({ cardId }) => cardId === staticId);
+    assert.ok(source);
+    assert.equal(result.session.state.stateVersion, beforeVersion + 1);
+    const allocations = result.receipt.events.filter(({ type }) =>
+      type === 'genesis-damage-allocated');
+    assert.deepEqual(allocations.map(({ payload }) => payload), [
+      result.session.state.players.north.avatar.card,
+      result.session.state.players.south.avatar.card,
+      alliedMinion,
+      enemyMinion,
+      wardedMinion,
+    ].map(({ instanceId }) => ({
+      amount: 1,
+      sourceInstanceId: source.instanceId,
+      targetInstanceId: instanceId,
+    })).sort((left, right) => left.targetInstanceId.localeCompare(right.targetInstanceId)));
+    assert.equal(allocations.some(({ payload }) =>
+      typeof payload === 'object'
+        && payload !== null
+        && 'targetInstanceId' in payload
+        && payload.targetInstanceId === source.instanceId), false);
+    assert.deepEqual({
+      northLife: result.session.state.players.north.avatar.life,
+      southLife: result.session.state.players.south.avatar.life,
+      sourceDamage: source.damage,
+      undergroundDamage: result.session.state.realm.units.find(({ instanceId }) =>
+        instanceId === undergroundMinion.instanceId)?.damage,
+      warded: result.session.state.realm.units.find(({ instanceId }) =>
+        instanceId === wardedMinion.instanceId)?.warded,
+    }, {
+      northLife: 19,
+      southLife: 19,
+      sourceDamage: 0,
+      undergroundDamage: 0,
+      warded: false,
+    });
+    assert.equal(result.session.state.realm.units.some(({ instanceId }) =>
+      instanceId === alliedMinion.instanceId), false);
+    assert.equal(result.session.state.realm.units.some(({ instanceId }) =>
+      instanceId === enemyMinion.instanceId), false);
+    assert.equal(result.session.state.players.north.atlas.length, beforeNorthAtlas - 1);
+    const avatarIds = new Set([
+      result.session.state.players.north.avatar.card.instanceId,
+      result.session.state.players.south.avatar.card.instanceId,
+    ]);
+    const targetIds = [
+      ...avatarIds,
+      alliedMinion.instanceId,
+      enemyMinion.instanceId,
+      wardedMinion.instanceId,
+    ].sort();
+    const resolutionTypes = targetIds.flatMap((instanceId) =>
+      avatarIds.has(instanceId)
+        ? ['damage-dealt', 'avatar-life-lost']
+        : instanceId === wardedMinion.instanceId
+          ? ['damage-dealt', 'ward-broken']
+          : ['damage-dealt']);
+    assert.deepEqual(result.receipt.events.map(({ type }) => type), [
+      'minion-summoned',
+      ...Array.from({ length: 5 }, () => 'genesis-damage-allocated'),
+      ...resolutionTypes,
+      'site-drawn',
+      'minion-died',
+      'minion-died',
+    ]);
+    assert.equal(result.receipt.randomDraws.length, 0);
+    assert.equal(result.session.state.pendingCombat, null);
+    assert.equal(result.session.state.terminal.status, 'active');
+    assert.equal(await ctx.verifyReplay(), true);
 
-  const titanResult = stepGame(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cardId === titanId
-      && descriptor.cell === 'C4'));
-  assert.equal(titanResult.accepted, true);
-  const titan = titanResult.session.state.realm.units.find(({ cardId }) => cardId === titanId);
-  assert.ok(titan);
-  const strikeAllocations = titanResult.receipt.events.filter(({ type }) =>
-    type === 'strike-damage-allocated');
-  assert.deepEqual(strikeAllocations.map(({ payload }) => payload), [
-    titanResult.session.state.players.south.avatar.card,
-    enemyMinion,
-    wardedMinion,
-  ].map(({ instanceId }) => ({
-    amount: 3,
-    strikerInstanceId: titan.instanceId,
-    targetInstanceId: instanceId,
-  })).sort((left, right) => left.targetInstanceId.localeCompare(right.targetInstanceId)));
-  assert.deepEqual({
-    alliedPresent: titanResult.session.state.realm.units.some(({ instanceId }) =>
-      instanceId === alliedMinion.instanceId),
-    enemyPresent: titanResult.session.state.realm.units.some(({ instanceId }) =>
-      instanceId === enemyMinion.instanceId),
-    southLife: titanResult.session.state.players.south.avatar.life,
-    titanDamage: titan.damage,
-    undergroundDamage: titanResult.session.state.realm.units.find(({ instanceId }) =>
-      instanceId === undergroundMinion.instanceId)?.damage,
-    warded: titanResult.session.state.realm.units.find(({ instanceId }) =>
-      instanceId === wardedMinion.instanceId)?.warded,
-  }, {
-    alliedPresent: true,
-    enemyPresent: false,
-    southLife: 17,
-    titanDamage: 0,
-    undergroundDamage: 0,
-    warded: false,
+    await ctx.resume(branchPoint);
+    const titanResult = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === titanId
+        && descriptor.cell === 'C4'));
+    assert.equal(titanResult.accepted, true);
+    const titan = titanResult.session.state.realm.units.find(({ cardId }) => cardId === titanId);
+    assert.ok(titan);
+    const strikeAllocations = titanResult.receipt.events.filter(({ type }) =>
+      type === 'strike-damage-allocated');
+    assert.deepEqual(strikeAllocations.map(({ payload }) => payload), [
+      titanResult.session.state.players.south.avatar.card,
+      enemyMinion,
+      wardedMinion,
+    ].map(({ instanceId }) => ({
+      amount: 3,
+      strikerInstanceId: titan.instanceId,
+      targetInstanceId: instanceId,
+    })).sort((left, right) => left.targetInstanceId.localeCompare(right.targetInstanceId)));
+    assert.deepEqual({
+      alliedPresent: titanResult.session.state.realm.units.some(({ instanceId }) =>
+        instanceId === alliedMinion.instanceId),
+      enemyPresent: titanResult.session.state.realm.units.some(({ instanceId }) =>
+        instanceId === enemyMinion.instanceId),
+      southLife: titanResult.session.state.players.south.avatar.life,
+      titanDamage: titan.damage,
+      undergroundDamage: titanResult.session.state.realm.units.find(({ instanceId }) =>
+        instanceId === undergroundMinion.instanceId)?.damage,
+      warded: titanResult.session.state.realm.units.find(({ instanceId }) =>
+        instanceId === wardedMinion.instanceId)?.warded,
+    }, {
+      alliedPresent: true,
+      enemyPresent: false,
+      southLife: 17,
+      titanDamage: 0,
+      undergroundDamage: 0,
+      warded: false,
+    });
+    const titanTargetIds = [
+      titanResult.session.state.players.south.avatar.card.instanceId,
+      enemyMinion.instanceId,
+      wardedMinion.instanceId,
+    ].sort();
+    const titanResolutionTypes = titanTargetIds.flatMap((instanceId) =>
+      instanceId === titanResult.session.state.players.south.avatar.card.instanceId
+        ? ['damage-dealt', 'avatar-life-lost']
+        : instanceId === wardedMinion.instanceId
+          ? ['damage-dealt', 'ward-broken']
+          : ['damage-dealt']);
+    assert.deepEqual(titanResult.receipt.events.map(({ type }) => type), [
+      'minion-summoned',
+      ...Array.from({ length: 3 }, () => 'strike-damage-allocated'),
+      ...titanResolutionTypes,
+      'minion-died',
+    ]);
+    assert.equal(titanResult.receipt.randomDraws.length, 0);
+    assert.equal(titanResult.session.state.pendingCombat, null);
+    assert.equal(titanResult.session.state.terminal.status, 'active');
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  const titanTargetIds = [
-    titanResult.session.state.players.south.avatar.card.instanceId,
-    enemyMinion.instanceId,
-    wardedMinion.instanceId,
-  ].sort();
-  const titanResolutionTypes = titanTargetIds.flatMap((instanceId) =>
-    instanceId === titanResult.session.state.players.south.avatar.card.instanceId
-      ? ['damage-dealt', 'avatar-life-lost']
-      : instanceId === wardedMinion.instanceId
-        ? ['damage-dealt', 'ward-broken']
-        : ['damage-dealt']);
-  assert.deepEqual(titanResult.receipt.events.map(({ type }) => type), [
-    'minion-summoned',
-    ...Array.from({ length: 3 }, () => 'strike-damage-allocated'),
-    ...titanResolutionTypes,
-    'minion-died',
-  ]);
-  assert.equal(titanResult.receipt.randomDraws.length, 0);
-  assert.equal(titanResult.session.state.pendingCombat, null);
-  assert.equal(titanResult.session.state.terminal.status, 'active');
-  assert.equal(verifyGameReplay(titanResult.session), true);
 });
 
 test('RULE-03/04 Vile Imp may deal 2 damage to one adjacent unit or decline', () => {
