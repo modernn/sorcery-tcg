@@ -1,4 +1,9 @@
 import assert from 'node:assert/strict';
+import { after } from 'node:test';
+
+import { canonicalJson, type JsonValue } from '../../src/authority/canonical-json.ts';
+import { RustSessionClient } from '../../src/engine/rust-engine.ts';
+import { parseExportedSession } from '../../src/engine/rust-session-helpers.ts';
 
 import {
   createGameManifest,
@@ -883,4 +888,23 @@ export async function withDevilsEggFixture(
     }
     await run(ctx, fixture);
   });
+}
+
+let sharedPeekClient: Promise<RustSessionClient> | null = null;
+
+after(async () => {
+  if (sharedPeekClient) await (await sharedPeekClient).close();
+});
+
+/**
+ * Returns the deterministic opening session for one manifest from the Rust engine.
+ *
+ * Seed searches call this thousands of times, so one `session-json` process is shared and
+ * re-pointed at each manifest instead of spawning a process per peek.
+ */
+export async function peekOpening(manifest: GameManifest): Promise<GameSession> {
+  sharedPeekClient ??= RustSessionClient.start();
+  const client = await sharedPeekClient;
+  await client.newSession(canonicalJson(manifest as unknown as JsonValue));
+  return parseExportedSession(await client.exportSession(), manifest);
 }
