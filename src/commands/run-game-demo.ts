@@ -17,7 +17,7 @@ import {
   type GameSession,
   type GameTerminal,
 } from '../engine/game.ts';
-import { runRustSyntheticDemo } from '../engine/rust-engine.ts';
+import { runRustSyntheticDemo, type Sha256Hash } from '../engine/rust-engine.ts';
 
 const SYNTHETIC_AUTHORITY_HASH =
   'sha256:1111111111111111111111111111111111111111111111111111111111111111' as const;
@@ -66,8 +66,11 @@ export function createSyntheticDemoManifest(seed = 1): GameManifest {
   });
 }
 
-export function selectDeterministicGameAction(session: GameSession): GameLegalAction {
-  const actions = legalGameActions(session.state, session.state.decisionSeat);
+export function selectDeterministicGameAction(
+  session: GameSession,
+  issuedActions?: readonly GameLegalAction[],
+): GameLegalAction {
+  const actions = issuedActions ?? legalGameActions(session.state, session.state.decisionSeat);
   const seat = session.state.decisionSeat;
   const player = session.state.players[seat];
   const enemySeat = seat === 'north' ? 'south' : 'north';
@@ -162,11 +165,11 @@ export function selectDeterministicGameAction(session: GameSession): GameLegalAc
 export type DeterministicGameReport = Readonly<{
   acceptedActionCount: number;
   classification: 'unranked_partial_rules';
-  finalStateHash: ReturnType<typeof hashGameState>;
+  finalStateHash: Sha256Hash;
   fightCount: number;
   replayVerified: boolean;
   terminal: Extract<GameTerminal, { status: 'finished' }>;
-  transcriptHash: ReturnType<typeof identityHash>;
+  transcriptHash: Sha256Hash;
   turnCount: number;
 }>;
 
@@ -197,10 +200,10 @@ export function runGameDemo(seed = 1): DeterministicGameReport {
     acceptedActionCount: report.acceptedActionCount,
     classification: 'unranked_partial_rules',
     fightCount: report.fightCount,
-    finalStateHash: report.finalStateHash as DeterministicGameReport['finalStateHash'],
+    finalStateHash: report.finalStateHash,
     replayVerified: report.replayVerified,
     terminal: report.terminal as DeterministicGameReport['terminal'],
-    transcriptHash: report.transcriptHash as DeterministicGameReport['transcriptHash'],
+    transcriptHash: report.transcriptHash,
     turnCount: report.turnCount,
   });
 }

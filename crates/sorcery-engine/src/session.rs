@@ -115,6 +115,15 @@ impl Session {
         self.game.observe(seat)
     }
 
+    /// Returns a seat-scoped UI observation with opponent hands redacted.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError`] when derived presentation stats cannot be built.
+    pub fn public_view(&self, seat: Seat) -> Result<Value, SessionError> {
+        Ok(self.game.public_view(seat)?)
+    }
+
     /// Returns legal actions materialized at the external boundary.
     ///
     /// # Errors

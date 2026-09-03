@@ -14,5 +14,6 @@ pub mod policy;
 pub mod prng;
 pub mod selfplay;
 pub mod session;
+pub mod session_json;
 pub mod simulator;
 pub mod synthetic;

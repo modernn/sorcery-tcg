@@ -1637,6 +1637,296 @@ impl Game {
         }
     }
 
+    /// Builds a seat-scoped public UI observation with opponent hands redacted to counts.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GameError`] when derived unit presentation stats cannot be materialized.
+    #[expect(clippy::too_many_lines)]
+    pub fn public_view(&self, viewer: Seat) -> Result<Value, GameError> {
+        let artifacts = if self.position.artifacts.is_empty() {
+            None
+        } else {
+            Some(
+                self.position
+                    .artifacts
+                    .iter()
+                    .map(|artifact| {
+                        let mut value = json!({
+                            "cardId": self.rules.cards[usize::from(artifact.card.card_id.0)].id,
+                            "instanceId": artifact.card.instance_id,
+                            "owner": artifact.card.owner,
+                        });
+                        match &artifact.placement {
+                            ArtifactPlacement::Carried { bearer } => {
+                                let carried = self.artifact_location(artifact)?;
+                                value["bearer"] = json!(bearer);
+                                value["controller"] = json!(bearer.seat());
+                                value["location"] = json!(carried.cell);
+                                value["region"] = json!(carried.region);
+                            }
+                            ArtifactPlacement::Loose { location, region } => {
+                                value["controller"] = Value::Null;
+                                value["location"] = json!(location);
+                                value["region"] = json!(region);
+                            }
+                        }
+                        Ok(value)
+                    })
+                    .collect::<Result<Vec<_>, GameError>>()?,
+            )
+        };
+        let auras = if self.position.auras.is_empty() {
+            None
+        } else {
+            Some(
+                self.position
+                    .auras
+                    .iter()
+                    .map(|aura| {
+                        json!({
+                            "cardId": self.rules.cards[usize::from(aura.card.card_id.0)].id,
+                            "cells": aura.cells,
+                            "controller": aura.controller,
+                            "instanceId": aura.card.instance_id,
+                            "owner": aura.card.owner,
+                            "turnCounters": aura.turn_counters,
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let immobile_areas = if self.position.immobile_areas.is_empty() {
+            None
+        } else {
+            Some(
+                self.position
+                    .immobile_areas
+                    .iter()
+                    .map(|area| {
+                        let mut entry = json!({
+                            "cells": area.cells,
+                            "sourceInstanceId": area.source_instance_id,
+                        });
+                        if let Some(expires_at_seat) = area.expires_at_seat {
+                            entry["expiresAtSeat"] = json!(expires_at_seat);
+                        }
+                        if area.minions_at_sites_only {
+                            entry["minionsAtSitesOnly"] = json!(true);
+                        }
+                        if area.suppresses_airborne {
+                            entry["suppressesAirborne"] = json!(true);
+                        }
+                        entry
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let sites: Map<_, _> = Cell::ALL
+            .into_iter()
+            .filter_map(|cell| {
+                if let Some(site) = self.position.sites[cell.index()].as_ref() {
+                    let CardFacts::Site(facts) =
+                        &self.rules.cards[usize::from(site.card.card_id.0)].facts
+                    else {
+                        return Some(Err(invalid("realm site lacks Site facts")));
+                    };
+                    return Some(Ok((
+                        cell.to_string(),
+                        json!({
+                            "cardId": self.rules.cards[usize::from(site.card.card_id.0)].id,
+                            "controller": site.controller,
+                            "elements": facts.elements.iter().map(|element| match element {
+                                Element::Air => "air",
+                                Element::Earth => "earth",
+                                Element::Fire => "fire",
+                                Element::Water => "water",
+                            }).collect::<Vec<_>>(),
+                            "instanceId": site.card.instance_id,
+                            "owner": site.card.owner,
+                        }),
+                    )));
+                }
+                self.position.rubble[cell.index()]
+                    .as_ref()
+                    .map(|instance_id| {
+                        Ok((
+                            cell.to_string(),
+                            json!({
+                                "cardId": "rubble",
+                                "controller": Value::Null,
+                                "elements": [],
+                                "instanceId": instance_id,
+                                "rubble": true,
+                            }),
+                        ))
+                    })
+            })
+            .collect::<Result<_, _>>()?;
+        let units = self
+            .position
+            .units
+            .iter()
+            .map(|unit| {
+                let CardFacts::Minion(facts) =
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                else {
+                    return Err(invalid("unit lacks Minion facts"));
+                };
+                let (attack, defense, _) = self.minion_current_stats(unit)?;
+                let location = Location {
+                    cell: unit.location,
+                    region: unit.region,
+                };
+                let immobile = facts.immobile
+                    || self.footprint_is_immobilized(
+                        unit.occupied_cells,
+                        unit.location,
+                        location,
+                        true,
+                    );
+                let mut value = json!({
+                    "airborne": self.minion_is_airborne(unit, facts),
+                    "attack": attack,
+                    "cardId": self.rules.cards[usize::from(unit.card.card_id.0)].id,
+                    "controller": unit.controller,
+                    "damage": unit.damage,
+                    "defense": defense,
+                    "disabled": self.minion_is_disabled(unit),
+                    "immobile": immobile,
+                    "instanceId": unit.card.instance_id,
+                    "location": unit.location,
+                    "owner": unit.card.owner,
+                    "region": unit.region,
+                    "stealthed": self.minion_has_active_stealth(unit),
+                    "summoningSickness": unit.summoning_sickness,
+                    "tapped": unit.tapped,
+                    "warded": unit.warded,
+                });
+                if unit.carried_lance_count > 0 {
+                    value["carriedLanceCount"] = json!(unit.carried_lance_count);
+                }
+                if let Some(cells) = unit.occupied_cells {
+                    value["occupiedCells"] = json!(cells);
+                }
+                if facts.token {
+                    value["token"] = json!(true);
+                }
+                if !unit.temporary_power_sources.is_empty() {
+                    value["temporaryPowerSources"] = json!(unit.temporary_power_sources);
+                }
+                Ok(value)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut realm = json!({ "sites": sites, "units": units });
+        if let Some(artifacts) = artifacts {
+            realm["artifacts"] = json!(artifacts);
+        }
+        if let Some(auras) = auras {
+            realm["auras"] = json!(auras);
+        }
+        if let Some(immobile_areas) = immobile_areas {
+            realm["immobileAreas"] = json!(immobile_areas);
+        }
+        Ok(json!({
+            "activeSeat": self.position.active_seat,
+            "decisionSeat": self.position.decision_seat,
+            "pendingCombat": self
+                .position
+                .pending_combat
+                .as_ref()
+                .map_or(Value::Null, Self::pending_combat_value),
+            "phase": self.position.phase.as_str(),
+            "players": {
+                "north": self.observed_player(Seat::North, viewer)?,
+                "south": self.observed_player(Seat::South, viewer)?,
+            },
+            "realm": realm,
+            "schemaVersion": 1,
+            "stateVersion": self.position.state_version,
+            "terminal": self.terminal_value(),
+            "turnNumber": self.position.turn_number,
+            "viewer": viewer,
+        }))
+    }
+
+    fn observed_player(&self, owner: Seat, viewer: Seat) -> Result<Value, GameError> {
+        let player = &self.position.players[seat_index(owner)];
+        let CardFacts::Avatar(facts) =
+            &self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts
+        else {
+            return Err(invalid("player Avatar lacks Avatar facts"));
+        };
+        let (attack, _) = self.combatant_attack_and_lethal(
+            UnitKind::Avatar,
+            owner,
+            &player.avatar.card.instance_id,
+        )?;
+        let affinity = self.elemental_affinities(owner);
+        let observed_card = |card: &CardInstance| {
+            json!({
+                "cardId": self.rules.cards[usize::from(card.card_id.0)].id,
+                "instanceId": card.instance_id,
+            })
+        };
+        let own = owner == viewer;
+        let mut value = json!({
+            "affinity": {
+                "air": affinity[3],
+                "earth": affinity[0],
+                "fire": affinity[1],
+                "water": affinity[2],
+            },
+            "atlasCount": player.atlas.len(),
+            "avatar": {
+                "attack": attack,
+                "cardId": self.rules.cards[usize::from(player.avatar.card.card_id.0)].id,
+                "deathDoorTurn": player.avatar.death_door_turn,
+                "defense": facts.defense,
+                "immobile": false,
+                "instanceId": player.avatar.card.instance_id,
+                "life": player.avatar.life,
+                "location": player.avatar.location,
+                "region": "surface",
+                "tapped": player.avatar.tapped,
+            },
+            "cemetery": player
+                .cemetery
+                .iter()
+                .map(observed_card)
+                .collect::<Vec<_>>(),
+            "domainEstablished": player.domain_established,
+            "hand": {
+                "atlas": if own {
+                    json!(player.hand_atlas.iter().map(observed_card).collect::<Vec<_>>())
+                } else {
+                    json!(player.hand_atlas.len())
+                },
+                "spellbook": if own {
+                    json!(
+                        player
+                            .hand_spellbook
+                            .iter()
+                            .map(observed_card)
+                            .collect::<Vec<_>>()
+                    )
+                } else {
+                    json!(player.hand_spellbook.len())
+                },
+            },
+            "mana": player.mana,
+            "mulliganComplete": player.mulligan_complete,
+            "spellbookCount": player.spellbook.len(),
+        });
+        if let Some(count) = player.air_thresholds_cast_this_turn {
+            value["airThresholdsCastThisTurn"] = json!(count);
+        }
+        if !player.avatar.temporary_power_sources.is_empty() {
+            value["avatar"]["temporaryPowerSources"] = json!(player.avatar.temporary_power_sources);
+        }
+        Ok(value)
+    }
+
     /// Returns whether the authoritative game has reached a terminal result.
     #[must_use]
     pub const fn is_terminal(&self) -> bool {

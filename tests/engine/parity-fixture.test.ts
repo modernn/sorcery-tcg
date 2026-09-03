@@ -7,9 +7,9 @@ import { canonicalJson, parseJsonWithDuplicateKeyCheck } from '../../src/authori
 
 const FIXTURE_URL = new URL('./fixtures/typescript-parity-v1.json', import.meta.url);
 
-test('TypeScript parity fixture regenerates byte-identically', () => {
+test('Rust session parity fixture regenerates byte-identically', async () => {
   const expected = readFileSync(FIXTURE_URL, 'utf8');
-  const regenerated = serializeEngineParityFixture();
+  const regenerated = await serializeEngineParityFixture();
   assert.equal(regenerated, expected);
 
   const fixture = JSON.parse(regenerated) as {
@@ -28,8 +28,10 @@ test('TypeScript parity fixture regenerates byte-identically', () => {
       }>;
     }>;
     prng: unknown[];
+    source: string;
   };
   assert.equal(fixture.fixtureVersion, 1);
+  assert.equal(fixture.source, 'rust-legality-engine');
   assert.equal(fixture.games.length, 3);
   assert.equal(fixture.prng.length, 3);
   assert.equal(fixture.games.every(({ actionIds }) => actionIds.length > 0), true);

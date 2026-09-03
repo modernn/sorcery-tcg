@@ -10,13 +10,12 @@ import {
 } from '../src/commands/run-game-demo.ts';
 import { createEngineState, drawUint32, hashEngineState } from '../src/engine/determinism.ts';
 import {
-  createGameSession,
   hashGameState,
-  legalGameActions,
-  replayGame,
-  stepGame,
-  verifyGameReplay,
+  type GameLegalAction,
+  type GameManifest,
+  type GameSession,
 } from '../src/engine/game.ts';
+import { RustSessionClient } from '../src/engine/rust-engine.ts';
 
 const FIXTURE_PATH = fileURLToPath(
   new URL('../tests/engine/fixtures/typescript-parity-v1.json', import.meta.url),
@@ -45,79 +44,126 @@ function capturePrng(seed: number): JsonValue {
   return { draws, initialStateHash: hashEngineState(createEngineState(seed)), seed };
 }
 
-function captureGame(seed: number): JsonValue {
+function parseExportedSession(exported: JsonValue, manifest: GameManifest): GameSession {
+  if (typeof exported !== 'object' || exported === null || Array.isArray(exported)) {
+    throw new Error('exportSession result was malformed');
+  }
+  const value = exported as Record<string, unknown>;
+  return {
+    attempts: value.attempts as GameSession['attempts'],
+    initialRandomDraws: value.initialRandomDraws as GameSession['initialRandomDraws'],
+    manifest,
+    state: value.state as GameSession['state'],
+    transcript: value.transcript as GameSession['transcript'],
+  };
+}
+
+async function replayRustGame(
+  client: RustSessionClient,
+  manifest: GameManifest,
+  actionIds: readonly string[],
+): Promise<GameSession> {
+  await client.newSession(canonicalJson(manifest as unknown as JsonValue));
+  let snapshot = parseExportedSession(await client.exportSession(), manifest);
+  for (const actionId of actionIds) {
+    const actions = await client.legalActions(snapshot.state.decisionSeat);
+    const action = actions.find((candidate) => candidate.actionId === actionId);
+    if (!action) throw new Error(`missing replay action ${actionId}`);
+    const result = await client.step(action);
+    if (!result.accepted) throw new Error(`replay rejected ${actionId}`);
+    snapshot = parseExportedSession(await client.exportSession(), manifest);
+  }
+  return snapshot;
+}
+
+async function captureGame(client: RustSessionClient, seed: number): Promise<JsonValue> {
   const manifest = createSyntheticDemoManifest(seed);
-  let session = createGameSession(manifest);
-  const initialActions = legalGameActions(session.state, session.state.decisionSeat);
+  await client.newSession(canonicalJson(manifest as unknown as JsonValue));
+  let snapshot = parseExportedSession(await client.exportSession(), manifest);
+  const initialActions = await client.legalActions(snapshot.state.decisionSeat);
   const initial = {
     legalActionIds: initialActions.map(({ actionId }) => actionId),
-    randomDrawsHash: hash(session.initialRandomDraws),
-    stateHash: hashGameState(session.state),
+    randomDrawsHash: hash(snapshot.initialRandomDraws),
+    stateHash: hashGameState(snapshot.state),
   };
   const actionIds: string[] = [];
   const steps: JsonValue[] = [];
 
-  while (session.state.terminal.status === 'active' && actionIds.length < MAX_ACTIONS) {
-    const legalActions = legalGameActions(session.state, session.state.decisionSeat);
-    const action = selectDeterministicGameAction(session);
-    const preStateHash = hashGameState(session.state);
-    const result = stepGame(session, action);
-    if (!result.accepted) throw new Error(`issued action was rejected: ${result.reason.code}`);
+  while (snapshot.state.terminal.status === 'active' && actionIds.length < MAX_ACTIONS) {
+    const legalActions = await client.legalActions(snapshot.state.decisionSeat);
+    const action = selectDeterministicGameAction(
+      snapshot,
+      legalActions as unknown as GameLegalAction[],
+    );
+    const preStateHash = hashGameState(snapshot.state);
+    const result = await client.step(action);
+    if (!result.accepted) throw new Error(`issued action was rejected`);
+    const receipt = result.receipt as GameSession['transcript'][number];
     actionIds.push(action.actionId);
     steps.push({
-      events: result.receipt.events,
-      eventIds: result.receipt.events.map(({ eventId }) => eventId),
-      eventTypes: result.receipt.events.map(({ type }) => type),
+      events: receipt.events,
+      eventIds: receipt.events.map(({ eventId }) => eventId),
+      eventTypes: receipt.events.map(({ type }) => type),
       legalActionIds: legalActions.map(({ actionId }) => actionId),
-      postStateHash: result.receipt.postStateHash,
+      postStateHash: receipt.postStateHash,
       preStateHash,
-      randomDrawsHash: hash(result.receipt.randomDraws),
-      receiptId: result.receipt.receiptId,
+      randomDrawsHash: hash(receipt.randomDraws),
+      receiptId: receipt.receiptId,
       selectedAction: action,
       selectedActionId: action.actionId,
-      stateVersion: session.state.stateVersion,
+      stateVersion: snapshot.state.stateVersion,
     });
-    session = result.session;
+    snapshot = parseExportedSession(await client.exportSession(), manifest);
   }
 
-  if (session.state.terminal.status !== 'finished') {
+  if (snapshot.state.terminal.status !== 'finished') {
     throw new Error(`seed ${seed} exceeded ${MAX_ACTIONS} actions`);
   }
-  const replayed = replayGame(manifest, actionIds);
+  const verified = await client.verifyReplay();
+  const replayed = await replayRustGame(client, manifest, actionIds);
   return {
     actionIds,
-    finalStateHash: hashGameState(session.state),
+    finalStateHash: hashGameState(snapshot.state),
     initial,
     ...(seed === 31 ? { manifestRecipe: 'synthetic-demo-v1' } : {}),
     manifestId: manifest.manifestId,
-    receiptIdsHash: hash(session.transcript.map(({ receiptId }) => receiptId)),
+    receiptIdsHash: hash(snapshot.transcript.map(({ receiptId }) => receiptId)),
     replay: {
       finalStateHash: hashGameState(replayed.state),
       transcriptHash: hash(replayed.transcript),
-      verified: verifyGameReplay(session),
+      verified,
     },
     seed,
     steps,
-    terminal: session.state.terminal,
-    transcriptHash: hash(session.transcript),
+    terminal: snapshot.state.terminal,
+    transcriptHash: hash(snapshot.transcript),
   };
 }
 
-export function captureEngineParityFixture(): JsonValue {
-  return {
-    fixtureVersion: 1,
-    games: SEEDS.map(captureGame),
-    prng: SEEDS.map(capturePrng),
-    source: 'typescript-legality-engine',
-  };
+export async function captureEngineParityFixture(): Promise<JsonValue> {
+  const client = await RustSessionClient.start();
+  try {
+    const games: JsonValue[] = [];
+    for (const seed of SEEDS) {
+      games.push(await captureGame(client, seed));
+    }
+    return {
+      fixtureVersion: 1,
+      games,
+      prng: SEEDS.map(capturePrng),
+      source: 'rust-legality-engine',
+    };
+  } finally {
+    await client.close();
+  }
 }
 
-export function serializeEngineParityFixture(): string {
-  return `${canonicalJson(captureEngineParityFixture())}\n`;
+export async function serializeEngineParityFixture(): Promise<string> {
+  return `${canonicalJson(await captureEngineParityFixture())}\n`;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const serialized = serializeEngineParityFixture();
+async function main(): Promise<void> {
+  const serialized = await serializeEngineParityFixture();
   if (process.argv[2] === '--check') {
     if (readFileSync(FIXTURE_PATH, 'utf8') !== serialized) {
       throw new Error(`parity fixture is stale: ${FIXTURE_PATH}`);
@@ -128,3 +174,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     process.stdout.write(serialized);
   }
 }
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  void main();
+}
+
+export type { GameLegalAction, GameManifest };
