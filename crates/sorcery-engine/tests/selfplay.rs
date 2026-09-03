@@ -713,14 +713,10 @@ fn pair_should_reject_scenario_changes_composition_mismatch_and_unsupported_fact
     assert!(train_and_promote(&champion, &candidate_deck, &planar_gate, &heldout, 500).is_ok());
 
     let unsupported_north = mutate_manifest(&north, |manifest| {
-        manifest["cards"]["north-spell-1"]["atStartOfControllerTurnTeleportToRandomSiteOrVoid"] =
-            json!(true);
-        manifest["cards"]["north-spell-1"]["voidwalk"] = json!(true);
+        manifest["cards"]["north-site-1"]["preventsUnitsWithPowerAtLeastFromEntering"] = json!(3);
     });
     let unsupported_south = mutate_manifest(&south, |manifest| {
-        manifest["cards"]["north-spell-1"]["atStartOfControllerTurnTeleportToRandomSiteOrVoid"] =
-            json!(true);
-        manifest["cards"]["north-spell-1"]["voidwalk"] = json!(true);
+        manifest["cards"]["north-site-1"]["preventsUnitsWithPowerAtLeastFromEntering"] = json!(3);
     });
     let unsupported = [pair(
         &unsupported_north,
@@ -733,7 +729,7 @@ fn pair_should_reject_scenario_changes_composition_mismatch_and_unsupported_fact
         train_and_promote(&champion, &candidate_deck, &unsupported, &heldout, 500)
             .expect_err("self-play must reject incomplete facts")
             .to_string(),
-        "manifest fact is not yet supported by Rust: atStartOfControllerTurnTeleportToRandomSiteOrVoid"
+        "manifest fact is not yet supported by Rust: preventsUnitsWithPowerAtLeastFromEntering"
     );
 
     let voidwalk_north = mutate_manifest(&north, |manifest| {
