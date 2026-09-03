@@ -2335,7 +2335,7 @@ impl Game {
             .ok_or(GameError::IllegalAction)?;
         let destination = Location {
             cell: pending.cell,
-            region: Region::Surface,
+            region: pending.region,
         };
         for (_kind, instance_id, start, profile) in self.defender_candidates()? {
             for path in self
@@ -7949,25 +7949,20 @@ impl Game {
         unit_instance_id: &IdentityHash,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
-        if self.position.phase != Phase::Defend
-            || path.is_empty()
-            || path.first() != Some(&from)
-            || path
-                .iter()
-                .any(|location| location.region != Region::Surface)
-        {
+        if self.position.phase != Phase::Defend || path.is_empty() || path.first() != Some(&from) {
             return Err(GameError::IllegalAction);
         }
-        let pending_cell = self
+        let pending = self
             .position
             .pending_combat
             .as_ref()
-            .ok_or(GameError::IllegalAction)?
-            .cell;
+            .ok_or(GameError::IllegalAction)?;
+        let pending_cell = pending.cell;
+        let pending_region = pending.region;
         if to
             != (Location {
                 cell: pending_cell,
-                region: Region::Surface,
+                region: pending_region,
             })
         {
             return Err(GameError::IllegalAction);
