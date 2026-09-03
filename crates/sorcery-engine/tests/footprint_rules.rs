@@ -84,6 +84,61 @@ fn manifest(seed: u32, blocks_ground_entry: bool) -> String {
     canonical_json(&value).expect("canonical manifest")
 }
 
+/// A realm whose only spells are one oversized minion and one holding Aura.
+///
+/// The separate fixture keeps the shuffled openings of the interaction proofs untouched.
+fn aura_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "footprint-aura-rules" }))
+                .expect("authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-footprint-aura-rules-v1",
+        },
+        "cards": {
+            "north-aura": {
+                "cardType": "aura",
+                "immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns": true,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
+            "north-avatar": avatar(),
+            "north-giant": minion(&json!({ "charge": true, "occupiesSquareArea": 2 })),
+            "north-site": site(false),
+            "south-avatar": avatar(),
+            "south-site": site(false),
+            "south-spell": minion(&json!({})),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 9],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-aura",
+                    "north-aura",
+                    "north-aura",
+                    "north-aura",
+                    "north-giant",
+                    "north-giant",
+                    "north-giant",
+                    "north-giant",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 9],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-spell"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    canonical_json(&value).expect("canonical manifest")
+}
+
 fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
     let actions = session.legal_actions().expect("legal actions");
     let action = actions
@@ -390,6 +445,92 @@ fn fixed_two_by_two_footprint_should_drive_the_supported_interaction_core() {
     assert_eq!(
         resumed.replay_value().expect("resumed value"),
         session.replay_value().expect("session value")
+    );
+    assert_exact_replay(&session);
+}
+
+/// Every destination one unit is offered, as `cell/region` labels.
+fn move_destinations(session: &Session, instance_id: &str) -> Vec<String> {
+    session
+        .legal_actions()
+        .expect("legal actions")
+        .iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "move-and-attack"
+                && action.descriptor["unitInstanceId"] == instance_id
+        })
+        .map(|action| {
+            format!(
+                "{}/{}",
+                action.descriptor["to"]["cell"]
+                    .as_str()
+                    .expect("destination cell"),
+                action.descriptor["to"]["region"]
+                    .as_str()
+                    .expect("destination region")
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn rule_catalog_0066_an_aura_should_hold_an_oversized_footprint_it_barely_overlaps() {
+    let mut session = Session::new(&aura_manifest(66)).expect("footprint Aura manifest");
+    keep(&mut session);
+    keep(&mut session);
+
+    play_site(&mut session, "C4");
+    end_and_draw_zone(&mut session, "atlas");
+    play_site(&mut session, "C1");
+    end_and_draw_zone(&mut session, "atlas");
+
+    play_site(&mut session, "C3");
+    end_and_draw_zone(&mut session, "atlas");
+    play_site(&mut session, "C2");
+    end_and_draw_zone(&mut session, "atlas");
+
+    play_site(&mut session, "B4");
+    end_and_draw_zone(&mut session, "atlas");
+    play_site(&mut session, "B2");
+    end_and_draw(&mut session);
+
+    play_site(&mut session, "B3");
+    end_and_draw_zone(&mut session, "atlas");
+    end_and_draw(&mut session);
+
+    let (giant, summon) = summon_at(&mut session, "north-giant", "B3");
+    assert_eq!(
+        summon.events.first().expect("summon event").payload["cells"],
+        json!(["B3", "B4", "C3", "C4"]),
+        "an oversized minion is summoned onto one whole canonical two-by-two area"
+    );
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    assert_eq!(
+        move_destinations(&session, &giant),
+        ["B2/surface", "B3/surface"],
+        "an unheld oversized minion translates its footprint onto whole existing terrain"
+    );
+
+    let (cast, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-aura" && descriptor["cells"] == json!(["C2", "C3", "D2", "D3"])
+    });
+    let aura = cast["cardInstanceId"].as_str().expect("aura identity");
+    assert_eq!(
+        state(&session)["realm"]["immobileAreas"],
+        json!([{
+            "cells": ["C2", "C3", "D2", "D3"],
+            "minionsAtSitesOnly": true,
+            "sourceInstanceId": aura,
+            "suppressesAirborne": true,
+        }])
+    );
+    assert_eq!(
+        move_destinations(&session, &giant),
+        ["B3/surface"],
+        "an Aura covering one footprint cell holds the whole oversized minion"
     );
     assert_exact_replay(&session);
 }

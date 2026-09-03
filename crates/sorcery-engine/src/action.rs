@@ -374,6 +374,17 @@ pub enum ActionDescriptor {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sacrificed_minion_instance_ids: Option<Vec<IdentityHash>>,
     },
+    /// Conjure one Aura across a canonical two-by-two realm area.
+    CastAura {
+        /// Stable rules card identity.
+        card_id: String,
+        /// Authoritative card instance identity.
+        card_instance_id: IdentityHash,
+        /// Authoritative caster instance identity.
+        caster_instance_id: IdentityHash,
+        /// Exact canonical two-by-two area the Aura covers.
+        cells: SquareArea,
+    },
     /// Cast one supported Magic card from the player's hand.
     CastMagic {
         /// Exact engine-issued ally selected by an ally-buffing Magic.
@@ -587,6 +598,31 @@ pub enum ActionDescriptor {
         /// Authoritative dead minion source identity.
         source_instance_id: IdentityHash,
     },
+    /// Commit one Lucky Charm random branch before resolving the deferred action.
+    ResolveRandomOutcome {
+        /// Authoritative candidate identity chosen by the controller.
+        outcome_instance_id: IdentityHash,
+    },
+    /// Resolve one start-turn random teleport trigger for a minion.
+    ResolveStartTurnTrigger {
+        /// Authoritative triggering minion identity.
+        source_instance_id: IdentityHash,
+    },
+    /// Choose the end-turn Aura random damage target after Lucky Charm.
+    ResolveEndTurnAuraRandom {
+        /// Authoritative Aura identity.
+        aura_instance_id: IdentityHash,
+        /// Authoritative damaged unit identity.
+        outcome_instance_id: IdentityHash,
+    },
+    /// Move an end-turn Aura one canonical step or decline the optional step.
+    ResolveEndTurnAuraMove {
+        /// Authoritative Aura identity.
+        aura_instance_id: IdentityHash,
+        /// Exact destination area, omitted to decline the optional move.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cells: Option<SquareArea>,
+    },
     /// End the acting player's turn.
     EndTurn,
 }
@@ -745,6 +781,14 @@ impl ActionDescriptor {
                 };
                 Some(format!("Cast {card_id} {destination} ({mana_cost} mana)"))
             }
+            Self::CastAura { card_id, cells, .. } => Some(format!(
+                "Conjure {card_id} across {}",
+                cells
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
             Self::DropArtifacts {
                 artifact_instance_ids,
                 unit,
@@ -934,7 +978,11 @@ impl ActionDescriptor {
                     .collect::<Vec<_>>()
                     .join(" → ")
             )),
-            Self::ActivateDiscardRandomDamage { .. }
+            Self::ResolveRandomOutcome { .. }
+            | Self::ResolveStartTurnTrigger { .. }
+            | Self::ResolveEndTurnAuraRandom { .. }
+            | Self::ResolveEndTurnAuraMove { .. }
+            | Self::ActivateDiscardRandomDamage { .. }
             | Self::ActivateSparkmage { .. }
             | Self::PlaySite { .. }
             | Self::ContinueBasicMovement { .. }
@@ -1254,7 +1302,13 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
             | (ActionDescriptor::SummonMinion { .. }, ActionDescriptor::CastMagic { .. })
             | (ActionDescriptor::SummonMinion { .. }, ActionDescriptor::BeginChainMagic { .. })
             | (ActionDescriptor::SummonMinion { .. }, ActionDescriptor::PlaySite { .. })
-            | (ActionDescriptor::CastArtifact { .. }, ActionDescriptor::PlaySite { .. }) => {
+            | (ActionDescriptor::CastArtifact { .. }, ActionDescriptor::PlaySite { .. })
+            // `cells` sorts under `kind`, over `cell`, and `casterInstanceId` sorts under `cell`.
+            | (ActionDescriptor::CastAura { .. }, ActionDescriptor::CastMagic { .. })
+            | (ActionDescriptor::CastAura { .. }, ActionDescriptor::BeginChainMagic { .. })
+            | (ActionDescriptor::CastAura { .. }, ActionDescriptor::PlaySite { .. })
+            | (ActionDescriptor::SummonMinion { .. }, ActionDescriptor::CastAura { .. })
+            | (ActionDescriptor::CastArtifact { .. }, ActionDescriptor::CastAura { .. }) => {
                 compare_card_prefix(left, right).then(Ordering::Less)
             }
             (ActionDescriptor::CastMagic { .. }, ActionDescriptor::BeginChainMagic { .. })
@@ -1263,7 +1317,12 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
             | (ActionDescriptor::CastMagic { .. }, ActionDescriptor::SummonMinion { .. })
             | (ActionDescriptor::BeginChainMagic { .. }, ActionDescriptor::SummonMinion { .. })
             | (ActionDescriptor::PlaySite { .. }, ActionDescriptor::SummonMinion { .. })
-            | (ActionDescriptor::PlaySite { .. }, ActionDescriptor::CastArtifact { .. }) => {
+            | (ActionDescriptor::PlaySite { .. }, ActionDescriptor::CastArtifact { .. })
+            | (ActionDescriptor::CastMagic { .. }, ActionDescriptor::CastAura { .. })
+            | (ActionDescriptor::BeginChainMagic { .. }, ActionDescriptor::CastAura { .. })
+            | (ActionDescriptor::PlaySite { .. }, ActionDescriptor::CastAura { .. })
+            | (ActionDescriptor::CastAura { .. }, ActionDescriptor::SummonMinion { .. })
+            | (ActionDescriptor::CastAura { .. }, ActionDescriptor::CastArtifact { .. }) => {
                 compare_card_prefix(left, right).then(Ordering::Greater)
             }
             (
@@ -1503,6 +1562,22 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                         ActionDescriptor::ContinueBasicMovement {
                             unit_instance_id: right,
                         },
+                    )
+                    | (
+                        ActionDescriptor::ResolveRandomOutcome {
+                            outcome_instance_id: left,
+                        },
+                        ActionDescriptor::ResolveRandomOutcome {
+                            outcome_instance_id: right,
+                        },
+                    )
+                    | (
+                        ActionDescriptor::ResolveStartTurnTrigger {
+                            source_instance_id: left,
+                        },
+                        ActionDescriptor::ResolveStartTurnTrigger {
+                            source_instance_id: right,
+                        },
                     ) => left.cmp(right),
                     (
                         ActionDescriptor::DeclareAttack { target: left },
@@ -1560,6 +1635,33 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                             (None, None) => Ordering::Equal,
                         })
                         .then_with(|| left_unit.cmp(right_unit)),
+                    (
+                        ActionDescriptor::ResolveEndTurnAuraRandom {
+                            aura_instance_id: left_aura,
+                            outcome_instance_id: left_outcome,
+                        },
+                        ActionDescriptor::ResolveEndTurnAuraRandom {
+                            aura_instance_id: right_aura,
+                            outcome_instance_id: right_outcome,
+                        },
+                    ) => left_aura
+                        .cmp(right_aura)
+                        .then_with(|| left_outcome.cmp(right_outcome)),
+                    (
+                        ActionDescriptor::ResolveEndTurnAuraMove {
+                            aura_instance_id: left_aura,
+                            cells: left_cells,
+                        },
+                        ActionDescriptor::ResolveEndTurnAuraMove {
+                            aura_instance_id: right_aura,
+                            cells: right_cells,
+                        },
+                    ) => left_aura.cmp(right_aura).then_with(|| match (left_cells, right_cells) {
+                        (Some(left), Some(right)) => compare_json_array(left, right, Cell::cmp),
+                        (None, None) => Ordering::Equal,
+                        (None, Some(_)) => Ordering::Less,
+                        (Some(_), None) => Ordering::Greater,
+                    }),
                     _ => Ordering::Equal,
                 }),
         })
@@ -1897,6 +1999,11 @@ fn card_prefix(action: &ActionDescriptor) -> (&str, &IdentityHash) {
             card_instance_id,
             ..
         }
+        | ActionDescriptor::CastAura {
+            card_id,
+            card_instance_id,
+            ..
+        }
         | ActionDescriptor::CastMagic {
             card_id,
             card_instance_id,
@@ -1929,35 +2036,40 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::AllocateStrike { .. } => 8,
         ActionDescriptor::BeginChainMagic { .. } => 9,
         ActionDescriptor::CastArtifact { .. } => 10,
-        ActionDescriptor::CastMagic { .. } => 11,
-        ActionDescriptor::CloseDefend { .. } => 12,
-        ActionDescriptor::CloseIntercept {} => 13,
-        ActionDescriptor::ContinueBasicMovement { .. } => 14,
-        ActionDescriptor::DeclareAttack { .. } => 15,
-        ActionDescriptor::DeclineAttack => 16,
-        ActionDescriptor::Defend { .. } => 17,
-        ActionDescriptor::Draw { .. } => 18,
-        ActionDescriptor::DrawSite => 19,
-        ActionDescriptor::DrawSpell => 20,
-        ActionDescriptor::DropArtifacts { .. } => 21,
-        ActionDescriptor::EndTurn => 22,
-        ActionDescriptor::ExtendChainMagic { .. } => 23,
-        ActionDescriptor::FlySite { .. } => 24,
-        ActionDescriptor::Intercept { .. } => 25,
-        ActionDescriptor::OrderDeathrites { .. } => 26,
-        ActionDescriptor::PickUpArtifacts { .. } => 27,
-        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 28,
-        ActionDescriptor::ResolveChainMagic => 29,
-        ActionDescriptor::ResolveGenesisSpell { .. } => 30,
-        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 31,
-        ActionDescriptor::ResolveGenesisToken { .. } => 32,
-        ActionDescriptor::ResolveRangedStep { .. } => 33,
-        ActionDescriptor::Mulligan { .. } => 34,
-        ActionDescriptor::PlaySite { .. } => 35,
-        ActionDescriptor::ShootDamageProjectile { .. } => 36,
-        ActionDescriptor::ShootDragProjectile { .. } => 37,
-        ActionDescriptor::ShootProjectile { .. } => 38,
-        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 39,
+        ActionDescriptor::CastAura { .. } => 11,
+        ActionDescriptor::CastMagic { .. } => 12,
+        ActionDescriptor::CloseDefend { .. } => 13,
+        ActionDescriptor::CloseIntercept {} => 14,
+        ActionDescriptor::ContinueBasicMovement { .. } => 15,
+        ActionDescriptor::DeclareAttack { .. } => 16,
+        ActionDescriptor::DeclineAttack => 17,
+        ActionDescriptor::Defend { .. } => 18,
+        ActionDescriptor::Draw { .. } => 19,
+        ActionDescriptor::DrawSite => 20,
+        ActionDescriptor::DrawSpell => 21,
+        ActionDescriptor::DropArtifacts { .. } => 22,
+        ActionDescriptor::EndTurn => 23,
+        ActionDescriptor::ResolveEndTurnAuraMove { .. } => 41,
+        ActionDescriptor::ResolveEndTurnAuraRandom { .. } => 42,
+        ActionDescriptor::ResolveRandomOutcome { .. } => 43,
+        ActionDescriptor::ResolveStartTurnTrigger { .. } => 44,
+        ActionDescriptor::ExtendChainMagic { .. } => 24,
+        ActionDescriptor::FlySite { .. } => 25,
+        ActionDescriptor::Intercept { .. } => 26,
+        ActionDescriptor::OrderDeathrites { .. } => 27,
+        ActionDescriptor::PickUpArtifacts { .. } => 28,
+        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 29,
+        ActionDescriptor::ResolveChainMagic => 30,
+        ActionDescriptor::ResolveGenesisSpell { .. } => 31,
+        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 32,
+        ActionDescriptor::ResolveGenesisToken { .. } => 33,
+        ActionDescriptor::ResolveRangedStep { .. } => 34,
+        ActionDescriptor::Mulligan { .. } => 35,
+        ActionDescriptor::PlaySite { .. } => 36,
+        ActionDescriptor::ShootDamageProjectile { .. } => 37,
+        ActionDescriptor::ShootDragProjectile { .. } => 38,
+        ActionDescriptor::ShootProjectile { .. } => 39,
+        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 40,
     }
 }
 

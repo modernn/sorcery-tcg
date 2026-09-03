@@ -17,10 +17,10 @@ use crate::board::{Cell, Location, LowerRegion, Region, SquareArea, translated_s
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{
-    AlternativeSummonPayment, ArtifactEffect, ArtifactFacts, AvatarFacts, BasicMovementRestriction,
-    CardFacts, DamagePrevention, Element, EndTurnStealth, FactError, MagicEffect, MagicFacts,
-    MinionFacts, MinionGenesis, RequiredCastRegion, SiteFacts, Thresholds, parse_card_definition,
-    validate_identifier,
+    AlternativeSummonPayment, ArtifactEffect, ArtifactFacts, AuraEffect, AuraFacts, AvatarFacts,
+    BasicMovementRestriction, CardFacts, DamagePrevention, Element, EndTurnStealth, FactError,
+    MagicEffect, MagicFacts, MinionFacts, MinionGenesis, RequiredCastRegion, SiteFacts, Thresholds,
+    parse_card_definition, validate_identifier,
 };
 use crate::prng::PrngState;
 
@@ -35,6 +35,8 @@ const ARTIFACT_DAMAGE_AMOUNT: u8 = 3;
 const ARTIFACT_ROLL_DAMAGE_AMOUNT: u8 = 4;
 /// The one air affinity `flyToNearbyVoidOncePerTurnAtAirThreshold` is admitted with.
 const SITE_FLIGHT_AIR_THRESHOLD: u64 = 3;
+/// Controller turns a conjured Aura survives before it is dispelled.
+const AURA_CONTROLLER_TURNS: u8 = 3;
 
 /// Immutable manifest facts shared by cloned game positions.
 #[derive(Debug)]
@@ -51,6 +53,7 @@ pub struct RulesContext {
 pub struct Position {
     active_seat: Seat,
     artifacts: Vec<ArtifactPosition>,
+    auras: Vec<AuraPosition>,
     decision_seat: Seat,
     immobile_areas: Vec<ImmobileArea>,
     pending_basic_movement: PendingField<PendingBasicMovement>,
@@ -61,7 +64,10 @@ pub struct Position {
     pending_genesis_spell: PendingField<PendingGenesisSpell>,
     pending_genesis_spell_order: PendingField<PendingGenesisSpellOrder>,
     pending_genesis_token: PendingField<PendingGenesisToken>,
+    pending_end_turn_aura: Option<PendingEndTurnAura>,
+    pending_random_outcome: Option<PendingRandomOutcome>,
     pending_ranged_step: PendingField<PendingRangedStep>,
+    pending_start_turn: Option<PendingStartTurn>,
     phase: Phase,
     players: [PlayerPosition; 2],
     prng: PrngState,
@@ -484,12 +490,28 @@ fn payload_damage_amount(card: &CardDefinition) -> Result<u16, GameError> {
     Ok(u16::try_from(mana_cost).unwrap_or(u16::MAX))
 }
 
-/// A realm area whose occupants cannot depart until the recorded seat's next turn.
+/// A realm area whose occupants cannot depart while it stands.
+///
+/// A seated expiry lifts the area at the start of that seat's next turn; an area without one is
+/// lifted by whatever conjured it, and is dispelled with that source.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ImmobileArea {
     cells: BTreeSet<Cell>,
-    expires_at_seat: Seat,
+    expires_at_seat: Option<Seat>,
+    /// Whether the area holds only minions standing on a site outside the void.
+    minions_at_sites_only: bool,
     source_instance_id: IdentityHash,
+    /// Whether the area also grounds the Airborne minions it holds.
+    suppresses_airborne: bool,
+}
+
+/// One conjured Aura, the canonical area it covers, and the controller turns it has survived.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AuraPosition {
+    card: CardInstance,
+    cells: SquareArea,
+    controller: Seat,
+    turn_counters: u8,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -620,6 +642,41 @@ struct DeferredMagicResolved {
     card_id: CardId,
     instance_id: IdentityHash,
     owner: Seat,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PendingRandomOutcome {
+    action: ActionDescriptor,
+    outcome_instance_ids: Vec<IdentityHash>,
+    seat: Seat,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EndTurnAuraStage {
+    Move,
+    Random,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PendingEndTurnAura {
+    aura_instance_id: IdentityHash,
+    outcome_instance_ids: Option<Vec<IdentityHash>>,
+    remaining_aura_instance_ids: Vec<IdentityHash>,
+    seat: Seat,
+    stage: EndTurnAuraStage,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PendingStartTurn {
+    remaining_trigger_instance_ids: Vec<IdentityHash>,
+    seat: Seat,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct LuckyRandomRequest {
+    candidate_instance_ids: Vec<IdentityHash>,
+    domain_kind: &'static str,
+    purpose: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -784,12 +841,15 @@ enum Phase {
     DeathriteOrder,
     Defend,
     Draw,
+    EndTurnAura,
     Genesis,
     Intercept,
     Main,
     Movement,
     Mulligan,
+    RandomChoice,
     RangedStep,
+    StartTurn,
     Terminal,
 }
 
@@ -803,12 +863,15 @@ impl Phase {
             Self::DeathriteOrder => "deathrite-order",
             Self::Defend => "defend",
             Self::Draw => "draw",
+            Self::EndTurnAura => "end-turn-aura",
             Self::Genesis => "genesis",
             Self::Intercept => "intercept",
             Self::Main => "main",
             Self::Movement => "movement",
             Self::Mulligan => "mulligan",
+            Self::RandomChoice => "random-choice",
             Self::RangedStep => "ranged-step",
+            Self::StartTurn => "start-turn",
             Self::Terminal => "terminal",
         }
     }
@@ -1145,10 +1208,19 @@ fn unsupported_selfplay_fact(facts: &CardFacts) -> Option<&'static str> {
             None
         }
         CardFacts::Artifact(facts) => unsupported_selfplay_artifact(facts),
-        CardFacts::Aura(_) => Some("cardType:aura"),
+        CardFacts::Aura(facts) => unsupported_selfplay_aura(facts),
         CardFacts::Magic(facts) => unsupported_selfplay_magic(facts),
         CardFacts::Minion(facts) => unsupported_selfplay_minion(facts),
         CardFacts::Site(facts) => unsupported_selfplay_site(facts),
+    }
+}
+
+const fn unsupported_selfplay_aura(facts: &AuraFacts) -> Option<&'static str> {
+    match facts.effect {
+        AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns
+        | AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree => {
+            None
+        }
     }
 }
 
@@ -1168,10 +1240,8 @@ const fn unsupported_artifact_effect(effect: ArtifactEffect) -> Option<&'static 
         | ArtifactEffect::GrantsBearerPowerTwo
         | ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
         | ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree
-        | ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour => None,
-        ArtifactEffect::BearerControllerChoosesExtraRandomOutcome => {
-            Some("bearerControllerChoosesExtraRandomOutcome")
-        }
+        | ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour
+        | ArtifactEffect::BearerControllerChoosesExtraRandomOutcome => None,
     }
 }
 
@@ -1185,6 +1255,7 @@ const fn artifact_effect_supported(effect: ArtifactEffect) -> bool {
             | ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
             | ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree
             | ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour
+            | ArtifactEffect::BearerControllerChoosesExtraRandomOutcome
     )
 }
 
@@ -1198,9 +1269,6 @@ fn unsupported_alongside_artifacts(facts: &CardFacts) -> Option<&'static str> {
             _ => None,
         },
         // An oversized bearer carries each Artifact at one exact cell of its footprint.
-        CardFacts::Minion(facts) => facts
-            .occupies_square_area_two
-            .then_some("occupiesSquareArea"),
         _ => None,
     }
 }
@@ -1235,9 +1303,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
 
 fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
     account_for_selfplay_minion_fields(facts);
-    if facts.at_start_of_controller_turn_teleport_to_random_site_or_void {
-        Some("atStartOfControllerTurnTeleportToRandomSiteOrVoid")
-    } else if let Some(field) = unsupported_selfplay_minion_genesis(facts.genesis) {
+    if let Some(field) = unsupported_selfplay_minion_genesis(facts.genesis) {
         Some(field)
     } else {
         None
@@ -1475,6 +1541,7 @@ impl Game {
             position: Position {
                 active_seat: Seat::North,
                 artifacts: Vec::new(),
+                auras: Vec::new(),
                 decision_seat: Seat::North,
                 immobile_areas: Vec::new(),
                 pending_basic_movement: PendingField::Absent,
@@ -1485,7 +1552,10 @@ impl Game {
                 pending_genesis_spell: PendingField::Absent,
                 pending_genesis_spell_order: PendingField::Absent,
                 pending_genesis_token: PendingField::Absent,
+                pending_end_turn_aura: None,
+                pending_random_outcome: None,
                 pending_ranged_step: PendingField::Absent,
+                pending_start_turn: None,
                 phase: Phase::Mulligan,
                 players: [north, south],
                 prng,
@@ -1651,12 +1721,15 @@ impl Game {
             Phase::DeathriteOrder => self.append_deathrite_order_actions(&mut actions)?,
             Phase::Defend => self.append_defend_actions(&mut actions)?,
             Phase::Draw => self.append_draw_actions(&mut actions)?,
+            Phase::EndTurnAura => self.append_end_turn_aura_actions(&mut actions)?,
             Phase::Genesis => self.append_genesis_actions(&mut actions)?,
             Phase::Intercept => self.append_intercept_actions(&mut actions)?,
             Phase::Mulligan => self.append_mulligan_actions(&mut actions)?,
             Phase::Main => self.append_main_actions(&mut actions)?,
             Phase::Movement => self.append_basic_movement_actions(&mut actions)?,
+            Phase::RandomChoice => self.append_random_choice_actions(&mut actions)?,
             Phase::RangedStep => self.append_ranged_step_actions(&mut actions)?,
+            Phase::StartTurn => self.append_start_turn_actions(&mut actions)?,
             Phase::Terminal => {}
         }
         actions
@@ -1836,7 +1909,7 @@ impl Game {
             region: Region::Surface,
         };
         let profile = MovementProfile {
-            airborne: facts.airborne,
+            airborne: self.minion_is_airborne(unit, facts),
             cause: MovementCause::BasicMovement,
             connects_top_bottom: facts.connects_top_bottom,
             maximum_cost: (!facts.immobile).then_some(1),
@@ -2101,7 +2174,9 @@ impl Game {
             };
             if facts.cannot_defend_or_intercept
                 || unit.summoning_sickness && !self.minion_has_active_charge(unit)
-                || attacker_airborne && !facts.airborne && !self.minion_is_ranged(unit, facts)
+                || attacker_airborne
+                    && !self.minion_is_airborne(unit, facts)
+                    && !self.minion_is_ranged(unit, facts)
             {
                 continue;
             }
@@ -2150,7 +2225,7 @@ impl Game {
         else {
             return Err(GameError::IllegalAction);
         };
-        Ok(facts.airborne && !self.minion_is_disabled(unit))
+        Ok(self.minion_is_airborne(unit, facts))
     }
 
     fn defender_candidates(
@@ -2219,7 +2294,7 @@ impl Game {
                 unit.card.instance_id.clone(),
                 unit.location,
                 MovementProfile {
-                    airborne: facts.airborne,
+                    airborne: self.minion_is_airborne(unit, facts),
                     cause: MovementCause::BasicMovement,
                     connects_top_bottom: facts.connects_top_bottom,
                     maximum_cost: if facts.cannot_defend || facts.immobile {
@@ -2286,7 +2361,7 @@ impl Game {
             else {
                 return Err(invalid("realm minion lacks Minion facts"));
             };
-            if !facts.airborne || self.minion_is_disabled(unit) || attacker_airborne {
+            if !self.minion_is_airborne(unit, facts) || attacker_airborne {
                 targets.push(CombatTarget::Minion {
                     instance_id: unit.card.instance_id.clone(),
                     seat: opposing_seat,
@@ -2677,6 +2752,12 @@ impl Game {
             }
         }
         self.push_site_flight_actions(seat, actions)?;
+        for descriptor in self.aura_cast_descriptors(seat) {
+            let label = descriptor
+                .state_independent_label()
+                .ok_or_else(|| invalid("cast-aura action requires a label"))?;
+            self.push_action(actions, descriptor, label);
+        }
         let spellcasters = self.spellcasters(seat);
         for card in &player.hand_spellbook {
             let definition = &self.rules.cards[usize::from(card.card_id.0)];
@@ -2978,7 +3059,7 @@ impl Game {
                     region: unit.region,
                 },
                 MovementProfile {
-                    airborne: facts.airborne,
+                    airborne: self.minion_is_airborne(unit, facts),
                     cause: MovementCause::BasicMovement,
                     connects_top_bottom: facts.connects_top_bottom,
                     maximum_cost: if facts.immobile {
@@ -3972,6 +4053,45 @@ impl Game {
         }
     }
 
+    /// Advances the controller-turn counter on every Aura one seat conjured.
+    ///
+    /// Returns one record per counted Aura in realm order, carrying the identity, controller,
+    /// owner, and the count it now stands at.
+    fn count_controller_turn_on_auras(
+        &mut self,
+        seat: Seat,
+    ) -> Vec<(IdentityHash, Seat, Seat, u8)> {
+        let mut counted = Vec::new();
+        for aura in &mut self.position.auras {
+            if aura.controller != seat {
+                continue;
+            }
+            aura.turn_counters = aura.turn_counters.saturating_add(1);
+            counted.push((
+                aura.card.instance_id.clone(),
+                aura.controller,
+                aura.card.owner,
+                aura.turn_counters,
+            ));
+        }
+        counted
+    }
+
+    /// Whether a minion is flying right now.
+    ///
+    /// Printed Airborne is lost while the minion is disabled or while a conjured area grounds any
+    /// cell of its footprint.
+    fn minion_is_airborne(&self, unit: &UnitPosition, facts: &MinionFacts) -> bool {
+        facts.airborne
+            && !self.minion_is_disabled(unit)
+            && !Self::unit_occupied_cells(unit).iter().any(|cell| {
+                self.location_suppresses_airborne(Location {
+                    cell: *cell,
+                    region: unit.region,
+                })
+            })
+    }
+
     fn minion_is_disabled(&self, unit: &UnitPosition) -> bool {
         if unit.disabled_until_damaged || !unit.disable_effects.is_empty() {
             return true;
@@ -4947,7 +5067,7 @@ impl Game {
                     disabled,
                     facts.immobile,
                     MovementProfile {
-                        airborne: facts.airborne,
+                        airborne: self.minion_is_airborne(unit, facts),
                         cause: MovementCause::CardEffect,
                         connects_top_bottom: facts.connects_top_bottom,
                         maximum_cost: Some(1),
@@ -5043,7 +5163,12 @@ impl Game {
             let mut next_frontier = Vec::new();
             for (cost, path, borrowed_voidwalk) in frontier {
                 let current = *path.last().expect("movement path starts nonempty");
-                if self.footprint_is_immobilized(profile.occupied_cells, start.cell, current.cell) {
+                if self.footprint_is_immobilized(
+                    profile.occupied_cells,
+                    start.cell,
+                    current,
+                    profile.moving_minion,
+                ) {
                     continue;
                 }
                 let can_voidwalk = profile.regions.voidwalk
@@ -5239,26 +5364,52 @@ impl Game {
         )
     }
 
-    fn cell_is_immobilized(&self, cell: Cell) -> bool {
+    /// Whether one immobile area holds a mover standing at `location`.
+    ///
+    /// An area that grips only site minions lets Avatars, void occupants, and everything standing
+    /// on a bare cell walk straight through it.
+    fn immobile_area_applies(&self, area: &ImmobileArea, location: Location, minion: bool) -> bool {
+        area.cells.contains(&location.cell)
+            && (!area.minions_at_sites_only
+                || minion
+                    && location.region != Region::Void
+                    && self.position.sites[location.cell.index()].is_some())
+    }
+
+    fn location_is_immobilized(&self, location: Location, minion: bool) -> bool {
         self.position
             .immobile_areas
             .iter()
-            .any(|area| area.cells.contains(&cell))
+            .any(|area| self.immobile_area_applies(area, location, minion))
+    }
+
+    /// Whether an Airborne minion standing at `location` is grounded by a conjured area.
+    fn location_suppresses_airborne(&self, location: Location) -> bool {
+        self.position.immobile_areas.iter().any(|area| {
+            area.suppresses_airborne && self.immobile_area_applies(area, location, true)
+        })
     }
 
     fn footprint_is_immobilized(
         &self,
         occupied_cells: Option<SquareArea>,
         start: Cell,
-        current: Cell,
+        current: Location,
+        minion: bool,
     ) -> bool {
         occupied_cells.map_or_else(
-            || self.cell_is_immobilized(current),
+            || self.location_is_immobilized(current, minion),
             |area| {
-                translated_square(area, start, current).is_some_and(|translated| {
-                    translated
-                        .into_iter()
-                        .any(|cell| self.cell_is_immobilized(cell))
+                translated_square(area, start, current.cell).is_some_and(|translated| {
+                    translated.into_iter().any(|cell| {
+                        self.location_is_immobilized(
+                            Location {
+                                cell,
+                                region: current.region,
+                            },
+                            minion,
+                        )
+                    })
                 })
             },
         )
@@ -5739,6 +5890,39 @@ impl Game {
             .all(|(available, required)| available >= required)
     }
 
+    /// Every Aura conjuring one seat can afford, across every canonical two-by-two area.
+    fn aura_cast_descriptors(&self, seat: Seat) -> Vec<ActionDescriptor> {
+        let player = &self.position.players[seat_index(seat)];
+        let spellcasters = self.spellcasters(seat);
+        let mut descriptors = Vec::new();
+        for card in &player.hand_spellbook {
+            let definition = &self.rules.cards[usize::from(card.card_id.0)];
+            let CardFacts::Aura(facts) = &definition.facts else {
+                continue;
+            };
+            if !matches!(
+                facts.effect,
+                AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns
+                    | AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree
+            ) || u64::from(player.mana) < facts.mana_cost
+                || !self.thresholds_met(seat, facts.thresholds)
+            {
+                continue;
+            }
+            for (_, caster_instance_id) in &spellcasters {
+                descriptors.extend(Cell::SQUARE_AREAS.into_iter().map(|cells| {
+                    ActionDescriptor::CastAura {
+                        card_id: definition.id.clone(),
+                        card_instance_id: card.instance_id.clone(),
+                        caster_instance_id: caster_instance_id.clone(),
+                        cells,
+                    }
+                }));
+            }
+        }
+        descriptors
+    }
+
     /// Offers every nearby empty cell a controlled flying site may settle into this turn.
     ///
     /// Flight is an air-affinity ability, so it stays available only while the controller still
@@ -6099,7 +6283,7 @@ impl Game {
     /// Returns [`GameError::IllegalAction`] when the action is stale, belongs to
     /// another decision, or is not valid for the current phase.
     pub fn apply_action(&mut self, action: &IssuedAction) -> Result<(), GameError> {
-        self.apply_action_with_log(action, &mut OutcomeLog::Ignore, None)
+        self.apply_action_with_log(action, &mut OutcomeLog::Ignore, None, None)
     }
 
     #[expect(
@@ -6116,6 +6300,7 @@ impl Game {
             action,
             &mut OutcomeLog::Record(&mut outcomes),
             Some(&mut random_draws),
+            None,
         )?;
         Ok((outcomes, random_draws))
     }
@@ -6129,11 +6314,33 @@ impl Game {
         action: &IssuedAction,
         outcomes: &mut OutcomeLog<'_>,
         random_draws: Option<&mut Vec<EngineRandomDraw>>,
+        forced_random_outcome: Option<&IdentityHash>,
     ) -> Result<(), GameError> {
         if action.seat != self.position.decision_seat
             || action.state_version != self.position.state_version
         {
             return Err(GameError::IllegalAction);
+        }
+        if let ActionDescriptor::ResolveRandomOutcome {
+            outcome_instance_id,
+        } = &action.descriptor
+        {
+            return self.apply_resolve_random_outcome_action(
+                action,
+                outcome_instance_id,
+                outcomes,
+                random_draws,
+            );
+        }
+        if forced_random_outcome.is_none()
+            && let Some(request) =
+                self.lucky_random_outcome_request(action.seat, &action.descriptor)
+            && !request.candidate_instance_ids.is_empty()
+        {
+            let Some(random_draws) = random_draws else {
+                return Err(GameError::IllegalAction);
+            };
+            return self.begin_random_choice(action, &request, random_draws);
         }
         let magic_completion = match &action.descriptor {
             ActionDescriptor::CastMagic {
@@ -6207,8 +6414,9 @@ impl Game {
             ActionDescriptor::CastArtifact { .. } => {
                 self.apply_cast_artifact_action(action, outcomes)
             }
+            ActionDescriptor::CastAura { .. } => self.apply_cast_aura_action(action, outcomes),
             ActionDescriptor::CastMagic { .. } => {
-                self.apply_cast_magic_action(action, outcomes, random_draws)
+                self.apply_cast_magic_action(action, outcomes, random_draws, forced_random_outcome)
             }
             ActionDescriptor::DropArtifacts { .. } => {
                 self.apply_drop_artifacts_action(action, outcomes)
@@ -6319,7 +6527,22 @@ impl Game {
             ActionDescriptor::OrderDeathrites { source_instance_id } => {
                 self.apply_deathrite_order_action(action.seat, source_instance_id, outcomes)
             }
-            ActionDescriptor::EndTurn => self.apply_end_turn_action(action.seat, outcomes),
+            ActionDescriptor::ResolveEndTurnAuraRandom { .. } => {
+                self.apply_resolve_end_turn_aura_random_action(action, outcomes, random_draws)
+            }
+            ActionDescriptor::ResolveEndTurnAuraMove { .. } => {
+                self.apply_resolve_end_turn_aura_move_action(action, outcomes)
+            }
+            ActionDescriptor::ResolveStartTurnTrigger { .. } => self
+                .apply_resolve_start_turn_trigger_action(
+                    action,
+                    forced_random_outcome,
+                    outcomes,
+                    random_draws,
+                ),
+            ActionDescriptor::EndTurn => {
+                self.apply_end_turn_action(action.seat, outcomes, random_draws)
+            }
             ActionDescriptor::ExtendChainMagic { .. } => self.apply_extend_chain_magic(action),
             ActionDescriptor::Intercept { unit_instance_id } => {
                 self.apply_intercept_action(action.seat, unit_instance_id, outcomes)
@@ -6331,6 +6554,7 @@ impl Game {
                 self.apply_draw_action(action.seat, DeckZone::Spellbook, true, outcomes)
             }
             ActionDescriptor::ResolveChainMagic => self.apply_resolve_chain_magic(action, outcomes),
+            ActionDescriptor::ResolveRandomOutcome { .. } => Err(GameError::IllegalAction),
         };
         applied?;
         let settlement_start = outcomes.len();
@@ -7029,7 +7253,11 @@ impl Game {
                 else {
                     return Err(GameError::IllegalAction);
                 };
-                (facts.airborne, facts.connects_top_bottom, true)
+                (
+                    self.minion_is_airborne(unit, facts),
+                    facts.connects_top_bottom,
+                    true,
+                )
             }
         };
         Ok(MovementProfile {
@@ -9563,6 +9791,7 @@ impl Game {
                 continuation.seat,
                 &continuation.remaining_instance_ids,
                 outcomes,
+                None,
             ),
             DeathriteContinuation::FirstStrike(continuation) => {
                 self.continue_after_first_strike(continuation, outcomes)
@@ -9816,7 +10045,7 @@ impl Game {
                     },
                     self.minion_can_move_and_attack(unit, seat),
                     MovementProfile {
-                        airborne: facts.airborne,
+                        airborne: self.minion_is_airborne(unit, facts),
                         cause: MovementCause::BasicMovement,
                         connects_top_bottom: facts.connects_top_bottom,
                         maximum_cost: if facts.immobile {
@@ -10176,8 +10405,10 @@ impl Game {
                 .collect();
             self.position.immobile_areas.push(ImmobileArea {
                 cells,
-                expires_at_seat: seat,
+                expires_at_seat: Some(seat),
+                minions_at_sites_only: false,
                 source_instance_id: card_instance_id.clone(),
+                suppresses_airborne: false,
             });
         }
         if let Some(amount) = genesis_gain_mana {
@@ -11879,6 +12110,7 @@ impl Game {
         request: CemeterySummonRequest<'_>,
         outcomes: &mut OutcomeLog<'_>,
         random_draws: Option<&mut Vec<EngineRandomDraw>>,
+        forced_random_outcome: Option<&IdentityHash>,
     ) -> Result<bool, GameError> {
         let CemeterySummonRequest {
             card_instance_id,
@@ -11902,13 +12134,20 @@ impl Game {
         if candidates.is_empty() {
             return Ok(false);
         }
-        let index = draw_index(
-            &mut self.position.prng,
-            candidates.len(),
-            "magic_random_dead_minion",
-            "dead_minion_instance_candidate",
-            random_draws,
-        )?;
+        let index = if let Some(forced) = forced_random_outcome {
+            candidates
+                .iter()
+                .position(|(_, instance_id, _)| instance_id == forced)
+                .ok_or(GameError::IllegalAction)?
+        } else {
+            draw_index(
+                &mut self.position.prng,
+                candidates.len(),
+                "magic_random_dead_minion",
+                "dead_minion_instance_candidate",
+                random_draws,
+            )?
+        };
         let (card_owner, dead_instance_id, dead_card_id) = candidates.swap_remove(index);
         let dead_definition = &self.rules.cards[usize::from(dead_card_id.0)];
         let CardFacts::Minion(facts) = &dead_definition.facts else {
@@ -11948,6 +12187,1119 @@ impl Game {
         });
         self.position.phase = Phase::CemeterySummon;
         Ok(true)
+    }
+
+    /// Conjures one Aura across a canonical two-by-two area and raises the area it holds.
+    ///
+    /// The Aura keeps the area immobilized, and grounds the Airborne minions standing on a site
+    /// inside it, until the controller's third turn ends and dispels it.
+    fn apply_cast_aura_action(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::CastAura {
+            card_id,
+            card_instance_id,
+            caster_instance_id,
+            cells,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let seat = action.seat;
+        let caster_kind = self
+            .spellcaster_kind(seat, caster_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        if self.position.phase != Phase::Main
+            || !self
+                .aura_cast_descriptors(seat)
+                .contains(&action.descriptor)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let player_index = seat_index(seat);
+        let hand_index = self.position.players[player_index]
+            .hand_spellbook
+            .iter()
+            .position(|card| card.instance_id == *card_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        let compact_card_id =
+            self.position.players[player_index].hand_spellbook[hand_index].card_id;
+        let CardFacts::Aura(facts) = &self.rules.cards[usize::from(compact_card_id.0)].facts else {
+            return Err(GameError::IllegalAction);
+        };
+        let air = u16::try_from(facts.thresholds.get(Element::Air))
+            .map_err(|_| GameError::IllegalAction)?;
+        let paid_mana = u16::try_from(facts.mana_cost).map_err(|_| GameError::IllegalAction)?;
+        let player = &mut self.position.players[player_index];
+        let card = player.hand_spellbook.remove(hand_index);
+        player.mana = player
+            .mana
+            .checked_sub(paid_mana)
+            .ok_or(GameError::IllegalAction)?;
+        player.air_thresholds_cast_this_turn = player
+            .air_thresholds_cast_this_turn
+            .map(|cast_air| cast_air.checked_add(air).ok_or(GameError::IllegalAction))
+            .transpose()?;
+        self.record_unit_interaction(caster_kind, seat, caster_instance_id, outcomes)?;
+        let instance_id = card.instance_id.clone();
+        let owner = card.owner;
+        self.position.immobile_areas.push(ImmobileArea {
+            cells: cells.iter().copied().collect(),
+            expires_at_seat: None,
+            minions_at_sites_only: true,
+            source_instance_id: instance_id.clone(),
+            suppresses_airborne: true,
+        });
+        self.position.auras.push(AuraPosition {
+            card,
+            cells: *cells,
+            controller: seat,
+            turn_counters: 0,
+        });
+        outcomes.push("aura-conjured", || {
+            json!({
+                "cardId": card_id,
+                "casterInstanceId": caster_instance_id,
+                "cells": cells,
+                "instanceId": instance_id,
+                "manaPaid": paid_mana,
+                "owner": owner,
+                "seat": seat,
+            })
+        });
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    fn lucky_charm_count(&self, seat: Seat) -> usize {
+        self.position
+            .artifacts
+            .iter()
+            .filter(|artifact| {
+                artifact
+                    .bearer()
+                    .is_some_and(|bearer| bearer.seat() == seat)
+                    && matches!(
+                        self.rules.cards[usize::from(artifact.card.card_id.0)].facts,
+                        CardFacts::Artifact(facts)
+                            if facts.effect
+                                == ArtifactEffect::BearerControllerChoosesExtraRandomOutcome
+                    )
+            })
+            .count()
+    }
+
+    fn draw_random_outcomes(
+        &mut self,
+        seat: Seat,
+        candidate_instance_ids: &[IdentityHash],
+        purpose: &str,
+        domain_kind: &'static str,
+        random_draws: &mut Vec<EngineRandomDraw>,
+    ) -> Result<Vec<IdentityHash>, GameError> {
+        let mut outcome_instance_ids = Vec::new();
+        for _ in 0..=self.lucky_charm_count(seat) {
+            let index = draw_index(
+                &mut self.position.prng,
+                candidate_instance_ids.len(),
+                purpose,
+                domain_kind,
+                Some(random_draws),
+            )?;
+            outcome_instance_ids.push(candidate_instance_ids[index].clone());
+        }
+        let mut unique = Vec::new();
+        for instance_id in outcome_instance_ids {
+            if !unique.contains(&instance_id) {
+                unique.push(instance_id);
+            }
+        }
+        Ok(unique)
+    }
+
+    #[expect(clippy::too_many_lines)]
+    fn lucky_random_outcome_request(
+        &self,
+        seat: Seat,
+        descriptor: &ActionDescriptor,
+    ) -> Option<LuckyRandomRequest> {
+        if self.lucky_charm_count(seat) == 0 {
+            return None;
+        }
+        let player = &self.position.players[seat_index(seat)];
+        match descriptor {
+            ActionDescriptor::CastMagic {
+                card_instance_id,
+                target_location,
+                ..
+            } => {
+                let card = player
+                    .hand_spellbook
+                    .iter()
+                    .find(|card| card.instance_id == *card_instance_id);
+                let card = card?;
+                let CardFacts::Magic(facts) = &self.rules.cards[usize::from(card.card_id.0)].facts
+                else {
+                    return None;
+                };
+                if facts.effect == MagicEffect::SummonRandomMinionFromAnyCemetery {
+                    let candidates = self.cemetery_minion_candidates();
+                    return (!candidates.is_empty()).then(|| LuckyRandomRequest {
+                        candidate_instance_ids: candidates,
+                        domain_kind: "dead_minion_instance_candidate",
+                        purpose: "magic_random_dead_minion".to_owned(),
+                    });
+                }
+                if let (MagicEffect::DamageRandomUnitAtLocation(_), Some(location)) =
+                    (&facts.effect, target_location)
+                {
+                    let candidates = self
+                        .units_at_location(*location)
+                        .into_iter()
+                        .map(|(instance_id, ..)| instance_id)
+                        .collect::<Vec<_>>();
+                    return (!candidates.is_empty()).then(|| LuckyRandomRequest {
+                        candidate_instance_ids: candidates,
+                        domain_kind: "unit_index_candidate",
+                        purpose: "magic_random_unit_at_location".to_owned(),
+                    });
+                }
+            }
+            ActionDescriptor::ResolveStartTurnTrigger { .. } => {
+                let candidates = self
+                    .random_site_or_void_locations()
+                    .into_iter()
+                    .map(|(instance_id, _)| instance_id)
+                    .collect::<Vec<_>>();
+                return (!candidates.is_empty()).then(|| LuckyRandomRequest {
+                    candidate_instance_ids: candidates,
+                    domain_kind: "realm_site_or_void_location",
+                    purpose: "start_turn_random_teleport".to_owned(),
+                });
+            }
+            ActionDescriptor::SummonMinion {
+                card_instance_id,
+                payment_mode: Some(SummonPaymentMode::RandomCardDiscard),
+                ..
+            } => {
+                let mut candidates = player
+                    .hand_atlas
+                    .iter()
+                    .map(|card| card.instance_id.clone())
+                    .collect::<Vec<_>>();
+                candidates.extend(
+                    player
+                        .hand_spellbook
+                        .iter()
+                        .filter(|card| card.instance_id != *card_instance_id)
+                        .map(|card| card.instance_id.clone()),
+                );
+                return (!candidates.is_empty()).then(|| LuckyRandomRequest {
+                    candidate_instance_ids: candidates,
+                    domain_kind: "card_index_candidate",
+                    purpose: "summon_random_card_discard_cost".to_owned(),
+                });
+            }
+            ActionDescriptor::ActivateDiscardRandomDamage {
+                source_instance_id, ..
+            } => {
+                let source = self
+                    .position
+                    .units
+                    .iter()
+                    .find(|unit| unit.card.instance_id == *source_instance_id);
+                let source = source?;
+                let location = Location {
+                    cell: source.location,
+                    region: source.region,
+                };
+                let candidates = self
+                    .random_unit_candidates_at_location(location, Some(source_instance_id))
+                    .into_iter()
+                    .map(|(instance_id, ..)| instance_id)
+                    .collect::<Vec<_>>();
+                return (!candidates.is_empty()).then(|| LuckyRandomRequest {
+                    candidate_instance_ids: candidates,
+                    domain_kind: "unit_index_candidate",
+                    purpose: "discard_spell_random_other_unit_here".to_owned(),
+                });
+            }
+            ActionDescriptor::ActivateSparkmage {
+                source_instance_id,
+                target_location,
+            } => {
+                let candidates = self
+                    .random_unit_candidates_at_location(*target_location, Some(source_instance_id))
+                    .into_iter()
+                    .map(|(instance_id, ..)| instance_id)
+                    .collect::<Vec<_>>();
+                return (!candidates.is_empty()).then(|| LuckyRandomRequest {
+                    candidate_instance_ids: candidates,
+                    domain_kind: "unit_index_candidate",
+                    purpose: "sparkmage_random_other_unit_at_nearby_location".to_owned(),
+                });
+            }
+            _ => {}
+        }
+        None
+    }
+
+    fn cemetery_minion_candidates(&self) -> Vec<IdentityHash> {
+        let mut candidates = Vec::new();
+        for owner in [Seat::North, Seat::South] {
+            for card in &self.position.players[seat_index(owner)].cemetery {
+                if matches!(
+                    self.rules.cards[usize::from(card.card_id.0)].facts,
+                    CardFacts::Minion(_)
+                ) {
+                    candidates.push(card.instance_id.clone());
+                }
+            }
+        }
+        candidates.sort_unstable();
+        candidates
+    }
+
+    fn random_site_or_void_locations(&self) -> Vec<(IdentityHash, Location)> {
+        Cell::ALL
+            .into_iter()
+            .filter_map(|cell| {
+                if self.position.rubble[cell.index()].is_some() {
+                    return None;
+                }
+                let region = if self.position.sites[cell.index()].is_some() {
+                    Region::Surface
+                } else {
+                    Region::Void
+                };
+                let location = Location { cell, region };
+                let instance_id = identity_hash(&json!({
+                    "cell": cell.to_string(),
+                    "kind": "random-site-or-void-location",
+                    "region": match region {
+                        Region::Surface => "surface",
+                        Region::Underground => "underground",
+                        Region::Underwater => "underwater",
+                        Region::Void => "void",
+                    },
+                }))
+                .ok()?;
+                Some((instance_id, location))
+            })
+            .collect()
+    }
+
+    fn random_unit_candidates_at_location(
+        &self,
+        location: Location,
+        exclude: Option<&IdentityHash>,
+    ) -> Vec<(IdentityHash, UnitKind, Seat)> {
+        self.units_at_location(location)
+            .into_iter()
+            .filter(|(instance_id, ..)| exclude != Some(instance_id))
+            .collect()
+    }
+
+    fn begin_random_choice(
+        &mut self,
+        action: &IssuedAction,
+        request: &LuckyRandomRequest,
+        random_draws: &mut Vec<EngineRandomDraw>,
+    ) -> Result<(), GameError> {
+        let outcome_instance_ids = self.draw_random_outcomes(
+            action.seat,
+            &request.candidate_instance_ids,
+            &request.purpose,
+            request.domain_kind,
+            random_draws,
+        )?;
+        self.position.pending_random_outcome = Some(PendingRandomOutcome {
+            action: action.descriptor.clone(),
+            outcome_instance_ids,
+            seat: action.seat,
+        });
+        self.position.phase = Phase::RandomChoice;
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    fn append_random_choice_actions(
+        &self,
+        actions: &mut Vec<IssuedAction>,
+    ) -> Result<(), GameError> {
+        let Some(pending) = &self.position.pending_random_outcome else {
+            return Err(GameError::IllegalAction);
+        };
+        if pending.seat != self.position.decision_seat || pending.outcome_instance_ids.is_empty() {
+            return Err(GameError::IllegalAction);
+        }
+        for outcome_instance_id in &pending.outcome_instance_ids {
+            let descriptor = ActionDescriptor::ResolveRandomOutcome {
+                outcome_instance_id: outcome_instance_id.clone(),
+            };
+            let label = self.random_outcome_label(&descriptor);
+            self.push_action(actions, descriptor, label);
+        }
+        Ok(())
+    }
+
+    fn random_outcome_label(&self, descriptor: &ActionDescriptor) -> String {
+        let ActionDescriptor::ResolveRandomOutcome {
+            outcome_instance_id,
+        } = descriptor
+        else {
+            return "Lucky Charm chooses outcome".to_owned();
+        };
+        if let Some(pending) = &self.position.pending_random_outcome {
+            if let ActionDescriptor::CastMagic {
+                card_instance_id, ..
+            } = &pending.action
+                && let Some(card) = self.position.players[seat_index(pending.seat)]
+                    .hand_spellbook
+                    .iter()
+                    .find(|card| card.instance_id == *card_instance_id)
+                && matches!(
+                    &self.rules.cards[usize::from(card.card_id.0)].facts,
+                    CardFacts::Magic(facts)
+                        if facts.effect == MagicEffect::SummonRandomMinionFromAnyCemetery
+                )
+                && let Some(dead) = self
+                    .cemetery_minion_candidates()
+                    .iter()
+                    .find(|candidate| *candidate == outcome_instance_id)
+            {
+                let card_id = &self.rules.cards[usize::from(
+                    self.position.players[seat_index(pending.seat)]
+                        .cemetery
+                        .iter()
+                        .find(|card| card.instance_id == *dead)
+                        .expect("dead minion")
+                        .card_id
+                        .0,
+                )]
+                .id;
+                return format!(
+                    "Lucky Charm chooses {card_id} {}…",
+                    &dead.as_str()[..15.min(dead.as_str().len())]
+                );
+            }
+            if matches!(
+                pending.action,
+                ActionDescriptor::ResolveStartTurnTrigger { .. }
+            ) && let Some((_, location)) = self
+                .random_site_or_void_locations()
+                .into_iter()
+                .find(|(instance_id, _)| instance_id == outcome_instance_id)
+            {
+                return format!(
+                    "Lucky Charm chooses {} {}",
+                    location.cell,
+                    match location.region {
+                        Region::Surface => "surface",
+                        Region::Underground => "underground",
+                        Region::Underwater => "underwater",
+                        Region::Void => "void",
+                    }
+                );
+            }
+        }
+        format!(
+            "Lucky Charm chooses {}…",
+            &outcome_instance_id.as_str()[..15.min(outcome_instance_id.as_str().len())]
+        )
+    }
+
+    fn append_start_turn_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
+        let Some(pending) = &self.position.pending_start_turn else {
+            return Err(GameError::IllegalAction);
+        };
+        if pending.seat != self.position.decision_seat
+            || pending.remaining_trigger_instance_ids.is_empty()
+        {
+            return Err(GameError::IllegalAction);
+        }
+        for source_instance_id in &pending.remaining_trigger_instance_ids {
+            let descriptor = ActionDescriptor::ResolveStartTurnTrigger {
+                source_instance_id: source_instance_id.clone(),
+            };
+            self.push_action(
+                actions,
+                descriptor,
+                format!(
+                    "Resolve start-turn trigger for {}…",
+                    &source_instance_id.as_str()[..15.min(source_instance_id.as_str().len())]
+                ),
+            );
+        }
+        Ok(())
+    }
+
+    fn append_end_turn_aura_actions(
+        &self,
+        actions: &mut Vec<IssuedAction>,
+    ) -> Result<(), GameError> {
+        let Some(pending) = &self.position.pending_end_turn_aura else {
+            return Err(GameError::IllegalAction);
+        };
+        if pending.seat != self.position.decision_seat {
+            return Err(GameError::IllegalAction);
+        }
+        let Some(aura) = self
+            .position
+            .auras
+            .iter()
+            .find(|aura| aura.card.instance_id == pending.aura_instance_id)
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        match pending.stage {
+            EndTurnAuraStage::Random => {
+                let outcome_instance_ids = pending
+                    .outcome_instance_ids
+                    .as_ref()
+                    .ok_or(GameError::IllegalAction)?;
+                for outcome_instance_id in outcome_instance_ids {
+                    let descriptor = ActionDescriptor::ResolveEndTurnAuraRandom {
+                        aura_instance_id: aura.card.instance_id.clone(),
+                        outcome_instance_id: outcome_instance_id.clone(),
+                    };
+                    self.push_action(
+                        actions,
+                        descriptor,
+                        format!(
+                            "Lucky Charm chooses {}…",
+                            &outcome_instance_id.as_str()
+                                [..15.min(outcome_instance_id.as_str().len())]
+                        ),
+                    );
+                }
+            }
+            EndTurnAuraStage::Move => {
+                self.push_action(
+                    actions,
+                    ActionDescriptor::ResolveEndTurnAuraMove {
+                        aura_instance_id: aura.card.instance_id.clone(),
+                        cells: None,
+                    },
+                    "Decline end-turn Aura move".to_owned(),
+                );
+                for cells in Self::aura_one_step_areas(aura.cells) {
+                    self.push_action(
+                        actions,
+                        ActionDescriptor::ResolveEndTurnAuraMove {
+                            aura_instance_id: aura.card.instance_id.clone(),
+                            cells: Some(cells),
+                        },
+                        format!(
+                            "Move Aura to {}",
+                            cells
+                                .iter()
+                                .map(ToString::to_string)
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_resolve_random_outcome_action(
+        &mut self,
+        action: &IssuedAction,
+        outcome_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
+    ) -> Result<(), GameError> {
+        let pending = self
+            .position
+            .pending_random_outcome
+            .take()
+            .ok_or(GameError::IllegalAction)?;
+        if self.position.phase != Phase::RandomChoice
+            || pending.seat != action.seat
+            || !pending.outcome_instance_ids.contains(outcome_instance_id)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        self.position.phase = if matches!(
+            pending.action,
+            ActionDescriptor::ResolveStartTurnTrigger { .. }
+        ) {
+            Phase::StartTurn
+        } else {
+            Phase::Main
+        };
+        let deferred = IssuedAction {
+            descriptor: pending.action,
+            label: action.label.clone(),
+            seat: pending.seat,
+            state_version: self.position.state_version,
+        };
+        self.apply_action_with_log(&deferred, outcomes, random_draws, Some(outcome_instance_id))
+    }
+
+    #[expect(clippy::too_many_lines)]
+    fn apply_resolve_start_turn_trigger_action(
+        &mut self,
+        action: &IssuedAction,
+        forced_random_outcome: Option<&IdentityHash>,
+        outcomes: &mut OutcomeLog<'_>,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::ResolveStartTurnTrigger { source_instance_id } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let pending = self
+            .position
+            .pending_start_turn
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        if self.position.phase != Phase::StartTurn
+            || pending.seat != action.seat
+            || !pending
+                .remaining_trigger_instance_ids
+                .contains(source_instance_id)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        if self
+            .start_turn_trigger_unit(action.seat, source_instance_id)
+            .is_none()
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let unit_snapshot = self
+            .position
+            .units
+            .iter()
+            .find(|candidate| candidate.card.instance_id == *source_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        let unit_location = unit_snapshot.location;
+        let unit_region = unit_snapshot.region;
+        let unit_card_id = unit_snapshot.card.card_id;
+        let unit_planar_gate_voidwalk = unit_snapshot.planar_gate_voidwalk;
+        let unit_occupied_cells = unit_snapshot.occupied_cells;
+        let unit_controller = unit_snapshot.controller;
+        let candidates = self.random_site_or_void_locations();
+        if candidates.is_empty() {
+            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+            self.position.state_version += 1;
+            return Ok(());
+        }
+        let candidate_ids: Vec<_> = candidates.iter().map(|(id, _)| id.clone()).collect();
+        let index = if let Some(forced) = forced_random_outcome {
+            candidate_ids
+                .iter()
+                .position(|candidate| candidate == forced)
+                .ok_or(GameError::IllegalAction)?
+        } else {
+            draw_index(
+                &mut self.position.prng,
+                candidate_ids.len(),
+                "start_turn_random_teleport",
+                "realm_site_or_void_location",
+                random_draws,
+            )?
+        };
+        let (selected_outcome_id, destination) = candidates[index].clone();
+        let unit = self
+            .position
+            .units
+            .iter()
+            .find(|candidate| candidate.card.instance_id == *source_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        let from = Location {
+            cell: unit_location,
+            region: unit_region,
+        };
+        let stays = from.cell == destination.cell && from.region == destination.region;
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit_card_id.0)].facts else {
+            return Err(GameError::IllegalAction);
+        };
+        let profile = MovementProfile {
+            airborne: self.minion_is_airborne(unit, facts),
+            cause: MovementCause::CardEffect,
+            connects_top_bottom: facts.connects_top_bottom,
+            maximum_cost: None,
+            moving_minion: true,
+            occupied_cells: unit_occupied_cells,
+            regions: RegionAbilities::of_unit(facts, unit_planar_gate_voidwalk),
+            restriction: None,
+            seat: unit_controller,
+        };
+        let legal = stays
+            || (self.location_exists_in_region(destination.cell, destination.region)
+                && (destination.region != Region::Void || profile.regions.voidwalk)
+                && self.unit_entry_allowed(from, destination, profile));
+        if legal && !stays {
+            self.move_minion_to(source_instance_id, destination)?;
+            outcomes.push("unit-teleported", || {
+                json!({
+                    "from": from,
+                    "outcomeInstanceId": selected_outcome_id,
+                    "seat": action.seat,
+                    "sourceInstanceId": source_instance_id,
+                    "targetInstanceId": source_instance_id,
+                    "to": destination,
+                })
+            });
+            self.settle_region_occupancy(outcomes)?;
+            self.settle_static_power_deaths(outcomes)?;
+        } else {
+            outcomes.push(
+                if legal {
+                    "unit-teleport-resolved"
+                } else {
+                    "unit-teleport-failed"
+                },
+                || {
+                    json!({
+                        "from": from,
+                        "outcomeInstanceId": selected_outcome_id,
+                        "reason": if legal { "already-there" } else { "illegal-entry" },
+                        "seat": action.seat,
+                        "sourceInstanceId": source_instance_id,
+                        "to": destination,
+                    })
+                },
+            );
+        }
+        self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    fn start_turn_trigger_unit(
+        &self,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+    ) -> Option<&UnitPosition> {
+        let unit = self
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == *source_instance_id)?;
+        if unit.controller != seat || self.minion_is_disabled(unit) {
+            return None;
+        }
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return None;
+        };
+        facts
+            .at_start_of_controller_turn_teleport_to_random_site_or_void
+            .then_some(unit)
+    }
+
+    fn start_turn_trigger_instance_ids(&self, seat: Seat) -> Vec<IdentityHash> {
+        self.position
+            .units
+            .iter()
+            .filter_map(|unit| {
+                self.start_turn_trigger_unit(seat, &unit.card.instance_id)
+                    .map(|unit| unit.card.instance_id.clone())
+            })
+            .collect()
+    }
+
+    fn finish_start_turn_trigger(
+        &mut self,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let Some(pending) = self.position.pending_start_turn.clone() else {
+            return Err(GameError::IllegalAction);
+        };
+        let remaining_trigger_instance_ids = pending
+            .remaining_trigger_instance_ids
+            .iter()
+            .filter(|instance_id| **instance_id != *source_instance_id)
+            .filter(|instance_id| {
+                self.start_turn_trigger_unit(pending.seat, instance_id)
+                    .is_some()
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if !remaining_trigger_instance_ids.is_empty() && self.position.terminal.is_none() {
+            self.position.pending_start_turn = Some(PendingStartTurn {
+                remaining_trigger_instance_ids,
+                seat: pending.seat,
+            });
+            self.position.phase = Phase::StartTurn;
+        } else {
+            self.position.pending_start_turn = None;
+            self.position.phase = if self.position.terminal.is_some() {
+                Phase::Terminal
+            } else {
+                Phase::Draw
+            };
+        }
+        let _ = outcomes;
+        Ok(())
+    }
+
+    fn end_turn_damage_aura_ids(&self, seat: Seat) -> Vec<IdentityHash> {
+        self.position
+            .auras
+            .iter()
+            .filter(|aura| {
+                if aura.controller != seat {
+                    return false;
+                }
+                let CardFacts::Aura(facts) =
+                    &self.rules.cards[usize::from(aura.card.card_id.0)].facts
+                else {
+                    return false;
+                };
+                facts.effect
+                    == AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree
+            })
+            .map(|aura| aura.card.instance_id.clone())
+            .collect()
+    }
+
+    fn end_turn_aura_candidates(&self, aura: &AuraPosition) -> Vec<(IdentityHash, UnitKind, Seat)> {
+        let affected_sites: BTreeSet<_> = aura
+            .cells
+            .iter()
+            .copied()
+            .filter(|cell| self.position.sites[cell.index()].is_some())
+            .collect();
+        let mut candidates = Vec::new();
+        for target_seat in [Seat::North, Seat::South] {
+            let avatar = &self.position.players[seat_index(target_seat)].avatar;
+            if affected_sites.contains(&avatar.location) {
+                candidates.push((
+                    avatar.card.instance_id.clone(),
+                    UnitKind::Avatar,
+                    target_seat,
+                ));
+            }
+            for unit in &self.position.units {
+                if unit.region != Region::Surface {
+                    continue;
+                }
+                if Self::unit_occupied_cells(unit)
+                    .iter()
+                    .any(|cell| affected_sites.contains(cell))
+                {
+                    candidates.push((
+                        unit.card.instance_id.clone(),
+                        UnitKind::Minion,
+                        unit.controller,
+                    ));
+                }
+            }
+        }
+        candidates.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        candidates
+    }
+
+    fn begin_end_turn_aura_sequence(
+        &mut self,
+        seat: Seat,
+        outcomes: &mut OutcomeLog<'_>,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
+    ) -> Result<(), GameError> {
+        let aura_ids = self.end_turn_damage_aura_ids(seat);
+        self.begin_end_turn_aura(seat, &aura_ids, outcomes, random_draws)
+    }
+
+    #[expect(clippy::too_many_lines)]
+    fn begin_end_turn_aura(
+        &mut self,
+        seat: Seat,
+        aura_instance_ids: &[IdentityHash],
+        outcomes: &mut OutcomeLog<'_>,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
+    ) -> Result<(), GameError> {
+        let Some(index) = aura_instance_ids.iter().position(|instance_id| {
+            self.position.auras.iter().any(|aura| {
+                if aura.card.instance_id != *instance_id || aura.controller != seat {
+                    return false;
+                }
+                let CardFacts::Aura(facts) =
+                    &self.rules.cards[usize::from(aura.card.card_id.0)].facts
+                else {
+                    return false;
+                };
+                facts.effect
+                    == AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree
+            })
+        }) else {
+            return self.finish_end_turn_cleanup(seat, outcomes);
+        };
+        let aura_instance_id = aura_instance_ids[index].clone();
+        let remaining_aura_instance_ids = aura_instance_ids[index + 1..].to_vec();
+        let aura = self
+            .position
+            .auras
+            .iter()
+            .find(|aura| aura.card.instance_id == aura_instance_id)
+            .ok_or(GameError::IllegalAction)?
+            .clone();
+        outcomes.push("aura-end-turn-triggered", || {
+            json!({
+                "cells": aura.cells,
+                "instanceId": aura_instance_id,
+                "seat": seat,
+                "sourceInstanceId": aura_instance_id,
+            })
+        });
+        let candidates = self.end_turn_aura_candidates(&aura);
+        if candidates.is_empty() {
+            outcomes.push("aura-random-damage-skipped", || {
+                json!({
+                    "instanceId": aura_instance_id,
+                    "seat": seat,
+                    "sourceInstanceId": aura_instance_id,
+                })
+            });
+            self.position.pending_end_turn_aura = Some(PendingEndTurnAura {
+                aura_instance_id,
+                outcome_instance_ids: None,
+                remaining_aura_instance_ids,
+                seat,
+                stage: EndTurnAuraStage::Move,
+            });
+            self.position.decision_seat = seat;
+            self.position.phase = Phase::EndTurnAura;
+            self.position.state_version += 1;
+            return Ok(());
+        }
+        if self.lucky_charm_count(seat) > 0 {
+            let candidate_ids: Vec<_> = candidates.iter().map(|(id, ..)| id.clone()).collect();
+            let Some(random_draws) = random_draws else {
+                return Err(GameError::IllegalAction);
+            };
+            let outcome_instance_ids = self.draw_random_outcomes(
+                seat,
+                &candidate_ids,
+                "aura_end_turn_random_unit_at_affected_sites",
+                "unit_index_candidate",
+                random_draws,
+            )?;
+            self.position.pending_end_turn_aura = Some(PendingEndTurnAura {
+                aura_instance_id,
+                outcome_instance_ids: Some(outcome_instance_ids),
+                remaining_aura_instance_ids,
+                seat,
+                stage: EndTurnAuraStage::Random,
+            });
+            self.position.decision_seat = seat;
+            self.position.phase = Phase::EndTurnAura;
+            self.position.state_version += 1;
+            return Ok(());
+        }
+        let candidate_ids: Vec<_> = candidates.iter().map(|(id, ..)| id.clone()).collect();
+        let index = draw_index(
+            &mut self.position.prng,
+            candidate_ids.len(),
+            "aura_end_turn_random_unit_at_affected_sites",
+            "unit_index_candidate",
+            random_draws,
+        )?;
+        let target = candidates[index].clone();
+        self.resolve_end_turn_aura_damage(&aura, target, outcomes)?;
+        if self.position.terminal.is_some() {
+            self.position.pending_end_turn_aura = None;
+            self.position.phase = Phase::Terminal;
+            self.position.state_version += 1;
+            return Ok(());
+        }
+        self.position.pending_end_turn_aura = Some(PendingEndTurnAura {
+            aura_instance_id,
+            outcome_instance_ids: None,
+            remaining_aura_instance_ids,
+            seat,
+            stage: EndTurnAuraStage::Move,
+        });
+        self.position.decision_seat = seat;
+        self.position.phase = Phase::EndTurnAura;
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    fn resolve_end_turn_aura_damage(
+        &mut self,
+        aura: &AuraPosition,
+        target: (IdentityHash, UnitKind, Seat),
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let (target_instance_id, target_kind, target_seat) = target;
+        outcomes.push("aura-end-turn-damage-allocated", || {
+            json!({
+                "amount": 3,
+                "sourceInstanceId": aura.card.instance_id,
+                "targetInstanceId": target_instance_id,
+            })
+        });
+        self.damage_unit_and_settle_deaths(
+            &(target_instance_id, target_kind, target_seat),
+            3,
+            UnitDamageSource {
+                current_power: 0,
+                lethal: false,
+            },
+            outcomes,
+        )
+    }
+
+    fn apply_resolve_end_turn_aura_random_action(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+        _random_draws: Option<&mut Vec<EngineRandomDraw>>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::ResolveEndTurnAuraRandom {
+            aura_instance_id,
+            outcome_instance_id,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let pending = self
+            .position
+            .pending_end_turn_aura
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        if self.position.phase != Phase::EndTurnAura
+            || pending.stage != EndTurnAuraStage::Random
+            || pending.seat != action.seat
+            || pending.aura_instance_id != *aura_instance_id
+            || !pending
+                .outcome_instance_ids
+                .as_ref()
+                .is_some_and(|ids| ids.contains(outcome_instance_id))
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let aura = self
+            .position
+            .auras
+            .iter()
+            .find(|aura| aura.card.instance_id == *aura_instance_id)
+            .ok_or(GameError::IllegalAction)?
+            .clone();
+        let candidates = self.end_turn_aura_candidates(&aura);
+        let Some(target) = candidates
+            .into_iter()
+            .find(|(instance_id, ..)| instance_id == outcome_instance_id)
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let remaining = pending.remaining_aura_instance_ids.clone();
+        self.resolve_end_turn_aura_damage(&aura, target, outcomes)?;
+        if self.position.terminal.is_some() {
+            self.position.pending_end_turn_aura = None;
+            self.position.phase = Phase::Terminal;
+            self.position.state_version += 1;
+            return Ok(());
+        }
+        self.position.pending_end_turn_aura = Some(PendingEndTurnAura {
+            aura_instance_id: aura_instance_id.clone(),
+            outcome_instance_ids: None,
+            remaining_aura_instance_ids: remaining,
+            seat: action.seat,
+            stage: EndTurnAuraStage::Move,
+        });
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    fn apply_resolve_end_turn_aura_move_action(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::ResolveEndTurnAuraMove {
+            aura_instance_id,
+            cells,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let pending = self
+            .position
+            .pending_end_turn_aura
+            .take()
+            .ok_or(GameError::IllegalAction)?;
+        if self.position.phase != Phase::EndTurnAura
+            || pending.stage != EndTurnAuraStage::Move
+            || pending.seat != action.seat
+            || pending.aura_instance_id != *aura_instance_id
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let legal_move = cells.is_none()
+            || self
+                .position
+                .auras
+                .iter()
+                .find(|aura| aura.card.instance_id == *aura_instance_id)
+                .is_some_and(|aura| {
+                    cells.is_some_and(|destination| {
+                        Self::aura_one_step_areas(aura.cells).contains(&destination)
+                    })
+                });
+        if !legal_move {
+            return Err(GameError::IllegalAction);
+        }
+        if let Some(destination) = cells {
+            if let Some(aura) = self
+                .position
+                .auras
+                .iter_mut()
+                .find(|aura| aura.card.instance_id == *aura_instance_id)
+            {
+                aura.cells = *destination;
+            }
+            if let Some(area) = self
+                .position
+                .immobile_areas
+                .iter_mut()
+                .find(|area| area.source_instance_id == *aura_instance_id)
+            {
+                area.cells = destination.iter().copied().collect();
+            }
+            outcomes.push("aura-moved", || {
+                json!({
+                    "cells": destination,
+                    "instanceId": aura_instance_id,
+                    "seat": action.seat,
+                    "sourceInstanceId": aura_instance_id,
+                })
+            });
+        } else {
+            outcomes.push("aura-move-declined", || {
+                json!({
+                    "instanceId": aura_instance_id,
+                    "seat": action.seat,
+                    "sourceInstanceId": aura_instance_id,
+                })
+            });
+        }
+        self.position.state_version += 1;
+        self.begin_end_turn_aura(
+            action.seat,
+            &pending.remaining_aura_instance_ids,
+            outcomes,
+            None,
+        )
+    }
+
+    fn aura_one_step_areas(cells: SquareArea) -> Vec<SquareArea> {
+        Cell::SQUARE_AREAS
+            .into_iter()
+            .filter(|candidate| {
+                candidate[0] != cells[0] && candidate[0].manhattan_distance(cells[0]) == 1
+            })
+            .collect()
     }
 
     fn apply_cast_artifact_action(
@@ -12214,6 +13566,7 @@ impl Game {
         action: &IssuedAction,
         outcomes: &mut OutcomeLog<'_>,
         random_draws: Option<&mut Vec<EngineRandomDraw>>,
+        forced_random_outcome: Option<&IdentityHash>,
     ) -> Result<(), GameError> {
         let ActionDescriptor::CastMagic {
             ally,
@@ -12482,6 +13835,7 @@ impl Game {
                     },
                     outcomes,
                     random_draws,
+                    forced_random_outcome,
                 )?;
             }
             MagicEffect::ReturnMinionFromOwnCemetery => {
@@ -12956,13 +14310,20 @@ impl Game {
                 let location = target_location.ok_or(GameError::IllegalAction)?;
                 let candidates = self.units_at_location(location);
                 if !candidates.is_empty() {
-                    let index = draw_index(
-                        &mut self.position.prng,
-                        candidates.len(),
-                        "magic_random_unit_at_location",
-                        "unit_index_candidate",
-                        random_draws,
-                    )?;
+                    let index = if let Some(forced) = forced_random_outcome {
+                        candidates
+                            .iter()
+                            .position(|(instance_id, ..)| instance_id == forced)
+                            .ok_or(GameError::IllegalAction)?
+                    } else {
+                        draw_index(
+                            &mut self.position.prng,
+                            candidates.len(),
+                            "magic_random_unit_at_location",
+                            "unit_index_candidate",
+                            random_draws,
+                        )?
+                    };
                     let (target_instance_id, target_kind, target_seat) = candidates[index].clone();
                     let allocated = u16::from(amount);
                     outcomes.push("magic-damage-allocated", || {
@@ -14586,6 +15947,7 @@ impl Game {
         &mut self,
         seat: Seat,
         outcomes: &mut OutcomeLog<'_>,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
     ) -> Result<(), GameError> {
         if self.position.phase != Phase::Main
             || seat != self.position.active_seat
@@ -14609,7 +15971,7 @@ impl Game {
                 .then(|| unit.card.instance_id.clone())
             })
             .collect();
-        self.continue_end_turn_deaths(seat, &triggered, outcomes)?;
+        self.continue_end_turn_deaths(seat, &triggered, outcomes, random_draws)?;
         self.position.state_version += 1;
         Ok(())
     }
@@ -14705,6 +16067,7 @@ impl Game {
         seat: Seat,
         remaining_instance_ids: &[IdentityHash],
         outcomes: &mut OutcomeLog<'_>,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
     ) -> Result<(), GameError> {
         for (index, instance_id) in remaining_instance_ids.iter().enumerate() {
             if !self
@@ -14727,7 +16090,7 @@ impl Game {
                 outcomes,
             );
         }
-        self.finish_end_turn_cleanup(seat, outcomes)
+        self.begin_end_turn_aura_sequence(seat, outcomes, random_draws)
     }
 
     #[expect(
@@ -14889,14 +16252,29 @@ impl Game {
             unit.disable_effects
                 .retain(|effect| effect.expires_at_seat != next_seat);
         }
-        self.position
-            .immobile_areas
-            .retain(|area| area.expires_at_seat != next_seat);
+        let counted_auras = self.count_controller_turn_on_auras(seat);
+        let expired_aura_ids: BTreeSet<_> = counted_auras
+            .iter()
+            .filter(|(_, _, _, count)| *count >= AURA_CONTROLLER_TURNS)
+            .map(|(instance_id, ..)| instance_id.clone())
+            .collect();
+        for aura in std::mem::take(&mut self.position.auras) {
+            if expired_aura_ids.contains(&aura.card.instance_id) {
+                self.position.players[seat_index(aura.card.owner)]
+                    .cemetery
+                    .push(aura.card);
+            } else {
+                self.position.auras.push(aura);
+            }
+        }
+        self.position.immobile_areas.retain(|area| {
+            area.expires_at_seat != Some(next_seat)
+                && !expired_aura_ids.contains(&area.source_instance_id)
+        });
         let ended_turn = self.position.turn_number;
         self.position.turn_number += 1;
         self.position.active_seat = next_seat;
         self.position.decision_seat = next_seat;
-        self.position.phase = Phase::Draw;
         for (instance_id, controller, source_instance_id) in expired_charge_sources {
             outcomes.push("charge-expired", || {
                 json!({
@@ -14913,6 +16291,29 @@ impl Game {
                     "instanceId": instance_id,
                     "seat": controller,
                     "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        for (instance_id, controller, _, count) in &counted_auras {
+            outcomes.push("aura-turn-counted", || {
+                json!({
+                    "count": count,
+                    "instanceId": instance_id,
+                    "seat": controller,
+                    "sourceInstanceId": instance_id,
+                })
+            });
+        }
+        for (instance_id, controller, owner, count) in &counted_auras {
+            if *count < AURA_CONTROLLER_TURNS {
+                continue;
+            }
+            outcomes.push("aura-dispelled", || {
+                json!({
+                    "instanceId": instance_id,
+                    "owner": owner,
+                    "seat": controller,
+                    "sourceInstanceId": instance_id,
                 })
             });
         }
@@ -14938,11 +16339,22 @@ impl Game {
                 "turnNumber": turn_number,
             })
         });
+        let start_turn_trigger_ids = self.start_turn_trigger_instance_ids(next_seat);
+        if start_turn_trigger_ids.is_empty() {
+            self.position.phase = Phase::Draw;
+        } else {
+            self.position.pending_start_turn = Some(PendingStartTurn {
+                remaining_trigger_instance_ids: start_turn_trigger_ids,
+                seat: next_seat,
+            });
+            self.position.phase = Phase::StartTurn;
+        }
         Ok(())
     }
 
     /// Materializes the authoritative JSON state used for receipts and replay.
     #[must_use]
+    #[expect(clippy::too_many_lines)]
     pub fn authoritative_state(&self) -> Value {
         let cards: Map<_, _> = self
             .rules
@@ -15028,17 +16440,43 @@ impl Game {
             }
         }
         self.insert_realm_artifacts(&mut value);
+        if !self.position.auras.is_empty() {
+            value["realm"]["auras"] = self
+                .position
+                .auras
+                .iter()
+                .map(|aura| {
+                    json!({
+                        "cardId": self.rules.cards[usize::from(aura.card.card_id.0)].id,
+                        "cells": aura.cells,
+                        "controller": aura.controller,
+                        "instanceId": aura.card.instance_id,
+                        "owner": aura.card.owner,
+                        "turnCounters": aura.turn_counters,
+                    })
+                })
+                .collect();
+        }
         if !self.position.immobile_areas.is_empty() {
             value["realm"]["immobileAreas"] = self
                 .position
                 .immobile_areas
                 .iter()
                 .map(|area| {
-                    json!({
+                    let mut entry = json!({
                         "cells": area.cells,
-                        "expiresAtSeat": area.expires_at_seat,
                         "sourceInstanceId": area.source_instance_id,
-                    })
+                    });
+                    if let Some(expires_at_seat) = area.expires_at_seat {
+                        entry["expiresAtSeat"] = json!(expires_at_seat);
+                    }
+                    if area.minions_at_sites_only {
+                        entry["minionsAtSitesOnly"] = json!(true);
+                    }
+                    if area.suppresses_airborne {
+                        entry["suppressesAirborne"] = json!(true);
+                    }
+                    entry
                 })
                 .collect();
         }
@@ -16444,16 +17882,16 @@ mod tests {
             .expect("valid Voidwalk manifest")
             .ensure_selfplay_supported()
             .expect("Voidwalk minion Bury is self-play safe");
-        assert!(matches!(
-            Game::from_manifest_json(&bury_manifest(&[
-                ("atStartOfControllerTurnTeleportToRandomSiteOrVoid", json!(true)),
-                ("voidwalk", json!(true)),
-            ]))
-            .expect("valid random teleport manifest")
-            .ensure_selfplay_supported(),
-            Err(GameError::UnsupportedManifestFact(field))
-                if field == "atStartOfControllerTurnTeleportToRandomSiteOrVoid"
-        ));
+        Game::from_manifest_json(&bury_manifest(&[
+            (
+                "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
+                json!(true),
+            ),
+            ("voidwalk", json!(true)),
+        ]))
+        .expect("valid random teleport manifest")
+        .ensure_selfplay_supported()
+        .expect("start-turn random teleport is self-play safe");
 
         let cave_in = selfplay_manifest_with(31, |manifest| {
             for ordinal in 1..=50 {

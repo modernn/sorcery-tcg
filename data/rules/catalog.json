@@ -1282,15 +1282,19 @@
         "RULE-03"
       ],
       "plainLanguage": "Aura occupies any canonical 2x2 area and grounds site minions for three controller turns.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "aura"
       ],
-      "actionHints": [],
-      "eventHints": [],
+      "actionHints": [
+        "cast-aura"
+      ],
+      "eventHints": [
+        "conjuration"
+      ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Aura occupies any canonical 2x2 area and grounds site minions for three controller turns"
+        "file": "crates/sorcery-engine/tests/aura_rules.rs",
+        "testName": "rule_catalog_0064_an_aura_should_hold_site_minions_across_a_canonical_area_for_three_turns"
       }
     },
     {
@@ -1299,17 +1303,20 @@
         "RULE-03"
       ],
       "plainLanguage": "An end-turn Aura damages a random affected unit before its optional step.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "aura"
       ],
-      "actionHints": [],
+      "actionHints": [
+        "resolve-end-turn-aura-random",
+        "resolve-end-turn-aura-move"
+      ],
       "eventHints": [
         "damage"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 an end-turn Aura damages a random affected unit before its optional step"
+        "file": "crates/sorcery-engine/tests/end_turn_aura_rules.rs",
+        "testName": "rule_catalog_0065_end_turn_aura_damages_random_unit_before_optional_move"
       }
     },
     {
@@ -1318,16 +1325,20 @@
         "RULE-03"
       ],
       "plainLanguage": "Oversized minions occupy one canonical 2x2 footprint for movement, combat, Auras, and terrain.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "fixed-footprint",
         "terrain"
       ],
-      "actionHints": [],
-      "eventHints": [],
+      "actionHints": [
+        "move"
+      ],
+      "eventHints": [
+        "movement"
+      ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 oversized minions occupy one canonical 2x2 footprint for movement, combat, Auras, and terrain"
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0066_an_aura_should_hold_an_oversized_footprint_it_barely_overlaps"
       }
     },
     {

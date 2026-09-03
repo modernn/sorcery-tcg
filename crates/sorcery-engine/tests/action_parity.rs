@@ -47,6 +47,7 @@ fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
         ActionDescriptor::AllocateStrike { .. } => "allocate-strike",
         ActionDescriptor::BeginChainMagic { .. } => "begin-chain-magic",
         ActionDescriptor::CastArtifact { .. } => "cast-artifact",
+        ActionDescriptor::CastAura { .. } => "cast-aura",
         ActionDescriptor::CastMagic { .. } => "cast-magic",
         ActionDescriptor::DropArtifacts { .. } => "drop-artifacts",
         ActionDescriptor::PickUpArtifacts { .. } => "pick-up-artifacts",
@@ -80,6 +81,10 @@ fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
         ActionDescriptor::EndTurn => "end-turn",
         ActionDescriptor::ExtendChainMagic { .. } => "extend-chain-magic",
         ActionDescriptor::ResolveChainMagic => "resolve-chain-magic",
+        ActionDescriptor::ResolveRandomOutcome { .. } => "resolve-random-outcome",
+        ActionDescriptor::ResolveStartTurnTrigger { .. } => "resolve-start-turn-trigger",
+        ActionDescriptor::ResolveEndTurnAuraRandom { .. } => "resolve-end-turn-aura-random",
+        ActionDescriptor::ResolveEndTurnAuraMove { .. } => "resolve-end-turn-aura-move",
     }
 }
 

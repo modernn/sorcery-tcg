@@ -65,16 +65,6 @@ fn devils_egg(amount: u64) -> Value {
     })
 }
 
-/// A Lucky Charm: an Artifact effect this slice still refuses to honor.
-fn lucky_charm() -> Value {
-    json!({
-        "bearerControllerChoosesExtraRandomOutcome": true,
-        "cardType": "artifact",
-        "manaCost": 0,
-        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-    })
-}
-
 fn manifest(
     seed: u32,
     cards: &Value,
@@ -414,32 +404,6 @@ fn end_turn_artifacts_should_cost_their_current_site_controller_life() {
     );
     assert!(south_ended.random_draws.is_empty());
     assert_exact_replay(&session);
-    unmodeled_artifact_effects_should_offer_no_conjuration();
-}
-
-/// The remaining Artifact effects stay inert instead of becoming silent no-ops in play.
-fn unmodeled_artifact_effects_should_offer_no_conjuration() {
-    let cards = json!({
-        "north-avatar": avatar(20, json!({})),
-        "north-charm": lucky_charm(),
-        "north-site": site(&["earth"]),
-        "south-avatar": avatar(20, json!({})),
-        "south-egg": devils_egg(1),
-        "south-site": site(&["earth"]),
-    });
-    let mut session = Session::new(&manifest(
-        74,
-        &cards,
-        &["north-charm"; 6],
-        &["south-egg"; 6],
-    ))
-    .expect("a Lucky Charm is an admitted fact");
-    keep(&mut session);
-    keep(&mut session);
-    play_site(&mut session, "C4");
-    assert!(descriptors_of_kind(&session, "cast-artifact").is_empty());
-    let quiet = end_turn(&mut session);
-    assert_eq!(event_types(&quiet), ["turn-ended", "turn-started"]);
 }
 
 fn carried_egg_cards(bearer: &Value) -> Value {
