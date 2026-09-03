@@ -11,7 +11,6 @@ import { opaqueActionId, type EngineActionDescriptor } from '../../src/engine/co
 import {
   createGameManifest,
   hashGameState,
-  legalGameActions,
   observeGame,
   type GameCardDefinition,
   type GameDeckSpec,
@@ -1314,21 +1313,10 @@ test('RULE-03/04 Chain Magic stages distinct nearby hops and damages all chosen 
     assert.equal(starts.some(({ descriptor }) => descriptor.kind === 'begin-chain-magic'
       && descriptor.target.instanceId === southAvatarId), false);
 
-    // TODO(rust-cutover): synthetic state, needs a Rust-side proof. This forged-mana
-    // GameSession is not reachable through legal play, so it stays on TS legalGameActions.
-    const lowMana: GameSession = {
-      ...ctx.session,
-      state: {
-        ...ctx.state,
-        players: {
-          ...ctx.state.players,
-          north: { ...ctx.state.players.north, mana: 1 },
-        },
-      },
-    };
-    assert.equal(legalGameActions(lowMana.state, 'north').some(({ descriptor }) =>
-      descriptor.kind === 'begin-chain-magic'
-        && descriptor.cardInstanceId === chain.instanceId), false);
+    // Mana below the printed cost offers no first hop at all: proven in Rust
+    // `chain_magic_start_requires_the_full_mana_cost`
+    // (crates/sorcery-engine/tests/chain_magic_cutover_rules.rs), which reaches one mana
+    // through legal play instead of forging it onto this session.
 
     const begin = starts.find(({ descriptor }) => descriptor.kind === 'begin-chain-magic'
       && descriptor.target.instanceId === firstTarget.instanceId);
@@ -1355,34 +1343,13 @@ test('RULE-03/04 Chain Magic stages distinct nearby hops and damages all chosen 
     assert.equal((await ctx.legalActions('north')).some(({ descriptor, label }) =>
       descriptor.kind === 'resolve-chain-magic' && /1 chosen unit \(2 mana\)/.test(label)), true);
 
-    // TODO(rust-cutover): synthetic state, needs a Rust-side proof. These forged
-    // region/stealth GameStates are not reachable through legal play, so they stay
-    // on TS legalGameActions.
-    const undergroundState: GameSession['state'] = {
-      ...ctx.state,
-      realm: {
-        ...ctx.state.realm,
-        units: ctx.state.realm.units.map((unit) => unit.instanceId === secondTarget.instanceId
-          ? { ...unit, region: 'underground' as const }
-          : unit),
-      },
-    };
-    assert.equal(legalGameActions(undergroundState, 'north').some(({ descriptor }) =>
-      descriptor.kind === 'extend-chain-magic'
-        && descriptor.target.instanceId === secondTarget.instanceId), false);
-
-    const stealthState: GameSession['state'] = {
-      ...ctx.state,
-      realm: {
-        ...ctx.state.realm,
-        units: ctx.state.realm.units.map((unit) => unit.instanceId === secondTarget.instanceId
-          ? { ...unit, controller: 'south' as const, stealthed: true }
-          : unit),
-      },
-    };
-    assert.equal(legalGameActions(stealthState, 'north').some(({ descriptor }) =>
-      descriptor.kind === 'extend-chain-magic'
-        && descriptor.target.instanceId === secondTarget.instanceId), false);
+    // A hop never crosses regions or lands on enemy Stealth. Both are proven in Rust on
+    // legally reached boards: `chain_magic_hops_skip_units_outside_the_caster_region`
+    // (crates/sorcery-engine/tests/chain_magic_cutover_rules.rs) summons twin minions of the
+    // same card on one cell, one burrowed and one on the surface, and only the surface twin is
+    // offered as a hop; `rule_catalog_0030_chain_magic_stages_distinct_nearby_hops_and_resolves
+    // _simultaneously` (crates/sorcery-engine/tests/magic_rules.rs) keeps a nearby enemy Stealth
+    // minion out of both the start and the extension target lists.
 
     const forgedDescriptor = {
       kind: 'extend-chain-magic',
