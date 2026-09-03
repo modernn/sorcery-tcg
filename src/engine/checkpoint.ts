@@ -9,6 +9,7 @@ import {
   type GameManifest,
   type GameSession,
 } from './game.ts';
+import { withRustSession } from './rust-session-helpers.ts';
 
 export const GAME_CHECKPOINT_MAX_BYTES = 16 * 1024 * 1024;
 const MAX_CHECKPOINT_REQUESTS = 1_000;
@@ -141,6 +142,18 @@ export function parseGameCheckpoint(text: string): GameCheckpoint {
     throw new RangeError(`checkpoint exceeds ${GAME_CHECKPOINT_MAX_BYTES} bytes`);
   }
   return validateCheckpoint(parseJsonWithDuplicateKeyCheck(text));
+}
+
+export async function resumeGameCheckpointAsync(checkpoint: GameCheckpoint): Promise<GameSession> {
+  const validated = validateCheckpoint(checkpoint);
+  return withRustSession(validated.manifest, async (handle) => {
+    await handle.resume(validated as unknown as JsonValue);
+    const session = handle.snapshot;
+    if (sessionHash(session) !== validated.expectedSessionHash) {
+      throw new RangeError('checkpoint session hash does not match reconstructed history');
+    }
+    return session;
+  });
 }
 
 export function resumeGameCheckpoint(checkpoint: GameCheckpoint): GameSession {
