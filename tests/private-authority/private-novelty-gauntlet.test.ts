@@ -6,14 +6,11 @@ import test from 'node:test';
 import { canonicalJson, type JsonValue } from '../../src/authority/canonical-json.ts';
 import {
   parseGameCheckpoint,
-  resumeGameCheckpoint,
+  resumeGameCheckpointAsync,
   serializeGameCheckpoint,
 } from '../../src/engine/checkpoint.ts';
-import {
-  hashGameState,
-  legalGameActions,
-  stepGame,
-} from '../../src/engine/game.ts';
+import { hashGameState } from '../../src/engine/game.ts';
+import { withRustSession } from '../../src/engine/rust-session-helpers.ts';
 import {
   runPrivateNoveltyGauntlet,
 } from '../../src/commands/run-private-novelty-gauntlet.ts';
@@ -59,11 +56,13 @@ test('private novelty gauntlet runs both actual lessons and seat swaps without l
         seed: lessons[0]!.manifest.seed,
         status: 'horizon',
       },
+      // Fail-closed: this rollout probes a Rubble replacement whose Genesis the Rust engine
+      // does not yet admit, so the job is invalidated instead of silently skipping it.
       {
         lessonId: 'earth-vs-air-lesson',
         orientation: 'original',
         seed: 7_382,
-        status: 'horizon',
+        status: 'failed',
       },
       {
         lessonId: 'earth-vs-air-lesson',
@@ -75,7 +74,7 @@ test('private novelty gauntlet runs both actual lessons and seat swaps without l
     assert.deepEqual(first.report.totals, {
       branchLimit: 32,
       completed: 0,
-      failed: 0,
+      failed: 1,
       frontierBranches: 8,
       frontierCompleted: 0,
       frontierFailed: 0,
@@ -84,16 +83,26 @@ test('private novelty gauntlet runs both actual lessons and seat swaps without l
       frontierMaxDepth: 2,
       frontierPending: 0,
       frontierPendingSignals: 0,
-      frontierPrunedCovered: 28,
-      horizon: 4,
+      frontierPrunedCovered: 25,
+      horizon: 3,
       jobs: 4,
       savedCheckpoints: first.report.totals.savedCheckpoints,
     });
+    assert.equal(first.report.jobs.every(({ result }) => result.replayVerified), true);
     assert.equal(first.report.jobs.every(({ result }) =>
-      result.acceptedActionCount === 10 && result.replayVerified), true);
+      result.acceptedActionCount === (result.status === 'horizon' ? 10 : 8)), true);
+    assert.deepEqual(
+      first.report.jobs.flatMap(({ result }) => result.status === 'failed'
+        ? [{
+          kind: result.failure.kind,
+          phase: 'phase' in result.failure ? result.failure.phase : null,
+        }]
+        : []),
+      [{ kind: 'exception', phase: 'probe' }],
+    );
     assert.equal(
       first.report.jobs.reduce((total, { result }) => total + result.frontier.length, 0),
-      20,
+      15,
     );
     assert.equal(first.report.frontierBranches.length, 8);
     assert.equal(first.report.frontierBranches.every(({ result }) =>
@@ -183,9 +192,9 @@ test('private novelty gauntlet runs both actual lessons and seat swaps without l
         `${result.checkpointId.slice('sha256:'.length)}.json`,
       );
       assert.equal(
-        hashGameState(resumeGameCheckpoint(parseGameCheckpoint(
+        hashGameState((await resumeGameCheckpointAsync(parseGameCheckpoint(
           await readFile(checkpointPath, 'utf8'),
-        )).state),
+        ))).state),
         result.finalStateHash,
       );
     }
@@ -218,21 +227,22 @@ test('private novelty gauntlet runs both actual lessons and seat swaps without l
         checkpointDirectory,
         `${candidate.checkpointId.slice('sha256:'.length)}.json`,
       );
-      const resumed = resumeGameCheckpoint(parseGameCheckpoint(
-        await readFile(checkpointPath, 'utf8'),
-      ));
-      const issued = legalGameActions(resumed.state, resumed.state.decisionSeat)
-        .filter(({ actionId }) => actionId === candidate.actionId);
-      assert.equal(issued.length, 1);
-      const applied = stepGame(resumed, issued[0]!);
-      assert.equal(applied.accepted, true);
-      if (!applied.accepted) continue;
-      assert.equal(hashGameState(applied.session.state), candidate.predictedStateHash);
-      assert.equal(branch.result.initialStateHash, candidate.predictedStateHash);
-      assert.deepEqual(
-        [...new Set(applied.receipt.events.map(({ type }) => type))].sort(),
-        branch.entryEventTypes,
-      );
+      const checkpoint = parseGameCheckpoint(await readFile(checkpointPath, 'utf8'));
+      await withRustSession(checkpoint.manifest, async (handle) => {
+        await handle.resume(checkpoint as unknown as JsonValue);
+        const issued = (await handle.legalActions())
+          .filter(({ actionId }) => actionId === candidate.actionId);
+        assert.equal(issued.length, 1);
+        const applied = await handle.stepAction(issued[0]!);
+        assert.equal(applied.accepted, true);
+        if (!applied.accepted) return;
+        assert.equal(hashGameState(applied.session.state), candidate.predictedStateHash);
+        assert.equal(branch.result.initialStateHash, candidate.predictedStateHash);
+        assert.deepEqual(
+          [...new Set(applied.receipt.events.map(({ type }) => type))].sort(),
+          branch.entryEventTypes,
+        );
+      });
     }
   } finally {
     globalThis.fetch = originalFetch;

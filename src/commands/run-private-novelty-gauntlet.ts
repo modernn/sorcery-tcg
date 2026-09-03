@@ -5,19 +5,17 @@ import { fileURLToPath } from 'node:url';
 import { canonicalJson, type JsonValue } from '../authority/canonical-json.ts';
 import { resolveWithinAuthorityRoot } from '../authority/validate-bundle.ts';
 import {
-  resumeGameCheckpoint,
   serializeGameCheckpoint,
   type GameCheckpoint,
 } from '../engine/checkpoint.ts';
 import { deepFreeze } from '../engine/contract.ts';
 import {
   createGameManifest,
-  createGameSession,
   hashGameState,
-  legalGameActions,
-  stepGame,
   type GameManifest,
+  type GameSession,
 } from '../engine/game.ts';
+import { withRustSession } from '../engine/rust-session-helpers.ts';
 import {
   NOVELTY_ROLLOUT_ACTION_LIMIT,
   runNoveltyRollout,
@@ -221,11 +219,12 @@ export async function runPrivateNoveltyGauntlet(
       const manifest = orientation === 'original'
         ? preset.manifest
         : swappedManifest(preset.manifest);
+      const root = await withRustSession(manifest, async (handle) => handle.snapshot);
       jobs.push({
         jobId: `${preset.id}:${orientation}`,
         lessonId: preset.id as LessonId,
         orientation,
-        result: runNoveltyRollout(createGameSession(manifest), {
+        result: await runNoveltyRollout(root, {
           maxActions,
           onCheckpoint: captureCheckpoint,
         }),
@@ -304,18 +303,27 @@ export async function runPrivateNoveltyGauntlet(
     }
     const checkpoint = checkpoints.get(seed.checkpointId);
     if (!checkpoint) throw new Error('private novelty frontier checkpoint was not captured');
-    const resumed = resumeGameCheckpoint(checkpoint);
-    const issued = legalGameActions(resumed.state, resumed.state.decisionSeat)
-      .filter(({ actionId }) => actionId === seed.actionId);
-    if (issued.length !== 1) throw new Error('private novelty frontier action is stale');
-    if (issued[0]!.descriptor.kind !== seed.actionKind) {
-      throw new Error('private novelty frontier action kind changed');
-    }
-    const entry = stepGame(resumed, issued[0]!);
-    if (!entry.accepted) {
-      throw new Error(`private novelty frontier action rejected: ${entry.reason.code}`);
-    }
-    const entryEventTypes = [...new Set(entry.receipt.events.map(({ type }) => type))].sort();
+    const entry = await withRustSession(checkpoint.manifest, async (handle): Promise<Readonly<{
+      eventTypes: readonly string[];
+      session: GameSession;
+    }>> => {
+      await handle.resume(checkpoint as unknown as JsonValue);
+      const issued = (await handle.legalActions())
+        .filter(({ actionId }) => actionId === seed.actionId);
+      if (issued.length !== 1) throw new Error('private novelty frontier action is stale');
+      if (issued[0]!.descriptor.kind !== seed.actionKind) {
+        throw new Error('private novelty frontier action kind changed');
+      }
+      const applied = await handle.stepAction(issued[0]!);
+      if (!applied.accepted) {
+        throw new Error(`private novelty frontier action rejected: ${applied.reason.code}`);
+      }
+      return {
+        eventTypes: [...new Set(applied.receipt.events.map(({ type }) => type))].sort(),
+        session: applied.session,
+      };
+    });
+    const entryEventTypes = entry.eventTypes;
     if (hashGameState(entry.session.state) !== seed.predictedStateHash
       || canonicalJson(entryEventTypes as unknown as JsonValue)
         !== canonicalJson(seed.predictedEventTypes as unknown as JsonValue)
@@ -328,7 +336,7 @@ export async function runPrivateNoveltyGauntlet(
     for (const value of entryEventTypes) {
       exercisedSignals.add(signalKey({ kind: 'event-type', value }));
     }
-    const result = runNoveltyRollout(entry.session, {
+    const result = await runNoveltyRollout(entry.session, {
       maxActions,
       onCheckpoint: captureCheckpoint,
     });
