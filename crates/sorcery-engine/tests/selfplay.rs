@@ -713,10 +713,12 @@ fn pair_should_reject_scenario_changes_composition_mismatch_and_unsupported_fact
     assert!(train_and_promote(&champion, &candidate_deck, &planar_gate, &heldout, 500).is_ok());
 
     let unsupported_north = mutate_manifest(&north, |manifest| {
-        manifest["cards"]["north-site-1"]["preventsUnitsWithPowerAtLeastFromEntering"] = json!(3);
+        manifest["cards"]["north-avatar"]["replaceAdjacentRubbleWithTopAtlasSite"] = json!(true);
+        manifest["cards"]["north-site-1"]["genesisDiscardTopSpells"] = json!(2);
     });
     let unsupported_south = mutate_manifest(&south, |manifest| {
-        manifest["cards"]["north-site-1"]["preventsUnitsWithPowerAtLeastFromEntering"] = json!(3);
+        manifest["cards"]["north-avatar"]["replaceAdjacentRubbleWithTopAtlasSite"] = json!(true);
+        manifest["cards"]["north-site-1"]["genesisDiscardTopSpells"] = json!(2);
     });
     let unsupported = [pair(
         &unsupported_north,
@@ -729,7 +731,7 @@ fn pair_should_reject_scenario_changes_composition_mismatch_and_unsupported_fact
         train_and_promote(&champion, &candidate_deck, &unsupported, &heldout, 500)
             .expect_err("self-play must reject incomplete facts")
             .to_string(),
-        "manifest fact is not yet supported by Rust: preventsUnitsWithPowerAtLeastFromEntering"
+        "manifest fact is not yet supported by Rust: genesisDiscardTopSpells"
     );
 
     let voidwalk_north = mutate_manifest(&north, |manifest| {

@@ -546,13 +546,13 @@
         "RULE-03"
       ],
       "plainLanguage": "Lucky Charm commits the random action before exposing two deterministic outcomes.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [],
       "eventHints": [],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-03 Lucky Charm commits the random action before exposing two deterministic outcomes"
+        "file": "crates/sorcery-engine/tests/lucky_charm_rules.rs",
+        "testName": "rule_catalog_0028_lucky_charm_commits_random_draws_before_exposing_two_outcomes"
       }
     },
     {
@@ -3192,7 +3192,7 @@
         "RULE-04"
       ],
       "plainLanguage": "Start-turn random teleports resolve in controller-chosen order through Lucky Charm.",
-      "implementationStatus": "typescript-supported",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [],
       "actionHints": [
         "teleport"
@@ -3201,8 +3201,8 @@
         "resolution"
       ],
       "scenarioProof": {
-        "file": "tests/engine/game-setup.test.ts",
-        "testName": "RULE-04 start-turn random teleports resolve in controller-chosen order through Lucky Charm"
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0158_start_turn_random_teleports_resolve_through_lucky_charm"
       }
     },
     {

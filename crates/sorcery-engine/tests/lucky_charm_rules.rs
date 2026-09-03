@@ -160,7 +160,6 @@ fn setup(seed: u32) -> Option<Session> {
 }
 
 #[test]
-#[ignore = "seed search pending preview-hand relabel parity with TypeScript RULE-03 proof"]
 #[expect(
     clippy::too_many_lines,
     reason = "one replayed scenario proves commit-before-choice and forged rejection"
@@ -197,6 +196,7 @@ fn rule_catalog_0028_lucky_charm_commits_random_draws_before_exposing_two_outcom
         }
         let mut committed = candidate;
         let cast = casts[0].clone();
+        let before = committed.clone();
         let StepResult::Accepted(receipt) = committed
             .step(ActionRequest {
                 action_id: cast.action_id.to_string(),
@@ -214,7 +214,7 @@ fn rule_catalog_0028_lucky_charm_commits_random_draws_before_exposing_two_outcom
             .filter(|action| action.descriptor["kind"] == "resolve-random-outcome")
             .collect();
         if candidate_choices.len() == 2 {
-            before_commit = Some(committed.clone());
+            before_commit = Some(before);
             session = Some(committed);
             choices = candidate_choices
                 .into_iter()
@@ -289,16 +289,12 @@ fn rule_catalog_0028_lucky_charm_commits_random_draws_before_exposing_two_outcom
                 "descriptor": { "kind": "resolve-random-outcome", "outcomeInstanceId": unoffered_id },
                 "engineVersion": "sorcery-core-v1",
                 "seat": "north",
-                "stateVersion": session.replay_value().expect("state")["stateVersion"],
+                "stateVersion": session.state_version(),
             }))
             .expect("forged action id")
             .to_string(),
             seat: Seat::North,
-            state_version: session
-                .replay_value()
-                .expect("state")["stateVersion"]
-                .as_u64()
-                .expect("state version"),
+            state_version: session.state_version(),
         })
         .expect("forged step");
     assert!(matches!(

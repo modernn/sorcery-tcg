@@ -181,7 +181,6 @@ fn source_ids(session: &Session) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "blocked-site teleport outcome differs from TypeScript seed-10 proof; engine parity pending"]
 #[expect(
     clippy::too_many_lines,
     reason = "one replayed scenario proves controller ordering, blocked teleport, and forged rejection"

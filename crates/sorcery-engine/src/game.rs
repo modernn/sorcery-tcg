@@ -1069,6 +1069,7 @@ struct MovementProfile {
     maximum_cost: Option<usize>,
     moving_minion: bool,
     occupied_cells: Option<SquareArea>,
+    power: u8,
     regions: RegionAbilities,
     restriction: Option<BasicMovementRestriction>,
     seat: Seat,
@@ -1312,14 +1313,7 @@ fn unsupported_selfplay_minion(facts: &MinionFacts) -> Option<&'static str> {
 
 fn unsupported_selfplay_site(facts: &SiteFacts) -> Option<&'static str> {
     account_for_selfplay_site_fields(facts);
-    if facts
-        .prevents_units_with_power_at_least_from_entering
-        .is_some()
-    {
-        Some("preventsUnitsWithPowerAtLeastFromEntering")
-    } else {
-        None
-    }
+    None
 }
 
 fn unsupported_selfplay_minion_genesis(genesis: Option<MinionGenesis>) -> Option<&'static str> {
@@ -1915,6 +1909,7 @@ impl Game {
             maximum_cost: (!facts.immobile).then_some(1),
             moving_minion: true,
             occupied_cells: unit.occupied_cells,
+            power: self.minion_entry_power(unit)?,
             regions: RegionAbilities::of_unit(facts, unit.planar_gate_voidwalk),
             restriction: facts.movement_restriction,
             seat: pending.seat,
@@ -2263,6 +2258,7 @@ impl Game {
                     maximum_cost: Some(1),
                     moving_minion: false,
                     occupied_cells: None,
+                    power: self.avatar_entry_power(seat),
                     regions: RegionAbilities::default(),
                     restriction: None,
                     seat,
@@ -2304,6 +2300,7 @@ impl Game {
                     },
                     moving_minion: true,
                     occupied_cells: unit.occupied_cells,
+                    power: self.minion_entry_power(unit)?,
                     regions: RegionAbilities::of_unit(facts, unit.planar_gate_voidwalk),
                     restriction: facts.movement_restriction,
                     seat,
@@ -3034,6 +3031,7 @@ impl Game {
                     maximum_cost: Some(1),
                     moving_minion: false,
                     occupied_cells: None,
+                    power: self.avatar_entry_power(seat),
                     regions: RegionAbilities::default(),
                     restriction: None,
                     seat,
@@ -3069,6 +3067,7 @@ impl Game {
                     },
                     moving_minion: true,
                     occupied_cells: unit.occupied_cells,
+                    power: self.minion_entry_power(unit)?,
                     regions: RegionAbilities::of_unit(facts, unit.planar_gate_voidwalk),
                     restriction: facts.movement_restriction,
                     seat,
@@ -5044,6 +5043,7 @@ impl Game {
                         maximum_cost: Some(1),
                         moving_minion: false,
                         occupied_cells: None,
+                        power: self.avatar_entry_power(*seat),
                         regions: RegionAbilities::default(),
                         restriction: None,
                         seat: *seat,
@@ -5073,6 +5073,7 @@ impl Game {
                         maximum_cost: Some(1),
                         moving_minion: true,
                         occupied_cells: unit.occupied_cells,
+                        power: self.minion_entry_power(unit)?,
                         regions: RegionAbilities::of_unit(facts, unit.planar_gate_voidwalk),
                         restriction: facts.movement_restriction,
                         seat: *seat,
@@ -5439,12 +5440,41 @@ impl Game {
         usize::from(!facts.airborne_minions_atop_move_freely_away)
     }
 
+    fn avatar_entry_power(&self, seat: Seat) -> u8 {
+        let avatar = &self.position.players[seat_index(seat)].avatar;
+        let CardFacts::Avatar(facts) = &self.rules.cards[usize::from(avatar.card.card_id.0)].facts
+        else {
+            return 0;
+        };
+        facts.attack
+    }
+
+    fn minion_entry_power(&self, unit: &UnitPosition) -> Result<u8, GameError> {
+        let (attack, _, _) = self.minion_current_stats(unit)?;
+        u8::try_from(attack).map_err(|_| GameError::IllegalAction)
+    }
+
     fn unit_entry_allowed(
         &self,
         current: Location,
         candidate: Location,
         profile: MovementProfile,
     ) -> bool {
+        if candidate.region == Region::Surface
+            && let Some(site) = &self.position.sites[candidate.cell.index()]
+        {
+            let CardFacts::Site(facts) =
+                &self.rules.cards[usize::from(site.card.card_id.0)].facts
+            else {
+                return true;
+            };
+            if facts
+                .prevents_units_with_power_at_least_from_entering
+                .is_some_and(|threshold| profile.power >= threshold)
+            {
+                return false;
+            }
+        }
         if !profile.moving_minion
             || profile.airborne
             || current.region != Region::Surface
@@ -7239,8 +7269,10 @@ impl Game {
     }
 
     fn haul_movement_profile(&self, target: &UnitTarget) -> Result<MovementProfile, GameError> {
-        let (airborne, connects_top_bottom, moving_minion) = match target {
-            UnitTarget::Avatar { .. } => (false, false, false),
+        let (airborne, connects_top_bottom, moving_minion, power) = match target {
+            UnitTarget::Avatar { seat, .. } => {
+                (false, false, false, self.avatar_entry_power(*seat))
+            }
             UnitTarget::Minion { instance_id, seat } => {
                 let unit = self
                     .position
@@ -7257,6 +7289,7 @@ impl Game {
                     self.minion_is_airborne(unit, facts),
                     facts.connects_top_bottom,
                     true,
+                    self.minion_entry_power(unit)?,
                 )
             }
         };
@@ -7267,6 +7300,7 @@ impl Game {
             maximum_cost: None,
             moving_minion,
             occupied_cells: None,
+            power,
             regions: RegionAbilities::default(),
             restriction: None,
             seat: target.seat(),
@@ -10019,6 +10053,7 @@ impl Game {
                         maximum_cost: Some(1),
                         moving_minion: false,
                         occupied_cells: None,
+                        power: self.avatar_entry_power(seat),
                         regions: RegionAbilities::default(),
                         restriction: None,
                         seat,
@@ -10055,6 +10090,7 @@ impl Game {
                         },
                         moving_minion: true,
                         occupied_cells: unit.occupied_cells,
+                        power: self.minion_entry_power(unit)?,
                         regions: RegionAbilities::of_unit(facts, unit.planar_gate_voidwalk),
                         restriction: facts.movement_restriction,
                         seat,
@@ -12828,6 +12864,7 @@ impl Game {
             maximum_cost: None,
             moving_minion: true,
             occupied_cells: unit_occupied_cells,
+            power: self.minion_entry_power(unit)?,
             regions: RegionAbilities::of_unit(facts, unit_planar_gate_voidwalk),
             restriction: None,
             seat: unit_controller,
