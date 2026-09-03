@@ -5,7 +5,6 @@ import { canonicalJson, type JsonValue } from '../../src/authority/canonical-jso
 import {
   createGameCheckpoint,
   parseGameCheckpoint,
-  resumeGameCheckpoint,
   serializeGameCheckpoint,
 } from '../../src/engine/checkpoint.ts';
 import { opaqueActionId } from '../../src/engine/contract.ts';
@@ -1087,7 +1086,7 @@ test('RULE-03/04 a drag projectile resumes after ordered movement Deathrites bef
       assert.equal(fragiles.every(({ instanceId }) => !interrupted.session.state.players.south.cemetery
         .some((card) => card.instanceId === instanceId)), true);
       const interruptedCheckpoint = createGameCheckpoint(interrupted.session);
-      const restored = resumeGameCheckpoint(parseGameCheckpoint(serializeGameCheckpoint(
+      const restored = await SetupCtx.resumeCheckpoint(parseGameCheckpoint(serializeGameCheckpoint(
         interruptedCheckpoint,
       )));
       assert.equal(
@@ -1152,7 +1151,7 @@ test('RULE-03/04 a drag projectile resumes after ordered movement Deathrites bef
         instanceId === finalEdge.target.instanceId)?.location, 'C4');
       assert.equal(interrupted.receipt.events.some(({ type }) => type === 'fight-started'), false);
       const interruptedCheckpoint = createGameCheckpoint(interrupted.session);
-      const restored = resumeGameCheckpoint(parseGameCheckpoint(serializeGameCheckpoint(
+      const restored = await SetupCtx.resumeCheckpoint(parseGameCheckpoint(serializeGameCheckpoint(
         interruptedCheckpoint,
       )));
       assert.equal(
@@ -1245,7 +1244,16 @@ test('RULE-03 Granary Rats suppresses its site threshold while enabled', async (
     assert.ok(gated);
     assert.ok(rats);
     const baseline = ctx.session;
-    // Forged-state affinity probes still use TS legalGameActions (Geomancer pattern).
+    // TODO(rust-cutover): synthetic state, needs a Rust-side proof. This test hand-builds
+    // GameSession objects (edited region/controller/cards/disableEffects) that are not
+    // reachable through legal play, so the Rust engine cannot be handed them; the affinity-
+    // suppression legality probes below stay on the legacy TS `legalGameActions`. The overall
+    // rule (enabled Granary Rats suppress the site threshold; a disabled Granary Rats or a
+    // protected site does not) is also proven directly in Rust by
+    // `rule_catalog_0094_granary_rats_suppress_site_threshold_while_enabled` in
+    // crates/sorcery-engine/tests/readiness_affinity_rules.rs, but that proof does not cover
+    // every branch below (e.g. a void-region rat, or one of two rats disabled), so this test
+    // is kept in full on the legacy engine rather than weakened.
     const canSummonGated = (checkpoint: GameSession) => legalGameActions(checkpoint.state, 'north')
       .some(({ descriptor }) => descriptor.kind === 'summon-minion'
         && descriptor.cardId === 'gated' && descriptor.cell === 'C4');
