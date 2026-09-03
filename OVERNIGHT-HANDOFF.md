@@ -26,7 +26,7 @@ Branch: `cursor/phase3-drown-bury-artifacts-36d3` is the integration line. `mast
 | `e05133d` | Migrate setup-02 Leap Attack / Magic targets / Lash to SetupCtx. |
 | `285c394` | Migrate setup-02 Freeze disable proof onto SetupCtx. |
 
-Tip: run `git log -1 --oneline` (expected near `285c394` / handoff doc commit).
+Tip: run `git log -1 --oneline` (expected near `e150a45`).
 
 ## Gate status at tip
 
