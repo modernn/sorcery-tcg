@@ -106,11 +106,11 @@ function eventTypes(receipt: Receipt): readonly string[] {
   return receipt.events.map(({ type }) => type);
 }
 
-test('Leap Attack fixture regenerates byte-identically from TypeScript legality', () => {
+test('Leap Attack fixture regenerates byte-identically from Rust legality', async () => {
   assert.ok(fixture, 'fixture missing: run capture-leap-attack-action-parity.ts --write');
-  assert.equal(serializeLeapAttackActionParityFixture(), readFileSync(fixtureUrl, 'utf8'));
+  assert.equal(await serializeLeapAttackActionParityFixture(), readFileSync(fixtureUrl, 'utf8'));
   assert.equal(fixture.schemaVersion, 1);
-  assert.equal(fixture.source, 'typescript-legality-engine');
+  assert.equal(fixture.source, 'rust-legality-engine');
 
   // hashes filled after capture --write
 

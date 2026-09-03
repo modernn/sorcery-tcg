@@ -31,10 +31,10 @@ const fixtureUrl = new URL(
 );
 const fixture = JSON.parse(readFileSync(fixtureUrl, 'utf8')) as Fixture;
 
-test('Shoot Damage Projectile fixture regenerates byte-identically from TypeScript legality', () => {
-  assert.equal(serializeShootDamageProjectileActionParityFixture(), readFileSync(fixtureUrl, 'utf8'));
+test('Shoot Damage Projectile fixture regenerates byte-identically from Rust legality', async () => {
+  assert.equal(await serializeShootDamageProjectileActionParityFixture(), readFileSync(fixtureUrl, 'utf8'));
   assert.equal(fixture.schemaVersion, 1);
-  assert.equal(fixture.source, 'typescript-legality-engine');
+  assert.equal(fixture.source, 'rust-legality-engine');
   assert.equal(fixture.actions.length, 4);
   assert.deepEqual(
     fixture.actions.map(({ descriptor }) => descriptor.kind),

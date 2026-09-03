@@ -5,21 +5,17 @@ import { fileURLToPath } from 'node:url';
 import { canonicalJson, type JsonValue } from '../src/authority/canonical-json.ts';
 import { identityHash } from '../src/authority/hash.ts';
 import {
-  createGameCheckpoint,
-  parseGameCheckpoint,
-  resumeGameCheckpoint,
-  serializeGameCheckpoint,
-} from '../src/engine/checkpoint.ts';
-import {
   createGameManifest,
-  createGameSession,
-  hashGameState,
-  legalGameActions,
-  stepGame,
-  verifyGameReplay,
   type GameLegalAction,
+  type GameManifest,
   type GameSession,
+  type GameStepResult,
 } from '../src/engine/game.ts';
+import {
+  RUST_LEGALITY_SOURCE,
+  transitionFromCheckpoint,
+  withRustSession,
+} from '../src/engine/rust-session-helpers.ts';
 
 const FIXTURE_PATH = fileURLToPath(new URL(
   '../tests/engine/fixtures/leap-attack-action-v1.json',
@@ -37,7 +33,6 @@ const DEATHRITE_FRAGILE_ID = 'synthetic-leap-fragile';
 const DEATHRITE_RAIN_ID = 'synthetic-leap-rain';
 const DEATHRITE_ENEMY_ID = 'synthetic-leap-enemy';
 
-// Pinned after a successful hunt so test imports do not rescan 1..4096.
 const MAIN_SEED = 1;
 const DEATHRITE_SEED = 1;
 
@@ -231,298 +226,286 @@ function deathriteManifest(seed: number) {
   });
 }
 
-function take(
-  session: GameSession,
-  predicate: (action: GameLegalAction) => boolean,
-): GameSession {
-  const action = legalGameActions(session.state, session.state.decisionSeat).find(predicate);
-  if (!action) throw new Error('expected deterministic Leap Attack setup action');
-  const result = stepGame(session, action);
-  if (!result.accepted) {
-    throw new Error(`issued Leap Attack setup action was rejected: ${result.reason.code}`);
-  }
-  return result.session;
+async function captureMovementDeathriteParityForManifest(
+  gameManifest: GameManifest,
+): Promise<JsonValue> {
+  return withRustSession(gameManifest, async (handle) => {
+    const fragileIds = [`${DEATHRITE_FRAGILE_ID}-a`, `${DEATHRITE_FRAGILE_ID}-b`];
+    const step = async (predicate: (action: GameLegalAction) => boolean): Promise<void> => {
+      await handle.take(predicate);
+    };
+    const keep = (action: GameLegalAction): boolean => action.descriptor.kind === 'mulligan'
+      && action.descriptor.atlasOrder.length === 0
+      && action.descriptor.spellbookOrder.length === 0;
+
+    await step(keep);
+    await step(keep);
+    await step((action) => action.descriptor.kind === 'play-site' && action.descriptor.cell === 'C4');
+    for (const fragileId of fragileIds) {
+      await step((action) => action.descriptor.kind === 'summon-minion'
+        && action.descriptor.cardId === fragileId
+        && action.descriptor.cell === 'C4');
+    }
+    await step((action) => action.descriptor.kind === 'end-turn');
+    await step((action) => action.descriptor.kind === 'draw' && action.descriptor.zone === 'spellbook');
+    await step((action) => action.descriptor.kind === 'play-site' && action.descriptor.cell === 'C1');
+    await step((action) => action.descriptor.kind === 'end-turn');
+    await step((action) => action.descriptor.kind === 'draw' && action.descriptor.zone === 'spellbook');
+    await step((action) => action.descriptor.kind === 'play-site' && action.descriptor.cell === 'C3');
+    await step((action) => action.descriptor.kind === 'summon-minion'
+      && action.descriptor.cardId === DEATHRITE_SOURCE_ID
+      && action.descriptor.cell === 'C3');
+    await step((action) => action.descriptor.kind === 'end-turn');
+    await step((action) => action.descriptor.kind === 'draw' && action.descriptor.zone === 'spellbook');
+    await step((action) => action.descriptor.kind === 'play-site' && action.descriptor.cell === 'C2');
+    await step((action) => action.descriptor.kind === 'summon-minion'
+      && action.descriptor.cardId === DEATHRITE_ENEMY_ID
+      && action.descriptor.cell === 'C2');
+    await step((action) => action.descriptor.kind === 'end-turn');
+    await step((action) => action.descriptor.kind === 'draw' && action.descriptor.zone === 'spellbook');
+    await step((action) => action.descriptor.kind === 'cast-magic' && action.descriptor.cardId === DEATHRITE_RAIN_ID);
+
+    const session = handle.snapshot;
+    const source = session.state.realm.units.find(({ cardId }) => cardId === DEATHRITE_SOURCE_ID);
+    const enemy = session.state.realm.units.find(({ cardId }) => cardId === DEATHRITE_ENEMY_ID);
+    const fragiles = session.state.realm.units.filter(({ cardId }) => fragileIds.includes(cardId));
+    if (!source || !enemy || fragiles.length !== 2) {
+      throw new Error('expected complete Leap Attack Deathrite position');
+    }
+
+    const leapAction = (await handle.legalActions('north')).find(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === LEAP_ID
+        && descriptor.ally?.instanceId === source.instanceId
+        && descriptor.allyDestination?.cell === 'C2');
+    if (!leapAction) throw new Error('expected Leap Attack Deathrite cast action');
+
+    const interrupted = await handle.stepAction(leapAction);
+    if (!interrupted.accepted) {
+      throw new Error(`Leap Attack Deathrite was rejected: ${interrupted.reason.code}`);
+    }
+    const continuation = interrupted.session.state.pendingDeathrites?.continuation;
+    if (continuation?.kind !== 'leap-attack') {
+      throw new Error('expected leap-attack continuation');
+    }
+    const pendingStateHash = await handle.stateHash(interrupted.session.state.decisionSeat);
+    const pendingSaved = await handle.checkpoint();
+    await handle.resume(pendingSaved.checkpoint);
+    const restored = handle.snapshot;
+    if (canonicalJson(restored as unknown as JsonValue)
+      !== canonicalJson(interrupted.session as unknown as JsonValue)) {
+      throw new Error('Leap Attack Deathrite checkpoint did not restore byte-identically');
+    }
+    const orderActions = (await handle.legalActions()).filter(({ descriptor }) =>
+      descriptor.kind === 'order-deathrites');
+    if (orderActions.length !== 2) {
+      throw new Error(`expected two Deathrite order actions, received ${orderActions.length}`);
+    }
+    const selectedOrderAction = orderActions[0]!;
+    const resolved = await handle.stepAction(selectedOrderAction);
+    if (!resolved.accepted) {
+      throw new Error(`Leap Attack Deathrite order was rejected: ${resolved.reason.code}`);
+    }
+    if (!(await handle.verifyReplay())) {
+      throw new Error('Leap Attack Deathrite replay failed verification');
+    }
+    const resolvedStateHash = await handle.stateHash(resolved.session.state.decisionSeat);
+    const resolvedSaved = await handle.checkpoint();
+
+    return {
+      leapAction,
+      manifestId: gameManifest.manifestId,
+      pending: {
+        checkpointId: pendingSaved.checkpointId,
+        checkpointRoundTrip: true,
+        continuation,
+        decisionSeat: interrupted.session.state.decisionSeat,
+        expectedSessionHash: pendingSaved.expectedSessionHash,
+        orderActions,
+        phase: interrupted.session.state.phase,
+        receipt: interrupted.receipt,
+        serializedCheckpointHash: pendingSaved.serializedCheckpointHash,
+        stateHash: pendingStateHash,
+        stateVersion: interrupted.session.state.stateVersion,
+      },
+      resolved: {
+        checkpointId: resolvedSaved.checkpointId,
+        decisionSeat: resolved.session.state.decisionSeat,
+        expectedSessionHash: resolvedSaved.expectedSessionHash,
+        phase: resolved.session.state.phase,
+        receipt: resolved.receipt,
+        replayVerified: true,
+        selectedOrderActionId: selectedOrderAction.actionId,
+        serializedCheckpointHash: resolvedSaved.serializedCheckpointHash,
+        stateHash: resolvedStateHash,
+        stateVersion: resolved.session.state.stateVersion,
+      },
+    };
+  });
 }
 
-function setupMainSession(gameManifest = mainManifest(MAIN_SEED)): GameSession {
-  let session = createGameSession(gameManifest);
-  const step = (predicate: (action: GameLegalAction) => boolean): void => {
-    session = take(session, predicate);
-  };
-  const keep = (action: GameLegalAction): boolean => action.descriptor.kind === 'mulligan'
-    && action.descriptor.atlasOrder.length === 0
-    && action.descriptor.spellbookOrder.length === 0;
-  const endTurn = (action: GameLegalAction): boolean => action.descriptor.kind === 'end-turn';
-  const playSite = (cell: string) => (action: GameLegalAction): boolean =>
-    action.descriptor.kind === 'play-site' && action.descriptor.cell === cell;
-  const drawAtlas = (action: GameLegalAction): boolean =>
-    action.descriptor.kind === 'draw' && action.descriptor.zone === 'atlas';
-  const summon = (cardId: string, cell: string) => (action: GameLegalAction): boolean =>
-    action.descriptor.kind === 'summon-minion'
-      && action.descriptor.cardId === cardId
-      && action.descriptor.cell === cell;
-
-  step(keep);
-  step(keep);
-  step(playSite('C4'));
-  step(summon(ALLY_ID, 'C4'));
-  step(endTurn);
-  step(drawAtlas);
-  step(playSite('C1'));
-  step(summon(ORIGIN_ID, 'C4'));
-  step(endTurn);
-  step(drawAtlas);
-  step(playSite('C3'));
-  step(endTurn);
-  step(drawAtlas);
-  step(summon(STEP_TARGET_ID, 'C3'));
-  step(summon(WARDED_ID, 'C3'));
-  step(endTurn);
-  step(drawAtlas);
-  return session;
-}
-
-function transition(
-  session: GameSession,
+async function previewStepSummary(
+  gameManifest: GameManifest,
+  checkpoint: JsonValue,
   action: GameLegalAction,
-  summary: JsonValue,
-): JsonValue {
-  const result = stepGame(session, action);
-  if (!result.accepted) throw new Error(`issued Leap Attack action was rejected: ${result.reason.code}`);
-  if (!verifyGameReplay(result.session)) throw new Error('Leap Attack replay failed verification');
-  const checkpoint = createGameCheckpoint(result.session);
-  return {
-    checkpointId: checkpoint.checkpointId,
-    expectedSessionHash: checkpoint.expectedSessionHash,
-    receipt: result.receipt,
-    replayVerified: true,
-    selectedActionId: action.actionId,
-    serializedCheckpointHash: identityHash(serializeGameCheckpoint(checkpoint)),
-    stateHash: hashGameState(result.session.state),
-    summary,
-  };
+  build: (result: Extract<GameStepResult, { accepted: true }>, session: GameSession) => JsonValue,
+): Promise<JsonValue> {
+  return withRustSession(gameManifest, async (preview) => {
+    await preview.resume(checkpoint);
+    const result = await preview.stepAction(action);
+    if (!result.accepted) throw new Error(`preview step was rejected: ${result.reason.code}`);
+    return build(result, preview.snapshot);
+  });
 }
 
-function captureMovementDeathriteParityForManifest(gameManifest: ReturnType<typeof deathriteManifest>): JsonValue {
-  const fragileIds = [`${DEATHRITE_FRAGILE_ID}-a`, `${DEATHRITE_FRAGILE_ID}-b`];
-  let session = createGameSession(gameManifest);
-  const step = (predicate: (action: GameLegalAction) => boolean): void => {
-    session = take(session, predicate);
-  };
-  const keep = (action: GameLegalAction): boolean => action.descriptor.kind === 'mulligan'
-    && action.descriptor.atlasOrder.length === 0
-    && action.descriptor.spellbookOrder.length === 0;
-
-  step(keep);
-  step(keep);
-  step((action) => action.descriptor.kind === 'play-site' && action.descriptor.cell === 'C4');
-  for (const fragileId of fragileIds) {
-    step((action) => action.descriptor.kind === 'summon-minion'
-      && action.descriptor.cardId === fragileId
-      && action.descriptor.cell === 'C4');
-  }
-  step((action) => action.descriptor.kind === 'end-turn');
-  step((action) => action.descriptor.kind === 'draw' && action.descriptor.zone === 'spellbook');
-  step((action) => action.descriptor.kind === 'play-site' && action.descriptor.cell === 'C1');
-  step((action) => action.descriptor.kind === 'end-turn');
-  step((action) => action.descriptor.kind === 'draw' && action.descriptor.zone === 'spellbook');
-  step((action) => action.descriptor.kind === 'play-site' && action.descriptor.cell === 'C3');
-  step((action) => action.descriptor.kind === 'summon-minion'
-    && action.descriptor.cardId === DEATHRITE_SOURCE_ID
-    && action.descriptor.cell === 'C3');
-  step((action) => action.descriptor.kind === 'end-turn');
-  step((action) => action.descriptor.kind === 'draw' && action.descriptor.zone === 'spellbook');
-  step((action) => action.descriptor.kind === 'play-site' && action.descriptor.cell === 'C2');
-  step((action) => action.descriptor.kind === 'summon-minion'
-    && action.descriptor.cardId === DEATHRITE_ENEMY_ID
-    && action.descriptor.cell === 'C2');
-  step((action) => action.descriptor.kind === 'end-turn');
-  step((action) => action.descriptor.kind === 'draw' && action.descriptor.zone === 'spellbook');
-  step((action) => action.descriptor.kind === 'cast-magic' && action.descriptor.cardId === DEATHRITE_RAIN_ID);
-
-  const source = session.state.realm.units.find(({ cardId }) => cardId === DEATHRITE_SOURCE_ID);
-  const enemy = session.state.realm.units.find(({ cardId }) => cardId === DEATHRITE_ENEMY_ID);
-  const fragiles = session.state.realm.units.filter(({ cardId }) => fragileIds.includes(cardId));
-  if (!source || !enemy || fragiles.length !== 2) {
-    throw new Error('expected complete Leap Attack Deathrite position');
-  }
-
-  const leapAction = legalGameActions(session.state, 'north').find(({ descriptor }) =>
-    descriptor.kind === 'cast-magic'
-      && descriptor.cardId === LEAP_ID
-      && descriptor.ally?.instanceId === source.instanceId
-      && descriptor.allyDestination?.cell === 'C2');
-  if (!leapAction) throw new Error('expected Leap Attack Deathrite cast action');
-
-  const interrupted = stepGame(session, leapAction);
-  if (!interrupted.accepted) {
-    throw new Error(`Leap Attack Deathrite was rejected: ${interrupted.reason.code}`);
-  }
-  const continuation = interrupted.session.state.pendingDeathrites?.continuation;
-  if (continuation?.kind !== 'leap-attack') {
-    throw new Error('expected leap-attack continuation');
-  }
-  const pendingCheckpoint = createGameCheckpoint(interrupted.session);
-  const serializedPending = serializeGameCheckpoint(pendingCheckpoint);
-  const restored = resumeGameCheckpoint(parseGameCheckpoint(serializedPending));
-  if (canonicalJson(restored as unknown as JsonValue)
-    !== canonicalJson(interrupted.session as unknown as JsonValue)) {
-    throw new Error('Leap Attack Deathrite checkpoint did not restore byte-identically');
-  }
-  const orderActions = legalGameActions(restored.state, restored.state.decisionSeat)
-    .filter(({ descriptor }) => descriptor.kind === 'order-deathrites');
-  if (orderActions.length !== 2) {
-    throw new Error(`expected two Deathrite order actions, received ${orderActions.length}`);
-  }
-  const selectedOrderAction = orderActions[0]!;
-  const resolved = stepGame(restored, selectedOrderAction);
-  if (!resolved.accepted) {
-    throw new Error(`Leap Attack Deathrite order was rejected: ${resolved.reason.code}`);
-  }
-  if (!verifyGameReplay(resolved.session)) {
-    throw new Error('Leap Attack Deathrite replay failed verification');
-  }
-  const resolvedCheckpoint = createGameCheckpoint(resolved.session);
-
-  return {
-    leapAction,
-    manifestId: gameManifest.manifestId,
-    pending: {
-      checkpointId: pendingCheckpoint.checkpointId,
-      checkpointRoundTrip: true,
-      continuation,
-      decisionSeat: interrupted.session.state.decisionSeat,
-      expectedSessionHash: pendingCheckpoint.expectedSessionHash,
-      orderActions,
-      phase: interrupted.session.state.phase,
-      receipt: interrupted.receipt,
-      serializedCheckpointHash: identityHash(serializedPending),
-      stateHash: hashGameState(interrupted.session.state),
-      stateVersion: interrupted.session.state.stateVersion,
-    },
-    resolved: {
-      checkpointId: resolvedCheckpoint.checkpointId,
-      decisionSeat: resolved.session.state.decisionSeat,
-      expectedSessionHash: resolvedCheckpoint.expectedSessionHash,
-      phase: resolved.session.state.phase,
-      receipt: resolved.receipt,
-      replayVerified: true,
-      selectedOrderActionId: selectedOrderAction.actionId,
-      serializedCheckpointHash: identityHash(serializeGameCheckpoint(resolvedCheckpoint)),
-      stateHash: hashGameState(resolved.session.state),
-      stateVersion: resolved.session.state.stateVersion,
-    },
-  };
-}
-
-function captureMovementDeathriteParity(): JsonValue {
-  return captureMovementDeathriteParityForManifest(deathriteManifest(DEATHRITE_SEED));
-}
-
-export function captureLeapAttackActionParityFixture(): JsonValue {
+export async function captureLeapAttackActionParityFixture(): Promise<JsonValue> {
   const gameManifest = mainManifest(MAIN_SEED);
-  const session = setupMainSession(gameManifest);
+  return withRustSession(gameManifest, async (handle) => {
+    const step = async (predicate: (action: GameLegalAction) => boolean): Promise<void> => {
+      await handle.take(predicate);
+    };
+    const keep = (action: GameLegalAction): boolean => action.descriptor.kind === 'mulligan'
+      && action.descriptor.atlasOrder.length === 0
+      && action.descriptor.spellbookOrder.length === 0;
+    const endTurn = (action: GameLegalAction): boolean => action.descriptor.kind === 'end-turn';
+    const playSite = (cell: string) => (action: GameLegalAction): boolean =>
+      action.descriptor.kind === 'play-site' && action.descriptor.cell === cell;
+    const drawAtlas = (action: GameLegalAction): boolean =>
+      action.descriptor.kind === 'draw' && action.descriptor.zone === 'atlas';
+    const summon = (cardId: string, cell: string) => (action: GameLegalAction): boolean =>
+      action.descriptor.kind === 'summon-minion'
+        && action.descriptor.cardId === cardId
+        && action.descriptor.cell === cell;
 
-  const allyInstanceId = session.state.realm.units.find(({ cardId }) =>
-    cardId === ALLY_ID)?.instanceId;
-  const originInstanceId = session.state.realm.units.find(({ cardId }) =>
-    cardId === ORIGIN_ID)?.instanceId;
-  const stepTargetInstanceId = session.state.realm.units.find(({ cardId }) =>
-    cardId === STEP_TARGET_ID)?.instanceId;
-  const wardedInstanceId = session.state.realm.units.find(({ cardId }) =>
-    cardId === WARDED_ID)?.instanceId;
-  const leapInstanceId = session.state.players.north.hand.spellbook.find(({ cardId }) =>
-    cardId === LEAP_ID)?.instanceId;
-  if (!allyInstanceId || !originInstanceId || !stepTargetInstanceId
-    || !wardedInstanceId || !leapInstanceId) {
-    throw new Error('expected complete synthetic Leap Attack position');
-  }
+    await step(keep);
+    await step(keep);
+    await step(playSite('C4'));
+    await step(summon(ALLY_ID, 'C4'));
+    await step(endTurn);
+    await step(drawAtlas);
+    await step(playSite('C1'));
+    await step(summon(ORIGIN_ID, 'C4'));
+    await step(endTurn);
+    await step(drawAtlas);
+    await step(playSite('C3'));
+    await step(endTurn);
+    await step(drawAtlas);
+    await step(summon(STEP_TARGET_ID, 'C3'));
+    await step(summon(WARDED_ID, 'C3'));
+    await step(endTurn);
+    await step(drawAtlas);
 
-  const actions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
-    descriptor.kind === 'cast-magic'
-      && descriptor.cardInstanceId === leapInstanceId
-      && descriptor.ally?.instanceId === allyInstanceId);
-  if (actions.length !== 2) {
-    throw new Error(`expected two Leap Attack actions, received ${actions.length}`);
-  }
-  const noStepAction = actions.find(({ descriptor }) => descriptor.kind === 'cast-magic'
-    && descriptor.allyDestination?.cell === 'C4');
-  const stepAction = actions.find(({ descriptor }) => descriptor.kind === 'cast-magic'
-    && descriptor.allyDestination?.cell === 'C3');
-  if (!noStepAction || !stepAction) {
-    throw new Error('expected stay and step Leap Attack actions');
-  }
-  if (stepAction.descriptor.kind !== 'cast-magic') {
-    throw new Error('expected Leap Attack cast descriptor');
-  }
-  const startCheckpoint = createGameCheckpoint(session);
+    const session = handle.snapshot;
+    const allyInstanceId = session.state.realm.units.find(({ cardId }) =>
+      cardId === ALLY_ID)?.instanceId;
+    const originInstanceId = session.state.realm.units.find(({ cardId }) =>
+      cardId === ORIGIN_ID)?.instanceId;
+    const stepTargetInstanceId = session.state.realm.units.find(({ cardId }) =>
+      cardId === STEP_TARGET_ID)?.instanceId;
+    const wardedInstanceId = session.state.realm.units.find(({ cardId }) =>
+      cardId === WARDED_ID)?.instanceId;
+    const leapInstanceId = session.state.players.north.hand.spellbook.find(({ cardId }) =>
+      cardId === LEAP_ID)?.instanceId;
+    if (!allyInstanceId || !originInstanceId || !stepTargetInstanceId
+      || !wardedInstanceId || !leapInstanceId) {
+      throw new Error('expected complete synthetic Leap Attack position');
+    }
 
-  const noStepResult = stepGame(session, noStepAction);
-  if (!noStepResult.accepted) throw new Error('stay Leap Attack rejected');
-  const stepResult = stepGame(session, stepAction);
-  if (!stepResult.accepted) throw new Error('step Leap Attack rejected');
+    const actions = (await handle.legalActions('north')).filter(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === leapInstanceId
+        && descriptor.ally?.instanceId === allyInstanceId);
+    if (actions.length !== 2) {
+      throw new Error(`expected two Leap Attack actions, received ${actions.length}`);
+    }
+    const noStepAction = actions.find(({ descriptor }) => descriptor.kind === 'cast-magic'
+      && descriptor.allyDestination?.cell === 'C4');
+    const stepAction = actions.find(({ descriptor }) => descriptor.kind === 'cast-magic'
+      && descriptor.allyDestination?.cell === 'C3');
+    if (!noStepAction || !stepAction) {
+      throw new Error('expected stay and step Leap Attack actions');
+    }
+    if (stepAction.descriptor.kind !== 'cast-magic') {
+      throw new Error('expected Leap Attack cast descriptor');
+    }
 
-  const noStepAlly = noStepResult.session.state.realm.units.find(({ instanceId }) =>
-    instanceId === allyInstanceId);
-  const stepAlly = stepResult.session.state.realm.units.find(({ instanceId }) =>
-    instanceId === allyInstanceId);
-  const stepWarded = stepResult.session.state.realm.units.find(({ instanceId }) =>
-    instanceId === wardedInstanceId);
-  const stepped = stepResult.receipt.events.find(({ type }) => type === 'unit-stepped');
+    const startSaved = await handle.checkpoint();
 
-  return {
-    actions: actions.map(({ actionId, descriptor, label }) => ({ actionId, descriptor, label })),
-    allyInstanceId,
-    canonicalActionIds: actions.map(({ actionId }) => actionId),
-    contract: 'sorcery-core-v1',
-    manifestId: gameManifest.manifestId,
-    movementDeathrite: captureMovementDeathriteParity(),
-    noStepTransition: transition(session, noStepAction, {
-      allyLocation: noStepAlly?.location ?? null,
-      allyTapped: noStepAlly?.tapped ?? null,
-      c3EnemiesRemain: [stepTargetInstanceId, wardedInstanceId].every((instanceId) =>
-        noStepResult.session.state.realm.units.some((unit) => unit.instanceId === instanceId)),
-      originDead: !noStepResult.session.state.realm.units.some(({ instanceId }) =>
-        instanceId === originInstanceId),
-      unitStepped: noStepResult.receipt.events.some(({ type }) => type === 'unit-stepped'),
-    }),
-    originInstanceId,
-    schemaVersion: 1,
-    seat: 'north',
-    source: 'typescript-legality-engine',
-    startCheckpoint: {
-      checkpointId: startCheckpoint.checkpointId,
-      expectedSessionHash: startCheckpoint.expectedSessionHash,
-      serializedCheckpointHash: identityHash(serializeGameCheckpoint(startCheckpoint)),
-      stateHash: hashGameState(session.state),
-    },
-    stateVersion: session.state.stateVersion,
-    stepTargetInstanceId,
-    stepTransition: transition(session, stepAction, {
-      allyDamage: stepAlly?.damage ?? null,
-      allyLocation: stepAlly?.location ?? null,
-      allyTapped: stepAlly?.tapped ?? null,
-      leapInCemetery: stepResult.session.state.players.north.cemetery.some(({ cardId }) =>
-        cardId === LEAP_ID),
-      originAlive: stepResult.session.state.realm.units.some(({ instanceId }) =>
-        instanceId === originInstanceId),
-      stepTargetDead: !stepResult.session.state.realm.units.some(({ instanceId }) =>
-        instanceId === stepTargetInstanceId),
-      strikeCount: stepResult.receipt.events.filter(({ type }) =>
-        type === 'strike-damage-allocated').length,
-      unitStepped: stepped?.payload ?? null,
-      wardBroken: stepWarded?.warded === false,
-    }),
-    wardedInstanceId,
-  };
+    return {
+      actions: actions.map(({ actionId, descriptor, label }) => ({ actionId, descriptor, label })),
+      allyInstanceId,
+      canonicalActionIds: actions.map(({ actionId }) => actionId),
+      contract: 'sorcery-core-v1',
+      manifestId: gameManifest.manifestId,
+      movementDeathrite: await captureMovementDeathriteParityForManifest(deathriteManifest(DEATHRITE_SEED)),
+      noStepTransition: await transitionFromCheckpoint(
+        gameManifest,
+        startSaved.checkpoint,
+        noStepAction,
+        await previewStepSummary(gameManifest, startSaved.checkpoint, noStepAction, (result, previewSession) => {
+          const noStepAlly = previewSession.state.realm.units.find(({ instanceId }) =>
+            instanceId === allyInstanceId);
+          return {
+            allyLocation: noStepAlly?.location ?? null,
+            allyTapped: noStepAlly?.tapped ?? null,
+            c3EnemiesRemain: [stepTargetInstanceId, wardedInstanceId].every((instanceId) =>
+              previewSession.state.realm.units.some((unit) => unit.instanceId === instanceId)),
+            originDead: !previewSession.state.realm.units.some(({ instanceId }) =>
+              instanceId === originInstanceId),
+            unitStepped: result.receipt.events.some(({ type }) => type === 'unit-stepped'),
+          };
+        }),
+      ),
+      originInstanceId,
+      schemaVersion: 1,
+      seat: 'north',
+      source: RUST_LEGALITY_SOURCE,
+      startCheckpoint: {
+        checkpointId: startSaved.checkpointId,
+        expectedSessionHash: startSaved.expectedSessionHash,
+        serializedCheckpointHash: startSaved.serializedCheckpointHash,
+        stateHash: await handle.stateHash('north'),
+      },
+      stateVersion: session.state.stateVersion,
+      stepTargetInstanceId,
+      stepTransition: await transitionFromCheckpoint(
+        gameManifest,
+        startSaved.checkpoint,
+        stepAction,
+        await previewStepSummary(gameManifest, startSaved.checkpoint, stepAction, (result, previewSession) => {
+          const stepAlly = previewSession.state.realm.units.find(({ instanceId }) =>
+            instanceId === allyInstanceId);
+          const stepWarded = previewSession.state.realm.units.find(({ instanceId }) =>
+            instanceId === wardedInstanceId);
+          const stepped = result.receipt.events.find(({ type }) => type === 'unit-stepped');
+          return {
+            allyDamage: stepAlly?.damage ?? null,
+            allyLocation: stepAlly?.location ?? null,
+            allyTapped: stepAlly?.tapped ?? null,
+            leapInCemetery: previewSession.state.players.north.cemetery.some(({ cardId }) =>
+              cardId === LEAP_ID),
+            originAlive: previewSession.state.realm.units.some(({ instanceId }) =>
+              instanceId === originInstanceId),
+            stepTargetDead: !previewSession.state.realm.units.some(({ instanceId }) =>
+              instanceId === stepTargetInstanceId),
+            strikeCount: result.receipt.events.filter(({ type }) =>
+              type === 'strike-damage-allocated').length,
+            unitStepped: stepped?.payload ?? null,
+            wardBroken: stepWarded?.warded === false,
+          };
+        }),
+      ),
+      wardedInstanceId,
+    };
+  });
 }
 
-export function serializeLeapAttackActionParityFixture(): string {
-  return `${canonicalJson(captureLeapAttackActionParityFixture())}\n`;
+export async function serializeLeapAttackActionParityFixture(): Promise<string> {
+  return `${canonicalJson(await captureLeapAttackActionParityFixture())}\n`;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const serialized = serializeLeapAttackActionParityFixture();
+async function main(): Promise<void> {
+  const serialized = await serializeLeapAttackActionParityFixture();
   if (process.argv[2] === '--check') {
     if (readFileSync(FIXTURE_PATH, 'utf8') !== serialized) {
       throw new Error(`Leap Attack fixture is stale: ${FIXTURE_PATH}`);
@@ -532,4 +515,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   } else {
     process.stdout.write(serialized);
   }
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  void main();
 }

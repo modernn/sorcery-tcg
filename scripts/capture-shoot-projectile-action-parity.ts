@@ -6,12 +6,12 @@ import { canonicalJson, type JsonValue } from '../src/authority/canonical-json.t
 import { identityHash } from '../src/authority/hash.ts';
 import {
   createGameManifest,
-  createGameSession,
-  legalGameActions,
-  stepGame,
   type GameLegalAction,
-  type GameSession,
 } from '../src/engine/game.ts';
+import {
+  RUST_LEGALITY_SOURCE,
+  withRustSession,
+} from '../src/engine/rust-session-helpers.ts';
 
 const FIXTURE_PATH = fileURLToPath(new URL(
   '../tests/engine/fixtures/shoot-projectile-action-v1.json',
@@ -69,90 +69,79 @@ function manifest() {
   });
 }
 
-function take(
-  session: GameSession,
-  predicate: (action: GameLegalAction) => boolean,
-): Readonly<{ action: GameLegalAction; session: GameSession }> {
-  const action = legalGameActions(session.state, session.state.decisionSeat).find(predicate);
-  if (!action) throw new Error('expected deterministic setup action');
-  const result = stepGame(session, action);
-  if (!result.accepted) throw new Error(`issued setup action was rejected: ${result.reason.code}`);
-  return { action, session: result.session };
+export async function captureShootProjectileActionParityFixture(): Promise<JsonValue> {
+  return withRustSession(manifest(), async (handle) => {
+    const setupActionIds: string[] = [];
+    const step = async (predicate: (action: GameLegalAction) => boolean): Promise<void> => {
+      const { action } = await handle.take(predicate);
+      setupActionIds.push(action.actionId);
+    };
+    const kind = (wanted: string) => (action: GameLegalAction): boolean =>
+      action.descriptor.kind === wanted;
+
+    await step((action) => action.descriptor.kind === 'mulligan'
+      && action.descriptor.atlasOrder.length === 0
+      && action.descriptor.spellbookOrder.length === 0);
+    await step((action) => action.descriptor.kind === 'mulligan'
+      && action.descriptor.atlasOrder.length === 0
+      && action.descriptor.spellbookOrder.length === 0);
+    await step((action) => action.descriptor.kind === 'play-site' && action.descriptor.cell === 'C4');
+    await step((action) => action.descriptor.kind === 'summon-minion'
+      && action.descriptor.cardId === 'north-shooter'
+      && action.descriptor.cell === 'C4');
+    const shooter = handle.snapshot.state.realm.units.find(({ controller }) => controller === 'north');
+    if (!shooter) throw new Error('missing synthetic Ranged shooter');
+    await step(kind('end-turn'));
+
+    await step((action) => action.descriptor.kind === 'draw' && action.descriptor.zone === 'atlas');
+    await step((action) => action.descriptor.kind === 'play-site' && action.descriptor.cell === 'C1');
+    await step(kind('end-turn'));
+
+    await step((action) => action.descriptor.kind === 'draw' && action.descriptor.zone === 'atlas');
+    await step((action) => action.descriptor.kind === 'play-site' && action.descriptor.cell === 'C3');
+    await step(kind('end-turn'));
+
+    await step((action) => action.descriptor.kind === 'draw' && action.descriptor.zone === 'atlas');
+    await step((action) => action.descriptor.kind === 'play-site' && action.descriptor.cell === 'C2');
+    await step((action) => action.descriptor.kind === 'summon-minion'
+      && action.descriptor.cardId === 'south-target'
+      && action.descriptor.cell === 'C3');
+    const target = handle.snapshot.state.realm.units.find(({ controller }) => controller === 'south');
+    if (!target) throw new Error('missing synthetic Ranged target');
+    await step(kind('end-turn'));
+
+    await step((action) => action.descriptor.kind === 'draw' && action.descriptor.zone === 'atlas');
+    const actions = (await handle.legalActions('north')).filter(({ descriptor }) =>
+      descriptor.kind === 'shoot-projectile');
+    if (actions.length !== 4) throw new Error(`expected four Ranged actions, received ${actions.length}`);
+    if ((await handle.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'shoot-damage-projectile')) {
+      throw new Error('ordinary Ranged fixture must not include fixed-damage projectile actions');
+    }
+
+    const gameManifest = manifest();
+    return {
+      actions: actions.map(({ actionId, descriptor, label }) => ({ actionId, descriptor, label })),
+      canonicalActionIds: actions.map(({ actionId }) => actionId),
+      contract: 'sorcery-core-v1',
+      manifestId: gameManifest.manifestId,
+      schemaVersion: 1,
+      seat: 'north',
+      setupActionIds,
+      shooterInstanceId: shooter.instanceId,
+      source: RUST_LEGALITY_SOURCE,
+      stateVersion: handle.snapshot.state.stateVersion,
+      targetInstanceId: target.instanceId,
+    };
+  });
 }
 
-export function captureShootProjectileActionParityFixture(): JsonValue {
-  const gameManifest = manifest();
-  let session = createGameSession(gameManifest);
-  const setupActionIds: string[] = [];
-  const step = (predicate: (action: GameLegalAction) => boolean): void => {
-    const result = take(session, predicate);
-    setupActionIds.push(result.action.actionId);
-    session = result.session;
-  };
-  const kind = (wanted: string) => (action: GameLegalAction): boolean =>
-    action.descriptor.kind === wanted;
-
-  step((action) => action.descriptor.kind === 'mulligan'
-    && action.descriptor.atlasOrder.length === 0
-    && action.descriptor.spellbookOrder.length === 0);
-  step((action) => action.descriptor.kind === 'mulligan'
-    && action.descriptor.atlasOrder.length === 0
-    && action.descriptor.spellbookOrder.length === 0);
-  step((action) => action.descriptor.kind === 'play-site' && action.descriptor.cell === 'C4');
-  step((action) => action.descriptor.kind === 'summon-minion'
-    && action.descriptor.cardId === 'north-shooter'
-    && action.descriptor.cell === 'C4');
-  const shooter = session.state.realm.units.find(({ controller }) => controller === 'north');
-  if (!shooter) throw new Error('missing synthetic Ranged shooter');
-  step(kind('end-turn'));
-
-  step((action) => action.descriptor.kind === 'draw' && action.descriptor.zone === 'atlas');
-  step((action) => action.descriptor.kind === 'play-site' && action.descriptor.cell === 'C1');
-  step(kind('end-turn'));
-
-  step((action) => action.descriptor.kind === 'draw' && action.descriptor.zone === 'atlas');
-  step((action) => action.descriptor.kind === 'play-site' && action.descriptor.cell === 'C3');
-  step(kind('end-turn'));
-
-  step((action) => action.descriptor.kind === 'draw' && action.descriptor.zone === 'atlas');
-  step((action) => action.descriptor.kind === 'play-site' && action.descriptor.cell === 'C2');
-  step((action) => action.descriptor.kind === 'summon-minion'
-    && action.descriptor.cardId === 'south-target'
-    && action.descriptor.cell === 'C3');
-  const target = session.state.realm.units.find(({ controller }) => controller === 'south');
-  if (!target) throw new Error('missing synthetic Ranged target');
-  step(kind('end-turn'));
-
-  step((action) => action.descriptor.kind === 'draw' && action.descriptor.zone === 'atlas');
-  const actions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
-    descriptor.kind === 'shoot-projectile');
-  if (actions.length !== 4) throw new Error(`expected four Ranged actions, received ${actions.length}`);
-  if (legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'shoot-damage-projectile')) {
-    throw new Error('ordinary Ranged fixture must not include fixed-damage projectile actions');
-  }
-
-  return {
-    actions: actions.map(({ actionId, descriptor, label }) => ({ actionId, descriptor, label })),
-    canonicalActionIds: actions.map(({ actionId }) => actionId),
-    contract: 'sorcery-core-v1',
-    manifestId: gameManifest.manifestId,
-    schemaVersion: 1,
-    seat: 'north',
-    setupActionIds,
-    shooterInstanceId: shooter.instanceId,
-    source: 'typescript-legality-engine',
-    stateVersion: session.state.stateVersion,
-    targetInstanceId: target.instanceId,
-  };
+export async function serializeShootProjectileActionParityFixture(): Promise<string> {
+  return `${canonicalJson(await captureShootProjectileActionParityFixture())}\n`;
 }
 
-export function serializeShootProjectileActionParityFixture(): string {
-  return `${canonicalJson(captureShootProjectileActionParityFixture())}\n`;
-}
-
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const serialized = serializeShootProjectileActionParityFixture();
+async function main(): Promise<void> {
+  const serialized = await serializeShootProjectileActionParityFixture();
   if (process.argv[2] === '--check') {
     if (readFileSync(FIXTURE_PATH, 'utf8') !== serialized) {
       throw new Error(`Ranged action parity fixture is stale: ${FIXTURE_PATH}`);
@@ -162,4 +151,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   } else {
     process.stdout.write(serialized);
   }
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  void main();
 }

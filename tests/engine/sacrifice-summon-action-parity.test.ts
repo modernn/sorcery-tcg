@@ -73,10 +73,10 @@ type Fixture = Readonly<{
 const fixtureUrl = new URL('./fixtures/sacrifice-summon-action-v1.json', import.meta.url);
 const fixture = JSON.parse(readFileSync(fixtureUrl, 'utf8')) as Fixture;
 
-test('sacrifice-summon fixture regenerates byte-identically from TypeScript legality', () => {
-  assert.equal(serializeSacrificeSummonActionParityFixture(), readFileSync(fixtureUrl, 'utf8'));
+test('sacrifice-summon fixture regenerates byte-identically from Rust legality', async () => {
+  assert.equal(await serializeSacrificeSummonActionParityFixture(), readFileSync(fixtureUrl, 'utf8'));
   assert.equal(fixture.schemaVersion, 1);
-  assert.equal(fixture.source, 'typescript-legality-engine');
+  assert.equal(fixture.source, 'rust-legality-engine');
   assert.deepEqual(fixture.eligibleSacrificeCandidateIds, [
     'sha256:6ba77ca7089f0021f72e8a10e69836c169b49d2816d0b7cc4bcd063a167a59a0',
     'sha256:6d54db9a8afec1f6eb3c1dc1a184b0b058485f4b927e61480b0c09207a3ab1b9',
@@ -205,7 +205,7 @@ test('sacrifice-summon fixture regenerates byte-identically from TypeScript lega
   assert.equal(fixture.deathrite.pending.checkpointRoundTrip, true);
   assert.equal(
     fixture.deathrite.pending.serializedCheckpointHash,
-    'sha256:bbb246138e7ec589c9cb72a747f3a165352754eb7b795673fc377c7c3af68150',
+    'sha256:c7f71d96932315eb76d9a605d7bfa505c96be0442b57377909fba8a60abd42c3',
   );
   assert.deepEqual(
     fixture.deathrite.pending.orderActions.map(({ actionId, descriptor, label }) => ({
@@ -257,7 +257,7 @@ test('sacrifice-summon fixture regenerates byte-identically from TypeScript lega
   );
   assert.equal(
     fixture.deathrite.resolved.serializedCheckpointHash,
-    'sha256:ae785b73f062821904129270eec29e18458b6f5997d4086b02e50bf8ee050df7',
+    'sha256:4ad2d676869c8fc4d7081172ff3fb97050a3d037dbee84dbc541f0f9ed623174',
   );
   assert.equal(fixture.deathrite.resolved.replayVerified, true);
 });

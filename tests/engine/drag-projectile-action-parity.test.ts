@@ -75,10 +75,10 @@ function dragDescriptor(descriptor: EngineActionDescriptor): DragDescriptor | un
     : undefined;
 }
 
-test('Pudge drag projectile fixture regenerates byte-identically from TypeScript legality', () => {
-  assert.equal(serializeDragProjectileActionParityFixture(), readFileSync(fixtureUrl, 'utf8'));
+test('Pudge drag projectile fixture regenerates byte-identically from Rust legality', async () => {
+  assert.equal(await serializeDragProjectileActionParityFixture(), readFileSync(fixtureUrl, 'utf8'));
   assert.equal(fixture.schemaVersion, 1);
-  assert.equal(fixture.source, 'typescript-legality-engine');
+  assert.equal(fixture.source, 'rust-legality-engine');
   assert.equal(fixture.actions.length, 2);
 
   for (const action of fixture.actions) {

@@ -42,13 +42,13 @@ const fixtureUrl = new URL(
 );
 const fixture = JSON.parse(readFileSync(fixtureUrl, 'utf8')) as Fixture;
 
-test('random-card-discard summon fixture regenerates byte-identically from TypeScript legality', () => {
+test('random-card-discard summon fixture regenerates byte-identically from Rust legality', async () => {
   assert.equal(
-    serializeRandomCardDiscardSummonActionParityFixture(),
+    await serializeRandomCardDiscardSummonActionParityFixture(),
     readFileSync(fixtureUrl, 'utf8'),
   );
   assert.equal(fixture.schemaVersion, 1);
-  assert.equal(fixture.source, 'typescript-legality-engine');
+  assert.equal(fixture.source, 'rust-legality-engine');
   assert.deepEqual(
     fixture.actions.map(({ descriptor }) => descriptor.kind),
     Array(4).fill('summon-minion'),

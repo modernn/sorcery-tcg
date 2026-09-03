@@ -96,10 +96,10 @@ function instanceId(value: unknown): unknown {
     : undefined;
 }
 
-test('Duel fixture regenerates byte-identically from TypeScript legality', () => {
-  assert.equal(serializeDuelActionParityFixture(), readFileSync(fixtureUrl, 'utf8'));
+test('Duel fixture regenerates byte-identically from Rust legality', async () => {
+  assert.equal(await serializeDuelActionParityFixture(), readFileSync(fixtureUrl, 'utf8'));
   assert.equal(fixture.schemaVersion, 1);
-  assert.equal(fixture.source, 'typescript-legality-engine');
+  assert.equal(fixture.source, 'rust-legality-engine');
   assert.equal(fixture.actions.length, 2);
   assert.deepEqual(
     fixture.actions.map(({ descriptor }) => descriptor.kind),
