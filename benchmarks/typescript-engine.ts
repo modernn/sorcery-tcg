@@ -10,6 +10,7 @@ import {
 } from '../src/commands/run-game-demo.ts';
 import {
   createGameSession,
+  legalGameActions,
   stepGame,
   verifyGameReplay,
   type GameSession,
@@ -82,7 +83,10 @@ function totals(samples: readonly Sample[]): Readonly<{
 function runGame(seed: number, transitionLatencies?: number[]): GameSession {
   let session = createGameSession(createSyntheticDemoManifest(seed));
   while (session.state.terminal.status === 'active' && session.transcript.length < MAX_ACTIONS) {
-    const action = selectDeterministicGameAction(session);
+    const action = selectDeterministicGameAction(
+      session,
+      legalGameActions(session.state, session.state.decisionSeat),
+    );
     const started = performance.now();
     const result = stepGame(session, action);
     const durationMs = performance.now() - started;

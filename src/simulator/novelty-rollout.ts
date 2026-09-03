@@ -350,7 +350,7 @@ export function runNoveltyRollout(
       tooWide.push(currentPosition);
       let fallback: GameLegalAction;
       try {
-        const suggested = selectDeterministicGameAction(session);
+        const suggested = selectDeterministicGameAction(session, actions);
         fallback = actions.find(({ actionId }) => actionId === suggested.actionId)!;
         if (!fallback) return fail({ kind: 'exception', phase: 'selector' });
       } catch {
@@ -384,7 +384,7 @@ export function runNoveltyRollout(
     } else {
       let fallbackActionId: string;
       try {
-        const suggested = selectDeterministicGameAction(session);
+        const suggested = selectDeterministicGameAction(session, actions);
         const fallback = actions.find(({ actionId }) => actionId === suggested.actionId);
         if (!fallback) return fail({ kind: 'exception', phase: 'selector' });
         fallbackActionId = fallback.actionId;

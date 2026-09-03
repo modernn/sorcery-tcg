@@ -102,7 +102,10 @@ test('coverage-guided rollout reports committed novelty and a resumable horizon 
 
   let terminal = root;
   for (let count = 0; count < 500 && terminal.state.terminal.status === 'active'; count += 1) {
-    terminal = accept(terminal, selectDeterministicGameAction(terminal));
+    terminal = accept(
+      terminal,
+      selectDeterministicGameAction(terminal, legalGameActions(terminal.state, terminal.state.decisionSeat)),
+    );
   }
   assert.equal(terminal.state.terminal.status, 'finished');
   let terminalCheckpointCount = 0;
