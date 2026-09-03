@@ -28,7 +28,9 @@ import {
   manifest,
   northAttacksAtC2,
   SYNTHETIC_AUTHORITY_HASH,
+  takeAction,
 } from './game-setup-helpers.ts';
+import { withSetup } from './rust-setup-session.ts';
 
 test('RULE-04 conditional end-turn Stealth requires no nearby enemy in the same region', () => {
   let prepared = keep(keep(createGameSession(manifest(241, {
@@ -750,44 +752,46 @@ test('RULE-04 Dalcean Phalanx can move itself only forward for its seat', () => 
   assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-02/04 a unit can move across connected top and bottom realm edges', () => {
-  let session = keep(createGameSession(manifest(128, {
+test('RULE-02/04 a unit can move across connected top and bottom realm edges', async () => {
+  await withSetup(manifest(128, {
     spell: {
       connectsTopBottom: true,
       manaCost: 1,
       thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
     },
-  })));
-  session = keep(session);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'summon-minion'));
-  const unit = session.state.realm.units[0];
-  assert.ok(unit);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'play-site');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'summon-minion');
+    const unit = ctx.state.realm.units[0];
+    assert.ok(unit);
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
-  const actions = legalGameActions(session.state, 'north');
-  const wraps = ({ descriptor }: GameLegalAction): boolean => descriptor.kind === 'move-and-attack'
-    && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C1';
-  assert.equal(actions.some((candidate) =>
-    wraps(candidate) && candidate.descriptor.kind === 'move-and-attack'
-      && candidate.descriptor.unitInstanceId === unit.instanceId), true);
-  assert.equal(actions.some((candidate) =>
-    wraps(candidate) && candidate.descriptor.kind === 'move-and-attack'
-      && candidate.descriptor.unitInstanceId === session.state.players.north.avatar.card.instanceId), false);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === unit.instanceId
-    && descriptor.to.cell === 'C1'));
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site'), true);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
-  assert.equal(verifyGameReplay(session), true);
+    const actions = await ctx.legalActions('north');
+    const wraps = ({ descriptor }: GameLegalAction): boolean => descriptor.kind === 'move-and-attack'
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C1';
+    assert.equal(actions.some((candidate) =>
+      wraps(candidate) && candidate.descriptor.kind === 'move-and-attack'
+        && candidate.descriptor.unitInstanceId === unit.instanceId), true);
+    assert.equal(actions.some((candidate) =>
+      wraps(candidate) && candidate.descriptor.kind === 'move-and-attack'
+        && candidate.descriptor.unitInstanceId === ctx.state.players.north.avatar.card.instanceId), false);
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === unit.instanceId
+      && descriptor.to.cell === 'C1');
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site'), true);
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'decline-attack');
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
 test('RULE-04 Submerge uses underwater summons, movement, and region-isolated combat', () => {

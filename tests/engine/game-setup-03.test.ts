@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { canonicalJson } from '../../src/authority/canonical-json.ts';
+import { createGameCheckpoint } from '../../src/engine/checkpoint.ts';
 import {
   createGameManifest,
   createGameSession,
@@ -24,8 +25,10 @@ import {
   manifest,
   numericGenesisSession,
   SYNTHETIC_AUTHORITY_HASH,
+  takeAction,
   type SpellFacts,
 } from './game-setup-helpers.ts';
+import { withPreview, withSetup } from './rust-setup-session.ts';
 
 test('RULE-03/04 Bury detaches and burrows Artifacts if able', () => {
   const castBury = (
@@ -989,7 +992,7 @@ test('RULE-03/04 Waterbound derives Disabled from terrain and survives only with
   assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-02/04 region settlement kills inhospitable minions and banishes them from the void', () => {
+test('RULE-02/04 region settlement kills inhospitable minions and banishes them from the void', async () => {
   const base = manifest(229, {
     northSpell: {
       burrowing: true,
@@ -1007,11 +1010,16 @@ test('RULE-02/04 region settlement kills inhospitable minions and banishes them 
       voidwalk: true,
     },
   });
-  const preview = createGameSession(base);
-  const waterSiteId = preview.state.players.north.hand.atlas[0]?.cardId;
-  const landSiteId = preview.state.players.north.hand.atlas[1]?.cardId;
-  const featuredId = preview.state.players.north.hand.spellbook[0]?.cardId;
-  const targetId = preview.state.players.north.hand.spellbook[1]?.cardId;
+  let waterSiteId: string | undefined;
+  let landSiteId: string | undefined;
+  let featuredId: string | undefined;
+  let targetId: string | undefined;
+  await withPreview(base, async (preview) => {
+    waterSiteId = preview.state.players.north.hand.atlas[0]?.cardId;
+    landSiteId = preview.state.players.north.hand.atlas[1]?.cardId;
+    featuredId = preview.state.players.north.hand.spellbook[0]?.cardId;
+    targetId = preview.state.players.north.hand.spellbook[1]?.cardId;
+  });
   assert.ok(waterSiteId);
   assert.ok(landSiteId);
   assert.ok(featuredId);
@@ -1033,169 +1041,186 @@ test('RULE-02/04 region settlement kills inhospitable minions and banishes them 
     firstSeat: base.firstSeat,
     seed: base.seed,
   });
-  const checkpoint = keep(keep(createGameSession(gameManifest)));
-  const waterSite = checkpoint.state.players.north.hand.atlas.find(({ cardId }) =>
-    cardId === waterSiteId);
-  const landSite = checkpoint.state.players.north.hand.atlas.find(({ cardId }) =>
-    cardId === landSiteId);
-  const featured = checkpoint.state.players.north.hand.spellbook.find(({ cardId }) =>
-    cardId === featuredId);
-  const target = checkpoint.state.players.north.hand.spellbook.find(({ cardId }) =>
-    cardId === targetId);
-  assert.ok(waterSite);
-  assert.ok(landSite);
-  assert.ok(featured);
-  assert.ok(target);
-  const play = (start: GameSession, cardInstanceId: string): GameSession =>
-    accept(start, action(start, ({ descriptor }) =>
-      descriptor.kind === 'play-site'
-        && descriptor.cardInstanceId === cardInstanceId
-        && descriptor.cell === 'C4'));
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    const opening = createGameCheckpoint(ctx.session);
+    const waterSite = ctx.state.players.north.hand.atlas.find(({ cardId }) =>
+      cardId === waterSiteId);
+    const landSite = ctx.state.players.north.hand.atlas.find(({ cardId }) =>
+      cardId === landSiteId);
+    const featured = ctx.state.players.north.hand.spellbook.find(({ cardId }) =>
+      cardId === featuredId);
+    const target = ctx.state.players.north.hand.spellbook.find(({ cardId }) =>
+      cardId === targetId);
+    assert.ok(waterSite);
+    assert.ok(landSite);
+    assert.ok(featured);
+    assert.ok(target);
 
-  const land = play(checkpoint, landSite.instanceId);
-  const atlasBeforeDeath = land.state.players.north.atlas.length;
-  const died = stepGame(land, action(land, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === featured.instanceId
-      && descriptor.cell === 'C4'
-      && descriptor.region === 'underground'));
-  assert.equal(died.accepted, true);
-  assert.deepEqual(died.receipt.events.map(({ type }) => type), [
-    'minion-summoned',
-    'minion-died',
-  ]);
-  assert.equal(died.session.state.realm.units.some(({ instanceId }) =>
-    instanceId === featured.instanceId), false);
-  assert.equal(died.session.state.players.north.cemetery.some(({ instanceId }) =>
-    instanceId === featured.instanceId), true);
-  assert.equal(died.session.state.players.north.atlas.length, atlasBeforeDeath);
-  assert.equal(died.receipt.events.some(({ type }) => type === 'site-drawn'), false);
-  assert.equal(died.session.state.stateVersion, land.state.stateVersion + 1);
-  assert.equal(verifyGameReplay(died.session), true);
+    const playSite = async (cardInstanceId: string): Promise<void> => {
+      await takeAction(ctx, ({ descriptor }) =>
+        descriptor.kind === 'play-site'
+          && descriptor.cardInstanceId === cardInstanceId
+          && descriptor.cell === 'C4');
+    };
 
-  const banished = stepGame(land, action(land, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === featured.instanceId
-      && descriptor.cell === 'A4'
-      && descriptor.region === 'void'));
-  assert.equal(banished.accepted, true);
-  assert.deepEqual(banished.receipt.events.map(({ type }) => type), [
-    'minion-summoned',
-    'minion-banished',
-  ]);
-  assert.equal(banished.session.state.realm.units.some(({ instanceId }) =>
-    instanceId === featured.instanceId), false);
-  assert.equal(banished.session.state.players.north.cemetery.some(({ instanceId }) =>
-    instanceId === featured.instanceId), false);
-  assert.equal(banished.session.state.stateVersion, land.state.stateVersion + 1);
-  assert.equal(verifyGameReplay(banished.session), true);
+    await playSite(landSite.instanceId);
+    const land = createGameCheckpoint(ctx.session);
+    const landStateVersion = ctx.state.stateVersion;
+    const atlasBeforeDeath = ctx.state.players.north.atlas.length;
+    const died = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === featured.instanceId
+        && descriptor.cell === 'C4'
+        && descriptor.region === 'underground'));
+    assert.equal(died.accepted, true);
+    if (!died.accepted) return;
+    assert.deepEqual(died.receipt.events.map(({ type }) => type), [
+      'minion-summoned',
+      'minion-died',
+    ]);
+    assert.equal(died.session.state.realm.units.some(({ instanceId }) =>
+      instanceId === featured.instanceId), false);
+    assert.equal(died.session.state.players.north.cemetery.some(({ instanceId }) =>
+      instanceId === featured.instanceId), true);
+    assert.equal(died.session.state.players.north.atlas.length, atlasBeforeDeath);
+    assert.equal(died.receipt.events.some(({ type }) => type === 'site-drawn'), false);
+    assert.equal(died.session.state.stateVersion, landStateVersion + 1);
+    assert.equal(await ctx.verifyReplay(), true);
 
-  let movement = play(checkpoint, waterSite.instanceId);
-  movement = accept(movement, action(movement, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === featured.instanceId
-      && descriptor.cell === 'C4'
-      && descriptor.region === undefined));
-  movement = accept(movement, action(movement, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  movement = accept(movement, action(movement, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  movement = accept(movement, action(movement, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
-  movement = accept(movement, action(movement, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  movement = accept(movement, action(movement, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  const beforeMove = movement;
-  const moved = stepGame(beforeMove, action(beforeMove, ({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === featured.instanceId
-      && descriptor.path.length === 3
-      && descriptor.path[0]?.cell === 'C4'
-      && descriptor.path[0]?.region === 'surface'
-      && descriptor.path[1]?.cell === 'B4'
-      && descriptor.path[1]?.region === 'void'
-      && descriptor.path[2]?.cell === 'A4'
-      && descriptor.path[2]?.region === 'void'));
-  assert.equal(moved.accepted, true);
-  assert.deepEqual(moved.receipt.events.map(({ type }) => type), [
-    'move-and-attack-activated',
-    'minion-banished',
-  ]);
-  assert.deepEqual(moved.receipt.events[0]?.payload, {
-    from: { cell: 'C4', region: 'surface' },
-    path: [
-      { cell: 'C4', region: 'surface' },
-      { cell: 'B4', region: 'void' },
-    ],
-    seat: 'north',
-    steps: 1,
-    to: { cell: 'B4', region: 'void' },
-    unitInstanceId: featured.instanceId,
+    await ctx.resume(land);
+    const banished = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === featured.instanceId
+        && descriptor.cell === 'A4'
+        && descriptor.region === 'void'));
+    assert.equal(banished.accepted, true);
+    if (!banished.accepted) return;
+    assert.deepEqual(banished.receipt.events.map(({ type }) => type), [
+      'minion-summoned',
+      'minion-banished',
+    ]);
+    assert.equal(banished.session.state.realm.units.some(({ instanceId }) =>
+      instanceId === featured.instanceId), false);
+    assert.equal(banished.session.state.players.north.cemetery.some(({ instanceId }) =>
+      instanceId === featured.instanceId), false);
+    assert.equal(banished.session.state.stateVersion, landStateVersion + 1);
+    assert.equal(await ctx.verifyReplay(), true);
+
+    await ctx.resume(opening);
+    await playSite(waterSite.instanceId);
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === featured.instanceId
+        && descriptor.cell === 'C4'
+        && descriptor.region === undefined);
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const beforeMoveVersion = ctx.state.stateVersion;
+    const moved = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === featured.instanceId
+        && descriptor.path.length === 3
+        && descriptor.path[0]?.cell === 'C4'
+        && descriptor.path[0]?.region === 'surface'
+        && descriptor.path[1]?.cell === 'B4'
+        && descriptor.path[1]?.region === 'void'
+        && descriptor.path[2]?.cell === 'A4'
+        && descriptor.path[2]?.region === 'void'));
+    assert.equal(moved.accepted, true);
+    if (!moved.accepted) return;
+    assert.deepEqual(moved.receipt.events.map(({ type }) => type), [
+      'move-and-attack-activated',
+      'minion-banished',
+    ]);
+    assert.deepEqual(moved.receipt.events[0]?.payload, {
+      from: { cell: 'C4', region: 'surface' },
+      path: [
+        { cell: 'C4', region: 'surface' },
+        { cell: 'B4', region: 'void' },
+        { cell: 'A4', region: 'void' },
+      ],
+      seat: 'north',
+      steps: 2,
+      to: { cell: 'A4', region: 'void' },
+      unitInstanceId: featured.instanceId,
+    });
+    assert.equal(moved.session.state.realm.units.some(({ instanceId }) =>
+      instanceId === featured.instanceId), false);
+    assert.equal(moved.session.state.players.north.cemetery.some(({ instanceId }) =>
+      instanceId === featured.instanceId), false);
+    assert.equal(moved.session.state.phase, 'main');
+    assert.equal(moved.session.state.pendingCombat, null);
+    assert.equal(moved.session.state.stateVersion, beforeMoveVersion + 1);
+    assert.equal(await ctx.verifyReplay(), true);
+
+    await ctx.resume(opening);
+    await playSite(waterSite.instanceId);
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === featured.instanceId
+        && descriptor.cell === 'C4'
+        && descriptor.region === undefined);
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === target.instanceId
+        && descriptor.cell === 'A4'
+        && descriptor.region === 'void');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    const southAttacker = ctx.state.players.south.hand.spellbook[0];
+    assert.ok(southAttacker);
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === southAttacker.instanceId
+        && descriptor.cell === 'A4'
+        && descriptor.region === 'void');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === southAttacker.instanceId
+        && descriptor.path.length === 1);
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === target.instanceId);
+    const beforeDefendVersion = ctx.state.stateVersion;
+    const defended = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'defend'
+        && descriptor.unitInstanceId === featured.instanceId
+        && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,B4,A4'));
+    assert.equal(defended.accepted, true);
+    if (!defended.accepted) return;
+    assert.deepEqual(defended.receipt.events.map(({ type }) => type), [
+      'defender-joined',
+      'minion-banished',
+    ]);
+    assert.deepEqual(defended.receipt.events[0]?.payload, {
+      from: { cell: 'C4', region: 'surface' },
+      instanceId: featured.instanceId,
+      path: [
+        { cell: 'C4', region: 'surface' },
+        { cell: 'B4', region: 'void' },
+        { cell: 'A4', region: 'void' },
+      ],
+      seat: 'north',
+      steps: 2,
+      to: { cell: 'A4', region: 'void' },
+    });
+    assert.deepEqual(defended.session.state.pendingCombat?.defenders, []);
+    assert.equal(defended.session.state.pendingCombat?.targetRemoved, false);
+    assert.equal(defended.session.state.stateVersion, beforeDefendVersion + 1);
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  assert.equal(moved.session.state.realm.units.some(({ instanceId }) =>
-    instanceId === featured.instanceId), false);
-  assert.equal(moved.session.state.players.north.cemetery.some(({ instanceId }) =>
-    instanceId === featured.instanceId), false);
-  assert.equal(moved.session.state.phase, 'main');
-  assert.equal(moved.session.state.pendingCombat, null);
-  assert.equal(moved.session.state.stateVersion, beforeMove.state.stateVersion + 1);
-  assert.equal(verifyGameReplay(moved.session), true);
-
-  let defense = play(checkpoint, waterSite.instanceId);
-  defense = accept(defense, action(defense, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === featured.instanceId
-      && descriptor.cell === 'C4'
-      && descriptor.region === undefined));
-  defense = accept(defense, action(defense, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === target.instanceId
-      && descriptor.cell === 'A4'
-      && descriptor.region === 'void'));
-  defense = accept(defense, action(defense, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  defense = accept(defense, action(defense, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  defense = accept(defense, action(defense, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
-  const southAttacker = defense.state.players.south.hand.spellbook[0];
-  assert.ok(southAttacker);
-  defense = accept(defense, action(defense, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === southAttacker.instanceId
-      && descriptor.cell === 'A4'
-      && descriptor.region === 'void'));
-  defense = accept(defense, action(defense, ({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === southAttacker.instanceId
-      && descriptor.path.length === 1));
-  defense = accept(defense, action(defense, ({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
-      && descriptor.target.kind === 'minion'
-      && descriptor.target.instanceId === target.instanceId));
-  const beforeDefend = defense;
-  const defended = stepGame(beforeDefend, action(beforeDefend, ({ descriptor }) =>
-    descriptor.kind === 'defend'
-      && descriptor.unitInstanceId === featured.instanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,B4,A4'));
-  assert.equal(defended.accepted, true);
-  assert.deepEqual(defended.receipt.events.map(({ type }) => type), [
-    'defender-moved',
-    'minion-banished',
-  ]);
-  assert.deepEqual(defended.receipt.events[0]?.payload, {
-    from: { cell: 'C4', region: 'surface' },
-    instanceId: featured.instanceId,
-    path: [
-      { cell: 'C4', region: 'surface' },
-      { cell: 'B4', region: 'void' },
-    ],
-    seat: 'north',
-    steps: 1,
-    to: { cell: 'B4', region: 'void' },
-  });
-  assert.deepEqual(defended.session.state.pendingCombat?.defenders, []);
-  assert.equal(defended.session.state.pendingCombat?.targetRemoved, false);
-  assert.equal(defended.session.state.stateVersion, beforeDefend.state.stateVersion + 1);
-  assert.equal(verifyGameReplay(defended.session), true);
 });
 
 test('RULE-02/04 playing a site surfaces uncarried Artifacts from the covered void', () => {

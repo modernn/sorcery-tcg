@@ -31,7 +31,9 @@ import {
   northAttacksAtC2,
   northSecondMain,
   SYNTHETIC_AUTHORITY_HASH,
+  takeAction,
 } from './game-setup-helpers.ts';
+import { withSetup } from './rust-setup-session.ts';
 
 test('RULE-03 Aura occupies any canonical 2x2 area and grounds site minions for three controller turns', () => {
   const base = manifest(247);
@@ -922,7 +924,7 @@ test('RULE-03 Humble Village Genesis may spend its mana to summon one Foot Soldi
   assert.equal(verifyGameReplay(paidResult.session), true);
 });
 
-test('RULE-02/03 Geomancer creates Rubble and privately replaces it with the top Atlas site', () => {
+test('RULE-02/03 Geomancer creates Rubble and privately replaces it with the top Atlas site', async () => {
   const northAtlas = Array.from({ length: 4 }, (_, index) => `rustic-village-${index + 1}`);
   const southAtlas = Array.from({ length: 4 }, (_, index) => `south-site-${index + 1}`);
   const north: GameDeckSpec = {
@@ -996,155 +998,155 @@ test('RULE-02/03 Geomancer creates Rubble and privately replaces it with the top
     firstSeat: 'north',
     seed: 104,
   });
-  let session = keep(keep(createGameSession(gameManifest)));
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
 
-  const firstPlay = action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site'
-      && descriptor.cell === 'C4'
-      && descriptor.createRubbleAt === 'C3'
-      && descriptor.genesisTokenChoice === 'decline');
-  const firstResult = stepGame(session, firstPlay);
-  assert.equal(firstResult.accepted, true);
-  if (!firstResult.accepted) return;
-  session = firstResult.session;
-  assert.deepEqual(firstResult.receipt.events.map(({ type }) => type), [
-    'site-played',
-    'rubble-created',
-  ]);
-  assert.equal('rubble' in session.state.realm.sites.C3!, true);
+    const firstPlay = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cell === 'C4'
+        && descriptor.createRubbleAt === 'C3'
+        && descriptor.genesisTokenChoice === 'decline');
+    const firstResult = await ctx.step(firstPlay);
+    assert.equal(firstResult.accepted, true);
+    if (!firstResult.accepted) return;
+    assert.deepEqual(firstResult.receipt.events.map(({ type }) => type), [
+      'site-played',
+      'rubble-created',
+    ]);
+    assert.equal('rubble' in ctx.state.realm.sites.C3!, true);
 
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = accept(session, action(session, predicate));
-  };
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
-  const top = session.state.players.north.atlas[0];
-  const swap = session.state.players.north.hand.atlas[0];
-  assert.ok(top);
-  assert.ok(swap);
-  const before = canonicalJson(observeGame(session.state, 'north') as unknown as JsonValue);
-  assert.equal(before.includes(top.cardId), false);
-  assert.equal(before.includes(top.instanceId), false);
-  const replacement = action(session, ({ descriptor }) =>
-    descriptor.kind === 'replace-rubble-with-top-atlas-site'
-      && descriptor.targetCell === 'C3');
-  assert.equal(replacement.label, 'Replace Rubble at C3 with the top site of your Atlas');
-  assert.equal(canonicalJson(replacement as unknown as JsonValue).includes(top.cardId), false);
-  assert.equal(canonicalJson(replacement as unknown as JsonValue).includes(top.instanceId), false);
-  const replacementDeathrites = session.state.players.north.hand.spellbook.slice(0, 2);
-  assert.equal(replacementDeathrites.length, 2);
-  const replacementDeathriteIds = replacementDeathrites.map(({ instanceId }) => instanceId);
-  const orderedReplacementState = {
-    ...session.state,
-    cards: {
-      ...session.state.cards,
-      [top.cardId]: {
-        ...session.state.cards[top.cardId]!,
-        elements: ['water'],
-      } as GameCardDefinition,
-      'north-minion': {
-        ...session.state.cards['north-minion']!,
-        burrowing: true,
-        deathriteDrawSite: true,
-      } as GameCardDefinition,
-    },
-    players: {
-      ...session.state.players,
-      north: {
-        ...session.state.players.north,
-        hand: {
-          ...session.state.players.north.hand,
-          spellbook: session.state.players.north.hand.spellbook.filter(({ instanceId }) =>
-            !replacementDeathriteIds.includes(instanceId)),
-        },
+    const top = ctx.state.players.north.atlas[0];
+    const swap = ctx.state.players.north.hand.atlas[0];
+    assert.ok(top);
+    assert.ok(swap);
+    const before = canonicalJson(observeGame(ctx.state, 'north') as unknown as JsonValue);
+    assert.equal(before.includes(top.cardId), false);
+    assert.equal(before.includes(top.instanceId), false);
+    const replacement = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'replace-rubble-with-top-atlas-site'
+        && descriptor.targetCell === 'C3');
+    assert.equal(replacement.label, 'Replace Rubble at C3 with the top site of your Atlas');
+    assert.equal(canonicalJson(replacement as unknown as JsonValue).includes(top.cardId), false);
+    assert.equal(canonicalJson(replacement as unknown as JsonValue).includes(top.instanceId), false);
+    const replacementDeathrites = ctx.state.players.north.hand.spellbook.slice(0, 2);
+    assert.equal(replacementDeathrites.length, 2);
+    const replacementDeathriteIds = replacementDeathrites.map(({ instanceId }) => instanceId);
+    const orderedReplacementState = {
+      ...ctx.state,
+      cards: {
+        ...ctx.state.cards,
+        [top.cardId]: {
+          ...ctx.state.cards[top.cardId]!,
+          elements: ['water'],
+        } as GameCardDefinition,
+        'north-minion': {
+          ...ctx.state.cards['north-minion']!,
+          burrowing: true,
+          deathriteDrawSite: true,
+        } as GameCardDefinition,
       },
-    },
-    realm: {
-      ...session.state.realm,
-      units: [...session.state.realm.units, ...replacementDeathrites.map((card) => ({
-        ...card,
-        controller: 'north' as const,
-        damage: 0,
-        location: 'C3' as const,
-        region: 'underground' as const,
-        stealthed: false,
-        summoningSickness: false,
-        tapped: false,
-        warded: false,
-      }))],
-    },
-  };
-  assert.equal(orderedReplacementState.phase, 'main');
-  assert.equal(orderedReplacementState.pendingGenesisToken ?? null, null);
-  const blockedTopDefinition = orderedReplacementState.cards[top.cardId];
-  assert.equal(blockedTopDefinition?.cardType === 'site'
-    && blockedTopDefinition.elements.includes('water')
-    && blockedTopDefinition.genesisPayOneManaToSummonToken === 'foot-soldier', true);
-  assert.equal(legalGameActions(orderedReplacementState, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'replace-rubble-with-top-atlas-site'
-      && descriptor.targetCell === 'C3'), true);
-
-  const swapped: GameSession = {
-    ...session,
-    state: {
-      ...session.state,
       players: {
-        ...session.state.players,
+        ...ctx.state.players,
         north: {
-          ...session.state.players.north,
-          atlas: [swap, ...session.state.players.north.atlas.slice(1)],
+          ...ctx.state.players.north,
           hand: {
-            ...session.state.players.north.hand,
-            atlas: [top, ...session.state.players.north.hand.atlas.slice(1)],
+            ...ctx.state.players.north.hand,
+            spellbook: ctx.state.players.north.hand.spellbook.filter(({ instanceId }) =>
+              !replacementDeathriteIds.includes(instanceId)),
           },
         },
       },
-    },
-  };
-  const swappedReplacement = action(swapped, ({ descriptor }) =>
-    descriptor.kind === 'replace-rubble-with-top-atlas-site'
-      && descriptor.targetCell === 'C3');
-  assert.equal(swappedReplacement.actionId, replacement.actionId);
-  assert.deepEqual(swappedReplacement.descriptor, replacement.descriptor);
+      realm: {
+        ...ctx.state.realm,
+        units: [...ctx.state.realm.units, ...replacementDeathrites.map((card) => ({
+          ...card,
+          controller: 'north' as const,
+          damage: 0,
+          location: 'C3' as const,
+          region: 'underground' as const,
+          stealthed: false,
+          summoningSickness: false,
+          tapped: false,
+          warded: false,
+        }))],
+      },
+    };
+    assert.equal(orderedReplacementState.phase, 'main');
+    assert.equal(orderedReplacementState.pendingGenesisToken ?? null, null);
+    const blockedTopDefinition = orderedReplacementState.cards[top.cardId];
+    assert.equal(blockedTopDefinition?.cardType === 'site'
+      && blockedTopDefinition.elements.includes('water')
+      && blockedTopDefinition.genesisPayOneManaToSummonToken === 'foot-soldier', true);
+    assert.equal(legalGameActions(orderedReplacementState, 'north').some(({ descriptor }) =>
+      descriptor.kind === 'replace-rubble-with-top-atlas-site'
+        && descriptor.targetCell === 'C3'), true);
 
-  const replaced = stepGame(session, replacement);
-  assert.equal(replaced.accepted, true);
-  if (!replaced.accepted) return;
-  session = replaced.session;
-  assert.deepEqual(replaced.receipt.events.map(({ type }) => type), [
-    'rubble-replaced',
-    'site-played',
-  ]);
-  assert.equal(session.state.phase, 'genesis');
-  assert.equal(session.state.players.north.avatar.tapped, true);
-  assert.equal(session.state.players.north.atlas.length, 0);
-  assert.equal(session.state.players.north.hand.atlas.length, 2);
-  assert.equal(session.state.realm.sites.C3?.instanceId, top.instanceId);
-  assert.equal(Object.values(session.state.realm.sites)
-    .filter((site) => 'rubble' in site).length, 0);
-  const revealed = canonicalJson(observeGame(session.state, 'south') as unknown as JsonValue);
-  assert.equal(revealed.includes(top.cardId), true);
-  assert.equal(revealed.includes(top.instanceId), true);
+    const swapped: GameSession = {
+      ...ctx.session,
+      state: {
+        ...ctx.state,
+        players: {
+          ...ctx.state.players,
+          north: {
+            ...ctx.state.players.north,
+            atlas: [swap, ...ctx.state.players.north.atlas.slice(1)],
+            hand: {
+              ...ctx.state.players.north.hand,
+              atlas: [top, ...ctx.state.players.north.hand.atlas.slice(1)],
+            },
+          },
+        },
+      },
+    };
+    const swappedReplacement = action(swapped, ({ descriptor }) =>
+      descriptor.kind === 'replace-rubble-with-top-atlas-site'
+        && descriptor.targetCell === 'C3');
+    assert.equal(swappedReplacement.actionId, replacement.actionId);
+    assert.deepEqual(swappedReplacement.descriptor, replacement.descriptor);
 
-  const choices = legalGameActions(session.state, 'north');
-  assert.equal(choices.length, 2);
-  assert.equal(choices.every(({ descriptor }) => descriptor.kind === 'resolve-genesis-token'), true);
-  const paid = action(session, ({ descriptor }) =>
-    descriptor.kind === 'resolve-genesis-token' && descriptor.choice === 'pay-one-mana');
-  const paidResult = stepGame(session, paid);
-  assert.equal(paidResult.accepted, true);
-  if (!paidResult.accepted) return;
-  session = paidResult.session;
-  assert.equal(session.state.phase, 'main');
-  assert.equal(session.state.pendingGenesisToken, null);
-  assert.equal(session.state.players.north.mana, 1);
-  assert.equal(session.state.realm.units.at(-1)?.cardId, 'foot-soldier');
-  assert.deepEqual(paidResult.receipt.events.map(({ type }) => type), ['minion-summoned']);
-  assert.equal(verifyGameReplay(session), true);
+    const replaced = await ctx.step(replacement);
+    assert.equal(replaced.accepted, true);
+    if (!replaced.accepted) return;
+    assert.deepEqual(replaced.receipt.events.map(({ type }) => type), [
+      'rubble-replaced',
+      'site-played',
+    ]);
+    assert.equal(ctx.state.phase, 'genesis');
+    assert.equal(ctx.state.players.north.avatar.tapped, true);
+    assert.equal(ctx.state.players.north.atlas.length, 0);
+    assert.equal(ctx.state.players.north.hand.atlas.length, 2);
+    assert.equal(ctx.state.realm.sites.C3?.instanceId, top.instanceId);
+    assert.equal(Object.values(ctx.state.realm.sites)
+      .filter((site) => 'rubble' in site).length, 0);
+    const revealed = canonicalJson(observeGame(ctx.state, 'south') as unknown as JsonValue);
+    assert.equal(revealed.includes(top.cardId), true);
+    assert.equal(revealed.includes(top.instanceId), true);
+
+    const choices = await ctx.legalActions('north');
+    assert.equal(choices.length, 2);
+    assert.equal(choices.every(({ descriptor }) => descriptor.kind === 'resolve-genesis-token'), true);
+    const paid = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'resolve-genesis-token' && descriptor.choice === 'pay-one-mana');
+    const paidResult = await ctx.step(paid);
+    assert.equal(paidResult.accepted, true);
+    if (!paidResult.accepted) return;
+    assert.equal(ctx.state.phase, 'main');
+    assert.equal(ctx.state.pendingGenesisToken, null);
+    assert.equal(ctx.state.players.north.mana, 1);
+    assert.equal(ctx.state.realm.units.at(-1)?.cardId, 'foot-soldier');
+    assert.deepEqual(paidResult.receipt.events.map(({ type }) => type), ['minion-summoned']);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
 test('RULE-02/03 site Genesis resumes after ordered terrain-replacement Deathrites', () => {
