@@ -419,7 +419,7 @@ test('RULE-03 Lash damages then untaps only a surviving nearby minion target', a
   });
 });
 
-test('RULE-03 Freeze disables a nearby minion until the caster next Start Phase', () => {
+test('RULE-03 Freeze disables a nearby minion until the caster next Start Phase', async () => {
   const decks = {
     north: deck('freeze-north', 6, 6),
     south: deck('freeze-south', 6, 6),
@@ -479,187 +479,188 @@ test('RULE-03 Freeze disables a nearby minion until the caster next Start Phase'
     }
   }
   assert.ok(gameManifest);
-  let session = keep(keep(createGameSession(gameManifest)));
-  const take = (predicate: Parameters<typeof action>[1]): void => {
-    session = accept(session, action(session, predicate));
-  };
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardId === allyCardId && descriptor.cell === 'C4');
-  const ally = session.state.realm.units.find(({ cardId }) => cardId === allyCardId);
-  assert.ok(ally);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardId === targetCardId && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardId === stealthCardId && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardId === wardCardId && descriptor.cell === 'C2');
-  const target = session.state.realm.units.find(({ cardId }) => cardId === targetCardId);
-  const stealthed = session.state.realm.units.find(({ cardId }) => cardId === stealthCardId);
-  const wardedTarget = session.state.realm.units.find(({ cardId }) => cardId === wardCardId);
-  assert.ok(target);
-  assert.ok(stealthed);
-  assert.ok(wardedTarget);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === session.state.players.north.avatar.card.instanceId
-    && descriptor.from.cell === 'C4'
-    && descriptor.to.cell === 'C3'
-    && descriptor.path.length === 2);
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  const checkpoint = session;
-  const freezeCards = checkpoint.state.players.north.hand.spellbook.filter(({ cardId }) =>
-    gameManifest.cards[cardId]?.cardType === 'magic');
-  assert.equal(freezeCards.length, 2);
-  const firstTargets = legalGameActions(checkpoint.state, 'north').flatMap(({ descriptor }) =>
-    descriptor.kind === 'cast-magic'
-      && descriptor.cardInstanceId === freezeCards[0]?.instanceId
-      && descriptor.target
-      ? [descriptor.target.instanceId]
-      : []);
-  assert.equal(firstTargets.includes(ally.instanceId), true);
-  assert.equal(firstTargets.includes(target.instanceId), true);
-  assert.equal(firstTargets.includes(wardedTarget.instanceId), true);
-  assert.equal(firstTargets.includes(stealthed.instanceId), false);
-  assert.equal(firstTargets.includes(checkpoint.state.players.north.avatar.card.instanceId), false);
-
-  let unfrozen = accept(checkpoint, action(checkpoint, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  unfrozen = accept(unfrozen, action(unfrozen, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
-  const unfrozenKinds = legalGameActions(unfrozen.state, 'south').flatMap(({ descriptor }) =>
-    'unitInstanceId' in descriptor && descriptor.unitInstanceId === target.instanceId
-      ? [descriptor.kind]
-      : 'shooterInstanceId' in descriptor && descriptor.shooterInstanceId === target.instanceId
-        ? [descriptor.kind]
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === allyCardId && descriptor.cell === 'C4');
+    const ally = ctx.state.realm.units.find(({ cardId }) => cardId === allyCardId);
+    assert.ok(ally);
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === targetCardId && descriptor.cell === 'C2');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === stealthCardId && descriptor.cell === 'C2');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === wardCardId && descriptor.cell === 'C2');
+    const target = ctx.state.realm.units.find(({ cardId }) => cardId === targetCardId);
+    const stealthed = ctx.state.realm.units.find(({ cardId }) => cardId === stealthCardId);
+    const wardedTarget = ctx.state.realm.units.find(({ cardId }) => cardId === wardCardId);
+    assert.ok(target);
+    assert.ok(stealthed);
+    assert.ok(wardedTarget);
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === ctx.state.players.north.avatar.card.instanceId
+      && descriptor.from.cell === 'C4'
+      && descriptor.to.cell === 'C3'
+      && descriptor.path.length === 2);
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'decline-attack');
+    const checkpoint = createGameCheckpoint(ctx.session);
+    const freezeCards = ctx.state.players.north.hand.spellbook.filter(({ cardId }) =>
+      gameManifest.cards[cardId]?.cardType === 'magic');
+    assert.equal(freezeCards.length, 2);
+    const firstTargets = (await ctx.legalActions('north')).flatMap(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === freezeCards[0]?.instanceId
+        && descriptor.target
+        ? [descriptor.target.instanceId]
         : []);
-  assert.equal(unfrozenKinds.includes('move-and-attack'), true);
-  assert.equal(unfrozenKinds.includes('shoot-projectile'), true);
-  assert.equal(unfrozenKinds.includes('activate-mana'), true);
+    assert.equal(firstTargets.includes(ally.instanceId), true);
+    assert.equal(firstTargets.includes(target.instanceId), true);
+    assert.equal(firstTargets.includes(wardedTarget.instanceId), true);
+    assert.equal(firstTargets.includes(stealthed.instanceId), false);
+    assert.equal(firstTargets.includes(ctx.state.players.north.avatar.card.instanceId), false);
 
-  const allied = accept(checkpoint, action(checkpoint, ({ descriptor }) =>
-    descriptor.kind === 'cast-magic'
-      && descriptor.cardInstanceId === freezeCards[0]?.instanceId
-      && descriptor.target?.instanceId === ally.instanceId));
-  const disabledAlly = allied.state.realm.units.find(({ instanceId }) => instanceId === ally.instanceId);
-  assert.equal(observeGame(allied.state, 'north').realm.units.find(({ instanceId }) =>
-    instanceId === ally.instanceId)?.disabled, true);
-  assert.deepEqual({ stealthed: disabledAlly?.stealthed, warded: disabledAlly?.warded }, {
-    stealthed: false,
-    warded: false,
-  });
-  assert.deepEqual(allied.transcript.at(-1)?.events.map(({ type }) => type), [
-    'magic-cast',
-    'minion-disabled',
-    'magic-resolved',
-  ]);
-  assert.deepEqual(allied.transcript.at(-1)?.events[1]?.payload, {
-    expiresAtSeat: 'north',
-    instanceId: ally.instanceId,
-    seat: 'north',
-    sourceInstanceId: freezeCards[0]!.instanceId,
-    stealthRemoved: true,
-    wardRemoved: true,
-  });
-  assert.equal(verifyGameReplay(allied), true);
-
-  const warded = stepGame(checkpoint, action(checkpoint, ({ descriptor }) =>
-    descriptor.kind === 'cast-magic'
-      && descriptor.cardInstanceId === freezeCards[0]?.instanceId
-      && descriptor.target?.instanceId === wardedTarget.instanceId));
-  assert.equal(warded.accepted, true);
-  if (!warded.accepted) return;
-  assert.deepEqual(warded.receipt.events.map(({ type }) => type), [
-    'magic-cast',
-    'ward-broken',
-    'magic-resolved',
-  ]);
-  assert.equal(warded.session.state.realm.units.find(({ instanceId }) =>
-    instanceId === wardedTarget.instanceId)?.disableEffects, undefined);
-  assert.equal(verifyGameReplay(warded.session), true);
-  const firstFreeze = stepGame(checkpoint, action(checkpoint, ({ descriptor }) =>
-    descriptor.kind === 'cast-magic'
-      && descriptor.cardInstanceId === freezeCards[0]?.instanceId
-      && descriptor.target?.instanceId === target.instanceId));
-  assert.equal(firstFreeze.accepted, true);
-  if (!firstFreeze.accepted) return;
-  session = firstFreeze.session;
-  const freeze = stepGame(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'cast-magic'
-      && descriptor.cardInstanceId === freezeCards[1]?.instanceId
-      && descriptor.target?.instanceId === target.instanceId));
-  assert.equal(freeze.accepted, true);
-  if (!freeze.accepted) return;
-  session = freeze.session;
-  const disabledTarget = session.state.realm.units.find(({ instanceId }) =>
-    instanceId === target.instanceId);
-  assert.deepEqual(disabledTarget?.disableEffects, [{
-    expiresAtSeat: 'north',
-    sourceInstanceId: freezeCards[0]!.instanceId,
-  }, {
-    expiresAtSeat: 'north',
-    sourceInstanceId: freezeCards[1]!.instanceId,
-  }]);
-  assert.equal(observeGame(session.state, 'south').realm.units.find(({ instanceId }) =>
-    instanceId === target.instanceId)?.disabled, true);
-  assert.equal(observeGame(session.state, 'south').players.south.affinity.air, 0);
-  assert.deepEqual(freeze.receipt.events.map(({ type }) => type), [
-    'magic-cast',
-    'minion-disabled',
-    'magic-resolved',
-  ]);
-
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  assert.equal(session.transcript.at(-1)?.events.some(({ type }) =>
-    type === 'minion-disable-expired'), false);
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
-  assert.equal(observeGame(session.state, 'south').realm.units.find(({ instanceId }) =>
-    instanceId === target.instanceId)?.disabled, true);
-  const disabledKinds = legalGameActions(session.state, 'south').flatMap(({ descriptor }) =>
-    'unitInstanceId' in descriptor && descriptor.unitInstanceId === target.instanceId
-      ? [descriptor.kind]
-      : 'shooterInstanceId' in descriptor && descriptor.shooterInstanceId === target.instanceId
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    const unfrozenKinds = (await ctx.legalActions('south')).flatMap(({ descriptor }) =>
+      'unitInstanceId' in descriptor && descriptor.unitInstanceId === target.instanceId
         ? [descriptor.kind]
-        : []);
-  assert.deepEqual(disabledKinds, []);
-  const expiration = stepGame(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  assert.equal(expiration.accepted, true);
-  if (!expiration.accepted) return;
-  session = expiration.session;
-  assert.deepEqual(expiration.receipt.events.map(({ type }) => type), [
-    'turn-ended',
-    'minion-disable-expired',
-    'minion-disable-expired',
-    'turn-started',
-  ]);
-  assert.deepEqual(expiration.receipt.events[1]?.payload, {
-    instanceId: target.instanceId,
-    seat: 'south',
-    sourceInstanceId: freezeCards[0]!.instanceId,
+        : 'shooterInstanceId' in descriptor && descriptor.shooterInstanceId === target.instanceId
+          ? [descriptor.kind]
+          : []);
+    assert.equal(unfrozenKinds.includes('move-and-attack'), true);
+    assert.equal(unfrozenKinds.includes('shoot-projectile'), true);
+    assert.equal(unfrozenKinds.includes('activate-mana'), true);
+
+    await ctx.resume(checkpoint);
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === freezeCards[0]?.instanceId
+        && descriptor.target?.instanceId === ally.instanceId);
+    const disabledAlly = ctx.state.realm.units.find(({ instanceId }) => instanceId === ally.instanceId);
+    assert.equal(observeGame(ctx.state, 'north').realm.units.find(({ instanceId }) =>
+      instanceId === ally.instanceId)?.disabled, true);
+    assert.deepEqual({ stealthed: disabledAlly?.stealthed, warded: disabledAlly?.warded }, {
+      stealthed: false,
+      warded: false,
+    });
+    assert.deepEqual(ctx.session.transcript.at(-1)?.events.map(({ type }) => type), [
+      'magic-cast',
+      'minion-disabled',
+      'magic-resolved',
+    ]);
+    assert.deepEqual(ctx.session.transcript.at(-1)?.events[1]?.payload, {
+      expiresAtSeat: 'north',
+      instanceId: ally.instanceId,
+      seat: 'north',
+      sourceInstanceId: freezeCards[0]!.instanceId,
+      stealthRemoved: true,
+      wardRemoved: true,
+    });
+    assert.equal(await ctx.verifyReplay(), true);
+
+    await ctx.resume(checkpoint);
+    const warded = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === freezeCards[0]?.instanceId
+        && descriptor.target?.instanceId === wardedTarget.instanceId));
+    assert.equal(warded.accepted, true);
+    if (!warded.accepted) return;
+    assert.deepEqual(warded.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'ward-broken',
+      'magic-resolved',
+    ]);
+    assert.equal(ctx.state.realm.units.find(({ instanceId }) =>
+      instanceId === wardedTarget.instanceId)?.disableEffects, undefined);
+    assert.equal(await ctx.verifyReplay(), true);
+
+    await ctx.resume(checkpoint);
+    const firstFreeze = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === freezeCards[0]?.instanceId
+        && descriptor.target?.instanceId === target.instanceId));
+    assert.equal(firstFreeze.accepted, true);
+    if (!firstFreeze.accepted) return;
+    const freeze = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === freezeCards[1]?.instanceId
+        && descriptor.target?.instanceId === target.instanceId));
+    assert.equal(freeze.accepted, true);
+    if (!freeze.accepted) return;
+    const disabledTarget = ctx.state.realm.units.find(({ instanceId }) =>
+      instanceId === target.instanceId);
+    assert.deepEqual(disabledTarget?.disableEffects, [{
+      expiresAtSeat: 'north',
+      sourceInstanceId: freezeCards[0]!.instanceId,
+    }, {
+      expiresAtSeat: 'north',
+      sourceInstanceId: freezeCards[1]!.instanceId,
+    }]);
+    assert.equal(observeGame(ctx.state, 'south').realm.units.find(({ instanceId }) =>
+      instanceId === target.instanceId)?.disabled, true);
+    assert.equal(observeGame(ctx.state, 'south').players.south.affinity.air, 0);
+    assert.deepEqual(freeze.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'minion-disabled',
+      'magic-resolved',
+    ]);
+
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    assert.equal(ctx.session.transcript.at(-1)?.events.some(({ type }) =>
+      type === 'minion-disable-expired'), false);
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    assert.equal(observeGame(ctx.state, 'south').realm.units.find(({ instanceId }) =>
+      instanceId === target.instanceId)?.disabled, true);
+    const disabledKinds = (await ctx.legalActions('south')).flatMap(({ descriptor }) =>
+      'unitInstanceId' in descriptor && descriptor.unitInstanceId === target.instanceId
+        ? [descriptor.kind]
+        : 'shooterInstanceId' in descriptor && descriptor.shooterInstanceId === target.instanceId
+          ? [descriptor.kind]
+          : []);
+    assert.deepEqual(disabledKinds, []);
+    const expiration = await ctx.step(await ctx.action(({ descriptor }) => descriptor.kind === 'end-turn'));
+    assert.equal(expiration.accepted, true);
+    if (!expiration.accepted) return;
+    assert.deepEqual(expiration.receipt.events.map(({ type }) => type), [
+      'turn-ended',
+      'minion-disable-expired',
+      'minion-disable-expired',
+      'turn-started',
+    ]);
+    assert.deepEqual(expiration.receipt.events[1]?.payload, {
+      instanceId: target.instanceId,
+      seat: 'south',
+      sourceInstanceId: freezeCards[0]!.instanceId,
+    });
+    assert.deepEqual(expiration.receipt.events[2]?.payload, {
+      instanceId: target.instanceId,
+      seat: 'south',
+      sourceInstanceId: freezeCards[1]!.instanceId,
+    });
+    const expiredTarget = ctx.state.realm.units.find(({ instanceId }) =>
+      instanceId === target.instanceId);
+    assert.equal(expiredTarget?.disableEffects, undefined);
+    assert.deepEqual({ warded: expiredTarget?.warded }, { warded: false });
+    assert.equal(observeGame(ctx.state, 'north').realm.units.find(({ instanceId }) =>
+      instanceId === target.instanceId)?.disabled, false);
+    assert.equal(observeGame(ctx.state, 'north').players.south.affinity.air, 1);
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  assert.deepEqual(expiration.receipt.events[2]?.payload, {
-    instanceId: target.instanceId,
-    seat: 'south',
-    sourceInstanceId: freezeCards[1]!.instanceId,
-  });
-  const expiredTarget = session.state.realm.units.find(({ instanceId }) =>
-    instanceId === target.instanceId);
-  assert.equal(expiredTarget?.disableEffects, undefined);
-  assert.deepEqual({ warded: expiredTarget?.warded }, { warded: false });
-  assert.equal(observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
-    instanceId === target.instanceId)?.disabled, false);
-  assert.equal(observeGame(session.state, 'north').players.south.affinity.air, 1);
-  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-03/04 disabling a subsurface minion immediately settles its region', () => {
