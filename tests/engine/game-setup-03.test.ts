@@ -746,7 +746,7 @@ test('RULE-03 explicit permission allows a minion to be summoned to any site', a
   assert.deepEqual(await summonCells(true), ['C1', 'C4']);
 });
 
-test('RULE-03 a Water-site cast restriction filters unrestricted summons by terrain', () => {
+test('RULE-03 a Water-site cast restriction filters unrestricted summons by terrain', async () => {
   const decks = {
     north: deck('water-cast-north', 3, 6),
     south: deck('water-cast-south', 3, 6),
@@ -780,56 +780,61 @@ test('RULE-03 a Water-site cast restriction filters unrestricted summons by terr
     firstSeat: 'north',
     seed: 144,
   });
-  let session = keep(createGameSession(restrictedManifest));
-  session = keep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = accept(session, action(session, predicate));
-  };
+  await withSetup(restrictedManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+      await takeAction(ctx, predicate);
+    };
 
-  const northWater = session.state.players.north.hand.atlas.find(({ cardId }) => cardId === northWaterId);
-  const northLand = session.state.players.north.hand.atlas.find(({ cardId }) => cardId === northLandId);
-  const southLand = session.state.players.south.hand.atlas.find(({ cardId }) => cardId === southLandId);
-  const southWater = session.state.players.south.hand.atlas.find(({ cardId }) => cardId === southWaterId);
-  const featuredId = session.state.players.north.hand.spellbook[0]?.cardId;
-  const ordinaryId = session.state.players.south.hand.spellbook[0]?.cardId;
-  assert.ok(northWater);
-  assert.ok(northLand);
-  assert.ok(southLand);
-  assert.ok(southWater);
-  assert.ok(featuredId);
-  assert.ok(ordinaryId);
+    const northWater = ctx.state.players.north.hand.atlas.find(({ cardId }) => cardId === northWaterId);
+    const northLand = ctx.state.players.north.hand.atlas.find(({ cardId }) => cardId === northLandId);
+    const southLand = ctx.state.players.south.hand.atlas.find(({ cardId }) => cardId === southLandId);
+    const southWater = ctx.state.players.south.hand.atlas.find(({ cardId }) => cardId === southWaterId);
+    const featuredId = ctx.state.players.north.hand.spellbook[0]?.cardId;
+    const ordinaryId = ctx.state.players.south.hand.spellbook[0]?.cardId;
+    assert.ok(northWater);
+    assert.ok(northLand);
+    assert.ok(southLand);
+    assert.ok(southWater);
+    assert.ok(featuredId);
+    assert.ok(ordinaryId);
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
-    && descriptor.cardInstanceId === northWater.instanceId && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
-    && descriptor.cardInstanceId === southLand.instanceId && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
-    && descriptor.cardInstanceId === northLand.instanceId && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
-    && descriptor.cardInstanceId === southWater.instanceId && descriptor.cell === 'B1');
-  const southSummons = legalGameActions(session.state, 'south');
-  assert.equal(southSummons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardId === ordinaryId && descriptor.cell === 'C4'), false);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === northWater.instanceId && descriptor.cell === 'C4');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === southLand.instanceId && descriptor.cell === 'C1');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === northLand.instanceId && descriptor.cell === 'C3');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === southWater.instanceId && descriptor.cell === 'B1');
+    const southSummons = await ctx.legalActions('south');
+    assert.equal(southSummons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === ordinaryId && descriptor.cell === 'C4'), false);
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
-  const summons = legalGameActions(session.state, 'north');
-  const cellsFor = (cardId: string): readonly string[] => summons.flatMap(({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.cardId === cardId ? [descriptor.cell] : []);
-  assert.deepEqual(cellsFor(featuredId), ['B1', 'C4']);
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardId === featuredId && descriptor.cell === 'B1');
-  assert.equal(session.state.realm.units[0]?.location, 'B1');
-  assert.equal(session.state.realm.units[0]?.controller, 'north');
-  assert.equal(verifyGameReplay(session), true);
+    const summons = await ctx.legalActions('north');
+    const cellsFor = (cardId: string): readonly string[] => summons.flatMap(({ descriptor }) =>
+      descriptor.kind === 'summon-minion' && descriptor.cardId === cardId ? [descriptor.cell] : []);
+    assert.deepEqual(cellsFor(featuredId), ['B1', 'C4']);
+    await take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === featuredId && descriptor.cell === 'B1');
+    assert.equal(ctx.state.realm.units[0]?.location, 'B1');
+    assert.equal(ctx.state.realm.units[0]?.controller, 'north');
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
+// TODO(rust-cutover): the Rust engine does not yet emit `stealth-lost` when a stealthed
+// minion is revealed by moving or is killed by site destruction, so this proof still runs
+// on the legacy TypeScript legality engine. Needs a Rust-side fix plus a Rust proof.
 test('RULE-03/04 Waterbound derives Disabled from terrain and survives only with active abilities', () => {
   const base = manifest(228);
   const preview = createGameSession(base);
