@@ -1069,7 +1069,11 @@ test('RULE-04 Pick Up and Drop manage local carried Artifacts once per unit turn
       .flatMap((artifact) => 'bearer' in artifact ? [] : [artifact]);
     assert.equal(surfaceArtifacts.length, 2);
     const artifactInstanceIds = surfaceArtifacts.map(({ instanceId }) => instanceId).sort();
-    // Forged-state probes still use TS legality; live probes use Rust SetupCtx.
+    // TODO(rust-cutover): synthetic state, needs a Rust-side proof. This test hand-builds
+    // GameSession objects (edited artifact owner/location/region/bearer, disableEffects,
+    // and an injected enemy unit) that are not reachable through legal play, so those
+    // forged-state probes stay on TS legalGameActions/accept/action/stepGame; the live
+    // probes elsewhere in this test already run through Rust SetupCtx.
     const pickupDescriptorsFrom = (checkpoint: GameSession) =>
       legalGameActions(checkpoint.state, checkpoint.state.decisionSeat)
         .flatMap(({ descriptor }) => descriptor.kind === 'pick-up-artifacts' ? [descriptor] : []);
@@ -1381,6 +1385,9 @@ test('RULE-04 Pick Up and Drop manage local carried Artifacts once per unit turn
         },
       },
     };
+    // TODO(rust-cutover): synthetic state, needs a Rust-side proof. strikeCheckpoint
+    // injects a south minion directly into realm.units, which is not reachable through
+    // legal play, so this branch stays on TS accept/action.
     let struck = accept(strikeCheckpoint, action(strikeCheckpoint, ({ descriptor }) =>
       descriptor.kind === 'move-and-attack'
         && descriptor.unitInstanceId === bearer.instanceId
@@ -1946,7 +1953,9 @@ test('RULE-03 Siege Ballista taps its bearer and another ally for measured artif
     assert.equal(abilities.some(({ descriptor }) => descriptor.kind === 'activate-artifact-damage'
       && descriptor.target.instanceId === bearer.instanceId), true);
 
-    // Forged-state probes still use TS legality.
+    // TODO(rust-cutover): synthetic state, needs a Rust-side proof. These forged
+    // GameStates (moved/tapped helper, disabled/uncarried bearer, stealthed/underground
+    // target) are not reachable through legal play, so they stay on TS legalGameActions.
     const noHelperState = {
       ...ctx.state,
       realm: {
@@ -2660,7 +2669,9 @@ test('RULE-03 Rolling Boulder rolls maximally and damages other units along its 
     assert.equal(await ctx.verifyReplay(), true);
     await ctx.resume(beforeZero);
 
-    // Forged carried-state probe still uses TS legality/step.
+    // TODO(rust-cutover): synthetic state, needs a Rust-side proof. carriedSession forces
+    // the boulder Artifact onto a bearer directly, which is not reachable through legal
+    // play, so this branch stays on TS legality/step.
     const carriedSession: GameSession = {
       ...ctx.session,
       state: {
