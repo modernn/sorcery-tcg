@@ -13,6 +13,7 @@ import {
   verifyGameReplay,
   type GameCardDefinition,
   type GameDeckSpec,
+  type GameLegalAction,
   type GameManifest,
   type GameSession,
 } from '../../src/engine/game.ts';
@@ -1460,83 +1461,90 @@ test('RULE-03 Artifacts make their current site controller lose life at each tur
   });
 });
 
-test('RULE-03 end-turn Artifact life loss uses its carried cell and survives bearer Disable', () => {
-  const { checkpoint, ids } = devilsEggFixture('carried', 4);
-  const carrier = checkpoint.state.realm.units.find(({ cardId }) => cardId === ids.carrier);
-  assert.ok(carrier);
-  const carried = checkpoint.state.realm.artifacts?.find(({ cardId }) => cardId === ids.northEgg);
-  assert.ok(carried && 'bearer' in carried);
+test('RULE-03 end-turn Artifact life loss uses its carried cell and survives bearer Disable', async () => {
+  await withDevilsEggFixture('carried', 4, async (ctx, { ids }) => {
+    const branchPoint = ctx.session;
+    const carrier = ctx.state.realm.units.find(({ cardId }) => cardId === ids.carrier);
+    assert.ok(carrier);
+    const carried = ctx.state.realm.artifacts?.find(({ cardId }) => cardId === ids.northEgg);
+    assert.ok(carried && 'bearer' in carried);
 
-  const ordinaryEnd = stepGame(checkpoint, action(checkpoint, ({ descriptor }) =>
-    descriptor.kind === 'end-turn'));
-  assert.equal(ordinaryEnd.accepted, true);
-  if (!ordinaryEnd.accepted) return;
-  assert.deepEqual(ordinaryEnd.receipt.events.map(({ type }) => type), [
-    'end-turn-site-life-loss-triggered',
-    'avatar-life-lost',
-    'artifact-dropped',
-    'minion-died',
-    'turn-ended',
-    'turn-started',
-  ]);
-  assert.deepEqual(observeGame(ordinaryEnd.session.state, 'north').realm.artifacts?.map((artifact) => ({
-    bearer: artifact.bearer,
-    controller: artifact.controller,
-    location: artifact.location,
-    region: artifact.region,
-  })), [{ bearer: undefined, controller: null, location: 'C4', region: 'surface' }]);
-  assert.equal(verifyGameReplay(ordinaryEnd.session), true);
+    const ordinaryEnd = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'end-turn'));
+    assert.equal(ordinaryEnd.accepted, true);
+    if (!ordinaryEnd.accepted) return;
+    assert.deepEqual(ordinaryEnd.receipt.events.map(({ type }) => type), [
+      'end-turn-site-life-loss-triggered',
+      'avatar-life-lost',
+      'artifact-dropped',
+      'minion-died',
+      'turn-ended',
+      'turn-started',
+    ]);
+    assert.deepEqual(ctx.observe('north').realm.artifacts?.map((artifact) => ({
+      bearer: artifact.bearer,
+      controller: artifact.controller,
+      location: artifact.location,
+      region: artifact.region,
+    })), [{ bearer: undefined, controller: null, location: 'C4', region: 'surface' }]);
+    assert.equal(await ctx.verifyReplay(), true);
 
-  const foreignSiteCard = checkpoint.state.players.south.hand.atlas[0];
-  assert.ok(foreignSiteCard);
-  const carriedOnDisabledOversizedBearer: GameSession = {
-    ...checkpoint,
-    state: {
-      ...checkpoint.state,
-      realm: {
-        ...checkpoint.state.realm,
-        artifacts: checkpoint.state.realm.artifacts!.map((artifact) =>
-          artifact.instanceId === carried.instanceId
-            ? { ...artifact, bearerCell: 'C1' }
-            : artifact),
-        sites: {
-          ...checkpoint.state.realm.sites,
-          C1: { ...foreignSiteCard, controller: 'south' },
+    const foreignSiteCard = branchPoint.state.players.south.hand.atlas[0];
+    assert.ok(foreignSiteCard);
+    // Forged-state Disable/oversized-bearer probe still uses TS stepGame: a disabled
+    // oversized carrier standing on a foreign site is not reachable through legal play.
+    // Rust proves the same fact in `carried_egg_should_outlast_a_disabled_bearer`
+    // in crates/sorcery-engine/tests/artifact_life_loss_rules.rs.
+    const carriedOnDisabledOversizedBearer: GameSession = {
+      ...branchPoint,
+      state: {
+        ...branchPoint.state,
+        realm: {
+          ...branchPoint.state.realm,
+          artifacts: branchPoint.state.realm.artifacts!.map((artifact) =>
+            artifact.instanceId === carried.instanceId
+              ? { ...artifact, bearerCell: 'C1' }
+              : artifact),
+          sites: {
+            ...branchPoint.state.realm.sites,
+            C1: { ...foreignSiteCard, controller: 'south' },
+          },
+          units: branchPoint.state.realm.units.map((unit) => unit.instanceId === carrier.instanceId
+            ? {
+              ...unit,
+              disableEffects: [{ expiresAtSeat: 'south', sourceInstanceId: carrier.instanceId }],
+              location: 'B1',
+              occupiedCells: ['B1', 'B2', 'C1', 'C2'],
+            }
+            : unit),
         },
-        units: checkpoint.state.realm.units.map((unit) => unit.instanceId === carrier.instanceId
-          ? {
-            ...unit,
-            disableEffects: [{ expiresAtSeat: 'south', sourceInstanceId: carrier.instanceId }],
-            location: 'B1',
-            occupiedCells: ['B1', 'B2', 'C1', 'C2'],
-          }
-          : unit),
       },
-    },
-  };
-  const disabledEnd = stepGame(
-    carriedOnDisabledOversizedBearer,
-    action(carriedOnDisabledOversizedBearer, ({ descriptor }) => descriptor.kind === 'end-turn'),
-  );
-  assert.equal(disabledEnd.accepted, true);
-  if (!disabledEnd.accepted) return;
-  assert.deepEqual(disabledEnd.receipt.events.slice(0, 2).map(({ payload, type }) => ({ payload, type })), [
-    {
-      payload: { amount: 1, seat: 'south', siteInstanceId: foreignSiteCard.instanceId,
-        sourceInstanceId: carried.instanceId },
-      type: 'end-turn-site-life-loss-triggered',
-    },
-    {
-      payload: { amount: 1, life: 19, seat: 'south', sourceInstanceId: carried.instanceId },
-      type: 'avatar-life-lost',
-    },
-  ]);
-  assert.equal(disabledEnd.session.state.realm.units.some(({ instanceId }) =>
-    instanceId === carrier.instanceId), true);
-  assert.equal(disabledEnd.session.state.players.north.avatar.life, 20);
-  assert.equal(observeGame(disabledEnd.session.state, 'north').realm.artifacts?.[0]?.location, 'C1');
+    };
+    const disabledEnd = stepGame(
+      carriedOnDisabledOversizedBearer,
+      action(carriedOnDisabledOversizedBearer, ({ descriptor }) => descriptor.kind === 'end-turn'),
+    );
+    assert.equal(disabledEnd.accepted, true);
+    if (!disabledEnd.accepted) return;
+    assert.deepEqual(disabledEnd.receipt.events.slice(0, 2).map(({ payload, type }) => ({ payload, type })), [
+      {
+        payload: { amount: 1, seat: 'south', siteInstanceId: foreignSiteCard.instanceId,
+          sourceInstanceId: carried.instanceId },
+        type: 'end-turn-site-life-loss-triggered',
+      },
+      {
+        payload: { amount: 1, life: 19, seat: 'south', sourceInstanceId: carried.instanceId },
+        type: 'avatar-life-lost',
+      },
+    ]);
+    assert.equal(disabledEnd.session.state.realm.units.some(({ instanceId }) =>
+      instanceId === carrier.instanceId), true);
+    assert.equal(disabledEnd.session.state.players.north.avatar.life, 20);
+    assert.equal(observeGame(disabledEnd.session.state, 'north').realm.artifacts?.[0]?.location, 'C1');
+  });
 });
 
+// TODO(rust-cutover): synthetic state, needs a Rust-side proof
 test('RULE-03 end-turn Artifact life loss respects regions, Rubble, stacking, and Death\'s Door', () => {
   const { checkpoint } = devilsEggFixture('regions', 91);
   const extraArtifactCard = checkpoint.state.players.north.spellbook[0];
@@ -1614,7 +1622,7 @@ test('RULE-03 end-turn Artifact life loss respects regions, Rubble, stacking, an
   assert.equal(ended.receipt.randomDraws.length, 0);
 });
 
-test('RULE-04 start-turn random teleports resolve in controller-chosen order through Lucky Charm', () => {
+test('RULE-04 start-turn random teleports resolve in controller-chosen order through Lucky Charm', async () => {
   const sourceCardId = 'headless-source';
   const luckyCharmCardId = 'headless-lucky-charm';
   const blockedSiteCardId = 'headless-blocked-site';
@@ -1662,7 +1670,7 @@ test('RULE-04 start-turn random teleports resolve in controller-chosen order thr
     preventsUnitsWithPowerAtLeastFromEntering: 3,
   } as GameCardDefinition;
 
-  let checkpoint = keep(keep(createGameSession(createGameManifest({
+  const gameManifest = createGameManifest({
     authority: {
       contentHash: SYNTHETIC_AUTHORITY_HASH,
       mode: 'synthetic',
@@ -1672,147 +1680,166 @@ test('RULE-04 start-turn random teleports resolve in controller-chosen order thr
     decks: { north, south },
     firstSeat: 'north',
     seed: 10,
-  }))));
-  const take = (predicate: Parameters<typeof action>[1]): void => {
-    checkpoint = accept(checkpoint, action(checkpoint, predicate));
-  };
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'cast-artifact'
-    && descriptor.cardId === luckyCharmCardId
-    && descriptor.bearer?.kind === 'avatar');
-  for (let count = 0; count < 2; count += 1) {
-    take(({ descriptor }) => descriptor.kind === 'summon-minion'
-      && descriptor.cardId === sourceCardId
-      && descriptor.cell === 'C4');
-  }
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
-    && descriptor.cardId === blockedSiteCardId
-    && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardId === 'headless-blocker'
-    && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-
-  const sourceIds = checkpoint.state.realm.units
-    .filter(({ cardId }) => cardId === sourceCardId)
-    .map(({ instanceId }) => instanceId)
-    .sort();
-  const triggers = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
-    descriptor.kind === 'resolve-start-turn-trigger');
-  const firstTrigger = triggers.find(({ descriptor }) =>
-    descriptor.kind === 'resolve-start-turn-trigger'
-      && descriptor.sourceInstanceId === sourceIds[1]);
-  assert.ok(firstTrigger);
-  const committed = stepGame(checkpoint, firstTrigger);
-  assert.equal(committed.accepted, true);
-  if (!committed.accepted) return;
-  const choices = legalGameActions(committed.session.state, 'north').filter(({ descriptor }) =>
-    descriptor.kind === 'resolve-random-outcome');
-  const blockedChoice = choices.find(({ label }) => label === 'Lucky Charm chooses C1 surface');
-  assert.ok(blockedChoice);
-  const blocked = stepGame(committed.session, blockedChoice);
-  assert.equal(blocked.accepted, true);
-  if (!blocked.accepted) return;
-  const secondTrigger = legalGameActions(blocked.session.state, 'north')
-    .find(({ descriptor }) => descriptor.kind === 'resolve-start-turn-trigger');
-  assert.ok(secondTrigger);
-  const secondCommitted = stepGame(blocked.session, secondTrigger);
-  assert.equal(secondCommitted.accepted, true);
-  if (!secondCommitted.accepted) return;
-  const movedChoice = legalGameActions(secondCommitted.session.state, 'north')
-    .filter(({ descriptor }) => descriptor.kind === 'resolve-random-outcome')
-    .find((choice) => {
-      const result = stepGame(secondCommitted.session, choice);
-      return result.accepted && result.receipt.events.some(({ type }) => type === 'unit-teleported');
-    });
-  assert.ok(movedChoice);
-  assert.match(movedChoice.label, /^Lucky Charm chooses [A-E][1-4] (surface|void)$/);
-
-  assert.equal(checkpoint.state.phase, 'start-turn');
-  assert.deepEqual(triggers.flatMap(({ descriptor }) =>
-    descriptor.kind === 'resolve-start-turn-trigger'
-      ? [descriptor.sourceInstanceId]
-      : []).sort(), sourceIds);
-  assert.equal(firstTrigger.descriptor.kind, 'resolve-start-turn-trigger');
-  if (firstTrigger.descriptor.kind !== 'resolve-start-turn-trigger') return;
-  assert.equal(firstTrigger.descriptor.sourceInstanceId, sourceIds[1]);
-  assert.equal(checkpoint.state.realm.units.some(({ cardId, location }) =>
-    cardId === 'headless-blocker' && location === 'C1'), true);
-  assert.equal(checkpoint.state.cards[blockedSiteCardId]?.cardType === 'site'
-    && checkpoint.state.cards[blockedSiteCardId].preventsUnitsWithPowerAtLeastFromEntering, 3);
-
-  const repeated = stepGame(checkpoint, firstTrigger);
-  assert.equal(repeated.accepted, true);
-  if (!repeated.accepted) return;
-  assert.deepEqual(repeated.receipt, committed.receipt);
-  assert.equal(committed.receipt.events.length, 0);
-  assert.equal(committed.receipt.randomDraws.length, 2);
-  assert.equal(committed.receipt.randomDraws.every(({ purpose }) =>
-    purpose === 'start_turn_random_teleport'), true);
-  assert.equal(committed.session.state.phase, 'random-choice');
-  assert.equal(blockedChoice.descriptor.kind, 'resolve-random-outcome');
-  if (blockedChoice.descriptor.kind !== 'resolve-random-outcome') return;
-  assert.deepEqual(blocked.receipt.events.map(({ payload, type }) => ({ payload, type })), [{
-    payload: {
-      from: { cell: 'C4', region: 'surface' },
-      outcomeInstanceId: blockedChoice.descriptor.outcomeInstanceId,
-      reason: 'illegal-entry',
-      seat: 'north',
-      sourceInstanceId: sourceIds[1],
-      to: { cell: 'C1', region: 'surface' },
-    },
-    type: 'unit-teleport-failed',
-  }]);
-  assert.deepEqual(blocked.receipt.randomDraws, []);
-  assert.equal(blocked.session.state.phase, 'start-turn');
-  assert.equal(blocked.session.state.realm.units.find(({ instanceId }) =>
-    instanceId === sourceIds[1])?.location, 'C4');
-  assert.equal(secondTrigger.descriptor.kind, 'resolve-start-turn-trigger');
-  if (secondTrigger.descriptor.kind !== 'resolve-start-turn-trigger') return;
-  assert.equal(secondTrigger.descriptor.sourceInstanceId, sourceIds[0]);
-
-  const beforeForgeHash = hashGameState(blocked.session.state);
-  const beforeForgeTranscript = blocked.session.transcript.length;
-  const forgedDescriptor = {
-    kind: 'resolve-start-turn-trigger' as const,
-    sourceInstanceId: sourceIds[1]!,
-  };
-  const forged = stepGame(blocked.session, {
-    actionId: opaqueActionId(
-      'sorcery-core-v1',
-      'north',
-      blocked.session.state.stateVersion,
-      forgedDescriptor,
-    ),
-    seat: 'north',
-    stateVersion: blocked.session.state.stateVersion,
   });
-  assert.equal(forged.accepted, false);
-  if (!forged.accepted) assert.equal(forged.reason.code, 'unknown_action');
-  assert.equal(hashGameState(forged.session.state), beforeForgeHash);
-  assert.equal(forged.session.transcript.length, beforeForgeTranscript);
 
-  const committedAfterForge = stepGame(forged.session, secondTrigger);
-  assert.equal(committedAfterForge.accepted, true);
-  if (!committedAfterForge.accepted) return;
-  assert.deepEqual(committedAfterForge.receipt, secondCommitted.receipt);
-  const moved = stepGame(committedAfterForge.session, movedChoice);
-  assert.equal(moved.accepted, true);
-  if (!moved.accepted) return;
-  assert.equal(moved.receipt.events.some(({ payload, type }) =>
-    type === 'unit-teleported'
-      && canonicalJson(payload).includes(sourceIds[0]!)
-      && canonicalJson(payload).includes('"region":"void"')), true);
-  assert.deepEqual(moved.receipt.randomDraws, []);
-  assert.equal(moved.session.state.phase, 'draw');
-  assert.equal(moved.session.state.pendingStartTurn, undefined);
-  assert.equal(moved.session.state.realm.units.find(({ instanceId }) =>
-    instanceId === sourceIds[0])?.region, 'void');
-  assert.equal(verifyGameReplay(moved.session), true);
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'cast-artifact'
+      && descriptor.cardId === luckyCharmCardId
+      && descriptor.bearer?.kind === 'avatar');
+    for (let count = 0; count < 2; count += 1) {
+      await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'summon-minion'
+        && descriptor.cardId === sourceCardId
+        && descriptor.cell === 'C4');
+    }
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardId === blockedSiteCardId
+      && descriptor.cell === 'C1');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === 'headless-blocker'
+      && descriptor.cell === 'C1');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+
+    const startTurn = ctx.session;
+    const branchPoint = createGameCheckpoint(startTurn);
+    const sourceIds = startTurn.state.realm.units
+      .filter(({ cardId }) => cardId === sourceCardId)
+      .map(({ instanceId }) => instanceId)
+      .sort();
+    const triggers = (await ctx.legalActions('north')).filter(({ descriptor }) =>
+      descriptor.kind === 'resolve-start-turn-trigger');
+    const firstTrigger = triggers.find(({ descriptor }) =>
+      descriptor.kind === 'resolve-start-turn-trigger'
+        && descriptor.sourceInstanceId === sourceIds[1]);
+    assert.ok(firstTrigger);
+    const committed = await ctx.step(firstTrigger);
+    assert.equal(committed.accepted, true);
+    if (!committed.accepted) return;
+    const choices = (await ctx.legalActions('north')).filter(({ descriptor }) =>
+      descriptor.kind === 'resolve-random-outcome');
+    const blockedChoice = choices.find(({ label }) => label === 'Lucky Charm chooses C1 surface');
+    assert.ok(blockedChoice);
+    const blocked = await ctx.step(blockedChoice);
+    assert.equal(blocked.accepted, true);
+    if (!blocked.accepted) return;
+    const blockedPoint = createGameCheckpoint(blocked.session);
+    const secondTrigger = (await ctx.legalActions('north'))
+      .find(({ descriptor }) => descriptor.kind === 'resolve-start-turn-trigger');
+    assert.ok(secondTrigger);
+    const secondCommitted = await ctx.step(secondTrigger);
+    assert.equal(secondCommitted.accepted, true);
+    if (!secondCommitted.accepted) return;
+    const secondCommittedPoint = createGameCheckpoint(secondCommitted.session);
+    let movedChoice: GameLegalAction | undefined;
+    for (const choice of (await ctx.legalActions('north'))
+      .filter(({ descriptor }) => descriptor.kind === 'resolve-random-outcome')) {
+      const probe = await ctx.step(choice);
+      const teleported = probe.accepted
+        && probe.receipt.events.some(({ type }) => type === 'unit-teleported');
+      await ctx.resume(secondCommittedPoint);
+      if (teleported) {
+        movedChoice = choice;
+        break;
+      }
+    }
+    assert.ok(movedChoice);
+    assert.match(movedChoice.label, /^Lucky Charm chooses [A-E][1-4] (surface|void)$/);
+
+    assert.equal(startTurn.state.phase, 'start-turn');
+    assert.deepEqual(triggers.flatMap(({ descriptor }) =>
+      descriptor.kind === 'resolve-start-turn-trigger'
+        ? [descriptor.sourceInstanceId]
+        : []).sort(), sourceIds);
+    assert.equal(firstTrigger.descriptor.kind, 'resolve-start-turn-trigger');
+    if (firstTrigger.descriptor.kind !== 'resolve-start-turn-trigger') return;
+    assert.equal(firstTrigger.descriptor.sourceInstanceId, sourceIds[1]);
+    assert.equal(startTurn.state.realm.units.some(({ cardId, location }) =>
+      cardId === 'headless-blocker' && location === 'C1'), true);
+    assert.equal(startTurn.state.cards[blockedSiteCardId]?.cardType === 'site'
+      && startTurn.state.cards[blockedSiteCardId].preventsUnitsWithPowerAtLeastFromEntering, 3);
+
+    await ctx.resume(branchPoint);
+    const repeated = await ctx.step(firstTrigger);
+    assert.equal(repeated.accepted, true);
+    if (!repeated.accepted) return;
+    assert.deepEqual(repeated.receipt, committed.receipt);
+    assert.equal(committed.receipt.events.length, 0);
+    assert.equal(committed.receipt.randomDraws.length, 2);
+    assert.equal(committed.receipt.randomDraws.every(({ purpose }) =>
+      purpose === 'start_turn_random_teleport'), true);
+    assert.equal(committed.session.state.phase, 'random-choice');
+    assert.equal(blockedChoice.descriptor.kind, 'resolve-random-outcome');
+    if (blockedChoice.descriptor.kind !== 'resolve-random-outcome') return;
+    assert.deepEqual(blocked.receipt.events.map(({ payload, type }) => ({ payload, type })), [{
+      payload: {
+        from: { cell: 'C4', region: 'surface' },
+        outcomeInstanceId: blockedChoice.descriptor.outcomeInstanceId,
+        reason: 'illegal-entry',
+        seat: 'north',
+        sourceInstanceId: sourceIds[1],
+        to: { cell: 'C1', region: 'surface' },
+      },
+      type: 'unit-teleport-failed',
+    }]);
+    assert.deepEqual(blocked.receipt.randomDraws, []);
+    assert.equal(blocked.session.state.phase, 'start-turn');
+    assert.equal(blocked.session.state.realm.units.find(({ instanceId }) =>
+      instanceId === sourceIds[1])?.location, 'C4');
+    assert.equal(secondTrigger.descriptor.kind, 'resolve-start-turn-trigger');
+    if (secondTrigger.descriptor.kind !== 'resolve-start-turn-trigger') return;
+    assert.equal(secondTrigger.descriptor.sourceInstanceId, sourceIds[0]);
+
+    await ctx.resume(blockedPoint);
+    const beforeForgeHash = hashGameState(blocked.session.state);
+    const beforeForgeTranscript = blocked.session.transcript.length;
+    const forgedDescriptor = {
+      kind: 'resolve-start-turn-trigger' as const,
+      sourceInstanceId: sourceIds[1]!,
+    };
+    const forged = await ctx.stepRequest({
+      actionId: opaqueActionId(
+        'sorcery-core-v1',
+        'north',
+        blocked.session.state.stateVersion,
+        forgedDescriptor,
+      ),
+      seat: 'north',
+      stateVersion: blocked.session.state.stateVersion,
+    });
+    assert.equal(forged.accepted, false);
+    if (!forged.accepted) assert.equal(forged.reason.code, 'unknown_action');
+    assert.equal(hashGameState(forged.session.state), beforeForgeHash);
+    assert.equal(forged.session.transcript.length, beforeForgeTranscript);
+
+    const committedAfterForge = await ctx.step(secondTrigger);
+    assert.equal(committedAfterForge.accepted, true);
+    if (!committedAfterForge.accepted) return;
+    assert.deepEqual(committedAfterForge.receipt, secondCommitted.receipt);
+    const moved = await ctx.step(movedChoice);
+    assert.equal(moved.accepted, true);
+    if (!moved.accepted) return;
+    assert.equal(moved.receipt.events.some(({ payload, type }) =>
+      type === 'unit-teleported'
+        && canonicalJson(payload).includes(sourceIds[0]!)
+        && canonicalJson(payload).includes('"region":"void"')), true);
+    assert.deepEqual(moved.receipt.randomDraws, []);
+    assert.equal(moved.session.state.phase, 'draw');
+    assert.equal(moved.session.state.pendingStartTurn, undefined);
+    assert.equal(moved.session.state.realm.units.find(({ instanceId }) =>
+      instanceId === sourceIds[0])?.region, 'void');
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
+// TODO(rust-cutover): blocked on a Rust engine panic. `legalActions` renders the
+// Lucky Charm label for a `summonRandomMinionFromAnyCemetery` outcome by looking the
+// chosen corpse up in the caster's cemetery only (game.rs `.expect("dead minion")`),
+// while `cemetery_minion_candidates` spans both cemeteries, so choosing an
+// opponent-owned corpse aborts session-json with exit code 101.
 test('RULE-03 Raise Dead selects a public random cemetery minion before free placement', () => {
   const raiseDeadId = 'raise-dead';
   const luckyCharmId = 'raise-dead-lucky-charm';
@@ -2117,6 +2144,7 @@ test('RULE-03 Raise Dead selects a public random cemetery minion before free pla
   assert.equal(verifyGameReplay(placed.session), true);
 });
 
+// TODO(rust-cutover): synthetic state, needs a Rust-side proof
 test('RULE-03 Craterize discards a site, destroys its target, and applies the printed damage grid', () => {
   const craterizeId = 'craterize';
   const targetSiteId = 'craterize-water-site';
