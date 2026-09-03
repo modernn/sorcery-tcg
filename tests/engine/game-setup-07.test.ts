@@ -33,8 +33,10 @@ import {
   northAttacksAtC2,
   northAvatarAttacksSouthAtC2,
   SYNTHETIC_AUTHORITY_HASH,
+  takeAction,
   type SpellFacts,
 } from './game-setup-helpers.ts';
+import { withSetup } from './rust-setup-session.ts';
 
 test('RULE-05 Bladderblimp Deathrite makes each player lose life for their nearby sites', () => {
   const blimp = {
@@ -888,45 +890,48 @@ test("RULE-04 later undefended site strikes cannot deliver Death's Door death bl
   assert.equal(verifyGameReplay(session), true);
 });
 
-test('shared stale rejection leaves game state, PRNG, and accepted transcript unchanged', () => {
-  const initial = createGameSession(manifest(17));
-  const command = action(initial, ({ descriptor }) =>
-    descriptor.kind === 'mulligan'
-      && descriptor.atlasOrder.length === 0
-      && descriptor.spellbookOrder.length === 0);
-  const accepted = stepGame(initial, command);
-  assert.equal(accepted.accepted, true);
-  const before = canonicalJson(accepted.session.state);
-  const beforeHash = hashGameState(accepted.session.state);
-  const stale = stepGame(accepted.session, command);
+test('shared stale rejection leaves game state, PRNG, and accepted transcript unchanged', async () => {
+  await withSetup(manifest(17), async (ctx) => {
+    const command = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'mulligan'
+        && descriptor.atlasOrder.length === 0
+        && descriptor.spellbookOrder.length === 0);
+    const accepted = await ctx.step(command);
+    assert.equal(accepted.accepted, true);
+    const before = canonicalJson(accepted.session.state);
+    const beforeHash = hashGameState(accepted.session.state);
+    const stale = await ctx.step(command);
 
-  assert.equal(stale.accepted, false);
-  assert.equal(stale.reason.code, 'stale_version');
-  assert.equal(stale.reason.currentStateHash, beforeHash);
-  assert.equal(canonicalJson(stale.session.state), before);
-  assert.equal(stale.session.transcript.length, 1);
-  assert.equal(stale.session.attempts.length, 2);
+    assert.equal(stale.accepted, false);
+    assert.equal(stale.reason.code, 'stale_version');
+    assert.equal(stale.reason.currentStateHash, beforeHash);
+    assert.equal(canonicalJson(stale.session.state), before);
+    assert.equal(stale.session.transcript.length, 1);
+    assert.equal(stale.session.attempts.length, 2);
+  });
 });
 
-test('RULE-01 attempting to draw from an empty deck immediately loses', () => {
+test('RULE-01 attempting to draw from an empty deck immediately loses', async () => {
   const short = deck('short', 3, 3);
-  let session = keep(createGameSession(manifest(19, { north: short, south: short })));
-  session = keep(session);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
+  await withSetup(manifest(19, { north: short, south: short }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'play-site');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'atlas');
 
-  assert.deepEqual(session.state.terminal, {
-    loser: 'south',
-    reason: 'deck_empty',
-    status: 'finished',
-    winner: 'north',
+    assert.deepEqual(ctx.state.terminal, {
+      loser: 'south',
+      reason: 'deck_empty',
+      status: 'finished',
+      winner: 'north',
+    });
+    assert.equal(ctx.state.phase, 'terminal');
+    assert.deepEqual(await ctx.legalActions('south'), []);
+    assert.equal(ctx.session.transcript.at(-1)?.events[0]?.type, 'game-ended');
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  assert.equal(session.state.phase, 'terminal');
-  assert.deepEqual(legalGameActions(session.state, 'south'), []);
-  assert.equal(session.transcript.at(-1)?.events[0]?.type, 'game-ended');
-  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-04 Pick Up and Drop manage local carried Artifacts once per unit turn', () => {
