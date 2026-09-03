@@ -246,3 +246,57 @@ fn rule_catalog_0049_waterbound_should_derive_disabled_from_terrain_and_die_with
     assert!(units(&land).is_empty());
     assert_exact_replay(&land);
 }
+
+fn stealth_manifest(seed: u64) -> String {
+    let mut value: Value =
+        serde_json::from_str(&manifest(seed, "submerge")).expect("Waterbound manifest JSON");
+    value["cards"]["north-waterbound"]["stealth"] = json!(true);
+    value
+        .as_object_mut()
+        .expect("manifest object")
+        .remove("manifestId");
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    canonical_json(&value).expect("canonical Stealth manifest")
+}
+
+#[test]
+fn waterbound_stealth_should_be_lost_permanently_once_disabled() {
+    let mut session = Session::new(&stealth_manifest(138)).expect("valid Stealth Waterbound");
+    keep(&mut session);
+    keep(&mut session);
+    play_site(&mut session, "north-water", "C4");
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["region"].is_null()
+    });
+    let bound_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("Waterbound identity")
+        .to_owned();
+    assert_eq!(units(&session)[0]["stealthed"], true);
+    end_turn(&mut session);
+    south_turn(&mut session, Some("C1"));
+
+    // Leaving Water disables the minion, and settlement strips its Stealth for good.
+    draw_spell(&mut session);
+    play_site(&mut session, "north-land", "C3");
+    let (_, moved) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == bound_id.as_str()
+            && descriptor["to"]["cell"] == "C3"
+            && descriptor["to"]["region"] == "surface"
+    });
+    assert!(
+        event_types(&moved)
+            .iter()
+            .any(|event| event == "stealth-lost")
+    );
+    assert_eq!(units(&session)[0]["stealthed"], false);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
+    end_turn(&mut session);
+    south_turn(&mut session, None);
+    draw_spell(&mut session);
+    assert_eq!(units(&session)[0]["stealthed"], false);
+    assert_exact_replay(&session);
+}

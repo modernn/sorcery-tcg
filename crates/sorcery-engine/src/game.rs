@@ -9554,6 +9554,7 @@ impl Game {
         if self.position.terminal.is_some() || self.position.pending_deathrites.is_some() {
             return Ok(());
         }
+        self.settle_disabled_stealth(outcomes);
         let (deaths, banishments) = self.region_settlement_removals();
         if deaths.is_empty() && banishments.is_empty() {
             return Ok(());
@@ -9572,6 +9573,33 @@ impl Game {
         }
         outcomes.splice_before_game_end(deaths_start, banished);
         Ok(())
+    }
+
+    /// Strips Stealth from every Disabled minion, permanently: a Disabled minion loses its
+    /// abilities, and Stealth once lost does not return when the minion is re-enabled.
+    fn settle_disabled_stealth(&mut self, outcomes: &mut OutcomeLog<'_>) {
+        let mut revealed: Vec<(IdentityHash, Seat)> = self
+            .position
+            .units
+            .iter()
+            .filter(|unit| unit.stealthed && self.minion_is_disabled(unit))
+            .map(|unit| (unit.card.instance_id.clone(), unit.controller))
+            .collect();
+        revealed.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        for (instance_id, seat) in revealed {
+            if let Some(unit) = self
+                .position
+                .units
+                .iter_mut()
+                .find(|unit| unit.card.instance_id == instance_id)
+            {
+                unit.stealthed = false;
+            }
+            outcomes.push(
+                "stealth-lost",
+                || json!({ "instanceId": instance_id, "seat": seat }),
+            );
+        }
     }
 
     /// Splits every unit its region no longer holds into deaths and void banishments.
