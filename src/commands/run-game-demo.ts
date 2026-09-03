@@ -17,6 +17,7 @@ import {
   type GameSession,
   type GameTerminal,
 } from '../engine/game.ts';
+import { runRustSyntheticDemo } from '../engine/rust-engine.ts';
 
 const SYNTHETIC_AUTHORITY_HASH =
   'sha256:1111111111111111111111111111111111111111111111111111111111111111' as const;
@@ -191,7 +192,17 @@ export function runDeterministicGame(manifest: GameManifest): DeterministicGameR
 }
 
 export function runGameDemo(seed = 1): DeterministicGameReport {
-  return runDeterministicGame(createSyntheticDemoManifest(seed));
+  const report = runRustSyntheticDemo(seed);
+  return Object.freeze({
+    acceptedActionCount: report.acceptedActionCount,
+    classification: 'unranked_partial_rules',
+    fightCount: report.fightCount,
+    finalStateHash: report.finalStateHash as DeterministicGameReport['finalStateHash'],
+    replayVerified: report.replayVerified,
+    terminal: report.terminal as DeterministicGameReport['terminal'],
+    transcriptHash: report.transcriptHash as DeterministicGameReport['transcriptHash'],
+    turnCount: report.turnCount,
+  });
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
