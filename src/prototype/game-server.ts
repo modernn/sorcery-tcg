@@ -6,14 +6,10 @@ import {
   createSyntheticDemoManifest,
   selectDeterministicGameAction,
 } from '../commands/run-game-demo.ts';
+import { canonicalJson, type JsonValue } from '../authority/canonical-json.ts';
+import { GAME_CHECKPOINT_MAX_BYTES, parseGameCheckpoint } from '../engine/checkpoint.ts';
 import {
   createGameManifest,
-  createGameSession,
-  hashGameState,
-  legalGameActions,
-  observeGame,
-  stepGame,
-  verifyGameReplay,
   type GameCardDefinition,
   type GameLegalAction,
   type GameObservation,
@@ -21,13 +17,7 @@ import {
   type GameManifest,
   type GameSession,
 } from '../engine/game.ts';
-import {
-  createGameCheckpoint,
-  GAME_CHECKPOINT_MAX_BYTES,
-  parseGameCheckpoint,
-  resumeGameCheckpoint,
-  serializeGameCheckpoint,
-} from '../engine/checkpoint.ts';
+import { RustSessionClient, type RustLegalAction, type Sha256Hash } from '../engine/rust-engine.ts';
 
 const HOST = '127.0.0.1';
 const DEFAULT_PORT = 4174;
@@ -185,6 +175,31 @@ function reseedManifest(manifest: GameManifest, seed: number): GameManifest {
     firstSeat: manifest.firstSeat,
     seed,
   });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parseExportedSession(exported: JsonValue, manifest: GameManifest): GameSession {
+  if (!isRecord(exported)
+    || !Array.isArray(exported.attempts)
+    || !Array.isArray(exported.initialRandomDraws)
+    || !Array.isArray(exported.transcript)
+    || !isRecord(exported.state)) {
+    throw new Error('Rust exportSession result did not match GameSession');
+  }
+  return {
+    attempts: exported.attempts as GameSession['attempts'],
+    initialRandomDraws: exported.initialRandomDraws as GameSession['initialRandomDraws'],
+    manifest,
+    state: exported.state as GameSession['state'],
+    transcript: exported.transcript as GameSession['transcript'],
+  };
+}
+
+function asGameLegalActions(actions: readonly RustLegalAction[]): readonly GameLegalAction[] {
+  return actions as readonly GameLegalAction[];
 }
 
 function displayActionLabel(
@@ -360,48 +375,86 @@ export function createGamePrototypeServer(
   }
   let selectedPreset = presets[0]!;
   let opponent = initialOpponent;
-  let session: GameSession = createGameSession(reseedManifest(
-    selectedPreset.manifest,
-    initialSeed ?? selectedPreset.manifest.seed,
-  ));
-  function advanceOpponent(start: GameSession): Readonly<{
+  const clientPromise = RustSessionClient.start();
+  const runtime = {
+    manifest: reseedManifest(
+      selectedPreset.manifest,
+      initialSeed ?? selectedPreset.manifest.seed,
+    ),
+    session: undefined as GameSession | undefined,
+    stateHash: undefined as Sha256Hash | undefined,
+  };
+
+  async function rustClient(): Promise<RustSessionClient> {
+    return clientPromise;
+  }
+
+  async function refreshSession(client: RustSessionClient): Promise<GameSession> {
+    runtime.session = parseExportedSession(await client.exportSession(), runtime.manifest);
+    const viewed = await client.publicView('north');
+    runtime.stateHash = viewed.stateHash;
+    return runtime.session;
+  }
+
+  async function startSession(client: RustSessionClient, manifest: GameManifest): Promise<GameSession> {
+    runtime.manifest = manifest;
+    await client.newSession(canonicalJson(manifest as unknown as JsonValue));
+    return refreshSession(client);
+  }
+
+  async function ensureSession(client: RustSessionClient): Promise<GameSession> {
+    if (!runtime.session) return startSession(client, runtime.manifest);
+    return runtime.session;
+  }
+
+  async function advanceOpponent(client: RustSessionClient): Promise<Readonly<{
     count: number;
-    session: GameSession;
     summaries: readonly Readonly<{
       events: readonly string[];
       kind: GameLegalAction['descriptor']['kind'];
     }>[];
-  }> {
-    let next = start;
+  }>> {
     let count = 0;
     const summaries: Array<Readonly<{
       events: readonly string[];
       kind: GameLegalAction['descriptor']['kind'];
     }>> = [];
-    while (next.state.terminal.status === 'active' && next.state.decisionSeat === 'south') {
+    while (true) {
+      const session = await refreshSession(client);
+      if (session.state.terminal.status !== 'active' || session.state.decisionSeat !== 'south') break;
       if (count >= MAX_OPPONENT_ACTIONS) throw new Error('deterministic opponent exceeded action limit');
-      const action = selectDeterministicGameAction(next);
-      const result = stepGame(next, action);
-      if (!result.accepted) throw new Error(`deterministic opponent action rejected: ${result.reason.code}`);
+      const issued = asGameLegalActions(await client.legalActions('south'));
+      const action = selectDeterministicGameAction(session, issued);
+      const result = await client.step(action);
+      if (!result.accepted) {
+        throw new Error(`deterministic opponent action rejected: ${
+          isRecord(result.rejection) && typeof result.rejection.code === 'string'
+            ? result.rejection.code
+            : 'unknown_action'
+        }`);
+      }
+      const receipt = result.receipt as GameSession['transcript'][number];
       summaries.push(Object.freeze({
-        events: Object.freeze(result.receipt.events.map(({ type }) => type)),
+        events: Object.freeze(receipt.events.map(({ type }) => type)),
         kind: action.descriptor.kind,
       }));
-      next = result.session;
       count += 1;
     }
-    return { count, session: next, summaries: Object.freeze(summaries) };
+    return { count, summaries: Object.freeze(summaries) };
   }
 
-  function view(seat: GameSeat): JsonRecord {
-    const observation = observeGame(session.state, seat);
+  async function view(client: RustSessionClient, seat: GameSeat): Promise<JsonRecord> {
+    await ensureSession(client);
+    const { view: observationValue, stateHash } = await client.publicView(seat);
+    runtime.stateHash = stateHash;
+    const observation = observationValue as GameObservation;
     const visible = visibleCardIds(observation);
     const cardNames = Object.fromEntries(Object.entries(selectedPreset.cardNames ?? {})
       .filter(([cardId]) => visible.has(cardId)));
-    const cardFacts = Object.fromEntries(Object.entries(session.manifest.cards)
+    const cardFacts = Object.fromEntries(Object.entries(runtime.manifest.cards)
       .filter(([cardId]) => visible.has(cardId))
       .map(([cardId, card]) => [cardId, displayCardFacts(card)]));
-    const actions = legalGameActions(session.state, seat);
+    const actions = asGameLegalActions(await client.legalActions(seat));
     return {
       actions: actions.map((action) => ({
         ...action,
@@ -409,23 +462,24 @@ export function createGamePrototypeServer(
           action,
           observation,
           selectedPreset.cardNames ?? {},
-          session.manifest.cards,
+          runtime.manifest.cards,
         ),
       })),
       cardFacts,
       cardNames,
-      mode: session.manifest.authority.mode,
+      mode: runtime.manifest.authority.mode,
       opponent,
       presetId: selectedPreset.id,
       presets: presets.map(({ id, label, manifest }) => ({ id, label, seed: manifest.seed })),
-      seed: session.manifest.seed,
-      stateHash: hashGameState(session.state),
+      seed: runtime.manifest.seed,
+      stateHash,
       view: observation,
     };
   }
 
-  return createServer(async (request, response) => {
+  const server = createServer(async (request, response) => {
     try {
+      const client = await rustClient();
       const url = new URL(request.url ?? '/', `http://${HOST}`);
       if (request.method === 'GET' && url.pathname === '/') return sendPage(response);
       if (request.method === 'GET' && url.pathname === '/api/view') {
@@ -434,7 +488,7 @@ export function createGamePrototypeServer(
         if (opponent === 'south' && seat === 'south') {
           return sendJson(response, 403, { error: 'south is hidden while controlled by the deterministic opponent' });
         }
-        return sendJson(response, 200, view(seat));
+        return sendJson(response, 200, await view(client, seat));
       }
       if (request.method === 'POST' && url.pathname === '/api/reset') {
         const body = await readJson(request);
@@ -452,8 +506,8 @@ export function createGamePrototypeServer(
         }
         selectedPreset = preset;
         opponent = requestedOpponent;
-        session = createGameSession(reseedManifest(selectedPreset.manifest, body.seed as number));
-        return sendJson(response, 200, view('north'));
+        await startSession(client, reseedManifest(selectedPreset.manifest, body.seed as number));
+        return sendJson(response, 200, await view(client, 'north'));
       }
       if (request.method === 'POST' && url.pathname === '/api/action') {
         const body = await readJson(request);
@@ -468,18 +522,20 @@ export function createGamePrototypeServer(
         if (opponent === 'south' && seat === 'south') {
           return sendJson(response, 400, { error: 'south is controlled by the deterministic opponent' });
         }
-        const observation = observeGame(session.state, seat);
-        const selectedAction = legalGameActions(session.state, seat)
+        await ensureSession(client);
+        const { view: observationValue } = await client.publicView(seat);
+        const observation = observationValue as GameObservation;
+        const selectedAction = asGameLegalActions(await client.legalActions(seat))
           .find(({ actionId }) => actionId === body.actionId);
         const playerAction = selectedAction
           ? displayActionLabel(
             selectedAction,
             observation,
             selectedPreset.cardNames ?? {},
-            session.manifest.cards,
+            runtime.manifest.cards,
           )
           : undefined;
-        const result = stepGame(session, {
+        const result = await client.step({
           actionId: body.actionId,
           seat,
           stateVersion: body.stateVersion as number,
@@ -487,27 +543,37 @@ export function createGamePrototypeServer(
         if (result.accepted && playerAction === undefined) {
           throw new Error('accepted action lacks a legal action summary');
         }
+        if (result.accepted) await refreshSession(client);
         const advanced = result.accepted && opponent === 'south'
-          ? advanceOpponent(result.session)
-          : { count: 0, session: result.session, summaries: [] };
-        session = advanced.session;
+          ? await advanceOpponent(client)
+          : { count: 0, summaries: [] as readonly Readonly<{
+            events: readonly string[];
+            kind: GameLegalAction['descriptor']['kind'];
+          }>[] };
         return sendJson(response, 200, {
-          ...view(seat),
+          ...await view(client, seat),
           accepted: result.accepted,
           opponentActionCount: advanced.count,
           opponentActions: advanced.summaries,
           ...(result.accepted
             ? { playerAction, receipt: result.receipt }
-            : { reason: result.reason }),
+            : { reason: result.rejection }),
         });
       }
       if (request.method === 'POST' && url.pathname === '/api/checkpoint') {
-        const checkpoint = createGameCheckpoint(session);
+        await ensureSession(client);
+        const checkpointValue = await client.checkpoint();
+        if (!isRecord(checkpointValue)
+          || typeof checkpointValue.checkpointId !== 'string'
+          || typeof checkpointValue.expectedSessionHash !== 'string') {
+          throw new Error('Rust checkpoint result was malformed');
+        }
+        const session = await refreshSession(client);
         return sendJson(response, 200, {
-          checkpoint: serializeGameCheckpoint(checkpoint),
-          checkpointId: checkpoint.checkpointId,
+          checkpoint: canonicalJson(checkpointValue as JsonValue),
+          checkpointId: checkpointValue.checkpointId,
           opponent,
-          stateHash: hashGameState(session.state),
+          stateHash: runtime.stateHash,
           turnNumber: session.state.turnNumber,
         });
       }
@@ -525,24 +591,26 @@ export function createGamePrototypeServer(
             error: 'south is hidden while controlled by the deterministic opponent',
           });
         }
-        const checkpoint = parseGameCheckpoint(
-          await readText(request, GAME_CHECKPOINT_MAX_BYTES),
-        );
+        const checkpointText = await readText(request, GAME_CHECKPOINT_MAX_BYTES);
+        const checkpoint = parseGameCheckpoint(checkpointText);
         const preset = presets.find(({ manifest }) =>
           reseedManifest(manifest, checkpoint.manifest.seed).manifestId
             === checkpoint.manifest.manifestId);
         if (!preset) throw new Error('saved position preset is unavailable');
-        const restored = resumeGameCheckpoint(checkpoint);
+        await client.resume(JSON.parse(checkpointText) as JsonValue);
         selectedPreset = preset;
         opponent = requestedOpponent;
-        session = restored;
-        return sendJson(response, 200, view(seat));
+        runtime.manifest = checkpoint.manifest;
+        await refreshSession(client);
+        return sendJson(response, 200, await view(client, seat));
       }
       if (request.method === 'POST' && url.pathname === '/api/replay') {
+        await ensureSession(client);
+        const session = await refreshSession(client);
         return sendJson(response, 200, {
           acceptedActionCount: session.transcript.length,
-          finalStateHash: hashGameState(session.state),
-          verified: verifyGameReplay(session),
+          finalStateHash: runtime.stateHash,
+          verified: await client.verifyReplay(),
         });
       }
       return sendJson(response, 404, { error: 'not found' });
@@ -550,6 +618,10 @@ export function createGamePrototypeServer(
       return sendJson(response, 400, { error: error instanceof Error ? error.message : 'bad request' });
     }
   });
+  server.on('close', () => {
+    void clientPromise.then((client) => client.close());
+  });
+  return server;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
