@@ -953,6 +953,18 @@ enum MovementCause {
     CardEffect,
 }
 
+/// One thing a Cave-In sent underground, kept so minions and Artifacts report in one sorted pass.
+enum BurrowOutcome {
+    Minion {
+        instance_id: IdentityHash,
+        seat: Seat,
+    },
+    Artifact {
+        instance_id: IdentityHash,
+        owner: Seat,
+    },
+}
+
 /// What settling realm occupancy does to a unit that its own region stopped holding.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RegionDisposition {
@@ -12785,16 +12797,6 @@ impl Game {
                         region: Region::Underground,
                     };
                 }
-                enum BurrowOutcome {
-                    Minion {
-                        instance_id: IdentityHash,
-                        seat: Seat,
-                    },
-                    Artifact {
-                        instance_id: IdentityHash,
-                        owner: Seat,
-                    },
-                }
                 let mut burrow_outcomes: Vec<(IdentityHash, BurrowOutcome)> = minions
                     .into_iter()
                     .map(|(instance_id, seat)| {
@@ -12832,7 +12834,7 @@ impl Game {
                                     "owner": owner,
                                     "sourceInstanceId": card_instance_id,
                                 })
-                            })
+                            });
                         }
                     }
                 }
@@ -16039,7 +16041,7 @@ mod tests {
         let cross_deck = selfplay_manifest_with(31, |manifest| {
             manifest["cards"]["north-avatar"]["replaceAdjacentRubbleWithTopAtlasSite"] =
                 json!(true);
-            manifest["cards"]["south-site-1"]["genesisGainMana"] = json!(1);
+            manifest["cards"]["south-site-1"]["genesisHealNearbyAvatars"] = json!(3);
         });
         Game::from_manifest_json(&cross_deck)
             .expect("valid cross-deck game")
@@ -16049,13 +16051,13 @@ mod tests {
         let same_deck = selfplay_manifest_with(31, |manifest| {
             manifest["cards"]["north-avatar"]["replaceAdjacentRubbleWithTopAtlasSite"] =
                 json!(true);
-            manifest["cards"]["north-site-1"]["genesisGainMana"] = json!(1);
+            manifest["cards"]["north-site-1"]["genesisHealNearbyAvatars"] = json!(3);
         });
         assert!(matches!(
             Game::from_manifest_json(&same_deck)
                 .expect("valid same-deck game")
                 .ensure_selfplay_supported(),
-            Err(GameError::UnsupportedManifestFact(field)) if field == "genesisGainMana"
+            Err(GameError::UnsupportedManifestFact(field)) if field == "genesisHealNearbyAvatars"
         ));
     }
 
