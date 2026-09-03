@@ -5463,8 +5463,7 @@ impl Game {
         if candidate.region == Region::Surface
             && let Some(site) = &self.position.sites[candidate.cell.index()]
         {
-            let CardFacts::Site(facts) =
-                &self.rules.cards[usize::from(site.card.card_id.0)].facts
+            let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
             else {
                 return true;
             };
