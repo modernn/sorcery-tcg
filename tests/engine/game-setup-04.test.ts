@@ -1113,6 +1113,11 @@ test('RULE-02/03 Geomancer creates Rubble and privately replaces it with the top
     assert.equal(blockedTopDefinition?.cardType === 'site'
       && blockedTopDefinition.elements.includes('water')
       && blockedTopDefinition.genesisPayOneManaToSummonToken === 'foot-soldier', true);
+    // TODO(rust-cutover): synthetic state — this hand-builds a GameSession with
+    // Deathrite units placed underground at C3 to prove the replace-rubble action
+    // stays available regardless of incidental site occupants. Not reachable
+    // through legal play in this test and no existing Rust-side proof was found;
+    // stays on the legacy synchronous engine's legalGameActions.
     assert.equal(legalGameActions(orderedReplacementState, 'north').some(({ descriptor }) =>
       descriptor.kind === 'replace-rubble-with-top-atlas-site'
         && descriptor.targetCell === 'C3'), true);
@@ -1134,6 +1139,11 @@ test('RULE-02/03 Geomancer creates Rubble and privately replaces it with the top
         },
       },
     };
+    // TODO(rust-cutover): synthetic state — swaps which Atlas card sits on top of
+    // north's deck to prove the replace-rubble action's id/descriptor stay
+    // identical regardless of the (hidden) top card. Not reachable through legal
+    // play in this test and no existing Rust-side proof was found; stays on the
+    // legacy synchronous engine's action helper.
     const swappedReplacement = action(swapped, ({ descriptor }) =>
       descriptor.kind === 'replace-rubble-with-top-atlas-site'
         && descriptor.targetCell === 'C3');
