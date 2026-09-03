@@ -14698,6 +14698,17 @@ impl Game {
                                 "sourceInstanceId": card_instance_id,
                             })
                         });
+                        for artifact in &mut self.position.artifacts {
+                            if let ArtifactPlacement::Carried { bearer } = &mut artifact.placement
+                                && unit_target_kind(bearer) == UnitKind::Minion
+                                && bearer.instance_id() == instance_id
+                            {
+                                *bearer = UnitTarget::Minion {
+                                    instance_id: instance_id.clone(),
+                                    seat,
+                                };
+                            }
+                        }
                         self.settle_static_power_deaths(outcomes)?;
                     }
                 }
