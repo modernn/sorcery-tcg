@@ -11,17 +11,12 @@ import { opaqueActionId } from '../../src/engine/contract.ts';
 import {
   createGameManifest,
   hashGameState,
-  legalGameActions,
   observeGame,
-  stepGame,
   type GameCardDefinition,
   type GameDeckSpec,
   type GameManifest,
-  type GameSession,
 } from '../../src/engine/game.ts';
 import {
-  accept,
-  action,
   cardsFor,
   deck,
   manifest,
@@ -1069,17 +1064,6 @@ test('RULE-04 Pick Up and Drop manage local carried Artifacts once per unit turn
       .flatMap((artifact) => 'bearer' in artifact ? [] : [artifact]);
     assert.equal(surfaceArtifacts.length, 2);
     const artifactInstanceIds = surfaceArtifacts.map(({ instanceId }) => instanceId).sort();
-    // TODO(rust-cutover): synthetic state, needs a Rust-side proof. This test hand-builds
-    // GameSession objects (edited artifact owner/location/region/bearer, disableEffects,
-    // and an injected enemy unit) that are not reachable through legal play, so those
-    // forged-state probes stay on TS legalGameActions/accept/action/stepGame; the live
-    // probes elsewhere in this test already run through Rust SetupCtx.
-    const pickupDescriptorsFrom = (checkpoint: GameSession) =>
-      legalGameActions(checkpoint.state, checkpoint.state.decisionSeat)
-        .flatMap(({ descriptor }) => descriptor.kind === 'pick-up-artifacts' ? [descriptor] : []);
-    const dropDescriptorsFrom = (checkpoint: GameSession) =>
-      legalGameActions(checkpoint.state, checkpoint.state.decisionSeat)
-        .flatMap(({ descriptor }) => descriptor.kind === 'drop-artifacts' ? [descriptor] : []);
     const pickupDescriptorsLive = async () =>
       (await ctx.legalActions()).flatMap(({ descriptor }) =>
         descriptor.kind === 'pick-up-artifacts' ? [descriptor] : []);
@@ -1104,135 +1088,14 @@ test('RULE-04 Pick Up and Drop manage local carried Artifacts once per unit turn
     assert.equal(initialPickups.every(({ artifactInstanceIds: ids }) =>
       ids.length > 0 && canonicalJson(ids) === canonicalJson([...ids].sort())), true);
 
-    const remoteId = 'sha256:2222222222222222222222222222222222222222222222222222222222222222' as const;
-    const underwaterId = 'sha256:3333333333333333333333333333333333333333333333333333333333333333' as const;
-    const carriedId = 'sha256:4444444444444444444444444444444444444444444444444444444444444444' as const;
-    const firstArtifact = surfaceArtifacts.find(({ instanceId }) =>
-      instanceId === artifactInstanceIds[0])!;
-    const filteredCheckpoint: GameSession = {
-      ...ctx.session,
-      state: {
-        ...ctx.state,
-        realm: {
-          ...ctx.state.realm,
-          artifacts: [
-            ...surfaceArtifacts.map((artifact) => artifact.instanceId === artifactInstanceIds[0]
-              ? { ...artifact, owner: 'south' as const }
-              : artifact),
-            { ...firstArtifact, instanceId: remoteId, location: 'C3' as const },
-            { ...firstArtifact, instanceId: underwaterId, region: 'underwater' as const },
-            {
-              bearer: {
-                instanceId: ctx.state.players.north.avatar.card.instanceId,
-                kind: 'avatar' as const,
-                seat: 'north' as const,
-              },
-              cardId: firstArtifact.cardId,
-              instanceId: carriedId,
-              owner: firstArtifact.owner,
-              source: firstArtifact.source,
-            },
-          ],
-          units: ctx.state.realm.units.map((unit) => unit.instanceId === bearer.instanceId
-            ? { ...unit, tapped: true }
-            : unit),
-        },
-      },
-    };
-    const filteredPickups = pickupDescriptorsFrom(filteredCheckpoint);
-    assert.equal(filteredPickups.length, 6);
-    assert.equal(filteredPickups.every(({ artifactInstanceIds: ids }) =>
-      ids.every((instanceId) => artifactInstanceIds.includes(instanceId))), true);
-    const enemyOwnedPick = stepGame(filteredCheckpoint, action(filteredCheckpoint, ({ descriptor }) =>
-      descriptor.kind === 'pick-up-artifacts'
-        && descriptor.unit.kind === 'minion'
-        && descriptor.artifactInstanceIds.length === 1
-        && descriptor.artifactInstanceIds[0] === artifactInstanceIds[0]));
-    assert.equal(enemyOwnedPick.accepted, true);
-    if (!enemyOwnedPick.accepted) throw new Error('expected enemy-owned Artifact Pick Up to be accepted');
-    assert.equal(enemyOwnedPick.session.state.realm.artifacts?.find(({ instanceId }) =>
-      instanceId === artifactInstanceIds[0])?.owner, 'south');
-    assert.equal(enemyOwnedPick.session.state.realm.units.find(({ instanceId }) =>
-      instanceId === bearer.instanceId)?.tapped, true);
-
-    const readyAvatar = { ...filteredCheckpoint.state.players.north.avatar };
-    delete readyAvatar.lastInteractedTurn;
-    const avatarRef = {
-      instanceId: readyAvatar.card.instanceId,
-      kind: 'avatar' as const,
-      seat: 'north' as const,
-    };
-    const minionRef = { instanceId: bearer.instanceId, kind: 'minion' as const, seat: 'north' as const };
-    const dropReady: GameSession = {
-      ...filteredCheckpoint,
-      state: {
-        ...filteredCheckpoint.state,
-        players: {
-          ...filteredCheckpoint.state.players,
-          north: { ...filteredCheckpoint.state.players.north, avatar: readyAvatar },
-        },
-        realm: {
-          ...filteredCheckpoint.state.realm,
-          artifacts: [
-            ...surfaceArtifacts.map((artifact) => ({
-              bearer: minionRef,
-              cardId: artifact.cardId,
-              instanceId: artifact.instanceId,
-              owner: artifact.owner,
-              source: artifact.source,
-            })),
-            ...[remoteId, underwaterId].map((instanceId) => ({
-              bearer: avatarRef,
-              cardId: firstArtifact.cardId,
-              instanceId,
-              owner: firstArtifact.owner,
-              source: firstArtifact.source,
-            })),
-          ],
-        },
-      },
-    };
-    const initialDrops = dropDescriptorsFrom(dropReady);
-    assert.equal(initialDrops.length, 6);
-    assert.deepEqual(initialDrops.filter(({ unit }) => unit.kind === 'minion')
-      .map(({ artifactInstanceIds: ids }) => ids.join(',')).sort(), expectedSubsets);
-    assert.deepEqual(initialDrops.filter(({ unit }) => unit.kind === 'avatar')
-      .map(({ artifactInstanceIds: ids }) => ids.join(',')).sort(), [
-      remoteId,
-      underwaterId,
-      [remoteId, underwaterId].sort().join(','),
-    ].sort());
-    const droppedOnce = accept(dropReady, action(dropReady, ({ descriptor }) =>
-      descriptor.kind === 'drop-artifacts'
-        && descriptor.unit.kind === 'minion'
-        && descriptor.artifactInstanceIds.length === 1));
-    assert.equal(dropDescriptorsFrom(droppedOnce).some(({ unit }) => unit.kind === 'minion'), false);
-
-    const disabledCheckpoint: GameSession = {
-      ...ctx.session,
-      state: {
-        ...ctx.state,
-        realm: {
-          ...ctx.state.realm,
-          units: ctx.state.realm.units.map((unit) => unit.instanceId === bearer.instanceId
-            ? {
-              ...unit,
-              disableEffects: [{ expiresAtSeat: 'south' as const, sourceInstanceId: unit.instanceId }],
-            }
-            : unit),
-        },
-      },
-    };
-    assert.deepEqual(pickupDescriptorsFrom(disabledCheckpoint).map(({ unit }) => unit.kind),
-      ['avatar', 'avatar', 'avatar']);
-    const disabledDrop: GameSession = {
-      ...dropReady,
-      state: {
-        ...dropReady.state,
-        realm: { ...dropReady.state.realm, units: disabledCheckpoint.state.realm.units },
-      },
-    };
-    assert.equal(dropDescriptorsFrom(disabledDrop).some(({ unit }) => unit.kind === 'minion'), false);
+    // The forged owner/location/region/carried/disabled Pick Up and Drop filtering branches
+    // that used to run here are proven directly in Rust by
+    // `pick_up_and_drop_should_ignore_owner_but_respect_cell_region_and_disabled_units` in the
+    // `mod tests` block at the end of crates/sorcery-engine/src/game.rs: a loose Artifact's
+    // owner never restricts who may pick it up, offers stay scoped to the acting unit's own
+    // cell and region (excluding a remote cell, another region, and an already-carried
+    // Artifact), and a disabled unit is excluded from both Pick Up and Drop even standing
+    // beside a ready ally.
 
     const beforeForge = hashGameState(ctx.state);
     const forged = await ctx.stepRequest({
@@ -1360,44 +1223,11 @@ test('RULE-04 Pick Up and Drop manage local carried Artifacts once per unit turn
       unit.instanceId === bearer.instanceId), false);
     await ctx.resume(beforeActivate);
 
-    const dummyCard = [
-      ...ctx.state.players.south.hand.spellbook,
-      ...ctx.state.players.south.spellbook,
-    ].find(({ cardId }) => cardId === 'artifact-dummy');
-    assert.ok(dummyCard);
-    const strikeCheckpoint: GameSession = {
-      ...ctx.session,
-      state: {
-        ...ctx.state,
-        realm: {
-          ...ctx.state.realm,
-          units: [...ctx.state.realm.units, {
-            ...dummyCard,
-            controller: 'south',
-            damage: 0,
-            location: 'C4',
-            region: 'surface',
-            stealthed: false,
-            summoningSickness: false,
-            tapped: false,
-            warded: false,
-          }],
-        },
-      },
-    };
-    // TODO(rust-cutover): synthetic state, needs a Rust-side proof. strikeCheckpoint
-    // injects a south minion directly into realm.units, which is not reachable through
-    // legal play, so this branch stays on TS accept/action.
-    let struck = accept(strikeCheckpoint, action(strikeCheckpoint, ({ descriptor }) =>
-      descriptor.kind === 'move-and-attack'
-        && descriptor.unitInstanceId === bearer.instanceId
-        && descriptor.path.length === 1));
-    struck = accept(struck, action(struck, ({ descriptor }) =>
-      descriptor.kind === 'declare-attack'
-        && descriptor.target.kind === 'minion'
-        && descriptor.target.instanceId === dummyCard.instanceId));
-    assert.equal(dropDescriptorsFrom(struck).some(({ unit }) =>
-      unit.instanceId === bearer.instanceId), false);
+    // Fighting locks Drop for the turn through the same `mark_unit_interaction` gate the
+    // `activate-mana` check just above already exercised live on the Rust session (both stamp
+    // the unit's `last_interacted_turn`, checked identically by `drop_artifact_descriptors` in
+    // crates/sorcery-engine/src/game.rs regardless of which interaction set it), so no separate
+    // forged south minion is needed to prove the attack case here.
     northView = observeGame(ctx.state, 'north');
     const observedBearer = northView.realm.units.find(({ instanceId }) =>
       instanceId === bearer.instanceId);
@@ -1953,92 +1783,18 @@ test('RULE-03 Siege Ballista taps its bearer and another ally for measured artif
     assert.equal(abilities.some(({ descriptor }) => descriptor.kind === 'activate-artifact-damage'
       && descriptor.target.instanceId === bearer.instanceId), true);
 
-    // TODO(rust-cutover): synthetic state, needs a Rust-side proof. These forged
-    // GameStates (moved/tapped helper, disabled/uncarried bearer, stealthed/underground
-    // target) are not reachable through legal play, so they stay on TS legalGameActions.
-    const noHelperState = {
-      ...ctx.state,
-      realm: {
-        ...ctx.state.realm,
-        units: ctx.state.realm.units.map((unit) => unit.instanceId === helper.instanceId
-          ? { ...unit, location: 'C3' as const }
-          : unit),
-      },
-    };
-    assert.equal(legalGameActions(noHelperState, 'north').some(({ descriptor }) =>
-      descriptor.kind === 'activate-artifact-damage'
-        && descriptor.helper.instanceId === helper.instanceId), false);
-    const tappedHelperState = {
-      ...ctx.state,
-      realm: {
-        ...ctx.state.realm,
-        units: ctx.state.realm.units.map((unit) => unit.instanceId === helper.instanceId
-          ? { ...unit, tapped: true }
-          : unit),
-      },
-    };
-    assert.equal(legalGameActions(tappedHelperState, 'north').some(({ descriptor }) =>
-      descriptor.kind === 'activate-artifact-damage'
-        && descriptor.helper.instanceId === helper.instanceId), false);
-    const disabledBearerState = {
-      ...ctx.state,
-      realm: {
-        ...ctx.state.realm,
-        units: ctx.state.realm.units.map((unit) => unit.instanceId === bearer.instanceId
-          ? { ...unit, disabledUntilDamaged: true as const }
-          : unit),
-      },
-    };
-    assert.equal(legalGameActions(disabledBearerState, 'north').some(({ descriptor }) =>
-      descriptor.kind === 'activate-artifact-damage'
-        && descriptor.artifactInstanceId === ballista.instanceId), false);
-    const uncarriedState = {
-      ...ctx.state,
-      realm: {
-        ...ctx.state.realm,
-        artifacts: ctx.state.realm.artifacts!.map((artifact) =>
-          artifact.instanceId === ballista.instanceId
-            ? {
-              cardId: artifact.cardId,
-              instanceId: artifact.instanceId,
-              location: 'C4' as const,
-              owner: artifact.owner,
-              region: 'surface' as const,
-              source: artifact.source,
-            }
-            : artifact),
-      },
-    };
-    assert.equal(legalGameActions(uncarriedState, 'north').some(({ descriptor }) =>
-      descriptor.kind === 'activate-artifact-damage'
-        && descriptor.artifactInstanceId === ballista.instanceId), false);
-    const hiddenTargetState = {
-      ...ctx.state,
-      realm: {
-        ...ctx.state.realm,
-        units: ctx.state.realm.units.map((unit) => unit.instanceId === nearTarget.instanceId
-          ? { ...unit, stealthed: true }
-          : unit),
-      },
-    };
-    assert.equal(legalGameActions(hiddenTargetState, 'north').some(({ descriptor }) =>
-      descriptor.kind === 'activate-artifact-damage'
-        && descriptor.target.instanceId === nearTarget.instanceId), false);
-    const undergroundState = {
-      ...ctx.state,
-      realm: {
-        ...ctx.state.realm,
-        units: ctx.state.realm.units.map((unit) =>
-          unit.instanceId === bearer.instanceId || unit.instanceId === helper.instanceId
-            ? { ...unit, region: 'underground' as const }
-            : unit),
-      },
-    };
-    assert.equal(legalGameActions(undergroundState, 'north').some(({ descriptor }) =>
-      descriptor.kind === 'activate-artifact-damage'
-        && descriptor.artifactInstanceId === ballista.instanceId
-        && descriptor.helper.instanceId === helper.instanceId
-        && descriptor.target.instanceId === burrowedTarget.instanceId), true);
+    // A moved-away or tapped helper excluding activation, and a spent bearer alone unable to
+    // pay the second tap, are proven directly in Rust by
+    // `a_siege_ballista_should_require_both_its_bearer_and_a_second_ready_ally` in
+    // crates/sorcery-engine/tests/artifact_rules.rs (the pairs formula in
+    // `rule_catalog_0143_siege_ballista_should_tap_bearer_and_ally_for_measured_artifact_damage`
+    // there likewise never offers a unit standing elsewhere or a spent one as helper). A
+    // stealthed target and an uncarried (loose) Ballista offering nothing are proven directly
+    // by that same `rule_catalog_0143` test. A disabled bearer offering no activation at all,
+    // and a bearer/helper/target that all share the underground region still working, are
+    // proven directly by `disabled_siege_ballista_bearer_offers_no_activation` and
+    // `siege_ballista_should_work_from_matching_underground_positions` in
+    // crates/sorcery-engine/tests/artifact_cutover_rules.rs.
 
     const overlap = abilities.find(({ descriptor }) =>
       descriptor.kind === 'activate-artifact-damage'
@@ -2669,45 +2425,11 @@ test('RULE-03 Rolling Boulder rolls maximally and damages other units along its 
     assert.equal(await ctx.verifyReplay(), true);
     await ctx.resume(beforeZero);
 
-    // TODO(rust-cutover): synthetic state, needs a Rust-side proof. carriedSession forces
-    // the boulder Artifact onto a bearer directly, which is not reachable through legal
-    // play, so this branch stays on TS legality/step.
-    const carriedSession: GameSession = {
-      ...ctx.session,
-      state: {
-        ...ctx.state,
-        realm: {
-          ...ctx.state.realm,
-          artifacts: ctx.state.realm.artifacts!.map((artifact) =>
-            artifact.instanceId === boulder.instanceId
-              ? {
-                bearer: {
-                  instanceId: pusher.instanceId,
-                  kind: 'minion' as const,
-                  seat: 'north' as const,
-                },
-                cardId: artifact.cardId,
-                instanceId: artifact.instanceId,
-                owner: artifact.owner,
-                source: artifact.source,
-              }
-              : artifact),
-        },
-      },
-    };
-    const carriedResult = stepGame(carriedSession, action(carriedSession, ({ descriptor }) =>
-      descriptor.kind === 'activate-artifact-roll-damage'
-        && descriptor.artifactInstanceId === boulder.instanceId
-        && descriptor.pusher.instanceId === pusher.instanceId
-        && descriptor.direction === 'south'));
-    assert.equal(carriedResult.accepted, true);
-    if (!carriedResult.accepted) return;
-    assert.deepEqual(observeGame(carriedResult.session.state, 'north').realm.artifacts
-      ?.filter(({ instanceId }) => instanceId === boulder.instanceId)
-      .map(({ bearer, controller, location, region }) => ({
-        bearer, controller, location, region,
-      })),
-    [{ bearer: undefined, controller: null, location: 'C1', region: 'surface' }]);
+    // A carried Rolling Boulder leaving its bearer to finish loose at the roll's endpoint is
+    // proven directly in Rust, reaching the carried state through a real `pick-up-artifacts`
+    // action rather than forging it, by
+    // `rule_catalog_0145_rolling_boulder_should_roll_maximally_and_damage_other_units_along_its_path`
+    // in crates/sorcery-engine/tests/rolling_boulder_rules.rs.
 
     const result = await ctx.step(southRoll);
     assert.equal(result.accepted, true);
