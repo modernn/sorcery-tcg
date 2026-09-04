@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { readFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,12 +17,8 @@ import { createGameCheckpoint } from '../engine/checkpoint.ts';
 import type { EngineRejection } from '../engine/contract.ts';
 import {
   createGameManifest,
-  createGameSession,
   hashGameState,
-  legalGameActions,
   observeGame,
-  stepGame,
-  verifyGameReplay,
   type GameActionRequest,
   type GameCardDefinition,
   type GameDeckSpec,
@@ -6131,9 +6128,32 @@ function buildManifest(
 // `GameSession` values around and branch by reusing an older value, so the driver re-positions
 // the Rust session with `resume` whenever the requested session is not the one it currently
 // holds. Seed scans build a fresh manifest per seed, which is why this keeps one long-lived
-// client instead of one `withRustSession` process per manifest.
-let engineClient: RustSessionClient | undefined;
-let engineKey = '';
+// client instead of one `withRustSession` process per manifest. The state lives in
+// AsyncLocalStorage (not a bare module-level `let`) so two top-level entry points running
+// concurrently (e.g. `Promise.all([runPrivateGameCheck(), loadPrivateStarterCatalog()])` in
+// tests) each get their own isolated Rust process instead of racing on a shared one.
+interface EngineStore {
+  client: RustSessionClient | undefined;
+  key: string;
+}
+const engineStorage = new AsyncLocalStorage<EngineStore>();
+
+function engineStore(): EngineStore {
+  const store = engineStorage.getStore();
+  if (!store) throw new Error('private game engine used outside an isolated engine scope');
+  return store;
+}
+
+/** Runs `body` with its own isolated Rust engine process, closed on exit. */
+async function withIsolatedEngine<T>(body: () => Promise<T>): Promise<T> {
+  return engineStorage.run({ client: undefined, key: '' }, async () => {
+    try {
+      return await body();
+    } finally {
+      await closeEngine();
+    }
+  });
+}
 
 function sessionKey(session: GameSession): string {
   return canonicalJson({
@@ -6143,19 +6163,21 @@ function sessionKey(session: GameSession): string {
 }
 
 function trackSession(session: GameSession): GameSession {
-  engineKey = sessionKey(session);
+  engineStore().key = sessionKey(session);
   return session;
 }
 
 async function engine(): Promise<RustSessionClient> {
-  engineClient ??= await RustSessionClient.start();
-  return engineClient;
+  const store = engineStore();
+  store.client ??= await RustSessionClient.start();
+  return store.client;
 }
 
 async function closeEngine(): Promise<void> {
-  const client = engineClient;
-  engineClient = undefined;
-  engineKey = '';
+  const store = engineStore();
+  const client = store.client;
+  store.client = undefined;
+  store.key = '';
   if (client) await client.close();
 }
 
@@ -6169,13 +6191,14 @@ async function newSession(manifest: GameManifest): Promise<GameSession> {
 /** Returns the shared client with its session positioned at the requested history. */
 async function positioned(session: GameSession): Promise<RustSessionClient> {
   const client = await engine();
-  if (sessionKey(session) === engineKey) return client;
+  const store = engineStore();
+  if (sessionKey(session) === store.key) return client;
   if (session.attempts.length === 0) {
     await client.newSession(canonicalJson(session.manifest as unknown as JsonValue));
   } else {
     await client.resume(createGameCheckpoint(session) as unknown as JsonValue);
   }
-  engineKey = sessionKey(session);
+  store.key = sessionKey(session);
   return client;
 }
 
@@ -6235,21 +6258,6 @@ async function keep(session: GameSession): Promise<GameSession> {
     descriptor.kind === 'mulligan'
       && descriptor.atlasOrder.length === 0
       && descriptor.spellbookOrder.length === 0));
-}
-
-function legacyAction(
-  session: GameSession,
-  predicate: (candidate: GameLegalAction) => boolean,
-): GameLegalAction {
-  const found = legalGameActions(session.state, session.state.decisionSeat).find(predicate);
-  if (!found) throw new Error(`actual-card scenario has no expected action in ${session.state.phase}`);
-  return found;
-}
-
-function legacyAccept(session: GameSession, candidate: GameLegalAction): GameSession {
-  const result = stepGame(session, candidate);
-  if (!result.accepted) throw new Error(`actual-card scenario action rejected: ${result.reason.code}`);
-  return result.session;
 }
 
 function openingPair(
@@ -6412,9 +6420,9 @@ async function findOpening(
   throw new Error(`private scenario seed ${seed} no longer produces its supported opening`);
 }
 
-function findEarthOpening(
+async function findEarthOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   deathriteInstanceId: string;
   genesisInstanceId: string;
   ghostTownSiteInstanceId: string;
@@ -6429,10 +6437,10 @@ function findEarthOpening(
   southFirstSiteInstanceId: string;
   southMinionInstanceId: string;
   southSecondSiteInstanceId: string;
-}> {
+}>> {
   const seed = input.config.earthSeed;
   const built = buildManifest(input, seed, 'earth');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const northSites = session.state.players.north.hand.atlas.filter((site) => {
     const definition = session.state.cards[site.cardId];
     return definition?.cardType === 'site' && definition.elements.includes('earth');
@@ -6491,19 +6499,19 @@ function findEarthOpening(
   throw new Error(`private Earth scenario seed ${seed} no longer produces its supported opening`);
 }
 
-function findEarthMalakhimOpening(
+async function findEarthMalakhimOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   malakhimInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   siteInstanceIds: readonly [string, string, string, string, string];
   southSiteInstanceId: string;
   session: GameSession;
-}> {
+}>> {
   const seed = 13_389;
   const built = buildManifest(input, seed, 'earth-malakhim');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const accessibleSites = [
     ...session.state.players.north.hand.atlas,
     ...session.state.players.north.atlas.slice(0, 2),
@@ -6542,10 +6550,10 @@ function findEarthMalakhimOpening(
   };
 }
 
-function findEarthDuelOpening(
+async function findEarthDuelOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   mode: 'first-strike' | 'ranged' | 'ward' = 'ranged',
-): Readonly<{
+): Promise<Readonly<{
   attackerInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -6555,7 +6563,7 @@ function findEarthDuelOpening(
   southFirstSiteInstanceId: string;
   southSecondSiteInstanceId: string;
   targetInstanceId: string;
-}> {
+}>> {
   const seed = mode === 'ward'
     ? input.config.earthWardSeed
     : mode === 'first-strike'
@@ -6566,7 +6574,7 @@ function findEarthDuelOpening(
     seed,
     mode === 'ward' ? 'earth-ward' : mode === 'first-strike' ? 'earth-first-strike' : 'earth',
   );
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const northSites = session.state.players.north.hand.atlas.filter((site) => {
     const definition = session.state.cards[site.cardId];
     return definition?.cardType === 'site' && definition.elements.includes('earth');
@@ -6625,9 +6633,9 @@ function findEarthDuelOpening(
   throw new Error(`private Earth ${mode} scenario seed ${seed} no longer produces its supported opening`);
 }
 
-function findEarthDuelMagicOpening(
+async function findEarthDuelMagicOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   boskTrollInstanceId: string;
   duelInstanceId: string;
   elthamTownsfolkInstanceId: string;
@@ -6636,11 +6644,11 @@ function findEarthDuelMagicOpening(
   northSiteInstanceIds: readonly [string, string, string];
   session: GameSession;
   southSiteInstanceIds: readonly [string, string];
-}> {
+}>> {
   // ponytail: bounded opening scan avoids another private seed/config field.
   for (let offset = 1; offset <= 4096; offset += 1) {
     const built = buildManifest(input, input.config.earthSeed + offset, 'earth-duel');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northEarthSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('earth');
@@ -6693,9 +6701,9 @@ function findEarthDuelMagicOpening(
   throw new Error('private Duel Magic scenario no longer produces its supported opening');
 }
 
-function findEarthBorderMilitiaOpening(
+async function findEarthBorderMilitiaOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   borderMilitiaInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -6703,10 +6711,10 @@ function findEarthBorderMilitiaOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceIds: readonly [string, string, string];
-}> {
+}>> {
   const seed = 7688;
   const built = buildManifest(input, seed, 'earth-border-militia');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const earthSites = (seat: GameSeat) => session.state.players[seat].hand.atlas
     .filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
@@ -6739,19 +6747,19 @@ function findEarthBorderMilitiaOpening(
   };
 }
 
-function findEarthHumbleVillageOpening(
+async function findEarthHumbleVillageOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   humbleVillageInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   seed: number;
   session: GameSession;
-}> {
+}>> {
   // ponytail: pinned seed keeps this private proof fast without another config field.
   const seed = 7383;
   const built = buildManifest(input, seed, 'earth-humble-village');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const humbleVillageInstanceId = session.state.players.north.hand.atlas
     .find(({ cardId }) => cardId === input.humbleVillage.stableId)?.instanceId;
   if (!humbleVillageInstanceId) {
@@ -6760,11 +6768,11 @@ function findEarthHumbleVillageOpening(
   return { ...built, humbleVillageInstanceId, seed, session };
 }
 
-function findEarthArtifactOpening(
+async function findEarthArtifactOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   artifact: NormalizedCard,
   scenario: 'earth-poisonous-dagger' | 'earth-sword-and-shield',
-): Readonly<{
+): Promise<Readonly<{
   artifactInstanceId: string;
   boskTrollInstanceId: string;
   elthamTownsfolkInstanceId: string;
@@ -6775,14 +6783,14 @@ function findEarthArtifactOpening(
   southEarthSiteInstanceIds: readonly [string, string];
   zapDrawCount?: number;
   zapInstanceIds?: readonly [string, string];
-}> {
+}>> {
   const offsetLimit = scenario === 'earth-sword-and-shield' ? 1 : 4096;
   for (let offset = 1; offset <= offsetLimit; offset += 1) {
     const seed = scenario === 'earth-sword-and-shield'
       ? 9_492
       : input.config.earthSeed + offset;
     const built = buildManifest(input, seed, scenario);
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const earthSites = (seat: GameSeat) => session.state.players[seat].hand.atlas.filter(({ cardId }) => {
       if (cardId === input.ghostTownSite.stableId) return false;
       const definition = session.state.cards[cardId];
@@ -6860,9 +6868,9 @@ function findEarthArtifactOpening(
   throw new Error('private carried Artifact scenario no longer produces its supported opening');
 }
 
-function findEarthOverpowerOpening(
+async function findEarthOverpowerOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   elthamTownsfolkInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -6870,11 +6878,11 @@ function findEarthOverpowerOpening(
   overpowerInstanceId: string;
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded opening scan avoids another private config field.
   for (let offset = 1; offset <= 256; offset += 1) {
     const built = buildManifest(input, input.config.earthSeed + offset, 'earth-overpower');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('earth');
@@ -6905,9 +6913,9 @@ function findEarthOverpowerOpening(
   throw new Error('private temporary power Magic no longer produces its supported opening');
 }
 
-function findEarthBurrowingOpening(
+async function findEarthBurrowingOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   comparisonInstanceId: string;
   featuredInstanceId: string;
   manifest: GameManifest;
@@ -6916,12 +6924,12 @@ function findEarthBurrowingOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceIds: readonly [string, string];
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
   for (let offset = 1; offset <= 64; offset += 1) {
     const seed = input.config.earthRangedSeed + offset;
     const built = buildManifest(input, seed, 'earth-burrowing');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const landSites = (seat: GameSeat) => session.state.players[seat].hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && !definition.elements.includes('water');
@@ -6981,9 +6989,9 @@ function findEarthBurrowingOpening(
   throw new Error('private Earth Burrowing scenario no longer produces its supported opening');
 }
 
-function findEarthEntombedOpening(
+async function findEarthEntombedOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   boskTrollInstanceId: string;
   entombedInstanceId: string;
   manifest: GameManifest;
@@ -6992,12 +7000,12 @@ function findEarthEntombedOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
   for (let offset = 1; offset <= 256; offset += 1) {
     const seed = input.config.earthSeed + offset;
     const built = buildManifest(input, seed, 'earth-entombed');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site'
@@ -7031,9 +7039,9 @@ function findEarthEntombedOpening(
   throw new Error('private Earth Entombed scenario no longer produces its supported opening');
 }
 
-function findEarthForwardOpening(
+async function findEarthForwardOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   ghostTownSiteInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -7042,12 +7050,12 @@ function findEarthForwardOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceIds: readonly [string, string];
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
   for (let offset = 1; offset <= 256; offset += 1) {
     const seed = input.config.earthSeed + offset;
     const built = buildManifest(input, seed, 'earth-forward');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return cardId !== input.ghostTownSite.stableId
@@ -7079,9 +7087,9 @@ function findEarthForwardOpening(
   throw new Error('private Earth forward-only scenario no longer produces its supported opening');
 }
 
-function findEarthImmobileOpening(
+async function findEarthImmobileOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   comparatorInstanceId: string;
   ghostTownSiteInstanceId: string;
   manifest: GameManifest;
@@ -7090,11 +7098,11 @@ function findEarthImmobileOpening(
   pudgeInstanceId: string;
   session: GameSession;
   southSiteInstanceIds: readonly [string, string];
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
   for (let offset = 1; offset <= 2048; offset += 1) {
     const built = buildManifest(input, input.config.earthSeed + offset, 'earth-immobile');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return cardId !== input.ghostTownSite.stableId
@@ -7138,9 +7146,9 @@ function findEarthImmobileOpening(
   throw new Error('private Earth Immobile scenario no longer produces its supported opening');
 }
 
-function findEarthDivineHealingOpening(
+async function findEarthDivineHealingOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   attackerInstanceId: string;
   divineHealingInstanceId: string;
   manifest: GameManifest;
@@ -7148,11 +7156,11 @@ function findEarthDivineHealingOpening(
   northSiteInstanceIds: readonly [string, string, string];
   session: GameSession;
   southSiteInstanceIds: readonly [string, string];
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
   for (let offset = 1; offset <= 256; offset += 1) {
     const built = buildManifest(input, input.config.earthSeed + offset, 'earth-divine-healing');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const earthSites = (seat: GameSeat) => session.state.players[seat].hand.atlas
       .filter(({ cardId }) => {
         const definition = session.state.cards[cardId];
@@ -7193,9 +7201,9 @@ function findEarthDivineHealingOpening(
   throw new Error('private Earth controller-healing Magic scenario no longer produces its supported opening');
 }
 
-function findEarthGrainSparrowOpening(
+async function findEarthGrainSparrowOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   demonInstanceId: string;
   ghostTownInstanceId: string;
   grainSparrowInstanceId: string;
@@ -7204,10 +7212,10 @@ function findEarthGrainSparrowOpening(
   session: GameSession;
   southSiteInstanceId: string;
   steppeInstanceId: string;
-}> {
+}>> {
   const seed = 8_016;
   const built = buildManifest(input, seed, 'earth-grain-sparrow');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const northAtlasHand = session.state.players.north.hand.atlas;
   const steppeInstanceId = northAtlasHand
     .find(({ cardId }) => cardId === input.steppe.stableId)?.instanceId;
@@ -7244,9 +7252,9 @@ function findEarthGrainSparrowOpening(
   };
 }
 
-function findEarthBuryOpening(
+async function findEarthBuryOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   boskTrollInstanceId: string;
   buryInstanceId: string;
   manifest: GameManifest;
@@ -7254,11 +7262,11 @@ function findEarthBuryOpening(
   northSiteInstanceIds: readonly [string, string, string];
   session: GameSession;
   southSiteInstanceIds: readonly [string, string];
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
   for (let offset = 1; offset <= 256; offset += 1) {
     const built = buildManifest(input, input.config.earthSeed + offset, 'earth-bury');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const earthSites = (seat: GameSeat) => session.state.players[seat].hand.atlas
       .filter(({ cardId }) => {
         const definition = session.state.cards[cardId];
@@ -7294,9 +7302,9 @@ function findEarthBuryOpening(
   throw new Error('private forced-burrow Magic scenario no longer produces its supported opening');
 }
 
-function findEarthQuagmireOpening(
+async function findEarthQuagmireOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   northSiteInstanceIds: readonly [string, string];
@@ -7305,7 +7313,7 @@ function findEarthQuagmireOpening(
   session: GameSession;
   southSiteInstanceIds: readonly [string, string];
   wildBoarsInstanceId: string;
-}> {
+}>> {
   const ordinaryEarthSiteIds = new Set(input.cards.filter((card) =>
     card.cardType === 'site'
       && card.rarity === 'ordinary'
@@ -7314,7 +7322,7 @@ function findEarthQuagmireOpening(
       && card.rulesText.trim() === '').map(({ stableId }) => stableId));
   const seed = 10_583;
   const built = buildManifest(input, seed, 'earth-quagmire');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const ordinarySites = (seat: GameSeat) => session.state.players[seat].hand.atlas
     .filter(({ cardId }) => ordinaryEarthSiteIds.has(cardId));
   const northSites = ordinarySites('north');
@@ -7340,9 +7348,9 @@ function findEarthQuagmireOpening(
   };
 }
 
-function findEarthEntangleTerrainOpening(
+async function findEarthEntangleTerrainOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   caveTrollsInstanceId: string;
   entangleTerrainInstanceId: string;
   malakhimInstanceId: string;
@@ -7352,12 +7360,12 @@ function findEarthEntangleTerrainOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: pinned seed keeps the actual-card proof fast and deterministic.
   const seed = 2;
   {
     const built = buildManifest(input, seed, 'earth-entangle-terrain');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const startingNorthSites = session.state.players.north.hand.atlas;
     const firstLandSite = startingNorthSites.find(({ cardId }) => {
       const definition = session.state.cards[cardId];
@@ -7407,9 +7415,9 @@ function findEarthEntangleTerrainOpening(
   throw new Error('private terrain Aura scenario no longer produces its supported opening');
 }
 
-function findEarthHolyGroundOpening(
+async function findEarthHolyGroundOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   demonInstanceIds: readonly [string, string];
   holyGroundInstanceId: string;
   manifest: GameManifest;
@@ -7418,7 +7426,7 @@ function findEarthHolyGroundOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   const ordinaryFireSiteIds = new Set(input.cards.filter((card) =>
     card.cardType === 'site'
       && card.rarity === 'ordinary'
@@ -7428,7 +7436,7 @@ function findEarthHolyGroundOpening(
   // ponytail: pinned seed keeps the actual-card proof fast and deterministic.
   const seed = 7398;
   const built = buildManifest(input, seed, 'earth-holy-ground');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const northSites = session.state.players.north.hand.atlas
     .filter(({ cardId }) => ordinaryFireSiteIds.has(cardId));
   const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
@@ -7461,9 +7469,9 @@ function findEarthHolyGroundOpening(
   throw new Error('private Holy Ground scenario no longer produces its supported opening');
 }
 
-function findEarthBedrockOpening(
+async function findEarthBedrockOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   bedrockInstanceId: string;
   granaryRatsInstanceId: string;
   manifest: GameManifest;
@@ -7473,11 +7481,11 @@ function findEarthBedrockOpening(
   sinkholeInstanceId: string;
   southSiteInstanceId: string;
   wastelandInstanceId: string;
-}> {
+}>> {
   // ponytail: pinned seed keeps the actual-card proof fast and deterministic.
   const seed = 7398;
   const built = buildManifest(input, seed, 'earth-bedrock');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const bedrockInstanceId = session.state.players.north.hand.atlas
     .find(({ cardId }) => cardId === input.bedrock.stableId)?.instanceId;
   const sinkholeInstanceId = session.state.players.north.hand.atlas
@@ -7508,9 +7516,9 @@ function findEarthBedrockOpening(
   throw new Error('private immutable-site scenario no longer produces its supported opening');
 }
 
-function findEarthWraetannisTitanOpening(
+async function findEarthWraetannisTitanOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   houseArnBannermanInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -7520,7 +7528,7 @@ function findEarthWraetannisTitanOpening(
   southEnemyInstanceIds: readonly [string, string];
   southSiteInstanceIds: readonly [string, string, string];
   wraetannisTitanInstanceId: string;
-}> {
+}>> {
   const earthThresholdSiteIds = new Set(input.cards.filter((card) =>
     card.cardType === 'site'
       && card.elements.length === 1
@@ -7529,7 +7537,7 @@ function findEarthWraetannisTitanOpening(
   // ponytail: pinned seed keeps the actual-card proof fast and deterministic.
   const seed = 9036;
   const built = buildManifest(input, seed, 'earth-wraetannis-titan');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const northSites = [
     ...session.state.players.north.hand.atlas,
     ...session.state.players.north.atlas.slice(0, 4),
@@ -7589,9 +7597,9 @@ function findEarthWraetannisTitanOpening(
   throw new Error('private Wraetannis Titan seed no longer produces its supported opening');
 }
 
-function findEarthKingOfRealmOpening(
+async function findEarthKingOfRealmOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   kingOfRealmInstanceId: string;
   landSurveyorInstanceId: string;
   manifest: GameManifest;
@@ -7601,11 +7609,11 @@ function findEarthKingOfRealmOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: pinned seed keeps the actual-card proof fast and deterministic.
   const seed = 2;
   const built = buildManifest(input, seed, 'earth-king-of-realm');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const northSites = [
     ...session.state.players.north.hand.atlas,
     ...session.state.players.north.atlas.slice(0, 4),
@@ -7661,9 +7669,9 @@ function findEarthKingOfRealmOpening(
   throw new Error('private King of the Realm seed no longer produces its supported opening');
 }
 
-function findEarthMountainGiantOpening(
+async function findEarthMountainGiantOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   manifest: GameManifest;
   mountainGiantInstanceId: string;
   names: ReadonlyMap<string, string>;
@@ -7681,11 +7689,11 @@ function findEarthMountainGiantOpening(
   session: GameSession;
   southSiteInstanceIds: readonly [string, string, string];
   wildBoarsInstanceId: string;
-}> {
+}>> {
   // ponytail: pinned seed keeps the actual-card proof fast and deterministic.
   const seed = 25;
   const built = buildManifest(input, seed, 'earth-mountain-giant');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const northSites = [
     ...session.state.players.north.hand.atlas,
     ...session.state.players.north.atlas.slice(0, 5),
@@ -7738,9 +7746,9 @@ function findEarthMountainGiantOpening(
   throw new Error('private Mountain Giant seed no longer produces its supported opening');
 }
 
-function findEarthSlumberingGiantessOpening(
+async function findEarthSlumberingGiantessOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   albespinePikemenInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -7749,11 +7757,11 @@ function findEarthSlumberingGiantessOpening(
   session: GameSession;
   slumberingGiantessInstanceId: string;
   southSiteInstanceIds: readonly [string, string, string];
-}> {
+}>> {
   // ponytail: pinned seed keeps this private proof fast and deterministic.
   const seed = 8883;
   const built = buildManifest(input, seed, 'earth-slumbering-giantess');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const earthSites = (seat: GameSeat) => session.state.players[seat].hand.atlas
     .filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
@@ -7794,9 +7802,9 @@ function findEarthSlumberingGiantessOpening(
   throw new Error('private Slumbering Giantess seed no longer produces its supported opening');
 }
 
-function findEarthCaveInOpening(
+async function findEarthCaveInOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   boskTrollInstanceId: string;
   caveInInstanceId: string;
   caveTrollsInstanceId: string;
@@ -7811,7 +7819,7 @@ function findEarthCaveInOpening(
   southSiteInstanceIds: readonly [string, string, string];
   southSpellDrawCount: number;
   swordAndShieldInstanceId: string;
-}> {
+}>> {
   const drawCount = (session: GameSession, seat: GameSeat, instanceId: string): number => {
     const player = session.state.players[seat];
     if (player.hand.spellbook.some((card) => card.instanceId === instanceId)) return 0;
@@ -7821,7 +7829,7 @@ function findEarthCaveInOpening(
   // Calibrated against the ignored exact-card authority snapshot.
   const seed = 9_852;
   const built = buildManifest(input, seed, 'earth-cave-in');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const earthSites = (seat: GameSeat) => session.state.players[seat].hand.atlas
     .filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
@@ -7894,9 +7902,9 @@ function findEarthCaveInOpening(
   throw new Error('private Cave-In scenario no longer produces its supported opening');
 }
 
-function findEarthCraterizeOpening(
+async function findEarthCraterizeOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   craterizeInstanceId: string;
   discardSiteInstanceId: string;
   manifest: GameManifest;
@@ -7905,11 +7913,11 @@ function findEarthCraterizeOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded scan avoids another ignored scenario-config field.
   for (let seed = 1; seed <= 4_096; seed += 1) {
     const built = buildManifest(input, seed, 'earth-craterize');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northSites = [
       ...session.state.players.north.hand.atlas,
       ...session.state.players.north.atlas.slice(0, 6),
@@ -7951,9 +7959,9 @@ function findEarthCraterizeOpening(
   throw new Error('private Craterize scenario lacks its supported bounded opening');
 }
 
-function findEarthSiegeBallistaOpening(
+async function findEarthSiegeBallistaOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   bearerInstanceId: string;
   helperInstanceId: string;
   manifest: GameManifest;
@@ -7965,11 +7973,11 @@ function findEarthSiegeBallistaOpening(
   snowLeopardInstanceId: string;
   southAirSiteInstanceId: string;
   southSecondSiteInstanceId: string;
-}> {
+}>> {
   // Calibrated against the ignored exact-card authority snapshot.
   const seed = 3_828;
   const built = buildManifest(input, seed, 'earth-siege-ballista');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const northEarthSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('earth');
@@ -8022,9 +8030,9 @@ function findEarthSiegeBallistaOpening(
   throw new Error('private Siege Ballista scenario no longer produces its supported opening');
 }
 
-function findEarthPayloadTrebuchetOpening(
+async function findEarthPayloadTrebuchetOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   bearerInstanceId: string;
   caveTrollsInstanceId: string;
   helperInstanceId: string;
@@ -8036,11 +8044,11 @@ function findEarthPayloadTrebuchetOpening(
   session: GameSession;
   southSiteInstanceIds: readonly [string, string];
   targetMinionInstanceId: string;
-}> {
+}>> {
   // Calibrated against the ignored exact-card authority snapshot.
   const seed = 188;
   const built = buildManifest(input, seed, 'earth-payload-trebuchet');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const northEarthSites = [
     ...session.state.players.north.hand.atlas,
     ...session.state.players.north.atlas.slice(0, 4),
@@ -8113,12 +8121,12 @@ type EarthRollingBoulderOpening = Readonly<{
   wildBoarsInstanceId: string;
 }>;
 
-function earthRollingBoulderOpeningAtSeed(
+async function earthRollingBoulderOpeningAtSeed(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-): EarthRollingBoulderOpening | null {
+): Promise<EarthRollingBoulderOpening | null> {
   const built = buildManifest(input, seed, 'earth-rolling-boulder');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const northHandSites = session.state.players.north.hand.atlas;
   const northEarthSite = northHandSites.find(({ cardId }) => {
     const definition = session.state.cards[cardId];
@@ -8171,19 +8179,19 @@ function earthRollingBoulderOpeningAtSeed(
   };
 }
 
-function findEarthRollingBoulderOpening(
+async function findEarthRollingBoulderOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): EarthRollingBoulderOpening {
+): Promise<EarthRollingBoulderOpening> {
   // Calibrated against the ignored exact-card authority snapshot.
   const seed = 378;
-  const opening = earthRollingBoulderOpeningAtSeed(input, seed);
+  const opening = await earthRollingBoulderOpeningAtSeed(input, seed);
   if (opening) return opening;
   throw new Error('private Rolling Boulder scenario no longer produces its supported opening');
 }
 
-function findEarthRescueOpening(
+async function findEarthRescueOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   boskTrollInstanceId: string;
   buryInstanceId: string;
   manifest: GameManifest;
@@ -8192,11 +8200,11 @@ function findEarthRescueOpening(
   rescueInstanceId: string;
   session: GameSession;
   southSiteInstanceIds: readonly [string, string, string];
-}> {
+}>> {
   // ponytail: bounded opening scan reuses Bury without adding private config.
   for (let offset = 1; offset <= 256; offset += 1) {
     const built = buildManifest(input, input.config.earthSeed + offset, 'earth-rescue');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const earthSites = (seat: GameSeat) => session.state.players[seat].hand.atlas
       .filter(({ cardId }) => {
         const definition = session.state.cards[cardId];
@@ -8239,18 +8247,18 @@ function findEarthRescueOpening(
   throw new Error('private cemetery-to-hand Rescue scenario no longer produces its supported opening');
 }
 
-function findEarthShallowGraveOpening(
+async function findEarthShallowGraveOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   session: GameSession;
   shallowGraveInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
   for (let offset = 1; offset <= 256; offset += 1) {
     const built = buildManifest(input, input.config.earthSeed + offset, 'earth-shallow-grave');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const shallowGraveInstanceId = session.state.players.north.hand.atlas
       .find(({ cardId }) => cardId === input.shallowGrave.stableId)?.instanceId;
     if (shallowGraveInstanceId && session.state.players.north.spellbook.length >= 2) {
@@ -8306,11 +8314,7 @@ async function findStarterOpening(
 export async function loadPrivateStarterCatalog(
   path = DEFAULT_SCENARIO,
 ): Promise<readonly PrivateStarterPreset[]> {
-  try {
-    return await buildPrivateStarterCatalog(path);
-  } finally {
-    await closeEngine();
-  }
+  return withIsolatedEngine(() => buildPrivateStarterCatalog(path));
 }
 
 async function buildPrivateStarterCatalog(
@@ -8375,9 +8379,9 @@ async function buildPrivateStarterCatalog(
   return Object.freeze(presets);
 }
 
-function findFireHamletOpening(
+async function findFireHamletOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   hamletInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -8386,12 +8390,12 @@ function findFireHamletOpening(
   session: GameSession;
   southSiteInstanceId: string;
   wastelandInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another strict private config field.
   for (let offset = 1; offset <= 256; offset += 1) {
     const seed = input.config.fireSeed + offset;
     const built = buildManifest(input, seed, 'fire-hamlet');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const hamletInstanceId = session.state.players.north.hand.atlas
       .find(({ cardId }) => cardId === input.hamlet.stableId)?.instanceId;
     const wastelandInstanceId = session.state.players.north.hand.atlas
@@ -8414,9 +8418,9 @@ function findFireHamletOpening(
   throw new Error('private Hamlet scenario no longer produces its supported opening');
 }
 
-function findEarthSinkholeOpening(
+async function findEarthSinkholeOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   recoverySiteInstanceId: string;
@@ -8425,12 +8429,12 @@ function findEarthSinkholeOpening(
   sinkholeInstanceId: string;
   southSiteInstanceId: string;
   targetSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another private config field.
   for (let offset = 1; offset <= 4096; offset += 1) {
     const seed = input.config.earthSeed + offset;
     const built = buildManifest(input, seed, 'earth-sinkhole');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const sinkholeInstanceId = session.state.players.north.hand.atlas
       .find(({ cardId }) => cardId === input.sinkhole.stableId)?.instanceId;
     const targetSiteInstanceId = session.state.players.north.hand.atlas
@@ -8459,9 +8463,9 @@ function findEarthSinkholeOpening(
   throw new Error('private sacrifice-to-destroy site scenario no longer produces its supported opening');
 }
 
-function findEarthSecretTunnelOpening(
+async function findEarthSecretTunnelOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   caveTrollsInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -8470,12 +8474,12 @@ function findEarthSecretTunnelOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
   for (let offset = 1; offset <= 256; offset += 1) {
     const seed = input.config.earthSeed + offset;
     const built = buildManifest(input, seed, 'earth-tunnel');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return cardId !== input.secretTunnel.stableId
@@ -8510,9 +8514,9 @@ function findEarthSecretTunnelOpening(
   throw new Error('private Secret Tunnel scenario no longer produces its supported opening');
 }
 
-function findAirOpening(
+async function findAirOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   attackerInstanceId: string;
   manifest: GameManifest;
   movementInstanceId: string;
@@ -8521,10 +8525,10 @@ function findAirOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   const seed = input.config.airSeed;
   const built = buildManifest(input, seed, 'air');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const northSites = session.state.players.north.hand.atlas.filter((site) => {
     const definition = session.state.cards[site.cardId];
     return definition?.cardType === 'site' && definition.elements.includes('air');
@@ -8561,9 +8565,9 @@ function findAirOpening(
   throw new Error(`private Air scenario seed ${seed} no longer produces its supported opening`);
 }
 
-function findAirZapOpening(
+async function findAirZapOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   northSiteInstanceId: string;
@@ -8571,11 +8575,11 @@ function findAirZapOpening(
   snowLeopardInstanceId: string;
   southSiteInstanceId: string;
   zapInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
   for (let offset = 1; offset <= 256; offset += 1) {
     const built = buildManifest(input, input.config.airSeed + offset, 'air-zap');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const airSite = (seat: GameSeat): string | undefined =>
       session.state.players[seat].hand.atlas.find(({ cardId }) => {
         const definition = session.state.cards[cardId];
@@ -8607,9 +8611,9 @@ function findAirZapOpening(
   throw new Error('private Air target-unit damage Magic scenario no longer produces its supported opening');
 }
 
-function findAirFireFatalityOpening(
+async function findAirFireFatalityOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   fatalityInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -8618,11 +8622,11 @@ function findAirFireFatalityOpening(
   snowLeopardInstanceId: string;
   southSpireInstanceId: string;
   zapInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded opening scan avoids another private seed field.
   for (let offset = 1; offset <= 4096; offset += 1) {
     const built = buildManifest(input, input.config.airSeed + offset, 'air-fire-fatality');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northSites = [
       ...session.state.players.north.hand.atlas,
       ...session.state.players.north.atlas.slice(0, 1),
@@ -8670,9 +8674,9 @@ function findAirFireFatalityOpening(
   throw new Error('private Fatality scenario lacks its supported mixed opening');
 }
 
-function findAirArcLightningOpening(
+async function findAirArcLightningOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   arcLightningInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -8680,11 +8684,11 @@ function findAirArcLightningOpening(
   session: GameSession;
   snowLeopardInstanceId: string;
   southSiteInstanceIds: readonly [string, string];
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
   for (let offset = 1; offset <= 256; offset += 1) {
     const built = buildManifest(input, input.config.airSeed + offset, 'air-arc-lightning');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northHandSites = session.state.players.north.hand.atlas;
     const northDrawnSite = session.state.players.north.atlas[0];
     const northSites = northDrawnSite ? [...northHandSites, northDrawnSite] : [];
@@ -8734,9 +8738,9 @@ function findAirArcLightningOpening(
   throw new Error('private Air nearby Magic scenario no longer produces its supported opening');
 }
 
-function findAirLightningBoltOpening(
+async function findAirLightningBoltOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   lightningBoltInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -8744,11 +8748,11 @@ function findAirLightningBoltOpening(
   session: GameSession;
   snowLeopardInstanceId: string;
   southSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: the bounded scan locks both the opening and the actual seeded random outcome.
   for (let offset = 1; offset <= 256; offset += 1) {
     const built = buildManifest(input, input.config.airSeed + offset, 'air-lightning-bolt');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('air');
@@ -8763,28 +8767,28 @@ function findAirLightningBoltOpening(
       || !lightningBoltInstanceId
       || !snowLeopardInstanceId) continue;
 
-    let probe = legacyKeep(session);
-    probe = legacyKeep(probe);
-    const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-      probe = legacyAccept(probe, legacyAction(probe, predicate));
+    let probe = await keep(session);
+    probe = await keep(probe);
+    const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+      probe = await accept(probe, await action(probe, predicate));
     };
-    take(({ descriptor }) => descriptor.kind === 'play-site'
+    await take(({ descriptor }) => descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === northSites[0]!.instanceId
       && descriptor.cell === 'C4');
-    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    await take(({ descriptor }) => descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === snowLeopardInstanceId
       && descriptor.cell === 'C4');
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    take(({ descriptor }) => descriptor.kind === 'play-site'
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === southSiteInstanceId
       && descriptor.cell === 'C1');
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    take(({ descriptor }) => descriptor.kind === 'play-site'
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === northSites[1]!.instanceId
       && descriptor.cell === 'C3');
-    take(({ descriptor }) => descriptor.kind === 'cast-magic'
+    await take(({ descriptor }) => descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === lightningBoltInstanceId
       && descriptor.targetLocation?.cell === 'C4'
       && descriptor.targetLocation.region === 'surface');
@@ -8808,9 +8812,9 @@ function findAirLightningBoltOpening(
   throw new Error('private random location-damage Magic scenario no longer produces its supported opening');
 }
 
-function findAirLuckyCharmOpening(
+async function findAirLuckyCharmOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   lightningBoltInstanceId: string;
   luckyCharmInstanceId: string;
   manifest: GameManifest;
@@ -8820,10 +8824,10 @@ function findAirLuckyCharmOpening(
   session: GameSession;
   snowLeopardInstanceId: string;
   southSiteInstanceId: string;
-}> {
+}>> {
   const seed = 859;
   const built = buildManifest(input, seed, 'air-lucky-charm');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const north = session.state.players.north;
   const south = session.state.players.south;
   const isAirSite = ({ cardId }: { cardId: string }): boolean => {
@@ -8859,9 +8863,9 @@ function findAirLuckyCharmOpening(
   };
 }
 
-function findAirThunderstormOpening(
+async function findAirThunderstormOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   northDrawnSiteInstanceId: string;
@@ -8870,10 +8874,10 @@ function findAirThunderstormOpening(
   session: GameSession;
   snowLeopardInstanceId: string;
   thunderstormInstanceId: string;
-}> {
+}>> {
   const seed = 155;
   const built = buildManifest(input, seed, 'air-thunderstorm');
-  const initial = createGameSession(built.manifest);
+  const initial = await newSession(built.manifest);
   const north = initial.state.players.north;
   const isAirSite = ({ cardId }: { cardId: string }): boolean => {
     const definition = built.manifest.cards[cardId];
@@ -8895,40 +8899,40 @@ function findAirThunderstormOpening(
     throw new Error('private Thunderstorm seed 155 no longer produces its supported opening');
   }
 
-  let probe = legacyKeep(legacyKeep(initial));
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    probe = legacyAccept(probe, legacyAction(probe, predicate));
+  let probe = await keep(await keep(initial));
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    probe = await accept(probe, await action(probe, predicate));
   };
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === northSites[0]!.instanceId && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === snowLeopard.instanceId && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === northSites[1]!.instanceId && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === northSites[2]!.instanceId && descriptor.cell === 'B4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === drawnSite.instanceId && descriptor.cell === 'B3');
-  take(({ descriptor }) => descriptor.kind === 'cast-aura'
+  await take(({ descriptor }) => descriptor.kind === 'cast-aura'
     && descriptor.cardInstanceId === thunderstorm.instanceId
     && descriptor.cells.join(',') === 'B3,B4,C3,C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
   if (probe.state.phase !== 'end-turn-aura'
     || probe.transcript.at(-1)?.randomDraws.length !== 1
-    || !legalGameActions(probe.state, 'north').some(({ descriptor }) =>
+    || !(await legalActionsAt(probe, 'north')).some(({ descriptor }) =>
       descriptor.kind === 'resolve-end-turn-aura-move')) {
     throw new Error('private Thunderstorm seed 155 no longer reaches its supported trigger');
   }
@@ -8943,9 +8947,9 @@ function findAirThunderstormOpening(
   };
 }
 
-function findAirBladderblimpOpening(
+async function findAirBladderblimpOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   bladderblimpInstanceId: string;
   ghostTownSiteInstanceId: string;
   lightningBoltInstanceId: string;
@@ -8954,11 +8958,11 @@ function findAirBladderblimpOpening(
   northAirSiteInstanceIds: readonly [string, string, string];
   session: GameSession;
   southSiteInstanceIds: readonly [string, string];
-}> {
+}>> {
   // ponytail: a bounded opening scan avoids another private seed field for one deterministic proof.
   for (let offset = 1; offset <= 2048; offset += 1) {
     const built = buildManifest(input, input.config.airSeed + offset, 'air-bladderblimp');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northHandAirSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return cardId !== input.ghostTownSite.stableId
@@ -9011,9 +9015,9 @@ function findAirBladderblimpOpening(
   throw new Error('private Bladderblimp nearby-site Deathrite scenario lacks its supported opening');
 }
 
-function findAirRainOfArrowsOpening(
+async function findAirRainOfArrowsOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   northSpireInstanceId: string;
@@ -9024,12 +9028,12 @@ function findAirRainOfArrowsOpening(
   shellycoatInstanceId: string;
   southSnowLeopardInstanceId: string;
   southSpireInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded opening scan avoids another private scenario config field.
   for (let offset = 1; offset <= 4096; offset += 1) {
     const seed = input.config.airSeed + offset;
     const built = buildManifest(input, seed, 'air-rain-of-arrows');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northSpireInstanceId = session.state.players.north.hand.atlas
       .find(({ cardId }) => cardId === input.spire.stableId)?.instanceId;
     const northStreamInstanceId = session.state.players.north.hand.atlas
@@ -9076,9 +9080,9 @@ function findAirRainOfArrowsOpening(
   throw new Error('private Rain of Arrows damage-reduction scenario lacks its supported opening');
 }
 
-function findAirStaticServantOpening(
+async function findAirStaticServantOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   northSiteInstanceIds: readonly [string, string];
@@ -9086,11 +9090,11 @@ function findAirStaticServantOpening(
   snowLeopardInstanceId: string;
   southSiteInstanceId: string;
   staticServantInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded opening scan avoids another private config field.
   for (let offset = 1; offset <= 4096; offset += 1) {
     const built = buildManifest(input, input.config.airSeed + offset, 'air-static-servant');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('air');
@@ -9121,9 +9125,9 @@ function findAirStaticServantOpening(
   throw new Error('private location-wide Genesis damage scenario lacks its supported opening');
 }
 
-function findAirTeleportOpening(
+async function findAirTeleportOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   northSiteInstanceIds: readonly [string, string];
@@ -9131,11 +9135,11 @@ function findAirTeleportOpening(
   snowLeopardInstanceId: string;
   southSiteInstanceId: string;
   teleportInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded opening scan avoids another private config field.
   for (let offset = 1; offset <= 256; offset += 1) {
     const built = buildManifest(input, input.config.airSeed + offset, 'air-teleport');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('air');
@@ -9162,20 +9166,20 @@ function findAirTeleportOpening(
   throw new Error('private ally-to-site Teleport scenario no longer produces its supported opening');
 }
 
-function findFireGenesisLifeLossOpening(
+async function findFireGenesisLifeLossOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   demonInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   northSiteInstanceIds: readonly [string, string];
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded opening scan avoids adding another private seed field.
   for (let offset = 1; offset <= 256; offset += 1) {
     const built = buildManifest(input, input.config.fireSeed + offset, 'fire-genesis-life-loss');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northFireSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('fire');
@@ -9198,9 +9202,9 @@ function findFireGenesisLifeLossOpening(
   throw new Error('private Genesis life-loss scenario no longer produces its supported opening');
 }
 
-function findFireVileImpOpening(
+async function findFireVileImpOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   northSiteInstanceIds: readonly [string, string];
@@ -9208,11 +9212,11 @@ function findFireVileImpOpening(
   session: GameSession;
   southSiteInstanceId: string;
   vileImpInstanceId: string;
-}> {
+}>> {
   // ponytail: pinned seed keeps this private teaching proof fast without another config field.
   const seed = 141;
   const built = buildManifest(input, seed, 'fire-vile-imp');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const northSites = session.state.players.north.hand.atlas
     .filter(({ cardId }) => cardId === input.wasteland.stableId);
   const vileImpInstanceId = [
@@ -9233,9 +9237,9 @@ function findFireVileImpOpening(
   throw new Error('private Vile Imp optional Genesis damage scenario lacks its supported opening');
 }
 
-function findFireSacredScarabsOpening(
+async function findFireSacredScarabsOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   northSiteInstanceIds: readonly [string, string, string];
@@ -9244,11 +9248,11 @@ function findFireSacredScarabsOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: pinned seed keeps the actual-card proof fast and deterministic.
   const seed = 135;
   const built = buildManifest(input, seed, 'fire-sacred-scarabs');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const northFireSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
     const definition = session.state.cards[cardId];
     return definition?.cardType === 'site' && definition.elements.includes('fire');
@@ -9290,20 +9294,20 @@ function findFireSacredScarabsOpening(
   throw new Error('private Sacred Scarabs Deathrite scenario lacks its supported opening');
 }
 
-function findFireAramosOpening(
+async function findFireAramosOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   aramosInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   northSiteInstanceIds: readonly [string, string];
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded opening scan avoids another private seed/config field.
   for (let offset = 1; offset <= 4096; offset += 1) {
     const built = buildManifest(input, input.config.fireSeed + offset, 'fire-aramos');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northFireSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('fire');
@@ -9330,9 +9334,9 @@ function findFireAramosOpening(
   throw new Error('private Aramos random-discard alternative-cost scenario lacks its supported opening');
 }
 
-function findFireLashOpening(
+async function findFireLashOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   fireSiteInstanceId: string;
   ghostTownInstanceId: string;
   lashInstanceId: string;
@@ -9341,11 +9345,11 @@ function findFireLashOpening(
   raalInstanceId: string;
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another private config field.
   for (let offset = 1; offset <= 256; offset += 1) {
     const built = buildManifest(input, input.config.fireSeed + offset, 'fire-lash');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const fireSiteInstanceId = session.state.players.north.hand.atlas.find(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('fire');
@@ -9380,9 +9384,9 @@ function findFireLashOpening(
   throw new Error('private Lash damage-and-untap scenario no longer produces its supported opening');
 }
 
-function findFireLeapAttackOpening(
+async function findFireLeapAttackOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   ghostTownInstanceId: string;
   leapAttackInstanceId: string;
   manifest: GameManifest;
@@ -9392,10 +9396,10 @@ function findFireLeapAttackOpening(
   session: GameSession;
   southRaalInstanceIds: readonly [string, string];
   southSiteInstanceIds: readonly [string, string];
-}> {
+}>> {
   const seed = 2_822;
   const built = buildManifest(input, seed, 'fire-leap-attack');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const fireSites = (seat: GameSeat) => session.state.players[seat].hand.atlas
     .filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
@@ -9442,9 +9446,9 @@ function findFireLeapAttackOpening(
   };
 }
 
-function findFireRecklessSquireOpening(
+async function findFireRecklessSquireOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   ghostTownInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -9453,10 +9457,10 @@ function findFireRecklessSquireOpening(
   session: GameSession;
   southFireSiteInstanceIds: readonly [string, string];
   southRaalInstanceIds: readonly [string, string];
-}> {
+}>> {
   const seed = 1_163;
   const built = buildManifest(input, seed, 'fire-reckless-squire');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const northFireSiteInstanceId = session.state.players.north.hand.atlas
     .find(({ cardId }) => {
       const definition = session.state.cards[cardId];
@@ -9500,20 +9504,20 @@ function findFireRecklessSquireOpening(
   };
 }
 
-function findFireIgnitedOpening(
+async function findFireIgnitedOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   ignitedInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   northSiteInstanceIds: readonly [string, string];
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded opening scan avoids adding another private seed field.
   for (let offset = 1; offset <= 256; offset += 1) {
     const built = buildManifest(input, input.config.fireSeed + offset, 'fire-ignited');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northFireSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('fire');
@@ -9536,9 +9540,9 @@ function findFireIgnitedOpening(
   throw new Error('private printed-Charge end-turn-death scenario lacks its supported opening');
 }
 
-function findFireChargeOpening(
+async function findFireChargeOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   chargeInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -9546,11 +9550,11 @@ function findFireChargeOpening(
   raalInstanceId: string;
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: a bounded opening scan avoids adding another private seed field.
   for (let offset = 1; offset <= 256; offset += 1) {
     const built = buildManifest(input, input.config.fireSeed + offset, 'fire-charge');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northFireSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('fire');
@@ -9584,9 +9588,9 @@ function findFireChargeOpening(
   throw new Error('private temporary Charge Magic scenario lacks its supported opening');
 }
 
-function findFireMinorExplosionOpening(
+async function findFireMinorExplosionOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   firstRaalInstanceId: string;
   manifest: GameManifest;
   minorExplosionInstanceId: string;
@@ -9595,11 +9599,11 @@ function findFireMinorExplosionOpening(
   secondRaalInstanceId: string;
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: a bounded opening scan avoids adding another private seed field.
   for (let offset = 1; offset <= 2048; offset += 1) {
     const built = buildManifest(input, input.config.fireSeed + offset, 'fire-minor-explosion');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northHandSites = session.state.players.north.hand.atlas;
     const northFireSites = northHandSites.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
@@ -9646,9 +9650,9 @@ function findFireMinorExplosionOpening(
   throw new Error('private location-wide damage Magic scenario lacks its supported opening');
 }
 
-function findFireVikingsOpening(
+async function findFireVikingsOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   daggerInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -9657,11 +9661,11 @@ function findFireVikingsOpening(
   southBoskTrollInstanceId: string;
   southSiteInstanceIds: readonly [string, string];
   vikingsInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded reuse of the Fire seed avoids another private config field.
   for (let offset = 1; offset <= 4096; offset += 1) {
     const built = buildManifest(input, input.config.fireSeed + offset, 'fire-vikings');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northHandSites = session.state.players.north.hand.atlas;
     const northFireSites = northHandSites.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
@@ -9720,10 +9724,10 @@ function findFireVikingsOpening(
   throw new Error('private Vikings area-damage scenario lacks its supported opening');
 }
 
-function findAirborneOpening(
+async function findAirborneOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   mode: 'airborne' | 'movement-two' = 'airborne',
-): Readonly<{
+): Promise<Readonly<{
   airborneInstanceId: string;
   groundInstanceId: string;
   manifest: GameManifest;
@@ -9732,11 +9736,11 @@ function findAirborneOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceIds: readonly [string, string, string];
-}> {
+}>> {
   const movementTwo = mode === 'movement-two';
   const seed = movementTwo ? input.config.movementTwoSeed : input.config.airborneSeed;
   const built = buildManifest(input, seed, mode);
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const sites = (seat: GameSeat) => session.state.players[seat].hand.atlas;
   const northSites = sites('north');
     const southSites = sites('south');
@@ -9783,9 +9787,9 @@ function findAirborneOpening(
   throw new Error(`private ${movementTwo ? 'Movement +2' : 'Airborne'} scenario seed ${seed} no longer produces its supported opening`);
 }
 
-function findAirVoidwalkOpening(
+async function findAirVoidwalkOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   comparisonInstanceId: string;
   featuredInstanceId: string;
   manifest: GameManifest;
@@ -9795,12 +9799,12 @@ function findAirVoidwalkOpening(
   session: GameSession;
   southSiteInstanceIds: readonly [string, string];
   restrictedInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
   for (let offset = 1; offset <= 256; offset += 1) {
     const seed = input.config.airborneSeed + offset;
     const built = buildManifest(input, seed, 'air-voidwalk');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('air');
@@ -9844,9 +9848,9 @@ function findAirVoidwalkOpening(
   throw new Error('private Air Voidwalk scenario no longer produces its supported opening');
 }
 
-function findAirVoidArtifactOpening(
+async function findAirVoidArtifactOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   artifactInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -9855,12 +9859,12 @@ function findAirVoidArtifactOpening(
   session: GameSession;
   southSiteInstanceId: string;
   stalkerInstanceId: string;
-}> {
+}>> {
   // ponytail: this bounded scan avoids adding a private config field for one teaching proof.
   for (let offset = 1; offset <= 256; offset += 1) {
     const seed = input.config.airborneSeed + offset;
     const built = buildManifest(input, seed, 'air-void-artifact');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northSites = [
       ...session.state.players.north.hand.atlas,
       ...session.state.players.north.atlas.slice(0, 1),
@@ -9889,9 +9893,9 @@ function findAirVoidArtifactOpening(
   throw new Error('private void Artifact relocation scenario lacks its supported opening');
 }
 
-function findAirGenesisSpellOpening(
+async function findAirGenesisSpellOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   featuredInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -9899,12 +9903,12 @@ function findAirGenesisSpellOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
   for (let offset = 1; offset <= 64; offset += 1) {
     const seed = input.config.airSeed + offset;
     const built = buildManifest(input, seed, 'air-genesis-spell');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northSites = session.state.players.north.hand.atlas;
     const featuredInstanceId = availableMinionInstance(
       session,
@@ -9932,9 +9936,9 @@ function findAirGenesisSpellOpening(
   throw new Error('private Air Genesis spell-draw scenario no longer produces its supported opening');
 }
 
-function findAirGrandmasterWizardOpening(
+async function findAirGrandmasterWizardOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   featuredInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -9942,11 +9946,11 @@ function findAirGrandmasterWizardOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   // Seed 785 is pinned from the original bounded opening scan.
   const seed = 785;
   const built = buildManifest(input, seed, 'air-grandmaster-wizard');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const northPlayer = session.state.players.north;
   const northSites = [...northPlayer.hand.atlas, ...northPlayer.atlas.slice(0, 3)];
   const featuredInstanceId = northPlayer.hand.spellbook
@@ -9976,9 +9980,9 @@ function findAirGrandmasterWizardOpening(
   };
 }
 
-function findAirSpireLichOpening(
+async function findAirSpireLichOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   darkTowerInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -9989,10 +9993,10 @@ function findAirSpireLichOpening(
   southTargetInstanceId: string;
   spireLichInstanceId: string;
   zapInstanceIds: readonly [string, string];
-}> {
+}>> {
   const seed = 220;
   const built = buildManifest(input, seed, 'air-spire-lich');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const north = session.state.players.north;
   const south = session.state.players.south;
   const darkTower = north.hand.atlas.find(({ cardId }) =>
@@ -10050,9 +10054,9 @@ function findAirSpireLichOpening(
   };
 }
 
-function findAirNimbusJinnOpening(
+async function findAirNimbusJinnOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   bandInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -10063,10 +10067,10 @@ function findAirNimbusJinnOpening(
   session: GameSession;
   southSiteInstanceIds: readonly [string, string];
   zapInstanceId: string;
-}> {
+}>> {
   const seed = 1_088;
   const built = buildManifest(input, seed, 'air-nimbus-jinn');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const north = session.state.players.north;
   const south = session.state.players.south;
   const airSites = north.hand.atlas.filter(({ cardId }) => {
@@ -10121,9 +10125,9 @@ function findAirNimbusJinnOpening(
   };
 }
 
-function findAirDevilsEggOpening(
+async function findAirDevilsEggOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   devilsEggInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -10131,10 +10135,10 @@ function findAirDevilsEggOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceIds: readonly [string, string];
-}> {
+}>> {
   const seed = 2;
   const built = buildManifest(input, seed, 'air-devils-egg');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const north = session.state.players.north;
   const south = session.state.players.south;
   const devilsEgg = [...north.hand.spellbook, ...north.spellbook.slice(0, 2)]
@@ -10157,9 +10161,9 @@ function findAirDevilsEggOpening(
   };
 }
 
-function findAirHeadlessHauntOpening(
+async function findAirHeadlessHauntOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   headlessHauntInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -10167,11 +10171,11 @@ function findAirHeadlessHauntOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded scan keeps the retail deck authoritative without another seed field.
   for (let seed = 1; seed <= 256; seed += 1) {
     const built = buildManifest(input, seed, 'air-vs-earth-lesson');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const north = session.state.players.north;
     const south = session.state.players.south;
     const headlessHaunt = [...north.hand.spellbook, ...north.spellbook.slice(0, 2)]
@@ -10193,9 +10197,9 @@ function findAirHeadlessHauntOpening(
   throw new Error('private Headless Haunt scenario no longer produces its supported opening');
 }
 
-function findAirKiteArcherOpening(
+async function findAirKiteArcherOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   kiteArcherInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -10204,10 +10208,10 @@ function findAirKiteArcherOpening(
   session: GameSession;
   snowLeopardInstanceId: string;
   southSiteInstanceIds: readonly [string, string];
-}> {
+}>> {
   const seed = 29;
   const built = buildManifest(input, seed, 'air-kite-archer');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const north = session.state.players.north;
   const south = session.state.players.south;
   const kiteArcher = [...north.hand.spellbook, ...north.spellbook.slice(0, 2)]
@@ -10237,9 +10241,9 @@ function findAirKiteArcherOpening(
   };
 }
 
-function findAirRaiseDeadOpening(
+async function findAirRaiseDeadOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   kiteArcherInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -10249,11 +10253,11 @@ function findAirRaiseDeadOpening(
   session: GameSession;
   snowLeopardInstanceId: string;
   southSiteInstanceIds: readonly [string, string];
-}> {
+}>> {
   // ponytail: bounded opening scan avoids another private seed/config field.
   for (let offset = 1; offset <= 256; offset += 1) {
     const built = buildManifest(input, input.config.airSeed + offset, 'air-raise-dead');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const airFirst = (left: { cardId: string }, right: { cardId: string }): number => {
       const isAir = ({ cardId }: { cardId: string }): boolean => {
         const definition = session.state.cards[cardId];
@@ -10315,9 +10319,9 @@ function findAirRaiseDeadOpening(
   throw new Error('private Raise Dead scenario no longer produces its supported opening');
 }
 
-function findAirSkirmishersOfMuOpening(
+async function findAirSkirmishersOfMuOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   northSiteInstanceIds: readonly [string, string, string, string];
@@ -10326,10 +10330,10 @@ function findAirSkirmishersOfMuOpening(
   skirmishersInstanceId: string;
   snowLeopardInstanceId: string;
   southSiteInstanceIds: readonly [string, string];
-}> {
+}>> {
   const seed = 29;
   const built = buildManifest(input, seed, 'air-skirmishers-of-mu');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const north = session.state.players.north;
   const south = session.state.players.south;
   const skirmishers = [...north.hand.spellbook, ...north.spellbook.slice(0, 2)]
@@ -10362,9 +10366,9 @@ function findAirSkirmishersOfMuOpening(
   };
 }
 
-function findAirChainLightningOpening(
+async function findAirChainLightningOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   chainLightningInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -10374,10 +10378,10 @@ function findAirChainLightningOpening(
   session: GameSession;
   southSiteInstanceIds: readonly [string, string, string];
   targetInstanceIds: readonly [string, string];
-}> {
+}>> {
   const seed = 508;
   const built = buildManifest(input, seed, 'air-chain-lightning');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const north = session.state.players.north;
   const south = session.state.players.south;
   const isAirSite = ({ cardId }: { cardId: string }): boolean => {
@@ -10424,9 +10428,9 @@ function findAirChainLightningOpening(
   };
 }
 
-function findAirSpellcasterFreezeOpening(
+async function findAirSpellcasterFreezeOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   apprenticeWizardInstanceId: string;
   freezeInstanceId: string;
   ghostTownInstanceId: string;
@@ -10437,11 +10441,11 @@ function findAirSpellcasterFreezeOpening(
   seravaInstanceId: string;
   session: GameSession;
   southWaterSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded opening scan avoids another private config field.
   for (let offset = 1; offset <= 2_048; offset += 1) {
     const built = buildManifest(input, input.config.airSeed + offset, 'air-spellcaster-freeze');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northAirSiteInstanceId = session.state.players.north.hand.atlas.find(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('air');
@@ -10497,21 +10501,21 @@ function findAirSpellcasterFreezeOpening(
   throw new Error('private Spellcaster Freeze scenario no longer produces its supported opening');
 }
 
-function findAirLeylineOpening(
+async function findAirLeylineOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   hengeInstanceIds: readonly [string, string];
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   seed: number;
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
   for (let offset = 1; offset <= 256; offset += 1) {
     const seed = input.config.airSeed + offset;
     const built = buildManifest(input, seed, 'air-leyline');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const henges = session.state.players.north.hand.atlas
       .filter(({ cardId }) => cardId === input.leylineHenge.stableId);
     const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
@@ -10528,9 +10532,9 @@ function findAirLeylineOpening(
   throw new Error('private Air Leyline Henge scenario no longer produces its supported opening');
 }
 
-function findStealthOpening(
+async function findStealthOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   groundInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -10539,10 +10543,10 @@ function findStealthOpening(
   session: GameSession;
   southSiteInstanceIds: readonly [string, string, string];
   stealthInstanceId: string;
-}> {
+}>> {
   const seed = input.config.stealthSeed;
   const built = buildManifest(input, seed, 'stealth');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const northSites = session.state.players.north.hand.atlas;
   const southSites = session.state.players.south.hand.atlas;
   const airAffinity = (sites: typeof northSites): number => sites.reduce((total, { cardId }) => {
@@ -10580,9 +10584,9 @@ function findStealthOpening(
   throw new Error(`private Stealth scenario seed ${seed} no longer produces its supported opening`);
 }
 
-function findAirSummoningOpening(
+async function findAirSummoningOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   northSiteInstanceIds: readonly [string, string, string, string, string];
@@ -10591,10 +10595,10 @@ function findAirSummoningOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   const seed = input.config.roamingSeed;
   const built = buildManifest(input, seed, 'air');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const north = session.state.players.north;
   const sites = [...north.hand.atlas, ...north.atlas.slice(0, 2)];
   const spells = [...north.hand.spellbook, ...north.spellbook.slice(0, 2)];
@@ -10635,9 +10639,9 @@ function findAirSummoningOpening(
   throw new Error(`private Air summoning seed ${input.config.roamingSeed} no longer produces its supported opening`);
 }
 
-function findFireOpening(
+async function findFireOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   attackerInstanceId: string;
   lionInstanceId: string;
   lumberingInstanceId: string;
@@ -10647,10 +10651,10 @@ function findFireOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceIds: readonly [string, string];
-}> {
+}>> {
   const seed = input.config.fireSeed;
   const built = buildManifest(input, seed, 'fire');
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const northSites = [
     ...session.state.players.north.hand.atlas,
     ...session.state.players.north.atlas.slice(0, 1),
@@ -10706,20 +10710,20 @@ function findFireOpening(
   throw new Error(`private Fire scenario seed ${input.config.fireSeed} no longer produces its supported opening`);
 }
 
-function findHuntersLodgeOpening(
+async function findHuntersLodgeOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   hunterLodgeInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   northWaterSiteInstanceId: string;
   session: GameSession;
   slyFoxInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded reuse of the Sly Fox seed avoids another private config field.
   for (let offset = 1; offset <= 4096; offset += 1) {
     const built = buildManifest(input, input.config.slyFoxSeed + offset, 'earth-hunters-lodge');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northWaterSiteInstanceId = session.state.players.north.hand.atlas.find(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('water');
@@ -10741,9 +10745,9 @@ function findHuntersLodgeOpening(
   throw new Error("private Hunter's Lodge scenario no longer produces its supported opening");
 }
 
-function findWaterConditionalStealthOpening(
+async function findWaterConditionalStealthOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   seed: number;
@@ -10751,12 +10755,12 @@ function findWaterConditionalStealthOpening(
   siteInstanceIds: readonly [string, string];
   southSiteInstanceId: string;
   survivorsInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded reuse of the Sly Fox seed avoids another private config field.
   for (let offset = 1; offset <= 4096; offset += 1) {
     const seed = input.config.slyFoxSeed + offset;
     const built = buildManifest(input, seed, 'water-conditional-stealth');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const siteInstanceIds = session.state.players.north.hand.atlas
       .filter(({ cardId }) => {
         const definition = session.state.cards[cardId];
@@ -10781,10 +10785,10 @@ function findWaterConditionalStealthOpening(
   throw new Error('private conditional end-turn Stealth scenario no longer produces its supported opening');
 }
 
-function findWaterOpening(
+async function findWaterOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   scenario: 'water' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'water',
-): Readonly<{
+): Promise<Readonly<{
   attackerInstanceId: string;
   comparisonInstanceId?: string;
   featuredInstanceId: string;
@@ -10794,7 +10798,7 @@ function findWaterOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceIds: readonly [string, string];
-}> {
+}>> {
   const endTurnStealth = scenario === 'water-stealth';
   const sideways = scenario === 'water-sideways';
   const submerge = scenario === 'water-submerge';
@@ -10804,7 +10808,7 @@ function findWaterOpening(
       ? input.config.sedgeCrabsSeed + (submerge ? 3 : 0)
       : input.config.waterSeed;
   const built = buildManifest(input, seed, scenario);
-  const session = createGameSession(built.manifest);
+  const session = await newSession(built.manifest);
   const northSites = session.state.players.north.hand.atlas.filter((site) => {
     const definition = session.state.cards[site.cardId];
     return definition?.cardType === 'site' && definition.elements.includes('water');
@@ -10881,9 +10885,9 @@ function findWaterOpening(
   throw new Error(`private Water ${scenarioName} scenario no longer produces its supported opening`);
 }
 
-function findWaterSubmergeFreezeOpening(
+async function findWaterSubmergeFreezeOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   comparisonInstanceId: string;
   featuredInstanceId: string;
   freezeInstanceId: string;
@@ -10894,11 +10898,11 @@ function findWaterSubmergeFreezeOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceIds: readonly [string, string];
-}> {
+}>> {
   for (let offset = 1; offset <= 512; offset += 1) {
     const seed = input.config.sedgeCrabsSeed + offset;
     const built = buildManifest(input, seed, 'water-submerge');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const north = session.state.players.north;
     const northWaterSites = north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
@@ -10953,9 +10957,9 @@ function findWaterSubmergeFreezeOpening(
   throw new Error('private underwater Freeze scenario no longer produces its supported opening');
 }
 
-function findWaterDrownOpening(
+async function findWaterDrownOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   drownInstanceId: string;
   ghostTownInstanceId: string;
   manifest: GameManifest;
@@ -10964,11 +10968,11 @@ function findWaterDrownOpening(
   session: GameSession;
   southSiteInstanceId: string;
   waterSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded opening scan avoids another private config field.
   for (let offset = 1; offset <= 256; offset += 1) {
     const built = buildManifest(input, input.config.waterSeed + offset, 'water-drown');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const waterSiteInstanceId = session.state.players.north.hand.atlas.find(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('water');
@@ -11000,9 +11004,9 @@ function findWaterDrownOpening(
   throw new Error('private forced-submerge Magic scenario no longer produces its supported opening');
 }
 
-function findWaterGnarledWendigoOpening(
+async function findWaterGnarledWendigoOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   ghostTownInstanceId: string;
   gnarledWendigoInstanceId: string;
   manifest: GameManifest;
@@ -11011,7 +11015,7 @@ function findWaterGnarledWendigoOpening(
   seravaInstanceId: string;
   session: GameSession;
   southSiteInstanceIds: readonly [string, string];
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another private config field; lock one only if runtime matters.
   for (let offset = 1; offset <= 4096; offset += 1) {
     const built = buildManifest(
@@ -11019,7 +11023,7 @@ function findWaterGnarledWendigoOpening(
       input.config.waterSeed + offset,
       'water-gnarled-wendigo',
     );
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northWaterSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return cardId !== input.ghostTownSite.stableId
@@ -11057,9 +11061,9 @@ function findWaterGnarledWendigoOpening(
   throw new Error('private summon-location sacrifice-discount scenario lacks its supported opening');
 }
 
-function findWaterLureOpening(
+async function findWaterLureOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   lureInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -11068,11 +11072,11 @@ function findWaterLureOpening(
   session: GameSession;
   southSeravaInstanceId: string;
   southSiteInstanceIds: readonly [string, string];
-}> {
+}>> {
   // ponytail: bounded opening scan avoids adding another private seed field.
   for (let offset = 1; offset <= 2048; offset += 1) {
     const built = buildManifest(input, input.config.waterSeed + offset, 'water-lure');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('water');
@@ -11117,9 +11121,9 @@ function findWaterLureOpening(
   throw new Error('private non-target Lure scenario no longer produces its supported opening');
 }
 
-function findWaterMesmerismOpening(
+async function findWaterMesmerismOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   farSeravaInstanceId: string;
   kettletopInstanceId: string;
   manifest: GameManifest;
@@ -11128,11 +11132,11 @@ function findWaterMesmerismOpening(
   northSiteInstanceIds: readonly [string, string, string, string];
   session: GameSession;
   southSiteInstanceIds: readonly [string, string];
-}> {
+}>> {
   // ponytail: pinned offset keeps this private proof fast without another config field.
   for (const offset of [4708]) {
     const built = buildManifest(input, input.config.waterSeed + offset, 'water-mesmerism');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northSites = [
       ...session.state.players.north.hand.atlas,
       ...session.state.players.north.atlas.slice(0, 1),
@@ -11183,9 +11187,9 @@ function findWaterMesmerismOpening(
   throw new Error('private nearby minion control Magic scenario lacks its supported opening');
 }
 
-function findWaterPirateShipOpening(
+async function findWaterPirateShipOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   ghostTownInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -11193,11 +11197,11 @@ function findWaterPirateShipOpening(
   pirateShipInstanceId: string;
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded opening scan keeps this private proof seed-free.
   for (let offset = 1; offset <= 2048; offset += 1) {
     const built = buildManifest(input, input.config.waterSeed + offset, 'water-pirate-ship');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northWaterSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('water');
@@ -11229,9 +11233,9 @@ function findWaterPirateShipOpening(
   throw new Error('private Waterbound scenario no longer produces its supported opening');
 }
 
-function findWaterFreezeOpening(
+async function findWaterFreezeOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   freezeInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -11239,11 +11243,11 @@ function findWaterFreezeOpening(
   seravaInstanceId: string;
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded opening scan avoids another private config field.
   for (let offset = 1; offset <= 256; offset += 1) {
     const built = buildManifest(input, input.config.waterSeed + offset, 'water-freeze');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('water');
@@ -11267,9 +11271,9 @@ function findWaterFreezeOpening(
   throw new Error('private timed-disable Magic scenario no longer produces its supported opening');
 }
 
-function findWaterEdgeConnectionOpening(
+async function findWaterEdgeConnectionOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   featuredInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -11277,12 +11281,12 @@ function findWaterEdgeConnectionOpening(
   seed: number;
   session: GameSession;
   southSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
   for (let offset = 1; offset <= 64; offset += 1) {
     const seed = input.config.waterSeed + offset;
     const built = buildManifest(input, seed, 'water-edge-connection');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('water');
@@ -11308,16 +11312,9 @@ function findWaterEdgeConnectionOpening(
   throw new Error('private Water top/bottom connection scenario no longer produces its supported opening');
 }
 
-function legacyKeep(session: GameSession): GameSession {
-  return legacyAccept(session, legacyAction(session, ({ descriptor }) =>
-    descriptor.kind === 'mulligan'
-      && descriptor.atlasOrder.length === 0
-      && descriptor.spellbookOrder.length === 0));
-}
-
-function findWaterDrownedOpening(
+async function findWaterDrownedOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   drownedInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -11326,12 +11323,12 @@ function findWaterDrownedOpening(
   session: GameSession;
   slyFoxInstanceId: string;
   southSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another private config field; persist one only if this becomes slow.
   for (let offset = 1; offset <= 256; offset += 1) {
     const seed = input.config.waterSeed + offset;
     const built = buildManifest(input, seed, 'water-drowned');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('water');
@@ -11363,9 +11360,9 @@ function findWaterDrownedOpening(
   throw new Error('private Water Drowned scenario no longer produces its supported opening');
 }
 
-function findWaterLugbogOpening(
+async function findWaterLugbogOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   lugbogInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
@@ -11375,11 +11372,11 @@ function findWaterLugbogOpening(
   southLandSiteInstanceId: string;
   southSecondDrawZone: 'atlas' | 'spellbook';
   southWaterSiteInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded scan keeps the ignored config stable for a small teaching scenario.
   for (let offset = 1; offset <= 128; offset += 1) {
     const built = buildManifest(input, input.config.slyFoxSeed + offset, 'water-lugbog');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const isWaterSite = (cardId: string): boolean => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('water');
@@ -11620,30 +11617,30 @@ async function runFireGranaryRats(
   });
 }
 
-function runFireHamlet(
+async function runFireHamlet(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['fireHamlet'] {
-  const opening = findFireHamletOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['fireHamlet']> {
+  const opening = await findFireHamletOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  const wastelandResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const wastelandResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.wastelandInstanceId
       && descriptor.cell === 'C4'));
   if (!wastelandResult.accepted) throw new Error('private Wasteland play was rejected');
   session = wastelandResult.session;
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const hamletResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const hamletResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.hamletInstanceId
       && descriptor.cell === 'C3'));
@@ -11652,7 +11649,7 @@ function runFireHamlet(
 
   const beforeSummon = observeGame(session.state, 'north');
   const manaBeforeSummon = session.state.players.north.mana;
-  const raalSummons = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const raalSummons = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.raalInstanceId
       && descriptor.region === undefined
@@ -11668,7 +11665,7 @@ function runFireHamlet(
   if (!hamletSummon || !wastelandSummon) {
     throw new Error('private Hamlet and Wasteland destination costs are unavailable');
   }
-  const summonResult = stepGame(session, hamletSummon);
+  const summonResult = await stepAt(session, hamletSummon);
   if (!summonResult.accepted) throw new Error('private zero-cost Raal summon was rejected');
   session = summonResult.session;
 
@@ -11732,7 +11729,7 @@ function runFireHamlet(
     manaPaid: manaBeforeSummon - session.state.players.north.mana,
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
     raalDromedary: input.raalDromedary.name,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     siteAndMinionStateVerified: wastelandSite !== undefined
       && 'cardId' in wastelandSite
@@ -11756,30 +11753,30 @@ function runFireHamlet(
   });
 }
 
-function runEarthOverpower(
+async function runEarthOverpower(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthOverpower'] {
-  const opening = findEarthOverpowerOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthOverpower']> {
+  const opening = await findEarthOverpowerOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.elthamTownsfolkInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
 
@@ -11788,7 +11785,7 @@ function runEarthOverpower(
   const observedBefore = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
     instanceId === opening.elthamTownsfolkInstanceId);
   if (!before || !observedBefore) throw new Error('private Overpower setup lacks Eltham Townsfolk');
-  const allyActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const allyActions = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.overpowerInstanceId);
   const selected = allyActions.find(({ descriptor }) => descriptor.kind === 'cast-magic'
@@ -11801,7 +11798,7 @@ function runEarthOverpower(
     && descriptor.ally?.seat === 'north' ? [descriptor.ally.instanceId] : []).sort();
   const exactOwnAllyChoices = allyActions.length === 2
     && chosenAllyIds.join(',')
-      === [avatarInstanceId, opening.elthamTownsfolkInstanceId].sort().join(',')
+      === (await [avatarInstanceId, opening.elthamTownsfolkInstanceId].sort()).join(',')
     && allyActions.every(({ descriptor }) => descriptor.kind === 'cast-magic'
       && descriptor.ally !== undefined
       && descriptor.target === undefined
@@ -11811,7 +11808,7 @@ function runEarthOverpower(
       && descriptor.temptedEnemy === undefined
       && descriptor.temptedDestination === undefined);
   const manaBefore = session.state.players.north.mana;
-  session = legacyAccept(session, selected);
+  session = await accept(session, selected);
   const manaAfterCast = session.state.players.north.mana;
 
   const afterGrant = session.state.realm.units.find(({ instanceId }) =>
@@ -11845,7 +11842,7 @@ function runEarthOverpower(
     && afterGrant.tapped === before.tapped
     && afterGrant.warded === before.warded;
 
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
   const afterExpiry = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.elthamTownsfolkInstanceId);
   const observedAfterExpiry = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
@@ -11893,7 +11890,7 @@ function runEarthOverpower(
       && observedAfterExpiry.attack === input.elthamTownsfolk.attack
       && observedAfterExpiry.defense === input.elthamTownsfolk.defense
       && afterExpiry.damage === 0,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     spellEnteredCemetery: session.state.players.north.hand.spellbook
       .every(({ instanceId }) => instanceId !== opening.overpowerInstanceId)
       && session.state.players.north.cemetery
@@ -11902,39 +11899,39 @@ function runEarthOverpower(
   });
 }
 
-function runEarthBurrowing(
+async function runEarthBurrowing(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthBurrowing'] {
-  const opening = findEarthBurrowingOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthBurrowing']> {
+  const opening = await findEarthBurrowingOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
     && descriptor.cell === 'B3');
 
-  const summons = legalGameActions(session.state, 'north');
+  const summons = await legalActionsAt(session, 'north');
   const matches = (cardInstanceId: string, region: 'surface' | 'underground'): boolean =>
     summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === cardInstanceId
@@ -11956,38 +11953,38 @@ function runEarthBurrowing(
     && !summonSiteDefinition.elements.includes('water')
     && attackSiteDefinition?.cardType === 'site'
     && !attackSiteDefinition.elements.includes('water');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.featuredInstanceId
     && descriptor.cell === 'C3'
     && descriptor.region === 'underground');
 
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.featuredInstanceId
     && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
       === 'C3/underground,C2/underground');
   const movedUnderground = session.state.realm.units.some(({ instanceId, location, region }) =>
     instanceId === opening.featuredInstanceId && location === 'C2' && region === 'underground');
-  const siteTargetUnavailableUnderground = !legalGameActions(session.state, 'north')
+  const siteTargetUnavailableUnderground = !(await legalActionsAt(session, 'north'))
     .some(({ descriptor }) => descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
 
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.featuredInstanceId
     && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
       === 'C2/underground,C2/surface');
   const surfaced = session.state.realm.units.some(({ instanceId, location, region }) =>
     instanceId === opening.featuredInstanceId && location === 'C2' && region === 'surface');
-  const siteTargetAvailableAfterSurfacing = legalGameActions(session.state, 'north')
+  const siteTargetAvailableAfterSurfacing = (await legalActionsAt(session, 'north'))
     .some(({ descriptor }) => descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
 
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
@@ -11996,7 +11993,7 @@ function runEarthBurrowing(
     movedUnderground,
     nonBurrowingSurfaceAvailable,
     nonBurrowingUndergroundUnavailable,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     siteTargetAvailableAfterSurfacing,
     siteTargetUnavailableUnderground,
@@ -12007,31 +12004,31 @@ function runEarthBurrowing(
   });
 }
 
-function runEarthEntombed(
+async function runEarthEntombed(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthEntombed'] {
-  const opening = findEarthEntombedOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthEntombed']> {
+  const opening = await findEarthEntombedOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
 
-  const summons = legalGameActions(session.state, 'north');
+  const summons = await legalActionsAt(session, 'north');
   const matches = (cardInstanceId: string, region: 'surface' | 'underground'): boolean =>
     summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === cardInstanceId
@@ -12041,7 +12038,7 @@ function runEarthEntombed(
   const entombedUndergroundAvailable = matches(opening.entombedInstanceId, 'underground');
   const boskTrollSurfaceAvailable = matches(opening.boskTrollInstanceId, 'surface');
   const boskTrollUndergroundUnavailable = !matches(opening.boskTrollInstanceId, 'underground');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.entombedInstanceId
     && descriptor.cell === 'C3'
     && descriptor.region === 'underground');
@@ -12059,54 +12056,54 @@ function runEarthEntombed(
     entombed: opening.names.get(input.entombed.stableId) ?? input.entombed.stableId,
     entombedSurfaceUnavailable,
     entombedUndergroundAvailable,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     summonedUnderground,
   });
 }
 
-function runEarthForwardMovement(
+async function runEarthForwardMovement(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthForwardMovement'] {
-  const opening = findEarthForwardOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthForwardMovement']> {
+  const opening = await findEarthForwardOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.ghostTownSiteInstanceId
     && descriptor.cell === 'B3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.phalanxInstanceId
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
-  const moves = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const moves = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.phalanxInstanceId);
   const hasPath = (cells: string): boolean => moves.some(({ descriptor }) =>
@@ -12118,14 +12115,14 @@ function runEarthForwardMovement(
     && !hasPath('C3,C4');
   const sidewaysPathUnavailable = session.state.realm.sites.B3 !== undefined
     && !hasPath('C3,B3');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.phalanxInstanceId
     && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C2');
-  const siteTargetAvailable = legalGameActions(session.state, 'north').some(({ descriptor }) =>
+  const siteTargetAvailable = (await legalActionsAt(session, 'north')).some(({ descriptor }) =>
     descriptor.kind === 'declare-attack'
       && descriptor.target.kind === 'site'
       && descriptor.target.instanceId === session.state.realm.sites.C2?.instanceId);
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
 
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
@@ -12134,61 +12131,61 @@ function runEarthForwardMovement(
     forwardPathAvailable,
     phalanx:
       opening.names.get(input.dalceanPhalanx.stableId) ?? input.dalceanPhalanx.stableId,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     sidewaysPathUnavailable,
     siteTargetAvailable,
   });
 }
 
-function runEarthImmobile(
+async function runEarthImmobile(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthImmobile'] {
-  const opening = findEarthImmobileOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthImmobile']> {
+  const opening = await findEarthImmobileOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.comparatorInstanceId
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.ghostTownSiteInstanceId
     && descriptor.cell === 'B3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.pudgeInstanceId
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
   let dragCheckpoint = session;
-  dragCheckpoint = legacyAccept(dragCheckpoint, legacyAction(dragCheckpoint, ({ descriptor }) =>
+  dragCheckpoint = await accept(dragCheckpoint, await action(dragCheckpoint, ({ descriptor }) =>
     descriptor.kind === 'end-turn'));
-  dragCheckpoint = legacyAccept(dragCheckpoint, legacyAction(dragCheckpoint, ({ descriptor }) =>
+  dragCheckpoint = await accept(dragCheckpoint, await action(dragCheckpoint, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  const dragChoices = legalGameActions(dragCheckpoint.state, 'north').filter(({ descriptor }) =>
+  const dragChoices = await (await legalActionsAt(dragCheckpoint, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'shoot-drag-projectile'
       && descriptor.shooterInstanceId === opening.pudgeInstanceId
       && descriptor.direction === 'south'
@@ -12202,8 +12199,8 @@ function runEarthImmobile(
     throw new Error('private Pudge drag scenario lacks both optional fight choices');
   }
   const dragChoicePairAvailable = dragChoices.length === 2;
-  const dragOnlySession = legacyAccept(dragCheckpoint, noFightAction);
-  const fightSession = legacyAccept(dragCheckpoint, fightAction);
+  const dragOnlySession = await accept(dragCheckpoint, noFightAction);
+  const fightSession = await accept(dragCheckpoint, fightAction);
   const dragOnlyEvents = dragOnlySession.transcript.at(-1)?.events ?? [];
   const fightEvents = fightSession.transcript.at(-1)?.events ?? [];
   const dragOnlyPudge = dragOnlySession.state.realm.units
@@ -12234,15 +12231,15 @@ function runEarthImmobile(
       && dragged.payload.to.cell === 'C3';
   };
 
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.comparatorInstanceId
     && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'close-intercept');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'close-intercept');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
-  const pudgeMoves = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const pudgeMoves = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.pudgeInstanceId);
   const nearbySitePresent = session.state.realm.sites.C4 !== undefined
@@ -12256,25 +12253,25 @@ function runEarthImmobile(
       descriptor.kind === 'move-and-attack'
         && descriptor.path.length === 1
         && descriptor.to.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.comparatorInstanceId
     && descriptor.path.length === 1
     && descriptor.to.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+  await take(({ descriptor }) => descriptor.kind === 'declare-attack'
     && descriptor.target.kind === 'site'
     && descriptor.target.instanceId === session.state.realm.sites.C3?.instanceId);
-  const defend = legacyAction(session, ({ descriptor }) =>
+  const defend = await action(session, ({ descriptor }) =>
     descriptor.kind === 'defend'
       && descriptor.unitInstanceId === opening.pudgeInstanceId
       && descriptor.path.length === 1
       && descriptor.to.cell === 'C3');
   const localDefendAvailable = defend.descriptor.kind === 'defend'
     && defend.descriptor.path.length === 1;
-  session = legacyAccept(session, defend);
-  take(({ descriptor }) =>
+  session = await accept(session, defend);
+  await take(({ descriptor }) =>
     descriptor.kind === 'close-defend' && !descriptor.originalTargetParticipates);
 
   return Object.freeze({
@@ -12288,7 +12285,7 @@ function runEarthImmobile(
     dragOnlyEventsVerified: dragOnlyEvents.map(({ type }) => type).join(',')
       === 'projectile-shot,unit-dragged'
       && dragEventsAreSourceLinked(dragOnlyEvents),
-    dragOnlyReplayVerified: verifyGameReplay(dragOnlySession),
+    dragOnlyReplayVerified: await verifyReplayAt(dragOnlySession),
     dragOnlyStateVerified: dragOnlyPudge?.location === 'C3'
       && dragOnlyPudge.tapped
       && dragOnlyPudge.damage === 0
@@ -12301,7 +12298,7 @@ function runEarthImmobile(
     fightEventsVerified: fightEvents.map(({ type }) => type).join(',')
       === 'projectile-shot,unit-dragged,fight-started,strike-damage-allocated,damage-dealt,damage-dealt,minion-died'
       && dragEventsAreSourceLinked(fightEvents),
-    fightReplayVerified: verifyGameReplay(fightSession),
+    fightReplayVerified: await verifyReplayAt(fightSession),
     fightStateVerified: fightPudge?.location === 'C3'
       && fightPudge.tapped
       && fightPudge.damage === 3
@@ -12315,50 +12312,50 @@ function runEarthImmobile(
     positiveStepMoveUnavailable,
     pudgeButcher:
       opening.names.get(input.pudgeButcher.stableId) ?? input.pudgeButcher.stableId,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     sameLocationAttackAvailable,
   });
 }
 
-function runEarthBury(
+async function runEarthBury(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthBury'] {
-  const opening = findEarthBuryOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthBury']> {
+  const opening = await findEarthBuryOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.boskTrollInstanceId
     && descriptor.cell === 'C2'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
     && descriptor.cell === 'B3');
 
-  const buryActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const buryActions = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.buryInstanceId
       && descriptor.target !== undefined
@@ -12367,7 +12364,7 @@ function runEarthBury(
   const chosenBury = buryActions[0];
   if (!chosenBury) throw new Error('private forced-burrow Magic target is unavailable');
   const manaBefore = session.state.players.north.mana;
-  session = legacyAccept(session, chosenBury);
+  session = await accept(session, chosenBury);
 
   const finalEvents = session.transcript.at(-1)?.events ?? [];
   const exactEventOrder = finalEvents.map(({ type }) => type).join(',')
@@ -12427,7 +12424,7 @@ function runEarthBury(
       && session.state.terminal.status === 'active',
     exactlyOneBuryTarget,
     manaPaid: manaBefore - session.state.players.north.mana,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     spellEnteredCemetery: session.state.players.north.cemetery
       .some(({ instanceId }) => instanceId === opening.buryInstanceId)
       && !session.state.players.north.hand.spellbook
@@ -12439,45 +12436,45 @@ function runEarthBury(
   });
 }
 
-function runEarthQuagmire(
+async function runEarthQuagmire(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthQuagmire'] {
-  const opening = findEarthQuagmireOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthQuagmire']> {
+  const opening = await findEarthQuagmireOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.wildBoarsInstanceId
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
-  const quagmireAction = legacyAction(session, ({ descriptor }) =>
+  const quagmireAction = await action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.quagmireInstanceId
       && descriptor.cell === 'B3');
-  const quagmireResult = stepGame(session, quagmireAction);
+  const quagmireResult = await stepAt(session, quagmireAction);
   if (!quagmireResult.accepted) {
     throw new Error(`private Quagmire play rejected: ${quagmireResult.reason.code}`);
   }
@@ -12485,11 +12482,11 @@ function runEarthQuagmire(
   const siteEvent = quagmireResult.receipt.events[0];
   const sitePayload = siteEvent && isJsonRecord(siteEvent.payload) ? siteEvent.payload : undefined;
 
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   const boarsDuringEffect = session.state.realm.units
     .find(({ instanceId }) => instanceId === opening.wildBoarsInstanceId);
-  const movementDuringEffect = legalGameActions(session.state, 'south').filter(({ descriptor }) =>
+  const movementDuringEffect = await (await legalActionsAt(session, 'south')).filter(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.wildBoarsInstanceId
       && descriptor.path.length > 1);
@@ -12498,11 +12495,11 @@ function runEarthQuagmire(
     && !boarsDuringEffect.tapped
     && movementDuringEffect.length === 0;
 
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const movementAfterExpiry = legalGameActions(session.state, 'south').filter(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const movementAfterExpiry = await (await legalActionsAt(session, 'south')).filter(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.wildBoarsInstanceId
       && descriptor.path.length > 1);
@@ -12530,80 +12527,80 @@ function runEarthQuagmire(
       && movementAfterExpiry.length > 0,
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
     quagmire: opening.names.get(input.quagmire.stableId) ?? input.quagmire.stableId,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     unitImmobileThroughOpponentTurn,
     wildBoars: opening.names.get(input.wildBoars.stableId) ?? input.wildBoars.stableId,
   });
 }
 
-function runEarthEntangleTerrain(
+async function runEarthEntangleTerrain(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthEntangleTerrain'] {
-  const opening = findEarthEntangleTerrainOpening(input);
-  let session = legacyKeep(legacyKeep(opening.session));
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthEntangleTerrain']> {
+  const opening = await findEarthEntangleTerrainOpening(input);
+  let session = await keep(await keep(opening.session));
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
-  const playNorthSite = (index: number, cell: string): void => {
-    take(({ descriptor }) => descriptor.kind === 'play-site'
+  const playNorthSite = async (index: number, cell: string): Promise<void> => {
+    await take(({ descriptor }) => descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[index]
       && descriptor.cell === cell);
   };
-  const drawAndEndSouthTurn = (): void => {
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
+  const drawAndEndSouthTurn = async (): Promise<void> => {
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
   };
 
-  playNorthSite(0, 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await playNorthSite(0, 'C4');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playNorthSite(1, 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  drawAndEndSouthTurn();
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await playNorthSite(1, 'C3');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await drawAndEndSouthTurn();
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playNorthSite(2, 'B4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  drawAndEndSouthTurn();
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await playNorthSite(2, 'B4');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await drawAndEndSouthTurn();
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.caveTrollsInstanceId
     && descriptor.cell === 'C4'
     && descriptor.region === 'underground');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  drawAndEndSouthTurn();
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await drawAndEndSouthTurn();
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  playNorthSite(3, 'B3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  drawAndEndSouthTurn();
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await playNorthSite(3, 'B3');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await drawAndEndSouthTurn();
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  playNorthSite(4, 'A4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  drawAndEndSouthTurn();
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await playNorthSite(4, 'A4');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await drawAndEndSouthTurn();
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  playNorthSite(5, 'A3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await playNorthSite(5, 'A3');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.malakhimInstanceId
     && descriptor.cell === 'C4'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  drawAndEndSouthTurn();
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await drawAndEndSouthTurn();
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   const beforeView = observeGame(session.state, 'north');
   const affectedCells = ['B3', 'B4', 'C3', 'C4'] as const;
-  const castActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const castActions = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-aura'
       && descriptor.cardInstanceId === opening.entangleTerrainInstanceId);
   const exactActions = castActions.filter(({ descriptor }) =>
@@ -12612,7 +12609,7 @@ function runEarthEntangleTerrain(
   if (exactActions.length !== 1) {
     throw new Error('private terrain Aura exact canonical cast is unavailable or ambiguous');
   }
-  const castResult = stepGame(session, exactActions[0]!);
+  const castResult = await stepAt(session, exactActions[0]!);
   if (!castResult.accepted) throw new Error('private terrain Aura cast was rejected');
   session = castResult.session;
   const castEvent = castResult.receipt.events.find(({ type }) => type === 'aura-conjured');
@@ -12630,15 +12627,15 @@ function runEarthEntangleTerrain(
     instanceId === opening.entangleTerrainInstanceId);
 
   const counters: (number | undefined)[] = [];
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
   counters.push(session.state.realm.auras?.[0]?.turnCounters);
-  drawAndEndSouthTurn();
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await drawAndEndSouthTurn();
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
   counters.push(session.state.realm.auras?.[0]?.turnCounters);
-  drawAndEndSouthTurn();
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await drawAndEndSouthTurn();
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
   counters.push(session.state.realm.auras?.[0]?.turnCounters);
 
   const finalView = observeGame(session.state, 'north');
@@ -12716,7 +12713,7 @@ function runEarthEntangleTerrain(
         === input.format.copyLimits[input.burrowingMinion.rarity!],
     malakhim: opening.names.get(input.malakhim.stableId) ?? input.malakhim.stableId,
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     surfaceAndSubsurfaceMinionsAffected: malakhimDuring?.region === 'surface'
       && malakhimDuring.immobile
@@ -12727,46 +12724,46 @@ function runEarthEntangleTerrain(
   });
 }
 
-function runEarthHolyGround(
+async function runEarthHolyGround(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthHolyGround'] {
-  const opening = findEarthHolyGroundOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthHolyGround']> {
+  const opening = await findEarthHolyGroundOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
   const initialNorthLife = session.state.players.north.avatar.life;
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.demonInstanceIds[0]
     && descriptor.cell === 'C3'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.demonInstanceIds[1]
     && descriptor.cell === 'C3'
     && descriptor.region === undefined);
 
   const northLifeBeforeHealing = session.state.players.north.avatar.life;
   const southLifeBeforeHealing = session.state.players.south.avatar.life;
-  const result = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const result = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.holyGroundInstanceId
       && descriptor.cell === 'B3'));
@@ -12812,49 +12809,49 @@ function runEarthHolyGround(
       opening.names.get(input.lesserBloodDemon.stableId) ?? input.lesserBloodDemon.stableId,
     lifeWasReducedByFour: northLifeBeforeHealing === initialNorthLife - 4,
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     siteEstablished: session.state.realm.sites.B3?.instanceId === opening.holyGroundInstanceId,
   });
 }
 
-function runEarthBedrock(
+async function runEarthBedrock(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthBedrock'] {
-  const opening = findEarthBedrockOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthBedrock']> {
+  const opening = await findEarthBedrockOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.wastelandInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.bedrockInstanceId
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.granaryRatsInstanceId
     && descriptor.cell === 'C3'
     && descriptor.region === undefined);
   const affinityWithRats = observeGame(session.state, 'north').players.north.affinity;
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.sinkholeInstanceId
     && descriptor.cell === 'B3');
 
-  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const choices = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'activate-site-destruction'
       && descriptor.sourceSiteInstanceId === opening.sinkholeInstanceId
       && descriptor.targetCell === 'C3'
@@ -12862,7 +12859,7 @@ function runEarthBedrock(
   const selected = choices[0];
   if (!selected) throw new Error('private Bedrock destruction attempt is unavailable');
   const exactActivationAvailable = choices.length === 1;
-  const result = stepGame(session, selected);
+  const result = await stepAt(session, selected);
   if (!result.accepted) throw new Error(`private Bedrock destruction attempt rejected: ${result.reason.code}`);
   session = result.session;
 
@@ -12919,7 +12916,7 @@ function runEarthBedrock(
       && !session.state.players.north.cemetery
         .some(({ instanceId }) => instanceId === opening.bedrockInstanceId),
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     sinkhole: opening.names.get(input.sinkhole.stableId) ?? input.sinkhole.stableId,
     sourceCostResolved: session.state.players.north.cemetery
@@ -12933,103 +12930,103 @@ function runEarthBedrock(
   });
 }
 
-function runEarthWraetannisTitan(
+async function runEarthWraetannisTitan(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthWraetannisTitan'] {
-  const opening = findEarthWraetannisTitanOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthWraetannisTitan']> {
+  const opening = await findEarthWraetannisTitanOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
-  const playSite = (instanceId: string, cell: string): void => {
-    take(({ descriptor }) => descriptor.kind === 'play-site'
+  const playSite = async (instanceId: string, cell: string): Promise<void> => {
+    await take(({ descriptor }) => descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === instanceId
       && descriptor.cell === cell);
   };
 
-  playSite(opening.northSiteInstanceIds[0], 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await playSite(opening.northSiteInstanceIds[0], 'C4');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playSite(opening.southSiteInstanceIds[0], 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await playSite(opening.southSiteInstanceIds[0], 'C1');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playSite(opening.northSiteInstanceIds[1], 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await playSite(opening.northSiteInstanceIds[1], 'C3');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playSite(opening.southSiteInstanceIds[1], 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await playSite(opening.southSiteInstanceIds[1], 'C2');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playSite(opening.northSiteInstanceIds[2], 'B4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await playSite(opening.northSiteInstanceIds[2], 'B4');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playSite(opening.southSiteInstanceIds[2], 'B1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await playSite(opening.southSiteInstanceIds[2], 'B1');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
   for (let turn = 4; turn <= 7; turn += 1) {
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
   }
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   for (const enemyInstanceId of opening.southEnemyInstanceIds) {
-    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    await take(({ descriptor }) => descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === enemyInstanceId
       && descriptor.cell === 'C2'
       && descriptor.region === undefined);
   }
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
   for (const enemyInstanceId of opening.southEnemyInstanceIds) {
-    take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+    await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === enemyInstanceId
       && descriptor.to.cell === 'C3');
-    take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    await take(({ descriptor }) => descriptor.kind === 'decline-attack');
   }
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  playSite(opening.northSiteInstanceIds[3], 'A4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await playSite(opening.northSiteInstanceIds[3], 'A4');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.houseArnBannermanInstanceId
     && descriptor.cell === 'C3'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  playSite(opening.northSiteInstanceIds[4], 'A3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await playSite(opening.northSiteInstanceIds[4], 'A3');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  playSite(opening.northSiteInstanceIds[5], 'A2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await playSite(opening.northSiteInstanceIds[5], 'A2');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  playSite(opening.northSiteInstanceIds[6], 'A1');
-  const summonResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await playSite(opening.northSiteInstanceIds[6], 'A1');
+  const summonResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.wraetannisTitanInstanceId
       && descriptor.cell === 'C3'
@@ -13046,7 +13043,7 @@ function runEarthWraetannisTitan(
     .map(({ targetInstanceId }) => targetInstanceId)
     .filter((instanceId): instanceId is string => typeof instanceId === 'string')
     .sort();
-  const expectedTargetIds = [...opening.southEnemyInstanceIds].sort();
+  const expectedTargetIds = await [...opening.southEnemyInstanceIds].sort();
   const allocationIndices = events.flatMap(({ type }, index) =>
     type === 'strike-damage-allocated' ? [index] : []);
   const damageIndices = events.flatMap(({ type }, index) => type === 'damage-dealt' ? [index] : []);
@@ -13099,7 +13096,7 @@ function runEarthWraetannisTitan(
       && deck.spellbook.find(({ name }) => name === input.houseArnBannerman.name)?.copies
         === input.format.copyLimits[input.houseArnBannerman.rarity!],
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     wildBoars: opening.names.get(input.wildBoars.stableId) ?? input.wildBoars.stableId,
     wraetannisTitan:
@@ -13107,72 +13104,72 @@ function runEarthWraetannisTitan(
   });
 }
 
-function runEarthKingOfRealm(
+async function runEarthKingOfRealm(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthKingOfRealm'] {
-  const opening = findEarthKingOfRealmOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthKingOfRealm']> {
+  const opening = await findEarthKingOfRealmOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
-  const playSite = (instanceId: string, cell: string): void => {
-    take(({ descriptor }) => descriptor.kind === 'play-site'
+  const playSite = async (instanceId: string, cell: string): Promise<void> => {
+    await take(({ descriptor }) => descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === instanceId
       && descriptor.cell === cell);
   };
-  const drawAndEndSouthTurn = (): void => {
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
+  const drawAndEndSouthTurn = async (): Promise<void> => {
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
   };
 
-  playSite(opening.northSiteInstanceIds[0], 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playSite(opening.southSiteInstanceId, 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await playSite(opening.northSiteInstanceIds[0], 'C4');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await playSite(opening.southSiteInstanceId, 'C1');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playSite(opening.northSiteInstanceIds[1], 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  drawAndEndSouthTurn();
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await playSite(opening.northSiteInstanceIds[1], 'C3');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await drawAndEndSouthTurn();
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playSite(opening.northSiteInstanceIds[2], 'B4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  drawAndEndSouthTurn();
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await playSite(opening.northSiteInstanceIds[2], 'B4');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await drawAndEndSouthTurn();
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.landSurveyorInstanceId
     && descriptor.cell === 'C4'
     && descriptor.region === undefined);
-  playSite(opening.northSiteInstanceIds[3], 'A4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  drawAndEndSouthTurn();
+  await playSite(opening.northSiteInstanceIds[3], 'A4');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await drawAndEndSouthTurn();
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  playSite(opening.northSiteInstanceIds[4], 'A3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await playSite(opening.northSiteInstanceIds[4], 'A3');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.scentHoundsInstanceId
     && descriptor.cell === 'C4'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  drawAndEndSouthTurn();
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await drawAndEndSouthTurn();
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  playSite(opening.northSiteInstanceIds[5], 'A2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  drawAndEndSouthTurn();
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await playSite(opening.northSiteInstanceIds[5], 'A2');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await drawAndEndSouthTurn();
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  playSite(opening.northSiteInstanceIds[6], 'A1');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await playSite(opening.northSiteInstanceIds[6], 'A1');
   const beforeView = observeGame(session.state, 'north');
   const beforeLandSurveyor = beforeView.realm.units.find(({ instanceId }) =>
     instanceId === opening.landSurveyorInstanceId);
   const beforeScentHounds = beforeView.realm.units.find(({ instanceId }) =>
     instanceId === opening.scentHoundsInstanceId);
-  const exactActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const exactActions = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.kingOfRealmInstanceId
       && descriptor.cell === 'C4'
@@ -13180,7 +13177,7 @@ function runEarthKingOfRealm(
   if (exactActions.length !== 1) {
     throw new Error('private King of the Realm exact summon is unavailable or ambiguous');
   }
-  const castResult = stepGame(session, exactActions[0]!);
+  const castResult = await stepAt(session, exactActions[0]!);
   if (!castResult.accepted) throw new Error('private King of the Realm summon was rejected');
   session = castResult.session;
 
@@ -13226,60 +13223,60 @@ function runEarthKingOfRealm(
       && beforeScentHounds.defense === 2
       && afterScentHounds?.attack === 2
       && afterScentHounds.defense === 2,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     scentHounds: opening.names.get(input.scentHounds.stableId) ?? input.scentHounds.stableId,
     seed: opening.seed,
   });
 }
 
-function runEarthMountainGiant(
+async function runEarthMountainGiant(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthMountainGiant'] {
-  const opening = findEarthMountainGiantOpening(input);
-  let session = legacyKeep(legacyKeep(opening.session));
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthMountainGiant']> {
+  const opening = await findEarthMountainGiantOpening(input);
+  let session = await keep(await keep(opening.session));
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
-  const playSite = (instanceId: string, cell: string): void => {
-    take(({ descriptor }) => descriptor.kind === 'play-site'
+  const playSite = async (instanceId: string, cell: string): Promise<void> => {
+    await take(({ descriptor }) => descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === instanceId
       && descriptor.cell === cell);
   };
-  const drawAndEndSouthTurn = (): void => {
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
+  const drawAndEndSouthTurn = async (): Promise<void> => {
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
   };
   const initialCells = ['B3', 'B4', 'C3', 'C4'] as const;
   const movedCells = ['C3', 'C4', 'D3', 'D4'] as const;
 
-  playSite(opening.northSiteInstanceIds[0], 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playSite(opening.southSiteInstanceIds[0], 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await playSite(opening.northSiteInstanceIds[0], 'C4');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await playSite(opening.southSiteInstanceIds[0], 'C1');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playSite(opening.northSiteInstanceIds[1], 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playSite(opening.southSiteInstanceIds[1], 'D1');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await playSite(opening.northSiteInstanceIds[1], 'C3');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await playSite(opening.southSiteInstanceIds[1], 'D1');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.wildBoarsInstanceId
     && descriptor.cell === 'D1'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playSite(opening.northSiteInstanceIds[2], 'B4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playSite(opening.southSiteInstanceIds[2], 'D2');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await playSite(opening.northSiteInstanceIds[2], 'B4');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await playSite(opening.southSiteInstanceIds[2], 'D2');
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.wildBoarsInstanceId
     && descriptor.from.cell === 'D1'
     && descriptor.to.cell === 'D2');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
   const laterNorthSites = [
     ['B3', opening.northSiteInstanceIds[3]],
@@ -13289,14 +13286,14 @@ function runEarthMountainGiant(
     ['D3', opening.northSiteInstanceIds[7]],
   ] as const;
   for (const [cell, siteInstanceId] of laterNorthSites) {
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-    playSite(siteInstanceId, cell);
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await playSite(siteInstanceId, cell);
     if (cell === 'D3') break;
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
-    drawAndEndSouthTurn();
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await drawAndEndSouthTurn();
   }
 
-  const exactSummons = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const exactSummons = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.mountainGiantInstanceId
       && descriptor.cell === 'B3'
@@ -13307,7 +13304,7 @@ function runEarthMountainGiant(
       `private Mountain Giant seed ${opening.seed} has ${exactSummons.length} exact summons`,
     );
   }
-  const summonResult = stepGame(session, exactSummons[0]!);
+  const summonResult = await stepAt(session, exactSummons[0]!);
   if (!summonResult.accepted) {
     throw new Error(
       `private Mountain Giant seed ${opening.seed} summon rejected: ${summonResult.reason.code}`,
@@ -13320,9 +13317,9 @@ function runEarthMountainGiant(
     .find(({ instanceId }) => instanceId === opening.mountainGiantInstanceId);
   const mountainDefinition = session.state.cards[input.mountainGiant.stableId];
 
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const boarMoveResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const boarMoveResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.wildBoarsInstanceId
       && descriptor.from.cell === 'D2'
@@ -13333,11 +13330,11 @@ function runEarthMountainGiant(
     );
   }
   session = boarMoveResult.session;
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const exactMoves = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const exactMoves = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.mountainGiantInstanceId
       && descriptor.from.cell === 'B3'
@@ -13351,7 +13348,7 @@ function runEarthMountainGiant(
       `private Mountain Giant seed ${opening.seed} has ${exactMoves.length} exact moves`,
     );
   }
-  const moveResult = stepGame(session, exactMoves[0]!);
+  const moveResult = await stepAt(session, exactMoves[0]!);
   if (!moveResult.accepted) {
     throw new Error(
       `private Mountain Giant seed ${opening.seed} move rejected: ${moveResult.reason.code}`,
@@ -13360,7 +13357,7 @@ function runEarthMountainGiant(
   session = moveResult.session;
   const movedGiant = observeGame(session.state, 'north').realm.units
     .find(({ instanceId }) => instanceId === opening.mountainGiantInstanceId);
-  const attackResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const attackResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'declare-attack'
       && descriptor.target.kind === 'minion'
       && descriptor.target.instanceId === opening.wildBoarsInstanceId));
@@ -13371,7 +13368,7 @@ function runEarthMountainGiant(
   }
   session = attackResult.session;
   const combatCell = session.state.pendingCombat?.cell;
-  const combatResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const combatResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'close-defend'
       && descriptor.originalTargetParticipates));
   if (!combatResult.accepted) {
@@ -13448,7 +13445,7 @@ function runEarthMountainGiant(
       && movedGiant?.location === 'C3'
       && canonicalJson(movedGiant.occupiedCells as JsonValue) === canonicalJson(movedCells),
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     unsupportedMechanicsAbsent: mountainDefinition?.cardType === 'minion'
       && mountainDefinition.occupiesSquareArea === 2
@@ -13493,37 +13490,37 @@ function runEarthMountainGiant(
   });
 }
 
-function runEarthSlumberingGiantess(
+async function runEarthSlumberingGiantess(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthSlumberingGiantess'] {
-  const opening = findEarthSlumberingGiantessOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthSlumberingGiantess']> {
+  const opening = await findEarthSlumberingGiantessOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
-  const playSite = (instanceId: string, cell: string): void => {
-    take(({ descriptor }) => descriptor.kind === 'play-site'
+  const playSite = async (instanceId: string, cell: string): Promise<void> => {
+    await take(({ descriptor }) => descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === instanceId
       && descriptor.cell === cell);
   };
 
-  playSite(opening.northSiteInstanceIds[0], 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playSite(opening.southSiteInstanceIds[0], 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await playSite(opening.northSiteInstanceIds[0], 'C4');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await playSite(opening.southSiteInstanceIds[0], 'C1');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playSite(opening.northSiteInstanceIds[1], 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playSite(opening.southSiteInstanceIds[1], 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await playSite(opening.northSiteInstanceIds[1], 'C3');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await playSite(opening.southSiteInstanceIds[1], 'C2');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playSite(opening.northSiteInstanceIds[2], 'B4');
-  const summonResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await playSite(opening.northSiteInstanceIds[2], 'B4');
+  const summonResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.slumberingGiantessInstanceId
       && descriptor.cell === 'C3'
@@ -13547,27 +13544,27 @@ function runEarthSlumberingGiantess(
     && summonPayload.payload.seat === 'north'
     && disabledPayload.payload.instanceId === opening.slumberingGiantessInstanceId
     && disabledPayload.payload.seat === 'north';
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playSite(opening.southSiteInstanceIds[2], 'B1');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await playSite(opening.southSiteInstanceIds[2], 'B1');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.albespinePikemenInstanceId
     && descriptor.cell === 'C2'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.albespinePikemenInstanceId
     && descriptor.from.cell === 'C2'
     && descriptor.to.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+  await take(({ descriptor }) => descriptor.kind === 'declare-attack'
     && descriptor.target.kind === 'minion'
     && descriptor.target.instanceId === opening.slumberingGiantessInstanceId);
-  const fightResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const fightResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
   if (!fightResult.accepted) {
     throw new Error(`private Giantess first-strike fight rejected: ${fightResult.reason.code}`);
@@ -13631,27 +13628,27 @@ function runEarthSlumberingGiantess(
       && deck.spellbook.find(({ name }) => name === input.firstStrikeMinion.name)?.copies
         === input.format.copyLimits[input.firstStrikeMinion.rarity!],
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     slumberingGiantess:
       opening.names.get(input.slumberingGiantess.stableId) ?? input.slumberingGiantess.stableId,
   });
 }
 
-function runEarthCaveIn(
+async function runEarthCaveIn(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthCaveIn'] {
-  const opening = findEarthCaveInOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthCaveIn']> {
+  const opening = await findEarthCaveInOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
   const cycles = Math.max(
     3,
     opening.northSpellDrawCount + 1,
@@ -13660,72 +13657,72 @@ function runEarthCaveIn(
   const southCells = ['C1', 'C2', 'B2'] as const;
   const northCells = ['C3', 'B3'] as const;
   for (let cycle = 0; cycle < cycles; cycle += 1) {
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
     if (cycle < opening.southSiteInstanceIds.length) {
-      take(({ descriptor }) => descriptor.kind === 'play-site'
+      await take(({ descriptor }) => descriptor.kind === 'play-site'
         && descriptor.cardInstanceId === opening.southSiteInstanceIds[cycle]
         && descriptor.cell === southCells[cycle]);
     }
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
-    take(({ descriptor }) => descriptor.kind === 'draw'
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw'
       && descriptor.zone === (cycle === 2 ? 'atlas' : 'spellbook'));
     if (cycle < northCells.length) {
-      take(({ descriptor }) => descriptor.kind === 'play-site'
+      await take(({ descriptor }) => descriptor.kind === 'play-site'
         && descriptor.cardInstanceId === opening.northSiteInstanceIds[cycle + 1]
         && descriptor.cell === northCells[cycle]);
     }
     if (cycle === 2) {
-      take(({ descriptor }) => descriptor.kind === 'play-site'
+      await take(({ descriptor }) => descriptor.kind === 'play-site'
         && descriptor.cardInstanceId === opening.northFourthSiteInstanceId
         && descriptor.cell === 'A3');
     }
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
   }
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.caveTrollsInstanceId
     && descriptor.cell === 'C2'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'cast-artifact'
     && descriptor.cardInstanceId === opening.swordAndShieldInstanceId
     && descriptor.bearer === undefined
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'pick-up-artifacts'
+  await take(({ descriptor }) => descriptor.kind === 'pick-up-artifacts'
     && descriptor.unit.kind === 'minion'
     && descriptor.unit.instanceId === opening.caveTrollsInstanceId
     && descriptor.artifactInstanceIds.length === 1
     && descriptor.artifactInstanceIds[0] === opening.swordAndShieldInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.boskTrollInstanceId
     && descriptor.cell === 'C2'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.controlScentInstanceId
     && descriptor.cell === 'C1'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
   const targetSite = session.state.realm.sites.C2;
   if (!targetSite) throw new Error('private Cave-In target Site is absent');
   const controlBefore = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.controlScentInstanceId);
-  const caveInChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const caveInChoices = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.caveInInstanceId
       && descriptor.targetLocation?.cell === 'C2'
@@ -13736,7 +13733,7 @@ function runEarthCaveIn(
     throw new Error('private Cave-In exact Land Site cast is unavailable or ambiguous');
   }
   const manaBefore = session.state.players.north.mana;
-  const result = stepGame(session, caveInChoice);
+  const result = await stepAt(session, caveInChoice);
   if (!result.accepted) throw new Error('private Cave-In cast was rejected');
   session = result.session;
 
@@ -13751,7 +13748,7 @@ function runEarthCaveIn(
     type === 'minion-burrowed' || type === 'artifact-burrowed');
   const burrowIds = burrowEvents.flatMap(({ payload }) =>
     isJsonRecord(payload) && typeof payload.instanceId === 'string' ? [payload.instanceId] : []);
-  const expectedBurrowIds = [
+  const expectedBurrowIds = await [
     opening.boskTrollInstanceId,
     opening.caveTrollsInstanceId,
     opening.swordAndShieldInstanceId,
@@ -13810,7 +13807,7 @@ function runEarthCaveIn(
       && session.state.players.south.cemetery.some(({ instanceId }) =>
         instanceId === opening.boskTrollInstanceId),
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     scentHounds:
       opening.names.get(input.scentHounds.stableId) ?? input.scentHounds.stableId,
     seed: opening.seed,
@@ -13835,25 +13832,25 @@ function runEarthCaveIn(
   });
 }
 
-function runEarthCraterize(
+async function runEarthCraterize(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthCraterize'] {
-  const opening = findEarthCraterizeOpening(input);
-  let session = legacyKeep(legacyKeep(opening.session));
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthCraterize']> {
+  const opening = await findEarthCraterizeOpening(input);
+  let session = await keep(await keep(opening.session));
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
-  const playSite = (instanceId: string, cell: RealmCell): void => {
-    take(({ descriptor }) => descriptor.kind === 'play-site'
+  const playSite = async (instanceId: string, cell: RealmCell): Promise<void> => {
+    await take(({ descriptor }) => descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === instanceId
       && descriptor.cell === cell);
   };
 
-  playSite(opening.northSiteInstanceIds[0], 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playSite(opening.southSiteInstanceId, 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await playSite(opening.northSiteInstanceIds[0], 'C4');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await playSite(opening.southSiteInstanceId, 'C1');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
   const northCells = ['C3', 'B4', 'B3', 'A4', 'A3', 'D4', 'D3'] as const;
   let northSiteIndex = 1;
@@ -13867,9 +13864,9 @@ function runEarthCraterize(
         && session.state.players.north.hand.atlas.every(({ instanceId }) =>
           instanceId !== opening.discardSiteInstanceId);
     const drawZone = needsAtlas ? 'atlas' : 'spellbook';
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === drawZone);
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === drawZone);
     if (northSiteIndex < 8) {
-      playSite(
+      await playSite(
         opening.northSiteInstanceIds[northSiteIndex]!,
         northCells[northSiteIndex - 1]!,
       );
@@ -13882,9 +13879,9 @@ function runEarthCraterize(
         instanceId === opening.craterizeInstanceId)
       && session.state.players.north.mana >= 8;
     if (ready) break;
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
   }
   if (!ready) throw new Error('private Craterize setup exceeded its bounded turn count');
 
@@ -13895,7 +13892,7 @@ function runEarthCraterize(
   if (!targetSite || 'rubble' in targetSite) {
     throw new Error('private Craterize target Site is absent');
   }
-  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const choices = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.craterizeInstanceId
       && descriptor.discardSiteInstanceId === opening.discardSiteInstanceId
@@ -13906,7 +13903,7 @@ function runEarthCraterize(
     throw new Error(`private Craterize exact cast has ${choices.length} choices`);
   }
   const selected = choices[0]!;
-  const result = stepGame(session, selected);
+  const result = await stepAt(session, selected);
   if (!result.accepted) {
     throw new Error(`private Craterize cast rejected: ${result.reason.code}`);
   }
@@ -13972,7 +13969,7 @@ function runEarthCraterize(
       && deck.spellbook.reduce((total, card) => total + card.copies, 0) === 60
       && deck.spellbook.find(({ name }) => name === input.craterize.name)?.copies === 1,
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     sourceDiscardAndSiteCemeteriesVerified:
       cemetery.some(({ instanceId }) => instanceId === opening.craterizeInstanceId)
@@ -13994,73 +13991,73 @@ function runEarthCraterize(
   });
 }
 
-function runEarthSiegeBallista(
+async function runEarthSiegeBallista(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthSiegeBallista'] {
-  const opening = findEarthSiegeBallistaOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthSiegeBallista']> {
+  const opening = await findEarthSiegeBallistaOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southAirSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.snowLeopardInstanceId
     && descriptor.cell === 'C1'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.bearerInstanceId
     && descriptor.cell === 'C3'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSecondSiteInstanceId
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
     && descriptor.cell === 'B4');
-  const castResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const castResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'cast-artifact'
       && descriptor.cardInstanceId === opening.siegeBallistaInstanceId
       && descriptor.bearer?.kind === 'minion'
       && descriptor.bearer.instanceId === opening.bearerInstanceId));
   if (!castResult.accepted) throw new Error('private Siege Ballista cast was rejected');
   session = castResult.session;
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.helperInstanceId
     && descriptor.cell === 'C3'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
   const bearerBefore = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.bearerInstanceId);
@@ -14068,7 +14065,7 @@ function runEarthSiegeBallista(
     instanceId === opening.helperInstanceId);
   const targetBefore = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.snowLeopardInstanceId);
-  const activationChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const activationChoices = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'activate-artifact-damage'
       && descriptor.artifactInstanceId === opening.siegeBallistaInstanceId
       && descriptor.helper.kind === 'minion'
@@ -14079,7 +14076,7 @@ function runEarthSiegeBallista(
   if (!activation || activationChoices.length !== 1) {
     throw new Error('private Siege Ballista exact activation is unavailable or ambiguous');
   }
-  const activationResult = stepGame(session, activation);
+  const activationResult = await stepAt(session, activation);
   if (!activationResult.accepted) throw new Error('private Siege Ballista activation was rejected');
   session = activationResult.session;
 
@@ -14163,7 +14160,7 @@ function runEarthSiegeBallista(
           && !(type === 'damage-dealt'
             && isJsonRecord(payload)
             && payload.instanceId === opening.bearerInstanceId)),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     scentHounds: opening.names.get(input.scentHounds.stableId) ?? input.scentHounds.stableId,
     seed: opening.seed,
     siegeBallista:
@@ -14178,69 +14175,69 @@ function runEarthSiegeBallista(
   });
 }
 
-function runEarthPayloadTrebuchet(
+async function runEarthPayloadTrebuchet(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthPayloadTrebuchet'] {
-  const opening = findEarthPayloadTrebuchetOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthPayloadTrebuchet']> {
+  const opening = await findEarthPayloadTrebuchetOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.bearerInstanceId
     && descriptor.cell === 'C4'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.targetMinionInstanceId
     && descriptor.cell === 'C1'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cell === 'B4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cell === 'A4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cell === 'A3');
   for (let draw = 0; draw < opening.northSpellDrawCount; draw += 1) {
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   }
 
-  const castResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const castResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'cast-artifact'
       && descriptor.cardInstanceId === opening.payloadTrebuchetInstanceId
       && descriptor.bearer?.kind === 'minion'
@@ -14253,7 +14250,7 @@ function runEarthPayloadTrebuchet(
   const helperBefore = session.state.players.north.avatar;
   const targetBefore = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.targetMinionInstanceId);
-  const activationChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const activationChoices = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'activate-artifact-discard-area-damage'
       && descriptor.artifactInstanceId === opening.payloadTrebuchetInstanceId
       && descriptor.helper.kind === 'avatar'
@@ -14266,7 +14263,7 @@ function runEarthPayloadTrebuchet(
   if (!activation || activationChoices.length !== 1) {
     throw new Error('private Payload Trebuchet exact activation is unavailable or ambiguous');
   }
-  const activationResult = stepGame(session, activation);
+  const activationResult = await stepAt(session, activation);
   if (!activationResult.accepted) {
     throw new Error('private Payload Trebuchet activation was rejected');
   }
@@ -14285,7 +14282,7 @@ function runEarthPayloadTrebuchet(
     : undefined;
   const allocationEvents = events.filter(({ type }) =>
     type === 'artifact-discard-area-damage-allocated');
-  const expectedTargetIds = [
+  const expectedTargetIds = await [
     session.state.players.south.avatar.card.instanceId,
     opening.targetMinionInstanceId,
   ].sort((left, right) => left.localeCompare(right));
@@ -14366,7 +14363,7 @@ function runEarthPayloadTrebuchet(
       && helperAfter.life === helperBefore.life,
     payloadTrebuchet:
       opening.names.get(input.payloadTrebuchet.stableId) ?? input.payloadTrebuchet.stableId,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     scentHounds: opening.names.get(input.scentHounds.stableId) ?? input.scentHounds.stableId,
     seed: opening.seed,
     targetsKilledByArtifact: targetBefore?.damage === 0
@@ -14393,69 +14390,69 @@ function runEarthPayloadTrebuchet(
   });
 }
 
-function runEarthRollingBoulder(
+async function runEarthRollingBoulder(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthRollingBoulder'] {
-  const opening = findEarthRollingBoulderOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthRollingBoulder']> {
+  const opening = await findEarthRollingBoulderOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.scentHoundsInstanceId
     && descriptor.cell === 'C4'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.wildBoarsInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
     && descriptor.cell === 'B4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[3]
     && descriptor.cell === 'A4');
-  const castResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const castResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'cast-artifact'
       && descriptor.cardInstanceId === opening.rollingBoulderInstanceId
       && descriptor.bearer === undefined
       && descriptor.cell === 'C4'));
   if (!castResult.accepted) throw new Error('private Rolling Boulder cast was rejected');
   session = castResult.session;
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
   const pusherBefore = session.state.players.north.avatar;
   const originTargetBefore = session.state.realm.units.find(({ instanceId }) =>
@@ -14464,7 +14461,7 @@ function runEarthRollingBoulder(
     instanceId === opening.wildBoarsInstanceId);
   const southAvatarBefore = session.state.players.south.avatar;
   const pusherInstanceId = pusherBefore.card.instanceId;
-  const activationChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const activationChoices = (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'activate-artifact-roll-damage'
       && descriptor.artifactInstanceId === opening.rollingBoulderInstanceId
       && descriptor.direction === 'south'
@@ -14475,7 +14472,7 @@ function runEarthRollingBoulder(
   if (!activation || activationChoices.length !== 1) {
     throw new Error('private Rolling Boulder exact activation is unavailable or ambiguous');
   }
-  const activationResult = stepGame(session, activation);
+  const activationResult = await stepAt(session, activation);
   if (!activationResult.accepted) throw new Error('private Rolling Boulder activation was rejected');
   session = activationResult.session;
 
@@ -14555,7 +14552,7 @@ function runEarthRollingBoulder(
       && session.state.players.north.avatar.tapped === true
       && session.state.players.north.avatar.life === pusherBefore.life
       && !allocationTargetIds.includes(pusherInstanceId),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     rollingBoulder:
       opening.names.get(input.rollingBoulder.stableId) ?? input.rollingBoulder.stableId,
     scentHounds: opening.names.get(input.scentHounds.stableId) ?? input.scentHounds.stableId,
@@ -14571,54 +14568,54 @@ function runEarthRollingBoulder(
   });
 }
 
-function runEarthBorderMilitia(
+async function runEarthBorderMilitia(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthBorderMilitia'] {
-  const opening = findEarthBorderMilitiaOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthBorderMilitia']> {
+  const opening = await findEarthBorderMilitiaOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'B4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
     && descriptor.cell === 'B3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[2]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
   const manaBefore = session.state.players.north.mana;
-  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const choices = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.borderMilitiaInstanceId);
   const chosen = choices[0];
   if (!chosen) throw new Error('private Border Militia targetless cast is unavailable');
-  const castResult = stepGame(session, chosen);
+  const castResult = await stepAt(session, chosen);
   if (!castResult.accepted) throw new Error('private Border Militia cast was rejected');
   session = castResult.session;
 
@@ -14696,7 +14693,7 @@ function runEarthBorderMilitia(
     footSoldier: input.footSoldier.name,
     manaPaid: manaBefore - session.state.players.north.mana,
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     spellEnteredCemetery,
     tokensVerified,
@@ -14706,9 +14703,9 @@ function runEarthBorderMilitia(
 async function runEarthHumbleVillage(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
 ): Promise<PrivateGameCheck['earthHumbleVillage']> {
-  const opening = findEarthHumbleVillageOpening(input);
-  const checkpoint = legacyKeep(legacyKeep(opening.session));
-  const rootActions = legalGameActions(checkpoint.state, 'north');
+  const opening = await findEarthHumbleVillageOpening(input);
+  const checkpoint = await keep(await keep(opening.session));
+  const rootActions = await legalActionsAt(checkpoint, 'north');
   const choices = rootActions.filter(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.humbleVillageInstanceId
@@ -14718,8 +14715,8 @@ async function runEarthHumbleVillage(
   const paid = choices.find(({ descriptor }) =>
     descriptor.kind === 'play-site' && descriptor.genesisTokenChoice === 'pay-one-mana');
   if (!declined || !paid) throw new Error('private Humble Village choices are unavailable');
-  const declinedResult = stepGame(checkpoint, declined);
-  const paidResult = stepGame(checkpoint, paid);
+  const declinedResult = await stepAt(checkpoint, declined);
+  const paidResult = await stepAt(checkpoint, paid);
   if (!declinedResult.accepted || !paidResult.accepted) {
     throw new Error('private Humble Village choice was rejected');
   }
@@ -14822,51 +14819,51 @@ async function runEarthHumbleVillage(
     noRandomDraws: [...declinedSession.transcript, ...paidSession.transcript]
       .every(({ randomDraws }) => randomDraws.length === 0),
     paidSpentManaAndSummonedToken,
-    replayVerified: verifyGameReplay(declinedSession) && verifyGameReplay(paidSession),
+    replayVerified: await verifyReplayAt(declinedSession) && await verifyReplayAt(paidSession),
     seed: opening.seed,
     tokenDefinitionVerified,
   });
 }
 
-function runEarthDuel(
+async function runEarthDuel(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthDuel'] {
-  const opening = findEarthDuelMagicOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthDuel']> {
+  const opening = await findEarthDuelMagicOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.boskTrollInstanceId
     && descriptor.cell === 'C3'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.elthamTownsfolkInstanceId
     && descriptor.cell === 'C2'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
     && descriptor.cell === 'B3');
 
@@ -14881,7 +14878,7 @@ function runEarthDuel(
     south: observeGame(session.state, 'north').players.south.avatar,
   } as unknown as JsonValue);
   const manaBefore = session.state.players.north.mana;
-  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const choices = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.duelInstanceId
       && descriptor.ally?.kind === 'minion'
@@ -14890,7 +14887,7 @@ function runEarthDuel(
       && descriptor.target.instanceId === opening.elthamTownsfolkInstanceId);
   const chosen = choices[0];
   if (!chosen) throw new Error('private Duel Bosk-to-Eltham fight pair is unavailable');
-  const duelResult = stepGame(session, chosen);
+  const duelResult = await stepAt(session, chosen);
   if (!duelResult.accepted) throw new Error('private Duel cast was rejected');
   session = duelResult.session;
 
@@ -14947,7 +14944,7 @@ function runEarthDuel(
     gameRemainedActive: session.state.phase === 'main' && session.state.terminal.status === 'active',
     manaPaid: manaBefore - session.state.players.north.mana,
     noRandomDraws: duelResult.receipt.randomDraws.length === 0,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     sitesAndAvatarsPreserved:
       canonicalJson(session.state.realm.sites as unknown as JsonValue) === sitesBefore
       && canonicalJson({
@@ -14973,56 +14970,56 @@ function runEarthDuel(
   });
 }
 
-function runEarthArtifactSetup(
-  opening: ReturnType<typeof findEarthArtifactOpening>,
+async function runEarthArtifactSetup(
+  opening: Awaited<ReturnType<typeof findEarthArtifactOpening>>,
   playThirdNorthSite: boolean,
-): GameSession {
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<GameSession> {
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southEarthSiteInstanceIds[0]
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.elthamTownsfolkInstanceId
     && descriptor.cell === 'C3'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southEarthSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.boskTrollInstanceId
     && descriptor.cell === 'C2'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   if (playThirdNorthSite) {
-    take(({ descriptor }) => descriptor.kind === 'play-site'
+    await take(({ descriptor }) => descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
       && descriptor.cell === 'B3');
   }
   return session;
 }
 
-function runEarthSwordAndShield(
+async function runEarthSwordAndShield(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthSwordAndShield'] {
-  const opening = findEarthArtifactOpening(
+): Promise<PrivateGameCheck['earthSwordAndShield']> {
+  const opening = await findEarthArtifactOpening(
     input,
     input.swordAndShield,
     'earth-sword-and-shield',
@@ -15030,9 +15027,9 @@ function runEarthSwordAndShield(
   if (!opening.zapInstanceIds || opening.zapDrawCount === undefined) {
     throw new Error('private Sword Drop-death opening lacks Zap!');
   }
-  let session = runEarthArtifactSetup(opening, true);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+  let session = await runEarthArtifactSetup(opening, true);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
   const sitesBeforeCombat = canonicalJson(session.state.realm.sites as unknown as JsonValue);
@@ -15049,14 +15046,14 @@ function runEarthSwordAndShield(
     },
   };
   const manaBefore = session.state.players.north.mana;
-  const uncarriedCastChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const uncarriedCastChoices = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-artifact'
       && descriptor.cardInstanceId === opening.artifactInstanceId
       && descriptor.bearer === undefined
       && descriptor.cell === 'C3');
   const chosenArtifact = uncarriedCastChoices[0];
   if (!chosenArtifact) throw new Error('private uncarried Sword and Shield cast is unavailable');
-  const castResult = stepGame(session, chosenArtifact);
+  const castResult = await stepAt(session, chosenArtifact);
   if (!castResult.accepted) throw new Error('private Sword and Shield cast was rejected');
   session = castResult.session;
 
@@ -15068,7 +15065,7 @@ function runEarthSwordAndShield(
   const unpoweredEltham = castView.realm.units.find(({ instanceId }) =>
     instanceId === opening.elthamTownsfolkInstanceId);
   const manaBeforePickup = session.state.players.north.mana;
-  const pickupChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const pickupChoices = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'pick-up-artifacts'
       && descriptor.unit.kind === 'minion'
       && descriptor.unit.instanceId === opening.elthamTownsfolkInstanceId
@@ -15076,7 +15073,7 @@ function runEarthSwordAndShield(
       && descriptor.artifactInstanceIds[0] === opening.artifactInstanceId);
   const chosenPickup = pickupChoices[0];
   if (!chosenPickup) throw new Error('private Sword and Shield Pick Up is unavailable');
-  const pickupResult = stepGame(session, chosenPickup);
+  const pickupResult = await stepAt(session, chosenPickup);
   if (!pickupResult.accepted) throw new Error('private Sword and Shield Pick Up was rejected');
   session = pickupResult.session;
   const manaAfterPickup = session.state.players.north.mana;
@@ -15091,7 +15088,7 @@ function runEarthSwordAndShield(
 
   const dropBranchStart = session;
   const manaBeforeDrop = dropBranchStart.state.players.north.mana;
-  const dropChoices = legalGameActions(dropBranchStart.state, 'north').filter(({ descriptor }) =>
+  const dropChoices = await (await legalActionsAt(dropBranchStart, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'drop-artifacts'
       && descriptor.unit.kind === 'minion'
       && descriptor.unit.instanceId === opening.elthamTownsfolkInstanceId
@@ -15099,7 +15096,7 @@ function runEarthSwordAndShield(
       && descriptor.artifactInstanceIds[0] === opening.artifactInstanceId);
   const chosenDrop = dropChoices[0];
   if (!chosenDrop) throw new Error('private Sword and Shield Drop is unavailable');
-  const dropResult = stepGame(dropBranchStart, chosenDrop);
+  const dropResult = await stepAt(dropBranchStart, chosenDrop);
   if (!dropResult.accepted) throw new Error('private Sword and Shield Drop was rejected');
   const dropSession = dropResult.session;
   const droppedView = observeGame(dropSession.state, 'north');
@@ -15111,30 +15108,30 @@ function runEarthSwordAndShield(
     instanceId === opening.elthamTownsfolkInstanceId);
   const dropEvent = dropResult.receipt.events.find(({ type }) => type === 'artifacts-dropped');
   const dropPayload = dropEvent && isJsonRecord(dropEvent.payload) ? dropEvent.payload : undefined;
-  const secondDropUnavailable = legalGameActions(dropSession.state, 'north')
+  const secondDropUnavailable = await (await legalActionsAt(dropSession, 'north'))
     .every(({ descriptor }) => descriptor.kind !== 'drop-artifacts'
       || descriptor.unit.kind !== 'minion'
       || descriptor.unit.instanceId !== opening.elthamTownsfolkInstanceId);
 
   let dropDeathSession = dropBranchStart;
-  const takeDropDeath = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    dropDeathSession = legacyAccept(dropDeathSession, legacyAction(dropDeathSession, predicate));
+  const takeDropDeath = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    dropDeathSession = await accept(dropDeathSession, await action(dropDeathSession, predicate));
   };
   for (let draw = 0; draw < Math.max(1, opening.zapDrawCount); draw += 1) {
-    takeDropDeath(({ descriptor }) => descriptor.kind === 'end-turn');
-    takeDropDeath(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-    takeDropDeath(({ descriptor }) => descriptor.kind === 'end-turn');
-    takeDropDeath(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await takeDropDeath(({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeDropDeath(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await takeDropDeath(({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeDropDeath(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   }
   for (const zapInstanceId of opening.zapInstanceIds) {
-    takeDropDeath(({ descriptor }) => descriptor.kind === 'cast-magic'
+    await takeDropDeath(({ descriptor }) => descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === zapInstanceId
       && descriptor.target?.kind === 'minion'
       && descriptor.target.instanceId === opening.elthamTownsfolkInstanceId);
   }
-  const damagedBearer = observeGame(dropDeathSession.state, 'north').realm.units
+  const damagedBearer = await (observeGame(dropDeathSession.state, 'north')).realm.units
     .find(({ instanceId }) => instanceId === opening.elthamTownsfolkInstanceId);
-  const dropDeathResult = stepGame(dropDeathSession, legacyAction(dropDeathSession, ({ descriptor }) =>
+  const dropDeathResult = await stepAt(dropDeathSession, await action(dropDeathSession, ({ descriptor }) =>
     descriptor.kind === 'drop-artifacts'
       && descriptor.unit.kind === 'minion'
       && descriptor.unit.instanceId === opening.elthamTownsfolkInstanceId
@@ -15142,7 +15139,7 @@ function runEarthSwordAndShield(
       && descriptor.artifactInstanceIds[0] === opening.artifactInstanceId));
   if (!dropDeathResult.accepted) throw new Error('private lethal Sword Drop was rejected');
   dropDeathSession = dropDeathResult.session;
-  const dropDeathArtifact = observeGame(dropDeathSession.state, 'north').realm.artifacts
+  const dropDeathArtifact = await (observeGame(dropDeathSession.state, 'north')).realm.artifacts
     ?.find(({ instanceId }) => instanceId === opening.artifactInstanceId);
   const dropDeathEvents = dropDeathResult.receipt.events;
   const dropDeathDropPayload = dropDeathEvents[0] && isJsonRecord(dropDeathEvents[0].payload)
@@ -15181,7 +15178,7 @@ function runEarthSwordAndShield(
       instanceId !== opening.artifactInstanceId)
     && dropDeathSession.transcript.every(({ randomDraws }) => randomDraws.length === 0);
 
-  const moveResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const moveResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.elthamTownsfolkInstanceId
       && descriptor.from.cell === 'C3'
@@ -15194,10 +15191,10 @@ function runEarthSwordAndShield(
   const movedEltham = movedView.realm.units.find(({ instanceId }) =>
     instanceId === opening.elthamTownsfolkInstanceId);
 
-  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+  await take(({ descriptor }) => descriptor.kind === 'declare-attack'
     && descriptor.target.kind === 'minion'
     && descriptor.target.instanceId === opening.boskTrollInstanceId);
-  const fightResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const fightResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
   if (!fightResult.accepted) throw new Error('private Sword and Shield fight was rejected');
   session = fightResult.session;
@@ -15220,7 +15217,7 @@ function runEarthSwordAndShield(
   const firstDamageIndex = fightEvents.findIndex(({ type }) => type === 'damage-dealt');
   const finalArtifactState = session.state.realm.artifacts?.find(({ instanceId }) =>
     instanceId === opening.artifactInstanceId);
-  const finalArtifactView = observeGame(session.state, 'north').realm.artifacts
+  const finalArtifactView = await (observeGame(session.state, 'north')).realm.artifacts
     ?.find(({ instanceId }) => instanceId === opening.artifactInstanceId);
   const finalEltham = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.elthamTownsfolkInstanceId);
@@ -15229,7 +15226,7 @@ function runEarthSwordAndShield(
   const boskInCemetery = session.state.players.south.cemetery.some(({ cardId, instanceId }) =>
     cardId === input.firstStrikeTargetMinion.stableId
       && instanceId === opening.boskTrollInstanceId);
-  const artifactAbsentFromCemeteries = (['north', 'south'] as const).every((seat) =>
+  const artifactAbsentFromCemeteries = (['north', 'south'] as const).every(async (seat) =>
     session.state.players[seat].cemetery.every(({ instanceId }) =>
       instanceId !== opening.artifactInstanceId));
   const artifactCastUncarried: boolean = uncarriedCastChoices.length === 1
@@ -15390,7 +15387,7 @@ function runEarthSwordAndShield(
     && finalArtifactView.controller === 'north'
     && finalArtifactView.location === 'C2'
     && finalArtifactView.region === 'surface';
-  const dropUnavailableAfterInteraction: boolean = legalGameActions(session.state, 'north')
+  const dropUnavailableAfterInteraction: boolean = await (await legalActionsAt(session, 'north'))
     .every(({ descriptor }) => descriptor.kind !== 'drop-artifacts'
       || descriptor.unit.kind !== 'minion'
       || descriptor.unit.instanceId !== opening.elthamTownsfolkInstanceId);
@@ -15426,11 +15423,11 @@ function runEarthSwordAndShield(
     dropAcceptedActionCount: dropSession.transcript.length,
     dropChoiceVerified,
     dropDeathAcceptedActionCount: dropDeathSession.transcript.length,
-    dropDeathReplayVerified: verifyGameReplay(dropDeathSession),
+    dropDeathReplayVerified: await verifyReplayAt(dropDeathSession),
     dropDeathVerified,
     dropEventVerified,
     dropNoRandomDraws: dropResult.receipt.randomDraws.length === 0,
-    dropReplayVerified: verifyGameReplay(dropSession),
+    dropReplayVerified: await verifyReplayAt(dropSession),
     dropSecondUseUnavailable: secondDropUnavailable,
     dropSideEffectsAbsent,
     dropStateVerified,
@@ -15441,7 +15438,7 @@ function runEarthSwordAndShield(
     manaPaid: manaBefore - session.state.players.north.mana,
     noRandomDraws,
     pickupSideEffectsAbsent,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.manifest.seed,
     swordAndShield: input.swordAndShield.name,
     swordFollowedBearer,
@@ -15451,43 +15448,43 @@ function runEarthSwordAndShield(
   });
 }
 
-function runEarthPoisonousDagger(
+async function runEarthPoisonousDagger(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthPoisonousDagger'] {
-  const opening = findEarthArtifactOpening(
+): Promise<PrivateGameCheck['earthPoisonousDagger']> {
+  const opening = await findEarthArtifactOpening(
     input,
     input.poisonousDagger,
     'earth-poisonous-dagger',
   );
-  let session = runEarthArtifactSetup(opening, false);
+  let session = await runEarthArtifactSetup(opening, false);
   const manaBefore = session.state.players.north.mana;
-  const bearerChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const bearerChoices = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-artifact'
       && descriptor.cardInstanceId === opening.artifactInstanceId
       && descriptor.bearer?.kind === 'minion'
       && descriptor.bearer.instanceId === opening.elthamTownsfolkInstanceId);
   const chosenArtifact = bearerChoices[0];
   if (!chosenArtifact) throw new Error('private Poisonous Dagger bearer cast is unavailable');
-  const castResult = stepGame(session, chosenArtifact);
+  const castResult = await stepAt(session, chosenArtifact);
   if (!castResult.accepted) throw new Error('private Poisonous Dagger cast was rejected');
   session = castResult.session;
 
   const castArtifactState = session.state.realm.artifacts?.find(({ instanceId }) =>
     instanceId === opening.artifactInstanceId);
-  const castArtifactView = observeGame(session.state, 'north').realm.artifacts
+  const castArtifactView = await (observeGame(session.state, 'north')).realm.artifacts
     ?.find(({ instanceId }) => instanceId === opening.artifactInstanceId);
-  const moveResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const moveResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.elthamTownsfolkInstanceId
       && descriptor.from.cell === 'C3'
       && descriptor.to.cell === 'C2'));
   if (!moveResult.accepted) throw new Error('private Poisonous Dagger bearer move was rejected');
   session = moveResult.session;
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'declare-attack'
       && descriptor.target.kind === 'minion'
       && descriptor.target.instanceId === opening.boskTrollInstanceId));
-  const fightResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const fightResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
   if (!fightResult.accepted) throw new Error('private Poisonous Dagger fight was rejected');
   session = fightResult.session;
@@ -15518,7 +15515,7 @@ function runEarthPoisonousDagger(
   const firstDamageIndex = events.findIndex(({ type }) => type === 'damage-dealt');
   const finalArtifactState = session.state.realm.artifacts?.find(({ instanceId }) =>
     instanceId === opening.artifactInstanceId);
-  const finalArtifactView = observeGame(session.state, 'north').realm.artifacts
+  const finalArtifactView = await (observeGame(session.state, 'north')).realm.artifacts
     ?.find(({ instanceId }) => instanceId === opening.artifactInstanceId);
   const castVerified: boolean = castResult.receipt.events.length === 1
     && castResult.receipt.events[0]?.type === 'artifact-conjured'
@@ -15577,7 +15574,7 @@ function runEarthPoisonousDagger(
     && session.state.players.south.cemetery.length === 1
     && session.state.players.south.cemetery[0]?.cardId === input.firstStrikeTargetMinion.stableId
     && session.state.players.south.cemetery[0].instanceId === opening.boskTrollInstanceId
-    && (['north', 'south'] as const).every((seat) =>
+    && (['north', 'south'] as const).every(async (seat) =>
       session.state.players[seat].cemetery.every(({ instanceId }) =>
         instanceId !== opening.artifactInstanceId))
     && session.state.players.north.hand.spellbook.every(({ instanceId }) =>
@@ -15605,49 +15602,49 @@ function runEarthPoisonousDagger(
       && moveResult.receipt.randomDraws.length === 0
       && fightResult.receipt.randomDraws.length === 0,
     poisonousDagger: input.poisonousDagger.name,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     stateAndCemeteriesVerified,
   });
 }
 
-function runEarthRescue(
+async function runEarthRescue(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthRescue'] {
-  const opening = findEarthRescueOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthRescue']> {
+  const opening = await findEarthRescueOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.boskTrollInstanceId
     && descriptor.cell === 'C2'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
     && descriptor.cell === 'B3');
-  take(({ descriptor }) => descriptor.kind === 'cast-magic'
+  await take(({ descriptor }) => descriptor.kind === 'cast-magic'
     && descriptor.cardInstanceId === opening.buryInstanceId
     && descriptor.target?.instanceId === opening.boskTrollInstanceId);
 
@@ -15659,20 +15656,20 @@ function runEarthRescue(
   const buryStayedNorthCemetery = session.state.players.north.cemetery
     .some(({ instanceId }) => instanceId === opening.buryInstanceId);
 
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[2]
     && descriptor.cell === 'B2');
 
-  const choices = legalGameActions(session.state, 'south').filter(({ descriptor }) =>
+  const choices = await (await legalActionsAt(session, 'south')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.rescueInstanceId);
   const selected = choices.find(({ descriptor }) => descriptor.kind === 'cast-magic'
     && descriptor.cemeteryMinionInstanceId === opening.boskTrollInstanceId);
   if (!selected) throw new Error('private Rescue cemetery choice is unavailable');
   const manaBefore = session.state.players.south.mana;
-  session = legacyAccept(session, selected);
+  session = await accept(session, selected);
 
   const northViewAfter = observeGame(session.state, 'north');
   const events = session.transcript.at(-1)?.events ?? [];
@@ -15708,7 +15705,7 @@ function runEarthRescue(
         && descriptor.cemeteryMinionInstanceId === opening.boskTrollInstanceId)
       && session.state.players.north.cemetery
         .every(({ instanceId }) => instanceId !== opening.boskTrollInstanceId),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     rescue: input.rescue.name,
     rescueEnteredSouthCemetery: session.state.players.south.cemetery
       .some(({ instanceId }) => instanceId === opening.rescueInstanceId),
@@ -15719,12 +15716,12 @@ function runEarthRescue(
   });
 }
 
-function runEarthShallowGrave(
+async function runEarthShallowGrave(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthShallowGrave'] {
-  const opening = findEarthShallowGraveOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
+): Promise<PrivateGameCheck['earthShallowGrave']> {
+  const opening = await findEarthShallowGraveOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
   const before = session.state.players.north;
   const topTwo = before.spellbook.slice(0, 2);
   if (topTwo.length !== 2) throw new Error('private site discard Genesis lacks two spells');
@@ -15733,7 +15730,7 @@ function runEarthShallowGrave(
     !southViewBefore.includes(cardId) && !southViewBefore.includes(instanceId));
   const spellHandBefore = canonicalJson(before.hand.spellbook as unknown as JsonValue);
 
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.shallowGraveInstanceId
       && descriptor.cell === 'C4'));
@@ -15775,7 +15772,7 @@ function runEarthShallowGrave(
       && topTwo.every((card, index) =>
         southViewAfter[index]?.cardId === card.cardId
           && southViewAfter[index]?.instanceId === card.instanceId),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     shallowGrave:
       opening.names.get(input.shallowGrave.stableId) ?? input.shallowGrave.stableId,
     siteEstablished: site?.instanceId === opening.shallowGraveInstanceId
@@ -15786,18 +15783,18 @@ function runEarthShallowGrave(
   });
 }
 
-function advanceToNorthSiteRecovery(
+async function advanceToNorthSiteRecovery(
   checkpoint: GameSession,
   valleyCardId: string,
   recoverySiteInstanceId: string,
   rubbleC3InstanceId: string | undefined,
-): GameSession {
-  let session = legacyAccept(checkpoint, legacyAction(checkpoint, ({ descriptor }) =>
+): Promise<GameSession> {
+  let session = await accept(checkpoint, await action(checkpoint, ({ descriptor }) =>
     descriptor.kind === 'end-turn'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
   const player = session.state.players.north;
   if (session.state.activeSeat !== 'north'
@@ -15807,7 +15804,7 @@ function advanceToNorthSiteRecovery(
     || player.mana !== 0) {
     throw new Error('private zero-domain recovery did not reach north ready Main');
   }
-  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const choices = (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'play-site');
   const exactCells = choices.flatMap(({ descriptor }) =>
     descriptor.kind === 'play-site' && descriptor.cardInstanceId === recoverySiteInstanceId
@@ -15816,7 +15813,7 @@ function advanceToNorthSiteRecovery(
   if (exactCells.length !== 1 || exactCells[0] !== 'C4') {
     throw new Error('private zero-domain recovery did not expose only Avatar-local C4');
   }
-  const result = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const result = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === recoverySiteInstanceId
       && descriptor.cell === 'C4'));
@@ -15852,27 +15849,27 @@ function advanceToNorthSiteRecovery(
   return session;
 }
 
-function runEarthSinkhole(
+async function runEarthSinkhole(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthSinkhole'] {
-  const opening = findEarthSinkholeOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthSinkhole']> {
+  const opening = await findEarthSinkholeOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.sinkholeInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.targetSiteInstanceId
     && descriptor.cell === 'C3');
 
@@ -15881,7 +15878,7 @@ function runEarthSinkhole(
   if (!sourceBefore || !targetBefore || 'rubble' in sourceBefore || 'rubble' in targetBefore) {
     throw new Error('private sacrifice-to-destroy setup lacks its two real sites');
   }
-  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const choices = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'activate-site-destruction'
       && descriptor.sourceSiteInstanceId === opening.sinkholeInstanceId
       && descriptor.targetCell === 'C3'
@@ -15889,7 +15886,7 @@ function runEarthSinkhole(
   const selected = choices[0];
   if (!selected) throw new Error('private sacrifice-to-destroy site action is unavailable');
   const exactActivationAvailable = choices.length === 1;
-  session = legacyAccept(session, selected);
+  session = await accept(session, selected);
 
   const rubbleC3 = session.state.realm.sites.C3;
   const rubbleC4 = session.state.realm.sites.C4;
@@ -15949,7 +15946,7 @@ function runEarthSinkhole(
     && !('cardId' in rubbleC4)
     && rubbleC4.instanceId !== opening.sinkholeInstanceId;
 
-  const recoveredSession = advanceToNorthSiteRecovery(
+  const recoveredSession = await advanceToNorthSiteRecovery(
     session,
     input.valley.stableId,
     opening.recoverySiteInstanceId,
@@ -15966,7 +15963,7 @@ function runEarthSinkhole(
     noAffinityOrControlContribution,
     noRandomDraws: recoveredSession.transcript.every(({ randomDraws }) => randomDraws.length === 0),
     recoveryVerified: true,
-    replayVerified: verifyGameReplay(recoveredSession),
+    replayVerified: await verifyReplayAt(recoveredSession),
     seed: opening.seed,
     sinkhole: input.sinkhole.name,
     sourceAndTargetEnteredCemetery,
@@ -15975,68 +15972,68 @@ function runEarthSinkhole(
   });
 }
 
-function runEarthDivineHealing(
+async function runEarthDivineHealing(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthDivineHealing'] {
-  const opening = findEarthDivineHealingOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthDivineHealing']> {
+  const opening = await findEarthDivineHealingOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.attackerInstanceId
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
     && descriptor.cell === 'B3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.attackerInstanceId
     && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3');
-  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+  await take(({ descriptor }) => descriptor.kind === 'declare-attack'
     && descriptor.target.kind === 'site'
     && descriptor.target.instanceId === session.state.realm.sites.C3?.instanceId);
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'close-defend' && !descriptor.originalTargetParticipates);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
   const avatarDefinition = session.state.cards[session.state.players.north.avatar.card.cardId];
   if (avatarDefinition?.cardType !== 'avatar') {
     throw new Error('private controller-healing Magic scenario Avatar is unsupported');
   }
   const lifeBefore = session.state.players.north.avatar.life;
-  const casts = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const casts = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.divineHealingInstanceId);
   const exactlyOneTargetlessCast = casts.length === 1
     && casts[0]?.descriptor.kind === 'cast-magic'
     && casts[0].descriptor.target === undefined;
   const manaBefore = session.state.players.north.mana;
-  take(({ descriptor }) => descriptor.kind === 'cast-magic'
+  await take(({ descriptor }) => descriptor.kind === 'cast-magic'
     && descriptor.cardInstanceId === opening.divineHealingInstanceId
     && descriptor.target === undefined);
   const lifeAfter = session.state.players.north.avatar.life;
@@ -16057,37 +16054,37 @@ function runEarthDivineHealing(
     lifeCappedAtMaximum: lifeAfter === avatarDefinition.life && actualLifeGained < 7,
     lifeWasDamagedAboveDeathsDoor: lifeBefore > 0 && lifeBefore < avatarDefinition.life,
     manaPaid,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     spellEnteredCemetery,
   });
 }
 
-function runEarthGrainSparrow(
+async function runEarthGrainSparrow(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthGrainSparrow'] {
-  const opening = findEarthGrainSparrowOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthGrainSparrow']> {
+  const opening = await findEarthGrainSparrowOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.steppeInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.ghostTownInstanceId
     && descriptor.cell === 'C3');
 
   const lifeBeforeDemon = session.state.players.north.avatar.life;
-  const demonResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const demonResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.demonInstanceId
       && descriptor.cell === 'C3'
@@ -16111,7 +16108,7 @@ function runEarthGrainSparrow(
   if (avatarDefinition?.cardType !== 'avatar') {
     throw new Error('private Grain Sparrow scenario Avatar is unsupported');
   }
-  const grainResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const grainResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.grainSparrowInstanceId
       && descriptor.cell === 'C3'
@@ -16194,7 +16191,7 @@ function runEarthGrainSparrow(
       && northAfter.avatar.tapped === northBefore.avatar.tapped
       && northAfter.mana === northBefore.mana - 1
       && session.state.phase === 'main',
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     steppe: input.steppe.name,
     summonedAtC3: grain?.cardId === input.grainSparrow.stableId
       && grain.controller === 'north'
@@ -16207,46 +16204,46 @@ function runEarthGrainSparrow(
   });
 }
 
-function runEarthSecretTunnel(
+async function runEarthSecretTunnel(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthSecretTunnel'] {
-  const opening = findEarthSecretTunnelOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthSecretTunnel']> {
+  const opening = await findEarthSecretTunnelOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.secretTunnelInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.caveTrollsInstanceId
     && descriptor.cell === 'C4'
     && descriptor.region === 'underground');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
-  const moves = legalGameActions(session.state, 'north');
+  const moves = await legalActionsAt(session, 'north');
   const hasPath = (
     unitInstanceId: string,
     cells: string,
@@ -16269,13 +16266,13 @@ function runEarthSecretTunnel(
   const avatarInstanceId = session.state.players.north.avatar.card.instanceId;
   const avatarPhysicalAvailable = hasPath(avatarInstanceId, 'C4,C3', 'surface');
   const avatarDirectUnavailable = !hasPath(avatarInstanceId, 'C4,C2', 'surface');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.caveTrollsInstanceId
     && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C2'
     && descriptor.path.every((step) => step.region === 'underground'));
   const movedUnderground = session.state.realm.units.some(({ instanceId, location, region }) =>
     instanceId === opening.caveTrollsInstanceId && location === 'C2' && region === 'underground');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
 
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
@@ -16288,134 +16285,134 @@ function runEarthSecretTunnel(
     directTunnelMoveAvailable,
     movedUnderground,
     physicalMoveAvailable,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     secretTunnel: opening.names.get(input.secretTunnel.stableId) ?? input.secretTunnel.stableId,
     seed: opening.seed,
   });
 }
 
-function runEarthRamp(
+async function runEarthRamp(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthRamp'] {
-  const opening = findEarthOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+): Promise<PrivateGameCheck['earthRamp']> {
+  const opening = await findEarthOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = await accept(session, await action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
 
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southFirstSiteInstanceId));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = await accept(session, await action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
 
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
       && descriptor.cell === 'C3'));
   const affinityBeforeProvider = observeGame(session.state, 'north').players.north.affinity.earth;
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.providerInstanceId
       && descriptor.cell === 'C4'));
   const affinityAdded =
     observeGame(session.state, 'north').players.north.affinity.earth === affinityBeforeProvider + 1;
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = await accept(session, await action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
 
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southSecondSiteInstanceId
       && descriptor.cell === 'B1'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.southMinionInstanceId
       && descriptor.cell === 'C1'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = await accept(session, await action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
 
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
   const manaBeforeGhostTown = session.state.players.north.mana;
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
       && descriptor.cell === 'C2'));
   const ghostTownBonusMana =
     session.state.players.north.mana - manaBeforeGhostTown - 1;
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.manaInstanceId
       && descriptor.cell === 'C3'));
-  const manaUnavailableWhileSick = !legalGameActions(session.state, 'north').some(({ descriptor }) =>
+  const manaUnavailableWhileSick = !await (await legalActionsAt(session, 'north')).some(({ descriptor }) =>
     descriptor.kind === 'activate-mana' && descriptor.unitInstanceId === opening.manaInstanceId);
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = await accept(session, await action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
   const ghostTownUnusedManaExpired = session.state.players.north.mana === 0;
 
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.southMinionInstanceId
       && descriptor.to.cell === 'C2'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = await accept(session, await action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  session = await accept(session, await action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
 
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
   const manaBefore = session.state.players.north.mana;
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'activate-mana' && descriptor.unitInstanceId === opening.manaInstanceId));
   const manaGained = session.state.players.north.mana - manaBefore;
   const payoffManaBefore = session.state.players.north.mana;
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.payoffInstanceId
       && descriptor.cell === 'C3'));
   const rampPaidFive = payoffManaBefore === 5 && session.state.players.north.mana === 0;
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = await accept(session, await action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
 
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = await accept(session, await action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
 
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  const payoffCanMoveAndAttack = legalGameActions(session.state, 'north').some(({ descriptor }) =>
+  const payoffCanMoveAndAttack = await (await legalActionsAt(session, 'north')).some(({ descriptor }) =>
     descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === opening.payoffInstanceId);
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'activate-mana' && descriptor.unitInstanceId === opening.manaInstanceId));
   const beforeGenesis = session.state.players.north;
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.genesisInstanceId
       && descriptor.cell === 'C4'));
   const afterGenesis = session.state.players.north;
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.deathriteInstanceId
       && descriptor.cell === 'C2'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = await accept(session, await action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
 
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.southMinionInstanceId
       && descriptor.to.cell === 'C2'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'declare-attack'
       && descriptor.target.kind === 'minion'
       && descriptor.target.instanceId === opening.deathriteInstanceId));
-  const movingDefendUnavailable = !legalGameActions(session.state, 'north').some(({ descriptor }) =>
+  const movingDefendUnavailable = !await (await legalActionsAt(session, 'north')).some(({ descriptor }) =>
     descriptor.kind === 'defend' && descriptor.unitInstanceId === opening.payoffInstanceId);
   const beforeDeathrite = session.state.players.north;
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
   const afterDeathrite = session.state.players.north;
   const finalEvents = session.transcript.at(-1)?.events ?? [];
@@ -16449,82 +16446,82 @@ function runEarthRamp(
     rampPaidFive,
     rampPayoffMinion:
       opening.names.get(input.cannotDefendMinion.stableId) ?? input.cannotDefendMinion.stableId,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
   });
 }
 
-function runEarthMalakhimSetup(
-  opening: ReturnType<typeof findEarthMalakhimOpening>,
-): GameSession {
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+async function runEarthMalakhimSetup(
+  opening: Awaited<ReturnType<typeof findEarthMalakhimOpening>>,
+): Promise<GameSession> {
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.siteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.siteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.siteInstanceIds[2]
     && descriptor.cell === 'B3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.siteInstanceIds[3]
     && descriptor.cell === 'A3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.siteInstanceIds[4]
     && descriptor.cell === 'A2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.malakhimInstanceId
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   return session;
 }
 
-function runEarthMalakhim(
+async function runEarthMalakhim(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthMalakhim'] {
-  const opening = findEarthMalakhimOpening(input);
-  let session = runEarthMalakhimSetup(opening);
+): Promise<PrivateGameCheck['earthMalakhim']> {
+  const opening = await findEarthMalakhimOpening(input);
+  let session = await runEarthMalakhimSetup(opening);
   const definition = session.state.cards[input.malakhim.stableId];
   const before = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.malakhimInstanceId);
   if (!before) throw new Error('private Malakhim setup did not summon Malakhim');
-  const summonEvent = session.transcript.flatMap(({ events }) => events)
+  const summonEvent = await (session.transcript.flatMap(({ events }) => events))
     .find(({ payload, type }) => type === 'minion-summoned'
       && isJsonRecord(payload)
       && payload.instanceId === opening.malakhimInstanceId);
   const summonPayload = summonEvent && isJsonRecord(summonEvent.payload)
     ? summonEvent.payload
     : undefined;
-  const affinity = observeGame(session.state, 'north').players.north.affinity.earth;
-  const move = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const affinity = (observeGame(session.state, 'north')).players.north.affinity.earth;
+  const move = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.malakhimInstanceId
       && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,B3'
@@ -16533,8 +16530,8 @@ function runEarthMalakhim(
   session = move.session;
   const moved = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.malakhimInstanceId);
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
-  const ended = stepGame(session, legacyAction(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = await accept(session, await action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  const ended = await stepAt(session, await action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
   if (!ended.accepted) throw new Error('private Malakhim end phase was rejected');
   session = ended.session;
   const after = session.state.realm.units.find(({ instanceId }) =>
@@ -16579,75 +16576,75 @@ function runEarthMalakhim(
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
     normalActionTapped,
     opponentTurnReady,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
   });
 }
 
-function stageEarthDuel(opening: ReturnType<typeof findEarthDuelOpening>): GameSession {
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+async function stageEarthDuel(opening: Awaited<ReturnType<typeof findEarthDuelOpening>>): Promise<GameSession> {
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southFirstSiteInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
       && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southSecondSiteInstanceId
       && descriptor.cell === 'C2');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.targetInstanceId
       && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
       && descriptor.cell === 'B4');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.attackerInstanceId
       && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
   return session;
 }
 
-function runEarthRanged(
+async function runEarthRanged(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthRanged'] {
-  const opening = findEarthDuelOpening(input);
-  let session = stageEarthDuel(opening);
+): Promise<PrivateGameCheck['earthRanged']> {
+  const opening = await findEarthDuelOpening(input);
+  let session = await stageEarthDuel(opening);
 
-  const shot = legacyAction(session, ({ descriptor }) =>
+  const shot = await action(session, ({ descriptor }) =>
     descriptor.kind === 'shoot-projectile'
       && descriptor.shooterInstanceId === opening.attackerInstanceId
       && descriptor.direction === 'south'
       && descriptor.hit?.instanceId === opening.targetInstanceId);
   const rangedOneStep = shot.descriptor.kind === 'shoot-projectile'
     && shot.descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C2';
-  session = legacyAccept(session, shot);
+  session = await accept(session, shot);
   const shooter = session.state.realm.units
     .find(({ instanceId }) => instanceId === opening.attackerInstanceId);
 
@@ -16660,32 +16657,32 @@ function runEarthRanged(
       shooter?.location === 'C3' && shooter.tapped && shooter.damage === 0,
     rangedTargetDied: session.state.players.south.cemetery
       .some(({ instanceId }) => instanceId === opening.targetInstanceId),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
   });
 }
 
-function runEarthFirstStrike(
+async function runEarthFirstStrike(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthFirstStrike'] {
-  const opening = findEarthDuelOpening(input, 'first-strike');
-  let session = stageEarthDuel(opening);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthFirstStrike']> {
+  const opening = await findEarthDuelOpening(input, 'first-strike');
+  let session = await stageEarthDuel(opening);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.attackerInstanceId
       && descriptor.from.cell === 'C3'
       && descriptor.to.cell === 'C2');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'declare-attack'
       && descriptor.target.kind === 'minion'
       && descriptor.target.instanceId === opening.targetInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
+  await take(({ descriptor }) => descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
   const attacker = session.state.realm.units
     .find(({ instanceId }) => instanceId === opening.attackerInstanceId);
-  const fightEvents = session.transcript.at(-1)?.events ?? [];
+  const fightEvents = (session.transcript.at(-1))?.events ?? [];
   const targetDied = session.state.players.south.cemetery
     .some(({ instanceId }) => instanceId === opening.targetInstanceId);
   const targetDiedBeforeReturn = targetDied && !fightEvents.some(({ payload, type }) =>
@@ -16700,7 +16697,7 @@ function runEarthFirstStrike(
     deck: deckList(opening.manifest.decks.north, opening.names),
     firstStrikeMinion:
       opening.names.get(input.firstStrikeMinion.stableId) ?? input.firstStrikeMinion.stableId,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     targetDiedBeforeReturn,
     targetMinion:
@@ -16708,20 +16705,20 @@ function runEarthFirstStrike(
   });
 }
 
-function runEarthWard(
+async function runEarthWard(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthWard'] {
-  const opening = findEarthDuelOpening(input, 'ward');
-  let session = stageEarthDuel(opening);
+): Promise<PrivateGameCheck['earthWard']> {
+  const opening = await findEarthDuelOpening(input, 'ward');
+  let session = await stageEarthDuel(opening);
   const targetBefore = session.state.realm.units
     .find(({ instanceId }) => instanceId === opening.targetInstanceId);
-  const firstShot = legacyAction(session, ({ descriptor }) =>
+  const firstShot = await action(session, ({ descriptor }) =>
     descriptor.kind === 'shoot-projectile'
       && descriptor.shooterInstanceId === opening.attackerInstanceId
       && descriptor.direction === 'south'
       && descriptor.hit?.instanceId === opening.targetInstanceId);
-  session = legacyAccept(session, firstShot);
-  const firstShotEvents = session.transcript.at(-1)?.events ?? [];
+  session = await accept(session, firstShot);
+  const firstShotEvents = (session.transcript.at(-1))?.events ?? [];
   const targetAfter = session.state.realm.units
     .find(({ instanceId }) => instanceId === opening.targetInstanceId);
   const wardBroke = targetBefore?.warded === true
@@ -16740,14 +16737,14 @@ function runEarthWard(
     && !session.state.players.south.cemetery
       .some(({ instanceId }) => instanceId === opening.targetInstanceId);
 
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'shoot-projectile'
       && descriptor.shooterInstanceId === opening.attackerInstanceId
       && descriptor.hit?.instanceId === opening.targetInstanceId);
@@ -16756,7 +16753,7 @@ function runEarthWard(
     acceptedActionCount: session.transcript.length,
     deck: deckList(opening.manifest.decks.north, opening.names),
     rangedMinion: opening.names.get(input.rangedMinion.stableId) ?? input.rangedMinion.stableId,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     wardBroke,
     wardMinion: opening.names.get(input.wardMinion.stableId) ?? input.wardMinion.stableId,
@@ -16767,118 +16764,118 @@ function runEarthWard(
   });
 }
 
-function runAirMovement(
+async function runAirMovement(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airMovement'] {
-  const opening = findAirOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+): Promise<PrivateGameCheck['airMovement']> {
+  const opening = await findAirOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = await accept(session, await action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
 
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site' && descriptor.cardInstanceId === opening.southSiteInstanceId));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion' && descriptor.cardInstanceId === opening.attackerInstanceId));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = await accept(session, await action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
 
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
       && descriptor.cell === 'C3'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = await accept(session, await action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
 
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
       && descriptor.cell === 'C2'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.movementInstanceId
       && descriptor.cell === 'C4'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = await accept(session, await action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
 
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.attackerInstanceId
       && descriptor.path.map(({ cell }) => cell).join(',') === 'C1,C2'));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'declare-attack'
       && descriptor.target.kind === 'site'
       && descriptor.target.instanceId === session.state.realm.sites.C2?.instanceId));
-  const defend = legacyAction(session, ({ descriptor }) =>
+  const defend = await action(session, ({ descriptor }) =>
     descriptor.kind === 'defend'
       && descriptor.unitInstanceId === opening.movementInstanceId
       && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3,C2');
   const twoStepDefend = defend.descriptor.kind === 'defend' && defend.descriptor.path.length === 3;
-  session = legacyAccept(session, defend);
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, defend);
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'close-defend' && !descriptor.originalTargetParticipates));
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
+  session = await accept(session, await action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
 
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) =>
+  session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  const move = legacyAction(session, ({ descriptor }) =>
+  const move = await action(session, ({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.movementInstanceId
       && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3,C4');
   const twoStepMoveAndAttack = move.descriptor.kind === 'move-and-attack'
     && move.descriptor.path.length === 3;
-  session = legacyAccept(session, move);
-  session = legacyAccept(session, legacyAction(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
+  session = await accept(session, move);
+  session = await accept(session, await action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
 
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
     deck: deckList(opening.manifest.decks.north, opening.names),
     movementMinion:
       opening.names.get(input.movementMinion.stableId) ?? input.movementMinion.stableId,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     twoStepDefend,
     twoStepMoveAndAttack,
   });
 }
 
-function runAirZap(
+async function runAirZap(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airZap'] {
-  const opening = findAirZapOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airZap']> {
+  const opening = await findAirZapOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.snowLeopardInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
   const manaBefore = session.state.players.north.mana;
   const targetBefore = session.state.realm.units
     .find(({ instanceId }) => instanceId === opening.snowLeopardInstanceId);
   const spellWasInHand = session.state.players.north.hand.spellbook
     .some(({ instanceId }) => instanceId === opening.zapInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'cast-magic'
+  await take(({ descriptor }) => descriptor.kind === 'cast-magic'
     && descriptor.cardInstanceId === opening.zapInstanceId
     && descriptor.target !== undefined
     && descriptor.target.kind === 'minion'
@@ -16901,7 +16898,7 @@ function runAirZap(
     damageDealt,
     deck: deckList(opening.manifest.decks.north, opening.names),
     manaPaid,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     snowLeopard:
       opening.names.get(input.stealthTargetMinion.stableId)
         ?? input.stealthTargetMinion.stableId,
@@ -16912,62 +16909,62 @@ function runAirZap(
   });
 }
 
-function runAirFireFatalitySetup(
-  opening: ReturnType<typeof findAirFireFatalityOpening>,
-): GameSession {
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+async function runAirFireFatalitySetup(
+  opening: Awaited<ReturnType<typeof findAirFireFatalityOpening>>,
+): Promise<GameSession> {
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSpireInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.snowLeopardInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
     && descriptor.cell === 'B3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[3]
     && descriptor.cell === 'A3');
   return session;
 }
 
-function runAirFireFatality(
+async function runAirFireFatality(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airFireFatality'] {
-  const opening = findAirFireFatalityOpening(input);
-  let session = runAirFireFatalitySetup(opening);
+): Promise<PrivateGameCheck['airFireFatality']> {
+  const opening = await findAirFireFatalityOpening(input);
+  let session = await runAirFireFatalitySetup(opening);
   const targetBefore = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.snowLeopardInstanceId);
   if (!targetBefore) throw new Error('private Fatality setup lacks its healthy Snow Leopard');
-  const healthyChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const healthyChoices = (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.fatalityInstanceId);
   const affinity = observeGame(session.state, 'north').players.north.affinity;
   const manaBeforeZap = session.state.players.north.mana;
-  const zap = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const zap = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.zapInstanceId
       && descriptor.target?.kind === 'minion'
@@ -16978,7 +16975,7 @@ function runAirFireFatality(
   const targetAfterZap = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.snowLeopardInstanceId);
   if (!targetAfterZap) throw new Error('private Fatality setup Zap killed its target');
-  const fatalityChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const fatalityChoices = (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.fatalityInstanceId);
   const chosen = fatalityChoices.find(({ descriptor }) => descriptor.kind === 'cast-magic'
@@ -16989,7 +16986,7 @@ function runAirFireFatality(
     throw new Error('private Fatality wounded target is not exactly available');
   }
   const manaBeforeFatality = session.state.players.north.mana;
-  const killed = stepGame(session, chosen);
+  const killed = await stepAt(session, chosen);
   if (!killed.accepted) throw new Error('private Fatality cast was rejected');
   session = killed.session;
 
@@ -17048,7 +17045,7 @@ function runAirFireFatality(
     healthyTargetUnavailable: targetBefore.damage === 0 && healthyChoices.length === 0,
     manaPaid: manaBeforeFatality - session.state.players.north.mana,
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     snowLeopard: input.stealthTargetMinion.name,
     targetEnteredOwnerCemetery: session.state.players.south.cemetery
       .some(({ instanceId }) => instanceId === opening.snowLeopardInstanceId),
@@ -17062,61 +17059,61 @@ function runAirFireFatality(
   });
 }
 
-function runAirArcLightning(
+async function runAirArcLightning(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airArcLightning'] {
-  const opening = findAirArcLightningOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airArcLightning']> {
+  const opening = await findAirArcLightningOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.snowLeopardInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.snowLeopardInstanceId
     && descriptor.path.map(({ cell }) => cell).join(',') === 'C1,C2');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
     && descriptor.cell === 'B3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.snowLeopardInstanceId
     && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[3]
     && descriptor.cell === 'B4');
-  const targets = legalGameActions(session.state, 'north');
+  const targets = await legalActionsAt(session, 'north');
   const nearbyTargetAvailable = targets.some(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.arcLightningInstanceId
@@ -17130,7 +17127,7 @@ function runAirArcLightning(
       || descriptor.target === undefined
       || descriptor.target.instanceId !== southAvatarInstanceId);
   const manaBefore = session.state.players.north.mana;
-  take(({ descriptor }) => descriptor.kind === 'cast-magic'
+  await take(({ descriptor }) => descriptor.kind === 'cast-magic'
     && descriptor.cardInstanceId === opening.arcLightningInstanceId
     && descriptor.target !== undefined
     && descriptor.target.kind === 'minion'
@@ -17153,7 +17150,7 @@ function runAirArcLightning(
     farSameRegionUnitUnavailable,
     manaPaid,
     nearbyTargetAvailable,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     snowLeopard:
       opening.names.get(input.stealthTargetMinion.stableId)
         ?? input.stealthTargetMinion.stableId,
@@ -17162,30 +17159,30 @@ function runAirArcLightning(
   });
 }
 
-function runAirLightningBolt(
+async function runAirLightningBolt(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airLightningBolt'] {
-  const opening = findAirLightningBoltOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airLightningBolt']> {
+  const opening = await findAirLightningBoltOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.snowLeopardInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
 
@@ -17193,7 +17190,7 @@ function runAirLightningBolt(
   const manaBefore = session.state.players.north.mana;
   const occupants = session.state.realm.units.filter(({ location, region }) =>
     location === 'C4' && region === 'surface');
-  const locationActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const locationActions = (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.lightningBoltInstanceId
       && descriptor.targetLocation?.cell === 'C4'
@@ -17203,7 +17200,7 @@ function runAirLightningBolt(
     && session.state.players.north.avatar.region === 'surface'
     && occupants.length === 1
     && occupants.some(({ instanceId }) => instanceId === opening.snowLeopardInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'cast-magic'
+  await take(({ descriptor }) => descriptor.kind === 'cast-magic'
     && descriptor.cardInstanceId === opening.lightningBoltInstanceId
     && descriptor.targetLocation?.cell === 'C4'
     && descriptor.targetLocation.region === 'surface');
@@ -17241,7 +17238,7 @@ function runAirLightningBolt(
       && randomDomain?.accepted === true
       && randomDomain.exclusiveMaximum === 2
       && randomDomain.kind === 'unit_index_candidate',
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     snowLeopard: input.stealthTargetMinion.name,
     snowLeopardDied: session.state.realm.units
       .every(({ instanceId }) => instanceId !== opening.snowLeopardInstanceId)
@@ -17254,18 +17251,18 @@ function runAirLightningBolt(
   });
 }
 
-function runAirLuckyCharm(
+async function runAirLuckyCharm(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airLuckyCharm'] {
-  const opening = findAirLuckyCharmOpening(input);
-  let session = legacyKeep(legacyKeep(opening.session));
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airLuckyCharm']> {
+  const opening = await findAirLuckyCharmOpening(input);
+  let session = await keep(await keep(opening.session));
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+  await take(({ descriptor }) => descriptor.kind === 'cast-artifact'
     && descriptor.cardInstanceId === opening.luckyCharmInstanceId
     && descriptor.bearer?.kind === 'avatar');
   const northAvatarId = session.state.players.north.avatar.card.instanceId;
@@ -17274,33 +17271,33 @@ function runAirLuckyCharm(
       && 'bearer' in artifact
       && artifact.bearer.kind === 'avatar'
       && artifact.bearer.instanceId === northAvatarId) === true;
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.snowLeopardInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
 
-  const casts = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const casts = (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.lightningBoltInstanceId
       && descriptor.targetLocation?.cell === 'C1'
       && descriptor.targetLocation.region === 'surface');
   if (casts.length !== 1) throw new Error('private Lucky Charm base Magic cast is not unique');
   const baseCastHasNoOutcome = !('randomOutcomeInstanceId' in casts[0]!.descriptor)
-    && !legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    && !(await legalActionsAt(session, 'north')).some(({ descriptor }) =>
       descriptor.kind === 'resolve-random-outcome');
-  const committed = stepGame(session, casts[0]!);
+  const committed = await stepAt(session, casts[0]!);
   if (!committed.accepted) throw new Error('private Lucky Charm base Magic cast was rejected');
   session = committed.session;
-  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const choices = (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'resolve-random-outcome');
   if (choices.length !== 2 || choices[1]?.descriptor.kind !== 'resolve-random-outcome') {
     throw new Error('private Lucky Charm seed lacks two distinct post-commit outcomes');
@@ -17311,7 +17308,7 @@ function runAirLuckyCharm(
   const chosenId = choices[1].descriptor.outcomeInstanceId;
   const southAvatarId = session.state.players.south.avatar.card.instanceId;
   const southAvatarLifeBefore = session.state.players.south.avatar.life;
-  const resolved = stepGame(session, choices[1]);
+  const resolved = await stepAt(session, choices[1]);
   if (!resolved.accepted) throw new Error('private Lucky Charm chosen outcome was rejected');
   session = resolved.session;
   const allocation = resolved.receipt.events.find(({ payload, type }) =>
@@ -17349,7 +17346,7 @@ function runAirLuckyCharm(
     luckyCharm: input.luckyCharm.name,
     offeredOutcomeCount: choices.length,
     randomDrawCount: committed.receipt.randomDraws.length,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     structuralFactsVerified: definition?.cardType === 'artifact'
       && definition.bearerControllerChoosesExtraRandomOutcome === true
@@ -17365,55 +17362,58 @@ function runAirLuckyCharm(
       && committed.receipt.randomDraws.every(({ purpose }) =>
         purpose === 'magic_random_unit_at_location')
       && committed.session.state.phase === 'random-choice'
-      && committed.session.state.pendingRandomOutcome !== null
+      // The Rust state export does not carry the pending outcome, so the engine-issued
+      // choices stand in for it: two offers while it is pending, none once it resolved.
+      && choices.length === 2
       && resolved.receipt.randomDraws.length === 0
       && session.state.phase === 'main'
-      && session.state.pendingRandomOutcome === null
+      && !(await legalActionsAt(session, 'north')).some(({ descriptor }) =>
+        descriptor.kind === 'resolve-random-outcome')
       && session.state.players.north.cemetery.some(({ instanceId }) =>
         instanceId === opening.lightningBoltInstanceId)
       && session.state.terminal.status === 'active',
   });
 }
 
-function runAirThunderstorm(
+async function runAirThunderstorm(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airThunderstorm'] {
-  const opening = findAirThunderstormOpening(input);
-  let session = legacyKeep(legacyKeep(opening.session));
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airThunderstorm']> {
+  const opening = await findAirThunderstormOpening(input);
+  let session = await keep(await keep(opening.session));
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.snowLeopardInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
     && descriptor.cell === 'B4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northDrawnSiteInstanceId
     && descriptor.cell === 'B3');
 
   const manaBeforeCast = session.state.players.north.mana;
-  const cast = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const cast = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'cast-aura'
       && descriptor.cardInstanceId === opening.thunderstormInstanceId
       && descriptor.cells.join(',') === 'B3,B4,C3,C4'));
@@ -17429,9 +17429,9 @@ function runAirThunderstorm(
     && session.state.players.north.hand.spellbook.every(({ instanceId }) =>
       instanceId !== opening.thunderstormInstanceId);
 
-  const randomChoiceHiddenBeforeCommit = !legalGameActions(session.state, 'north')
+  const randomChoiceHiddenBeforeCommit = !(await legalActionsAt(session, 'north'))
     .some(({ descriptor }) => descriptor.kind === 'resolve-end-turn-aura-random');
-  const triggered = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const triggered = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'end-turn'));
   if (!triggered.accepted) throw new Error('private Thunderstorm end-turn trigger was rejected');
   session = triggered.session;
@@ -17460,7 +17460,10 @@ function runAirThunderstorm(
     && session.state.phase === 'end-turn-aura';
 
   const pendingMove = session;
-  const decline = stepGame(pendingMove, legacyAction(pendingMove, ({ descriptor }) =>
+  // The Rust state export does not carry the pending aura stage, so the stage is proven by the
+  // actions the engine issues there: the move step is offered and the random step is finished.
+  const pendingMoveActions = await legalActionsAt(pendingMove, 'north');
+  const decline = await stepAt(pendingMove, await action(pendingMove, ({ descriptor }) =>
     descriptor.kind === 'resolve-end-turn-aura-move' && descriptor.cells === undefined));
   if (!decline.accepted) throw new Error('private Thunderstorm move decline was rejected');
   const declineBranchVerified = decline.session.state.phase === 'draw'
@@ -17469,7 +17472,7 @@ function runAirThunderstorm(
     && decline.session.state.realm.auras?.find(({ instanceId }) => instanceId === aura.instanceId)
       ?.cells.join(',') === 'B3,B4,C3,C4';
 
-  const moved = stepGame(pendingMove, legacyAction(pendingMove, ({ descriptor }) =>
+  const moved = await stepAt(pendingMove, await action(pendingMove, ({ descriptor }) =>
     descriptor.kind === 'resolve-end-turn-aura-move'
       && descriptor.cells?.join(',') === 'C3,C4,D3,D4'));
   if (!moved.accepted) throw new Error('private Thunderstorm one-step move was rejected');
@@ -17481,15 +17484,15 @@ function runAirThunderstorm(
   const causalReceipts = [cast.receipt, triggered.receipt, decline.receipt, moved.receipt];
 
   for (let controllerTurn = 2; controllerTurn <= 3; controllerTurn += 1) {
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    const nextTrigger = stepGame(session, legacyAction(session, ({ descriptor }) =>
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const nextTrigger = await stepAt(session, await action(session, ({ descriptor }) =>
       descriptor.kind === 'end-turn'));
     if (!nextTrigger.accepted) throw new Error('private Thunderstorm repeat trigger was rejected');
     session = nextTrigger.session;
     causalReceipts.push(nextTrigger.receipt);
-    const nextDecline = stepGame(session, legacyAction(session, ({ descriptor }) =>
+    const nextDecline = await stepAt(session, await action(session, ({ descriptor }) =>
       descriptor.kind === 'resolve-end-turn-aura-move' && descriptor.cells === undefined));
     if (!nextDecline.accepted) throw new Error('private Thunderstorm repeat decline was rejected');
     session = nextDecline.session;
@@ -17526,9 +17529,9 @@ function runAirThunderstorm(
       && 1 <= input.format.copyLimits[input.thunderstorm.rarity!],
     moveBranchVerified,
     randomDrawCount: triggered.receipt.randomDraws.length,
-    replayVerified: verifyGameReplay(decline.session)
-      && verifyGameReplay(moved.session)
-      && verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(decline.session)
+      && await verifyReplayAt(moved.session)
+      && await verifyReplayAt(session),
     seed: opening.seed,
     structuralFactsVerified: definition?.cardType === 'aura'
       && definition.atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3
@@ -17538,57 +17541,58 @@ function runAirThunderstorm(
     thunderstorm: input.thunderstorm.name,
     unsupportedMechanicsAbsent: randomChoiceHiddenBeforeCommit
       && triggered.receipt.randomDraws.length === 1
-      && !legalGameActions(pendingMove.state, 'north').some(({ descriptor }) =>
+      && !pendingMoveActions.some(({ descriptor }) =>
         descriptor.kind === 'resolve-end-turn-aura-random')
-      && pendingMove.state.pendingEndTurnAura?.stage === 'move'
+      && pendingMoveActions.some(({ descriptor }) =>
+        descriptor.kind === 'resolve-end-turn-aura-move')
       && !opening.manifest.decks.north.spellbook.includes(input.luckyCharm.stableId)
       && session.state.terminal.status === 'active',
   });
 }
 
-function runAirBladderblimp(
+async function runAirBladderblimp(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airBladderblimp'] {
-  const opening = findAirBladderblimpOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airBladderblimp']> {
+  const opening = await findAirBladderblimpOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northAirSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northAirSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northAirSiteInstanceIds[2]
     && descriptor.cell === 'B4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.ghostTownSiteInstanceId
     && descriptor.cell === 'B3');
 
   const manaBeforeSummon = session.state.players.north.mana;
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.bladderblimpInstanceId
     && descriptor.cell === 'C3');
   const summonManaPaid = manaBeforeSummon - session.state.players.north.mana;
@@ -17603,10 +17607,10 @@ function runAirBladderblimp(
     && blimp.owner === 'north'
     && blimp.controller === 'north';
 
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
   const nearbyCells = new Set(['B2', 'B3', 'B4', 'C2', 'C3', 'C4', 'D2', 'D3', 'D4']);
   const nearbySiteCounts = (['north', 'south'] as const).map((seat) =>
@@ -17618,13 +17622,13 @@ function runAirBladderblimp(
     south: session.state.players.south.avatar.life,
   };
   const manaBeforeMagic = session.state.players.north.mana;
-  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const choices = (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.lightningBoltInstanceId
       && descriptor.targetLocation?.cell === 'C3'
       && descriptor.targetLocation.region === 'surface');
   if (choices.length !== 1) throw new Error('private Bladderblimp Lightning Bolt location is not unique');
-  const result = stepGame(session, choices[0]!);
+  const result = await stepAt(session, choices[0]!);
   if (!result.accepted) throw new Error('private Bladderblimp Lightning Bolt cast was rejected');
   session = result.session;
 
@@ -17688,45 +17692,45 @@ function runAirBladderblimp(
       && randomDomain?.accepted === true
       && randomDomain.exclusiveMaximum === 1
       && randomDomain.kind === 'unit_index_candidate',
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     summonManaPaid,
   });
 }
 
-function runAirRainOfArrows(
+async function runAirRainOfArrows(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airRainOfArrows'] {
-  const opening = findAirRainOfArrowsOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airRainOfArrows']> {
+  const opening = await findAirRainOfArrowsOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSpireInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSpireInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.southSnowLeopardInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northStreamInstanceId
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.shellycoatInstanceId
     && descriptor.cell === 'C3'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
   const shellycoatBefore = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.shellycoatInstanceId);
@@ -17746,7 +17750,7 @@ function runAirRainOfArrows(
   const southCemeteryBefore = canonicalJson(
     session.state.players.south.cemetery as unknown as JsonValue,
   );
-  const casts = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const casts = (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.rainOfArrowsInstanceId);
   const selected = casts[0];
@@ -17761,7 +17765,7 @@ function runAirRainOfArrows(
     && selected.descriptor.temptedEnemy === undefined
     && selected.descriptor.temptedDestination === undefined;
   const manaBefore = session.state.players.north.mana;
-  const castResult = stepGame(session, selected);
+  const castResult = await stepAt(session, selected);
   if (!castResult.accepted) throw new Error('private Rain of Arrows was rejected');
   session = castResult.session;
 
@@ -17859,7 +17863,7 @@ function runAirRainOfArrows(
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
     noTargetChoice,
     rainOfArrows: input.rainOfArrows.name,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     shellycoat: input.shellycoat.name,
     sitesPreserved: canonicalJson(session.state.realm.sites as unknown as JsonValue) === sitesBefore,
@@ -17876,31 +17880,31 @@ function runAirRainOfArrows(
   });
 }
 
-function runAirStaticServant(
+async function runAirStaticServant(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airStaticServant'] {
-  const opening = findAirStaticServantOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airStaticServant']> {
+  const opening = await findAirStaticServantOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.snowLeopardInstanceId
     && descriptor.cell === 'C4'
     && descriptor.region === undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
 
@@ -17913,7 +17917,7 @@ function runAirStaticServant(
   const northCemeteryBefore = canonicalJson(northBefore.cemetery as unknown as JsonValue);
   const southCemeteryBefore = canonicalJson(southBefore.cemetery as unknown as JsonValue);
   const avatarInstanceId = northBefore.avatar.card.instanceId;
-  const summons = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const summons = (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.staticServantInstanceId
       && descriptor.cell === 'C4'
@@ -17923,7 +17927,7 @@ function runAirStaticServant(
     throw new Error('private Static Servant summon is not exactly available');
   }
   const manaBefore = northBefore.mana;
-  const summoned = stepGame(session, selected);
+  const summoned = await stepAt(session, selected);
   if (!summoned.accepted) throw new Error('private Static Servant summon was rejected');
   session = summoned.session;
 
@@ -18008,7 +18012,7 @@ function runAirStaticServant(
       && northAfter.avatar.region === northBefore.avatar.region
       && northAfter.avatar.tapped === northBefore.avatar.tapped
       && session.state.phase === 'main',
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     snowLeopard: input.stealthTargetMinion.name,
     staticServant: input.staticServant.name,
     staticServantExcludedAndUndamaged: servantAfter?.cardId === input.staticServant.stableId
@@ -18025,30 +18029,30 @@ function runAirStaticServant(
   });
 }
 
-function runAirTeleport(
+async function runAirTeleport(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airTeleport'] {
-  const opening = findAirTeleportOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airTeleport']> {
+  const opening = await findAirTeleportOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.snowLeopardInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
 
@@ -18059,7 +18063,7 @@ function runAirTeleport(
   if (!before || !sourceSiteBefore || !targetSiteBefore) {
     throw new Error('private Teleport setup lacks its unit or sites');
   }
-  const pairs = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const pairs = (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.teleportInstanceId
       && descriptor.ally?.kind === 'minion'
@@ -18071,7 +18075,7 @@ function runAirTeleport(
   if (!chosen) throw new Error('private Teleport ally/site pair is unavailable');
   const manaBefore = session.state.players.north.mana;
   const noPathTeleport = !('path' in chosen.descriptor);
-  session = legacyAccept(session, chosen);
+  session = await accept(session, chosen);
 
   const after = session.state.realm.units
     .find(({ instanceId }) => instanceId === opening.snowLeopardInstanceId);
@@ -18106,7 +18110,7 @@ function runAirTeleport(
     exactAllySitePair: pairs.length === 1,
     manaPaid: manaBefore - session.state.players.north.mana,
     noPathTeleport,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     siteUnchanged: canonicalJson(session.state.realm.sites.C4 as unknown as JsonValue)
       === canonicalJson(sourceSiteBefore as unknown as JsonValue)
       && canonicalJson(session.state.realm.sites.C1 as unknown as JsonValue)
@@ -18133,79 +18137,79 @@ function runAirTeleport(
   });
 }
 
-function runAirborne(
+async function runAirborne(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airborne'] {
-  const opening = findAirborneOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airborne']> {
+  const opening = await findAirborneOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
       && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
       && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
       && descriptor.cell === 'B3');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.airborneInstanceId
       && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southSiteInstanceIds[2]
       && descriptor.cell === 'B2');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.groundInstanceId
       && descriptor.cell === 'B2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
-  const move = legacyAction(session, ({ descriptor }) =>
+  const move = await action(session, ({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.airborneInstanceId
       && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,B2');
   const diagonalMove = move.descriptor.kind === 'move-and-attack'
     && move.descriptor.path.length === 2;
-  session = legacyAccept(session, move);
-  const airborneCanAttackGround = legalGameActions(session.state, 'north').some(({ descriptor }) =>
+  session = await accept(session, move);
+  const airborneCanAttackGround = (await legalActionsAt(session, 'north')).some(({ descriptor }) =>
     descriptor.kind === 'declare-attack'
       && descriptor.target.kind === 'minion'
       && descriptor.target.instanceId === opening.groundInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
   const groundCannotIntercept = session.state.phase === 'main';
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.groundInstanceId
       && descriptor.path.map(({ cell }) => cell).join(',') === 'B2');
-  const groundCannotAttackAirborne = legalGameActions(session.state, 'south').every(({ descriptor }) =>
+  const groundCannotAttackAirborne = (await legalActionsAt(session, 'south')).every(({ descriptor }) =>
     descriptor.kind !== 'declare-attack'
       || descriptor.target.kind !== 'minion'
       || descriptor.target.instanceId !== opening.airborneInstanceId);
@@ -18220,65 +18224,65 @@ function runAirborne(
     groundCannotIntercept,
     groundMinion:
       opening.names.get(input.airborneTargetMinion.stableId) ?? input.airborneTargetMinion.stableId,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
   });
 }
 
-function runAirMovementTwo(
+async function runAirMovementTwo(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airMovementTwo'] {
-  const opening = findAirborneOpening(input, 'movement-two');
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airMovementTwo']> {
+  const opening = await findAirborneOpening(input, 'movement-two');
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
       && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
       && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
       && descriptor.cell === 'B3');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.airborneInstanceId
       && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southSiteInstanceIds[2]
       && descriptor.cell === 'B2');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.groundInstanceId
       && descriptor.cell === 'B2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
-  const legalMoves = legalGameActions(session.state, 'north');
+  const legalMoves = await legalActionsAt(session, 'north');
   const returningPathAvailable = legalMoves.some(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.airborneInstanceId
@@ -18287,19 +18291,19 @@ function runAirMovementTwo(
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.airborneInstanceId
       && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C4,C3,C4');
-  const move = legacyAction(session, ({ descriptor }) =>
+  const move = await action(session, ({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.airborneInstanceId
       && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C4,B3,B2');
   const threeStepAirbornePath = move.descriptor.kind === 'move-and-attack'
     && move.descriptor.path.length === 4;
-  session = legacyAccept(session, move);
-  const attackAvailableAfterThreeSteps = legalGameActions(session.state, 'north')
+  session = await accept(session, move);
+  const attackAvailableAfterThreeSteps = (await legalActionsAt(session, 'north'))
     .some(({ descriptor }) =>
       descriptor.kind === 'declare-attack'
         && descriptor.target.kind === 'minion'
         && descriptor.target.instanceId === opening.groundInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
 
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
@@ -18307,7 +18311,7 @@ function runAirMovementTwo(
     deck: deckList(opening.manifest.decks.north, opening.names),
     movementMinion:
       opening.names.get(input.movementTwoMinion.stableId) ?? input.movementTwoMinion.stableId,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     repeatedStepUnavailable,
     returningPathAvailable,
     seed: opening.seed,
@@ -18315,30 +18319,30 @@ function runAirMovementTwo(
   });
 }
 
-function runAirVoidwalk(
+async function runAirVoidwalk(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airVoidwalk'] {
-  const opening = findAirVoidwalkOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airVoidwalk']> {
+  const opening = await findAirVoidwalkOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
 
   const targetWasVoid = session.state.realm.sites.B2 === undefined;
-  const summons = legalGameActions(session.state, 'north');
+  const summons = await legalActionsAt(session, 'north');
   const matches = (cardInstanceId: string, cell: string, region: 'surface' | 'void'): boolean =>
     summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === cardInstanceId
@@ -18351,22 +18355,22 @@ function runAirVoidwalk(
   const forsakenInnerSurfaceUnavailable = !matches(opening.restrictedInstanceId, 'C3', 'surface');
   const nonVoidSurfaceAvailable = matches(opening.comparisonInstanceId, 'C3', 'surface');
   const nonVoidVoidUnavailable = !matches(opening.comparisonInstanceId, 'B2', 'void');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.featuredInstanceId
     && descriptor.cell === 'B2'
     && descriptor.region === 'void');
   const summonedInVoid = session.state.realm.units.some(({ instanceId, location, region }) =>
     instanceId === opening.featuredInstanceId && location === 'B2' && region === 'void');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
-  const moves = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const moves = (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === opening.featuredInstanceId);
   const hasPath = (path: string): boolean => moves.some(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
@@ -18375,13 +18379,13 @@ function runAirVoidwalk(
   const surfaceExitAvailable = hasPath('B2/void,C2/surface');
   const subsurfaceExitUnavailable = !hasPath('B2/void,C2/underground')
     && !hasPath('B2/void,C2/underwater');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.featuredInstanceId
     && descriptor.to.cell === 'C2'
     && descriptor.to.region === 'surface');
-  const siteTargetAvailableAfterExit = legalGameActions(session.state, 'north')
+  const siteTargetAvailableAfterExit = (await legalActionsAt(session, 'north'))
     .some(({ descriptor }) => descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
 
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
@@ -18392,7 +18396,7 @@ function runAirVoidwalk(
     forsakenOuterVoidAvailable,
     nonVoidSurfaceAvailable,
     nonVoidVoidUnavailable,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     siteTargetAvailableAfterExit,
     subsurfaceExitUnavailable,
@@ -18406,42 +18410,42 @@ function runAirVoidwalk(
   });
 }
 
-function runAirVoidArtifact(
+async function runAirVoidArtifact(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airVoidArtifact'] {
-  const opening = findAirVoidArtifactOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airVoidArtifact']> {
+  const opening = await findAirVoidArtifactOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.stalkerInstanceId
     && descriptor.cell === 'B3'
     && descriptor.region === 'void');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
     && descriptor.cell === 'B4');
 
-  const castResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const castResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'cast-artifact'
       && descriptor.cardInstanceId === opening.artifactInstanceId
       && descriptor.bearer?.kind === 'minion'
@@ -18451,7 +18455,7 @@ function runAirVoidArtifact(
   const carried = session.state.realm.artifacts?.find(({ instanceId }) =>
     instanceId === opening.artifactInstanceId);
 
-  const dropResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const dropResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'drop-artifacts'
       && descriptor.unit.kind === 'minion'
       && descriptor.unit.instanceId === opening.stalkerInstanceId
@@ -18464,12 +18468,12 @@ function runAirVoidArtifact(
   const droppedView = observeGame(session.state, 'north').realm.artifacts
     ?.find(({ instanceId }) => instanceId === opening.artifactInstanceId);
 
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
   const coveredVoid = session.state.realm.sites.B3 === undefined;
-  const coverResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const coverResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[3]
       && descriptor.cell === 'B3'));
@@ -18516,46 +18520,46 @@ function runAirVoidArtifact(
     deck: deckList(opening.manifest.decks.north, opening.names),
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
     relocationVerified,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     spectralStalker: input.voidwalkMinion.name,
     swordAndShield: input.swordAndShield.name,
   });
 }
 
-function runAirGenesisSpell(
+async function runAirGenesisSpell(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airGenesisSpell'] {
-  const opening = findAirGenesisSpellOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airGenesisSpell']> {
+  const opening = await findAirGenesisSpellOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
     && descriptor.cell === 'B3');
 
   const before = session.state.players.north;
   const drawn = before.spellbook[0];
   if (!drawn) throw new Error('private Air Genesis spell-draw scenario lacks a spell to draw');
-  const summoned = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const summoned = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.featuredInstanceId
       && descriptor.cell === 'B3'));
@@ -18577,64 +18581,64 @@ function runAirGenesisSpell(
       opening.names.get(input.genesisSpellMinion.stableId) ?? input.genesisSpellMinion.stableId,
     handSizePreserved: after.hand.spellbook.length === before.hand.spellbook.length,
     hiddenFromOpponent,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
   });
 }
 
-function runAirGrandmasterWizard(
+async function runAirGrandmasterWizard(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airGrandmasterWizard'] {
-  const opening = findAirGrandmasterWizardOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airGrandmasterWizard']> {
+  const opening = await findAirGrandmasterWizardOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
-  const playNorthSite = (index: number, cell: RealmCell): void => {
-    take(({ descriptor }) => descriptor.kind === 'play-site'
+  const playNorthSite = async (index: number, cell: RealmCell): Promise<void> => {
+    await take(({ descriptor }) => descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[index]
       && descriptor.cell === cell);
   };
-  const endNorthTurn = (): void => {
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  const endNorthTurn = async (): Promise<void> => {
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
   };
 
-  playNorthSite(0, 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await playNorthSite(0, 'C4');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
 
-  playNorthSite(1, 'C3');
-  endNorthTurn();
-  playNorthSite(2, 'B3');
-  endNorthTurn();
-  playNorthSite(3, 'B4');
-  endNorthTurn();
-  playNorthSite(4, 'A4');
-  endNorthTurn();
-  playNorthSite(5, 'A3');
+  await playNorthSite(1, 'C3');
+  await endNorthTurn();
+  await playNorthSite(2, 'B3');
+  await endNorthTurn();
+  await playNorthSite(3, 'B4');
+  await endNorthTurn();
+  await playNorthSite(4, 'A4');
+  await endNorthTurn();
+  await playNorthSite(5, 'A3');
 
   const before = session.state.players.north;
   const drawn = before.spellbook.slice(0, 3);
   if (drawn.length !== 3) {
     throw new Error('private Grandmaster Wizard scenario lacks three spells to draw');
   }
-  const summonAction = legacyAction(session, ({ descriptor }) =>
+  const summonAction = await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.featuredInstanceId
       && descriptor.cell === 'A3');
   if (summonAction.descriptor.kind !== 'summon-minion') {
     throw new Error('private Grandmaster Wizard scenario selected a non-summon action');
   }
-  const summoned = stepGame(session, summonAction);
+  const summoned = await stepAt(session, summonAction);
   if (!summoned.accepted) throw new Error('private Grandmaster Wizard summon was rejected');
   session = summoned.session;
 
@@ -18697,7 +18701,7 @@ function runAirGrandmasterWizard(
       && deck.spellbook.find(({ name }) => name === input.grandmasterWizard.name)?.copies === 1,
     manaPaid: before.mana - after.mana,
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     spellcasterAndZeroPowerVerified: definition?.cardType === 'minion'
       && definition.spellcaster === true
@@ -18710,12 +18714,12 @@ function runAirGrandmasterWizard(
   });
 }
 
-function runAirSlingPixies(
+async function runAirSlingPixies(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airSlingPixies'] {
+): Promise<PrivateGameCheck['airSlingPixies']> {
   const seed = 280;
   const built = buildManifest(input, seed, 'air-sling-pixies');
-  let session = legacyKeep(legacyKeep(createGameSession(built.manifest)));
+  let session = await keep(await keep(await newSession(built.manifest)));
   const slingInstanceId = session.state.players.north.hand.spellbook
     .find(({ cardId }) => cardId === input.slingPixies.stableId)?.instanceId;
   const vikingsInstanceId = session.state.players.south.hand.spellbook
@@ -18725,75 +18729,75 @@ function runAirSlingPixies(
   if (!slingInstanceId || !vikingsInstanceId || !raalInstanceId) {
     throw new Error('private Sling Pixies seed 280 no longer produces its supported opening');
   }
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
-  const draw = (zone: 'atlas' | 'spellbook'): void => {
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === zone);
+  const draw = async (zone: 'atlas' | 'spellbook'): Promise<void> => {
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === zone);
   };
-  const endTurn = (): void => take(({ descriptor }) => descriptor.kind === 'end-turn');
+  const endTurn = async (): Promise<void> => await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === slingInstanceId && descriptor.cell === 'C4');
-  endTurn();
-  draw('atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-  endTurn();
+  await endTurn();
+  await draw('atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+  await endTurn();
 
-  draw('atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await draw('atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === slingInstanceId
     && descriptor.from.cell === 'C4'
     && descriptor.to.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  endTurn();
-  draw('spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await endTurn();
+  await draw('spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === raalInstanceId && descriptor.cell === 'C2');
-  endTurn();
+  await endTurn();
 
-  draw('spellbook');
-  endTurn();
-  draw('spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B1');
-  endTurn();
-  draw('spellbook');
-  endTurn();
-  draw('spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'A1');
-  endTurn();
+  await draw('spellbook');
+  await endTurn();
+  await draw('spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B1');
+  await endTurn();
+  await draw('spellbook');
+  await endTurn();
+  await draw('spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'A1');
+  await endTurn();
 
-  draw('spellbook');
-  endTurn();
-  draw('atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await draw('spellbook');
+  await endTurn();
+  await draw('atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === vikingsInstanceId && descriptor.cell === 'C2');
-  endTurn();
+  await endTurn();
 
-  draw('spellbook');
-  endTurn();
-  draw('spellbook');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await draw('spellbook');
+  await endTurn();
+  await draw('spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === vikingsInstanceId
     && descriptor.from.cell === 'C2'
     && descriptor.to.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'close-intercept');
-  endTurn();
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'close-intercept');
+  await endTurn();
 
-  draw('spellbook');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await draw('spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === slingInstanceId
     && descriptor.from.cell === 'C3'
     && descriptor.to.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+  await take(({ descriptor }) => descriptor.kind === 'declare-attack'
     && descriptor.target.kind === 'minion'
     && descriptor.target.instanceId === vikingsInstanceId);
-  const firstFight = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const firstFight = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
   if (!firstFight.accepted) throw new Error('private Sling Pixies first fight was rejected');
   session = firstFight.session;
@@ -18833,26 +18837,26 @@ function runAirSlingPixies(
   const firstFightPrevented = canonicalJson(firstFight.receipt.events
     .map(({ payload, type }) => ({ payload, type })) as unknown as JsonValue)
     === canonicalJson(firstExpected as unknown as JsonValue);
-  endTurn();
+  await endTurn();
 
-  draw('spellbook');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await draw('spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === raalInstanceId
     && descriptor.from.cell === 'C2'
     && descriptor.to.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  endTurn();
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await endTurn();
 
-  draw('spellbook');
+  await draw('spellbook');
   const beforeSecond = observeGame(session.state, 'north').realm.units;
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === slingInstanceId
     && descriptor.from.cell === 'C3'
     && descriptor.to.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+  await take(({ descriptor }) => descriptor.kind === 'declare-attack'
     && descriptor.target.kind === 'minion'
     && descriptor.target.instanceId === raalInstanceId);
-  const secondFight = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const secondFight = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
   if (!secondFight.accepted) throw new Error('private Sling Pixies second fight was rejected');
   session = secondFight.session;
@@ -18922,7 +18926,7 @@ function runAirSlingPixies(
       && southDeck.spellbook.reduce((total, card) => total + card.copies, 0) === 60,
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
     raalDromedary: input.raalDromedary.name,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     secondFightKilledSling,
     seed,
     slingPixies: input.slingPixies.name,
@@ -18933,58 +18937,58 @@ function runAirSlingPixies(
   });
 }
 
-function runAirSpireLich(
+async function runAirSpireLich(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airSpireLich'] {
-  const opening = findAirSpireLichOpening(input);
-  let session = legacyKeep(legacyKeep(opening.session));
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airSpireLich']> {
+  const opening = await findAirSpireLichOpening(input);
+  let session = await keep(await keep(opening.session));
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
-  const drawSpell = (): void => take(({ descriptor }) =>
+  const drawSpell = async (): Promise<void> => await take(({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const endTurn = (): void => take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  const endTurn = async (): Promise<void> => await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  endTurn();
-  drawSpell();
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await endTurn();
+  await drawSpell();
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
     && descriptor.cell === 'C1');
-  endTurn();
+  await endTurn();
 
-  drawSpell();
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await drawSpell();
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'B4');
-  endTurn();
-  drawSpell();
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await endTurn();
+  await drawSpell();
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  endTurn();
+  await endTurn();
 
-  drawSpell();
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await drawSpell();
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
     && descriptor.cell === 'A4');
-  endTurn();
-  drawSpell();
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await endTurn();
+  await drawSpell();
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[2]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.southTargetInstanceId
     && descriptor.cell === 'C3');
-  endTurn();
+  await endTurn();
 
-  drawSpell();
-  const summonAction = legacyAction(session, ({ descriptor }) =>
+  await drawSpell();
+  const summonAction = await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.spireLichInstanceId
       && descriptor.cell === 'C4');
-  const summoned = stepGame(session, summonAction);
+  const summoned = await stepAt(session, summonAction);
   if (!summoned.accepted || summonAction.descriptor.kind !== 'summon-minion') {
     throw new Error('private Spire Lich summon was rejected');
   }
@@ -19000,16 +19004,16 @@ function runAirSpireLich(
     },
     type: 'minion-summoned',
   }];
-  endTurn();
-  drawSpell();
-  endTurn();
+  await endTurn();
+  await drawSpell();
+  await endTurn();
 
-  drawSpell();
+  await drawSpell();
   const towerView = observeGame(session.state, 'north').realm.units
     .find(({ instanceId }) => instanceId === opening.spireLichInstanceId);
   const spireDefinition = session.state.cards[input.spireLich.stableId];
   const darkTowerDefinition = session.state.cards[input.darkTower.stableId];
-  const northActions = legalGameActions(session.state, 'north');
+  const northActions = await legalActionsAt(session, 'north');
   const spellAction = northActions.find(({ descriptor }) => descriptor.kind === 'cast-magic'
     && descriptor.cardInstanceId === opening.zapInstanceIds[0]
     && descriptor.casterInstanceId === opening.spireLichInstanceId
@@ -19018,7 +19022,7 @@ function runAirSpireLich(
   if (!spellAction) throw new Error('private Spire Lich lacks its derived Spellcaster Zap action');
   const southAvatarInstanceId = session.state.players.south.avatar.card.instanceId;
   const lifeBeforeSpell = session.state.players.south.avatar.life;
-  const spell = stepGame(session, spellAction);
+  const spell = await stepAt(session, spellAction);
   if (!spell.accepted || spellAction.descriptor.kind !== 'cast-magic') {
     throw new Error('private Spire Lich Zap was rejected');
   }
@@ -19067,7 +19071,7 @@ function runAirSpireLich(
     },
   ];
 
-  const shotAction = legalGameActions(session.state, 'north').find(({ descriptor }) =>
+  const shotAction = (await legalActionsAt(session, 'north')).find(({ descriptor }) =>
     descriptor.kind === 'shoot-projectile'
       && descriptor.shooterInstanceId === opening.spireLichInstanceId
       && descriptor.direction === 'south'
@@ -19076,7 +19080,7 @@ function runAirSpireLich(
   if (!shotAction || shotAction.descriptor.kind !== 'shoot-projectile') {
     throw new Error('private Spire Lich lacks its derived Ranged action');
   }
-  const shot = stepGame(session, shotAction);
+  const shot = await stepAt(session, shotAction);
   if (!shot.accepted) throw new Error('private Spire Lich projectile was rejected');
   session = shot.session;
   const expectedShot = [
@@ -19121,23 +19125,23 @@ function runAirSpireLich(
     },
   ];
 
-  endTurn();
-  drawSpell();
-  endTurn();
-  drawSpell();
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await endTurn();
+  await drawSpell();
+  await endTurn();
+  await drawSpell();
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.spireLichInstanceId
     && descriptor.from.cell === 'C4'
     && descriptor.to.cell === 'B4');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  endTurn();
-  drawSpell();
-  endTurn();
-  drawSpell();
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await endTurn();
+  await drawSpell();
+  await endTurn();
+  await drawSpell();
 
   const offTowerView = observeGame(session.state, 'north').realm.units
     .find(({ instanceId }) => instanceId === opening.spireLichInstanceId);
-  const offTowerActions = legalGameActions(session.state, 'north');
+  const offTowerActions = await legalActionsAt(session, 'north');
   const secondZapInHand = session.state.players.north.hand.spellbook
     .some(({ instanceId }) => instanceId === opening.zapInstanceIds[1]);
   const exactEvents = (actual: typeof summoned.receipt.events, expected: unknown): boolean =>
@@ -19174,7 +19178,7 @@ function runAirSpireLich(
     rangedActionResolved: exactEvents(shot.receipt.events, expectedShot)
       && session.state.players.south.cemetery.some(({ instanceId }) =>
         instanceId === opening.southTargetInstanceId),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     spellcasterActionResolved: exactEvents(spell.receipt.events, expectedSpell)
       && session.state.players.north.cemetery.some(({ instanceId }) =>
@@ -19194,68 +19198,68 @@ function runAirSpireLich(
   });
 }
 
-function runAirNimbusJinn(
+async function runAirNimbusJinn(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airNimbusJinn'] {
-  const opening = findAirNimbusJinnOpening(input);
-  let session = legacyKeep(legacyKeep(opening.session));
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airNimbusJinn']> {
+  const opening = await findAirNimbusJinnOpening(input);
+  let session = await keep(await keep(opening.session));
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
-  const drawAtlas = (): void => take(({ descriptor }) =>
+  const drawAtlas = async (): Promise<void> => await take(({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  const drawSpell = (): void => take(({ descriptor }) =>
+  const drawSpell = async (): Promise<void> => await take(({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const endTurn = (): void => take(({ descriptor }) => descriptor.kind === 'end-turn');
-  const playSite = (instanceId: string, cell: RealmCell): void => take(({ descriptor }) =>
+  const endTurn = async (): Promise<void> => await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  const playSite = async (instanceId: string, cell: RealmCell): Promise<void> => await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === instanceId
       && descriptor.cell === cell);
 
-  playSite(opening.northSiteInstanceIds[0], 'C4');
-  endTurn();
-  drawSpell();
-  playSite(opening.southSiteInstanceIds[0], 'C1');
-  endTurn();
+  await playSite(opening.northSiteInstanceIds[0], 'C4');
+  await endTurn();
+  await drawSpell();
+  await playSite(opening.southSiteInstanceIds[0], 'C1');
+  await endTurn();
 
-  drawAtlas();
-  playSite(opening.northSiteInstanceIds[1], 'C3');
-  endTurn();
-  drawSpell();
-  playSite(opening.southSiteInstanceIds[1], 'C2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await drawAtlas();
+  await playSite(opening.northSiteInstanceIds[1], 'C3');
+  await endTurn();
+  await drawSpell();
+  await playSite(opening.southSiteInstanceIds[1], 'C2');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.raalInstanceId
     && descriptor.cell === 'C2');
-  endTurn();
+  await endTurn();
 
-  drawAtlas();
-  playSite(opening.northSiteInstanceIds[2], 'B4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await drawAtlas();
+  await playSite(opening.northSiteInstanceIds[2], 'B4');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.bandInstanceId
     && descriptor.cell === 'C3');
-  endTurn();
-  drawAtlas();
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await endTurn();
+  await drawAtlas();
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.raalInstanceId
     && descriptor.from.cell === 'C2'
     && descriptor.to.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'close-intercept');
-  endTurn();
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'close-intercept');
+  await endTurn();
 
-  drawAtlas();
-  playSite(opening.northSiteInstanceIds[3], 'A4');
-  endTurn();
-  drawAtlas();
-  endTurn();
-  drawSpell();
-  playSite(opening.northSiteInstanceIds[4], 'B3');
-  endTurn();
-  drawAtlas();
-  endTurn();
-  drawSpell();
-  playSite(opening.northSiteInstanceIds[5], 'A3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await drawAtlas();
+  await playSite(opening.northSiteInstanceIds[3], 'A4');
+  await endTurn();
+  await drawAtlas();
+  await endTurn();
+  await drawSpell();
+  await playSite(opening.northSiteInstanceIds[4], 'B3');
+  await endTurn();
+  await drawAtlas();
+  await endTurn();
+  await drawSpell();
+  await playSite(opening.northSiteInstanceIds[5], 'A3');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.nimbusInstanceId
     && descriptor.cell === 'C3');
 
@@ -19268,7 +19272,7 @@ function runAirNimbusJinn(
     instanceId === opening.nimbusInstanceId);
   const candidates = [opening.bandInstanceId, opening.raalInstanceId]
     .sort((left, right) => left.localeCompare(right));
-  const activationActions = legalGameActions(before, 'north').filter(({ descriptor }) =>
+  const activationActions = (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'activate-discard-random-damage'
       && descriptor.sourceInstanceId === opening.nimbusInstanceId
       && descriptor.discardCardInstanceId === opening.zapInstanceId);
@@ -19277,7 +19281,7 @@ function runAirNimbusJinn(
     throw new Error('private Nimbus Jinn lacks one exact discard activation');
   }
   const activationAction = activationActions[0];
-  const activated = stepGame(session, activationAction);
+  const activated = await stepAt(session, activationAction);
   if (!activated.accepted) throw new Error('private Nimbus Jinn activation was rejected');
   session = activated.session;
   const draw = activated.receipt.randomDraws[0];
@@ -19402,7 +19406,7 @@ function runAirNimbusJinn(
     randomReceiptVerified: activated.receipt.randomDraws.length === 1
       && draw?.purpose === 'discard_spell_random_other_unit_here'
       && session.transcript.slice(0, -1).every(({ randomDraws }) => randomDraws.length === 0),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     structuralFactsVerified: definition?.cardType === 'minion'
       && definition.airborne === true
@@ -19416,60 +19420,60 @@ function runAirNimbusJinn(
   });
 }
 
-function runAirKiteArcher(
+async function runAirKiteArcher(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airKiteArcher'] {
-  const opening = findAirKiteArcherOpening(input);
-  let session = legacyKeep(legacyKeep(opening.session));
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airKiteArcher']> {
+  const opening = await findAirKiteArcherOpening(input);
+  let session = await keep(await keep(opening.session));
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
-  const drawSpell = (): void => take(({ descriptor }) =>
+  const drawSpell = async (): Promise<void> => await take(({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const playSite = (instanceId: string, cell: RealmCell): void => take(({ descriptor }) =>
+  const playSite = async (instanceId: string, cell: RealmCell): Promise<void> => await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === instanceId
       && descriptor.cell === cell);
-  const endTurn = (): void => take(({ descriptor }) => descriptor.kind === 'end-turn');
+  const endTurn = async (): Promise<void> => await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  playSite(opening.northSiteInstanceIds[0], 'C4');
-  endTurn();
-  drawSpell();
-  playSite(opening.southSiteInstanceIds[0], 'C1');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await playSite(opening.northSiteInstanceIds[0], 'C4');
+  await endTurn();
+  await drawSpell();
+  await playSite(opening.southSiteInstanceIds[0], 'C1');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.snowLeopardInstanceId
     && descriptor.cell === 'C1');
-  endTurn();
+  await endTurn();
 
-  drawSpell();
-  playSite(opening.northSiteInstanceIds[1], 'C3');
-  endTurn();
-  drawSpell();
-  playSite(opening.southSiteInstanceIds[1], 'C2');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await drawSpell();
+  await playSite(opening.northSiteInstanceIds[1], 'C3');
+  await endTurn();
+  await drawSpell();
+  await playSite(opening.southSiteInstanceIds[1], 'C2');
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.snowLeopardInstanceId
     && descriptor.from.cell === 'C1'
     && descriptor.to.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  endTurn();
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await endTurn();
 
-  drawSpell();
-  playSite(opening.northSiteInstanceIds[2], 'B3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await drawSpell();
+  await playSite(opening.northSiteInstanceIds[2], 'B3');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.kiteArcherInstanceId
     && descriptor.cell === 'C3');
-  endTurn();
-  drawSpell();
-  endTurn();
-  drawSpell();
+  await endTurn();
+  await drawSpell();
+  await endTurn();
+  await drawSpell();
 
-  const shot = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const shot = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'shoot-projectile'
       && descriptor.shooterInstanceId === opening.kiteArcherInstanceId
       && descriptor.hit?.instanceId === opening.snowLeopardInstanceId));
   if (!shot.accepted) throw new Error('private Kite Archer Ranged strike was rejected');
   const pending = shot.session;
-  const choices = legalGameActions(pending.state, 'north');
+  const choices = await legalActionsAt(pending, 'north');
   const declineAction = choices.find(({ descriptor }) =>
     descriptor.kind === 'resolve-ranged-step' && descriptor.choice === 'decline');
   const stepAction = choices.find(({ descriptor }) =>
@@ -19479,8 +19483,8 @@ function runAirKiteArcher(
   if (!declineAction || !stepAction) {
     throw new Error('private Kite Archer lacks both supported optional step branches');
   }
-  const declined = stepGame(pending, declineAction);
-  const stepped = stepGame(pending, stepAction);
+  const declined = await stepAt(pending, declineAction);
+  const stepped = await stepAt(pending, stepAction);
   if (!declined.accepted || !stepped.accepted) {
     throw new Error('private Kite Archer optional step branch was rejected');
   }
@@ -19517,7 +19521,7 @@ function runAirKiteArcher(
       && declined.receipt.events.length === 0
       && declined.session.state.realm.units.some(({ instanceId, location, tapped }) =>
         instanceId === opening.kiteArcherInstanceId && location === 'C3' && tapped)
-      && verifyGameReplay(declined.session),
+      && await verifyReplayAt(declined.session),
     exactStepVerified: kite?.location === 'C4'
       && kite.tapped
       && session.state.phase === 'main'
@@ -19533,7 +19537,7 @@ function runAirKiteArcher(
         <= input.format.copyLimits[input.kiteArcher.rarity!],
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0)
       && declined.session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     structuralFactsVerified: definition?.cardType === 'minion'
       && definition.attack === 2
@@ -19551,68 +19555,68 @@ function runAirKiteArcher(
   });
 }
 
-function runAirRaiseDead(
+async function runAirRaiseDead(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airRaiseDead'] {
-  const opening = findAirRaiseDeadOpening(input);
-  let session = legacyKeep(legacyKeep(opening.session));
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airRaiseDead']> {
+  const opening = await findAirRaiseDeadOpening(input);
+  let session = await keep(await keep(opening.session));
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
-  const drawSpell = (): void => take(({ descriptor }) =>
+  const drawSpell = async (): Promise<void> => await take(({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const playSite = (instanceId: string, cell: RealmCell): void => take(({ descriptor }) =>
+  const playSite = async (instanceId: string, cell: RealmCell): Promise<void> => await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === instanceId
       && descriptor.cell === cell);
-  const endTurn = (): void => take(({ descriptor }) => descriptor.kind === 'end-turn');
+  const endTurn = async (): Promise<void> => await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  playSite(opening.northSiteInstanceIds[0], 'C4');
-  endTurn();
-  drawSpell();
-  playSite(opening.southSiteInstanceIds[0], 'C1');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await playSite(opening.northSiteInstanceIds[0], 'C4');
+  await endTurn();
+  await drawSpell();
+  await playSite(opening.southSiteInstanceIds[0], 'C1');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.snowLeopardInstanceId
     && descriptor.cell === 'C1');
-  endTurn();
+  await endTurn();
 
-  drawSpell();
-  playSite(opening.northSiteInstanceIds[1], 'C3');
-  endTurn();
-  drawSpell();
-  playSite(opening.southSiteInstanceIds[1], 'C2');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await drawSpell();
+  await playSite(opening.northSiteInstanceIds[1], 'C3');
+  await endTurn();
+  await drawSpell();
+  await playSite(opening.southSiteInstanceIds[1], 'C2');
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.snowLeopardInstanceId
     && descriptor.to.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  endTurn();
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await endTurn();
 
-  drawSpell();
-  playSite(opening.northSiteInstanceIds[2], 'B3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await drawSpell();
+  await playSite(opening.northSiteInstanceIds[2], 'B3');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.kiteArcherInstanceId
     && descriptor.cell === 'C3');
-  endTurn();
-  drawSpell();
-  endTurn();
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  playSite(opening.northSiteInstanceIds[3], 'B4');
+  await endTurn();
+  await drawSpell();
+  await endTurn();
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await playSite(opening.northSiteInstanceIds[3], 'B4');
 
-  const shot = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const shot = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'shoot-projectile'
       && descriptor.shooterInstanceId === opening.kiteArcherInstanceId
       && descriptor.hit?.instanceId === opening.snowLeopardInstanceId));
   if (!shot.accepted) throw new Error('private Raise Dead setup shot was rejected');
   session = shot.session;
-  take(({ descriptor }) => descriptor.kind === 'resolve-ranged-step'
+  await take(({ descriptor }) => descriptor.kind === 'resolve-ranged-step'
     && descriptor.choice === 'decline');
 
-  const castAction = legacyAction(session, ({ descriptor }) =>
+  const castAction = await action(session, ({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.raiseDeadInstanceId);
   const manaBeforeCast = session.state.players.north.mana;
   const versionBeforeCast = session.state.stateVersion;
-  const cast = stepGame(session, castAction);
+  const cast = await stepAt(session, castAction);
   if (!cast.accepted) throw new Error('private Raise Dead cast was rejected');
   const random = cast.receipt.randomDraws[0];
   const randomDomain = random && isJsonRecord(random.domain) ? random.domain : undefined;
@@ -19621,14 +19625,14 @@ function runAirRaiseDead(
   const sourceInCemetery = cast.session.state.players.north.cemetery
     .some(({ instanceId }) => instanceId === opening.raiseDeadInstanceId);
   const opponentSite = cast.session.state.realm.sites.C1;
-  const placementAction = legalGameActions(cast.session.state, 'north').find(({ descriptor }) =>
+  const placementAction = (await legalActionsAt(cast.session, 'north')).find(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.snowLeopardInstanceId
       && descriptor.cell === 'C1'
       && descriptor.manaCost === 0);
   if (!placementAction) throw new Error('private Raise Dead lacks opponent-site placement');
   const manaBeforePlacement = cast.session.state.players.north.mana;
-  const summoned = stepGame(cast.session, placementAction);
+  const summoned = await stepAt(cast.session, placementAction);
   if (!summoned.accepted) throw new Error('private Raise Dead placement was rejected');
   session = summoned.session;
 
@@ -19674,7 +19678,7 @@ function runAirRaiseDead(
       && cast.receipt.events.map(({ type }) => type).join(',')
         === 'magic-cast,dead-minion-selected',
     raiseDead: input.raiseDead.name,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     sourceAndCemeteriesVerified: sourceInCemetery
       && session.state.players.north.cemetery
@@ -19693,91 +19697,91 @@ function runAirRaiseDead(
   });
 }
 
-function runAirSkirmishersOfMu(
+async function runAirSkirmishersOfMu(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airSkirmishersOfMu'] {
-  const opening = findAirSkirmishersOfMuOpening(input);
-  let session = legacyKeep(legacyKeep(opening.session));
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airSkirmishersOfMu']> {
+  const opening = await findAirSkirmishersOfMuOpening(input);
+  let session = await keep(await keep(opening.session));
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
-  const drawSpell = (): void => take(({ descriptor }) =>
+  const drawSpell = async (): Promise<void> => await take(({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const playSite = (instanceId: string, cell: RealmCell): void => take(({ descriptor }) =>
+  const playSite = async (instanceId: string, cell: RealmCell): Promise<void> => await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === instanceId
       && descriptor.cell === cell);
-  const endTurn = (): void => take(({ descriptor }) => descriptor.kind === 'end-turn');
+  const endTurn = async (): Promise<void> => await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  playSite(opening.northSiteInstanceIds[0], 'C4');
-  endTurn();
-  drawSpell();
-  playSite(opening.southSiteInstanceIds[0], 'C1');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await playSite(opening.northSiteInstanceIds[0], 'C4');
+  await endTurn();
+  await drawSpell();
+  await playSite(opening.southSiteInstanceIds[0], 'C1');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.snowLeopardInstanceId
     && descriptor.cell === 'C1');
-  endTurn();
+  await endTurn();
 
-  drawSpell();
-  playSite(opening.northSiteInstanceIds[1], 'C3');
-  endTurn();
-  drawSpell();
-  playSite(opening.southSiteInstanceIds[1], 'C2');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await drawSpell();
+  await playSite(opening.northSiteInstanceIds[1], 'C3');
+  await endTurn();
+  await drawSpell();
+  await playSite(opening.southSiteInstanceIds[1], 'C2');
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.snowLeopardInstanceId
     && descriptor.from.cell === 'C1'
     && descriptor.to.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  endTurn();
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await endTurn();
 
-  drawSpell();
-  playSite(opening.northSiteInstanceIds[2], 'B3');
-  endTurn();
-  drawSpell();
-  endTurn();
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  playSite(opening.northSiteInstanceIds[3], 'B4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await drawSpell();
+  await playSite(opening.northSiteInstanceIds[2], 'B3');
+  await endTurn();
+  await drawSpell();
+  await endTurn();
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await playSite(opening.northSiteInstanceIds[3], 'B4');
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.skirmishersInstanceId
     && descriptor.cell === 'C3');
-  endTurn();
-  drawSpell();
-  endTurn();
-  drawSpell();
+  await endTurn();
+  await drawSpell();
+  await endTurn();
+  await drawSpell();
 
-  const staged = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const staged = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.skirmishersInstanceId
       && descriptor.from.cell === 'C3'
       && descriptor.to.cell === 'C4'));
   if (!staged.accepted) throw new Error('private Skirmishers basic movement was rejected');
   const pending = staged.session;
-  const continueEdge = stepGame(pending, legacyAction(pending, ({ descriptor }) =>
+  const continueEdge = await stepAt(pending, await action(pending, ({ descriptor }) =>
     descriptor.kind === 'continue-basic-movement'
       && descriptor.unitInstanceId === opening.skirmishersInstanceId));
   if (!continueEdge.accepted) throw new Error('private Skirmishers decline branch edge was rejected');
-  const continueFinish = stepGame(continueEdge.session, legacyAction(continueEdge.session, ({ descriptor }) =>
+  const continueFinish = await stepAt(continueEdge.session, await action(continueEdge.session, ({ descriptor }) =>
     descriptor.kind === 'continue-basic-movement'
       && descriptor.unitInstanceId === opening.skirmishersInstanceId));
   if (!continueFinish.accepted) throw new Error('private Skirmishers decline branch finish was rejected');
-  const continueDecline = stepGame(continueFinish.session, legacyAction(continueFinish.session, ({ descriptor }) =>
+  const continueDecline = await stepAt(continueFinish.session, await action(continueFinish.session, ({ descriptor }) =>
     descriptor.kind === 'decline-attack'));
   if (!continueDecline.accepted) throw new Error('private Skirmishers decline branch attack close was rejected');
 
-  const shot = stepGame(pending, legacyAction(pending, ({ descriptor }) =>
+  const shot = await stepAt(pending, await action(pending, ({ descriptor }) =>
     descriptor.kind === 'shoot-projectile'
       && descriptor.shooterInstanceId === opening.skirmishersInstanceId
       && descriptor.hit?.instanceId === opening.snowLeopardInstanceId));
   if (!shot.accepted) throw new Error('private Skirmishers during-movement Ranged strike was rejected');
-  const shotEdge = stepGame(shot.session, legacyAction(shot.session, ({ descriptor }) =>
+  const shotEdge = await stepAt(shot.session, await action(shot.session, ({ descriptor }) =>
     descriptor.kind === 'continue-basic-movement'
       && descriptor.unitInstanceId === opening.skirmishersInstanceId));
   if (!shotEdge.accepted) throw new Error('private Skirmishers shot branch edge was rejected');
-  const shotFinish = stepGame(shotEdge.session, legacyAction(shotEdge.session, ({ descriptor }) =>
+  const shotFinish = await stepAt(shotEdge.session, await action(shotEdge.session, ({ descriptor }) =>
     descriptor.kind === 'continue-basic-movement'
       && descriptor.unitInstanceId === opening.skirmishersInstanceId));
   if (!shotFinish.accepted) throw new Error('private Skirmishers shot branch finish was rejected');
-  const shotDecline = stepGame(shotFinish.session, legacyAction(shotFinish.session, ({ descriptor }) =>
+  const shotDecline = await stepAt(shotFinish.session, await action(shotFinish.session, ({ descriptor }) =>
     descriptor.kind === 'decline-attack'));
   if (!shotDecline.accepted) throw new Error('private Skirmishers shot branch attack close was rejected');
   session = shotDecline.session;
@@ -19806,7 +19810,7 @@ function runAirSkirmishersOfMu(
     instanceId === opening.skirmishersInstanceId);
   const continueSkirmishers = continueDecline.session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.skirmishersInstanceId);
-  const initialActions = legalGameActions(pending.state, 'north');
+  const initialActions = await legalActionsAt(pending, 'north');
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
     causalEventsVerified: causal,
@@ -19819,7 +19823,7 @@ function runAirSkirmishersOfMu(
       && continueEdge.receipt.events.map(({ type }) => type).join(',') === 'basic-movement-continued'
       && continueFinish.receipt.events.map(({ type }) => type).join(',') === 'move-and-attack-activated'
       && continueDecline.receipt.events.map(({ type }) => type).join(',') === 'attack-declined'
-      && verifyGameReplay(continueDecline.session),
+      && await verifyReplayAt(continueDecline.session),
     deck,
     exactMovementShotVerified: staged.receipt.events.map(({ type }) => type).join(',')
       === 'basic-movement-started'
@@ -19848,7 +19852,7 @@ function runAirSkirmishersOfMu(
         <= input.format.copyLimits[input.skirmishersOfMu.rarity!],
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0)
       && continueDecline.session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     skirmishersOfMu: input.skirmishersOfMu.name,
     structuralFactsVerified: definition?.cardType === 'minion'
@@ -19863,86 +19867,82 @@ function runAirSkirmishersOfMu(
     unsupportedMechanicsAbsent: session.state.phase === 'main'
       && session.state.pendingBasicMovement === null
       && shot.session.state.pendingBasicMovement?.rangedStrikeUsed === true
-      && legalGameActions(shot.session.state, 'north').every(({ descriptor }) =>
+      && (await legalActionsAt(shot.session, 'north')).every(({ descriptor }) =>
         descriptor.kind !== 'shoot-projectile'),
   });
 }
 
-function runAirChainLightning(
+async function runAirChainLightning(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airChainLightning'] {
-  const opening = findAirChainLightningOpening(input);
-  let session = legacyKeep(legacyKeep(opening.session));
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airChainLightning']> {
+  const opening = await findAirChainLightningOpening(input);
+  let session = await keep(await keep(opening.session));
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
-  const drawSpell = (): void => take(({ descriptor }) =>
+  const drawSpell = async (): Promise<void> => await take(({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const playSite = (instanceId: string, cell: RealmCell): void => take(({ descriptor }) =>
+  const playSite = async (instanceId: string, cell: RealmCell): Promise<void> => await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === instanceId
       && descriptor.cell === cell);
-  const summon = (instanceId: string): void => take(({ descriptor }) =>
+  const summon = async (instanceId: string): Promise<void> => await take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === instanceId
       && descriptor.cell === 'C4');
-  const endTurn = (): void => take(({ descriptor }) => descriptor.kind === 'end-turn');
+  const endTurn = async (): Promise<void> => await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  playSite(opening.northSiteInstanceIds[0], 'C4');
-  summon(opening.targetInstanceIds[0]);
-  endTurn();
-  drawSpell();
-  playSite(opening.southSiteInstanceIds[0], 'C1');
-  endTurn();
+  await playSite(opening.northSiteInstanceIds[0], 'C4');
+  await summon(opening.targetInstanceIds[0]);
+  await endTurn();
+  await drawSpell();
+  await playSite(opening.southSiteInstanceIds[0], 'C1');
+  await endTurn();
 
-  drawSpell();
-  playSite(opening.northSiteInstanceIds[1], 'B4');
-  summon(opening.targetInstanceIds[1]);
-  endTurn();
-  drawSpell();
-  playSite(opening.southSiteInstanceIds[1], 'B1');
-  endTurn();
+  await drawSpell();
+  await playSite(opening.northSiteInstanceIds[1], 'B4');
+  await summon(opening.targetInstanceIds[1]);
+  await endTurn();
+  await drawSpell();
+  await playSite(opening.southSiteInstanceIds[1], 'B1');
+  await endTurn();
 
-  drawSpell();
-  playSite(opening.northSiteInstanceIds[2], 'A4');
-  endTurn();
-  drawSpell();
-  playSite(opening.southSiteInstanceIds[2], 'A1');
-  endTurn();
+  await drawSpell();
+  await playSite(opening.northSiteInstanceIds[2], 'A4');
+  await endTurn();
+  await drawSpell();
+  await playSite(opening.southSiteInstanceIds[2], 'A1');
+  await endTurn();
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  playSite(opening.northDrawnSiteInstanceId, 'D4');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  const lowMana = session;
+  await playSite(opening.northDrawnSiteInstanceId, 'D4');
   const checkpoint = session;
-  const begins = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+  const begins = (await legalActionsAt(checkpoint, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'begin-chain-magic'
       && descriptor.cardInstanceId === opening.chainLightningInstanceId);
   const beginAction = begins.find(({ descriptor }) => descriptor.kind === 'begin-chain-magic'
     && descriptor.target.instanceId === opening.targetInstanceIds[0]);
   if (!beginAction) throw new Error('private Chain Lightning lacks its first actual target');
 
-  const lowMana: GameSession = {
-    ...checkpoint,
-    state: {
-      ...checkpoint.state,
-      players: {
-        ...checkpoint.state.players,
-        north: { ...checkpoint.state.players.north, mana: 3 },
-      },
-    },
-  };
-  const lowBegin = stepGame(lowMana, legacyAction(lowMana, ({ descriptor }) =>
-    descriptor.kind === 'begin-chain-magic'
+  // The Rust engine owns state, so the mana rule is proven one site earlier in the same real
+  // game — three sites, three mana — instead of against a forged cheaper position.
+  const lowBeginAction = (await legalActionsAt(lowMana, 'north'))
+    .find(({ descriptor }) => descriptor.kind === 'begin-chain-magic'
       && descriptor.cardInstanceId === opening.chainLightningInstanceId
-      && descriptor.target.instanceId === opening.targetInstanceIds[0]));
-  const lowManaStopsExtraTarget = lowBegin.accepted
-    && !legalGameActions(lowBegin.session.state, 'north').some(({ descriptor }) =>
+      && descriptor.target.instanceId === opening.targetInstanceIds[0]);
+  const lowBegin = lowBeginAction ? await stepAt(lowMana, lowBeginAction) : undefined;
+  const lowManaStopsExtraTarget = lowMana.state.players.north.mana === 3
+    && lowBegin !== undefined
+    && lowBegin.accepted
+    && !(await legalActionsAt(lowBegin.session, 'north')).some(({ descriptor }) =>
       descriptor.kind === 'extend-chain-magic');
 
   const beforeMana = checkpoint.state.players.north.mana;
-  const begin = stepGame(checkpoint, beginAction);
+  const begin = await stepAt(checkpoint, beginAction);
   if (!begin.accepted) throw new Error('private Chain Lightning target selection was rejected');
   session = begin.session;
-  const extensions = legalGameActions(session.state, 'north');
+  const extensions = await legalActionsAt(session, 'north');
   const extendAction = extensions.find(({ descriptor }) => descriptor.kind === 'extend-chain-magic'
     && descriptor.target.instanceId === opening.targetInstanceIds[1]);
   if (!extendAction) throw new Error('private Chain Lightning lacks its linked actual target');
@@ -19954,10 +19954,10 @@ function runAirChainLightning(
     && session.state.pendingChainMagic?.targets.length === 1
     && session.state.pendingChainMagic.targets[0]?.instanceId === opening.targetInstanceIds[0];
 
-  const extend = stepGame(session, extendAction);
+  const extend = await stepAt(session, extendAction);
   if (!extend.accepted) throw new Error('private Chain Lightning target extension was rejected');
   session = extend.session;
-  const resolves = legalGameActions(session.state, 'north');
+  const resolves = await legalActionsAt(session, 'north');
   const resolveAction = resolves.find(({ descriptor }) => descriptor.kind === 'resolve-chain-magic');
   if (!resolveAction) throw new Error('private Chain Lightning lacks its resolve action');
   const selectionReceiptsVerified = begin.receipt.events.length === 0
@@ -19969,7 +19969,7 @@ function runAirChainLightning(
       === opening.targetInstanceIds.join(',')
     && !resolves.some(({ descriptor }) => descriptor.kind === 'extend-chain-magic');
 
-  const resolved = stepGame(session, resolveAction);
+  const resolved = await stepAt(session, resolveAction);
   if (!resolved.accepted) throw new Error('private Chain Lightning resolution was rejected');
   session = resolved.session;
   const events = resolved.receipt.events;
@@ -20020,7 +20020,7 @@ function runAirChainLightning(
       && beforeMana - session.state.players.north.mana === 4,
     noActionTimeRandomness: resolved.receipt.randomDraws.length === 0
       && session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     simultaneousDeathsVerified: firstDeath > 0
       && damageIndices.length === 2
@@ -20039,54 +20039,54 @@ function runAirChainLightning(
   });
 }
 
-function runAirHeadlessHaunt(
+async function runAirHeadlessHaunt(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airHeadlessHaunt'] {
-  const opening = findAirHeadlessHauntOpening(input);
-  let session = legacyKeep(legacyKeep(opening.session));
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airHeadlessHaunt']> {
+  const opening = await findAirHeadlessHauntOpening(input);
+  let session = await keep(await keep(opening.session));
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
-  const drawSpell = (): void => take(({ descriptor }) =>
+  const drawSpell = async (): Promise<void> => await take(({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const playSite = (instanceId: string, cell: RealmCell): void => take(({ descriptor }) =>
+  const playSite = async (instanceId: string, cell: RealmCell): Promise<void> => await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === instanceId
       && descriptor.cell === cell);
-  const endTurn = (): void => take(({ descriptor }) => descriptor.kind === 'end-turn');
+  const endTurn = async (): Promise<void> => await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  playSite(opening.northSiteInstanceIds[0], 'C4');
-  endTurn();
-  drawSpell();
-  playSite(opening.southSiteInstanceId, 'C1');
-  endTurn();
+  await playSite(opening.northSiteInstanceIds[0], 'C4');
+  await endTurn();
+  await drawSpell();
+  await playSite(opening.southSiteInstanceId, 'C1');
+  await endTurn();
 
-  drawSpell();
-  playSite(opening.northSiteInstanceIds[1], 'B4');
-  endTurn();
-  drawSpell();
-  endTurn();
+  await drawSpell();
+  await playSite(opening.northSiteInstanceIds[1], 'B4');
+  await endTurn();
+  await drawSpell();
+  await endTurn();
 
-  drawSpell();
-  playSite(opening.northSiteInstanceIds[2], 'A4');
-  take(({ descriptor }) =>
+  await drawSpell();
+  await playSite(opening.northSiteInstanceIds[2], 'A4');
+  await take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.headlessHauntInstanceId
       && descriptor.cell === 'C4');
-  endTurn();
-  drawSpell();
-  endTurn();
+  await endTurn();
+  await drawSpell();
+  await endTurn();
 
   const startTurnPhaseVerified = session.state.phase === 'start-turn'
     && session.state.decisionSeat === 'north';
-  const trigger = legacyAction(session, ({ descriptor }) =>
+  const trigger = await action(session, ({ descriptor }) =>
     descriptor.kind === 'resolve-start-turn-trigger'
       && descriptor.sourceInstanceId === opening.headlessHauntInstanceId);
-  const legalTriggerVerified = legalGameActions(session.state, 'north')
+  const legalTriggerVerified = (await legalActionsAt(session, 'north'))
     .some(({ actionId }) => actionId === trigger.actionId);
   const randomCandidateCount = 20 - Object.values(session.state.realm.sites)
     .filter((site) => 'rubble' in site).length;
-  const resolved = stepGame(session, trigger);
+  const resolved = await stepAt(session, trigger);
   if (!resolved.accepted) throw new Error('private Headless Haunt start-turn trigger was rejected');
   session = resolved.session;
 
@@ -20122,7 +20122,7 @@ function runAirHeadlessHaunt(
       && randomDomain?.accepted === true
       && randomDomain.exclusiveMaximum === randomCandidateCount
       && randomDomain.kind === 'realm_site_or_void_location',
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     startTurnPhaseVerified,
     structuralFactsVerified: definition?.cardType === 'minion'
@@ -20143,39 +20143,39 @@ function runAirHeadlessHaunt(
   });
 }
 
-function runAirDevilsEgg(
+async function runAirDevilsEgg(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airDevilsEgg'] {
-  const opening = findAirDevilsEggOpening(input);
-  let session = legacyKeep(legacyKeep(opening.session));
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airDevilsEgg']> {
+  const opening = await findAirDevilsEggOpening(input);
+  let session = await keep(await keep(opening.session));
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
-  const drawSpell = (): void => take(({ descriptor }) =>
+  const drawSpell = async (): Promise<void> => await take(({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const playSite = (instanceId: string, cell: RealmCell): void => take(({ descriptor }) =>
+  const playSite = async (instanceId: string, cell: RealmCell): Promise<void> => await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === instanceId
       && descriptor.cell === cell);
-  const endTurn = (): void => take(({ descriptor }) => descriptor.kind === 'end-turn');
+  const endTurn = async (): Promise<void> => await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  playSite(opening.northSiteInstanceIds[0], 'C4');
-  endTurn();
-  drawSpell();
-  playSite(opening.southSiteInstanceIds[0], 'C1');
-  endTurn();
+  await playSite(opening.northSiteInstanceIds[0], 'C4');
+  await endTurn();
+  await drawSpell();
+  await playSite(opening.southSiteInstanceIds[0], 'C1');
+  await endTurn();
 
-  drawSpell();
-  playSite(opening.northSiteInstanceIds[1], 'B4');
-  endTurn();
-  drawSpell();
-  playSite(opening.southSiteInstanceIds[1], 'C2');
-  endTurn();
+  await drawSpell();
+  await playSite(opening.northSiteInstanceIds[1], 'B4');
+  await endTurn();
+  await drawSpell();
+  await playSite(opening.southSiteInstanceIds[1], 'C2');
+  await endTurn();
 
-  drawSpell();
-  playSite(opening.northSiteInstanceIds[2], 'A4');
+  await drawSpell();
+  await playSite(opening.northSiteInstanceIds[2], 'A4');
   const beforeCast = session.state.players.north;
-  const castAction = legacyAction(session, ({ descriptor }) =>
+  const castAction = await action(session, ({ descriptor }) =>
     descriptor.kind === 'cast-artifact'
       && descriptor.cardInstanceId === opening.devilsEggInstanceId
       && descriptor.bearer === undefined
@@ -20183,7 +20183,7 @@ function runAirDevilsEgg(
   if (castAction.descriptor.kind !== 'cast-artifact') {
     throw new Error("private Devil's Egg cast action has the wrong descriptor");
   }
-  const cast = stepGame(session, castAction);
+  const cast = await stepAt(session, castAction);
   if (!cast.accepted) throw new Error("private Devil's Egg loose cast was rejected");
   session = cast.session;
   const site = session.state.realm.sites.C4;
@@ -20205,13 +20205,13 @@ function runAirDevilsEgg(
 
   const lifeBefore = session.state.players.north.avatar.life;
   const northTurnNumber = session.state.turnNumber;
-  const northEnded = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const northEnded = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'end-turn'));
   if (!northEnded.accepted) throw new Error("private Devil's Egg North End Phase was rejected");
   session = northEnded.session;
-  drawSpell();
+  await drawSpell();
   const southTurnNumber = session.state.turnNumber;
-  const southEnded = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const southEnded = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'end-turn'));
   if (!southEnded.accepted) throw new Error("private Devil's Egg South End Phase was rejected");
   session = southEnded.session;
@@ -20293,7 +20293,7 @@ function runAirDevilsEgg(
       && allEvents.every(({ type }) => type !== 'damage-dealt'
         && type !== 'minion-died'
         && type !== 'game-ended'),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     structuralFactsVerified: definition?.cardType === 'artifact'
       && definition.manaCost === 3
@@ -20310,44 +20310,44 @@ function runAirDevilsEgg(
   });
 }
 
-function runAirSpellcasterFreeze(
+async function runAirSpellcasterFreeze(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airSpellcasterFreeze'] {
-  const opening = findAirSpellcasterFreezeOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airSpellcasterFreeze']> {
+  const opening = await findAirSpellcasterFreezeOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northAirSiteInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southWaterSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.seravaInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northWaterSiteInstanceId
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.ghostTownInstanceId
     && descriptor.cell === 'C2');
 
   const beforeGenesis = session.state.players.north;
   const genesisCard = beforeGenesis.spellbook[0];
   if (!genesisCard) throw new Error('private Spellcaster scenario lacks its Genesis spell draw');
-  const summon = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const summon = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.apprenticeWizardInstanceId
       && descriptor.cell === 'C2'));
@@ -20368,7 +20368,7 @@ function runAirSpellcasterFreeze(
     throw new Error('private Spellcaster Freeze setup lacks its Wizard or target');
   }
   const avatarInstanceId = session.state.players.north.avatar.card.instanceId;
-  const targetActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const targetActions = (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.freezeInstanceId
       && descriptor.target?.kind === 'minion'
@@ -20391,7 +20391,7 @@ function runAirSpellcasterFreeze(
   const wizardCastWhileSummoningSick = wizardBefore.summoningSickness
     && !wizardBefore.tapped;
   const manaBefore = session.state.players.north.mana;
-  session = legacyAccept(session, selected);
+  session = await accept(session, selected);
   const manaAfter = session.state.players.north.mana;
 
   const wizardAfter = session.state.realm.units.find(({ instanceId }) =>
@@ -20437,7 +20437,7 @@ function runAirSpellcasterFreeze(
     manaPaid: manaBefore - manaAfter,
     noRandomDraws: summon.receipt.randomDraws.length === 0
       && receipt?.randomDraws.length === 0,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seravaDisabled: observedSerava?.disabled === true
       && seravaAfter?.disableEffects?.length === 1
       && seravaAfter.disableEffects[0]?.expiresAtSeat === 'north'
@@ -20462,18 +20462,18 @@ function runAirSpellcasterFreeze(
   });
 }
 
-function runAirLeyline(
+async function runAirLeyline(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airLeyline'] {
-  const opening = findAirLeylineOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airLeyline']> {
+  const opening = await findAirLeylineOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
   const beforeFirst = session.state.players.north;
-  const first = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const first = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.hengeInstanceIds[0]
       && descriptor.cell === 'C4'));
@@ -20483,18 +20483,18 @@ function runAirLeyline(
   const firstHengeDrewNothing = afterFirst.spellbook.length === beforeFirst.spellbook.length
     && afterFirst.hand.spellbook.length === beforeFirst.hand.spellbook.length
     && first.receipt.events.map(({ type }) => type).join(',') === 'site-played';
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
   const before = session.state.players.north;
   const drawn = before.spellbook[0];
   if (!drawn) throw new Error('private Leyline Henge scenario lacks a spell to draw');
-  const second = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const second = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.hengeInstanceIds[1]
       && descriptor.cell === 'C3'));
@@ -20520,64 +20520,64 @@ function runAirLeyline(
     genesisDrewOne,
     henge: opening.names.get(input.leylineHenge.stableId) ?? input.leylineHenge.stableId,
     hiddenFromOpponent,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
   });
 }
 
-function runStealth(
+async function runStealth(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['stealth'] {
-  const opening = findStealthOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['stealth']> {
+  const opening = await findStealthOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
       && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
       && descriptor.cell === 'C2');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.groundInstanceId
       && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
       && descriptor.cell === 'B3');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.stealthInstanceId
       && descriptor.cell === 'C3');
   const enteredStealthed = session.state.realm.units
     .some(({ instanceId, stealthed }) => instanceId === opening.stealthInstanceId && stealthed);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.groundInstanceId
       && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3');
-  const groundTargets = legalGameActions(session.state, 'south');
+  const groundTargets = await legalActionsAt(session, 'south');
   const protectedUnit = session.state.realm.units
     .find(({ instanceId }) => instanceId === opening.stealthInstanceId);
   const groundCouldNotAttack = protectedUnit?.location === 'C3'
@@ -20588,15 +20588,15 @@ function runStealth(
       descriptor.kind !== 'declare-attack'
         || descriptor.target.kind !== 'minion'
         || descriptor.target.instanceId !== opening.stealthInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'close-intercept');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'close-intercept');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.stealthInstanceId
       && descriptor.path.map(({ cell }) => cell).join(',') === 'C3');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'declare-attack'
       && descriptor.target.kind === 'minion'
       && descriptor.target.instanceId === opening.groundInstanceId);
@@ -20628,49 +20628,49 @@ function runStealth(
       opening.names.get(input.stealthTargetMinion.stableId) ?? input.stealthTargetMinion.stableId,
     groundMinionDied: session.state.players.south.cemetery
       .some(({ instanceId }) => instanceId === opening.groundInstanceId),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     stealthLostAfterAttack,
     stealthMinion: opening.names.get(input.stealthMinion.stableId) ?? input.stealthMinion.stableId,
   });
 }
 
-function runAirSummoning(
+async function runAirSummoning(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['airSummoning'] {
-  const opening = findAirSummoningOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['airSummoning']> {
+  const opening = await findAirSummoningOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
   const cells = ['C4', 'C3', 'B4', 'D4', 'B3'] as const;
 
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southSiteInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
   for (let index = 1; index < cells.length; index += 1) {
-    take(({ descriptor }) =>
+    await take(({ descriptor }) =>
       descriptor.kind === 'draw'
         && descriptor.zone === (index < 3 ? 'spellbook' : 'atlas'));
-    take(({ descriptor }) =>
+    await take(({ descriptor }) =>
       descriptor.kind === 'play-site'
         && descriptor.cardInstanceId === opening.northSiteInstanceIds[index]
         && descriptor.cell === cells[index]);
     if (index === cells.length - 1) break;
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
   }
 
-  const actions = legalGameActions(session.state, 'north');
+  const actions = await legalActionsAt(session, 'north');
   const ordinaryActions = actions.filter(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.ordinaryInstanceId);
@@ -20678,7 +20678,7 @@ function runAirSummoning(
     descriptor.kind === 'summon-minion' && descriptor.cell === 'C4')
     && ordinaryActions.every(({ descriptor }) =>
       descriptor.kind !== 'summon-minion' || descriptor.cell !== 'C1');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.roamingInstanceId
       && descriptor.cell === 'C1');
@@ -20689,7 +20689,7 @@ function runAirSummoning(
     acceptedActionCount: session.transcript.length,
     deck: deckList(opening.manifest.decks.north, opening.names),
     ordinaryRestricted,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     roamingMinion: opening.names.get(input.roamingMinion.stableId) ?? input.roamingMinion.stableId,
     seed: opening.seed,
     summonedAtEnemySite:
@@ -20697,34 +20697,34 @@ function runAirSummoning(
   });
 }
 
-function runFireGenesisLifeLoss(
+async function runFireGenesisLifeLoss(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['fireGenesisLifeLoss'] {
-  const opening = findFireGenesisLifeLossOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['fireGenesisLifeLoss']> {
+  const opening = await findFireGenesisLifeLossOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
 
   const northBefore = session.state.players.north;
   const southBefore = session.state.players.south;
   const sitesBefore = session.state.realm.sites;
-  const summoned = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const summoned = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.demonInstanceId
       && descriptor.cell === 'C3'
@@ -20782,7 +20782,7 @@ function runFireGenesisLifeLoss(
       && northAfter.avatar.region === northBefore.avatar.region
       && northAfter.avatar.tapped === northBefore.avatar.tapped
       && session.state.phase === 'main',
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     summonedAtC3: demon?.controller === 'north'
       && demon.location === 'C3'
       && demon.owner === 'north'
@@ -20790,30 +20790,30 @@ function runFireGenesisLifeLoss(
   });
 }
 
-function runFireVileImp(
+async function runFireVileImp(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['fireVileImp'] {
-  const opening = findFireVileImpOpening(input);
-  let checkpoint = legacyKeep(legacyKeep(opening.session));
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    checkpoint = legacyAccept(checkpoint, legacyAction(checkpoint, predicate));
+): Promise<PrivateGameCheck['fireVileImp']> {
+  const opening = await findFireVileImpOpening(input);
+  let checkpoint = await keep(await keep(opening.session));
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    checkpoint = await accept(checkpoint, await action(checkpoint, predicate));
   };
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
 
   const avatarInstanceId = checkpoint.state.players.north.avatar.card.instanceId;
-  const choices = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+  const choices = await (await legalActionsAt(checkpoint, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.vileImpInstanceId
       && descriptor.cell === 'C3');
@@ -20830,8 +20830,8 @@ function runFireVileImp(
   if (!decline || !selfTarget || !target) {
     throw new Error('private Vile Imp Genesis choices are unavailable');
   }
-  const declined = stepGame(checkpoint, decline);
-  const targeted = stepGame(checkpoint, target);
+  const declined = await stepAt(checkpoint, decline);
+  const targeted = await stepAt(checkpoint, target);
   if (!declined.accepted || !targeted.accepted) {
     throw new Error('private Vile Imp Genesis choice was rejected');
   }
@@ -20852,10 +20852,10 @@ function runFireVileImp(
   const cardsById = new Map(input.cards.map((card) => [card.stableId, card]));
   const legalLowRarityDeck = opening.manifest.decks.north.atlas.length === 30
     && opening.manifest.decks.north.spellbook.length === 60
-    && opening.manifest.decks.north.atlas.filter((cardId) =>
-      cardId === input.wasteland.stableId).length === input.format.copyLimits.ordinary
-    && opening.manifest.decks.north.spellbook.filter((cardId) =>
-      cardId === input.vileImp.stableId).length === input.format.copyLimits.ordinary
+    && (opening.manifest.decks.north.atlas.filter((cardId) =>
+      cardId === input.wasteland.stableId)).length === input.format.copyLimits.ordinary
+    && (opening.manifest.decks.north.spellbook.filter((cardId) =>
+      cardId === input.vileImp.stableId)).length === input.format.copyLimits.ordinary
     && deckCardIds.every((cardId) => {
       const rarity = cardsById.get(cardId)?.rarity;
       return rarity === 'ordinary' || rarity === 'exceptional';
@@ -20888,7 +20888,7 @@ function runFireVileImp(
       - targeted.session.state.players.north.mana,
     noRandomDraws: [...declined.session.transcript, ...targeted.session.transcript]
       .every(({ randomDraws }) => randomDraws.length === 0),
-    replayVerified: verifyGameReplay(declined.session) && verifyGameReplay(targeted.session),
+    replayVerified: await verifyReplayAt(declined.session) && await verifyReplayAt(targeted.session),
     seed: opening.seed,
     summonedAtC3: imp?.cardId === input.vileImp.stableId
       && imp.controller === 'north'
@@ -20901,60 +20901,60 @@ function runFireVileImp(
   });
 }
 
-function runFireSacredScarabs(
+async function runFireSacredScarabs(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['fireSacredScarabs'] {
-  const opening = findFireSacredScarabsOpening(input);
-  let session = legacyKeep(legacyKeep(opening.session));
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['fireSacredScarabs']> {
+  const opening = await findFireSacredScarabsOpening(input);
+  let session = await keep(await keep(opening.session));
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.raalInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.sacredScarabsInstanceId
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
-  const moveResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const moveResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.sacredScarabsInstanceId
       && descriptor.from.cell === 'C2'
       && descriptor.to.cell === 'C1'));
   if (!moveResult.accepted) throw new Error('private Sacred Scarabs move was rejected');
   session = moveResult.session;
-  const attackResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const attackResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'declare-attack'
       && descriptor.target.kind === 'minion'
       && descriptor.target.instanceId === opening.raalInstanceId));
   if (!attackResult.accepted) throw new Error('private Sacred Scarabs attack was rejected');
   session = attackResult.session;
-  const fightResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const fightResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
   if (!fightResult.accepted) throw new Error('private Sacred Scarabs fight was rejected');
   session = fightResult.session;
@@ -21163,7 +21163,7 @@ function runFireSacredScarabs(
     normalStrikeWoundedRaal: raalWoundIndex > scarabStrikeIndex
       && firstDeathriteIndex > raalWoundIndex,
     raalDromedary: input.raalDromedary.name,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     sacredScarabs: input.sacredScarabs.name,
     seed: opening.seed,
     unsupportedMechanicsAbsent: scarabDefinition?.cardType === 'minion'
@@ -21175,27 +21175,27 @@ function runFireSacredScarabs(
   });
 }
 
-function runFireAramos(
+async function runFireAramos(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['fireAramos'] {
-  const opening = findFireAramosOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['fireAramos']> {
+  const opening = await findFireAramosOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
 
@@ -21206,13 +21206,13 @@ function runFireAramos(
   const northAvatarBefore = observeGame(session.state, 'north').players.north.avatar;
   const eligibleCards = [
     ...northBefore.hand.atlas.map((card) => ({ ...card, zone: 'atlas' as const })),
-    ...northBefore.hand.spellbook
-      .filter(({ instanceId }) => instanceId !== opening.aramosInstanceId)
+    ...(northBefore.hand.spellbook
+      .filter(({ instanceId }) => instanceId !== opening.aramosInstanceId))
       .map((card) => ({ ...card, zone: 'spellbook' as const })),
   ];
   const northObservedBefore = observeGame(session.state, 'north').players.north.hand;
   const southObservedBefore = observeGame(session.state, 'south').players.north.hand;
-  const summonActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const summonActions = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.aramosInstanceId);
   const alternative = summonActions.find(({ descriptor }) =>
@@ -21223,7 +21223,7 @@ function runFireAramos(
   const normalManaSummonUnavailable = summonActions.every(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.paymentMode === 'random-card-discard');
-  const result = stepGame(session, alternative);
+  const result = await stepAt(session, alternative);
   if (!result.accepted) throw new Error('private Aramos alternative-cost summon was rejected');
   session = result.session;
 
@@ -21308,7 +21308,7 @@ function runFireAramos(
       && randomDomain?.accepted === true
       && randomDomain.kind === 'card_index_candidate'
       && randomDomain.exclusiveMaximum === eligibleCards.length,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     summonedAtC3: aramos?.cardId === input.aramosMercenaries.stableId
       && aramos.controller === 'north'
       && aramos.location === 'C3'
@@ -21339,34 +21339,34 @@ function runFireAramos(
   });
 }
 
-function runFireIgnited(
+async function runFireIgnited(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['fireIgnited'] {
-  const opening = findFireIgnitedOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['fireIgnited']> {
+  const opening = await findFireIgnitedOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
 
   const manaBefore = session.state.players.north.mana;
   const northAvatarLifeBefore = session.state.players.north.avatar.life;
   const southAvatarLifeBefore = session.state.players.south.avatar.life;
-  const summoned = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const summoned = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.ignitedInstanceId
       && descriptor.cell === 'C3'
@@ -21380,7 +21380,7 @@ function runFireIgnited(
     && isJsonRecord(summoned.receipt.events[0].payload)
     ? summoned.receipt.events[0].payload
     : undefined;
-  const chargeActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const chargeActions = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.ignitedInstanceId
       && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C4');
@@ -21389,13 +21389,13 @@ function runFireIgnited(
   const southCemeteryBefore = canonicalJson(
     session.state.players.south.cemetery as unknown as JsonValue,
   );
-  const otherUnitIdsBefore = session.state.realm.units
-    .filter(({ instanceId }) => instanceId !== opening.ignitedInstanceId)
+  const otherUnitIdsBefore = (session.state.realm.units
+    .filter(({ instanceId }) => instanceId !== opening.ignitedInstanceId))
     .map(({ instanceId }) => instanceId)
     .sort();
-  const endActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const endActions = (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'end-turn');
-  const ended = endActions[0] && stepGame(session, endActions[0]);
+  const ended = endActions[0] && await stepAt(session, endActions[0]);
   if (!ended || !ended.accepted) throw new Error('private Ignited end turn was rejected');
   session = ended.session;
 
@@ -21459,7 +21459,7 @@ function runFireIgnited(
         === southCemeteryBefore
       && canonicalJson(otherUnitIdsAfter as unknown as JsonValue)
         === canonicalJson(otherUnitIdsBefore as unknown as JsonValue),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     summonedStateVerified: ignited.cardId === input.ignited.stableId
       && ignited.controller === 'north'
       && ignited.damage === 0
@@ -21473,46 +21473,46 @@ function runFireIgnited(
   });
 }
 
-function runFireCharge(
+async function runFireCharge(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['fireCharge'] {
-  const opening = findFireChargeOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['fireCharge']> {
+  const opening = await findFireChargeOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.raalInstanceId
     && descriptor.cell === 'C3');
 
-  const hasPositiveRaalMove = (candidate: GameSession): boolean =>
-    legalGameActions(candidate.state, 'north').some(({ descriptor }) =>
+  const hasPositiveRaalMove = async (candidate: GameSession): Promise<boolean> =>
+    await (await legalActionsAt(candidate, 'north')).some(({ descriptor }) =>
       descriptor.kind === 'move-and-attack'
         && descriptor.unitInstanceId === opening.raalInstanceId
         && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C4');
   const before = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.raalInstanceId);
   if (!before) throw new Error('private temporary Charge setup lacks Raal Dromedary');
-  const moveUnavailableBeforeCharge = legalGameActions(session.state, 'north')
+  const moveUnavailableBeforeCharge = await (await legalActionsAt(session, 'north'))
     .every(({ descriptor }) =>
       descriptor.kind !== 'move-and-attack'
         || descriptor.unitInstanceId !== opening.raalInstanceId);
-  const chargeActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const chargeActions = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.chargeInstanceId
       && descriptor.ally?.kind === 'minion'
@@ -21527,7 +21527,7 @@ function runFireCharge(
     throw new Error('private non-target Charge ally choice is not exactly available');
   }
   const manaBefore = session.state.players.north.mana;
-  session = legacyAccept(session, chosenCharge);
+  session = await accept(session, chosenCharge);
   const after = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.raalInstanceId);
   if (!after) throw new Error('private temporary Charge removed its ally');
@@ -21543,7 +21543,7 @@ function runFireCharge(
     : undefined;
   const temporaryChargeRecorded = after.temporaryChargeSources?.length === 1
     && after.temporaryChargeSources[0] === opening.chargeInstanceId;
-  const moveAvailableAfterCharge = hasPositiveRaalMove(session);
+  const moveAvailableAfterCharge = await hasPositiveRaalMove(session);
   const unitStatePreservedOnGrant = after.cardId === before.cardId
     && after.controller === before.controller
     && after.damage === before.damage
@@ -21555,7 +21555,7 @@ function runFireCharge(
     && after.tapped === before.tapped
     && after.warded === before.warded;
 
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
   const expired = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.raalInstanceId);
   const expiryEvents = session.transcript.at(-1)?.events ?? [];
@@ -21595,7 +21595,7 @@ function runFireCharge(
     moveAvailableAfterCharge,
     moveUnavailableBeforeCharge,
     raalDromedary: input.raalDromedary.name,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     spellEnteredCemetery: session.state.players.north.hand.spellbook
       .every(({ instanceId }) => instanceId !== opening.chargeInstanceId)
       && session.state.players.north.cemetery
@@ -21605,37 +21605,37 @@ function runFireCharge(
   });
 }
 
-function runFireLash(
+async function runFireLash(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['fireLash'] {
-  const opening = findFireLashOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['fireLash']> {
+  const opening = await findFireLashOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.fireSiteInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.raalInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.ghostTownInstanceId
     && descriptor.cell === 'C3');
 
   const readyRaal = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.raalInstanceId);
   if (!readyRaal) throw new Error('private Lash setup lacks Raal Dromedary');
-  const zeroStepMoves = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const zeroStepMoves = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.raalInstanceId
       && descriptor.path.length === 1
@@ -21645,8 +21645,8 @@ function runFireLash(
   if (!zeroStepMove || zeroStepMoves.length !== 1) {
     throw new Error('private Lash setup lacks one exact zero-step Raal action');
   }
-  session = legacyAccept(session, zeroStepMove);
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  session = await accept(session, zeroStepMove);
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
   const tappedRaal = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.raalInstanceId);
   if (!tappedRaal) throw new Error('private Lash setup removed Raal Dromedary');
@@ -21656,7 +21656,7 @@ function runFireLash(
   const sitesBefore = session.state.realm.sites;
   const otherUnitsBefore = session.state.realm.units.filter(({ instanceId }) =>
     instanceId !== opening.raalInstanceId);
-  const lashActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const lashActions = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.lashInstanceId
       && descriptor.casterInstanceId === northBefore.avatar.card.instanceId
@@ -21667,7 +21667,7 @@ function runFireLash(
   if (!lashAction || lashActions.length !== 1) {
     throw new Error('private Lash nearby Raal target is not exactly available');
   }
-  const lashResult = stepGame(session, lashAction);
+  const lashResult = await stepAt(session, lashAction);
   if (!lashResult.accepted) throw new Error('private Lash cast was rejected');
   session = lashResult.session;
   const northAfter = session.state.players.north;
@@ -21765,7 +21765,7 @@ function runFireLash(
       && northAfter.avatar.tapped === northBefore.avatar.tapped
       && session.state.phase === 'main',
     raalDromedary: input.raalDromedary.name,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     spellEnteredCemetery: northAfter.hand.spellbook
       .every(({ instanceId }) => instanceId !== opening.lashInstanceId)
       && northAfter.cemetery.some(({ instanceId }) => instanceId === opening.lashInstanceId),
@@ -21775,45 +21775,45 @@ function runFireLash(
   });
 }
 
-function runFireLeapAttack(
+async function runFireLeapAttack(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['fireLeapAttack'] {
-  const opening = findFireLeapAttackOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['fireLeapAttack']> {
+  const opening = await findFireLeapAttackOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.northRaalInstanceId
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
   for (const instanceId of opening.southRaalInstanceIds) {
-    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    await take(({ descriptor }) => descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === instanceId
       && descriptor.cell === 'C2');
   }
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.ghostTownInstanceId
     && descriptor.cell === 'B3');
 
@@ -21823,7 +21823,7 @@ function runFireLeapAttack(
   const sitesBefore = session.state.realm.sites;
   const northAvatarBefore = observeGame(session.state, 'north').players.north.avatar;
   const southAvatarBefore = observeGame(session.state, 'north').players.south.avatar;
-  const leapActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const leapActions = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.leapAttackInstanceId
       && descriptor.ally?.kind === 'minion'
@@ -21843,7 +21843,7 @@ function runFireLeapAttack(
     throw new Error('private Leap Attack optional C3 and stepped C2 choices are not exactly available');
   }
   const manaBefore = session.state.players.north.mana;
-  const leapResult = stepGame(session, stepAction);
+  const leapResult = await stepAt(session, stepAction);
   if (!leapResult.accepted) throw new Error('private Leap Attack cast was rejected');
   session = leapResult.session;
 
@@ -21861,7 +21861,7 @@ function runFireLeapAttack(
     .flatMap(({ payload }) => isJsonRecord(payload) ? [payload] : []);
   const deathPayloads = events.filter(({ type }) => type === 'minion-died')
     .flatMap(({ payload }) => isJsonRecord(payload) ? [payload] : []);
-  const enemyIds = [...opening.southRaalInstanceIds].sort((left, right) =>
+  const enemyIds = await [...opening.southRaalInstanceIds].sort((left, right) =>
     left.localeCompare(right));
   const allocationIds = allocationPayloads.map(({ targetInstanceId }) => targetInstanceId);
   const damageIds = damagePayloads.map(({ instanceId }) => instanceId).sort();
@@ -21914,7 +21914,7 @@ function runFireLeapAttack(
       && session.state.phase === 'main'
       && session.state.decisionSeat === 'north',
     raalDromedary: input.raalDromedary.name,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     sitesAndAvatarsPreserved:
       canonicalJson(session.state.realm.sites as unknown as JsonValue)
         === canonicalJson(sitesBefore as unknown as JsonValue)
@@ -21935,44 +21935,44 @@ function runFireLeapAttack(
   });
 }
 
-function runFireMinorExplosion(
+async function runFireMinorExplosion(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['fireMinorExplosion'] {
-  const opening = findFireMinorExplosionOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['fireMinorExplosion']> {
+  const opening = await findFireMinorExplosionOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.firstRaalInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.secondRaalInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
     && descriptor.cell === 'C2');
 
-  const casts = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const casts = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.minorExplosionInstanceId);
   const targetCells = casts.flatMap(({ descriptor }) =>
@@ -21985,12 +21985,12 @@ function runFireMinorExplosion(
   if (selected.length !== 1 || !selected[0]) {
     throw new Error('private location-wide damage Magic target is unavailable');
   }
-  const targetIds = [opening.firstRaalInstanceId, opening.secondRaalInstanceId].sort();
+  const targetIds = await [opening.firstRaalInstanceId, opening.secondRaalInstanceId].sort();
   const occupantsBefore = session.state.realm.units.filter(({ instanceId, location, region }) =>
     targetIds.includes(instanceId) && location === 'C4' && region === 'surface');
   const avatarLifeBefore = session.state.players.north.avatar.life;
   const manaBefore = session.state.players.north.mana;
-  session = legacyAccept(session, selected[0]);
+  session = await accept(session, selected[0]);
 
   const receipt = session.transcript.at(-1);
   const events = receipt?.events ?? [];
@@ -22040,7 +22040,7 @@ function runFireMinorExplosion(
     minorExplosion: input.minorExplosion.name,
     noRandomDraws: receipt?.randomDraws.length === 0,
     raalDromedary: input.raalDromedary.name,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     simultaneousDamageVerified: allocations.length === 2
       && damageEvents.length === 2
       && deathEvents.length === 2
@@ -22056,66 +22056,66 @@ function runFireMinorExplosion(
   });
 }
 
-function runFireVikingsSetup(
-  opening: ReturnType<typeof findFireVikingsOpening>,
-): GameSession {
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+async function runFireVikingsSetup(
+  opening: Awaited<ReturnType<typeof findFireVikingsOpening>>,
+): Promise<GameSession> {
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.southBoskTrollInstanceId
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
     && descriptor.cell === 'B3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === session.state.players.south.avatar.card.instanceId
     && descriptor.path.map(({ cell }) => cell).join(',') === 'C1,C2');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[3]
     && descriptor.cell === 'B4');
   return session;
 }
 
-function runFireVikings(
+async function runFireVikings(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['fireVikings'] {
-  const opening = findFireVikingsOpening(input);
-  let session = runFireVikingsSetup(opening);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['fireVikings']> {
+  const opening = await findFireVikingsOpening(input);
+  let session = await runFireVikingsSetup(opening);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
   const manaBeforeSummon = session.state.players.north.mana;
-  const summonResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const summonResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.vikingsInstanceId
       && descriptor.cell === 'C3'));
@@ -22125,19 +22125,19 @@ function runFireVikings(
   const summonPayload = summonResult.receipt.events
     .map(({ payload }) => isJsonRecord(payload) ? payload : undefined)
     .find((payload) => payload?.instanceId === opening.vikingsInstanceId);
-  const sickActivationUnavailable = legalGameActions(session.state, 'north').every(({ descriptor }) =>
+  const sickActivationUnavailable = await (await legalActionsAt(session, 'north')).every(({ descriptor }) =>
     descriptor.kind !== 'activate-area-damage'
       || descriptor.sourceInstanceId !== opening.vikingsInstanceId);
 
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
   const boskBefore = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.southBoskTrollInstanceId);
   const manaBeforeDagger = session.state.players.north.mana;
-  const castResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const castResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'cast-artifact'
       && descriptor.cardInstanceId === opening.daggerInstanceId
       && descriptor.bearer?.instanceId === opening.vikingsInstanceId));
@@ -22148,7 +22148,7 @@ function runFireVikings(
     ? castResult.receipt.events[0].payload
     : undefined;
 
-  const activations = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const activations = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'activate-area-damage'
       && descriptor.sourceInstanceId === opening.vikingsInstanceId);
   const targetCells = activations.flatMap(({ descriptor }) =>
@@ -22163,7 +22163,7 @@ function runFireVikings(
     throw new Error('private Vikings adjacent C2 activation is unavailable');
   }
   const southAvatarLifeBefore = session.state.players.south.avatar.life;
-  const activationResult = stepGame(session, selected[0]);
+  const activationResult = await stepAt(session, selected[0]);
   if (!activationResult.accepted) throw new Error('private Vikings activation was rejected');
   session = activationResult.session;
 
@@ -22189,7 +22189,7 @@ function runFireVikings(
   const firstDeathIndex = Math.min(...deaths.map((event) => events.indexOf(event)));
   const vikings = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.vikingsInstanceId);
-  const tappedActivationUnavailable = legalGameActions(session.state, 'north').every(({ descriptor }) =>
+  const tappedActivationUnavailable = await (await legalActionsAt(session, 'north')).every(({ descriptor }) =>
     descriptor.kind !== 'activate-area-damage'
       || descriptor.sourceInstanceId !== opening.vikingsInstanceId);
   const activationUnavailableWhileSickAndTapped: boolean = sickActivationUnavailable
@@ -22267,7 +22267,7 @@ function runFireVikings(
     noCombatOrReturnDamage,
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
     poisonousDagger: input.poisonousDagger.name,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     simultaneousDamageVerified,
     summonManaPaid: manaBeforeSummon - manaAfterSummon,
     targetsEnteredCemetery,
@@ -22276,30 +22276,30 @@ function runFireVikings(
   });
 }
 
-function runFireRecklessSquire(
+async function runFireRecklessSquire(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['fireRecklessSquire'] {
-  const opening = findFireRecklessSquireOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['fireRecklessSquire']> {
+  const opening = await findFireRecklessSquireOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northFireSiteInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southFireSiteInstanceIds[0]
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.ghostTownInstanceId
     && descriptor.cell === 'C3');
-  const summonResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const summonResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.recklessSquireInstanceId
       && descriptor.cell === 'C3'));
@@ -22307,46 +22307,46 @@ function runFireRecklessSquire(
   session = summonResult.session;
   const squireAfterSummon = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.recklessSquireInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southFireSiteInstanceIds[1]
     && descriptor.cell === 'C2');
   for (const instanceId of opening.southRaalInstanceIds) {
-    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    await take(({ descriptor }) => descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === instanceId
       && descriptor.cell === 'C2');
   }
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
   const sitesBeforeCombat = session.state.realm.sites;
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.recklessSquireInstanceId
     && descriptor.from.cell === 'C3'
     && descriptor.to.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+  await take(({ descriptor }) => descriptor.kind === 'declare-attack'
     && descriptor.target.kind === 'minion'
     && descriptor.target.instanceId === opening.southRaalInstanceIds[0]);
-  const firstFight = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const firstFight = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
   if (!firstFight.accepted) throw new Error('private Lance first fight was rejected');
   session = firstFight.session;
   const squireAfterFirstFight = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.recklessSquireInstanceId);
 
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.recklessSquireInstanceId
     && descriptor.path.length === 1
     && descriptor.to.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+  await take(({ descriptor }) => descriptor.kind === 'declare-attack'
     && descriptor.target.kind === 'minion'
     && descriptor.target.instanceId === opening.southRaalInstanceIds[1]);
-  const secondFight = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const secondFight = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
   if (!secondFight.accepted) throw new Error('private post-Lance fight was rejected');
   session = secondFight.session;
@@ -22460,7 +22460,7 @@ function runFireRecklessSquire(
       && secondFight.receipt.randomDraws.length === 0,
     raalDromedary: input.raalDromedary.name,
     recklessSquire: input.recklessSquire.name,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     secondStrikeNormal: secondAllocations.length === 1
       && secondSquireAllocation
       && secondRaalReturnDamage
@@ -22474,119 +22474,119 @@ function runFireRecklessSquire(
   });
 }
 
-function runFireResponse(
+async function runFireResponse(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['fireResponse'] {
-  const opening = findFireOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['fireResponse']> {
+  const opening = await findFireOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]);
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.attackerInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
       && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
       && descriptor.cell === 'C2');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.attackerInstanceId
       && descriptor.to.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
       && descriptor.cell === 'B4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[3]
       && descriptor.cell === 'D4');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.lionInstanceId
       && descriptor.cell === 'C3');
-  const chargeMoveAndAttack = legalGameActions(session.state, 'north').some(({ descriptor }) =>
+  const chargeMoveAndAttack = await (await legalActionsAt(session, 'north')).some(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.lionInstanceId
       && descriptor.to.cell === 'C2');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.lionInstanceId
       && descriptor.to.cell === 'C2');
-  const lionTargets = legalGameActions(session.state, 'north');
+  const lionTargets = await legalActionsAt(session, 'north');
   const unitTargetAvailable = lionTargets.some(({ descriptor }) =>
     descriptor.kind === 'declare-attack'
       && descriptor.target.kind === 'minion'
       && descriptor.target.instanceId === opening.attackerInstanceId);
   const siteTargetUnavailable = lionTargets.every(({ descriptor }) =>
     descriptor.kind !== 'declare-attack' || descriptor.target.kind !== 'site');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'close-intercept');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'close-intercept');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.lumberingInstanceId
       && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.attackerInstanceId
       && descriptor.to.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  const interceptUnavailable = legalGameActions(session.state, 'north').every(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  const interceptUnavailable = await (await legalActionsAt(session, 'north')).every(({ descriptor }) =>
     descriptor.kind !== 'intercept' || descriptor.unitInstanceId !== opening.lumberingInstanceId);
   if (session.state.phase === 'intercept') {
-    take(({ descriptor }) => descriptor.kind === 'close-intercept');
+    await take(({ descriptor }) => descriptor.kind === 'close-intercept');
   }
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.attackerInstanceId
       && descriptor.to.cell === 'C3');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'declare-attack'
       && descriptor.target.kind === 'site'
       && descriptor.target.instanceId === session.state.realm.sites.C3?.instanceId);
-  const defendUnavailable = legalGameActions(session.state, 'north').every(({ descriptor }) =>
+  const defendUnavailable = await (await legalActionsAt(session, 'north')).every(({ descriptor }) =>
     descriptor.kind !== 'defend' || descriptor.unitInstanceId !== opening.lumberingInstanceId);
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'close-defend' && !descriptor.originalTargetParticipates);
 
   return Object.freeze({
@@ -22599,27 +22599,27 @@ function runFireResponse(
       opening.names.get(input.lumberingMinion.stableId) ?? input.lumberingMinion.stableId,
     monstrousLion:
       opening.names.get(input.monstrousLion.stableId) ?? input.monstrousLion.stableId,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     siteTargetUnavailable,
     unitTargetAvailable,
   });
 }
 
-function findWaterRiverOpening(
+async function findWaterRiverOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   riverInstanceId: string;
   seed: number;
   session: GameSession;
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another private config field.
   for (let offset = 1; offset <= 64; offset += 1) {
     const seed = input.config.waterSeed + offset;
     const built = buildManifest(input, seed, 'water-river');
-    const session = createGameSession(built.manifest);
+    const session = await newSession(built.manifest);
     const river = session.state.players.north.hand.atlas
       .find(({ cardId }) => cardId === input.autumnRiver.stableId);
     if (river && session.state.players.north.spellbook.length > 1) {
@@ -22634,32 +22634,32 @@ function findWaterRiverOpening(
   throw new Error('private seasonal River scenario no longer produces its supported opening');
 }
 
-function runWaterRiver(
+async function runWaterRiver(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['waterRiver'] {
-  const opening = findWaterRiverOpening(input);
-  let checkpoint = legacyKeep(opening.session);
-  checkpoint = legacyKeep(checkpoint);
+): Promise<PrivateGameCheck['waterRiver']> {
+  const opening = await findWaterRiverOpening(input);
+  let checkpoint = await keep(opening.session);
+  checkpoint = await keep(checkpoint);
   const before = checkpoint.state.players.north.spellbook;
   const top = before[0];
   if (!top) throw new Error('private seasonal River scenario lacks a next spell');
-  const plays = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+  const plays = await (await legalActionsAt(checkpoint, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.riverInstanceId
       && descriptor.cell === 'C4');
   const play = plays[0];
   if (plays.length !== 1 || !play) throw new Error('private seasonal River play is unavailable');
-  const played = stepGame(checkpoint, play);
+  const played = await stepAt(checkpoint, play);
   if (!played.accepted) throw new Error('private seasonal River play was rejected');
-  const choices = legalGameActions(played.session.state, 'north').filter(({ descriptor }) =>
+  const choices = (await legalActionsAt(played.session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'resolve-genesis-spell');
   const keepChoice = choices.find(({ descriptor }) =>
     descriptor.kind === 'resolve-genesis-spell' && descriptor.choice === 'keep-next');
   const bottomChoice = choices.find(({ descriptor }) =>
     descriptor.kind === 'resolve-genesis-spell' && descriptor.choice === 'bottom-next');
   if (!keepChoice || !bottomChoice) throw new Error('private seasonal River choices are unavailable');
-  const kept = stepGame(played.session, keepChoice);
-  const bottomed = stepGame(played.session, bottomChoice);
+  const kept = await stepAt(played.session, keepChoice);
+  const bottomed = await stepAt(played.session, bottomChoice);
   if (!kept.accepted || !bottomed.accepted) {
     throw new Error('private seasonal River choice was rejected');
   }
@@ -22716,60 +22716,60 @@ function runWaterRiver(
     noRandomDraws: played.receipt.randomDraws.length === 0
       && kept.receipt.randomDraws.length === 0
       && bottomed.receipt.randomDraws.length === 0,
-    replayVerified: verifyGameReplay(kept.session) && verifyGameReplay(bottomed.session),
+    replayVerified: await verifyReplayAt(kept.session) && await verifyReplayAt(bottomed.session),
     river: input.autumnRiver.name,
     seed: opening.seed,
   });
 }
 
-function runWaterSidewaysMovement(
+async function runWaterSidewaysMovement(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['waterSidewaysMovement'] {
-  const opening = findWaterOpening(input, 'water-sideways');
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['waterSidewaysMovement']> {
+  const opening = await findWaterOpening(input, 'water-sideways');
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
       && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
       && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
       && descriptor.cell === 'B3');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.featuredInstanceId
       && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
-  const crabActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const crabActions = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.featuredInstanceId);
   const hasPath = (cells: string): boolean => crabActions.some(({ descriptor }) =>
@@ -22781,62 +22781,62 @@ function runWaterSidewaysMovement(
     && !hasPath('C3,C2');
   const backwardPathUnavailable = session.state.realm.sites.C4 !== undefined
     && !hasPath('C3,C4');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.featuredInstanceId
       && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,B3');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
 
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
     backwardPathUnavailable,
     deck: deckList(opening.manifest.decks.north, opening.names),
     forwardPathUnavailable,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     sedgeCrabs: opening.names.get(input.sedgeCrabs.stableId) ?? input.sedgeCrabs.stableId,
     seed: opening.seed,
     sidewaysPathAvailable,
   });
 }
 
-function runWaterSubmerge(
+async function runWaterSubmerge(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['waterSubmerge'] {
-  const opening = findWaterSubmergeFreezeOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['waterSubmerge']> {
+  const opening = await findWaterSubmergeFreezeOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
       && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
       && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
       && descriptor.cell === 'B3');
 
-  const summons = legalGameActions(session.state, 'north');
+  const summons = await legalActionsAt(session, 'north');
   const matches = (cardInstanceId: string, region: 'surface' | 'underwater'): boolean =>
     summons.some(({ descriptor }) =>
       descriptor.kind === 'summon-minion'
@@ -22853,7 +22853,7 @@ function runWaterSubmerge(
     : undefined;
   const targetIsWaterSite = targetDefinition?.cardType === 'site'
     && targetDefinition.elements.includes('water');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.featuredInstanceId
       && descriptor.cell === 'C3'
@@ -22861,12 +22861,12 @@ function runWaterSubmerge(
   const summonedUnderwater = session.state.realm.units.some(({ instanceId, location, region }) =>
     instanceId === opening.featuredInstanceId && location === 'C3' && region === 'underwater');
 
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   const manaBeforeSeaWitch = session.state.players.north.mana;
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.seaWitchInstanceId
       && descriptor.cell === 'C3'
@@ -22879,7 +22879,7 @@ function runWaterSubmerge(
   if (!seaWitchBefore || !kelpieBefore) {
     throw new Error('private underwater Freeze setup lacks its caster or target');
   }
-  const freezeActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const freezeActions = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.freezeInstanceId
       && descriptor.casterInstanceId === opening.seaWitchInstanceId
@@ -22890,7 +22890,7 @@ function runWaterSubmerge(
   if (!selectedFreeze || freezeActions.length !== 1) {
     throw new Error('private underwater Spellcaster Freeze target is not exactly available');
   }
-  session = legacyAccept(session, selectedFreeze);
+  session = await accept(session, selectedFreeze);
 
   const receipt = session.transcript.at(-1);
   const events = receipt?.events ?? [];
@@ -22925,7 +22925,7 @@ function runWaterSubmerge(
     freeze: input.freeze.name,
     nonSubmergeSurfaceAvailable,
     nonSubmergeUnderwaterUnavailable,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seaWitch: input.seaWitch.name,
     seed: opening.seed,
     submergeMinion:
@@ -22938,32 +22938,32 @@ function runWaterSubmerge(
   });
 }
 
-function runWaterDrown(
+async function runWaterDrown(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['waterDrown'] {
-  const opening = findWaterDrownOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['waterDrown']> {
+  const opening = await findWaterDrownOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.waterSiteInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.seravaInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
   const manaBeforeGhostTown = session.state.players.north.mana;
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.ghostTownInstanceId
     && descriptor.cell === 'C3');
   const ghostTownEvents = session.transcript.at(-1)?.events ?? [];
@@ -22971,14 +22971,14 @@ function runWaterDrown(
     ? ghostTownEvents[1].payload
     : undefined;
   const manaBeforeCast = session.state.players.north.mana;
-  const drownActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const drownActions = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === opening.drownInstanceId);
   const selected = drownActions.find(({ descriptor }) => descriptor.kind === 'cast-magic'
     && descriptor.target?.kind === 'minion'
     && descriptor.target.instanceId === opening.seravaInstanceId);
   if (!selected) throw new Error('private forced-submerge Magic target is unavailable');
   const exactTargetAvailable = drownActions.length === 1;
-  session = legacyAccept(session, selected);
+  session = await accept(session, selected);
 
   const events = session.transcript.at(-1)?.events ?? [];
   const castPayload = events[0] && isJsonRecord(events[0].payload) ? events[0].payload : undefined;
@@ -23023,7 +23023,7 @@ function runWaterDrown(
       && ghostTownManaPayload.seat === 'north'
       && ghostTownManaPayload.sourceInstanceId === opening.ghostTownInstanceId,
     manaPaid: manaBeforeCast - session.state.players.north.mana,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seravaTownsfolk: input.seravaTownsfolk.name,
     spellEnteredCemetery: session.state.players.north.cemetery
       .some(({ instanceId }) => instanceId === opening.drownInstanceId)
@@ -23037,42 +23037,42 @@ function runWaterDrown(
   });
 }
 
-function runWaterGnarledWendigo(
+async function runWaterGnarledWendigo(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['waterGnarledWendigo'] {
-  const opening = findWaterGnarledWendigoOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['waterGnarledWendigo']> {
+  const opening = await findWaterGnarledWendigoOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northWaterSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.seravaInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northWaterSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'B1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
   const manaBeforeGhostTown = session.state.players.north.mana;
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.ghostTownInstanceId
     && descriptor.cell === 'C2');
   const ghostTownEvents = session.transcript.at(-1)?.events ?? [];
@@ -23086,7 +23086,7 @@ function runWaterGnarledWendigo(
   const otherUnitsBefore = session.state.realm.units.filter(({ instanceId }) =>
     instanceId !== opening.seravaInstanceId);
   const stateVersionBefore = session.state.stateVersion;
-  const allSummons = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const allSummons = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.gnarledWendigoInstanceId
       && descriptor.cell === 'C4'
@@ -23103,7 +23103,7 @@ function runWaterGnarledWendigo(
   if (!selected || discountedSummons.length !== 1) {
     throw new Error('private Gnarled Wendigo sacrifice-discount summon is not exactly available');
   }
-  const summoned = stepGame(session, selected);
+  const summoned = await stepAt(session, selected);
   if (!summoned.accepted) throw new Error('private Gnarled Wendigo summon was rejected');
   session = summoned.session;
 
@@ -23186,7 +23186,7 @@ function runWaterGnarledWendigo(
         === canonicalJson(northBefore.hand.atlas as unknown as JsonValue)
       && canonicalJson(observeGame(session.state, 'north').players.north.avatar as unknown as JsonValue)
         === canonicalJson(northAvatarBefore as unknown as JsonValue),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seravaTownsfolk: input.seravaTownsfolk.name,
     stateVersionAdvancedOnce: session.state.stateVersion === stateVersionBefore + 1,
     summonedAtC4: wendigo?.cardId === input.gnarledWendigo.stableId
@@ -23200,31 +23200,31 @@ function runWaterGnarledWendigo(
   });
 }
 
-function runWaterDrowned(
+async function runWaterDrowned(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['waterDrowned'] {
-  const opening = findWaterDrownedOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['waterDrowned']> {
+  const opening = await findWaterDrownedOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
 
-  const summons = legalGameActions(session.state, 'north');
+  const summons = await legalActionsAt(session, 'north');
   const matches = (cardInstanceId: string, region: 'surface' | 'underwater'): boolean =>
     summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === cardInstanceId
@@ -23234,7 +23234,7 @@ function runWaterDrowned(
   const drownedUnderwaterAvailable = matches(opening.drownedInstanceId, 'underwater');
   const slyFoxSurfaceAvailable = matches(opening.slyFoxInstanceId, 'surface');
   const slyFoxUnderwaterUnavailable = !matches(opening.slyFoxInstanceId, 'underwater');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.drownedInstanceId
     && descriptor.cell === 'C3'
     && descriptor.region === 'underwater');
@@ -23247,7 +23247,7 @@ function runWaterDrowned(
     drowned: opening.names.get(input.drowned.stableId) ?? input.drowned.stableId,
     drownedSurfaceUnavailable,
     drownedUnderwaterAvailable,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     slyFox: opening.names.get(input.slyFox.stableId) ?? input.slyFox.stableId,
     slyFoxSurfaceAvailable,
@@ -23256,42 +23256,42 @@ function runWaterDrowned(
   });
 }
 
-function runWaterLugbog(
+async function runWaterLugbog(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['waterLugbog'] {
-  const opening = findWaterLugbogOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['waterLugbog']> {
+  const opening = await findWaterLugbogOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southLandSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw'
     && descriptor.zone === opening.southSecondDrawZone);
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southWaterSiteInstanceId
     && descriptor.cell === 'B1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
     && descriptor.cell === 'C2');
 
-  const summons = legalGameActions(session.state, 'north');
+  const summons = await legalActionsAt(session, 'north');
   const matches = (cardInstanceId: string, cell: 'B1' | 'C1' | 'C3'): boolean =>
     summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === cardInstanceId
@@ -23301,7 +23301,7 @@ function runWaterLugbog(
   const enemyLandUnavailable = !matches(opening.lugbogInstanceId, 'C1');
   const slyFoxControlledWaterAvailable = matches(opening.slyFoxInstanceId, 'C3');
   const slyFoxEnemyWaterUnavailable = !matches(opening.slyFoxInstanceId, 'B1');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.lugbogInstanceId
     && descriptor.cell === 'B1'
     && descriptor.region === undefined);
@@ -23318,7 +23318,7 @@ function runWaterLugbog(
     enemyLandUnavailable,
     enemyWaterAvailable,
     lugbogCat: opening.names.get(input.lugbogCat.stableId) ?? input.lugbogCat.stableId,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     slyFox: opening.names.get(input.slyFox.stableId) ?? input.slyFox.stableId,
     slyFoxControlledWaterAvailable,
     slyFoxEnemyWaterUnavailable,
@@ -23326,36 +23326,36 @@ function runWaterLugbog(
   });
 }
 
-function runWaterEdgeConnection(
+async function runWaterEdgeConnection(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['waterEdgeConnection'] {
-  const opening = findWaterEdgeConnectionOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['waterEdgeConnection']> {
+  const opening = await findWaterEdgeConnectionOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.featuredInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
-  const moves = legalGameActions(session.state, 'north');
+  const moves = await legalActionsAt(session, 'north');
   const wraps = (candidate: GameLegalAction): boolean => candidate.descriptor.kind === 'move-and-attack'
     && candidate.descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C1';
   const wrapMoveAvailable = moves.some((candidate) => wraps(candidate)
@@ -23364,44 +23364,44 @@ function runWaterEdgeConnection(
   const avatarWrapUnavailable = !moves.some((candidate) => wraps(candidate)
     && candidate.descriptor.kind === 'move-and-attack'
     && candidate.descriptor.unitInstanceId === session.state.players.north.avatar.card.instanceId);
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.featuredInstanceId
     && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C1');
-  const siteTargetAvailable = legalGameActions(session.state, 'north').some(({ descriptor }) =>
+  const siteTargetAvailable = (await legalActionsAt(session, 'north')).some(({ descriptor }) =>
     descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
 
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
     avatarWrapUnavailable,
     deck: deckList(opening.manifest.decks.north, opening.names),
     polarBears: opening.names.get(input.polarBears.stableId) ?? input.polarBears.stableId,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     siteTargetAvailable,
     wrapMoveAvailable,
   });
 }
 
-function runEarthHuntersLodge(
+async function runEarthHuntersLodge(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthHuntersLodge'] {
-  const opening = findHuntersLodgeOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['earthHuntersLodge']> {
+  const opening = await findHuntersLodgeOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northWaterSiteInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.slyFoxInstanceId
     && descriptor.cell === 'C4');
   const summonedFox = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.slyFoxInstanceId);
-  const endResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const endResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'end-turn'));
   if (!endResult.accepted) throw new Error("private Sly Fox end turn before Hunter's Lodge was rejected");
   session = endResult.session;
@@ -23419,13 +23419,13 @@ function runEarthHuntersLodge(
     && stealthGainedIndex >= 0
     && stealthGainedIndex < turnEndedIndex;
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   const northAvatarBefore = session.state.players.north.avatar;
   const southAvatarBefore = session.state.players.south.avatar;
   const northSiteBefore = canonicalJson(
     session.state.realm.sites.C4 as unknown as JsonValue,
   );
-  const lodgeResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const lodgeResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.hunterLodgeInstanceId
       && descriptor.cell === 'C1'));
@@ -23495,40 +23495,40 @@ function runEarthHuntersLodge(
     enemyStealthRemoved,
     hunterLodge: input.huntersLodge.name,
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     slyFox: input.slyFox.name,
     slyFoxGainedStealthFirst,
     statePreserved,
   });
 }
 
-function runWaterConditionalStealth(
+async function runWaterConditionalStealth(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['waterConditionalStealth'] {
-  const opening = findWaterConditionalStealthOpening(input);
-  let session = legacyKeep(legacyKeep(opening.session));
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['waterConditionalStealth']> {
+  const opening = await findWaterConditionalStealthOpening(input);
+  let session = await keep(await keep(opening.session));
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.siteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.siteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.survivorsInstanceId
     && descriptor.cell === 'C3');
   const summoned = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.survivorsInstanceId);
-  const endResult = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const endResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'end-turn'));
   if (!endResult.accepted) {
     throw new Error('private conditional end-turn Stealth resolution was rejected');
@@ -23549,48 +23549,48 @@ function runWaterConditionalStealth(
     gainedStealthAtEndOfTurn: stealthed?.stealthed === true
       && stealthGainedIndex >= 0
       && stealthGainedIndex < turnEndedIndex,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     summonedUnstealthed: summoned?.stealthed === false,
     survivorsOfSerava: input.survivorsOfSerava.name,
   });
 }
 
-function runWaterEndTurnStealth(
+async function runWaterEndTurnStealth(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['waterEndTurnStealth'] {
-  const opening = findWaterOpening(input, 'water-stealth');
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['waterEndTurnStealth']> {
+  const opening = await findWaterOpening(input, 'water-stealth');
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]);
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.attackerInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
       && descriptor.cell === 'C3');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.featuredInstanceId
       && descriptor.cell === 'C3');
   const summonedUnstealthed = session.state.realm.units.some(({ instanceId, stealthed }) =>
     instanceId === opening.featuredInstanceId && !stealthed);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
   const northEndEvents = session.transcript.at(-1)?.events ?? [];
   const stealthGainedIndex = northEndEvents.findIndex(({ payload, type }) =>
     type === 'stealth-gained'
@@ -23602,31 +23602,31 @@ function runWaterEndTurnStealth(
     && stealthGainedIndex >= 0
     && stealthGainedIndex < turnEndedIndex;
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
       && descriptor.cell === 'C2');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.attackerInstanceId
       && descriptor.path.map(({ cell }) => cell).join(',') === 'C1,C2');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   const readyAttacker = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.attackerInstanceId);
   const attackerWasReady = readyAttacker?.location === 'C2'
     && !readyAttacker.tapped
     && !readyAttacker.summoningSickness;
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.attackerInstanceId
       && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3');
-  const attackTargets = legalGameActions(session.state, 'south');
+  const attackTargets = await legalActionsAt(session, 'south');
   const protectedUnit = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.featuredInstanceId);
   const movedAttacker = session.state.realm.units.find(({ instanceId }) =>
@@ -23643,8 +23643,8 @@ function runWaterEndTurnStealth(
       descriptor.kind !== 'declare-attack'
         || descriptor.target.kind !== 'minion'
         || descriptor.target.instanceId !== opening.featuredInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'close-intercept');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'close-intercept');
 
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
@@ -23652,7 +23652,7 @@ function runWaterEndTurnStealth(
     coLocatedReadyAttacker,
     deck: deckList(opening.manifest.decks.north, opening.names),
     gainedStealthAtEndOfTurn,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
     slyFox: opening.names.get(input.slyFox.stableId) ?? input.slyFox.stableId,
     slyFoxAttackUnavailable,
@@ -23660,42 +23660,42 @@ function runWaterEndTurnStealth(
   });
 }
 
-function runWaterLure(
+async function runWaterLure(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['waterLure'] {
-  const opening = findWaterLureOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['waterLure']> {
+  const opening = await findWaterLureOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.northSeravaInstanceId
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.southSeravaInstanceId
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
   const allyBefore = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.northSeravaInstanceId);
@@ -23706,7 +23706,7 @@ function runWaterLure(
   }
   const northCemeteryBefore = session.state.players.north.cemetery;
   const southCemeteryBefore = session.state.players.south.cemetery;
-  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const choices = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.lureInstanceId
       && descriptor.ally?.kind === 'minion'
@@ -23726,7 +23726,7 @@ function runWaterLure(
     throw new Error('private Lure ally, enemy, and unique closer step are not exactly available');
   }
   const manaBefore = session.state.players.north.mana;
-  session = legacyAccept(session, chosen);
+  session = await accept(session, chosen);
 
   const allyAfter = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.northSeravaInstanceId);
@@ -23788,7 +23788,7 @@ function runWaterLure(
       && session.state.phase === 'main'
       && session.state.pendingCombat === null,
     noRandomDraws: receipt?.randomDraws.length === 0,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seravaTownsfolk: input.seravaTownsfolk.name,
     spellEnteredCemetery: session.state.players.north.hand.spellbook
       .every(({ instanceId }) => instanceId !== opening.lureInstanceId)
@@ -23814,68 +23814,68 @@ function runWaterLure(
   });
 }
 
-function runWaterMesmerismSetup(
-  opening: ReturnType<typeof findWaterMesmerismOpening>,
-): GameSession {
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+async function runWaterMesmerismSetup(
+  opening: Awaited<ReturnType<typeof findWaterMesmerismOpening>>,
+): Promise<GameSession> {
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.farSeravaInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.kettletopInstanceId
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
     && descriptor.cell === 'B3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[3]
     && descriptor.cell === 'A3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === session.state.players.north.avatar.card.instanceId
     && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
   return session;
 }
 
-function runWaterMesmerism(
+async function runWaterMesmerism(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['waterMesmerism'] {
-  const opening = findWaterMesmerismOpening(input);
-  let session = runWaterMesmerismSetup(opening);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['waterMesmerism']> {
+  const opening = await findWaterMesmerismOpening(input);
+  let session = await runWaterMesmerismSetup(opening);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
   const targetBefore = session.state.realm.units.find(({ instanceId }) =>
@@ -23886,7 +23886,7 @@ function runWaterMesmerism(
   const oldControllerHadAction = targetBefore.controller === 'south'
     && !targetBefore.summoningSickness
     && !targetBefore.tapped;
-  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const choices = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.mesmerismInstanceId);
   const chosen = choices.find(({ descriptor }) => descriptor.kind === 'cast-magic'
@@ -23897,8 +23897,8 @@ function runWaterMesmerism(
     throw new Error('private Mesmerism exact nearby target is not uniquely available');
   }
   const manaBefore = session.state.players.north.mana;
-  const affinityBefore = observeGame(session.state, 'north').players.north.affinity.water;
-  const cast = stepGame(session, chosen);
+  const affinityBefore = (observeGame(session.state, 'north')).players.north.affinity.water;
+  const cast = await stepAt(session, chosen);
   if (!cast.accepted) throw new Error('private Mesmerism cast was rejected');
   session = cast.session;
   const manaAfterCast = session.state.players.north.mana;
@@ -23908,7 +23908,7 @@ function runWaterMesmerism(
   const farAfter = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.farSeravaInstanceId);
   if (!targetAfter || !farAfter) throw new Error('private Mesmerism removed a minion');
-  const newControllerGainedAction = legalGameActions(session.state, 'north').some(({ descriptor }) =>
+  const newControllerGainedAction = await (await legalActionsAt(session, 'north')).some(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.kettletopInstanceId);
   const events = cast.receipt.events;
@@ -23919,9 +23919,9 @@ function runWaterMesmerism(
   const resolvedPayload = events[2] && isJsonRecord(events[2].payload)
     ? events[2].payload
     : undefined;
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const southActions = legalGameActions(session.state, 'south');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const southActions = await legalActionsAt(session, 'south');
   const controlEventsVerified: boolean = events.map(({ type }) => type).join(',')
     === 'magic-cast,minion-control-changed,magic-resolved'
     && castPayload?.instanceId === opening.mesmerismInstanceId
@@ -23960,14 +23960,14 @@ function runWaterMesmerism(
     && southActions.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.farSeravaInstanceId);
   const playersBeforeDeathrite = session.state.players;
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.farSeravaInstanceId
     && descriptor.from.cell === 'C1'
     && descriptor.to.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'declare-attack'
+  await take(({ descriptor }) => descriptor.kind === 'declare-attack'
     && descriptor.target.kind === 'minion'
     && descriptor.target.instanceId === opening.kettletopInstanceId);
-  const fight = stepGame(session, legacyAction(session, ({ descriptor }) =>
+  const fight = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
   if (!fight.accepted) throw new Error('private Mesmerism Deathrite fight was rejected');
   session = fight.session;
@@ -24015,57 +24015,57 @@ function runWaterMesmerism(
     noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
     oldControllerHadAction,
     oldControllerLostAction,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.manifest.seed,
     seravaTownsfolk: input.seravaTownsfolk.name,
     waterAffinityFour,
   });
 }
 
-function runWaterPirateShip(
+async function runWaterPirateShip(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['waterPirateShip'] {
-  const opening = findWaterPirateShipOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['waterPirateShip']> {
+  const opening = await findWaterPirateShipOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northWaterSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northWaterSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
   const manaBeforeGhostTown = session.state.players.north.mana;
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.ghostTownInstanceId
     && descriptor.cell === 'C2');
   const manaBeforeSummon = session.state.players.north.mana;
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.pirateShipInstanceId
     && descriptor.cell === 'C3'
     && descriptor.region === undefined);
   const ghostTownManaUsed = manaBeforeGhostTown === 2
     && manaBeforeSummon === 4
     && session.state.players.north.mana === 0;
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
   const before = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.pirateShipInstanceId);
@@ -24082,7 +24082,7 @@ function runWaterPirateShip(
   if (!before || !waterSite || !ghostTownSite) {
     throw new Error('private Waterbound setup lacks its minion or sites');
   }
-  const moveChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const moveChoices = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.pirateShipInstanceId
       && descriptor.from.cell === 'C3'
@@ -24102,7 +24102,7 @@ function runWaterPirateShip(
   const southCemeteryBefore = canonicalJson(
     session.state.players.south.cemetery as unknown as JsonValue,
   );
-  const moved = stepGame(session, selectedMove);
+  const moved = await stepAt(session, selectedMove);
   if (!moved.accepted) throw new Error('private Waterbound move was rejected');
   session = moved.session;
 
@@ -24120,12 +24120,12 @@ function runWaterPirateShip(
   const movementTo = movementPayload && isJsonRecord(movementPayload.to)
     ? movementPayload.to
     : undefined;
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const subsequentActions = legalGameActions(session.state, 'north');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  const subsequentActions = await legalActionsAt(session, 'north');
 
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
@@ -24168,7 +24168,7 @@ function runWaterPirateShip(
       descriptor.kind === 'move-and-attack'
         && descriptor.unitInstanceId === opening.pirateShipInstanceId),
     pirateShip: input.pirateShip.name,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     sitesUnchanged: sitesBefore
       === canonicalJson(session.state.realm.sites as unknown as JsonValue),
     unitStatePreserved: after !== undefined
@@ -24189,43 +24189,43 @@ function runWaterPirateShip(
   });
 }
 
-function runWaterFreeze(
+async function runWaterFreeze(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['waterFreeze'] {
-  const opening = findWaterFreezeOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['waterFreeze']> {
+  const opening = await findWaterFreezeOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.seravaInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
 
-  const hasSeravaMove = (candidate: GameSession): boolean =>
-    legalGameActions(candidate.state, 'north').some(({ descriptor }) =>
+  const hasSeravaMove = async (candidate: GameSession): Promise<boolean> =>
+    await (await legalActionsAt(candidate, 'north')).some(({ descriptor }) =>
       descriptor.kind === 'move-and-attack'
         && descriptor.unitInstanceId === opening.seravaInstanceId
         && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3');
   const before = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.seravaInstanceId);
   if (!before) throw new Error('private timed-disable setup lacks its ready minion');
-  const actionAvailableBefore = hasSeravaMove(session);
-  const freezeActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const actionAvailableBefore = await hasSeravaMove(session);
+  const freezeActions = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.freezeInstanceId
       && descriptor.target?.kind === 'minion'
@@ -24235,7 +24235,7 @@ function runWaterFreeze(
     throw new Error('private timed-disable Magic target is not exactly available');
   }
   const manaBefore = session.state.players.north.mana;
-  session = legacyAccept(session, chosenFreeze);
+  session = await accept(session, chosenFreeze);
   const manaPaid = manaBefore - session.state.players.north.mana;
 
   const afterCast = session.state.realm.units.find(({ instanceId }) =>
@@ -24253,7 +24253,7 @@ function runWaterFreeze(
   const disabledStateRecorded = afterCast?.disableEffects?.length === 1
     && afterCast.disableEffects[0]?.expiresAtSeat === 'north'
     && afterCast.disableEffects[0].sourceInstanceId === opening.freezeInstanceId;
-  const actionUnavailableWhileDisabled = !hasSeravaMove(session);
+  const actionUnavailableWhileDisabled = !await hasSeravaMove(session);
   const unitStatePreservedAfterCast = afterCast !== undefined
     && afterCast.cardId === before.cardId
     && afterCast.controller === before.controller
@@ -24266,14 +24266,14 @@ function runWaterFreeze(
     && afterCast.tapped === before.tapped
     && afterCast.warded === before.warded;
 
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   const duringOpponentTurn = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.seravaInstanceId);
   const disabledThroughOpponentTurn = duringOpponentTurn?.disableEffects?.length === 1
     && duringOpponentTurn.disableEffects[0]?.expiresAtSeat === 'north'
     && duringOpponentTurn.disableEffects[0].sourceInstanceId === opening.freezeInstanceId;
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
   const afterExpiry = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.seravaInstanceId);
@@ -24293,12 +24293,12 @@ function runWaterFreeze(
     && turnEndedIndex >= 0
     && expiryIndex === turnEndedIndex + 1
     && turnStartedIndex === expiryIndex + 1;
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
     actionAvailableBefore,
-    actionReturnedOnNextTurn: hasSeravaMove(session),
+    actionReturnedOnNextTurn: await hasSeravaMove(session),
     actionUnavailableWhileDisabled,
     causalEventsVerified: castEvents.map(({ type }) => type).join(',')
       === 'magic-cast,minion-disabled,magic-resolved'
@@ -24322,7 +24322,7 @@ function runWaterFreeze(
     expiredAtCasterStart,
     freeze: input.freeze.name,
     manaPaid,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seravaTownsfolk: input.seravaTownsfolk.name,
     spellEnteredCemetery: session.state.players.north.hand.spellbook
       .every(({ instanceId }) => instanceId !== opening.freezeInstanceId)
@@ -24343,80 +24343,80 @@ function runWaterFreeze(
   });
 }
 
-function runWaterHealing(
+async function runWaterHealing(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['waterHealing'] {
-  const opening = findWaterOpening(input);
-  let session = legacyKeep(opening.session);
-  session = legacyKeep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = legacyAccept(session, legacyAction(session, predicate));
+): Promise<PrivateGameCheck['waterHealing']> {
+  const opening = await findWaterOpening(input);
+  let session = await keep(opening.session);
+  session = await keep(session);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await accept(session, await action(session, predicate));
   };
 
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]);
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.attackerInstanceId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
       && descriptor.cell === 'C3');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.featuredInstanceId
       && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) =>
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
       && descriptor.cell === 'C2');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.attackerInstanceId
       && descriptor.to.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
   for (let strike = 0; strike < 2; strike += 1) {
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    take(({ descriptor }) =>
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) =>
       descriptor.kind === 'move-and-attack'
         && descriptor.unitInstanceId === opening.attackerInstanceId
         && descriptor.to.cell === 'C3');
-    take(({ descriptor }) =>
+    await take(({ descriptor }) =>
       descriptor.kind === 'declare-attack'
         && descriptor.target.kind === 'site'
         && descriptor.target.instanceId === session.state.realm.sites.C3?.instanceId);
-    take(({ descriptor }) =>
+    await take(({ descriptor }) =>
       descriptor.kind === 'close-defend' && !descriptor.originalTargetParticipates);
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    if (strike === 0) take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    if (strike === 0) await take(({ descriptor }) => descriptor.kind === 'end-turn');
   }
 
   const lifeBeforeHealing = session.state.players.north.avatar.life;
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.featuredInstanceId
       && descriptor.to.cell === 'C3');
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'declare-attack'
       && descriptor.target.kind === 'minion'
       && descriptor.target.instanceId === opening.attackerInstanceId);
-  take(({ descriptor }) =>
+  await take(({ descriptor }) =>
     descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
   const finalEvents = session.transcript.at(-1)?.events ?? [];
   const healIndex = finalEvents.findIndex(({ type }) => type === 'avatar-healed');
@@ -24436,17 +24436,13 @@ function runWaterHealing(
       opening.names.get(input.healingMinion.stableId) ?? input.healingMinion.stableId,
     opponentMinionDied: session.state.players.south.cemetery
       .some(({ instanceId }) => instanceId === opening.attackerInstanceId),
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await verifyReplayAt(session),
     seed: opening.seed,
   });
 }
 
 export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<PrivateGameCheck> {
-  try {
-    return await runPrivateGameScenarios(path);
-  } finally {
-    await closeEngine();
-  }
+  return withIsolatedEngine(() => runPrivateGameScenarios(path));
 }
 
 async function runPrivateGameScenarios(path: string): Promise<PrivateGameCheck> {
@@ -24458,36 +24454,36 @@ async function runPrivateGameScenarios(path: string): Promise<PrivateGameCheck> 
     input.spire,
     input.stealthTargetMinion,
   );
-  const airFireFatality = runAirFireFatality(input);
-  const airBladderblimp = runAirBladderblimp(input);
-  const airGenesisSpell = runAirGenesisSpell(input);
-  const airGrandmasterWizard = runAirGrandmasterWizard(input);
-  const airSlingPixies = runAirSlingPixies(input);
-  const airSpireLich = runAirSpireLich(input);
-  const airNimbusJinn = runAirNimbusJinn(input);
-  const airHeadlessHaunt = runAirHeadlessHaunt(input);
-  const airRaiseDead = runAirRaiseDead(input);
-  const airDevilsEgg = runAirDevilsEgg(input);
-  const airKiteArcher = runAirKiteArcher(input);
-  const airSkirmishersOfMu = runAirSkirmishersOfMu(input);
-  const airChainLightning = runAirChainLightning(input);
-  const airSpellcasterFreeze = runAirSpellcasterFreeze(input);
-  const airArcLightning = runAirArcLightning(input);
-  const airLightningBolt = runAirLightningBolt(input);
-  const airLuckyCharm = runAirLuckyCharm(input);
-  const airThunderstorm = runAirThunderstorm(input);
-  const airRainOfArrows = runAirRainOfArrows(input);
-  const airStaticServant = runAirStaticServant(input);
-  const airTeleport = runAirTeleport(input);
-  const airLeyline = runAirLeyline(input);
-  const airborne = runAirborne(input);
-  const airMovement = runAirMovement(input);
-  const airMovementTwo = runAirMovementTwo(input);
-  const airSummoning = runAirSummoning(input);
-  const airVoidArtifact = runAirVoidArtifact(input);
-  const airVoidwalk = runAirVoidwalk(input);
-  const airZap = runAirZap(input);
-  const earthBurrowing = runEarthBurrowing(input);
+  const airFireFatality = await runAirFireFatality(input);
+  const airBladderblimp = await runAirBladderblimp(input);
+  const airGenesisSpell = await runAirGenesisSpell(input);
+  const airGrandmasterWizard = await runAirGrandmasterWizard(input);
+  const airSlingPixies = await runAirSlingPixies(input);
+  const airSpireLich = await runAirSpireLich(input);
+  const airNimbusJinn = await runAirNimbusJinn(input);
+  const airHeadlessHaunt = await runAirHeadlessHaunt(input);
+  const airRaiseDead = await runAirRaiseDead(input);
+  const airDevilsEgg = await runAirDevilsEgg(input);
+  const airKiteArcher = await runAirKiteArcher(input);
+  const airSkirmishersOfMu = await runAirSkirmishersOfMu(input);
+  const airChainLightning = await runAirChainLightning(input);
+  const airSpellcasterFreeze = await runAirSpellcasterFreeze(input);
+  const airArcLightning = await runAirArcLightning(input);
+  const airLightningBolt = await runAirLightningBolt(input);
+  const airLuckyCharm = await runAirLuckyCharm(input);
+  const airThunderstorm = await runAirThunderstorm(input);
+  const airRainOfArrows = await runAirRainOfArrows(input);
+  const airStaticServant = await runAirStaticServant(input);
+  const airTeleport = await runAirTeleport(input);
+  const airLeyline = await runAirLeyline(input);
+  const airborne = await runAirborne(input);
+  const airMovement = await runAirMovement(input);
+  const airMovementTwo = await runAirMovementTwo(input);
+  const airSummoning = await runAirSummoning(input);
+  const airVoidArtifact = await runAirVoidArtifact(input);
+  const airVoidwalk = await runAirVoidwalk(input);
+  const airZap = await runAirZap(input);
+  const earthBurrowing = await runEarthBurrowing(input);
   const earthStarter = await runStarter(
     input,
     'earth-starter',
@@ -24495,41 +24491,41 @@ async function runPrivateGameScenarios(path: string): Promise<PrivateGameCheck> 
     input.humbleVillage,
     input.wildBoars,
   );
-  const earthOverpower = runEarthOverpower(input);
-  const earthBury = runEarthBury(input);
-  const earthQuagmire = runEarthQuagmire(input);
-  const earthEntangleTerrain = runEarthEntangleTerrain(input);
-  const earthHolyGround = runEarthHolyGround(input);
-  const earthBedrock = runEarthBedrock(input);
-  const earthWraetannisTitan = runEarthWraetannisTitan(input);
-  const earthKingOfRealm = runEarthKingOfRealm(input);
-  const earthMountainGiant = runEarthMountainGiant(input);
-  const earthSlumberingGiantess = runEarthSlumberingGiantess(input);
-  const earthCaveIn = runEarthCaveIn(input);
-  const earthCraterize = runEarthCraterize(input);
-  const earthSiegeBallista = runEarthSiegeBallista(input);
-  const earthPayloadTrebuchet = runEarthPayloadTrebuchet(input);
-  const earthRollingBoulder = runEarthRollingBoulder(input);
-  const earthBorderMilitia = runEarthBorderMilitia(input);
+  const earthOverpower = await runEarthOverpower(input);
+  const earthBury = await runEarthBury(input);
+  const earthQuagmire = await runEarthQuagmire(input);
+  const earthEntangleTerrain = await runEarthEntangleTerrain(input);
+  const earthHolyGround = await runEarthHolyGround(input);
+  const earthBedrock = await runEarthBedrock(input);
+  const earthWraetannisTitan = await runEarthWraetannisTitan(input);
+  const earthKingOfRealm = await runEarthKingOfRealm(input);
+  const earthMountainGiant = await runEarthMountainGiant(input);
+  const earthSlumberingGiantess = await runEarthSlumberingGiantess(input);
+  const earthCaveIn = await runEarthCaveIn(input);
+  const earthCraterize = await runEarthCraterize(input);
+  const earthSiegeBallista = await runEarthSiegeBallista(input);
+  const earthPayloadTrebuchet = await runEarthPayloadTrebuchet(input);
+  const earthRollingBoulder = await runEarthRollingBoulder(input);
+  const earthBorderMilitia = await runEarthBorderMilitia(input);
   const earthHumbleVillage = await runEarthHumbleVillage(input);
-  const earthDuel = runEarthDuel(input);
-  const earthHuntersLodge = runEarthHuntersLodge(input);
-  const earthPoisonousDagger = runEarthPoisonousDagger(input);
-  const earthSwordAndShield = runEarthSwordAndShield(input);
-  const earthRescue = runEarthRescue(input);
-  const earthDivineHealing = runEarthDivineHealing(input);
-  const earthGrainSparrow = runEarthGrainSparrow(input);
-  const earthShallowGrave = runEarthShallowGrave(input);
-  const earthSinkhole = runEarthSinkhole(input);
-  const earthEntombed = runEarthEntombed(input);
-  const earthFirstStrike = runEarthFirstStrike(input);
-  const earthForwardMovement = runEarthForwardMovement(input);
-  const earthImmobile = runEarthImmobile(input);
-  const earthRamp = runEarthRamp(input);
-  const earthMalakhim = runEarthMalakhim(input);
-  const earthRanged = runEarthRanged(input);
-  const earthSecretTunnel = runEarthSecretTunnel(input);
-  const earthWard = runEarthWard(input);
+  const earthDuel = await runEarthDuel(input);
+  const earthHuntersLodge = await runEarthHuntersLodge(input);
+  const earthPoisonousDagger = await runEarthPoisonousDagger(input);
+  const earthSwordAndShield = await runEarthSwordAndShield(input);
+  const earthRescue = await runEarthRescue(input);
+  const earthDivineHealing = await runEarthDivineHealing(input);
+  const earthGrainSparrow = await runEarthGrainSparrow(input);
+  const earthShallowGrave = await runEarthShallowGrave(input);
+  const earthSinkhole = await runEarthSinkhole(input);
+  const earthEntombed = await runEarthEntombed(input);
+  const earthFirstStrike = await runEarthFirstStrike(input);
+  const earthForwardMovement = await runEarthForwardMovement(input);
+  const earthImmobile = await runEarthImmobile(input);
+  const earthRamp = await runEarthRamp(input);
+  const earthMalakhim = await runEarthMalakhim(input);
+  const earthRanged = await runEarthRanged(input);
+  const earthSecretTunnel = await runEarthSecretTunnel(input);
+  const earthWard = await runEarthWard(input);
   const fireStarter = await runStarter(
     input,
     'fire-starter',
@@ -24538,35 +24534,35 @@ async function runPrivateGameScenarios(path: string): Promise<PrivateGameCheck> 
     input.raalDromedary,
   );
   const fireGranaryRats = await runFireGranaryRats(input);
-  const fireHamlet = runFireHamlet(input);
-  const fireAramos = runFireAramos(input);
-  const fireCharge = runFireCharge(input);
-  const fireGenesisLifeLoss = runFireGenesisLifeLoss(input);
-  const fireVileImp = runFireVileImp(input);
-  const fireIgnited = runFireIgnited(input);
-  const fireSacredScarabs = runFireSacredScarabs(input);
-  const fireLash = runFireLash(input);
-  const fireLeapAttack = runFireLeapAttack(input);
-  const fireMinorExplosion = runFireMinorExplosion(input);
-  const fireVikings = runFireVikings(input);
-  const fireRecklessSquire = runFireRecklessSquire(input);
-  const fireResponse = runFireResponse(input);
-  const stealth = runStealth(input);
-  const waterDrowned = runWaterDrowned(input);
-  const waterDrown = runWaterDrown(input);
-  const waterEdgeConnection = runWaterEdgeConnection(input);
-  const waterLugbog = runWaterLugbog(input);
-  const waterLure = runWaterLure(input);
-  const waterMesmerism = runWaterMesmerism(input);
-  const waterPirateShip = runWaterPirateShip(input);
-  const waterConditionalStealth = runWaterConditionalStealth(input);
-  const waterEndTurnStealth = runWaterEndTurnStealth(input);
-  const waterFreeze = runWaterFreeze(input);
-  const waterGnarledWendigo = runWaterGnarledWendigo(input);
-  const waterHealing = runWaterHealing(input);
-  const waterRiver = runWaterRiver(input);
-  const waterSidewaysMovement = runWaterSidewaysMovement(input);
-  const waterSubmerge = runWaterSubmerge(input);
+  const fireHamlet = await runFireHamlet(input);
+  const fireAramos = await runFireAramos(input);
+  const fireCharge = await runFireCharge(input);
+  const fireGenesisLifeLoss = await runFireGenesisLifeLoss(input);
+  const fireVileImp = await runFireVileImp(input);
+  const fireIgnited = await runFireIgnited(input);
+  const fireSacredScarabs = await runFireSacredScarabs(input);
+  const fireLash = await runFireLash(input);
+  const fireLeapAttack = await runFireLeapAttack(input);
+  const fireMinorExplosion = await runFireMinorExplosion(input);
+  const fireVikings = await runFireVikings(input);
+  const fireRecklessSquire = await runFireRecklessSquire(input);
+  const fireResponse = await runFireResponse(input);
+  const stealth = await runStealth(input);
+  const waterDrowned = await runWaterDrowned(input);
+  const waterDrown = await runWaterDrown(input);
+  const waterEdgeConnection = await runWaterEdgeConnection(input);
+  const waterLugbog = await runWaterLugbog(input);
+  const waterLure = await runWaterLure(input);
+  const waterMesmerism = await runWaterMesmerism(input);
+  const waterPirateShip = await runWaterPirateShip(input);
+  const waterConditionalStealth = await runWaterConditionalStealth(input);
+  const waterEndTurnStealth = await runWaterEndTurnStealth(input);
+  const waterFreeze = await runWaterFreeze(input);
+  const waterGnarledWendigo = await runWaterGnarledWendigo(input);
+  const waterHealing = await runWaterHealing(input);
+  const waterRiver = await runWaterRiver(input);
+  const waterSidewaysMovement = await runWaterSidewaysMovement(input);
+  const waterSubmerge = await runWaterSubmerge(input);
   const waterStarter = await runStarter(
     input,
     'water-starter',
