@@ -702,6 +702,7 @@ mod tests {
         let cemetery_magic = ActionDescriptor::CastMagic {
             ally: None,
             ally_destination: None,
+            ally_destination_cells: None,
             ally_strike_location: None,
             card_id: "synthetic-magic".to_owned(),
             card_instance_id: identity('c'),
@@ -719,6 +720,7 @@ mod tests {
         let enemy_magic = ActionDescriptor::CastMagic {
             ally: None,
             ally_destination: None,
+            ally_destination_cells: None,
             ally_strike_location: None,
             card_id: "synthetic-unknown-effect".to_owned(),
             card_instance_id: identity('f'),

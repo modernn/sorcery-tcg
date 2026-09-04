@@ -518,6 +518,7 @@ struct AuraPosition {
 struct MagicChoice {
     ally: Option<UnitTarget>,
     ally_destination: Option<Location>,
+    ally_destination_cells: Option<SquareArea>,
     ally_strike_location: Option<Location>,
     cemetery_minion_instance_id: Option<IdentityHash>,
     discard_site_instance_id: Option<IdentityHash>,
@@ -3086,6 +3087,7 @@ impl Game {
                     let descriptor = ActionDescriptor::CastMagic {
                         ally: choice.ally,
                         ally_destination: choice.ally_destination,
+                        ally_destination_cells: choice.ally_destination_cells,
                         ally_strike_location: choice.ally_strike_location,
                         card_id: definition.id.clone(),
                         card_instance_id: card.instance_id.clone(),
@@ -4851,7 +4853,8 @@ impl Game {
                 if self.spellcaster_location(seat, caster_instance_id)?.region != Region::Surface {
                     return Ok(Vec::new());
                 }
-                // Teleport bypasses the entry gates that only restrict deliberate movement.
+                // Teleport skips the gates that only restrict deliberate movement, but a site's
+                // power limit still keeps a strong enough unit out.
                 let destinations: Vec<(Location, IdentityHash)> = Cell::ALL
                     .into_iter()
                     .filter_map(|cell| {
@@ -4871,18 +4874,30 @@ impl Game {
                     .collect();
                 let mut choices = Vec::with_capacity(destinations.len());
                 for ally in self.controlled_allies(seat) {
-                    if self.unit_target_occupied_cells(&ally)?.len() > 1 {
-                        return Err(GameError::UnsupportedManifestFact(
-                            "teleportAllyToTargetSite:occupiesSquareArea".to_owned(),
-                        ));
-                    }
+                    let occupied = self.unit_target_occupied_cells(&ally)?.to_vec();
+                    let power = self.unit_target_entry_power(&ally)?;
                     for (target_location, target_site_instance_id) in &destinations {
-                        choices.push(MagicChoice {
-                            ally: Some(ally.clone()),
-                            target_location: Some(*target_location),
-                            target_site_instance_id: Some(target_site_instance_id.clone()),
-                            ..MagicChoice::default()
-                        });
+                        for cells in self.teleport_footprints(&occupied, *target_location) {
+                            if !self.teleport_entry_allowed(
+                                &occupied,
+                                cells
+                                    .as_ref()
+                                    .map_or(std::slice::from_ref(&target_location.cell), |cells| {
+                                        cells.as_slice()
+                                    }),
+                                target_location.region,
+                                power,
+                            ) {
+                                continue;
+                            }
+                            choices.push(MagicChoice {
+                                ally: Some(ally.clone()),
+                                ally_destination_cells: cells,
+                                target_location: Some(*target_location),
+                                target_site_instance_id: Some(target_site_instance_id.clone()),
+                                ..MagicChoice::default()
+                            });
+                        }
                     }
                 }
                 choices
@@ -4890,34 +4905,47 @@ impl Game {
             MagicEffect::TeleportNearbyAllyThenDrawCard => {
                 let mut choices = Vec::new();
                 for ally in self.controlled_allies(seat) {
-                    if self.unit_target_occupied_cells(&ally)?.len() > 1 {
-                        return Err(GameError::UnsupportedManifestFact(
-                            "teleportNearbyAllyThenDrawCard:occupiesSquareArea".to_owned(),
-                        ));
-                    }
+                    let occupied = self.unit_target_occupied_cells(&ally)?.to_vec();
                     let from = self.unit_target_location(&ally)?;
+                    let power = self.unit_target_entry_power(&ally)?;
                     // Blink relocates without a deliberate step, so only the layer must exist.
-                    let destinations = std::iter::once(from.cell)
-                        .chain(from.cell.bordering(false))
-                        .chain(from.cell.diagonals(false))
-                        .collect::<BTreeSet<_>>()
-                        .into_iter()
-                        .filter(|cell| self.location_exists_in_region(*cell, from.region));
+                    let destinations = occupied
+                        .iter()
+                        .flat_map(|cell| {
+                            std::iter::once(*cell)
+                                .chain(cell.bordering(false))
+                                .chain(cell.diagonals(false))
+                        })
+                        .collect::<BTreeSet<_>>();
                     for cell in destinations {
-                        for zone in [DeckZone::Atlas, DeckZone::Spellbook] {
-                            choices.push(MagicChoice {
-                                ally: Some(ally.clone()),
-                                draw_zone: Some(zone),
-                                target_location: Some(Location {
-                                    cell,
-                                    region: from.region,
-                                }),
-                                target_site_instance_id: self.position.sites[cell.index()]
+                        let target_location = Location {
+                            cell,
+                            region: from.region,
+                        };
+                        for cells in self.teleport_footprints(&occupied, target_location) {
+                            if !self.teleport_entry_allowed(
+                                &occupied,
+                                cells
                                     .as_ref()
-                                    .map(|site| site.card.instance_id.clone())
-                                    .or_else(|| self.position.rubble[cell.index()].clone()),
-                                ..MagicChoice::default()
-                            });
+                                    .map_or(std::slice::from_ref(&cell), |cells| cells.as_slice()),
+                                from.region,
+                                power,
+                            ) {
+                                continue;
+                            }
+                            for zone in [DeckZone::Atlas, DeckZone::Spellbook] {
+                                choices.push(MagicChoice {
+                                    ally: Some(ally.clone()),
+                                    ally_destination_cells: cells,
+                                    draw_zone: Some(zone),
+                                    target_location: Some(target_location),
+                                    target_site_instance_id: self.position.sites[cell.index()]
+                                        .as_ref()
+                                        .map(|site| site.card.instance_id.clone())
+                                        .or_else(|| self.position.rubble[cell.index()].clone()),
+                                    ..MagicChoice::default()
+                                });
+                            }
                         }
                     }
                 }
@@ -5295,6 +5323,83 @@ impl Game {
             }
         }
         Ok(choices)
+    }
+
+    /// Footprints an ally may land on when teleported to one location: `None` for a single-cell
+    /// unit, otherwise every two-by-two area containing the cell whose cells all exist there.
+    fn teleport_footprints(&self, occupied: &[Cell], target: Location) -> Vec<Option<SquareArea>> {
+        if occupied.len() <= 1 {
+            return if self.location_exists_in_region(target.cell, target.region) {
+                vec![None]
+            } else {
+                Vec::new()
+            };
+        }
+        Cell::SQUARE_AREAS
+            .into_iter()
+            .filter(|cells| cells.contains(&target.cell))
+            .filter(|cells| {
+                cells
+                    .iter()
+                    .all(|cell| self.location_exists_in_region(*cell, target.region))
+            })
+            .map(Some)
+            .collect()
+    }
+
+    /// Whether every newly entered cell admits a unit of this power: teleports ignore the
+    /// movement-only gates, but a site's entry power limit still applies.
+    fn teleport_entry_allowed(
+        &self,
+        occupied: &[Cell],
+        entered: &[Cell],
+        region: Region,
+        power: u8,
+    ) -> bool {
+        region != Region::Surface
+            || entered
+                .iter()
+                .filter(|cell| !occupied.contains(cell))
+                .all(|cell| {
+                    self.position.sites[cell.index()]
+                        .as_ref()
+                        .is_none_or(|site| {
+                            !matches!(
+                                &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                                CardFacts::Site(facts)
+                                    if facts
+                                        .prevents_units_with_power_at_least_from_entering
+                                        .is_some_and(|threshold| power >= threshold)
+                            )
+                        })
+                })
+    }
+
+    fn unit_target_entry_power(&self, target: &UnitTarget) -> Result<u8, GameError> {
+        match target {
+            UnitTarget::Avatar { seat, .. } => Ok(self.avatar_entry_power(*seat)),
+            UnitTarget::Minion { instance_id, seat } => {
+                let unit = self
+                    .position
+                    .units
+                    .iter()
+                    .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
+                    .ok_or(GameError::IllegalAction)?;
+                self.minion_entry_power(unit)
+            }
+        }
+    }
+
+    /// The anchor location a teleport lands on: the footprint's first cell for an oversized ally.
+    fn teleport_destination(
+        target_location: Option<Location>,
+        cells: Option<SquareArea>,
+    ) -> Result<Location, GameError> {
+        let target = target_location.ok_or(GameError::IllegalAction)?;
+        Ok(cells.map_or(target, |cells| Location {
+            cell: cells[0],
+            region: target.region,
+        }))
     }
 
     fn controlled_allies(&self, seat: Seat) -> Vec<UnitTarget> {
@@ -13932,6 +14037,7 @@ impl Game {
         let ActionDescriptor::CastMagic {
             ally,
             ally_destination,
+            ally_destination_cells,
             ally_strike_location,
             card_id,
             card_instance_id,
@@ -13977,6 +14083,7 @@ impl Game {
                 .contains(&MagicChoice {
                     ally: ally.clone(),
                     ally_destination: *ally_destination,
+                    ally_destination_cells: *ally_destination_cells,
                     ally_strike_location: *ally_strike_location,
                     cemetery_minion_instance_id: cemetery_minion_instance_id.clone(),
                     discard_site_instance_id: discard_site_instance_id.clone(),
@@ -14302,7 +14409,8 @@ impl Game {
             }
             MagicEffect::TeleportAllyToTargetSite => {
                 let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
-                let destination = target_location.ok_or(GameError::IllegalAction)?;
+                let destination =
+                    Self::teleport_destination(*target_location, *ally_destination_cells)?;
                 let target_site_instance_id = target_site_instance_id
                     .as_ref()
                     .ok_or(GameError::IllegalAction)?
@@ -14313,15 +14421,20 @@ impl Game {
                     let instance_id = ally.instance_id().clone();
                     let ally_seat = ally.seat();
                     let source_instance_id = card_instance_id.clone();
+                    let cells = *ally_destination_cells;
                     outcomes.push("unit-teleported", || {
-                        json!({
+                        let mut payload = json!({
                             "from": from,
                             "seat": ally_seat,
                             "sourceInstanceId": source_instance_id,
                             "targetInstanceId": instance_id,
                             "targetSiteInstanceId": target_site_instance_id,
                             "to": to,
-                        })
+                        });
+                        if let Some(cells) = cells {
+                            payload["cells"] = json!(cells);
+                        }
+                        payload
                     });
                     self.settle_region_occupancy(outcomes)?;
                     self.settle_static_power_deaths(outcomes)?;
@@ -14329,7 +14442,8 @@ impl Game {
             }
             MagicEffect::TeleportNearbyAllyThenDrawCard => {
                 let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
-                let destination = target_location.ok_or(GameError::IllegalAction)?;
+                let destination =
+                    Self::teleport_destination(*target_location, *ally_destination_cells)?;
                 let zone = draw_zone.ok_or(GameError::IllegalAction)?;
                 let from = self.unit_target_location(ally)?;
                 let to = self.move_unit_target_to(ally, destination)?;
@@ -14338,6 +14452,7 @@ impl Game {
                     let ally_seat = ally.seat();
                     let source_instance_id = card_instance_id.clone();
                     let site_instance_id = target_site_instance_id.clone();
+                    let cells = *ally_destination_cells;
                     outcomes.push("unit-teleported", || {
                         let mut payload = json!({
                             "from": from,
@@ -14348,6 +14463,9 @@ impl Game {
                         });
                         if let Some(site_instance_id) = site_instance_id {
                             payload["targetSiteInstanceId"] = json!(site_instance_id);
+                        }
+                        if let Some(cells) = cells {
+                            payload["cells"] = json!(cells);
                         }
                         payload
                     });
@@ -20488,5 +20606,155 @@ mod tests {
             .as_str()
             .to_owned();
         assert!(!descriptor_json.contains(&hidden_top_card_id));
+    }
+
+    /// One Teleport board: an oversized minion at A1-B2, a full site block at C3-D4, and one
+    /// lone site at A4 that no two-by-two footprint can fit onto.
+    fn footprint_teleport_game(gate_power: bool) -> (Game, IdentityHash) {
+        let manifest = selfplay_manifest_with(246, |manifest| {
+            manifest["cards"]["north-spell-1"] = json!({
+                "cardType": "magic",
+                "manaCost": 0,
+                "teleportAllyToTargetSite": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+            manifest["cards"]["north-spell-2"]["occupiesSquareArea"] = json!(2);
+            manifest["cards"]["north-spell-2"]["attack"] = json!(2);
+            if gate_power {
+                manifest["cards"]["north-site-2"]["preventsUnitsWithPowerAtLeastFromEntering"] =
+                    json!(2);
+            }
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid Teleport manifest");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let instance = |card_id: CardId, owner: Seat, source: CardSource, ordinal: usize| {
+            card_instance(&game.rules, card_id, owner, source, ordinal).expect("fixture instance")
+        };
+        let teleport = instance(
+            card_id("north-spell-1"),
+            Seat::North,
+            CardSource::Spellbook,
+            700,
+        );
+        let cell = |name: &str| Cell::parse(name).expect("fixture cell");
+        let sites = [
+            ("C3", "north-site-1", 701),
+            ("C4", "north-site-1", 702),
+            ("D3", "north-site-1", 703),
+            ("D4", "north-site-2", 704),
+            ("A4", "north-site-1", 705),
+        ];
+        game.position.sites = std::array::from_fn(|_| None);
+        game.position.rubble = std::array::from_fn(|_| None);
+        for (name, card, ordinal) in sites {
+            game.position.sites[cell(name).index()] = Some(SitePosition {
+                card: instance(card_id(card), Seat::North, CardSource::Atlas, ordinal),
+                controller: Seat::North,
+                last_flight_turn: None,
+            });
+        }
+        let giant_id = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+        game.position.units = vec![test_minion(
+            card_id("north-spell-2"),
+            giant_id,
+            Seat::North,
+            cell("A1"),
+            Some(Cell::SQUARE_AREAS[0]),
+        )];
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        let south = &mut game.position.players[seat_index(Seat::South)];
+        south.avatar.location = cell("D1");
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.avatar.location = cell("C4");
+        north.domain_established = true;
+        north.hand_spellbook = vec![teleport];
+        north.mana = 3;
+        (game, IdentityHash::parse(giant_id).expect("giant identity"))
+    }
+
+    fn footprint_teleports(game: &Game, giant: &IdentityHash) -> Vec<IssuedAction> {
+        game.legal_actions()
+            .expect("Teleport actions enumerate around an oversized ally")
+            .into_iter()
+            .filter(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::CastMagic { ally: Some(UnitTarget::Minion { instance_id, .. }), .. }
+                        if instance_id == giant
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn teleport_should_land_an_oversized_ally_on_a_whole_footprint() {
+        let (mut game, giant) = footprint_teleport_game(false);
+        let block = Cell::SQUARE_AREAS[8];
+        let teleports = footprint_teleports(&game, &giant);
+        let mut landings: Vec<(Cell, SquareArea)> = teleports
+            .iter()
+            .map(|action| match &action.descriptor {
+                ActionDescriptor::CastMagic {
+                    ally_destination_cells: Some(cells),
+                    target_location: Some(location),
+                    ..
+                } => (location.cell, *cells),
+                other => panic!("footprint teleport without cells: {other:?}"),
+            })
+            .collect();
+        landings.sort_unstable();
+        // Every cell of the C3-D4 block lands on that block; the lone A4 site fits nothing.
+        assert_eq!(
+            landings,
+            block.iter().map(|cell| (*cell, block)).collect::<Vec<_>>()
+        );
+
+        let cast = teleports
+            .iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::CastMagic { target_location: Some(location), .. }
+                        if location.cell == block[3]
+                )
+            })
+            .expect("teleport onto D4");
+        let (events, _) = game
+            .apply_action_recorded(cast)
+            .expect("footprint teleport resolves");
+        let teleported = events
+            .iter()
+            .find(|(event_type, _)| event_type == "unit-teleported")
+            .expect("unit-teleported event");
+        assert_eq!(teleported.1["cells"], json!(block));
+        assert_eq!(
+            teleported.1["to"],
+            json!({ "cell": block[0], "region": "surface" })
+        );
+        let giant_unit = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == giant)
+            .expect("giant survives");
+        assert_eq!(giant_unit.location, block[0]);
+        assert_eq!(giant_unit.occupied_cells, Some(block));
+
+        // A site that refuses power two keeps the whole footprint out.
+        let (gated, giant) = footprint_teleport_game(true);
+        assert!(footprint_teleports(&gated, &giant).is_empty());
     }
 }
