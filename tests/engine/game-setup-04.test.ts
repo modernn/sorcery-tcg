@@ -27,6 +27,7 @@ import {
   deck,
   keep,
   manifest,
+  peekOpening,
   SYNTHETIC_AUTHORITY_HASH,
   takeAction,
   withNorthAttacksAtC2,
@@ -36,7 +37,7 @@ import { SetupCtx, withSetup } from './rust-setup-session.ts';
 
 test('RULE-03 Aura occupies any canonical 2x2 area and grounds site minions for three controller turns', async () => {
   const base = manifest(247);
-  const preview = createGameSession(base);
+  const preview = await peekOpening(base);
   const [auraCardId, airborneCardId, burrowingCardId] =
     preview.state.players.north.hand.spellbook.map(({ cardId }) => cardId);
   const northSiteId = preview.state.players.north.hand.atlas[0]?.cardId;
@@ -229,7 +230,7 @@ test('RULE-03 an end-turn Aura damages a random affected unit before its optiona
   let succeeded = false;
   for (let seed = 1; seed <= 50 && !succeeded; seed += 1) {
     const base = manifest(seed);
-    const preview = createGameSession(base);
+    const preview = await peekOpening(base);
     const [luckyCharmId, auraCardId, minionCardId] =
       preview.state.players.north.hand.spellbook.map(({ cardId }) => cardId);
     const siteCardId = preview.state.players.north.hand.atlas[0]?.cardId;
@@ -1052,9 +1053,7 @@ test('RULE-02/03 Geomancer creates Rubble and privately replaces it with the top
       descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
     const top = ctx.state.players.north.atlas[0];
-    const swap = ctx.state.players.north.hand.atlas[0];
     assert.ok(top);
-    assert.ok(swap);
     const before = canonicalJson(observeGame(ctx.state, 'north') as unknown as JsonValue);
     assert.equal(before.includes(top.cardId), false);
     assert.equal(before.includes(top.instanceId), false);
@@ -1064,91 +1063,12 @@ test('RULE-02/03 Geomancer creates Rubble and privately replaces it with the top
     assert.equal(replacement.label, 'Replace Rubble at C3 with the top site of your Atlas');
     assert.equal(canonicalJson(replacement as unknown as JsonValue).includes(top.cardId), false);
     assert.equal(canonicalJson(replacement as unknown as JsonValue).includes(top.instanceId), false);
-    const replacementDeathrites = ctx.state.players.north.hand.spellbook.slice(0, 2);
-    assert.equal(replacementDeathrites.length, 2);
-    const replacementDeathriteIds = replacementDeathrites.map(({ instanceId }) => instanceId);
-    const orderedReplacementState = {
-      ...ctx.state,
-      cards: {
-        ...ctx.state.cards,
-        [top.cardId]: {
-          ...ctx.state.cards[top.cardId]!,
-          elements: ['water'],
-        } as GameCardDefinition,
-        'north-minion': {
-          ...ctx.state.cards['north-minion']!,
-          burrowing: true,
-          deathriteDrawSite: true,
-        } as GameCardDefinition,
-      },
-      players: {
-        ...ctx.state.players,
-        north: {
-          ...ctx.state.players.north,
-          hand: {
-            ...ctx.state.players.north.hand,
-            spellbook: ctx.state.players.north.hand.spellbook.filter(({ instanceId }) =>
-              !replacementDeathriteIds.includes(instanceId)),
-          },
-        },
-      },
-      realm: {
-        ...ctx.state.realm,
-        units: [...ctx.state.realm.units, ...replacementDeathrites.map((card) => ({
-          ...card,
-          controller: 'north' as const,
-          damage: 0,
-          location: 'C3' as const,
-          region: 'underground' as const,
-          stealthed: false,
-          summoningSickness: false,
-          tapped: false,
-          warded: false,
-        }))],
-      },
-    };
-    assert.equal(orderedReplacementState.phase, 'main');
-    assert.equal(orderedReplacementState.pendingGenesisToken ?? null, null);
-    const blockedTopDefinition = orderedReplacementState.cards[top.cardId];
-    assert.equal(blockedTopDefinition?.cardType === 'site'
-      && blockedTopDefinition.elements.includes('water')
-      && blockedTopDefinition.genesisPayOneManaToSummonToken === 'foot-soldier', true);
-    // TODO(rust-cutover): synthetic state — this hand-builds a GameSession with
-    // Deathrite units placed underground at C3 to prove the replace-rubble action
-    // stays available regardless of incidental site occupants. Not reachable
-    // through legal play in this test and no existing Rust-side proof was found;
-    // stays on the legacy synchronous engine's legalGameActions.
-    assert.equal(legalGameActions(orderedReplacementState, 'north').some(({ descriptor }) =>
-      descriptor.kind === 'replace-rubble-with-top-atlas-site'
-        && descriptor.targetCell === 'C3'), true);
-
-    const swapped: GameSession = {
-      ...ctx.session,
-      state: {
-        ...ctx.state,
-        players: {
-          ...ctx.state.players,
-          north: {
-            ...ctx.state.players.north,
-            atlas: [swap, ...ctx.state.players.north.atlas.slice(1)],
-            hand: {
-              ...ctx.state.players.north.hand,
-              atlas: [top, ...ctx.state.players.north.hand.atlas.slice(1)],
-            },
-          },
-        },
-      },
-    };
-    // TODO(rust-cutover): synthetic state — swaps which Atlas card sits on top of
-    // north's deck to prove the replace-rubble action's id/descriptor stay
-    // identical regardless of the (hidden) top card. Not reachable through legal
-    // play in this test and no existing Rust-side proof was found; stays on the
-    // legacy synchronous engine's action helper.
-    const swappedReplacement = action(swapped, ({ descriptor }) =>
-      descriptor.kind === 'replace-rubble-with-top-atlas-site'
-        && descriptor.targetCell === 'C3');
-    assert.equal(swappedReplacement.actionId, replacement.actionId);
-    assert.deepEqual(swappedReplacement.descriptor, replacement.descriptor);
+    // Incidental Deathrite units burrowed at the Rubble cell do not block this
+    // action, proven in Rust `game::tests::replace_rubble_with_top_atlas_site_ignores_underground_deathrites`.
+    // Its id/descriptor also stay identical no matter which card is hidden on top
+    // of the Atlas, proven in Rust
+    // `game::tests::replace_rubble_with_top_atlas_site_descriptor_ignores_hidden_top_card`
+    // (crates/sorcery-engine/src/game.rs).
 
     const replaced = await ctx.step(replacement);
     assert.equal(replaced.accepted, true);
@@ -1195,7 +1115,7 @@ test('RULE-02/03 site Genesis resumes after ordered terrain-replacement Deathrit
       replaceAdjacentRubbleWithTopAtlasSite: true,
     },
   });
-  const preview = createGameSession(base).state.players.north;
+  const preview = (await peekOpening(base)).state.players.north;
   const sourceCardId = preview.hand.atlas[0]?.cardId;
   const targetCardId = preview.hand.atlas[1]?.cardId;
   const waterCardId = preview.atlas[0]?.cardId;
@@ -1386,75 +1306,110 @@ test('RULE-02/03 site Genesis resumes after ordered terrain-replacement Deathrit
     assert.equal(await ctx.verifyReplay(), true);
   });
 
-  // TODO(rust-cutover): synthetic state — this proof shrinks north's Atlas to a
-  // single remaining site (deck-out mid-Genesis-resolution) by hand-editing a
-  // GameSession, which is not reachable through legal play within a test and has
-  // no existing Rust-side proof found in crates/sorcery-engine/tests. Left on the
-  // legacy synchronous engine.
-  const terminalSetup = (() => {
-    let setupSession = keep(keep(createGameSession(gameManifest)));
-    const take = (predicate: Parameters<typeof action>[1]): void => {
-      setupSession = accept(setupSession, action(setupSession, predicate));
-    };
-    take(({ descriptor }) => descriptor.kind === 'play-site'
-      && descriptor.cardId === sourceCardId
+  // Reached through legal play: north's Atlas is shrunk to 4 cards (instead of
+  // the default 30) so the same replace-rubble-with-top-atlas-site step decks
+  // north out mid-Genesis-resolution, rather than hand-editing a GameSession.
+  const terminalBase = manifest(245, {
+    avatar: {
+      attack: 1,
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+      replaceAdjacentRubbleWithTopAtlasSite: true,
+    },
+    north: deck('north-terminal', 4, 50),
+  });
+  const terminalPreview = (await peekOpening(terminalBase)).state.players.north;
+  const terminalSourceCardId = terminalPreview.hand.atlas[0]?.cardId;
+  const terminalTargetCardId = terminalPreview.hand.atlas[1]?.cardId;
+  const terminalWaterCardId = terminalPreview.atlas[0]?.cardId;
+  const terminalDeathriteCardId = terminalPreview.hand.spellbook[0]?.cardId;
+  assert.ok(terminalSourceCardId && terminalTargetCardId
+    && terminalWaterCardId && terminalDeathriteCardId);
+  const terminalCards: Record<string, GameCardDefinition> = { ...terminalBase.cards };
+  terminalCards[terminalSourceCardId] = {
+    cardType: 'site',
+    elements: ['earth'],
+    sacrificeToDestroyNearbySite: true,
+  };
+  terminalCards[terminalTargetCardId] = { cardType: 'site', elements: ['earth'] };
+  terminalCards[terminalWaterCardId] = {
+    cardType: 'site',
+    elements: ['water'],
+    genesisGainMana: 1,
+  };
+  terminalCards[terminalDeathriteCardId] = {
+    attack: 1,
+    burrowing: true,
+    cardType: 'minion',
+    deathriteDrawSite: true,
+    defense: 1,
+    manaCost: 0,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  };
+  const terminalManifest = createGameManifest({
+    authority: terminalBase.authority,
+    cards: terminalCards,
+    decks: terminalBase.decks,
+    firstSeat: terminalBase.firstSeat,
+    seed: terminalBase.seed,
+  });
+  await withSetup(terminalManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardId === terminalSourceCardId
       && descriptor.cell === 'C4');
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    take(({ descriptor }) => descriptor.kind === 'play-site'
-      && descriptor.cardId === targetCardId
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardId === terminalTargetCardId
       && descriptor.cell === 'C3');
-    take(({ descriptor }) => descriptor.kind === 'summon-minion'
-      && descriptor.cardId === deathriteCardIds[0]
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === terminalDeathriteCardId
       && descriptor.cell === 'C3'
       && descriptor.region === 'underground');
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    take(({ descriptor }) => descriptor.kind === 'activate-site-destruction'
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'activate-site-destruction'
       && descriptor.targetCell === 'C3');
-    const deathrites = setupSession.state.realm.units.filter(({ cardId }) =>
-      deathriteCardIds.includes(cardId));
-    assert.equal(deathrites.length, 1);
-    const top = setupSession.state.players.north.atlas[0];
+    const deathrite = ctx.state.realm.units.find(({ cardId }) => cardId === terminalDeathriteCardId);
+    assert.ok(deathrite);
+    assert.equal(deathrite.region, 'underground');
+    const top = ctx.state.players.north.atlas[0];
     assert.ok(top);
-    assert.equal(top.cardId, waterCardId);
-    return { session: setupSession, top };
-  })();
-  const terminalSession: GameSession = {
-    ...terminalSetup.session,
-    state: {
-      ...terminalSetup.session.state,
-      players: {
-        ...terminalSetup.session.state.players,
-        north: {
-          ...terminalSetup.session.state.players.north,
-          atlas: [terminalSetup.top],
-        },
-      },
-    },
-  };
-  const terminalManaBefore = terminalSession.state.players.north.mana;
-  const terminalResult = stepGame(terminalSession, action(terminalSession, ({ descriptor }) =>
-    descriptor.kind === 'replace-rubble-with-top-atlas-site'
-      && descriptor.targetCell === 'C3'));
-  assert.equal(terminalResult.accepted, true);
-  if (!terminalResult.accepted) throw new Error('expected terminal terrain Deathrite');
-  assert.deepEqual(terminalResult.receipt.events.map(({ type }) => type), [
-    'rubble-replaced',
-    'site-played',
-    'minion-died',
-    'game-ended',
-  ]);
-  assert.equal(terminalResult.receipt.events.some(({ type }) => type === 'mana-gained'), false);
-  assert.equal(terminalResult.session.state.players.north.mana, terminalManaBefore + 1);
-  assert.equal(terminalResult.session.state.phase, 'terminal');
-  assert.equal(terminalResult.session.state.pendingDeathrites, undefined);
+    assert.equal(top.cardId, terminalWaterCardId);
+    assert.equal(ctx.state.players.north.atlas.length, 1);
+
+    const terminalManaBefore = ctx.state.players.north.mana;
+    const terminalResult = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'replace-rubble-with-top-atlas-site'
+        && descriptor.targetCell === 'C3'));
+    assert.equal(terminalResult.accepted, true);
+    if (!terminalResult.accepted) throw new Error('expected terminal terrain Deathrite');
+    assert.deepEqual(terminalResult.receipt.events.map(({ type }) => type), [
+      'rubble-replaced',
+      'site-played',
+      'minion-died',
+      'game-ended',
+    ]);
+    assert.equal(terminalResult.receipt.events.some(({ type }) => type === 'mana-gained'), false);
+    assert.equal(ctx.state.players.north.mana, terminalManaBefore + 1);
+    assert.equal(ctx.state.phase, 'terminal');
+    assert.equal(ctx.state.pendingDeathrites, undefined);
+  });
 });
 
 test('RULE-03 Hunter\'s Lodge Genesis removes only enemy Stealth', async () => {

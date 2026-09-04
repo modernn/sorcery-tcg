@@ -20276,4 +20276,109 @@ mod tests {
         assert!(repeated_random.is_empty());
         assert_eq!(repeated.position, placed.position);
     }
+
+    fn geomancer_manifest_with_rubble_at_c3() -> (Game, Cell) {
+        let manifest = selfplay_manifest_with(104, |manifest| {
+            manifest["cards"]["north-avatar"]["replaceAdjacentRubbleWithTopAtlasSite"] =
+                json!(true);
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid Geomancer manifest");
+        let c3 = Cell::parse("C3").expect("C3");
+        let c4 = Cell::parse("C4").expect("C4");
+        game.position.rubble[c3.index()] = Some(
+            identity_hash(&json!({ "fixture": "geomancer-rubble-c3" })).expect("Rubble identity"),
+        );
+        game.position.players[seat_index(Seat::North)]
+            .avatar
+            .location = c4;
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        (game, c3)
+    }
+
+    fn find_replace_rubble_action(game: &Game, target: Cell) -> Option<IssuedAction> {
+        game.legal_actions()
+            .expect("legal actions")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    action.descriptor,
+                    ActionDescriptor::ReplaceRubbleWithTopAtlasSite { target_cell, .. }
+                        if target_cell == target
+                )
+            })
+    }
+
+    // Replaces the TS fixture at the end of the game-setup-04.test.ts
+    // 'RULE-02/03 Geomancer creates Rubble and privately replaces it with the top
+    // Atlas site' test: incidental Deathrite units burrowed at a Rubble cell must
+    // not block the replace-rubble-with-top-atlas-site action, which only
+    // consults the Rubble and the Avatar's fact, never the units above/below it.
+    #[test]
+    fn replace_rubble_with_top_atlas_site_ignores_underground_deathrites() {
+        let (mut game, c3) = geomancer_manifest_with_rubble_at_c3();
+        let deathrite_card_id = CardId(
+            u16::try_from(
+                game.rules
+                    .cards
+                    .iter()
+                    .position(|card| card.id == "north-spell-1")
+                    .expect("fixture card"),
+            )
+            .expect("fixture card index"),
+        );
+        let first_id = "sha256:4444444444444444444444444444444444444444444444444444444444444444";
+        let second_id = "sha256:5555555555555555555555555555555555555555555555555555555555555555";
+        let mut first = test_minion(deathrite_card_id, first_id, Seat::North, c3, None);
+        first.region = Region::Underground;
+        let mut second = test_minion(deathrite_card_id, second_id, Seat::North, c3, None);
+        second.region = Region::Underground;
+        game.position.units.push(first);
+        game.position.units.push(second);
+
+        assert!(
+            find_replace_rubble_action(&game, c3).is_some(),
+            "replace-rubble-with-top-atlas-site must stay legal with Deathrites burrowed at the Rubble cell"
+        );
+    }
+
+    // Replaces the second TS fixture in the same test: the action's id/descriptor
+    // must stay identical no matter which (hidden) card currently sits on top of
+    // the acting player's Atlas, and the descriptor must never reveal that card.
+    #[test]
+    fn replace_rubble_with_top_atlas_site_descriptor_ignores_hidden_top_card() {
+        let (game, c3) = geomancer_manifest_with_rubble_at_c3();
+        let north = seat_index(Seat::North);
+        assert!(
+            game.position.players[north].atlas.len() >= 2,
+            "fixture needs two Atlas reserve cards to swap"
+        );
+
+        let mut swapped = game.clone();
+        swapped.position.players[north].atlas.swap(0, 1);
+        assert_ne!(
+            game.position.players[north].atlas[0].instance_id,
+            swapped.position.players[north].atlas[0].instance_id,
+            "fixture must actually change which card sits on top"
+        );
+
+        let original = find_replace_rubble_action(&game, c3)
+            .expect("replace-rubble-with-top-atlas-site is legal")
+            .to_legal_action()
+            .expect("legal action export");
+        let after_swap = find_replace_rubble_action(&swapped, c3)
+            .expect("replace-rubble-with-top-atlas-site is legal")
+            .to_legal_action()
+            .expect("legal action export");
+
+        assert_eq!(original.descriptor, after_swap.descriptor);
+        assert_eq!(original.action_id, after_swap.action_id);
+        let descriptor_json = canonical_json(&original.descriptor).expect("descriptor json");
+        let hidden_top_card_id = game.position.players[north].atlas[0]
+            .instance_id
+            .as_str()
+            .to_owned();
+        assert!(!descriptor_json.contains(&hidden_top_card_id));
+    }
 }
