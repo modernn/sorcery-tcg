@@ -431,8 +431,15 @@ struct DisableEffect {
 /// Artifacts with oversized minions are refused for self-play instead of guessing that cell.
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum ArtifactPlacement {
-    Carried { bearer: UnitTarget },
-    Loose { location: Cell, region: Region },
+    Carried {
+        bearer: UnitTarget,
+        /// Cell of an oversized bearer's footprint this Artifact rides on.
+        bearer_cell: Option<Cell>,
+    },
+    Loose {
+        location: Cell,
+        region: Region,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -445,7 +452,7 @@ impl ArtifactPosition {
     /// The bearer carrying this Artifact, when it is not lying loose in the realm.
     const fn bearer(&self) -> Option<&UnitTarget> {
         match &self.placement {
-            ArtifactPlacement::Carried { bearer } => Some(bearer),
+            ArtifactPlacement::Carried { bearer, .. } => Some(bearer),
             ArtifactPlacement::Loose { .. } => None,
         }
     }
@@ -1659,7 +1666,7 @@ impl Game {
                             "owner": artifact.card.owner,
                         });
                         match &artifact.placement {
-                            ArtifactPlacement::Carried { bearer } => {
+                            ArtifactPlacement::Carried { bearer, .. } => {
                                 let carried = self.artifact_location(artifact)?;
                                 value["bearer"] = json!(bearer);
                                 value["controller"] = json!(bearer.seat());
@@ -3815,7 +3822,7 @@ impl Game {
         seat: Seat,
     ) -> Result<(), GameError> {
         let descriptors = self
-            .artifact_cast_descriptors(seat)
+            .artifact_cast_descriptors(seat)?
             .into_iter()
             .chain(self.pick_up_artifact_descriptors(seat)?)
             .chain(self.drop_artifact_descriptors(seat)?)
@@ -3831,7 +3838,7 @@ impl Game {
         Ok(())
     }
 
-    fn artifact_cast_descriptors(&self, seat: Seat) -> Vec<ActionDescriptor> {
+    fn artifact_cast_descriptors(&self, seat: Seat) -> Result<Vec<ActionDescriptor>, GameError> {
         let player = &self.position.players[seat_index(seat)];
         let spellcasters = self.spellcasters(seat);
         let bearers = self.seat_unit_targets(seat);
@@ -3849,24 +3856,32 @@ impl Game {
                 continue;
             }
             for (_, caster_instance_id) in &spellcasters {
-                let conjure = |bearer, cell| ActionDescriptor::CastArtifact {
+                let conjure = |bearer, bearer_cell, cell| ActionDescriptor::CastArtifact {
                     bearer,
-                    bearer_cell: None,
+                    bearer_cell,
                     card_id: definition.id.clone(),
                     card_instance_id: card.instance_id.clone(),
                     caster_instance_id: caster_instance_id.clone(),
                     cell,
                     mana_cost: facts.mana_cost,
                 };
-                descriptors.extend(cells.iter().map(|cell| conjure(None, Some(*cell))));
-                descriptors.extend(
-                    bearers
-                        .iter()
-                        .map(|bearer| conjure(Some(bearer.clone()), None)),
-                );
+                descriptors.extend(cells.iter().map(|cell| conjure(None, None, Some(*cell))));
+                for bearer in &bearers {
+                    // An oversized bearer offers each cell of its footprint separately.
+                    let occupied = self.unit_target_occupied_cells(bearer)?;
+                    if occupied.len() > 1 {
+                        descriptors.extend(
+                            occupied
+                                .iter()
+                                .map(|cell| conjure(Some(bearer.clone()), Some(*cell), None)),
+                        );
+                    } else {
+                        descriptors.push(conjure(Some(bearer.clone()), None, None));
+                    }
+                }
             }
         }
-        descriptors
+        Ok(descriptors)
     }
 
     fn pick_up_artifact_descriptors(&self, seat: Seat) -> Result<Vec<ActionDescriptor>, GameError> {
@@ -4259,7 +4274,16 @@ impl Game {
     /// Where an Artifact currently sits: the cell its bearer stands on, or the cell it lies on.
     fn artifact_location(&self, artifact: &ArtifactPosition) -> Result<Location, GameError> {
         match &artifact.placement {
-            ArtifactPlacement::Carried { bearer } => self.unit_target_location(bearer),
+            ArtifactPlacement::Carried {
+                bearer,
+                bearer_cell,
+            } => {
+                let carried = self.unit_target_location(bearer)?;
+                Ok(bearer_cell.map_or(carried, |cell| Location {
+                    cell,
+                    region: carried.region,
+                }))
+            }
             ArtifactPlacement::Loose { location, region } => Ok(Location {
                 cell: *location,
                 region: *region,
@@ -4590,6 +4614,7 @@ impl Game {
             .iter_mut()
             .find(|unit| unit.card.instance_id == *instance_id)
             .ok_or(GameError::IllegalAction)?;
+        let from = unit.location;
         if let Some(area) = unit.occupied_cells {
             unit.occupied_cells = Some(
                 translated_square(area, unit.location, location.cell)
@@ -4597,6 +4622,19 @@ impl Game {
             );
         }
         unit.location = location.cell;
+        for artifact in &mut self.position.artifacts {
+            if let ArtifactPlacement::Carried {
+                bearer,
+                bearer_cell: Some(cell),
+            } = &mut artifact.placement
+                && unit_target_kind(bearer) == UnitKind::Minion
+                && bearer.instance_id() == instance_id
+            {
+                *cell = cell
+                    .translated(from, location.cell)
+                    .ok_or(GameError::IllegalAction)?;
+            }
+        }
         unit.planar_gate_voidwalk = retains;
         unit.region = location.region;
         Ok(())
@@ -13802,6 +13840,7 @@ impl Game {
     ) -> Result<(), GameError> {
         let ActionDescriptor::CastArtifact {
             bearer,
+            bearer_cell,
             card_id,
             card_instance_id,
             caster_instance_id,
@@ -13818,7 +13857,7 @@ impl Game {
             .ok_or(GameError::IllegalAction)?;
         if self.position.phase != Phase::Main
             || !self
-                .artifact_cast_descriptors(seat)
+                .artifact_cast_descriptors(seat)?
                 .contains(&action.descriptor)
         {
             return Err(GameError::IllegalAction);
@@ -13826,6 +13865,7 @@ impl Game {
         let placement = match (bearer, cell) {
             (Some(bearer), _) => ArtifactPlacement::Carried {
                 bearer: bearer.clone(),
+                bearer_cell: *bearer_cell,
             },
             (None, Some(cell)) => ArtifactPlacement::Loose {
                 location: *cell,
@@ -13898,6 +13938,7 @@ impl Game {
     ) -> Result<(), GameError> {
         let ActionDescriptor::PickUpArtifacts {
             artifact_instance_ids,
+            cell,
             unit,
             ..
         } = &action.descriptor
@@ -13917,6 +13958,7 @@ impl Game {
             if selected.contains(&artifact.card.instance_id) {
                 artifact.placement = ArtifactPlacement::Carried {
                     bearer: unit.clone(),
+                    bearer_cell: *cell,
                 };
             }
         }
@@ -13958,8 +14000,14 @@ impl Game {
         let selected: BTreeSet<_> = artifact_instance_ids.iter().cloned().collect();
         for artifact in &mut self.position.artifacts {
             if selected.contains(&artifact.card.instance_id) {
+                let cell = match &artifact.placement {
+                    ArtifactPlacement::Carried { bearer_cell, .. } => {
+                        bearer_cell.unwrap_or(fell_at.cell)
+                    }
+                    ArtifactPlacement::Loose { location, .. } => *location,
+                };
                 artifact.placement = ArtifactPlacement::Loose {
-                    location: fell_at.cell,
+                    location: cell,
                     region: fell_at.region,
                 };
             }
@@ -14884,7 +14932,8 @@ impl Game {
                             })
                         });
                         for artifact in &mut self.position.artifacts {
-                            if let ArtifactPlacement::Carried { bearer } = &mut artifact.placement
+                            if let ArtifactPlacement::Carried { bearer, .. } =
+                                &mut artifact.placement
                                 && unit_target_kind(bearer) == UnitKind::Minion
                                 && bearer.instance_id() == instance_id
                             {
@@ -17373,8 +17422,14 @@ impl Game {
         let mut value = self.card_value(&artifact.card);
         if let Value::Object(object) = &mut value {
             match &artifact.placement {
-                ArtifactPlacement::Carried { bearer } => {
+                ArtifactPlacement::Carried {
+                    bearer,
+                    bearer_cell,
+                } => {
                     object.insert("bearer".to_owned(), json!(bearer));
+                    if let Some(cell) = bearer_cell {
+                        object.insert("bearerCell".to_owned(), json!(cell));
+                    }
                 }
                 ArtifactPlacement::Loose { location, region } => {
                     object.insert("location".to_owned(), json!(location));
@@ -18937,6 +18992,7 @@ mod tests {
             ArtifactPosition {
                 card: carried,
                 placement: ArtifactPlacement::Carried {
+                    bearer_cell: None,
                     bearer: UnitTarget::Minion {
                         instance_id: disabled_instance_id.clone(),
                         seat: Seat::North,
@@ -20528,6 +20584,7 @@ mod tests {
         game.position.artifacts.push(ArtifactPosition {
             card: base.charm,
             placement: ArtifactPlacement::Carried {
+                bearer_cell: None,
                 bearer: UnitTarget::Avatar {
                     instance_id: north_avatar,
                     seat: Seat::North,
@@ -21611,5 +21668,151 @@ mod tests {
             game.position.players[seat_index(Seat::South)].air_thresholds_cast_this_turn,
             Some(0)
         );
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one proof keeps per-cell enumeration, placement, and the ride-along step together"
+    )]
+    fn carried_artifacts_should_ride_one_named_cell_of_an_oversized_bearer() {
+        let manifest = selfplay_manifest_with(248, |manifest| {
+            manifest["cards"]["north-spell-1"] = json!({
+                "atEndOfEachTurnSiteControllerLosesLife": 1,
+                "cardType": "artifact",
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+            manifest["cards"]["north-spell-2"]["occupiesSquareArea"] = json!(2);
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid bearer-cell manifest");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let instance = |card_id: CardId, owner: Seat, source: CardSource, ordinal: usize| {
+            card_instance(&game.rules, card_id, owner, source, ordinal).expect("fixture instance")
+        };
+        let cell = |name: &str| Cell::parse(name).expect("fixture cell");
+        let artifact = instance(
+            card_id("north-spell-1"),
+            Seat::North,
+            CardSource::Spellbook,
+            900,
+        );
+        game.position.sites = std::array::from_fn(|_| None);
+        game.position.rubble = std::array::from_fn(|_| None);
+        // A full block of sites so the giant has somewhere to stand and to step into.
+        for (index, name) in ["A1", "A2", "B1", "B2", "C1", "C2"].into_iter().enumerate() {
+            game.position.sites[cell(name).index()] = Some(SitePosition {
+                card: instance(
+                    card_id("north-site-1"),
+                    Seat::North,
+                    CardSource::Atlas,
+                    901 + index,
+                ),
+                controller: Seat::North,
+                last_flight_turn: None,
+            });
+        }
+        let giant_id = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+        let mut giant = test_minion(
+            card_id("north-spell-2"),
+            giant_id,
+            Seat::North,
+            cell("A1"),
+            Some(Cell::SQUARE_AREAS[0]),
+        );
+        giant.tapped = false;
+        giant.summoning_sickness = false;
+        game.position.units = vec![giant];
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        game.position.players[seat_index(Seat::South)]
+            .avatar
+            .location = cell("D1");
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.avatar.location = cell("C1");
+        north.domain_established = true;
+        north.hand_spellbook = vec![artifact.clone()];
+        north.mana = 3;
+
+        // The giant offers one cast per cell of its footprint; the Avatar offers exactly one.
+        let mut bearer_cells: Vec<String> = game
+            .legal_actions()
+            .expect("artifact casts enumerate")
+            .into_iter()
+            .filter_map(|action| match action.descriptor {
+                ActionDescriptor::CastArtifact {
+                    bearer: Some(UnitTarget::Minion { instance_id, .. }),
+                    bearer_cell,
+                    ..
+                } if instance_id.as_str() == giant_id => Some(
+                    bearer_cell
+                        .expect("oversized bearer names its cell")
+                        .to_string(),
+                ),
+                _ => None,
+            })
+            .collect();
+        bearer_cells.sort_unstable();
+        assert_eq!(bearer_cells, ["A1", "A2", "B1", "B2"]);
+        assert_eq!(
+            game.legal_actions()
+                .expect("artifact casts enumerate")
+                .into_iter()
+                .filter(|action| matches!(
+                    &action.descriptor,
+                    ActionDescriptor::CastArtifact {
+                        bearer: Some(UnitTarget::Avatar { .. }),
+                        bearer_cell: None,
+                        ..
+                    }
+                ))
+                .count(),
+            1
+        );
+
+        // Casting onto B2 pins the Artifact there rather than on the footprint's anchor.
+        let onto_b2 = game
+            .legal_actions()
+            .expect("artifact casts enumerate")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::CastArtifact { bearer_cell: Some(at), .. }
+                        if *at == cell("B2")
+                )
+            })
+            .expect("cast onto B2");
+        game.apply_action_recorded(&onto_b2)
+            .expect("carried Artifact cast resolves");
+        let located = |game: &Game| {
+            game.artifact_location(&game.position.artifacts[0])
+                .expect("carried Artifact location")
+                .cell
+        };
+        assert_eq!(located(&game), cell("B2"));
+
+        // The marked cell rides along when the bearer steps, staying inside the new footprint.
+        game.move_minion_to(
+            &IdentityHash::parse(giant_id).expect("giant identity"),
+            Location {
+                cell: cell("B1"),
+                region: Region::Surface,
+            },
+        )
+        .expect("giant steps one file");
+        assert_eq!(located(&game), cell("C2"));
     }
 }
