@@ -478,7 +478,10 @@ fn disabled_raw_stealth_should_not_hide_an_attack_target() {
         .expect("disabled raw-Stealth target")
         .clone();
 
-    assert_eq!(target["stealthed"], true);
+    // Waterbound off Water is Disabled, and settlement strips a Disabled minion's Stealth for
+    // good, so the target is exposed rather than merely visible. See
+    // `waterbound_stealth_should_be_lost_permanently_once_disabled` in waterbound_rules.rs.
+    assert_eq!(target["stealthed"], false);
     assert!(minion_is_attack_target(
         &setup.session,
         &setup.target_instance_id

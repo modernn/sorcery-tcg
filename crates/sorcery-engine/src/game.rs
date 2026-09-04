@@ -4878,7 +4878,7 @@ impl Game {
                     let power = self.unit_target_entry_power(&ally)?;
                     for (target_location, target_site_instance_id) in &destinations {
                         for cells in self.teleport_footprints(&occupied, *target_location) {
-                            if !self.teleport_entry_allowed(
+                            if !self.entry_power_allowed(
                                 &occupied,
                                 cells
                                     .as_ref()
@@ -4923,7 +4923,7 @@ impl Game {
                             region: from.region,
                         };
                         for cells in self.teleport_footprints(&occupied, target_location) {
-                            if !self.teleport_entry_allowed(
+                            if !self.entry_power_allowed(
                                 &occupied,
                                 cells
                                     .as_ref()
@@ -5347,9 +5347,10 @@ impl Game {
             .collect()
     }
 
-    /// Whether every newly entered cell admits a unit of this power: teleports ignore the
-    /// movement-only gates, but a site's entry power limit still applies.
-    fn teleport_entry_allowed(
+    /// Whether every newly entered cell admits a unit of this power. Teleports and summons skip
+    /// the gates that only restrict deliberate movement, but a site's entry power limit still
+    /// applies to every cell the unit newly occupies.
+    fn entry_power_allowed(
         &self,
         occupied: &[Cell],
         entered: &[Cell],
@@ -6401,6 +6402,30 @@ impl Game {
         Ok(())
     }
 
+    /// Drops the summon destinations a site's entry power limit keeps this minion out of.
+    fn admissible_summons(
+        &self,
+        minion: &MinionFacts,
+        destinations: Vec<SummonDestination>,
+    ) -> Vec<SummonDestination> {
+        destinations
+            .into_iter()
+            .filter(|destination| {
+                self.entry_power_allowed(
+                    &[],
+                    destination
+                        .cells
+                        .as_ref()
+                        .map_or(std::slice::from_ref(&destination.cell), |cells| {
+                            cells.as_slice()
+                        }),
+                    destination.region.map_or(Region::Surface, Region::from),
+                    minion.attack,
+                )
+            })
+            .collect()
+    }
+
     fn summon_destinations(&self, seat: Seat, minion: &MinionFacts) -> Vec<SummonDestination> {
         let summon_cell = |cell: Cell| {
             if minion.must_be_cast_to_outer_column && !cell.in_outer_file() {
@@ -6421,7 +6446,7 @@ impl Game {
             let discount = u64::from(minion.ordinary && site_facts.ordinary_minion_mana_discount);
             Some(minion.mana_cost.saturating_sub(discount))
         };
-        if minion.occupies_square_area_two {
+        let destinations = if minion.occupies_square_area_two {
             Cell::SQUARE_AREAS
                 .into_iter()
                 .filter_map(|cells| {
@@ -6448,7 +6473,8 @@ impl Game {
                 .collect::<Vec<_>>();
             destinations.extend(self.void_summon_destinations(minion, minion.mana_cost, false));
             destinations
-        }
+        };
+        self.admissible_summons(minion, destinations)
     }
 
     /// The void beside every cell no site or rubble covers, offered only to a Voidwalk minion.
@@ -6532,7 +6558,7 @@ impl Game {
     /// Enumerates the placements a free summon grants: any existing surface location, ignoring
     /// site control, mana, thresholds, and the printed casting restrictions.
     fn free_summon_destinations(&self, minion: &MinionFacts) -> Vec<SummonDestination> {
-        if minion.occupies_square_area_two {
+        let destinations = if minion.occupies_square_area_two {
             Cell::SQUARE_AREAS
                 .into_iter()
                 .filter(|cells| cells.iter().all(|cell| self.surface_location_exists(*cell)))
@@ -6551,7 +6577,8 @@ impl Game {
                 .collect::<Vec<_>>();
             destinations.extend(self.void_summon_destinations(minion, 0, true));
             destinations
-        }
+        };
+        self.admissible_summons(minion, destinations)
     }
 
     fn genesis_damage_targets(
@@ -18702,45 +18729,6 @@ mod tests {
         );
     }
 
-    /// `tests/engine/game-setup-08.test.ts` forged the non-active seat's
-    /// `airThresholdsCastThisTurn` counter to a nonzero value to prove that ending a turn resets
-    /// it for both seats, not only the seat whose turn just ended. South cannot act during
-    /// North's turn, so a nonzero South counter mid-North-turn is unreachable through legal play;
-    /// this builds the position directly.
-    #[test]
-    fn end_turn_should_reset_air_thresholds_cast_this_turn_for_both_seats() {
-        let manifest = selfplay_manifest_with(402, |manifest| {
-            for seat in ["north", "south"] {
-                manifest["cards"][format!("{seat}-avatar")]["tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"] =
-                    json!(true);
-            }
-        });
-        let mut game = Game::from_manifest_json(&manifest).expect("valid air-threshold manifest");
-        game.position.active_seat = Seat::North;
-        game.position.decision_seat = Seat::North;
-        game.position.phase = Phase::Main;
-        game.position.players[seat_index(Seat::North)].air_thresholds_cast_this_turn = Some(3);
-        game.position.players[seat_index(Seat::South)].air_thresholds_cast_this_turn = Some(2);
-        game.position.players[seat_index(Seat::North)].domain_established = true;
-
-        let end_turn = game
-            .legal_actions()
-            .expect("legal actions")
-            .into_iter()
-            .find(|action| matches!(action.descriptor, ActionDescriptor::EndTurn))
-            .expect("end-turn is legal in Main phase");
-        game.apply_action(&end_turn).expect("end-turn accepted");
-
-        assert_eq!(
-            game.position.players[seat_index(Seat::North)].air_thresholds_cast_this_turn,
-            Some(0)
-        );
-        assert_eq!(
-            game.position.players[seat_index(Seat::South)].air_thresholds_cast_this_turn,
-            Some(0)
-        );
-    }
-
     #[test]
     fn site_destruction_should_drain_loose_artifacts_with_the_flooded_layer() {
         let manifest = selfplay_manifest_with(245, |manifest| {
@@ -21497,5 +21485,131 @@ mod tests {
         // A site that refuses power two keeps the whole footprint out.
         let (gated, giant) = footprint_teleport_game(true);
         assert!(footprint_teleports(&gated, &giant).is_empty());
+    }
+
+    #[test]
+    fn summon_destinations_should_respect_a_site_entry_power_limit() {
+        let manifest = selfplay_manifest_with(247, |manifest| {
+            for (card, attack) in [("north-spell-1", 2), ("north-spell-2", 1)] {
+                manifest["cards"][card]["attack"] = json!(attack);
+                manifest["cards"][card]["manaCost"] = json!(0);
+                manifest["cards"][card]["thresholds"] =
+                    json!({ "air": 0, "earth": 0, "fire": 0, "water": 0 });
+            }
+            manifest["cards"]["north-site-2"]["preventsUnitsWithPowerAtLeastFromEntering"] =
+                json!(2);
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid entry-limit manifest");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let instance = |card_id: CardId, owner: Seat, source: CardSource, ordinal: usize| {
+            card_instance(&game.rules, card_id, owner, source, ordinal).expect("fixture instance")
+        };
+        let cell = |name: &str| Cell::parse(name).expect("fixture cell");
+        let strong = instance(
+            card_id("north-spell-1"),
+            Seat::North,
+            CardSource::Spellbook,
+            800,
+        );
+        let weak = instance(
+            card_id("north-spell-2"),
+            Seat::North,
+            CardSource::Spellbook,
+            801,
+        );
+        game.position.sites = std::array::from_fn(|_| None);
+        game.position.rubble = std::array::from_fn(|_| None);
+        for (name, card, ordinal) in [("C4", "north-site-1", 802), ("C3", "north-site-2", 803)] {
+            game.position.sites[cell(name).index()] = Some(SitePosition {
+                card: instance(card_id(card), Seat::North, CardSource::Atlas, ordinal),
+                controller: Seat::North,
+                last_flight_turn: None,
+            });
+        }
+        game.position.units = Vec::new();
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        game.position.players[seat_index(Seat::South)]
+            .avatar
+            .location = cell("C1");
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.avatar.location = cell("C4");
+        north.domain_established = true;
+        north.hand_spellbook = vec![strong, weak];
+        north.mana = 3;
+
+        let summon_cells = |card: &str| {
+            let mut cells: Vec<String> = game
+                .legal_actions()
+                .expect("summon actions enumerate")
+                .into_iter()
+                .filter_map(|action| match action.descriptor {
+                    ActionDescriptor::SummonMinion {
+                        card_id, cell: at, ..
+                    } if card_id == card => Some(at.to_string()),
+                    _ => None,
+                })
+                .collect();
+            cells.sort_unstable();
+            cells.dedup();
+            cells
+        };
+        // Power two is exactly the limit C3 refuses; power one walks in.
+        assert_eq!(summon_cells("north-spell-1"), vec!["C4".to_owned()]);
+        assert_eq!(
+            summon_cells("north-spell-2"),
+            vec!["C3".to_owned(), "C4".to_owned()]
+        );
+    }
+
+    /// `tests/engine/game-setup-08.test.ts` forged the non-active seat's
+    /// `airThresholdsCastThisTurn` counter to a nonzero value to prove that ending a turn resets
+    /// it for both seats, not only the seat whose turn just ended. South cannot act during
+    /// North's turn, so a nonzero South counter mid-North-turn is unreachable through legal play;
+    /// this builds the position directly.
+    #[test]
+    fn end_turn_should_reset_air_thresholds_cast_this_turn_for_both_seats() {
+        let manifest = selfplay_manifest_with(402, |manifest| {
+            for seat in ["north", "south"] {
+                manifest["cards"][format!("{seat}-avatar")]["tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"] =
+                    json!(true);
+            }
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid air-threshold manifest");
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        game.position.players[seat_index(Seat::North)].air_thresholds_cast_this_turn = Some(3);
+        game.position.players[seat_index(Seat::South)].air_thresholds_cast_this_turn = Some(2);
+        game.position.players[seat_index(Seat::North)].domain_established = true;
+
+        let end_turn = game
+            .legal_actions()
+            .expect("legal actions")
+            .into_iter()
+            .find(|action| matches!(action.descriptor, ActionDescriptor::EndTurn))
+            .expect("end-turn is legal in Main phase");
+        game.apply_action(&end_turn).expect("end-turn accepted");
+
+        assert_eq!(
+            game.position.players[seat_index(Seat::North)].air_thresholds_cast_this_turn,
+            Some(0)
+        );
+        assert_eq!(
+            game.position.players[seat_index(Seat::South)].air_thresholds_cast_this_turn,
+            Some(0)
+        );
     }
 }

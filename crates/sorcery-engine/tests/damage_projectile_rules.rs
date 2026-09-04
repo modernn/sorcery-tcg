@@ -386,7 +386,10 @@ fn disabled_stealth_should_be_visible_but_disabled_shooter_cannot_fire() {
         ["C4", "C3"]
     );
     let before = state(&visible.session);
-    assert_eq!(unit(&before, near_target_id)["stealthed"], true);
+    // Waterbound off Water is Disabled, and settlement strips a Disabled minion's Stealth for
+    // good, so the shot sees an exposed target. See
+    // `waterbound_stealth_should_be_lost_permanently_once_disabled` in waterbound_rules.rs.
+    assert_eq!(unit(&before, near_target_id)["stealthed"], false);
     let mut fired = visible.session;
     fire_south(&mut fired, &visible.shooter_id, near_target_id);
     assert_eq!(unit(&state(&fired), near_target_id)["damage"], 1);
