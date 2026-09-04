@@ -18476,6 +18476,114 @@ mod tests {
         }
     }
 
+    /// `tests/engine/game-setup-08.test.ts` forged a Warded copy of a wounded target to prove
+    /// that `killTargetWoundedMinion` (e.g. Fatality) is absorbed by Ward instead of killing.
+    /// A wounded-and-Warded minion is unreachable through legal play (any legal way to wound it
+    /// would itself break the Ward first), so this builds the position directly, matching
+    /// `craterize_fixture`'s pattern.
+    #[test]
+    fn kill_target_wounded_minion_should_break_ward_instead_of_killing() {
+        let manifest = selfplay_manifest_with(401, |manifest| {
+            for ordinal in 1..=50 {
+                manifest["cards"][format!("north-spell-{ordinal}")] = json!({
+                    "cardType": "magic",
+                    "killTargetWoundedMinion": true,
+                    "manaCost": 0,
+                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                });
+            }
+            manifest["cards"]["south-spell-1"]["defense"] = json!(3);
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid Fatality Ward manifest");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let c1 = Cell::parse("C1").expect("C1");
+        let site = card_instance(
+            &game.rules,
+            card_id("south-site-1"),
+            Seat::South,
+            CardSource::Atlas,
+            600,
+        )
+        .expect("south site instance");
+        game.position.sites[c1.index()] = Some(SitePosition {
+            card: site,
+            controller: Seat::South,
+            last_flight_turn: None,
+        });
+        let instance_id = identity_hash(&json!({ "fixture": "fatality-ward-target" }))
+            .expect("fixture minion identity");
+        let mut target = test_minion(
+            card_id("south-spell-1"),
+            instance_id.as_str(),
+            Seat::South,
+            c1,
+            None,
+        );
+        target.damage = 1;
+        target.warded = true;
+        game.position.units = vec![target];
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.domain_established = true;
+        north.mana = 1;
+
+        let fatality = game.position.players[seat_index(Seat::North)].hand_spellbook[0]
+            .instance_id
+            .clone();
+        let cast = game
+            .legal_actions()
+            .expect("legal actions")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::CastMagic {
+                        card_instance_id,
+                        target: Some(UnitTarget::Minion { instance_id: target_id, .. }),
+                        ..
+                    } if *card_instance_id == fatality && *target_id == instance_id
+                )
+            })
+            .expect("Fatality cast targeting the Warded minion");
+        let (events, random_draws) = game
+            .apply_action_recorded(&cast)
+            .expect("Fatality cast against a Warded target");
+        assert!(random_draws.is_empty());
+        assert_eq!(
+            events
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            ["magic-cast", "ward-broken", "magic-resolved"]
+        );
+        let survivor = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == instance_id)
+            .expect("Ward-protected survivor");
+        assert_eq!((survivor.damage, survivor.warded), (1, false));
+        assert!(
+            !game.position.players[seat_index(Seat::South)]
+                .cemetery
+                .iter()
+                .any(|card| card.instance_id == instance_id)
+        );
+    }
+
     #[test]
     fn site_destruction_should_drain_loose_artifacts_with_the_flooded_layer() {
         let manifest = selfplay_manifest_with(245, |manifest| {
