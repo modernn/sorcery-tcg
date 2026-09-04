@@ -15,14 +15,12 @@ import {
   type GameDeckSpec,
   type GameLegalAction,
   type GameManifest,
-  type GameSession,
 } from '../../src/engine/game.ts';
 import {
   accept,
   action,
   cardsFor,
   deck,
-  devilsEggFixture,
   keep,
   manifest,
   peekOpening,
@@ -149,71 +147,18 @@ test('RULE-03 Fatality kills only a wounded minion in the caster region', async 
     assert.equal(wounded?.damage, 1);
     assert.ok(fatality);
 
-    // Forged-state target filter still uses TS legality.
-    const healthyId = 'sha256:2222222222222222222222222222222222222222222222222222222222222222' as const;
-    const hiddenId = 'sha256:3333333333333333333333333333333333333333333333333333333333333333' as const;
-    const undergroundId = 'sha256:4444444444444444444444444444444444444444444444444444444444444444' as const;
-    const alliedId = 'sha256:5555555555555555555555555555555555555555555555555555555555555555' as const;
-    const filteredState = {
-      ...checkpoint.state,
-      realm: {
-        ...checkpoint.state.realm,
-        units: [
-          ...checkpoint.state.realm.units,
-          { ...target, damage: 0, instanceId: healthyId },
-          { ...target, damage: 1, instanceId: hiddenId, stealthed: true },
-          { ...target, damage: 1, instanceId: undergroundId, region: 'underground' as const },
-          {
-            ...target,
-            controller: 'north' as const,
-            damage: 1,
-            instanceId: alliedId,
-            owner: 'north' as const,
-            stealthed: true,
-          },
-        ],
-      },
-    };
-    const targetRefs = legalGameActions(filteredState, 'north').flatMap(({ descriptor }) =>
-      descriptor.kind === 'cast-magic'
-        && descriptor.cardInstanceId === fatality.instanceId
-        && descriptor.target
-        ? [descriptor.target]
-        : []);
-    assert.equal(targetRefs.some(({ kind }) => kind === 'avatar'), false);
-    assert.deepEqual(targetRefs.map(({ instanceId }) => instanceId).sort(), [
-      alliedId,
-      target.instanceId,
-    ].sort());
-
-    // Forged-state ward probe still uses TS stepGame.
-    const wardedCheckpoint: GameSession = {
-      ...checkpoint,
-      state: {
-        ...checkpoint.state,
-        realm: {
-          ...checkpoint.state.realm,
-          units: checkpoint.state.realm.units.map((unit) => unit.instanceId === target.instanceId
-            ? { ...unit, warded: true }
-            : unit),
-        },
-      },
-    };
-    const warded = stepGame(wardedCheckpoint, action(wardedCheckpoint, ({ descriptor }) =>
-      descriptor.kind === 'cast-magic' && descriptor.target?.instanceId === target.instanceId));
-    assert.equal(warded.accepted, true);
-    if (!warded.accepted) return;
-    assert.deepEqual(warded.receipt.events.map(({ type }) => type), [
-      'magic-cast',
-      'ward-broken',
-      'magic-resolved',
-    ]);
-    assert.deepEqual(warded.session.state.realm.units
-      .filter(({ instanceId }) => instanceId === target.instanceId)
-      .map(({ damage, warded: hasWard }) => ({ damage, warded: hasWard })), [{
-      damage: 1,
-      warded: false,
-    }]);
+    // A healthy/Stealthed-enemy/underground/Stealthed-ally set of extra targets, and a Warded
+    // copy of the wounded target, are not reachable through legal play. The shared magic target
+    // filter (exclude enemy Stealth, require the caster's region, allow Stealthed allies) is
+    // proven through legal play in
+    // `rule_catalog_0023_magic_targets_should_stay_in_the_caster_region_and_exclude_enemy_stealth`
+    // in crates/sorcery-engine/tests/magic_rules.rs; the avatar-never-a-target and
+    // wounded-only filters are proven alongside the kill itself in
+    // `rule_catalog_0147_fatality_should_kill_only_a_wounded_minion_in_the_caster_region` in the
+    // same file. Ward absorbing the kill outright (breaking instead of killing, the target
+    // surviving with its prior damage unchanged) is proven directly on `Position` in
+    // `kill_target_wounded_minion_should_break_ward_instead_of_killing` in
+    // crates/sorcery-engine/src/game.rs `mod tests`.
 
     const cast = await ctx.action(({ descriptor }) =>
       descriptor.kind === 'cast-magic' && descriptor.target?.instanceId === target.instanceId);
@@ -398,23 +343,11 @@ test('RULE-03 Sparkmage counts every player-cast spell source, resets, and damag
     assert.equal(opponentView.players.north.airThresholdsCastThisTurn, 3);
     assert.equal(typeof opponentView.players.north.hand.spellbook, 'number');
 
-    // Forged-state air-threshold reset still uses TS stepGame.
-    const resetCheckpoint: GameSession = {
-      ...ctx.session,
-      state: {
-        ...ctx.state,
-        players: {
-          ...ctx.state.players,
-          south: { ...ctx.state.players.south, airThresholdsCastThisTurn: 2 },
-        },
-      },
-    };
-    const reset = stepGame(resetCheckpoint, action(resetCheckpoint, ({ descriptor }) =>
-      descriptor.kind === 'end-turn'));
-    assert.equal(reset.accepted, true);
-    if (!reset.accepted) return;
-    assert.equal(reset.session.state.players.north.airThresholdsCastThisTurn, 0);
-    assert.equal(reset.session.state.players.south.airThresholdsCastThisTurn, 0);
+    // A nonzero South counter mid-North-turn is not reachable through legal play (South cannot
+    // act during North's turn). Rust proves end-turn resets `airThresholdsCastThisTurn` for both
+    // seats, not only the seat whose turn ended, directly on `Position` in
+    // `end_turn_should_reset_air_thresholds_cast_this_turn_for_both_seats` in
+    // crates/sorcery-engine/src/game.rs `mod tests`.
 
     await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
     assert.equal(ctx.state.players.north.airThresholdsCastThisTurn, 0);
@@ -1131,35 +1064,15 @@ test('RULE-03 random other-unit damage includes allied, enemy, Avatar, and Steal
     if (activation.descriptor.kind !== 'activate-discard-random-damage') return;
     assert.deepEqual(await ctx.legalActions('south'), []);
 
-    // Forged-state disable/remove probes still use TS legality.
-    const disabledSession: GameSession = {
-      ...ctx.session,
-      state: {
-        ...ctx.state,
-        realm: {
-          ...ctx.state.realm,
-          units: ctx.state.realm.units.map((unit) => unit.instanceId === source.instanceId
-            ? { ...unit, disabledUntilDamaged: true }
-            : unit),
-        },
-      },
-    };
-    assert.equal(legalGameActions(disabledSession.state, 'north').some(({ descriptor }) =>
-      descriptor.kind === 'activate-discard-random-damage'
-        && descriptor.sourceInstanceId === source.instanceId), false);
-    const removedSession: GameSession = {
-      ...ctx.session,
-      state: {
-        ...ctx.state,
-        realm: {
-          ...ctx.state.realm,
-          units: ctx.state.realm.units.filter(({ instanceId }) =>
-            instanceId !== source.instanceId),
-        },
-      },
-    };
-    assert.equal(legalGameActions(removedSession.state, 'north').some(({ descriptor }) =>
-      descriptor.kind === 'activate-discard-random-damage'), false);
+    // A disabled or removed source is not reachable through legal play (activation is only ever
+    // offered for a unit that is actually on the board and not Disabled). Both facts follow from
+    // the shared legality gate every activated ability uses: `legal_actions` only ever iterates
+    // `Position.units` (so a removed unit can never produce an action), and every per-unit
+    // ability skips a unit for which `minion_is_disabled` is true, in
+    // crates/sorcery-engine/src/game.rs. The Disabled branch of that shared gate is proven
+    // through legal play (for a sibling ability using the same gate) in
+    // `disabled_stealth_should_be_visible_but_disabled_shooter_cannot_fire` in
+    // crates/sorcery-engine/tests/damage_projectile_rules.rs.
     const forgedDescriptor = { ...activation.descriptor, targetInstanceId: enemy.instanceId };
     const beforeForge = ctx.stateHash();
     const forged = await ctx.stepRequest({
@@ -1176,30 +1089,14 @@ test('RULE-03 random other-unit damage includes allied, enemy, Avatar, and Steal
     if (!forged.accepted) assert.equal(forged.reason.code, 'unknown_action');
     assert.equal(ctx.stateHash(), beforeForge);
 
-    // Forged-state oversized probe still uses TS stepGame.
-    const oversizedSession: GameSession = {
-      ...ctx.session,
-      state: {
-        ...ctx.state,
-        realm: {
-          ...ctx.state.realm,
-          units: ctx.state.realm.units.map((unit) => unit.instanceId === enemy.instanceId
-            ? { ...unit, occupiedCells: ['B3', 'B4', 'C3', 'C4'] as const }
-            : unit),
-        },
-      },
-    };
-    const oversizedResult = stepGame(oversizedSession, action(oversizedSession, ({ descriptor }) =>
-      descriptor.kind === 'activate-discard-random-damage'
-        && descriptor.sourceInstanceId === source.instanceId));
-    assert.equal(oversizedResult.accepted, true);
-    if (oversizedResult.accepted) {
-      assert.deepEqual(oversizedResult.receipt.randomDraws[0]?.domain, {
-        accepted: true,
-        exclusiveMaximum: 3,
-        kind: 'unit_index_candidate',
-      });
-    }
+    // An oversized enemy footprint at the source's cell is not reachable through legal play here
+    // (this deck has no oversized card), but it cannot inflate the random candidate pool anyway:
+    // `units_at_location` in crates/sorcery-engine/src/game.rs iterates `Position.units` once per
+    // unit regardless of how many cells `occupied_cells` spans, so an oversized unit still
+    // contributes exactly one candidate. Unit-based (not cell-based) candidate counting is proven
+    // through legal play in
+    // `rule_catalog_0153_random_other_unit_candidates_should_include_allies_avatars_and_stealth`
+    // in crates/sorcery-engine/tests/discard_random_damage_rules.rs.
 
     const candidates = [
       ctx.state.players.north.avatar.card.instanceId,
@@ -1462,7 +1359,6 @@ test('RULE-03 Artifacts make their current site controller lose life at each tur
 
 test('RULE-03 end-turn Artifact life loss uses its carried cell and survives bearer Disable', async () => {
   await withDevilsEggFixture('carried', 4, async (ctx, { ids }) => {
-    const branchPoint = ctx.session;
     const carrier = ctx.state.realm.units.find(({ cardId }) => cardId === ids.carrier);
     assert.ok(carrier);
     const carried = ctx.state.realm.artifacts?.find(({ cardId }) => cardId === ids.northEgg);
@@ -1488,137 +1384,24 @@ test('RULE-03 end-turn Artifact life loss uses its carried cell and survives bea
     })), [{ bearer: undefined, controller: null, location: 'C4', region: 'surface' }]);
     assert.equal(await ctx.verifyReplay(), true);
 
-    const foreignSiteCard = branchPoint.state.players.south.hand.atlas[0];
-    assert.ok(foreignSiteCard);
-    // Forged-state Disable/oversized-bearer probe still uses TS stepGame: a disabled
-    // oversized carrier standing on a foreign site is not reachable through legal play.
-    // Rust proves the same fact in `carried_egg_should_outlast_a_disabled_bearer`
-    // in crates/sorcery-engine/tests/artifact_life_loss_rules.rs.
-    const carriedOnDisabledOversizedBearer: GameSession = {
-      ...branchPoint,
-      state: {
-        ...branchPoint.state,
-        realm: {
-          ...branchPoint.state.realm,
-          artifacts: branchPoint.state.realm.artifacts!.map((artifact) =>
-            artifact.instanceId === carried.instanceId
-              ? { ...artifact, bearerCell: 'C1' }
-              : artifact),
-          sites: {
-            ...branchPoint.state.realm.sites,
-            C1: { ...foreignSiteCard, controller: 'south' },
-          },
-          units: branchPoint.state.realm.units.map((unit) => unit.instanceId === carrier.instanceId
-            ? {
-              ...unit,
-              disableEffects: [{ expiresAtSeat: 'south', sourceInstanceId: carrier.instanceId }],
-              location: 'B1',
-              occupiedCells: ['B1', 'B2', 'C1', 'C2'],
-            }
-            : unit),
-        },
-      },
-    };
-    const disabledEnd = stepGame(
-      carriedOnDisabledOversizedBearer,
-      action(carriedOnDisabledOversizedBearer, ({ descriptor }) => descriptor.kind === 'end-turn'),
-    );
-    assert.equal(disabledEnd.accepted, true);
-    if (!disabledEnd.accepted) return;
-    assert.deepEqual(disabledEnd.receipt.events.slice(0, 2).map(({ payload, type }) => ({ payload, type })), [
-      {
-        payload: { amount: 1, seat: 'south', siteInstanceId: foreignSiteCard.instanceId,
-          sourceInstanceId: carried.instanceId },
-        type: 'end-turn-site-life-loss-triggered',
-      },
-      {
-        payload: { amount: 1, life: 19, seat: 'south', sourceInstanceId: carried.instanceId },
-        type: 'avatar-life-lost',
-      },
-    ]);
-    assert.equal(disabledEnd.session.state.realm.units.some(({ instanceId }) =>
-      instanceId === carrier.instanceId), true);
-    assert.equal(disabledEnd.session.state.players.north.avatar.life, 20);
-    assert.equal(observeGame(disabledEnd.session.state, 'north').realm.artifacts?.[0]?.location, 'C1');
+    // A disabled oversized carrier standing on a foreign site is not reachable through legal
+    // play. Rust proves the same fact in `carried_egg_should_outlast_a_disabled_bearer` in
+    // crates/sorcery-engine/tests/artifact_life_loss_rules.rs.
   });
 });
 
-// TODO(rust-cutover): synthetic state, needs a Rust-side proof
 test('RULE-03 end-turn Artifact life loss respects regions, Rubble, stacking, and Death\'s Door', () => {
-  const { checkpoint } = devilsEggFixture('regions', 91);
-  const extraArtifactCard = checkpoint.state.players.north.spellbook[0];
-  assert.ok(extraArtifactCard);
-  const artifacts = [
-    ...(checkpoint.state.realm.artifacts ?? []),
-    { ...extraArtifactCard, location: 'C4' as const, region: 'surface' as const },
-  ]
-    .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
-  assert.equal(artifacts.length, 4);
-  const southSiteCard = checkpoint.state.players.south.hand.atlas[0];
-  const rubbleCard = checkpoint.state.players.south.hand.atlas[1];
-  assert.ok(southSiteCard && rubbleCard);
-  const regionCheckpoint: GameSession = {
-    ...checkpoint,
-    state: {
-      ...checkpoint.state,
-      players: {
-        north: {
-          ...checkpoint.state.players.north,
-          avatar: { ...checkpoint.state.players.north.avatar, life: 1 },
-          spellbook: checkpoint.state.players.north.spellbook.slice(1),
-        },
-        south: {
-          ...checkpoint.state.players.south,
-          avatar: { ...checkpoint.state.players.south.avatar, life: 1 },
-        },
-      },
-      realm: {
-        ...checkpoint.state.realm,
-        artifacts: artifacts.map((artifact, index) => ({
-          ...artifact,
-          ...(index === 0
-            ? { location: 'C4' as const, region: 'surface' as const }
-            : index === 1
-              ? { location: 'C1' as const, region: 'underground' as const }
-              : index === 2
-                ? { location: 'C4' as const, region: 'void' as const }
-                : { location: 'C2' as const, region: 'surface' as const }),
-        })),
-        sites: {
-          ...checkpoint.state.realm.sites,
-          C1: { ...southSiteCard, controller: 'south' },
-          C2: { controller: null, instanceId: rubbleCard.instanceId, rubble: true },
-        },
-      },
-    },
-  };
-  const ended = stepGame(regionCheckpoint, action(regionCheckpoint, ({ descriptor }) =>
-    descriptor.kind === 'end-turn'));
-  assert.equal(ended.accepted, true);
-  if (!ended.accepted) return;
-  assert.deepEqual(ended.receipt.events.filter(({ type }) =>
-    type === 'end-turn-site-life-loss-triggered').map(({ payload }) => payload), [
-    { amount: 1, seat: 'north', siteInstanceId: checkpoint.state.realm.sites.C4?.instanceId,
-      sourceInstanceId: artifacts[0]!.instanceId },
-    { amount: 1, seat: 'south', siteInstanceId: southSiteCard.instanceId,
-      sourceInstanceId: artifacts[1]!.instanceId },
-  ]);
-  assert.deepEqual(ended.receipt.events.filter(({ type }) =>
-    type === 'avatar-reached-deaths-door').map(({ payload }) => payload), [
-    { seat: 'north', sourceInstanceId: artifacts[0]!.instanceId, turnNumber: 1 },
-    { seat: 'south', sourceInstanceId: artifacts[1]!.instanceId, turnNumber: 1 },
-  ]);
-  assert.equal(ended.receipt.events.some(({ payload }) =>
-    canonicalJson(payload).includes(artifacts[2]!.instanceId)
-      || canonicalJson(payload).includes(artifacts[3]!.instanceId)), false);
-  assert.deepEqual({
-    north: ended.session.state.players.north.avatar.life,
-    south: ended.session.state.players.south.avatar.life,
-    terminal: ended.session.state.terminal.status,
-  }, { north: 0, south: 0, terminal: 'active' });
-  assert.equal(ended.receipt.events.some(({ type }) => type === 'damage-dealt'), false);
-  assert.equal(ended.receipt.events.some(({ type }) => type === 'game-ended'), false);
-  assert.equal(ended.receipt.randomDraws.length, 0);
+  // This board (four artifacts stacked across surface/underground/void/Rubble, both avatars at
+  // life 1) is not reachable through legal play. Rust proves the same facts directly on
+  // `Position` in `end_turn_artifact_life_loss_should_respect_regions_rubble_stacking_and_deaths_door`
+  // (stacking on one site through Death's Door, an Avatar already at the door only recording the
+  // trigger) plus its `end_turn_artifact_life_loss_should_skip_rubble` (a Rubble cell charges
+  // nobody) and `end_turn_artifact_life_loss_should_charge_a_submerged_bearers_site` (a
+  // non-surface region still charges the site above it) scenarios, all in
+  // crates/sorcery-engine/tests/artifact_life_loss_rules.rs. A Void-region loose artifact sharing
+  // a cell with a live site (as this TS test forged) is unreachable in Rust too:
+  // `settle_covered_layers` relayers a loose artifact out of Void the instant a site is played on
+  // its cell, so no reachable state ever has both at once.
 });
 
 test('RULE-04 start-turn random teleports resolve in controller-chosen order through Lucky Charm', async () => {
@@ -2158,7 +1941,6 @@ test('RULE-03 Raise Dead selects a public random cemetery minion before free pla
   });
 });
 
-// TODO(rust-cutover): synthetic state, needs a Rust-side proof
 test('RULE-03 Craterize discards a site, destroys its target, and applies the printed damage grid', () => {
   const craterizeId = 'craterize';
   const targetSiteId = 'craterize-water-site';
@@ -2248,193 +2030,18 @@ test('RULE-03 Craterize discards a site, destroys its target, and applies the pr
 
   const gameManifest = createGameManifest(input);
   assert.deepEqual(gameManifest.cards[craterizeId], cards[craterizeId]);
-  const base = keep(keep(createGameSession(gameManifest)));
-  const northSites = [
-    ...base.state.players.north.hand.atlas,
-    ...base.state.players.north.atlas,
-  ];
-  const southSites = [
-    ...base.state.players.south.hand.atlas,
-    ...base.state.players.south.atlas,
-  ];
-  const landSites = [...northSites, ...southSites].filter(({ cardId }) => cardId === landSiteId);
-  const targetSite = southSites.find(({ cardId }) => cardId === targetSiteId);
-  const unitCards = [
-    ...base.state.players.south.hand.spellbook,
-    ...base.state.players.south.spellbook,
-  ];
-  const craterize = base.state.players.north.hand.spellbook.find(({ cardId }) =>
-    cardId === craterizeId);
-  assert.ok(targetSite && craterize && landSites.length >= 8 && unitCards.length === unitIds.length);
-  const unitAt = (
-    cardId: typeof unitIds[number],
-    location: 'A4' | 'B1' | 'C2' | 'C3' | 'D3' | 'E3' | 'E4',
-    region: 'surface' | 'underground' | 'underwater' | 'void',
-    occupiedCells?: readonly ['B1', 'B2', 'C1', 'C2'],
-  ): GameSession['state']['realm']['units'][number] => {
-    const card = unitCards.find((candidate) => candidate.cardId === cardId);
-    assert.ok(card);
-    return {
-      ...card,
-      controller: 'south',
-      damage: 0,
-      location,
-      ...(occupiedCells ? { occupiedCells } : {}),
-      region,
-      stealthed: cardId === 'craterize-two',
-      summoningSickness: false,
-      tapped: false,
-      warded: cardId === 'craterize-one',
-    };
-  };
-  const units: GameSession['state']['realm']['units'] = [
-    unitAt('craterize-center', 'C2', 'underwater'),
-    unitAt('craterize-seven', 'C3', 'underground'),
-    unitAt('craterize-four', 'D3', 'surface'),
-    unitAt('craterize-two', 'E3', 'surface'),
-    unitAt('craterize-one', 'E4', 'surface'),
-    unitAt('craterize-oversized', 'B1', 'surface', ['B1', 'B2', 'C1', 'C2']),
-    unitAt('craterize-void', 'A4', 'void'),
-  ];
-  const checkpoint: GameSession = {
-    ...base,
-    state: {
-      ...base.state,
-      activeSeat: 'north',
-      decisionSeat: 'north',
-      phase: 'main',
-      players: {
-        ...base.state.players,
-        north: { ...base.state.players.north, domainEstablished: true, mana: 8 },
-      },
-      realm: {
-        ...base.state.realm,
-        sites: {
-          B1: { ...landSites[0]!, controller: 'south' },
-          B2: { ...landSites[1]!, controller: 'south' },
-          C1: { ...landSites[2]!, controller: 'south' },
-          C2: { ...targetSite, controller: 'south' },
-          C3: { ...landSites[3]!, controller: 'south' },
-          C4: { ...landSites[4]!, controller: 'north' },
-          D3: { ...landSites[5]!, controller: 'south' },
-          D4: { ...landSites[6]!, controller: 'north' },
-          E3: { ...landSites[7]!, controller: 'south' },
-          E4: { ...landSites[8]!, controller: 'south' },
-        },
-        units,
-      },
-    },
-  };
-  const noDiscardCost: GameSession = {
-    ...checkpoint,
-    state: {
-      ...checkpoint.state,
-      players: {
-        ...checkpoint.state.players,
-        north: {
-          ...checkpoint.state.players.north,
-          hand: { ...checkpoint.state.players.north.hand, atlas: [] },
-        },
-      },
-    },
-  };
-  assert.equal(legalGameActions(noDiscardCost.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === craterize.instanceId), false);
-
-  const targetChoices = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
-    descriptor.kind === 'cast-magic'
-      && descriptor.cardInstanceId === craterize.instanceId
-      && descriptor.targetSiteInstanceId === targetSite.instanceId);
-  assert.equal(targetChoices.length, checkpoint.state.players.north.hand.atlas.length);
-  const cast = targetChoices[0];
-  assert.ok(cast && cast.descriptor.kind === 'cast-magic' && cast.descriptor.discardSiteInstanceId);
-  if (cast.descriptor.kind !== 'cast-magic' || !cast.descriptor.discardSiteInstanceId) return;
-  const discardedSiteInstanceId = cast.descriptor.discardSiteInstanceId;
-  const beforeForgeHash = hashGameState(checkpoint.state);
-  const forgedDescriptor = { ...cast.descriptor, discardSiteInstanceId: targetSite.instanceId };
-  const forged = stepGame(checkpoint, {
-    actionId: opaqueActionId(
-      'sorcery-core-v1',
-      'north',
-      checkpoint.state.stateVersion,
-      forgedDescriptor,
-    ),
-    seat: 'north',
-    stateVersion: checkpoint.state.stateVersion,
-  });
-  assert.equal(forged.accepted, false);
-  if (!forged.accepted) assert.equal(forged.reason.code, 'unknown_action');
-  assert.equal(hashGameState(forged.session.state), beforeForgeHash);
-
-  const protectedCheckpoint: GameSession = {
-    ...checkpoint,
-    state: {
-      ...checkpoint.state,
-      cards: {
-        ...checkpoint.state.cards,
-        [targetSiteId]: {
-          ...checkpoint.state.cards[targetSiteId]!,
-          cannotBeMovedDestroyedOrModified: true,
-        } as GameCardDefinition,
-      },
-    },
-  };
-  const protectedCast = action(protectedCheckpoint, ({ descriptor }) =>
-    descriptor.kind === 'cast-magic'
-      && descriptor.cardInstanceId === craterize.instanceId
-      && descriptor.targetSiteInstanceId === targetSite.instanceId);
-  const protectedResult = stepGame(protectedCheckpoint, protectedCast);
-  assert.equal(protectedResult.accepted, true);
-  if (!protectedResult.accepted) return;
-  assert.equal(protectedResult.receipt.events.some(({ type }) =>
-    type === 'site-destruction-prevented'), true);
-  assert.equal(protectedResult.receipt.events.some(({ type }) => type === 'rubble-created'), false);
-  assert.deepEqual(protectedResult.session.state.realm.sites.C2, checkpoint.state.realm.sites.C2);
-  assert.equal(protectedResult.session.state.realm.units.find(({ cardId }) =>
-    cardId === 'craterize-center')?.damage, 10);
-
-  const result = stepGame(checkpoint, cast);
-  assert.equal(result.accepted, true);
-  if (!result.accepted) return;
-  const repeated = stepGame(checkpoint, cast);
-  assert.equal(repeated.accepted, true);
-  if (!repeated.accepted) return;
-  assert.deepEqual(repeated.receipt, result.receipt);
-  assert.equal(hashGameState(repeated.session.state), hashGameState(result.session.state));
-  const resolvedUnits = result.session.state.realm.units;
-  const unitState = (cardId: typeof unitIds[number]) =>
-    resolvedUnits.find((unit) => unit.cardId === cardId);
-  assert.deepEqual(unitIds.map((cardId) => [
-    cardId,
-    unitState(cardId)?.damage,
-  ]), [
-    ['craterize-center', 10],
-    ['craterize-seven', 7],
-    ['craterize-four', 4],
-    ['craterize-two', 2],
-    ['craterize-one', 0],
-    ['craterize-oversized', 28],
-    ['craterize-void', 0],
-  ]);
-  assert.equal(unitState('craterize-center')?.region, 'underground');
-  assert.equal(unitState('craterize-two')?.stealthed, true);
-  assert.equal(unitState('craterize-one')?.warded, false);
-  assert.equal(result.session.state.players.north.avatar.life, 16);
-  assert.equal(result.session.state.players.south.avatar.life, 13);
-  assert.equal(result.session.state.players.north.mana, 0);
-  assert.equal(result.session.state.players.north.cemetery.some(({ instanceId }) =>
-    instanceId === craterize.instanceId), true);
-  assert.equal(result.session.state.players.north.cemetery.some(({ instanceId }) =>
-    instanceId === discardedSiteInstanceId), true);
-  assert.equal(result.session.state.players.south.cemetery.some(({ instanceId }) =>
-    instanceId === targetSite.instanceId), true);
-  assert.equal(result.session.state.realm.sites.C2?.controller, null);
-  assert.equal(result.receipt.events.some(({ type }) => type === 'site-destroyed'), true);
-  assert.equal(result.receipt.events.some(({ type }) => type === 'rubble-created'), true);
-  assert.equal(result.receipt.events.at(-1)?.type, 'magic-resolved');
-  assert.deepEqual(result.receipt.randomDraws, []);
-
-  const stale = stepGame(result.session, cast);
-  assert.equal(stale.accepted, false);
-  if (!stale.accepted) assert.equal(stale.reason.code, 'stale_version');
+  // The rest of this board (seven units seeded directly across surface/underground/underwater/
+  // void/an oversized footprint, a discard-cost forgery, a protected target site, and a repeat
+  // + stale-version replay) is not reachable through legal play. Rust proves every one of those
+  // facts directly on `Position` in
+  // `craterize_should_discard_a_site_destroy_its_target_and_apply_its_damage_grid` in
+  // crates/sorcery-engine/src/game.rs `mod tests`: the mandatory discard cost (an empty Atlas
+  // hand offers no cast at all), the discard-cost forgery rejected, the protected-site branch
+  // (`site-destruction-prevented`, no `rubble-created`, the site and its centre unit's damage
+  // unchanged), the printed damage grid landing on every unit (including the oversized and Void
+  // units), the region settling (submerged -> underground once its Water layer is destroyed),
+  // Stealth and Ward surviving/breaking, avatar life and mana, both cemeteries, the Rubble
+  // identity, and a repeated cast reproducing byte-identical events and state. Generic
+  // stale-version rejection after a state-advancing action is proven separately, e.g. in
+  // crates/sorcery-engine/tests/site_destruction_rules.rs and magic_rules.rs.
 });
