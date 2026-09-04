@@ -5,23 +5,16 @@ import { canonicalJson, type JsonValue } from '../../src/authority/canonical-jso
 import { opaqueActionId } from '../../src/engine/contract.ts';
 import {
   createGameManifest,
-  createGameSession,
   hashGameState,
-  legalGameActions,
   observeGame,
-  stepGame,
-  verifyGameReplay,
   type GameCardDefinition,
   type GameDeckSpec,
   type GameLegalAction,
   type GameManifest,
 } from '../../src/engine/game.ts';
 import {
-  accept,
-  action,
   cardsFor,
   deck,
-  keep,
   manifest,
   peekOpening,
   SYNTHETIC_AUTHORITY_HASH,
