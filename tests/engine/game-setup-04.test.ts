@@ -374,21 +374,25 @@ test('RULE-03 an end-turn Aura damages a random affected unit before its optiona
   assert.equal(succeeded, true, 'expected a seed producing two distinct end-turn Aura random outcomes');
 });
 
-// TODO(rust-cutover): the Teleport/Blink occupiesSquareArea gap this test originally hit is
-// fixed (see 205fdfd), but the Rust engine still cannot reproduce this proof: cast-artifact
-// legal actions never disambiguate by bearerCell for an occupiesSquareArea minion.
-// crates/sorcery-engine/src/game.rs `artifact_cast_descriptors` (~line 3834) always builds
-// `ActionDescriptor::CastArtifact { bearer_cell: None, .. }` (line 3854), one descriptor per
-// bearer regardless of how many cells it occupies, whereas src/engine/game.ts
-// `artifactDescriptors` emits one descriptor per occupied cell with an explicit `bearerCell`
-// whenever `cells.length > 1` (see the `bearers.flatMap` branch, ~line 1352). Reproduction:
-// build the RULE-03 footprint manifest below (giant with occupiesSquareArea: 2, artifact
-// grantsBearerPower), summon the giant at B3/B4/C3/C4, then call
-// `ctx.legalActions('north')` filtered to `descriptor.kind === 'cast-artifact' &&
-// descriptor.cardId === artifactCardId` — the Rust engine returns exactly one action for the
-// giant bearer with no `bearerCell` field, instead of four actions (one per occupied cell,
-// `bearerCell` in ['B3','B4','C3','C4']) like the TS engine. This proof stays on the legacy
-// synchronous engine until that gap is closed.
+// TODO(rust-cutover): the two previously reported Teleport/Blink footprint and cast-artifact
+// bearerCell gaps are fixed (205fdfd, 9e6a4f4), but a third gap in the same family blocks this
+// proof: when an oversized bearer carrying an Artifact on a non-anchor footprint cell DIES (not
+// merely drops the Artifact), the Artifact falls at the bearer's primary `location` instead of
+// its `bearerCell`. crates/sorcery-engine/src/game.rs `release_carried_artifacts` (~line 14068,
+// called from `finish_corpses` at ~line 10250 for `minion-died` and from `banish_units` at
+// ~line 9827) always sets `ArtifactPlacement::Loose { location: fell_at.cell, .. }` where
+// `fell_at` is the dying unit's primary `location`/region — it never reads
+// `ArtifactPlacement::Carried { bearer_cell, .. }`, unlike the sibling `DropArtifacts` action
+// handler (~line 13999-14012) which correctly does `bearer_cell.unwrap_or(fell_at.cell)`.
+// src/engine/game.ts honors bearerCell on death too (see `location: 'bearer' in artifact ?
+// artifact.bearerCell ?? bearer.location : bearer.location` at ~line 6184/6194). Reproduction:
+// build the RULE-03 footprint manifest below (giant occupiesSquareArea: 2, artifact
+// grantsBearerPower), summon the giant at B3/B4/C3/C4, cast the artifact onto bearerCell C4,
+// move the giant's footprint to B2/B3/C2/C3 (artifact bearerCell translates to C3, confirmed
+// correct), then cast Cave-In (burrowAllMinionsAndArtifactsAtTargetLandSite) targeting C2 so the
+// giant burrows and dies. The TS engine drops the artifact at its own bearerCell 'C3'; the Rust
+// engine drops it at the giant's primary location 'B2' instead. This proof stays on the legacy
+// synchronous engine until `release_carried_artifacts` is fixed to honor `bearer_cell`.
 test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement, combat, Auras, and terrain', () => {
   const base = manifest(248);
   const preview = createGameSession(base);
