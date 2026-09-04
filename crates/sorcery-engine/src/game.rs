@@ -20921,6 +20921,434 @@ mod tests {
         assert!(!descriptor_json.contains(&hidden_top_card_id));
     }
 
+    /// Ported from the legacy TS-cutover `paymentCheckpoint()` probes in
+    /// `RULE-03 Hamlet reduces only Ordinary minion mana payments at that site`
+    /// (tests/engine/game-setup-01.test.ts): forges the post-setup board those checkpoints
+    /// synthesized (mana, hand, and board units unreachable through legal play from one seed)
+    /// to prove Hamlet's Ordinary-only discount composes correctly with Aramos's discard
+    /// payment mode, Gnarled's per-sacrifice discount tiers, and a `summonToAnySite` bypass.
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one Hamlet Position fixture retains all four payment-mode combinatorics"
+    )]
+    fn hamlet_discount_should_compose_with_aramos_gnarled_and_roaming_payment_modes() {
+        let thresholds = json!({ "air": 0, "earth": 0, "fire": 0, "water": 0 });
+        let manifest = selfplay_manifest_with(701, |manifest| {
+            manifest["cards"]["north-site-1"] = json!({
+                "cardType": "site",
+                "elements": ["earth"],
+                "ordinaryMinionManaDiscount": 1,
+            });
+            manifest["cards"]["north-site-2"] = manifest["cards"]["north-site-1"].clone();
+            manifest["cards"]["north-site-3"] =
+                json!({ "cardType": "site", "elements": ["earth"] });
+            manifest["cards"]["north-spell-1"] = json!({
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 1,
+                "manaCost": 1,
+                "ordinary": true,
+                "thresholds": thresholds,
+            });
+            manifest["cards"]["north-spell-2"] = json!({
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 1,
+                "manaCost": 1,
+                "thresholds": thresholds,
+            });
+            manifest["cards"]["north-spell-3"] = json!({
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 1,
+                "discardRandomCardInsteadOfMana": true,
+                "manaCost": 3,
+                "ordinary": true,
+                "thresholds": thresholds,
+            });
+            manifest["cards"]["north-spell-4"] = json!({
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 1,
+                "manaCost": 6,
+                "sacrificeMinionAtSummoningLocationForManaDiscount": 2,
+                "thresholds": thresholds,
+            });
+            manifest["cards"]["north-spell-5"] = json!({
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 1,
+                "manaCost": 1,
+                "ordinary": true,
+                "summonToAnySite": true,
+                "thresholds": thresholds,
+            });
+            manifest["cards"]["north-spell-6"] = json!({
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 1,
+                "manaCost": 0,
+                "thresholds": thresholds,
+            });
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid Hamlet payment manifest");
+        let find_card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let instance = |card_id: CardId, owner: Seat, source: CardSource, ordinal: usize| {
+            card_instance(&game.rules, card_id, owner, source, ordinal).expect("fixture instance")
+        };
+
+        let c1 = Cell::parse("C1").expect("C1");
+        let c3 = Cell::parse("C3").expect("C3");
+        let c4 = Cell::parse("C4").expect("C4");
+        let hamlet_c4 = instance(
+            find_card_id("north-site-1"),
+            Seat::North,
+            CardSource::Atlas,
+            800,
+        );
+        // South controls the Hamlet at C1 (their own printed copy): a north-owned minion
+        // without `summonToAnySite` cannot summon onto a site it does not control, but the
+        // site-level discount still applies to whichever minion legally lands there.
+        let hamlet_c1 = instance(
+            find_card_id("north-site-2"),
+            Seat::South,
+            CardSource::Atlas,
+            801,
+        );
+        let ordinary_site_c3 = instance(
+            find_card_id("north-site-3"),
+            Seat::North,
+            CardSource::Atlas,
+            802,
+        );
+        let ordinary_one = instance(
+            find_card_id("north-spell-1"),
+            Seat::North,
+            CardSource::Spellbook,
+            810,
+        );
+        let nonordinary_one = instance(
+            find_card_id("north-spell-2"),
+            Seat::North,
+            CardSource::Spellbook,
+            811,
+        );
+        let aramos = instance(
+            find_card_id("north-spell-3"),
+            Seat::North,
+            CardSource::Spellbook,
+            812,
+        );
+        let gnarled = instance(
+            find_card_id("north-spell-4"),
+            Seat::North,
+            CardSource::Spellbook,
+            813,
+        );
+        let roaming = instance(
+            find_card_id("north-spell-5"),
+            Seat::North,
+            CardSource::Spellbook,
+            814,
+        );
+        let helper_card_id = find_card_id("north-spell-6");
+        let helpers: Vec<CardInstance> = (0..3)
+            .map(|ordinal| {
+                instance(
+                    helper_card_id,
+                    Seat::North,
+                    CardSource::Spellbook,
+                    820 + ordinal,
+                )
+            })
+            .collect();
+
+        game.position.sites = std::array::from_fn(|_| None);
+        game.position.rubble = std::array::from_fn(|_| None);
+        for (cell, card, controller) in [
+            (c4, hamlet_c4, Seat::North),
+            (c1, hamlet_c1, Seat::South),
+            (c3, ordinary_site_c3, Seat::North),
+        ] {
+            game.position.sites[cell.index()] = Some(SitePosition {
+                card,
+                controller,
+                last_flight_turn: None,
+            });
+        }
+        game.position.units = Vec::new();
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.avatar.location = c4;
+        north.domain_established = true;
+        north.hand_spellbook = vec![
+            nonordinary_one,
+            aramos,
+            gnarled.clone(),
+            roaming.clone(),
+            ordinary_one,
+        ];
+        north.spellbook = Vec::new();
+        north.mana = 2;
+
+        let summons = |game: &Game, card_id: &str| -> Vec<ActionDescriptor> {
+            game.legal_actions()
+                .expect("legal actions")
+                .into_iter()
+                .filter_map(|action| match &action.descriptor {
+                    ActionDescriptor::SummonMinion {
+                        card_id: candidate, ..
+                    } if candidate == card_id => Some(action.descriptor),
+                    _ => None,
+                })
+                .collect()
+        };
+
+        // Hamlet's discount is Ordinary-only: a non-Ordinary minion pays full price everywhere
+        // it can legally summon, including at the Hamlet cell itself.
+        let mut nonordinary_costs: Vec<(Cell, u64)> = summons(&game, "north-spell-2")
+            .into_iter()
+            .map(|descriptor| match descriptor {
+                ActionDescriptor::SummonMinion {
+                    cell, mana_cost, ..
+                } => (cell, mana_cost),
+                _ => unreachable!("filtered SummonMinion action"),
+            })
+            .collect();
+        nonordinary_costs.sort_by_key(|(cell, _)| *cell);
+        assert_eq!(nonordinary_costs, [(c3, 1), (c4, 1)]);
+
+        // A plain Ordinary minion without summonToAnySite cannot reach the far controlled
+        // Hamlet at C1 -- only sites within the caster's normal summon range are legal.
+        assert!(!summons(&game, "north-spell-1")
+            .into_iter()
+            .any(|descriptor| matches!(descriptor, ActionDescriptor::SummonMinion { cell, .. } if cell == c1)));
+
+        // summonToAnySite bypasses the range restriction, and Hamlet still discounts it there.
+        assert!(
+            summons(&game, "north-spell-5")
+                .into_iter()
+                .any(|descriptor| matches!(
+                    descriptor,
+                    ActionDescriptor::SummonMinion { cell, mana_cost: 0, .. } if cell == c1
+                ))
+        );
+
+        // Aramos's discard-vs-mana payment ordering: at Hamlet (C4) the mana price is
+        // discounted to 2 (affordable with 2 mana), so both payment modes are legal; at the
+        // plain site (C3) only the discard mode is legal because 3 mana is unaffordable.
+        let mut aramos_costs: Vec<(Cell, u64, Option<SummonPaymentMode>)> =
+            summons(&game, "north-spell-3")
+                .into_iter()
+                .map(|descriptor| match descriptor {
+                    ActionDescriptor::SummonMinion {
+                        cell,
+                        mana_cost,
+                        payment_mode,
+                        ..
+                    } => (cell, mana_cost, payment_mode),
+                    _ => unreachable!("filtered SummonMinion action"),
+                })
+                .collect();
+        aramos_costs.sort_by_key(|(cell, mana_cost, _)| (*cell, *mana_cost));
+        assert_eq!(
+            aramos_costs,
+            [
+                (c3, 0, Some(SummonPaymentMode::RandomCardDiscard)),
+                (c4, 0, Some(SummonPaymentMode::RandomCardDiscard)),
+                (c4, 2, None),
+            ]
+        );
+
+        // Gnarled's per-sacrifice discount stacks independently of Hamlet: with three ready
+        // local minions to sacrifice at the Hamlet cell, every tier from 0 to 3 sacrifices is
+        // legal and each sacrifice removes 2 mana from the printed cost of 6.
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.hand_spellbook = vec![gnarled, roaming];
+        north.mana = 6;
+        game.position.units = helpers
+            .iter()
+            .map(|card| UnitPosition {
+                card: card.clone(),
+                carried_lance_count: 0,
+                controller: Seat::North,
+                damage: 0,
+                disable_effects: Vec::new(),
+                disabled_until_damaged: false,
+                last_dropped_artifacts_turn: None,
+                last_interacted_turn: None,
+                last_picked_up_artifacts_turn: None,
+                location: c4,
+                occupied_cells: None,
+                planar_gate_voidwalk: false,
+                region: Region::Surface,
+                stealthed: false,
+                summoning_sickness: false,
+                tapped: false,
+                temporary_charge_sources: Vec::new(),
+                temporary_power_sources: Vec::new(),
+                warded: false,
+            })
+            .collect();
+        let mut gnarled_tiers: Vec<(usize, u64)> = summons(&game, "north-spell-4")
+            .into_iter()
+            .filter_map(|descriptor| match descriptor {
+                ActionDescriptor::SummonMinion {
+                    cell,
+                    mana_cost,
+                    sacrificed_minion_instance_ids,
+                    ..
+                } if cell == c4 => Some((
+                    sacrificed_minion_instance_ids.map_or(0, |ids| ids.len()),
+                    mana_cost,
+                )),
+                _ => None,
+            })
+            .collect();
+        gnarled_tiers.sort_unstable();
+        gnarled_tiers.dedup();
+        assert_eq!(gnarled_tiers, [(0, 6), (1, 4), (2, 2), (3, 0)]);
+    }
+
+    /// Ported from the legacy TS-cutover underground-caster probe in
+    /// `RULE-03/04 Cave-In burrows every surface minion and Artifact at one Land Site together`
+    /// (tests/engine/game-setup-03.test.ts): that probe forced the north Avatar's region to
+    /// `'underground'`, a state the Rust `AvatarPosition` cannot represent (it carries no
+    /// `region` field, and `spellcaster_location` hardcodes the Avatar caster's region to
+    /// `Region::Surface`), so casting from an underground Avatar is impossible to forge here.
+    /// The rule it exercised -- `BurrowAllMinionsAndArtifactsAtTargetLandSite` yields zero
+    /// choices unless its caster's own region is `Surface` (`crates/sorcery-engine/src/game.rs`,
+    /// the `MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite` arm of `magic_choices`)
+    /// -- is instead proven here with an underground spellcaster minion, which is a
+    /// representable Rust state and exercises the identical gate.
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the direct Position fixture retains caster, site, and hand setup inline"
+    )]
+    fn burrow_all_minions_magic_should_require_a_surface_caster() {
+        let thresholds = json!({ "air": 0, "earth": 0, "fire": 0, "water": 0 });
+        let manifest = selfplay_manifest_with(702, |manifest| {
+            manifest["cards"]["north-spell-1"] = json!({
+                "burrowAllMinionsAndArtifactsAtTargetLandSite": true,
+                "cardType": "magic",
+                "manaCost": 0,
+                "thresholds": thresholds,
+            });
+            manifest["cards"]["north-spell-2"] = json!({
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 1,
+                "manaCost": 0,
+                "spellcaster": true,
+                "thresholds": thresholds,
+            });
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid Cave-In manifest");
+        let find_card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let spell = card_instance(
+            &game.rules,
+            find_card_id("north-spell-1"),
+            Seat::North,
+            CardSource::Spellbook,
+            900,
+        )
+        .expect("fixture instance");
+        let caster_card = card_instance(
+            &game.rules,
+            find_card_id("north-spell-2"),
+            Seat::North,
+            CardSource::Spellbook,
+            901,
+        )
+        .expect("fixture instance");
+        let caster_location = game.position.players[seat_index(Seat::North)]
+            .avatar
+            .location;
+        let site = card_instance(
+            &game.rules,
+            find_card_id("north-site-1"),
+            Seat::North,
+            CardSource::Atlas,
+            902,
+        )
+        .expect("fixture instance");
+        game.position.sites[caster_location.index()] = Some(SitePosition {
+            card: site,
+            controller: Seat::North,
+            last_flight_turn: None,
+        });
+
+        game.position.units = vec![UnitPosition {
+            card: caster_card.clone(),
+            carried_lance_count: 0,
+            controller: Seat::North,
+            damage: 0,
+            disable_effects: Vec::new(),
+            disabled_until_damaged: false,
+            last_dropped_artifacts_turn: None,
+            last_interacted_turn: None,
+            last_picked_up_artifacts_turn: None,
+            location: caster_location,
+            occupied_cells: None,
+            planar_gate_voidwalk: false,
+            region: Region::Underground,
+            stealthed: false,
+            summoning_sickness: false,
+            tapped: false,
+            temporary_charge_sources: Vec::new(),
+            temporary_power_sources: Vec::new(),
+            warded: false,
+        }];
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.hand_spellbook = vec![spell.clone()];
+        north.spellbook = Vec::new();
+        north.mana = 0;
+        north.domain_established = true;
+
+        let actions = game.legal_actions().expect("legal actions");
+        assert!(
+            !actions.iter().any(|action| matches!(
+                &action.descriptor,
+                ActionDescriptor::CastMagic {
+                    card_instance_id,
+                    caster_instance_id,
+                    ..
+                } if *card_instance_id == spell.instance_id
+                    && *caster_instance_id == caster_card.instance_id
+            )),
+            "an underground spellcaster must not offer Burrow-All-at-Land-Site targets"
+        );
+    }
+
     /// One Teleport board: an oversized minion at A1-B2, a full site block at C3-D4, and one
     /// lone site at A4 that no two-by-two footprint can fit onto.
     fn footprint_teleport_game(gate_power: bool) -> (Game, IdentityHash) {
