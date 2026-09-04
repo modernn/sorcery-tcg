@@ -11,7 +11,6 @@ import { opaqueActionId } from '../../src/engine/contract.ts';
 import {
   createGameManifest,
   hashGameState,
-  legalGameActions,
   observeGame,
   type GameCardDefinition,
   type GameDeckSpec,
@@ -1244,88 +1243,21 @@ test('RULE-03 Granary Rats suppresses its site threshold while enabled', async (
     assert.ok(gated);
     assert.ok(rats);
     const baseline = ctx.session;
-    // TODO(rust-cutover): synthetic state, needs a Rust-side proof. This test hand-builds
-    // GameSession objects (edited region/controller/cards/disableEffects) that are not
-    // reachable through legal play, so the Rust engine cannot be handed them; the affinity-
-    // suppression legality probes below stay on the legacy TS `legalGameActions`. The overall
-    // rule (enabled Granary Rats suppress the site threshold; a disabled Granary Rats or a
-    // protected site does not) is also proven directly in Rust by
-    // `rule_catalog_0094_granary_rats_suppress_site_threshold_while_enabled` in
-    // crates/sorcery-engine/tests/readiness_affinity_rules.rs, but that proof does not cover
-    // every branch below (e.g. a void-region rat, or one of two rats disabled), so this test
-    // is kept in full on the legacy engine rather than weakened.
-    const canSummonGated = (checkpoint: GameSession) => legalGameActions(checkpoint.state, 'north')
-      .some(({ descriptor }) => descriptor.kind === 'summon-minion'
-        && descriptor.cardId === 'gated' && descriptor.cell === 'C4');
     assert.deepEqual(observeGame(baseline.state, 'north').players.north.affinity,
       { air: 0, earth: 1, fire: 1, water: 0 });
-    assert.equal(canSummonGated(baseline), true);
     assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
       descriptor.kind === 'summon-minion'
         && descriptor.cardId === 'gated' && descriptor.cell === 'C4'), true);
 
-    const unit = {
-      ...rats,
-      controller: 'north' as const,
-      damage: 0,
-      location: 'C4' as const,
-      region: 'underground' as const,
-      stealthed: false,
-      summoningSickness: false,
-      tapped: false,
-      warded: false,
-    };
-    const withUnits = (units: GameSession['state']['realm']['units']): GameSession => ({
-      ...baseline,
-      state: {
-        ...baseline.state,
-        realm: { ...baseline.state.realm, units },
-      },
-    });
-    const voidRat = withUnits([{ ...unit, region: 'void' }]);
-    assert.equal(canSummonGated(voidRat), true);
-    const enemyInstanceId =
-      'sha256:2222222222222222222222222222222222222222222222222222222222222222' as const;
-    const suppressed = withUnits([
-      unit,
-      { ...unit, controller: 'south', instanceId: enemyInstanceId, region: 'underwater' },
-    ]);
-    assert.deepEqual(observeGame(suppressed.state, 'north').players.north.affinity,
-      { air: 0, earth: 0, fire: 0, water: 0 });
-    assert.equal(canSummonGated(suppressed), false);
-
-    const immutableSuppressed: GameSession = {
-      ...suppressed,
-      state: {
-        ...suppressed.state,
-        cards: {
-          ...suppressed.state.cards,
-          'dual-site': {
-            ...suppressed.state.cards['dual-site']!,
-            cannotBeMovedDestroyedOrModified: true,
-          } as GameCardDefinition,
-        },
-      },
-    };
-    assert.deepEqual(observeGame(immutableSuppressed.state, 'north').players.north.affinity,
-      { air: 0, earth: 1, fire: 1, water: 0 });
-    assert.equal(canSummonGated(immutableSuppressed), true);
-
-    const oneDisabled = withUnits(suppressed.state.realm.units.map((candidate) =>
-      candidate.instanceId === unit.instanceId
-        ? {
-          ...candidate,
-          disableEffects: [{ expiresAtSeat: 'north' as const, sourceInstanceId: candidate.instanceId }],
-        }
-        : candidate));
-    assert.equal(canSummonGated(oneDisabled), false);
-    const allDisabled = withUnits(oneDisabled.state.realm.units.map((candidate) => ({
-      ...candidate,
-      disableEffects: [{ expiresAtSeat: 'north' as const, sourceInstanceId: candidate.instanceId }],
-    })));
-    assert.deepEqual(observeGame(allDisabled.state, 'north').players.north.affinity,
-      { air: 0, earth: 1, fire: 1, water: 0 });
-    assert.equal(canSummonGated(allDisabled), true);
+    // Every other Granary Rats suppression branch is proven directly in Rust: an enabled rat
+    // suppressing an occupied site, a disabled rat not suppressing it, and a protected site
+    // retaining its threshold despite an active rat by
+    // `rule_catalog_0094_granary_rats_suppress_site_threshold_while_enabled` in
+    // crates/sorcery-engine/tests/readiness_affinity_rules.rs; a void-region rat suppressing
+    // nothing by `void_granary_rats_leaves_every_site_threshold_alone`, and one of two rats
+    // disabled leaving its enabled twin's suppression intact by
+    // `one_disabled_granary_rats_still_suppresses_beside_its_enabled_twin`, both in
+    // crates/sorcery-engine/tests/granary_rats_cutover_rules.rs.
   });
 });
 
