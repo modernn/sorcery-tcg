@@ -1720,17 +1720,6 @@ test('RULE-03 Raise Dead selects a public random cemetery minion before free pla
     assert.equal(await ctx.verifyReplay(), true);
   });
 
-  // TODO(rust-cutover): this one branch stays on the legacy synchronous engine. The Rust
-  // engine never applies `preventsUnitsWithPowerAtLeastFromEntering` to summons: TS filters
-  // every summon destination through `unitEntryAllowed(..., 'summon')` (src/engine/game.ts
-  // summonLocations), while Rust's `free_summon_destinations`/`summon_regions`
-  // (crates/sorcery-engine/src/game.rs) consult only `surface_location_exists`, so
-  // `unit_entry_allowed` is reached from movement and teleport but never from a summon.
-  // Reproduction: with `blockedManifest` below, after `resolve-random-outcome` selects the
-  // South corpse (attack 2) Rust issues `Raise raise-dead-south-corpse at C1 (free)` and
-  // `... at C4 (free)` and parks in `cemetery-summon`, where TS issues no placement and
-  // resolves `magic-cast, dead-minion-selected, minion-summon-failed, magic-resolved` back
-  // into `main`. Needs the Rust summon gate (and a Rust proof) before it can move.
   const blockedManifest = createGameManifest({
     ...input,
     cards: {
@@ -1741,42 +1730,45 @@ test('RULE-03 Raise Dead selects a public random cemetery minion before free pla
       } as GameCardDefinition,
     },
   });
-  let blocked = keep(keep(createGameSession(blockedManifest)));
-  const blockedTake = (predicate: Parameters<typeof action>[1]): void => {
-    blocked = accept(blocked, action(blocked, predicate));
-  };
-  blockedTake(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
-  blockedTake(({ descriptor }) => descriptor.kind === 'cast-artifact'
-    && descriptor.cardId === luckyCharmId && descriptor.bearer?.kind === 'avatar');
-  blockedTake(({ descriptor }) => descriptor.kind === 'end-turn');
-  blockedTake(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  blockedTake(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-  blockedTake(({ descriptor }) => descriptor.kind === 'end-turn');
-  blockedTake(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  const blockedCorpse = blocked.state.players.south.cemetery.find(({ cardId }) =>
-    cardId === southCorpseId);
-  assert.ok(blockedCorpse);
-  const blockedCast = stepGame(blocked, action(blocked, ({ descriptor }) =>
-    descriptor.kind === 'cast-magic' && descriptor.cardId === raiseDeadId));
-  assert.equal(blockedCast.accepted, true);
-  if (!blockedCast.accepted) return;
-  const blockedChoice = legalGameActions(blockedCast.session.state, 'north')
-    .find(({ descriptor }) => descriptor.kind === 'resolve-random-outcome'
-      && descriptor.outcomeInstanceId === blockedCorpse.instanceId);
-  assert.ok(blockedChoice);
-  const failedPlacement = stepGame(blockedCast.session, blockedChoice);
-  assert.equal(failedPlacement.accepted, true);
-  if (!failedPlacement.accepted) return;
-  assert.equal(failedPlacement.session.state.phase, 'main');
-  assert.deepEqual(failedPlacement.receipt.events.map(({ type }) => type), [
-    'magic-cast',
-    'dead-minion-selected',
-    'minion-summon-failed',
-    'magic-resolved',
-  ]);
-  assert.equal(failedPlacement.session.state.players.south.cemetery.some(({ instanceId }) =>
-    instanceId === blockedCorpse.instanceId), true);
-  assert.equal(verifyGameReplay(failedPlacement.session), true);
+  await withSetup(blockedManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    const blockedTake = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+      await takeAction(ctx, predicate);
+    };
+    await blockedTake(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await blockedTake(({ descriptor }) => descriptor.kind === 'cast-artifact'
+      && descriptor.cardId === luckyCharmId && descriptor.bearer?.kind === 'avatar');
+    await blockedTake(({ descriptor }) => descriptor.kind === 'end-turn');
+    await blockedTake(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await blockedTake(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await blockedTake(({ descriptor }) => descriptor.kind === 'end-turn');
+    await blockedTake(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    const blockedCorpse = ctx.state.players.south.cemetery.find(({ cardId }) =>
+      cardId === southCorpseId);
+    assert.ok(blockedCorpse);
+    const blockedCast = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic' && descriptor.cardId === raiseDeadId));
+    assert.equal(blockedCast.accepted, true);
+    if (!blockedCast.accepted) return;
+    const blockedChoice = (await ctx.legalActions('north'))
+      .find(({ descriptor }) => descriptor.kind === 'resolve-random-outcome'
+        && descriptor.outcomeInstanceId === blockedCorpse.instanceId);
+    assert.ok(blockedChoice);
+    const failedPlacement = await ctx.step(blockedChoice);
+    assert.equal(failedPlacement.accepted, true);
+    if (!failedPlacement.accepted) return;
+    assert.equal(ctx.state.phase, 'main');
+    assert.deepEqual(failedPlacement.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'dead-minion-selected',
+      'minion-summon-failed',
+      'magic-resolved',
+    ]);
+    assert.equal(ctx.state.players.south.cemetery.some(({ instanceId }) =>
+      instanceId === blockedCorpse.instanceId), true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 
   await withSetup(gameManifest, async (ctx) => {
     await ctx.keep();
