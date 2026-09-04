@@ -374,10 +374,21 @@ test('RULE-03 an end-turn Aura damages a random affected unit before its optiona
   assert.equal(succeeded, true, 'expected a seed producing two distinct end-turn Aura random outcomes');
 });
 
-// TODO(rust-cutover): the Rust engine cannot compute legal actions for TeleportAllyToTargetSite
-// or TeleportNearbyAllyThenDrawCard once the controller has any occupiesSquareArea minion
-// (crates/sorcery-engine/src/game.rs GameError::UnsupportedManifestFact("teleportAllyToTargetSite:occupiesSquareArea")),
-// so this proof stays on the legacy synchronous engine until that gap is closed.
+// TODO(rust-cutover): the Teleport/Blink occupiesSquareArea gap this test originally hit is
+// fixed (see 205fdfd), but the Rust engine still cannot reproduce this proof: cast-artifact
+// legal actions never disambiguate by bearerCell for an occupiesSquareArea minion.
+// crates/sorcery-engine/src/game.rs `artifact_cast_descriptors` (~line 3834) always builds
+// `ActionDescriptor::CastArtifact { bearer_cell: None, .. }` (line 3854), one descriptor per
+// bearer regardless of how many cells it occupies, whereas src/engine/game.ts
+// `artifactDescriptors` emits one descriptor per occupied cell with an explicit `bearerCell`
+// whenever `cells.length > 1` (see the `bearers.flatMap` branch, ~line 1352). Reproduction:
+// build the RULE-03 footprint manifest below (giant with occupiesSquareArea: 2, artifact
+// grantsBearerPower), summon the giant at B3/B4/C3/C4, then call
+// `ctx.legalActions('north')` filtered to `descriptor.kind === 'cast-artifact' &&
+// descriptor.cardId === artifactCardId` — the Rust engine returns exactly one action for the
+// giant bearer with no `bearerCell` field, instead of four actions (one per occupied cell,
+// `bearerCell` in ['B3','B4','C3','C4']) like the TS engine. This proof stays on the legacy
+// synchronous engine until that gap is closed.
 test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement, combat, Auras, and terrain', () => {
   const base = manifest(248);
   const preview = createGameSession(base);
