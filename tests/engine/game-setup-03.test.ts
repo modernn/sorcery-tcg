@@ -5,11 +5,7 @@ import { canonicalJson } from '../../src/authority/canonical-json.ts';
 import { createGameCheckpoint } from '../../src/engine/checkpoint.ts';
 import {
   createGameManifest,
-  createGameSession,
-  legalGameActions,
   observeGame,
-  stepGame,
-  verifyGameReplay,
   type GameCardDefinition,
   type GameDeckSpec,
   type GameLegalAction,
@@ -17,12 +13,10 @@ import {
   type GameSession,
 } from '../../src/engine/game.ts';
 import {
-  accept,
-  action,
   cardsFor,
   deck,
-  keep,
   manifest,
+  peekOpening,
   SYNTHETIC_AUTHORITY_HASH,
   takeAction,
   withNumericGenesisSession,
@@ -310,36 +304,15 @@ test('RULE-03/04 Cave-In burrows every surface minion and Artifact at one Land S
         && descriptor.targetLocation
         ? [`${descriptor.targetLocation.cell}:${descriptor.targetLocation.region}`]
         : []), ['C1:surface']);
-      const rubbleId = 'sha256:6666666666666666666666666666666666666666666666666666666666666666' as const;
-      const rubbleState = {
-        ...ctx.state,
-        realm: {
-          ...ctx.state.realm,
-          sites: {
-            ...ctx.state.realm.sites,
-            A1: { controller: null, instanceId: rubbleId, rubble: true as const },
-          },
-        },
-      };
-      // TODO(rust-cutover): synthetic state (injected Rubble, forced underground Avatar) that
-      // legal play cannot reach, so these two probes still use the TS legalGameActions engine.
-      // Needs Rust-side proofs before the TypeScript legality engine can be deleted.
-      assert.equal(legalGameActions(rubbleState, 'north').some(({ descriptor }) =>
-        descriptor.kind === 'cast-magic'
-          && descriptor.cardInstanceId === spell.instanceId
-          && descriptor.targetSiteInstanceId === rubbleId
-          && descriptor.targetLocation?.cell === 'A1'), true);
-      assert.equal(legalGameActions({
-        ...ctx.state,
-        players: {
-          ...ctx.state.players,
-          north: {
-            ...ctx.state.players.north,
-            avatar: { ...ctx.state.players.north.avatar, region: 'underground' as const },
-          },
-        },
-      }, 'north').some(({ descriptor }) => descriptor.kind === 'cast-magic'
-        && descriptor.cardInstanceId === spell.instanceId), false);
+      // Both probes here forge state legal play cannot reach: a Rubble injected at a specific
+      // cell, and the north Avatar's region forced to 'underground' (the Rust `AvatarPosition`
+      // carries no region field at all, so that state is not representable there). Both facts
+      // are proven directly in Rust instead: Cave-In legally targeting Rubble alongside a land
+      // site is `rule_catalog_0044_cave_in_minion_slice_should_burrow_in_canonical_order`
+      // (crates/sorcery-engine/tests/magic_rules.rs), and the caster-region gate that empties
+      // Cave-In's target choices for an underground caster is
+      // `burrow_all_minions_magic_should_require_a_surface_caster`
+      // (crates/sorcery-engine/src/game.rs).
       const result = await ctx.step(casts[0]!);
       assert.equal(result.accepted, true);
       if (!result.accepted) return;
@@ -834,12 +807,9 @@ test('RULE-03 a Water-site cast restriction filters unrestricted summons by terr
   });
 });
 
-// TODO(rust-cutover): the Rust engine does not yet emit `stealth-lost` when a stealthed
-// minion is revealed by moving or is killed by site destruction, so this proof still runs
-// on the legacy TypeScript legality engine. Needs a Rust-side fix plus a Rust proof.
-test('RULE-03/04 Waterbound derives Disabled from terrain and survives only with active abilities', () => {
+test('RULE-03/04 Waterbound derives Disabled from terrain and survives only with active abilities', async () => {
   const base = manifest(228);
-  const preview = createGameSession(base);
+  const preview = await peekOpening(base);
   const waterSiteId = preview.state.players.north.hand.atlas[0]?.cardId;
   const sinkholeId = preview.state.players.north.hand.atlas[1]?.cardId;
   const waterboundId = preview.state.players.north.hand.spellbook[0]?.cardId;
@@ -890,164 +860,175 @@ test('RULE-03/04 Waterbound derives Disabled from terrain and survives only with
     firstSeat: base.firstSeat,
     seed: base.seed,
   });
-  let session = keep(keep(createGameSession(gameManifest)));
-  const waterSite = session.state.players.north.hand.atlas.find(({ cardId }) =>
-    cardId === waterSiteId);
-  const sinkhole = session.state.players.north.hand.atlas.find(({ cardId }) =>
-    cardId === sinkholeId);
-  const waterbound = session.state.players.north.hand.spellbook.find(({ cardId }) =>
-    cardId === waterboundId);
-  const teleport = session.state.players.north.hand.spellbook.find(({ cardId }) =>
-    cardId === teleportId);
-  assert.ok(waterSite);
-  assert.ok(sinkhole);
-  assert.ok(waterbound);
-  assert.ok(teleport);
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site'
-      && descriptor.cardInstanceId === waterSite.instanceId
-      && descriptor.cell === 'C4'));
-  const summonCheckpoint = session;
-  const summonRegions = legalGameActions(summonCheckpoint.state, 'north').flatMap(({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === waterbound.instanceId
-      ? [descriptor.region ?? 'surface']
-      : []);
-  assert.deepEqual(summonRegions, ['underwater', 'surface']);
-  const summoned = (region: 'surface' | 'underwater'): GameSession =>
-    accept(summonCheckpoint, action(summonCheckpoint, ({ descriptor }) =>
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    const waterSite = ctx.state.players.north.hand.atlas.find(({ cardId }) =>
+      cardId === waterSiteId);
+    const sinkhole = ctx.state.players.north.hand.atlas.find(({ cardId }) =>
+      cardId === sinkholeId);
+    const waterbound = ctx.state.players.north.hand.spellbook.find(({ cardId }) =>
+      cardId === waterboundId);
+    const teleport = ctx.state.players.north.hand.spellbook.find(({ cardId }) =>
+      cardId === teleportId);
+    assert.ok(waterSite);
+    assert.ok(sinkhole);
+    assert.ok(waterbound);
+    assert.ok(teleport);
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardInstanceId === waterSite.instanceId
+        && descriptor.cell === 'C4');
+    const cp = createGameCheckpoint(ctx.session);
+    const summonRegions = (await ctx.legalActions('north')).flatMap(({ descriptor }) =>
       descriptor.kind === 'summon-minion'
         && descriptor.cardInstanceId === waterbound.instanceId
-        && (descriptor.region ?? 'surface') === region));
-  const underwater = summoned('underwater');
-  assert.equal(observeGame(underwater.state, 'north').realm.units[0]?.disabled, false);
-  assert.equal(observeGame(underwater.state, 'north').realm.units[0]?.stealthed, true);
-  assert.equal(observeGame(underwater.state, 'north').players.north.affinity.water, 2);
-  assert.equal(verifyGameReplay(underwater), true);
+        ? [descriptor.region ?? 'surface']
+        : []);
+    assert.deepEqual(summonRegions, ['underwater', 'surface']);
 
-  const northSecondMain = (start: GameSession): GameSession => {
-    let branch = accept(start, action(start, ({ descriptor }) => descriptor.kind === 'end-turn'));
-    branch = accept(branch, action(branch, ({ descriptor }) =>
-      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-    branch = accept(branch, action(branch, ({ descriptor }) =>
-      descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
-    branch = accept(branch, action(branch, ({ descriptor }) => descriptor.kind === 'end-turn'));
-    branch = accept(branch, action(branch, ({ descriptor }) =>
-      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-    return accept(branch, action(branch, ({ descriptor }) =>
-      descriptor.kind === 'play-site'
-        && descriptor.cardInstanceId === sinkhole.instanceId
-        && descriptor.cell === 'C3'));
-  };
+    const northSecondMain = async (): Promise<void> => {
+      await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+      await takeAction(ctx, ({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+      await takeAction(ctx, ({ descriptor }) =>
+        descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+      await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+      await takeAction(ctx, ({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+      await takeAction(ctx, ({ descriptor }) =>
+        descriptor.kind === 'play-site'
+          && descriptor.cardInstanceId === sinkhole.instanceId
+          && descriptor.cell === 'C3');
+    };
 
-  const underwaterCheckpoint = northSecondMain(underwater);
-  const atlasBefore = underwaterCheckpoint.state.players.north.atlas.length;
-  const atlasHandBefore = underwaterCheckpoint.state.players.north.hand.atlas.length;
-  const destroyed = stepGame(underwaterCheckpoint, action(underwaterCheckpoint, ({ descriptor }) =>
-    descriptor.kind === 'activate-site-destruction'
-      && descriptor.sourceSiteInstanceId === sinkhole.instanceId
-      && descriptor.targetCell === 'C4'));
-  assert.equal(destroyed.accepted, true);
-  assert.deepEqual(destroyed.receipt.events.map(({ type }) => type), [
-    'site-sacrificed',
-    'site-destroyed',
-    'stealth-lost',
-    'minion-died',
-    'rubble-created',
-    'rubble-created',
-  ]);
-  assert.equal(destroyed.session.state.realm.units.some(({ instanceId }) =>
-    instanceId === waterbound.instanceId), false);
-  assert.equal(destroyed.session.state.players.north.atlas.length, atlasBefore);
-  assert.equal(destroyed.session.state.players.north.hand.atlas.length, atlasHandBefore);
-  assert.equal(destroyed.receipt.events.some(({ type }) => type === 'site-drawn'), false);
-  assert.equal(verifyGameReplay(destroyed.session), true);
+    // --- underwater branch: summon underwater, then destroy the site under it ---
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === waterbound.instanceId
+        && (descriptor.region ?? 'surface') === 'underwater');
+    assert.equal(observeGame(ctx.state, 'north').realm.units[0]?.disabled, false);
+    assert.equal(observeGame(ctx.state, 'north').realm.units[0]?.stealthed, true);
+    assert.equal(observeGame(ctx.state, 'north').players.north.affinity.water, 2);
+    assert.equal(await ctx.verifyReplay(), true);
 
-  const surface = summoned('surface');
-  assert.equal(observeGame(surface.state, 'north').realm.units[0]?.stealthed, true);
-  let activeTargetCheckpoint = accept(surface, action(surface, ({ descriptor }) =>
-    descriptor.kind === 'end-turn'));
-  activeTargetCheckpoint = accept(activeTargetCheckpoint, action(activeTargetCheckpoint, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  assert.equal(legalGameActions(activeTargetCheckpoint.state, 'south').some(({ descriptor }) =>
-    descriptor.kind === 'cast-magic'
-      && descriptor.target?.instanceId === waterbound.instanceId), false);
-  session = northSecondMain(surface);
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === waterbound.instanceId
-      && descriptor.to.cell === 'C3'));
-  assert.deepEqual(session.transcript.at(-1)?.events.map(({ type }) => type), [
-    'move-and-attack-activated',
-    'stealth-lost',
-  ]);
-  assert.equal(session.state.realm.units.find(({ instanceId }) =>
-    instanceId === waterbound.instanceId)?.stealthed, false);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
-  assert.equal(observeGame(session.state, 'north').realm.units[0]?.disabled, true);
-  assert.equal(observeGame(session.state, 'north').realm.units[0]?.stealthed, false);
-  assert.equal(observeGame(session.state, 'north').players.north.affinity.water, 1);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
-    descriptor.kind === 'cast-magic'
-      && descriptor.target?.instanceId === waterbound.instanceId), true);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  const disabledActions = legalGameActions(session.state, 'north');
-  assert.equal(disabledActions.some(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === waterbound.instanceId), false);
-  assert.equal(disabledActions.some(({ descriptor }) =>
-    descriptor.kind === 'activate-mana'
-      && descriptor.unitInstanceId === waterbound.instanceId), false);
-  const beforeTeleport = session.state.realm.units.find(({ instanceId }) =>
-    instanceId === waterbound.instanceId);
-  assert.ok(beforeTeleport);
-  assert.deepEqual({
-    damage: beforeTeleport.damage,
-    summoningSickness: beforeTeleport.summoningSickness,
-    tapped: beforeTeleport.tapped,
-  }, { damage: 0, summoningSickness: false, tapped: false });
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'cast-magic'
-      && descriptor.cardInstanceId === teleport.instanceId
-      && descriptor.ally?.instanceId === waterbound.instanceId
-      && descriptor.targetLocation?.cell === 'C4'));
-  const returned = session.state.realm.units.find(({ instanceId }) =>
-    instanceId === waterbound.instanceId);
-  assert.deepEqual({
-    damage: returned?.damage,
-    location: returned?.location,
-    region: returned?.region,
-    summoningSickness: returned?.summoningSickness,
-    tapped: returned?.tapped,
-  }, {
-    damage: 0,
-    location: 'C4',
-    region: 'surface',
-    summoningSickness: false,
-    tapped: false,
+    await northSecondMain();
+    const atlasBefore = ctx.state.players.north.atlas.length;
+    const atlasHandBefore = ctx.state.players.north.hand.atlas.length;
+    const destroyed = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'activate-site-destruction'
+        && descriptor.sourceSiteInstanceId === sinkhole.instanceId
+        && descriptor.targetCell === 'C4'));
+    assert.equal(destroyed.accepted, true);
+    if (!destroyed.accepted) return;
+    assert.deepEqual(destroyed.receipt.events.map(({ type }) => type), [
+      'site-sacrificed',
+      'site-destroyed',
+      'stealth-lost',
+      'minion-died',
+      'rubble-created',
+      'rubble-created',
+    ]);
+    assert.equal(ctx.state.realm.units.some(({ instanceId }) =>
+      instanceId === waterbound.instanceId), false);
+    assert.equal(ctx.state.players.north.atlas.length, atlasBefore);
+    assert.equal(ctx.state.players.north.hand.atlas.length, atlasHandBefore);
+    assert.equal(destroyed.receipt.events.some(({ type }) => type === 'site-drawn'), false);
+    assert.equal(await ctx.verifyReplay(), true);
+
+    // --- surface branch: summon on the surface and confirm Disabled survival rules ---
+    await ctx.resume(cp);
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === waterbound.instanceId
+        && (descriptor.region ?? 'surface') === 'surface');
+    assert.equal(observeGame(ctx.state, 'north').realm.units[0]?.stealthed, true);
+    const surfaceCp = createGameCheckpoint(ctx.session);
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    assert.equal((await ctx.legalActions('south')).some(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.target?.instanceId === waterbound.instanceId), false);
+
+    await ctx.resume(surfaceCp);
+    await northSecondMain();
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === waterbound.instanceId
+        && descriptor.to.cell === 'C3');
+    assert.deepEqual(ctx.session.transcript.at(-1)?.events.map(({ type }) => type), [
+      'move-and-attack-activated',
+      'stealth-lost',
+    ]);
+    assert.equal(ctx.state.realm.units.find(({ instanceId }) =>
+      instanceId === waterbound.instanceId)?.stealthed, false);
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'decline-attack');
+    assert.equal(observeGame(ctx.state, 'north').realm.units[0]?.disabled, true);
+    assert.equal(observeGame(ctx.state, 'north').realm.units[0]?.stealthed, false);
+    assert.equal(observeGame(ctx.state, 'north').players.north.affinity.water, 1);
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    assert.equal((await ctx.legalActions('south')).some(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.target?.instanceId === waterbound.instanceId), true);
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const disabledActions = await ctx.legalActions('north');
+    assert.equal(disabledActions.some(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === waterbound.instanceId), false);
+    assert.equal(disabledActions.some(({ descriptor }) =>
+      descriptor.kind === 'activate-mana'
+        && descriptor.unitInstanceId === waterbound.instanceId), false);
+    const beforeTeleport = ctx.state.realm.units.find(({ instanceId }) =>
+      instanceId === waterbound.instanceId);
+    assert.ok(beforeTeleport);
+    assert.deepEqual({
+      damage: beforeTeleport.damage,
+      summoningSickness: beforeTeleport.summoningSickness,
+      tapped: beforeTeleport.tapped,
+    }, { damage: 0, summoningSickness: false, tapped: false });
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === teleport.instanceId
+        && descriptor.ally?.instanceId === waterbound.instanceId
+        && descriptor.targetLocation?.cell === 'C4');
+    const returned = ctx.state.realm.units.find(({ instanceId }) =>
+      instanceId === waterbound.instanceId);
+    assert.deepEqual({
+      damage: returned?.damage,
+      location: returned?.location,
+      region: returned?.region,
+      summoningSickness: returned?.summoningSickness,
+      tapped: returned?.tapped,
+    }, {
+      damage: 0,
+      location: 'C4',
+      region: 'surface',
+      summoningSickness: false,
+      tapped: false,
+    });
+    assert.equal(observeGame(ctx.state, 'north').realm.units[0]?.disabled, false);
+    assert.equal(observeGame(ctx.state, 'north').realm.units[0]?.stealthed, false);
+    assert.equal(observeGame(ctx.state, 'north').players.north.affinity.water, 2);
+    const enabledActions = await ctx.legalActions('north');
+    assert.equal(enabledActions.some(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === waterbound.instanceId), true);
+    assert.equal(enabledActions.some(({ descriptor }) =>
+      descriptor.kind === 'activate-mana'
+        && descriptor.unitInstanceId === waterbound.instanceId), true);
+    await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
+    await takeAction(ctx, ({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    assert.equal((await ctx.legalActions('south')).some(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.target?.instanceId === waterbound.instanceId), true);
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  assert.equal(observeGame(session.state, 'north').realm.units[0]?.disabled, false);
-  assert.equal(observeGame(session.state, 'north').realm.units[0]?.stealthed, false);
-  assert.equal(observeGame(session.state, 'north').players.north.affinity.water, 2);
-  const enabledActions = legalGameActions(session.state, 'north');
-  assert.equal(enabledActions.some(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === waterbound.instanceId), true);
-  assert.equal(enabledActions.some(({ descriptor }) =>
-    descriptor.kind === 'activate-mana'
-      && descriptor.unitInstanceId === waterbound.instanceId), true);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
-    descriptor.kind === 'cast-magic'
-      && descriptor.target?.instanceId === waterbound.instanceId), true);
-  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-02/04 region settlement kills inhospitable minions and banishes them from the void', async () => {
@@ -1723,8 +1704,7 @@ test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', a
   let gameManifest: GameManifest | undefined;
   for (let seed = 1; seed <= 4_096; seed += 1) {
     const candidate = createGameManifest({ ...input, seed });
-    // Seed search peeks opening hands via TS createGameSession (cheap); play path uses SetupCtx.
-    const opening = createGameSession(candidate).state.players;
+    const opening = (await peekOpening(candidate)).state.players;
     const northReady = [staticId, alliedMinionId, titanId].every((cardId) =>
       opening.north.hand.spellbook.some((card) => card.cardId === cardId));
     const southAvailable = [
