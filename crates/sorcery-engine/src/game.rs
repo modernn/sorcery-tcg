@@ -18702,6 +18702,45 @@ mod tests {
         );
     }
 
+    /// `tests/engine/game-setup-08.test.ts` forged the non-active seat's
+    /// `airThresholdsCastThisTurn` counter to a nonzero value to prove that ending a turn resets
+    /// it for both seats, not only the seat whose turn just ended. South cannot act during
+    /// North's turn, so a nonzero South counter mid-North-turn is unreachable through legal play;
+    /// this builds the position directly.
+    #[test]
+    fn end_turn_should_reset_air_thresholds_cast_this_turn_for_both_seats() {
+        let manifest = selfplay_manifest_with(402, |manifest| {
+            for seat in ["north", "south"] {
+                manifest["cards"][format!("{seat}-avatar")]["tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"] =
+                    json!(true);
+            }
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid air-threshold manifest");
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        game.position.players[seat_index(Seat::North)].air_thresholds_cast_this_turn = Some(3);
+        game.position.players[seat_index(Seat::South)].air_thresholds_cast_this_turn = Some(2);
+        game.position.players[seat_index(Seat::North)].domain_established = true;
+
+        let end_turn = game
+            .legal_actions()
+            .expect("legal actions")
+            .into_iter()
+            .find(|action| matches!(action.descriptor, ActionDescriptor::EndTurn))
+            .expect("end-turn is legal in Main phase");
+        game.apply_action(&end_turn).expect("end-turn accepted");
+
+        assert_eq!(
+            game.position.players[seat_index(Seat::North)].air_thresholds_cast_this_turn,
+            Some(0)
+        );
+        assert_eq!(
+            game.position.players[seat_index(Seat::South)].air_thresholds_cast_this_turn,
+            Some(0)
+        );
+    }
+
     #[test]
     fn site_destruction_should_drain_loose_artifacts_with_the_flooded_layer() {
         let manifest = selfplay_manifest_with(245, |manifest| {
@@ -18771,6 +18810,280 @@ mod tests {
                 region: Region::Underground,
             }
         );
+    }
+
+    /// `tests/engine/game-setup-07.test.ts` forged a `GameSession` (edited artifact
+    /// owner/location/region and injected `disableEffects`) to prove Pick Up and Drop stay
+    /// scoped to a unit's own cell and region, ignore an Artifact's owner, and exclude a
+    /// disabled unit. Rebuilding the same facts here through direct `Position` construction
+    /// keeps every invariant the engine itself would have derived.
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one direct Position proof keeps ownership, region, and disabled-unit branches together"
+    )]
+    fn pick_up_and_drop_should_ignore_owner_but_respect_cell_region_and_disabled_units() {
+        let manifest = selfplay_manifest_with(77, |manifest| {
+            manifest["cards"]["north-spell-3"] = json!({
+                "cardType": "artifact",
+                "grantsBearerPower": 2,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid Pick Up scenario");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let c3 = Cell::parse("C3").expect("C3");
+        let c4 = Cell::parse("C4").expect("C4");
+        let artifact_card = card_id("north-spell-3");
+
+        let ready = test_minion(
+            card_id("north-spell-1"),
+            "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+            Seat::North,
+            c4,
+            None,
+        );
+        let mut disabled = test_minion(
+            card_id("north-spell-2"),
+            "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            Seat::North,
+            c4,
+            None,
+        );
+        disabled.disable_effects.push(DisableEffect {
+            expires_at_seat: Seat::South,
+            source_instance_id: identity_hash(&json!({ "fixture": "pick-up-disabler" }))
+                .expect("disabler identity"),
+        });
+        let ready_instance_id = ready.card.instance_id.clone();
+        let disabled_instance_id = disabled.card.instance_id.clone();
+        game.position.units = vec![ready, disabled];
+
+        let north_owned = card_instance(
+            &game.rules,
+            artifact_card,
+            Seat::North,
+            CardSource::Spellbook,
+            900,
+        )
+        .expect("north-owned Artifact identity");
+        let south_owned = card_instance(
+            &game.rules,
+            artifact_card,
+            Seat::South,
+            CardSource::Spellbook,
+            901,
+        )
+        .expect("south-owned Artifact identity");
+        let remote_cell = card_instance(
+            &game.rules,
+            artifact_card,
+            Seat::North,
+            CardSource::Spellbook,
+            902,
+        )
+        .expect("remote-cell Artifact identity");
+        let other_region = card_instance(
+            &game.rules,
+            artifact_card,
+            Seat::North,
+            CardSource::Spellbook,
+            903,
+        )
+        .expect("other-region Artifact identity");
+        let carried = card_instance(
+            &game.rules,
+            artifact_card,
+            Seat::North,
+            CardSource::Spellbook,
+            904,
+        )
+        .expect("already-carried Artifact identity");
+        let north_owned_id = north_owned.instance_id.clone();
+        let south_owned_id = south_owned.instance_id.clone();
+        let carried_id = carried.instance_id.clone();
+        let mut colocated = [north_owned_id.clone(), south_owned_id.clone()];
+        colocated.sort_unstable();
+
+        game.position.artifacts = vec![
+            ArtifactPosition {
+                card: north_owned,
+                placement: ArtifactPlacement::Loose {
+                    location: c4,
+                    region: Region::Surface,
+                },
+            },
+            ArtifactPosition {
+                card: south_owned,
+                placement: ArtifactPlacement::Loose {
+                    location: c4,
+                    region: Region::Surface,
+                },
+            },
+            ArtifactPosition {
+                card: remote_cell,
+                placement: ArtifactPlacement::Loose {
+                    location: c3,
+                    region: Region::Surface,
+                },
+            },
+            ArtifactPosition {
+                card: other_region,
+                placement: ArtifactPlacement::Loose {
+                    location: c4,
+                    region: Region::Underwater,
+                },
+            },
+            ArtifactPosition {
+                card: carried,
+                placement: ArtifactPlacement::Carried {
+                    bearer: UnitTarget::Minion {
+                        instance_id: disabled_instance_id.clone(),
+                        seat: Seat::North,
+                    },
+                },
+            },
+        ];
+        let north_site = card_instance(
+            &game.rules,
+            card_id("north-site-1"),
+            Seat::North,
+            CardSource::Atlas,
+            905,
+        )
+        .expect("north site identity");
+        game.position.sites[c4.index()] = Some(SitePosition {
+            card: north_site,
+            controller: Seat::North,
+            last_flight_turn: None,
+        });
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.avatar.location = c4;
+        north.domain_established = true;
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+
+        let pickups: Vec<_> = game
+            .legal_actions()
+            .expect("legal actions")
+            .into_iter()
+            .filter_map(|action| match action.descriptor {
+                ActionDescriptor::PickUpArtifacts {
+                    artifact_instance_ids,
+                    unit,
+                    ..
+                } => Some((unit, artifact_instance_ids)),
+                _ => None,
+            })
+            .collect();
+
+        // Only the two ready units at C4 (Avatar and minion) may act; the disabled minion is
+        // excluded even though it stands at the same cell.
+        assert!(
+            pickups
+                .iter()
+                .all(|(unit, _)| unit.instance_id() != &disabled_instance_id)
+        );
+        for kind in [UnitKind::Avatar, UnitKind::Minion] {
+            let mut offers: Vec<Vec<IdentityHash>> = pickups
+                .iter()
+                .filter(|(unit, _)| unit_target_kind(unit) == kind)
+                .map(|(_, ids)| {
+                    let mut ids = ids.clone();
+                    ids.sort_unstable();
+                    ids
+                })
+                .collect();
+            offers.sort();
+            let mut expected = vec![
+                vec![north_owned_id.clone()],
+                vec![south_owned_id.clone()],
+                colocated.to_vec(),
+            ];
+            expected.sort();
+            // Every combination stays scoped to the two loose Artifacts at C4 surface: the
+            // owner does not matter, but the remote cell, the other region, and the Artifact
+            // already carried by the disabled minion are all excluded.
+            assert_eq!(offers, expected);
+        }
+
+        let pick_south_owned = game
+            .legal_actions()
+            .expect("legal actions")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::PickUpArtifacts {
+                        artifact_instance_ids,
+                        unit: UnitTarget::Minion { instance_id, .. },
+                        ..
+                    } if *instance_id == ready_instance_id
+                        && *artifact_instance_ids == [south_owned_id.clone()]
+                )
+            })
+            .expect("ready minion may pick up the south-owned Artifact");
+        let (outcomes, _) = game
+            .apply_action_recorded(&pick_south_owned)
+            .expect("cross-owner Pick Up is accepted");
+        assert_eq!(
+            outcomes
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            ["artifacts-picked-up"]
+        );
+        let picked = game
+            .position
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.card.instance_id == south_owned_id)
+            .expect("south-owned Artifact still tracked");
+        // Picking up an Artifact never changes who owns it.
+        assert_eq!(picked.card.owner, Seat::South);
+        assert!(picked.carried_by(UnitKind::Minion, Seat::North, &ready_instance_id));
+
+        let drops: Vec<_> = game
+            .legal_actions()
+            .expect("legal actions")
+            .into_iter()
+            .filter_map(|action| match action.descriptor {
+                ActionDescriptor::DropArtifacts { unit, .. } => Some(unit),
+                _ => None,
+            })
+            .collect();
+        // The disabled minion still carries its Artifact but may not Drop it; the ready minion
+        // may Drop the one it just picked up.
+        assert!(
+            drops
+                .iter()
+                .any(|unit| unit.instance_id() == &ready_instance_id)
+        );
+        assert!(
+            drops
+                .iter()
+                .all(|unit| unit.instance_id() != &disabled_instance_id)
+        );
+        let carried_still = game
+            .position
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.card.instance_id == carried_id)
+            .expect("disabled minion's carried Artifact stays tracked");
+        assert!(carried_still.carried_by(UnitKind::Minion, Seat::North, &disabled_instance_id));
     }
 
     #[test]
