@@ -225,7 +225,7 @@ export async function runPrivateNoveltyGauntlet(
         jobId: `${preset.id}:${orientation}`,
         lessonId: preset.id as LessonId,
         orientation,
-        result: runNoveltyRollout(createGameSession(manifest), {
+        result: await runNoveltyRollout(createGameSession(manifest), {
           maxActions,
           onCheckpoint: captureCheckpoint,
         }),
@@ -328,7 +328,7 @@ export async function runPrivateNoveltyGauntlet(
     for (const value of entryEventTypes) {
       exercisedSignals.add(signalKey({ kind: 'event-type', value }));
     }
-    const result = runNoveltyRollout(entry.session, {
+    const result = await runNoveltyRollout(entry.session, {
       maxActions,
       onCheckpoint: captureCheckpoint,
     });
