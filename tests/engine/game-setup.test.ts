@@ -2050,52 +2050,54 @@ test('RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relati
   assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-03/04 a Spellcaster pays mana and summons a minion atop a controlled site', () => {
-  let session = keep(createGameSession(manifest(41)));
-  session = keep(session);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  const before = session.state.players.north;
-  const summons = legalGameActions(session.state, 'north')
-    .filter(({ descriptor }) => descriptor.kind === 'summon-minion');
-  assert.equal(observeGame(session.state, 'north').players.north.affinity.earth, 1);
-  assert.equal(summons.length, 3);
-  assert.ok(summons.every(({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cell === 'C4'
-      && descriptor.casterInstanceId === before.avatar.card.instanceId
-      && descriptor.manaCost === 1));
+test('RULE-03/04 a Spellcaster pays mana and summons a minion atop a controlled site', async () => {
+  await withSetup(manifest(41), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'play-site'));
+    const before = ctx.state.players.north;
+    const summons = (await ctx.legalActions('north'))
+      .filter(({ descriptor }) => descriptor.kind === 'summon-minion');
+    assert.equal(ctx.observe('north').players.north.affinity.earth, 1);
+    assert.equal(summons.length, 3);
+    assert.ok(summons.every(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cell === 'C4'
+        && descriptor.casterInstanceId === before.avatar.card.instanceId
+        && descriptor.manaCost === 1));
 
-  const summon = summons[0];
-  assert.ok(summon);
-  const result = stepGame(session, summon);
-  assert.equal(result.accepted, true);
-  session = result.session;
-  const unit = session.state.realm.units[0];
-  assert.ok(unit);
-  assert.equal(session.state.players.north.hand.spellbook.length, before.hand.spellbook.length - 1);
-  assert.equal(session.state.players.north.mana, 0);
-  assert.deepEqual({
-    controller: unit.controller,
-    damage: unit.damage,
-    location: unit.location,
-    summoningSickness: unit.summoningSickness,
-    tapped: unit.tapped,
-  }, {
-    controller: 'north',
-    damage: 0,
-    location: 'C4',
-    summoningSickness: true,
-    tapped: false,
+    const summon = summons[0];
+    assert.ok(summon);
+    const result = await ctx.step(summon);
+    assert.equal(result.accepted, true);
+    if (!result.accepted) return;
+    const unit = ctx.state.realm.units[0];
+    assert.ok(unit);
+    assert.equal(ctx.state.players.north.hand.spellbook.length, before.hand.spellbook.length - 1);
+    assert.equal(ctx.state.players.north.mana, 0);
+    assert.deepEqual({
+      controller: unit.controller,
+      damage: unit.damage,
+      location: unit.location,
+      summoningSickness: unit.summoningSickness,
+      tapped: unit.tapped,
+    }, {
+      controller: 'north',
+      damage: 0,
+      location: 'C4',
+      summoningSickness: true,
+      tapped: false,
+    });
+    assert.equal(result.receipt.events[0]?.type, 'minion-summoned');
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'), false);
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === unit.instanceId), false);
+
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'end-turn'));
+    assert.equal(ctx.state.realm.units[0]?.summoningSickness, false);
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  assert.equal(result.receipt.events[0]?.type, 'minion-summoned');
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'summon-minion'), false);
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === unit.instanceId), false);
-
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  assert.equal(session.state.realm.units[0]?.summoningSickness, false);
-  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-03/04 token Magic summons deterministically and tokens banish instead of entering a cemetery', () => {
@@ -8427,27 +8429,29 @@ test('RULE-02/04 playing a site surfaces uncarried Artifacts from the covered vo
   assert.equal(verifyGameReplay(result.session), true);
 });
 
-test('RULE-04 Charge allows a summoned minion to Move and Attack immediately', () => {
-  let session = keep(createGameSession(manifest(42, {
+test('RULE-04 Charge allows a summoned minion to Move and Attack immediately', async () => {
+  await withSetup(manifest(42, {
     spell: {
       charge: true,
       manaCost: 1,
       thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
     },
-  })));
-  session = keep(session);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'summon-minion'));
-  const unit = session.state.realm.units[0];
-  assert.ok(unit);
-  assert.equal(unit.summoningSickness, true);
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === unit.instanceId
-      && descriptor.to.cell === 'C4'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
-  assert.equal(session.state.realm.units[0]?.tapped, true);
-  assert.equal(verifyGameReplay(session), true);
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'play-site'));
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'summon-minion'));
+    const unit = ctx.state.realm.units[0];
+    assert.ok(unit);
+    assert.equal(unit.summoningSickness, true);
+    await ctx.accept(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === unit.instanceId
+        && descriptor.to.cell === 'C4'));
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'decline-attack'));
+    assert.equal(ctx.state.realm.units[0]?.tapped, true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
 test('RULE-03 Genesis draws a hidden site and an empty Atlas loses after summoning', () => {
